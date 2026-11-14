@@ -67,7 +67,7 @@ private struct SettingsHeader: View {
     var body: some View { Label(title, systemImage: icon) }
 }
 
-/// The gear: which Mac this phone is paired with, how it is doing, and unpairing.
+/// The gear: which Mac is open, how it is doing, and removing this iPhone from it.
 struct SettingsView: View {
     /// A tab of the app's own bar, not a sheet: there is nothing to dismiss.
     var inTab = false
@@ -75,6 +75,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
+    private var macName: String { model.snapshot?.mac ?? model.registry.active?.name ?? "this Mac" }
     @State private var changingFaceID = false
     /// `-squeak-controls` (screenshots only) opens the Mac controls page.
     @State private var showingControls = ProcessInfo.processInfo.arguments.contains("-squeak-controls")
@@ -233,6 +234,7 @@ struct SettingsView: View {
             ScrollViewReader { proxy in
             Form {
                 macCardSection
+                if !model.demo { YourMacsSection() }
                 if !model.demo { AccountSettingsSection() }
                 if let snapshot = model.snapshot {
                     Section {
@@ -327,7 +329,7 @@ struct SettingsView: View {
                         }
                         .frame(minHeight: 44)
                     }
-                    Button("Unpair this iPhone", role: .destructive) { Haptics.play(.tap); confirmingUnpair = true }
+                    Button("Remove this iPhone from \(model.snapshot?.mac ?? model.registry.active?.name ?? "this Mac")", role: .destructive) { Haptics.play(.tap); confirmingUnpair = true }
                         .frame(minHeight: 44)
                 } header: { SettingsHeader("This iPhone", icon: "iphone") } footer: {
                     VStack(alignment: .leading, spacing: 6) {
@@ -358,10 +360,10 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(inTab ? .large : .inline)
             .sheet(isPresented: $showingUsage) { UsageView().screenName("Usage") }
             .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } } }
-            .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
-                Button("Unpair", role: .destructive) { model.unpair(); dismiss() }
+            .confirmationDialog("Remove this iPhone from \(macName)?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) { if let id = model.registry.activeId { model.removeMac(id) } else { model.unpair() }; dismiss() }
             } message: {
-                Text("It will stop seeing and answering your agents until you pair again.")
+                Text("It will stop seeing and answering that Mac's agents. Your other Macs stay. Open it again from Your Macs.")
             }
             }
         }

@@ -4,9 +4,11 @@ import SqueakIcons
 import SwiftUI
 import VisionKit
 
-/// The unpaired first screen: one job (scan the code on the Mac), and the failures that send you back to it.
+/// The fallback for a Mac that is not on an account yet: scan the code it shows (or paste the link), and the failures
+/// that send you back to it. Reached only from "Mac not on an account yet?" on the sign-in screen.
 struct PairView: View {
     @Environment(AppModel.self) private var model
+    var onBack: () -> Void = {}
     @State private var scanning = false
     @State private var pasted = ""
     @State private var working = false
@@ -28,9 +30,12 @@ struct PairView: View {
                     Button(PairingScreen.tryAgain) { Haptics.play(.tap); model.clearPairingFailure() }
                         .buttonStyle(PrimaryButtonStyle())
                     ReportProblemButton(problem: screen.detail, place: "Pairing")
+                    Button("Sign in instead") { Haptics.play(.tap); model.clearPairingFailure(); onBack() }
+                        .font(.footnote).foregroundStyle(Theme.muted).frame(minHeight: 44)
                 } else {
                     scanSection
-                    AccountPairSection()
+                    Button("Sign in instead") { Haptics.play(.tap); model.clearPairingFailure(); onBack() }
+                        .font(.footnote).foregroundStyle(Theme.muted).frame(minHeight: 44)
                 }
             }
             .padding(24)

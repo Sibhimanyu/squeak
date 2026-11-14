@@ -85,8 +85,16 @@ public struct AccountTokenStore: Sendable {
 public struct AccountMac: Equatable, Sendable, Identifiable {
     public let macId: String
     public let name: String
+    /// All optional: an older relay sends none of them.
+    public let lastSeenAt: Date?
+    /// `online`, `asleep` or `offline`, when the relay says.
+    public let state: String?
+    /// The Mac asks before adding a device (`askOwnDevices` on).
+    public let requiresApproval: Bool?
     public var id: String { macId }
-    public init(macId: String, name: String) { self.macId = macId; self.name = name }
+    public init(macId: String, name: String, lastSeenAt: Date? = nil, state: String? = nil, requiresApproval: Bool? = nil) {
+        self.macId = macId; self.name = name; self.lastSeenAt = lastSeenAt; self.state = state; self.requiresApproval = requiresApproval
+    }
 }
 
 public enum AccountError: Error, Equatable, Sendable {
@@ -181,7 +189,10 @@ public struct AccountAPI: Sendable {
         return (json["macs"] as? [[String: Any]] ?? []).compactMap { entry in
             guard let id = entry["macId"] as? String, !id.isEmpty else { return nil }
             let name = entry["name"] as? String
-            return AccountMac(macId: id, name: name?.isEmpty == false ? name! : "Your Mac")
+            let seen = (entry["lastSeenAt"] as? Double).flatMap { $0 > 0 ? ($0 < 1e12 ? $0 : $0 / 1000) : nil }
+            return AccountMac(macId: id, name: name?.isEmpty == false ? name! : "Your Mac",
+                              lastSeenAt: seen.map { Date(timeIntervalSince1970: $0) }, state: entry["state"] as? String,
+                              requiresApproval: entry["askOwnDevices"] as? Bool)
         }
     }
 

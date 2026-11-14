@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.26.0] - 2026-11-14 (iOS)
+
+- Sign in with your Squeak account and every Mac signed in to it is listed, with whether it is online, asleep or offline and when it was last seen. Open one and use it. Nothing to scan, no code to type.
+- The first screen is just sign-in. A Mac that is not on an account yet is reached from one small link at the bottom ("Mac not on an account yet?").
+- Switch between Macs from Home or Settings. Each Mac keeps its own chats on this iPhone.
+- A Mac that asks first shows "Waiting for your Mac to approve".
+- "Unpair" is now "Remove this iPhone from <Mac>" for one Mac; signing out removes this iPhone from all of them. An iPhone that was paired before keeps its Mac.
+
 ## [1.25.3] - 2026-11-13 (iOS)
 
 - Recent no longer empties when a read fails.

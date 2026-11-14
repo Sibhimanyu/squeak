@@ -68,8 +68,12 @@ final class AppModel {
     private(set) var pairingAskedAt: Date?
     /// The Mac's name from approval until the celebration has shown.
     private(set) var pairingCelebration: String?
-    /// The Squeak account: sign-in, Your Macs, adding one without a QR code.
+    /// The Squeak account: sign-in, Your Macs, opening one.
     @ObservationIgnored let account = AccountModel()
+    /// Every Mac this phone holds and which one is open. Each has its own caches (`MacEntry.cacheKey`).
+    private(set) var registry = MacRegistry()
+    @ObservationIgnored private let macStore = MacRegistryStore(secrets: KeychainSecrets())
+    @ObservationIgnored private var registrySavedAt = Date.distantPast
     func endPairingCelebration() { pairingCelebration = nil }
     func clearPairingFailure() { pairingFailure = nil; problem = nil }
     /// What this phone sent since the app opened, per session. Local only:
@@ -112,9 +116,9 @@ final class AppModel {
     /// The last timeline each chat drew, in memory, so reopening a chat shows it in its first frame (`ChatTimelineStore`).
     @ObservationIgnored private var timelineFrames = TimelineFrameCache()
     /// Nil in the demo, which must neither read nor write the real cache.
-    @ObservationIgnored private let historyStore: HistoryStore?
+    @ObservationIgnored private var historyStore: HistoryStore?
     /// The Mac's last view, kept across launches (`SnapshotStore`) so a cold launch shows it at once. Nil in the demo.
-    @ObservationIgnored private let snapshotStore: SnapshotStore?
+    @ObservationIgnored private var snapshotStore: SnapshotStore?
     /// A view read from disk is on screen, and no fresh one has arrived yet: the list says it is updating.
     private var savedShown = false
     /// When the phone came back from a long absence; the view on screen is old until a fresh one lands after it.
@@ -141,7 +145,7 @@ final class AppModel {
         }
     }
     /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
-    @ObservationIgnored private let outboxStore: OutboxStore?
+    @ObservationIgnored private var outboxStore: OutboxStore?
     /// Restored sends whose answer, if the Mac wrote one while the app was gone, has not been looked for yet.
     @ObservationIgnored private var unreconciled = true
     /// A failed message put back for editing, per chat; the chat's composer takes it and clears it.
@@ -231,13 +235,16 @@ final class AppModel {
     init() {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo") || ProcessInfo.processInfo.arguments.contains("-squeak-demo-films")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
-        historyStore = demo ? nil : HistoryStore()
-        snapshotStore = demo ? nil : SnapshotStore()
+        // The Mac list; a phone that still has the old single pairing gets it here as its first Mac (once).
+        let held = demo ? MacRegistry() : macStore.load()
+        let cacheName = held.active?.cacheKey
+        historyStore = demo ? nil : HistoryStore(name: cacheName)
+        snapshotStore = demo ? nil : SnapshotStore(name: cacheName)
         if let historyStore {
             historyStates = historyStore.states()
             lastHistory = historyStates.mapValues(\.entries)
         }
-        outboxStore = demo ? nil : OutboxStore()
+        outboxStore = demo ? nil : OutboxStore(name: cacheName)
         if let outboxStore { outbox = Self.restore(outboxStore.all()) }
         if demo {
             snapshot = DemoData.snapshot
@@ -249,12 +256,11 @@ final class AppModel {
             phase = .paired
             return
         }
-        if let data = KeyStore.load(account: "pairing"),
-           let pairing = try? JSONDecoder().decode(PairingPayload.self, from: data),
-           let deviceId = KeyStore.load(account: "device-id").flatMap({ String(data: $0, encoding: .utf8) }) {
-            channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
-            phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
-                code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
+        registry = held
+        if let entry = held.active {
+            channel = Channel(pairing: entry.pairing, deviceId: entry.deviceId, local: LocalSupport.standard)
+            phase = entry.approved ? .paired : .awaitingApproval(
+                code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: entry.name)
             if phase == .paired { loadSavedSnapshot() }
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -336,8 +342,12 @@ final class AppModel {
             let deviceId = UUID().uuidString.lowercased()
             let channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
             try await channel.requestPairing(name: UIDevice.current.name, signer: signer)
-            KeyStore.save(try JSONEncoder().encode(pairing), account: "pairing")
-            KeyStore.save(Data(deviceId.utf8), account: "device-id")
+            // The fallback for a Mac not on an account yet: one more Mac in the list, waiting for its approval.
+            resetLive()
+            var next = registry
+            next.upsert(MacEntry(pairing: pairing, deviceId: deviceId, approved: false))
+            setRegistry(next)
+            useStores(for: registry.active)
             self.channel = channel
             problem = nil
             pairingFailure = nil
@@ -356,43 +366,120 @@ final class AppModel {
     /// This phone's signing key, which a Squeak account request names (the Mac registers it under the request id).
     var devicePublicKey: Data { signer.publicKeyX963 }
 
-    /// The relay base a saved Catalyst pairing names, for finding the account's app.
+    /// The relay base a held Catalyst pairing names, for finding the account's app.
     var pairedRelayURL: String? {
-        KeyStore.load(account: "pairing").flatMap { try? JSONDecoder().decode(PairingPayload.self, from: $0) }?.cu
+        ((registry.active.map { [$0] } ?? []) + registry.entries).compactMap { $0.pairing.cu }.first
     }
 
     /// A Mac's answer to an account request: the pairing a QR code carries, already approved on the Mac, so what a
-    /// scanned code stores (with the request id as the device id) and no approval to wait for.
+    /// scanned code stores (with the request id as the device id) and no approval to wait for. It joins the list and opens.
     func adopt(_ pairing: PairingPayload, deviceId: String) {
-        KeyStore.save(try! JSONEncoder().encode(pairing), account: "pairing")
-        KeyStore.save(Data(deviceId.utf8), account: "device-id")
-        KeyStore.save(Data("1".utf8), account: "approved")
+        resetLive()
+        var next = registry
+        next.upsert(MacEntry(pairing: pairing, deviceId: deviceId, approved: true, lastSeen: Date()))
+        setRegistry(next)
+        useStores(for: registry.active)
         channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
         problem = nil
         pairingFailure = nil
         pairingCelebration = pairing.n
         phase = .paired
+        loadSavedSnapshot()
         if let channel { startLocal(channel) }
         resume()
     }
 
+    /// Opens another Mac this phone already holds. Everything on screen is that Mac's own: its saved view and chats
+    /// come from its own cache files, and nothing of the Mac left behind carries over.
+    func switchTo(_ macId: String) {
+        guard !demo, macId != registry.activeId, registry.entry(for: macId) != nil else { return }
+        resetLive()
+        var next = registry
+        next.activate(macId)
+        setRegistry(next)
+        openActive()
+        resume()
+    }
+
+    /// Takes the open Mac from the registry: its channel, its caches, its phase.
+    private func openActive() {
+        guard let entry = registry.active else { phase = .unpaired; channel = nil; useStores(for: nil); return }
+        useStores(for: entry)
+        channel = Channel(pairing: entry.pairing, deviceId: entry.deviceId, local: LocalSupport.standard)
+        problem = nil
+        pairingFailure = nil
+        if entry.approved {
+            phase = .paired
+            loadSavedSnapshot()
+            if let channel { startLocal(channel) }
+        } else {
+            pairingAskedAt = Date()
+            phase = .awaitingApproval(code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: entry.name)
+        }
+    }
+
+    /// "Remove this iPhone from <Mac>": that Mac's pairing and caches go; the others stay. When it was the open one,
+    /// the next Mac opens, or the Mac list shows when none is left. The Mac keeps listing this iPhone until it is
+    /// disconnected there; the key it holds cannot be used without this phone.
+    func removeMac(_ macId: String) {
+        guard let entry = registry.entry(for: macId) else { return }
+        let wasOpen = registry.activeId == macId
+        if wasOpen { resetLive() }
+        clearCaches(of: entry)
+        var next = registry
+        next.remove(macId)
+        if next.isEmpty { macStore.wipe(); registry = next } else { setRegistry(next) }
+        if wasOpen {
+            openActive()
+            if phase == .paired { resume() }
+        }
+    }
+
+    /// There is another Mac to move to: the account lists some, or this phone holds more than one.
+    var canSwitchMacs: Bool { !demo && (account.session != nil || registry.entries.count > 1) }
+
+    /// The person's own sign-out: the account, every Mac on this iPhone and its key.
+    func signOutEverywhere() {
+        account.signOut()
+        unpair()
+    }
+
+    /// Sign out: every Mac, every cache and this phone's key go; the account sign-in goes with them.
     func unpair() {
+        resetLive()
+        for entry in registry.entries { clearCaches(of: entry) }
+        macStore.wipe()
+        registry = MacRegistry()
+        KeyStore.wipe()
+        useStores(for: nil)
+        channel = nil
+        phase = .unpaired
+        SentPhotos.clear()
+    }
+
+    private func setRegistry(_ next: MacRegistry) {
+        registry = next
+        registrySavedAt = Date()
+        macStore.save(next)
+    }
+
+    /// Stops what the open Mac was feeding (loop, stream, direct path) and empties everything drawn from it in memory.
+    /// Nothing on disk changes: caches belong to their Mac and are kept (or cleared by the caller).
+    private func resetLive() {
         pairingFailure = nil
         pairingAskedAt = nil
         routeTask?.cancel()
         routeTask = nil
         if let channel { Task { await channel.stopLocal() } }
         route = .cloud
-        KeyStore.wipe()
-        KeyStore.delete(account: "approved")
-        channel = nil
+        snapshotStore?.flush()
         snapshot = nil
         baseSnapshot = nil
         recentDoc = nil
         seenSessions.reset()
         macAliveAt = nil
-        phase = .unpaired
         loop?.cancel()
+        loop = nil
         liveTask?.cancel()
         liveTask = nil
         liveTurns = [:]
@@ -403,13 +490,29 @@ final class AppModel {
         catchingUp = []
         earlierLoad = [:]
         earlierPrependedAt = [:]
-        historyStore?.clear()
-        snapshotStore?.clear()
         savedShown = false
-        outboxStore?.clear()
-        SentPhotos.clear()
+        freshSnapshotAt = nil
         outbox = [:]
         unreconciled = true
+    }
+
+    /// Points the three caches at `entry`'s own files and reads what they hold (nothing for no Mac).
+    private func useStores(for entry: MacEntry?) {
+        guard !demo else { return }
+        let name = entry?.cacheKey
+        historyStore = entry == nil ? nil : HistoryStore(name: name)
+        snapshotStore = entry == nil ? nil : SnapshotStore(name: name)
+        outboxStore = entry == nil ? nil : OutboxStore(name: name)
+        historyStates = historyStore?.states() ?? [:]
+        lastHistory = historyStates.mapValues(\.entries)
+        outbox = outboxStore.map { Self.restore($0.all()) } ?? [:]
+    }
+
+    /// One Mac's cache files, removed (it was removed, or everything was).
+    private func clearCaches(of entry: MacEntry) {
+        HistoryStore(name: entry.cacheKey).clear()
+        SnapshotStore(name: entry.cacheKey).clear()
+        OutboxStore(name: entry.cacheKey).clear()
     }
 
     /* ---------- the loop: only while the app is on screen ---------- */
@@ -501,9 +604,11 @@ final class AppModel {
     /// the channel secret), rebuild the channel on the new store and start again, which writes presence there.
     private func follow(_ move: CloudMove) async {
         guard !demo, let current = channel, let moved = current.pairing.applying(move),
-              let data = try? JSONEncoder().encode(moved),
-              let deviceId = KeyStore.load(account: "device-id").flatMap({ String(data: $0, encoding: .utf8) }) else { return }
-        KeyStore.save(data, account: "pairing")
+              let entry = registry.entry(for: current.pairing.c) else { return }
+        let deviceId = entry.deviceId
+        var next = registry
+        next.update(entry.macId) { $0.pairing = moved }
+        setRegistry(next)
         loop?.cancel()
         loop = nil
         routeTask?.cancel()
@@ -802,6 +907,11 @@ final class AppModel {
 
     private func heard(_ alive: MacAlive) {
         if macAliveAt.map({ alive.date > $0 }) ?? true { macAliveAt = alive.date }
+        // The list shows how recently each Mac answered; saved at most every five minutes, in memory every time.
+        if let open = registry.activeId {
+            registry.update(open) { $0.lastSeen = alive.date }
+            if Date().timeIntervalSince(registrySavedAt) > 300 { setRegistry(registry) }
+        }
     }
 
     /// A view straight from the stream.
@@ -981,13 +1091,17 @@ final class AppModel {
             if case .awaitingApproval = phase {
                 if let answer = try await channel.pairingAnswer() {
                     if answer.approved {
-                        KeyStore.save(Data("1".utf8), account: "approved")
+                        if let open = registry.activeId {
+                            var next = registry
+                            next.update(open) { $0.approved = true }
+                            setRegistry(next)
+                        }
                         if case let .awaitingApproval(_, mac) = phase { pairingCelebration = mac }
                         phase = .paired
                         startLocal(channel)
                     } else {
-                        unpair()
-                        problem = "Your Mac said no. Pair again if that was a mistake."
+                        if let open = registry.activeId { removeMac(open) }
+                        problem = "Your Mac said no. Try again if that was a mistake."
                         pairingFailure = .refused
                     }
                 }
@@ -1025,7 +1139,7 @@ final class AppModel {
             problem = nil
             await reconcileRestored(on: channel)
         } catch ChannelCrypto.Failure.badBox, ChannelCrypto.Failure.badKey {
-            problem = "This phone's pairing no longer matches your Mac. Pair again."
+            problem = "This iPhone's access to your Mac no longer matches. Open the Mac from Your Macs again."
         } catch {
             problem = "Can't reach Squeak's server right now."
         }

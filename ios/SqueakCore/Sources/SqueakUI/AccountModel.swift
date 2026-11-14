@@ -6,8 +6,9 @@ import SqueakCore
 import SwiftUI
 import UIKit
 
-/// Squeak account on the phone: sign in (Zoho, Google or email, through the web page), your Macs, and asking one to let this
-/// iPhone in without a QR code. Signing in never opens a Mac by itself.
+/// Squeak account on the phone: sign in (Zoho, Google or email, through the web page), your Macs, and opening one. Under
+/// the hood opening a Mac sends it this iPhone's device key; the Mac adds it (or asks its owner first) and answers with
+/// what the phone needs. Nothing to scan, nothing to type. Signing in never opens a Mac by itself.
 @MainActor
 @Observable
 final class AccountModel {
@@ -15,8 +16,8 @@ final class AccountModel {
         case idle
         case signingIn
         case loadingMacs
-        /// Waiting for the Mac: both screens show `code`.
-        case waiting(mac: String, code: String)
+        /// Opening a Mac. `needsApproval`: the account says it asks its owner first.
+        case waiting(mac: String, needsApproval: Bool)
     }
 
     private(set) var session: AccountSession? {
@@ -157,20 +158,21 @@ final class AccountModel {
         }
     }
 
-    /// Asks `mac`; polls every 2 s; on approval the app opens exactly as after a scanned code.
-    func add(_ mac: AccountMac, _ app: AppModel) {
+    /// Opens `mac`: a Mac this phone already holds opens at once; otherwise it is asked, polled every 2 s, and opens on its
+    /// answer exactly as a scanned code once did.
+    func open(_ mac: AccountMac, _ app: AppModel) {
         guard let session, case .idle = step else { return }
         message = nil
+        if app.registry.entry(for: mac.macId) != nil { app.switchTo(mac.macId); return }
         let api = api(app, session)
         let boxKey = P256.KeyAgreement.PrivateKey()
         let name = UIDevice.current.name
         let publicKey = app.devicePublicKey
-        step = .loadingMacs
+        step = .waiting(mac: mac.name, needsApproval: mac.requiresApproval == true)
         task?.cancel()
         task = Task { [weak self] in
             do {
                 let request = try await AccountPairing.request(api: api, mac: mac, deviceName: name, publicKeyX963: publicKey, boxKey: boxKey)
-                self?.step = .waiting(mac: mac.name, code: request.code)
                 let outcome = try await AccountPairing.await(api: api, request: request, boxKey: boxKey)
                 guard let self else { return }
                 self.step = .idle
@@ -199,84 +201,14 @@ private final class PresentationAnchor: NSObject, ASWebAuthenticationPresentatio
     }
 }
 
-/// The pairing screen's account part: sign in, or your Macs, or the code to approve.
-struct AccountPairSection: View {
-    @Environment(AppModel.self) private var app
-    var account: AccountModel { app.account }
-
-    var body: some View {
-        VStack(spacing: 14) {
-            switch account.step {
-            case let .waiting(mac, code):
-                ProgressView()
-                Text("Adding this iPhone to \(mac)\u{2026}").font(.headline).multilineTextAlignment(.center)
-                VStack(spacing: 4) {
-                    Text("If your Mac asks, check it shows")
-                    Text("\(code.prefix(3)) \(code.suffix(3))")
-                        .font(.system(size: 20, weight: .semibold, design: .rounded).monospacedDigit()).tracking(2)
-                        .foregroundStyle(Theme.ink)
-                        .accessibilityLabel("code \(code.map(String.init).joined(separator: " "))")
-                }
-                .font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                Button("Cancel") { Haptics.play(.tap); account.cancelRequest() }.foregroundStyle(Theme.muted).frame(minHeight: 44)
-            default:
-                if let session = account.session { macsList(session) } else { signedOut }
-            }
-            if let message = account.message {
-                Text(message).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                ReportProblemButton(problem: message, place: "Sign in", title: "Report")
-            }
-        }
-    }
-
-    private var signedOut: some View {
-        VStack(spacing: 8) {
-            Button("Sign in to see your Macs") { Haptics.play(.tap); account.signIn(app) }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(account.step != .idle)
-            Text("Continue with Zoho, Google or email. Signing in never opens a Mac by itself.")
-                .font(.footnote).foregroundStyle(Theme.subtle).multilineTextAlignment(.center)
-        }
-    }
-
-    private func macsList(_ session: AccountSession) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Your Macs").font(.headline)
-            if account.step == .loadingMacs {
-                ProgressView().frame(maxWidth: .infinity)
-            } else if account.macs.isEmpty {
-                Text("No Mac is linked to \(session.email.isEmpty ? "this account" : session.email) yet. Link one in Squeak on your Mac, under Settings.")
-                    .font(.footnote).foregroundStyle(Theme.muted)
-            }
-            ForEach(account.macs) { mac in
-                Button { Haptics.play(.tap); account.add(mac, app) } label: {
-                    HStack {
-                        Text(mac.name).font(.body)
-                        Spacer()
-                        Text("Add").font(.subheadline).foregroundStyle(Theme.muted)
-                    }
-                    .padding(12).frame(minHeight: 44)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
-                }
-                .buttonStyle(.press)
-            }
-            HStack {
-                Text(session.email).font(.footnote).foregroundStyle(Theme.muted)
-                Spacer()
-                Button("Sign out") { account.signOut() }.font(.footnote).foregroundStyle(Theme.muted)
-            }
-        }
-        .onAppear { if account.macs.isEmpty && account.step == .idle { account.loadMacs(app) } }
-    }
-}
 #endif
 
 #if os(iOS)
-/// Settings: who is signed in. Signing out forgets the sign-in only; paired Macs stay.
+/// Settings: who is signed in. Signing out removes this iPhone from every Mac and forgets the sign-in.
 struct AccountSettingsSection: View {
     @Environment(AppModel.self) private var app
     @State private var picked: PhotosPickerItem?
+    @State private var confirmingSignOut = false
 
     var body: some View {
         let account = app.account
@@ -295,7 +227,7 @@ struct AccountSettingsSection: View {
                         .disabled(account.avatarPhase == .working)
                 }
                 if case let .failed(sentence) = account.avatarPhase { Text(sentence).font(.footnote).foregroundStyle(Theme.muted) }
-                Button("Sign out", role: .destructive) { account.signOut() }
+                Button("Sign out", role: .destructive) { Haptics.play(.tap); confirmingSignOut = true }
             } else {
                 Button("Sign in to Squeak") { Haptics.play(.tap); account.signIn(app) }
                     .disabled(account.step != .idle)
@@ -305,7 +237,12 @@ struct AccountSettingsSection: View {
                 ReportProblemButton(problem: message, place: "Settings › Account", title: "Report")
             }
         } footer: {
-            Text("Your Squeak account lists your Macs so this iPhone can ask one to let it in. Signing out keeps the Macs you already paired.")
+            Text("Your Squeak account lists your Macs, so this iPhone can open any of them. Signing out removes this iPhone from all of them.")
+        }
+        .confirmationDialog("Sign out of Squeak?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { app.signOutEverywhere() }
+        } message: {
+            Text("This iPhone stops seeing your Macs until you sign in again.")
         }
         .task(id: account.session?.token) { account.loadAvatar(app) }
         .onChange(of: picked) { _, item in

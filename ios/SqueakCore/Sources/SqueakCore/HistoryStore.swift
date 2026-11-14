@@ -30,9 +30,9 @@ public final class HistoryStore: @unchecked Sendable {
     private var pending: DispatchWorkItem?
 
     /// `directory` defaults to the app's Caches folder.
-    public init(directory: URL? = nil, delay: TimeInterval = 1) {
+    public init(directory: URL? = nil, name: String? = nil, delay: TimeInterval = 1) {
         let dir = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        url = dir.appendingPathComponent("squeak-history.json")
+        url = dir.appendingPathComponent("squeak-history\(name.map { "-" + $0 } ?? "").json")
         self.delay = delay
         if let data = try? Data(contentsOf: url), let file = try? JSONDecoder().decode(File.self, from: data), file.v == 1 {
             chats = Array(file.chats.sorted { $0.at > $1.at }.prefix(Self.maxChats))
