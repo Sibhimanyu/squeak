@@ -39,14 +39,9 @@ function makeAddon(id: string, body: string, manifest: Partial<AddonManifest> = 
 const noContext = (manifest: AddonManifest) => ({ id: manifest.id }) as unknown as AddonContext;
 
 describe("requestedAddons", () => {
-  it("reads SQUEAK_ADDONS and the older relay alias, once each, ignoring odd names", () => {
+  it("reads SQUEAK_ADDONS, once each, ignoring odd names", () => {
     expect(requestedAddons({})).toEqual([]);
     expect(requestedAddons({ SQUEAK_ADDONS: " A-one , b2,../x,, a-one" })).toEqual(["a-one", "b2"]);
-    expect(requestedAddons({ SQUEAK_CONDUCTOR_RELAY: "on" })).toEqual(["conductor-relay"]);
-    expect(requestedAddons({ SQUEAK_ADDONS: "conductor-relay", SQUEAK_CONDUCTOR_RELAY: "ON" })).toEqual([
-      "conductor-relay",
-    ]);
-    expect(requestedAddons({ SQUEAK_CONDUCTOR_RELAY: "off" })).toEqual([]);
   });
 });
 

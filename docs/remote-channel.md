@@ -1108,8 +1108,9 @@ legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted
   then runs the signed `move` so paired phones follow (the old store is read for the usual window), and `legacy`
   becomes `null`. The Firebase and old-Catalyst read paths stay for phones that have not updated.
 - Self-hosting is removed: `/control/cloud/catalyst/*`, `/control/cloud/firebase/rename` and `/control/cloud/select`
-  answer 410 `{ error: "self-hosting-removed" }`. `SQUEAK_REMOTE_SHARED` and `src/remote/shared-limits.ts` remain only
-  for Macs still on the old shared server (their budget and throttles), and go once those have moved.
+  answer 410 `{ error: "self-hosting-removed" }`. The shared server's code (`SQUEAK_REMOTE_SHARED`,
+  `shared-limits.ts`, `firebase/shared/`) is removed: a Mac still configured for it logs one line at start, keeps its
+  config, reports `legacy: "shared"` and runs unthrottled like any Firebase Mac until sign-in moves it to hosted.
 
 The older Firebase and shared-server instructions are in git history (2026-10-29).
 

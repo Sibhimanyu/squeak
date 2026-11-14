@@ -75,11 +75,7 @@ const schema = z.object({
    * the snapshot. On by default; the phone's switch is off by default.
    */
   SQUEAK_REMOTE_VERBOSE: z.string().optional(),
-  /**
-   * "1"/"on"/"true": the shared server (the owner's free Spark project): needs SQUEAK_REMOTE_DATABASE_URL, polls
-   * and publishes slowly, under a daily byte budget, with no live turns, films, voice or Cliq relay
-   * (remote/shared-limits.ts).
-   */
+  /** Retired: the old shared server. Read only to say once that signing in moves the Mac to the hosted relay. */
   SQUEAK_REMOTE_SHARED: z.string().optional(),
   /**
    * "off": no direct same-Wi-Fi path to the phone (remote/local-channel.ts);
@@ -156,8 +152,8 @@ export interface SqueakConfig {
   remoteDatabaseUrl: string | null;
   /** Whether a phone may ask for a session's whole turn (live-turn.ts). */
   remoteVerbose: boolean;
-  /** The phone channel is on the shared server (SQUEAK_REMOTE_SHARED): slow, budgeted, no verbose/films/voice/Cliq relay. */
-  remoteShared: boolean;
+  /** The Mac is still configured for the retired shared server (SQUEAK_REMOTE_SHARED): reported as `legacy`, nothing more. */
+  legacyShared: boolean;
   /** The direct same-Wi-Fi path to a paired phone (SQUEAK_REMOTE_LOCAL=off turns it off). */
   remoteLocal: boolean;
   /** 0: pick a free port. */
@@ -236,9 +232,9 @@ export function loadSqueakConfig(): SqueakConfig {
   };
 
   initFlags(baseDir);
-  const remoteShared = sharedFlag(parsed.SQUEAK_REMOTE_SHARED, parsed.SQUEAK_REMOTE_DATABASE_URL);
-  if (remoteShared) {
-    logger.info("shared server: the voice relay and Cliq two-way relay are off (the shared database allows neither)");
+  const legacyShared = ["1", "on", "true"].includes(parsed.SQUEAK_REMOTE_SHARED?.trim().toLowerCase() ?? "");
+  if (legacyShared) {
+    logger.info("SQUEAK_REMOTE_SHARED is retired and ignored: sign in to Squeak to move this Mac to the hosted relay");
   }
   return {
     botToken: parsed.SQUEAK_BOT_TOKEN?.trim() || null,
@@ -254,7 +250,7 @@ export function loadSqueakConfig(): SqueakConfig {
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
     remoteVerbose: flag("remote.verbose"),
-    remoteShared,
+    legacyShared,
     remoteLocal: flag("remote.local"),
     remoteLocalPort: localPort(parsed.SQUEAK_REMOTE_LOCAL_PORT),
     caffeinate: flag("caffeinate"),
@@ -262,11 +258,11 @@ export function loadSqueakConfig(): SqueakConfig {
       flag("caffeinate") && !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     voice: voiceConfig(parsed, baseDir),
-    voiceRelay: remoteShared ? null : voiceRelayConfig(parsed),
+    voiceRelay: voiceRelayConfig(parsed),
     voiceWhisperModel: parsed.SQUEAK_VOICE_WHISPER_MODEL?.trim()
       ? resolve(parsed.SQUEAK_VOICE_WHISPER_MODEL.trim())
       : path.join(baseDir, "whisper", "ggml-base.en.bin"),
-    cliqTwoWay: remoteShared ? null : cliqTwoWay(parsed),
+    cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,
@@ -309,17 +305,6 @@ export function databaseUrl(raw: string | undefined): string | null {
     // Not a URL.
   }
   throw new Error(`SQUEAK_REMOTE_DATABASE_URL is not a Realtime Database URL: ${value}`);
-}
-
-/** SQUEAK_REMOTE_SHARED on needs a Realtime Database URL, like every other use of one. */
-export function sharedFlag(value: string | undefined, url: string | undefined): boolean {
-  if (!["1", "on", "true"].includes(value?.trim().toLowerCase() ?? "")) {
-    return false;
-  }
-  if (!url?.trim()) {
-    throw new Error("SQUEAK_REMOTE_SHARED needs SQUEAK_REMOTE_DATABASE_URL");
-  }
-  return true;
 }
 
 /** A wrong voice setting turns voice off with a warning: a throw here would restart the daemon in a loop. */
