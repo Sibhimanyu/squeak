@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.26.4
+
+- A chat interrupted by a restart now closes the right turn; Markdown preview only shows images inside the workspace.
+
 ## 2.26.3
 
 - Chat polish: earlier turns no longer redraw when only the newest one changes, long commands shorten in the middle, durations keep their width as they tick, long command output stops at 12 lines with Show all, and steps read their duration and open state to VoiceOver.
