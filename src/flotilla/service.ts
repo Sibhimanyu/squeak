@@ -1147,7 +1147,10 @@ export class FlotillaService extends EventEmitter {
       delete pond.local;
       this.save();
       this.watch(pond.id);
-      await this.ripple(pond.id, "made the pond").catch(() => undefined);
+      // Published already; the ripple is only the pond's first line of history, so a miss is logged, not fatal.
+      await this.ripple(pond.id, "made the pond").catch((error) =>
+        logger.warn("pond published but its first ripple failed", { pond: pond.id, error: String(error) }),
+      );
     })().finally(() => this.publishing.delete(pondId));
     this.publishing.set(pondId, run);
     return run;
@@ -1479,7 +1482,15 @@ export class FlotillaService extends EventEmitter {
       try {
         made = await this.options.relay!.shortCreate!(pond.id, body);
       } catch {
-        if (tokenId) await this.options.relay?.revoke(pond.id, tokenId).catch(() => undefined);
+        // A join token whose short code failed must not stay live: if revoke fails too, say so.
+        if (tokenId) {
+          await this.options.relay?.revoke(pond.id, tokenId).catch((error) =>
+            logger.warn("could not revoke a join token after its short code failed", {
+              pond: pond.id,
+              error: String(error),
+            }),
+          );
+        }
         throw new FlotillaError("The relay would not make a short code; try again.", 503);
       }
       pond.invites.push({
@@ -1759,7 +1770,9 @@ export class FlotillaService extends EventEmitter {
       ids.map(async (id) => {
         await this.storeOf(pond)
           .delete(this.docPath(pond.id, "joins", id))
-          .catch(() => undefined);
+          .catch((error) =>
+            logger.warn("could not remove a superseded join request", { pond: pond.id, error: String(error) }),
+          );
         await this.dropJoinIdentity(pond, id);
       }),
     );

@@ -293,7 +293,13 @@ export class AwakeSession {
     if (saved) {
       this.begin(saved);
     }
-    const outcome = await this.options.lid?.recover(Boolean(saved?.lid)).catch(() => undefined);
+    const outcome = await this.options.lid?.recover(Boolean(saved?.lid)).catch((error) => {
+      // Sleep or Low Power Mode may still be held by a journalled change: say so; the journal and backstop stay.
+      logger.warn("could not recover the lid journal at start", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    });
     if (outcome?.foreignDisable) {
       // Not Squeak's to clear: it may be a setting the owner made on purpose.
       this.foreignDisable = true;
@@ -414,7 +420,11 @@ export class AwakeSession {
       // Already on (the user's) or refused: do not ask again until the want goes.
       this.lowPowerDeclined = !this.lowPowerActual;
     } else {
-      await lid.lowPowerOff().catch(() => undefined);
+      await lid.lowPowerOff().catch((error) => {
+        logger.warn("could not turn Low Power Mode off", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       this.lowPowerActual = false;
     }
     this.options.onChange?.();
