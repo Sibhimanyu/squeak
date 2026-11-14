@@ -153,6 +153,54 @@ describe("NativePhone", () => {
     expect(await make(false, { error: "not found" }).ponds()).toBeNull();
   });
 
+  it("lists other members' threads with the powered-by mark and says why messaging is off", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "token"), "tok\n");
+    const view = (me: Record<string, unknown>) => ({
+      me,
+      threads: [
+        { id: "mine", starter: "me", title: "Mine", mode: "own", updatedAt: 5 },
+        { id: "p", starter: "x", private: true, title: "Private", updatedAt: 5 },
+        {
+          id: "o",
+          starter: "x",
+          starterName: "Aarav",
+          nestName: "Aarav-mac",
+          mode: "own",
+          title: "Add tests",
+          state: "working",
+          updatedAt: 1_700_000_000_000,
+          locked: true,
+        },
+        { id: "s", starter: "y", starterName: "Vera", mode: "shared", title: "Shared", updatedAt: 1_600_000_000_000 },
+      ],
+    });
+    const make = (me: Record<string, unknown>) =>
+      new NativePhone({
+        dbPath: path.join(dir, "none.db"),
+        baseUrl: "http://h",
+        tokenPath: path.join(dir, "token"),
+        models: () => [],
+        fetch: (async () => new Response(JSON.stringify(view(me)), { status: 200 })) as unknown as typeof fetch,
+      });
+    const open = await make({ id: "me", role: "member", caps: { message: true } }).pondFlock("a");
+    expect(open?.canMessage).toBe(true);
+    expect(open?.threads.map((x) => x.id)).toEqual(["o", "s"]);
+    expect(open?.threads[0]).toMatchObject({
+      by: "Aarav",
+      mode: "own",
+      poweredBy: "Powered by Aarav-mac · Flotilla",
+      locked: true,
+    });
+    expect(open?.threads[1]?.poweredBy).toBeUndefined();
+    const off = await make({ id: "me", role: "member", caps: { message: false } }).pondFlock("a");
+    expect(off).toMatchObject({
+      canMessage: false,
+      reason: "The owner has turned off messaging for you in this pond.",
+    });
+  });
+
   it("reads the order and a pond's page from the host's own routes, and writes through them", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
     dirs.push(dir);

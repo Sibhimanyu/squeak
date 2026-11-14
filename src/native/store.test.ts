@@ -75,7 +75,8 @@ describe("NativeStore", () => {
     old.db.exec(
       "ALTER TABLE project_settings DROP COLUMN clone_dependencies; ALTER TABLE project_settings DROP COLUMN auto_compact_tokens;",
     );
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 9}`);
+    old.db.exec("DROP TABLE timeline_events;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 10}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -110,7 +111,8 @@ describe("NativeStore", () => {
     old.db.exec(
       "ALTER TABLE project_settings DROP COLUMN clone_dependencies; ALTER TABLE project_settings DROP COLUMN auto_compact_tokens;",
     );
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 5}`);
+    old.db.exec("DROP TABLE timeline_events;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 6}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([

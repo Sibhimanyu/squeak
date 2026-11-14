@@ -431,6 +431,20 @@ fs.writeFileSync(
             () => true,
             (s) => s.title ?? "Untitled",
           ),
+          // Other members' threads and this person's switches, as `NativePhone.pondFlock` answers them.
+          flock: [
+            {
+              id: "t-aarav",
+              title: "Add tests",
+              state: "working",
+              at: "2026-09-24T00:00:00.000Z",
+              by: "Aarav",
+              mode: "own",
+              poweredBy: "Powered by Aarav-mac · Flotilla",
+              locked: true,
+            },
+          ],
+          access: { canMessage: false, reason: "The owner has turned off messaging for you in this pond." },
           seq: 1790305200005,
         },
         z,

@@ -101,13 +101,23 @@ export function answeringLine(holds, requestId, meId) {
 }
 
 /** Whether the guest can message this thread, or the one sentence that says why not. */
-export function composerBlock(role, thread) {
+export function composerBlock(role, thread, me = null) {
   if (role === "viewer") return "Viewers can read but not send.";
+  if (me && thread && thread.starter !== me.id) {
+    if (thread.deny?.includes(me.id)) return `${thread.starterName} doesn't let you message this thread.`;
+    if (me.caps?.message === false) return "The owner has turned off messaging for you in this pond.";
+    if (thread.locked && !thread.allow?.includes(me.id)) return "This thread is read-only: its starter locked it.";
+  }
   if (thread?.permissionMode === "bypassPermissions") {
     return `Only ${thread.starterName} can message this thread while it runs without asking.`;
   }
   if (thread && thread.starterOnline === false && thread.state !== "idle") return null;
   return null;
+}
+
+/** "Powered by <their Mac> · Flotilla" on a thread a member runs with their own agent; null on a shared thread. */
+export function poweredBy(thread) {
+  return thread?.mode === "own" ? `Powered by ${thread.nest || "their Mac"} · Flotilla` : null;
 }
 
 /** A line about the thread's starter when their Mac looks away, or null. */

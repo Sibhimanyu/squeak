@@ -3,6 +3,9 @@
  * applies to a document it opened. A document that fails its check is dropped, never repaired.
  */
 
+import { readCapsPatch, type CapsPatch } from "./permissions.js";
+import { readTimelineEvent, type TimelineEvent } from "../native/timeline.js";
+
 export type Role = "owner" | "member" | "viewer";
 export const ROLES: readonly Role[] = ["owner", "member", "viewer"];
 
@@ -33,6 +36,8 @@ export interface MemberDoc {
   addedAt: number;
   /** A seam for Catalyst sign-in; unused today. */
   accountId?: string;
+  /** What the owner lets this member do beyond their role's default (`effectiveCaps`); signed with the document. */
+  caps?: CapsPatch;
 }
 
 export interface JoinRequestDoc {
@@ -48,6 +53,10 @@ export interface JoinRequestDoc {
 }
 
 export interface PondThread {
+  /** The starter's overrides for everyone else (`threadWriteDecision`): locked, and who is let in or kept out. */
+  locked?: boolean;
+  allow?: string[];
+  deny?: string[];
   id: string;
   title: string;
   /** The starter's member id. */
@@ -150,14 +159,20 @@ export type ThreadEventBody =
   | { type: "approval"; requestId: string; label: string }
   | { type: "resolved"; requestId: string }
   | { type: "state"; state: ThreadState }
-  | ({ type: "changed" } & ChangedFiles);
+  | ({ type: "changed" } & ChangedFiles)
+  /**
+   * One event of the starter's chat timeline, with the host's own `seq` inside (`ev.seq`): a member's Mac reduces
+   * these with the same reducer the starter's Mac uses, and a copy it saw twice or out of order changes nothing.
+   * The other kinds above stay for Macs that do not know this one.
+   */
+  | { type: "timeline"; ev: TimelineEvent };
 
 export type ThreadEvent = ThreadEventBody & { seq: number; at: number };
 
 export const MAX_PATHS = 200;
 export const MAX_DIFF_BYTES = 64 * 1024;
 export const MAX_TEXT = 20_000;
-export const KEEP_EVENTS = 500;
+export const KEEP_EVENTS = 1200;
 
 /** The only things a member can ask of a thread's starter. Approving and stopping are not among them. */
 export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start"] as const;
@@ -274,6 +289,7 @@ export function readMember(v: unknown): MemberDoc | null {
     ...(v.client ? { client: v.client } : {}),
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
+    ...(readCapsPatch(v.caps) ? { caps: readCapsPatch(v.caps)! } : {}),
   };
 }
 
@@ -326,6 +342,9 @@ export function readThread(v: unknown): PondThread | null {
     ...(s(v.branch, 250) ? { branch: v.branch } : {}),
     ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
     ...(v.waitingFor === "approval" || v.waitingFor === "question" ? { waitingFor: v.waitingFor } : {}),
+    ...(v.locked === true ? { locked: true } : {}),
+    ...(Array.isArray(v.allow) ? { allow: v.allow.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
+    ...(Array.isArray(v.deny) ? { deny: v.deny.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
     ...(rec(v.requester) && s(v.requester.memberId, 64) && s(v.requester.requestId, 80)
       ? { requester: { memberId: v.requester.memberId, requestId: v.requester.requestId } }
       : {}),
@@ -400,6 +419,10 @@ export function readThreadEvent(v: unknown): ThreadEvent | null {
       return THREAD_STATES.includes(v.state as ThreadState)
         ? { ...base, type: "state", state: v.state as ThreadState }
         : null;
+    case "timeline": {
+      const ev = readTimelineEvent(v.ev);
+      return ev ? { ...base, type: "timeline", ev } : null;
+    }
     case "changed": {
       if (!n(v.files) || !n(v.added) || !n(v.removed) || !Array.isArray(v.paths)) return null;
       if (!v.paths.every((p) => s(p, 500)) || v.paths.length > MAX_PATHS) return null;

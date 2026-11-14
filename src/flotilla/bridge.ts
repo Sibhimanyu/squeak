@@ -21,6 +21,7 @@ import {
   type ThreadEventBody,
   type ThreadState,
 } from "./types.js";
+import type { TimelineEvent } from "../native/timeline.js";
 import type { CommandOutcome, FlotillaService, VerifiedCommand } from "./service.js";
 
 /** The small port between ponds and the session host: what the bridge reads, and what a member's command may do. */
@@ -44,6 +45,8 @@ export interface HostPort {
   changes?(id: string): Promise<ChangedFiles | null>;
   /** The chat's workspace name and branch (native.db `workspaces`), when it has one. */
   workspace?(id: string): { name: string; branch: string } | null;
+  /** The newest turns of the chat's timeline log (an older host has none). */
+  timelineTail?(id: string): TimelineEvent[];
 }
 
 /** What sending a message to a thread says: where it is now, and one sentence for it. */
@@ -205,6 +208,7 @@ export class FlotillaBridge {
       for (const body of normalizer.message(row.role, row.kind, row.payload))
         this.queue(t, this.attribute(local.sessionId, body), Date.parse(row.createdAt) || this.now());
     }
+    for (const ev of this.host.timelineTail?.(local.sessionId) ?? []) this.queueTimeline(t, ev);
     for (const request of this.host.openRequests(local.sessionId))
       this.queue(t, normalizer.request(request.id, request.kind, request.payload));
     const session = this.host.getSession(local.sessionId);
@@ -244,6 +248,24 @@ export class FlotillaBridge {
       }, this.flushMs);
       this.timer.unref?.();
     }
+  }
+
+  /**
+   * A host timeline event as a member's Mac gets it: the host's order and ids untouched, its author named (the
+   * owner's own prompts say who the owner is, since "you" means someone else over there), and nothing private to
+   * the sending composer (its nonce).
+   */
+  private queueTimeline(t: Tracked, ev: TimelineEvent): void {
+    const me = this.service.me;
+    const out = { ...ev } as Record<string, unknown>;
+    delete out.clientNonce;
+    // A reader refuses text past the cap, which would lose the whole event: an overlong message is cut instead.
+    if (typeof out.text === "string" && out.text.length > MAX_TEXT) out.text = out.text.slice(0, MAX_TEXT - 1) + "…";
+    if (out.detail !== undefined && JSON.stringify(out.detail).length > MAX_TEXT) delete out.detail;
+    if ((ev.type === "turn.started" || ev.type === "prompt.queued") && !ev.author) {
+      out.author = { id: me.id, name: me.name, initial: [...(me.name.trim() || "?")][0]!.toUpperCase() };
+    }
+    this.queue(t, { type: "timeline", ev: out as unknown as TimelineEvent }, Date.parse(ev.at) || this.now());
   }
 
   /** Who a user row's text came from: a member's message waiting in `sent` (taken once), else the starter. */
@@ -290,6 +312,11 @@ export class FlotillaBridge {
     for (const t of list) {
       const local = this.service.localThread(t.pondId, t.threadId);
       if (!local) continue;
+      if (e.type === "timeline") {
+        // Stored events only: the ephemeral reply.delta never leaves this Mac.
+        if (!local.private && "seq" in e.event) this.queueTimeline(t, e.event);
+        continue;
+      }
       if (who && e.type === "message") this.noteWho(t, who, Date.parse(e.createdAt) || this.now());
       if (e.type === "title") {
         // A rename republishes the thread document under the new name (a private thread only keeps it locally).

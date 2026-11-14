@@ -2,6 +2,7 @@ import AppKit
 import QuickLookUI
 import SqueakIcons
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 // DESIGN.md §8.10, the file viewer in the centre: a file opened from the Files tab replaces the chat under the tab
@@ -19,6 +20,8 @@ struct FileViewer: View {
             Rectangle().fill(Theme.line).frame(height: 1)
             if file.conflict != nil { conflictBanner }
             switch file.content {
+            case .text where MarkdownPreview.showsPreview(path: file.path, editing: file.editing, choice: file.markdownChoice):
+                MarkdownFilePreview(text: file.edited, fileURL: files.url(for: file.path)).id(file.path)
             case .text:
                 CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
                     .id(file.path).clipped()
@@ -53,6 +56,16 @@ struct FileViewer: View {
             if file.outside { Text("Outside this stream").font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1) }
             if let note = file.note { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.negative).lineLimit(1) }
             Spacer(minLength: Space.s)
+            if case .text = file.content, MarkdownPreview.isMarkdown(path: file.path), !file.editing {
+                Picker("View", selection: Binding(
+                    get: { MarkdownPreview.mode(editing: false, choice: file.markdownChoice) },
+                    set: { file.markdownChoice = MarkdownPreview.choice(afterPicking: $0) })
+                ) {
+                    Text("Preview").tag(MarkdownPreview.Mode.preview)
+                    Text("Source").tag(MarkdownPreview.Mode.source)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 150).help("Show the Markdown rendered, or as text")
+            }
             if case .text = file.content, !file.outside {
                 if file.editing {
                     Button("Done") { file.editing = false }.buttonStyle(SecondaryButtonStyle())
@@ -149,6 +162,44 @@ struct FileCloseGuard: ViewModifier {
             Button("Cancel", role: .cancel) { files?.closeAsk = nil }
         } message: {
             Text("Your edits to this file are lost if you don't save them.")
+        }
+    }
+}
+
+// MARK: Markdown preview
+
+/// A Markdown file rendered with the chat's own renderer (`MessageText`, `.reading` style), whole and selectable.
+/// Relative images resolve against the file's folder; remote ones are never fetched.
+struct MarkdownFilePreview: View {
+    let text: String
+    let fileURL: URL?
+
+    private var style: MessageStyle {
+        var s = MessageStyle.reading
+        s.collapseLines = .max
+        return s
+    }
+
+    var body: some View {
+        ScrollView {
+            MessageText(markdown: text, style: style)
+                .environment(\.messageImage, imageView)
+                .textSelection(.enabled)
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .background(Theme.bg)
+    }
+
+    private var imageView: MessageImageView {
+        let base = fileURL
+        return { alt, source in
+            guard let base, let url = MarkdownPreview.localImageURL(source: source, fileURL: base),
+                let image = NSImage(contentsOf: url)
+            else { return AnyView(Text(verbatim: "[image: \(alt.isEmpty ? source : alt)]").foregroundStyle(Theme.muted)) }
+            return AnyView(Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: image.size.width, alignment: .leading)
+                .accessibilityLabel(alt))
         }
     }
 }

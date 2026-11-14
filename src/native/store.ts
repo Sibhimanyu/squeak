@@ -145,6 +145,14 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE project_settings ADD COLUMN auto_compact_tokens INTEGER;
   `,
+  `
+  CREATE TABLE timeline_events (
+    session_id TEXT NOT NULL, seq INTEGER NOT NULL, turn_id TEXT, type TEXT NOT NULL,
+    body TEXT NOT NULL, at TEXT NOT NULL,
+    PRIMARY KEY (session_id, seq)
+  );
+  CREATE INDEX timeline_turn ON timeline_events(session_id, turn_id);
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>

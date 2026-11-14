@@ -484,6 +484,20 @@ struct PondAllThreadsPage: View {
                     }
                 } header: { Text(stream.name) }
             }
+            if let flock = all.flock, !flock.isEmpty {
+                Section {
+                    ForEach(flock) { thread in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(thread.title).font(.body).lineLimit(2)
+                            Text([thread.by, thread.poweredBy, thread.locked == true ? "Locked" : nil].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                                .font(.footnote).foregroundStyle(Theme.muted)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                } header: { Text("From the flock") } footer: {
+                    Text(all.access?.canMessage == false ? (all.access?.reason ?? "You can read these but not message them.") : "These run on their starters' Macs. Open them in Squeak on your Mac.")
+                }
+            }
             if all.total > all.threads.count {
                 Text("Showing the newest \(all.threads.count) of \(all.total)").font(.footnote).foregroundStyle(Theme.muted)
                     .listRowBackground(Color.clear)

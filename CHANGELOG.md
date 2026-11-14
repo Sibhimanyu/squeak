@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.27.1] - 2026-11-15 (iOS)
+
+- A pond shows the flock's threads, and who can message each one.
+
 ## [1.27.0] - 2026-11-14 (iOS)
 
 - A pond opens with its threads already there, from this iPhone's copy for that Mac, and the Mac's fresh list replaces it in place.

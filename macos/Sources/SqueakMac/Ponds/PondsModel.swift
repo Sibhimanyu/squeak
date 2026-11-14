@@ -416,6 +416,19 @@ final class PondsModel {
         _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.") { try await self.client!.removeMember(pond: pond, member: member) }
     }
 
+    func setPreset(pond: String, member: String, preset: String) async {
+        let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
+        _ = await act("role:\(pond):\(member)", pond: pond, success: "\(name) is now a \(preset).") { try await self.client!.setMemberCaps(pond: pond, member: member, preset: preset) }
+    }
+
+    func setCap(pond: String, member: String, cap: String, on: Bool) async {
+        _ = await act("role:\(pond):\(member)", pond: pond, success: on ? "Allowed." : "Restricted.") { try await self.client!.setMemberCaps(pond: pond, member: member, caps: [cap: on]) }
+    }
+
+    func setThreadAccess(pond: String, thread: String, locked: Bool? = nil, allow: [String]? = nil, deny: [String]? = nil) async {
+        if await attempt({ try await client!.setThreadAccess(pond: pond, thread: thread, locked: locked, allow: allow, deny: deny) }) { await refresh(pond: pond, byPerson: true) }
+    }
+
     func setRole(pond: String, member: String, role: PondRole) async {
         let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
         _ = await act("role:\(pond):\(member)", pond: pond, success: "\(name) is now a \(role.word.lowercased()).") { try await self.client!.setRole(pond: pond, member: member, role: role) }

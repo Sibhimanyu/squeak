@@ -286,7 +286,7 @@ public enum ThreadTimeline {
                 flush(); rows.append(.approval(id: e.seq, requestId: r, label: label, resolved: resolved.contains(r)))
             case .changed(let files, let added, let removed, _):
                 flush(); rows.append(.changed(id: e.seq, files: files, added: added, removed: removed))
-            case .resolved, .state, .other: break
+            case .resolved, .state, .other, .timeline: break
             }
         }
         flush()
