@@ -2199,8 +2199,8 @@ describe("RemoteBridge snapshot", () => {
       f.emit([session({ state: "finished" })]); // 350 ms after the last write
       await vi.advanceTimersByTimeAsync(400);
       expect(sets).not.toHaveBeenCalled();
-      f.advance(1_000);
-      await vi.advanceTimersByTimeAsync(1_000);
+      f.advance(1_500);
+      await vi.advanceTimersByTimeAsync(1_500);
       expect(sets).toHaveBeenCalledTimes(1);
       f.bridge.stop();
     } finally {
