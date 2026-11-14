@@ -47,7 +47,7 @@
 //   POST   /account/macs/hist-token {channel, token, previous?} (the Mac's own key) -> 200 {ok:true}: the write token of the channel's
 //                      history in the cloud (kind "hist", docs/remote-channel.md "History cache" Layer 2): only a request carrying it
 //                      as x-squeak-hist may PUT or DELETE there (403 otherwise); 413 {error:"cap"} past 50 MB / 4000 documents per
-//                      account; GET by id works with the channel's key, /list is 403. First token wins, a change needs `previous` (409)
+//                      account; GET by id works with the channel's key, /list is 403. A Mac's own key registers or rotates it (409 for another Mac's)
 //   DELETE /account/macs/<macId> (cookie or x-squeak-account, the owner) -> 204: revokes that key
 //   with header x-squeak-mac-key (a per-Mac key, tenants.js; /token gives the shared stream, whose hosted notices are opaque tags) instead of the relay key: /doc, /list, /ping, /token,
 //   /pond-token, /pond-revoke, /account/link, /account/unlink and GET /account/avatar?userId= for that Mac's own channels

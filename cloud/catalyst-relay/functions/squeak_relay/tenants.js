@@ -165,8 +165,8 @@ function createTenants(deps) {
    * History in the cloud (docs/remote-channel.md, "History cache" Layer 2). The sealed copy of recent chats lives under kind
    * `hist`; only the Mac that holds the channel's write token may put or delete there (devices read with the channel's key
    * and cannot write it). `hist-tokens` doc <channel> = {hash, macId, userId, at}; `hist-usage` doc <userId> = {bytes, docs}.
-   * POST /account/macs/hist-token {channel, token, previous?} (a Mac's own key): the first registration wins; changing it
-   * needs `previous` (the current token), so a phone holding the same Mac key cannot take the write side over.
+   * POST /account/macs/hist-token {channel, token, previous?} (a Mac's own key): a Mac's own key registers or
+   * rotates the token (replacing the old one); another Mac's key cannot. `previous` is accepted and ignored.
    */
   async function registerHistToken(mac, body) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, body: { error: "body" } };
@@ -177,11 +177,9 @@ function createTenants(deps) {
     if (typeof body.token !== "string" || !CLIQ_TOKEN_SHAPE.test(body.token))
       return { status: 400, body: { error: "token" } };
     if (!(await channelAllowed(mac, body.channel))) return { status: 403, body: { error: "channel" } };
+    // A lost token is replaced by the channel's own Mac (channelAllowed above), so a Mac can always re-register.
     const rec = parse(await store.get(HIST_TOKENS, body.channel));
-    if (rec) {
-      const theirs = await authenticateHist(body.channel, body.previous);
-      if (!theirs) return { status: 409, body: { error: "hist-token" } };
-    }
+    if (rec && rec.macId !== mac.macId) return { status: 409, body: { error: "hist-token" } };
     await store.put(
       HIST_TOKENS,
       body.channel,

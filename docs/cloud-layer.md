@@ -244,6 +244,6 @@ shows only the existing Firebase settings. DESIGN.md applies.
 Kind `hist` (`channels/<id>/hist/<doc>`): a sealed copy of the Mac's recent chats for a device that cannot ask the Mac
 (asleep, or new). Reads by id with the channel's key; `GET /list` of `hist` is 403. `PUT` and `DELETE` also need
 `x-squeak-hist: <token>`, whose hash the Mac registered with `POST /account/macs/hist-token {channel, token, previous?}` (its own
-key; first wins, a change needs `previous`, else 409). A store write over the account's cap (50 MB, 4000 documents, kept in
+key; registers or rotates it, replacing the old token; another Mac's key gets 409). A store write over the account's cap (50 MB, 4000 documents, kept in
 `hist-usage/<userId>`; a replacement counts as the difference) answers 413 `{error:"cap"}`. Only the index document `idx`
 sends a change notice. Design and client behaviour: docs/remote-channel.md, "History cache", Layer 2.

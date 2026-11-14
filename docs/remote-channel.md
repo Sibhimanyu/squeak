@@ -1208,12 +1208,12 @@ newest, complete, act}], seq, at}`; the only document that wakes readers (a chan
 - _Server (relay 1.5.0)._ New kind `hist`. Reads go by id with the channel's key (`GET /doc`); `/list` of `hist` is 403 (it
   would return every page). PUT and DELETE need `x-squeak-hist: <write token>` too: the Mac makes a random 43-character token,
   keeps it in `remote.json` (`historyCloudToken`) and registers its hash with `POST /account/macs/hist-token` (a Mac's own key;
-  the first token wins, a change needs `previous`, 409 otherwise), so a phone, which holds the same Mac key in its pairing grant,
-  can read and cannot write or delete. Per account (all its Macs together) 50 MB and 4000 documents of stored history
+  the Mac's own key registers or rotates it, so a Mac that lost its token just registers a new one), so a device that only has
+  the channel key can read and cannot write or delete. Per account (all its Macs together) 50 MB and 4000 documents of stored history
   (`hist-usage`), 413 `{error:"cap"}` past it (the Mac then waits an hour); a replacement counts as the difference and a delete
   frees its bytes. History writes are not charged against the daily 20 MB limit (the cap is theirs) but count as requests.
-  If a Mac loses its token while the relay still holds it, the cloud copy stays frozen until the operator clears
-  `hist-tokens/<channel>`.
+  A phone's pairing grant carries the Mac's own key, so a phone could in principle rotate the token; sealing and the Mac's
+  next write bound that to a denial of the cloud copy, never a read of it.
 - _Setting._ "Keep recent chats in Squeak's cloud (encrypted)" in the Mac app's Account settings: on by default for a hosted,
   signed-in Mac (`keepHistoryInCloud` absent in `remote.json`'s `account` = on, `false` = off), `POST
 /control/remote/account/settings {keepHistoryInCloud}` (strict, one key), `GET /control/remote/account` carries

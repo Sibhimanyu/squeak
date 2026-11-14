@@ -517,7 +517,7 @@ describe("history in the cloud (kind hist)", () => {
       ...(token ? { "x-squeak-hist": token } : {}),
     });
 
-  it("registers with the Mac's own key; the first token wins and a change needs the current one", async () => {
+  it("registers with the Mac's own key and lets that Mac rotate a lost token", async () => {
     const { f, a, b } = await twoMacs();
     expect((await reg(f, null, { channel: MAC_A, token: TOKEN })).status).toBe(401);
     expect((await reg(f, a, { channel: MAC_A, token: "short" })).status).toBe(400);
@@ -525,10 +525,10 @@ describe("history in the cloud (kind hist)", () => {
     expect((await reg(f, b, { channel: MAC_A, token: TOKEN })).status).toBe(403); // not that Mac's channel
     expect((await reg(f, a, { channel: MAC_A, token: TOKEN })).status).toBe(200);
     expect(f.rows.get(`hist-tokens|${MAC_A}`)).not.toContain(TOKEN);
-    // a device holding the same Mac key cannot take the write side over
-    expect((await reg(f, a, { channel: MAC_A, token: OTHER })).status).toBe(409);
-    expect((await reg(f, a, { channel: MAC_A, token: OTHER, previous: OTHER })).status).toBe(409);
-    expect((await reg(f, a, { channel: MAC_A, token: OTHER, previous: TOKEN })).status).toBe(200);
+    // a Mac that lost its token re-registers with its own key, with or without `previous`; the old token stops working
+    expect((await reg(f, a, { channel: MAC_A, token: OTHER })).status).toBe(200);
+    expect((await reg(f, a, { channel: MAC_A, token: TOKEN, previous: "x".repeat(43) })).status).toBe(200);
+    expect((await reg(f, a, { channel: MAC_A, token: OTHER })).status).toBe(200);
     expect((await hput(f, a, TOKEN, "idx")).status).toBe(403);
     expect((await hput(f, a, OTHER, "idx")).status).toBe(204);
   });
