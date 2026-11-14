@@ -29,7 +29,21 @@ import {
   neverAllowReason,
   normalizeRule,
 } from "./rules.js";
-import { AutoTitler } from "./auto-title.js";
+import { AutoTitler, defaultTitleCall, type TitleModelCall } from "./auto-title.js";
+import {
+  autoCompactDue,
+  autoCompactThreshold,
+  chatSize,
+  classifyConnectionFailure,
+  claudeTranscriptBytes,
+  cliCompactWindow,
+  COMPACT_COMMAND,
+  failureCardText,
+  HANDOFF_SYSTEM,
+  handoffFallback,
+  handoffPrompt,
+  type HandoffRow,
+} from "./api-wait.js";
 import type { NativeStore } from "./store.js";
 import {
   ResumeFailedError,
@@ -186,6 +200,10 @@ export interface HostOptions {
   warmRecentMs?: number;
   /** Names untitled chats; the real one (Haiku, with a local fallback) unless a runner factory is injected, then none. */
   autoTitle?: AutoTitler | false;
+  /** The cheap model call that writes a handoff summary; the real one (Haiku) unless injected. */
+  summaryCall?: TitleModelCall;
+  /** Where the agent's own transcripts live (tests); `~/.claude/projects` otherwise. */
+  projectsDir?: string;
 }
 
 /** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
@@ -198,6 +216,7 @@ export function defaultRunnerFactory(
   codexBin?: string,
   mcpFor?: (sessionId: string) => McpEndpoint | null,
   contextFor?: (session: SessionRow) => string | null,
+  compactWindowFor?: (session: SessionRow) => number | null,
 ): RunnerFactory {
   const plugin = squeakPluginPath();
   return (session, hooks) =>
@@ -211,6 +230,7 @@ export function defaultRunnerFactory(
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
+          autoCompactWindow: compactWindowFor?.(session) ?? null,
           log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
@@ -275,7 +295,15 @@ export class SessionHost extends EventEmitter {
     this.store = options.store;
     this.ownerNameOf = options.ownerName ?? (() => null);
     this.factory =
-      options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor, (s) => this.contextNote(s));
+      options.runnerFactory ??
+      defaultRunnerFactory(
+        options.codexBin,
+        options.mcpFor,
+        (s) => this.contextNote(s),
+        (s) => cliCompactWindow(this.compactThreshold(s), s.model),
+      );
+    this.summaryCall = options.summaryCall ?? defaultTitleCall();
+    this.projectsDir = options.projectsDir;
     this.idleMs = options.idleMs ?? 30 * 60_000;
     // An injected factory (tests) is not warmed at start unless asked.
     this.warmRecentMs = options.warmRecentMs ?? (options.runnerFactory ? 0 : 30 * 60_000);
@@ -291,6 +319,36 @@ export class SessionHost extends EventEmitter {
   }
 
   private readonly titler: AutoTitler | null;
+  private readonly summaryCall: TitleModelCall;
+  private readonly projectsDir: string | undefined;
+  /** When each running turn began: a failure card says how long it ran. */
+  private readonly turnStarts = new Map<string, number>();
+  private readonly lastAutoCompact = new Map<string, number>();
+  /** Chats whose last turn failed by a lost connection and not since sent again. */
+  private readonly retryable = new Set<string>();
+  private readonly sizeCache = new Map<string, { at: number; bytes: number | null }>();
+
+  /** The context size at which this chat compacts itself (its project's setting; 200k by default; null = off). */
+  compactThreshold(s: SessionRow): number | null {
+    if (s.agent !== "claude") return null;
+    const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
+    const project = ws ? this.store.getProject(ws.projectId) : this.store.getProjectByRoot(s.cwd);
+    return autoCompactThreshold(project ? this.store.getProjectSettings(project.id).autoCompactTokens : null);
+  }
+
+  private transcriptBytesOf(s: SessionRow): number | null {
+    if (s.agent !== "claude" || !s.agentSessionId) return null;
+    const hit = this.sizeCache.get(s.id);
+    if (hit && Date.now() - hit.at < 5 * 60_000) return hit.bytes;
+    const bytes = claudeTranscriptBytes(s.agentSessionId, this.projectsDir);
+    this.sizeCache.set(s.id, { at: Date.now(), bytes });
+    return bytes;
+  }
+
+  /** How large the chat is: very large ones get a notice and a way to continue in a new thread. */
+  sizeOf(s: SessionRow): ReturnType<typeof chatSize> {
+    return chatSize(this.contextOf(s), this.transcriptBytesOf(s));
+  }
 
   /** What this thread's agent is told about Squeak and about who may write (built when its agent starts). */
   private contextNote(s: SessionRow): string {
@@ -489,7 +547,10 @@ export class SessionHost extends EventEmitter {
       ctx = this.contextOf(s);
     }
     const ducklings = this.ducklingsOf(s.id);
+    const size = s.agent === "claude" && ctx ? this.sizeOf(s) : null;
     const row: SessionRow = {
+      ...(s.status === "error" && this.retryable.has(s.id) ? { retryable: true } : {}),
+      ...(size?.large && size.reason ? { large: { reason: size.reason, transcriptBytes: size.transcriptBytes } } : {}),
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
       ...(ducklings && ducklings.items.length > 0 ? { ducklings } : {}),
       ...(ctx ? { context: ctx } : {}),
@@ -719,7 +780,7 @@ export class SessionHost extends EventEmitter {
     if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
       throw new HostError("The chat is working. Compact it when it finishes.", 409);
     if (s.agent === "claude") {
-      await this.send(id, "/compact");
+      await this.send(id, COMPACT_COMMAND);
       return { ok: true };
     }
     let runner: Runner;
@@ -735,6 +796,76 @@ export class SessionHost extends EventEmitter {
       throw new HostError(error instanceof Error ? error.message : "compaction failed", 502);
     }
     return { ok: true };
+  }
+
+  /**
+   * The opening message for a new thread that continues this one: a cheap model (Haiku) summarises the title and the
+   * last messages; when it cannot, the person's own recent words stand in. The person edits it before it is sent.
+   */
+  async handoffDraft(id: string): Promise<{ summary: string; auto: boolean; size: ReturnType<typeof chatSize> }> {
+    const s = this.require(id);
+    const rows: HandoffRow[] = this.store
+      .messagesBefore(id, null, 200)
+      .map((r) => ({ role: r.role, text: rowText(r) }))
+      .filter((r) => r.text.trim())
+      .slice(-24);
+    const size = this.sizeOf(s);
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 45_000);
+    try {
+      const text = (
+        await this.summaryCall({
+          prompt: handoffPrompt(s.title, rows),
+          system: HANDOFF_SYSTEM,
+          signal: abort.signal,
+        })
+      ).trim();
+      if (text) return { summary: text.slice(0, 8000), auto: true, size };
+    } catch (error) {
+      logger.warn("handoff summary failed", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      clearTimeout(timer);
+    }
+    return { summary: handoffFallback(s.title, rows), auto: false, size };
+  }
+
+  /**
+   * "Continue in a new thread": a new chat in the same workspace and folder, same model, whose first message is the
+   * (edited) summary. Both chats get a note naming the other, so each leads to the other.
+   */
+  async handoff(id: string, summary: string): Promise<SessionRow> {
+    const s = this.require(id);
+    const text = summary.trim();
+    if (!text) throw new HostError("The first message cannot be empty.", 400);
+    if (text.length > 20_000) throw new HostError("The first message is too long.", 400);
+    if (BUSY.has(s.status))
+      throw new HostError("The chat is working. Continue it in a new thread when it finishes.", 409);
+    const base = (s.title ?? "Chat").replace(/ \(continued\)$/, "");
+    const next = this.store.createSession({
+      workspaceId: s.workspaceId,
+      cwd: s.cwd,
+      agent: s.agent,
+      model: s.model,
+      effort: s.effort,
+      permissionMode: s.permissionMode,
+      title: `${base} (continued)`,
+    });
+    this.emitMessage(
+      this.store.appendMessage(next.id, "system", "system/note", {
+        text: `Continued from "${s.title ?? "an earlier chat"}"`,
+        linkedSessionId: s.id,
+        link: "from",
+      }),
+    );
+    this.emitMessage(
+      this.store.appendMessage(id, "system", "system/note", {
+        text: `Continued in "${next.title ?? "a new thread"}"`,
+        linkedSessionId: next.id,
+        link: "to",
+      }),
+    );
+    await this.send(next.id, text);
+    return this.store.getSession(next.id)!;
   }
 
   async interrupt(id: string): Promise<void> {
@@ -1110,6 +1241,10 @@ export class SessionHost extends EventEmitter {
     );
     this.emitMessage(userRow);
     const turn = this.store.addTurn(s.id, text, userRow.seq);
+    if (!steered) {
+      this.turnStarts.set(s.id, Date.now());
+      this.retryable.delete(s.id);
+    }
     // A chat's first message names it, in the background; the send never waits.
     if (turn.n === 1 && !s.title) this.titler?.request(s.id);
     try {
@@ -1256,9 +1391,8 @@ export class SessionHost extends EventEmitter {
         this.closeTurn(id, () => {
           for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
           this.setStatus(id, outcome, true);
-          if (outcome === "error") {
-            this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text: detail ?? "error" }));
-          }
+          if (outcome === "error") this.failureRow(id, detail ?? "error");
+          this.turnStarts.delete(id);
         }).then(() => this.afterTurn(id));
       },
       onExit: (error) => {
@@ -1283,6 +1417,52 @@ export class SessionHost extends EventEmitter {
     return runner;
   }
 
+  /**
+   * The chat's failure row. A connection failure (dropped, timed out, overloaded, a stall) says so plainly and is
+   * `retryable`, which is what draws "Try again"; the agent's own words stay in `detail`. Anything else keeps its text.
+   */
+  private failureRow(id: string, detail: string): void {
+    const kind = classifyConnectionFailure(detail);
+    const started = this.turnStarts.get(id);
+    const payload = kind
+      ? {
+          text: failureCardText(kind, started === undefined ? null : Date.now() - started),
+          detail,
+          failure: kind,
+          retryable: true,
+        }
+      : { text: detail };
+    if (kind) this.retryable.add(id);
+    this.emitMessage(this.store.appendMessage(id, "system", "system/error", payload));
+  }
+
+  /**
+   * Try again after a failed turn: sends the person's last message once more, unless the agent already got somewhere
+   * with it (a reply or a tool call is in the chat), in which case nothing is sent and `resent` is false.
+   */
+  async retry(id: string): Promise<{ resent: boolean; reason?: string }> {
+    const s = this.require(id);
+    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+      throw new HostError("The chat is working.", 409);
+    const rows = this.store.messagesBefore(id, null, 400);
+    let newest = -1;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i]!.role === "user" && rows[i]!.kind === "user/text") {
+        newest = i;
+        break;
+      }
+    }
+    if (newest < 0) throw new HostError("There is no message to send again.", 409);
+    const msg = rows[newest]!;
+    const after = rows.slice(newest + 1);
+    if (after.some((r) => r.role === "agent" && agentProgressed(r)))
+      return { resent: false, reason: "The agent already replied to that message." };
+    const text = (msg.payload as { text?: unknown } | null)?.text;
+    if (typeof text !== "string" || !text.trim()) throw new HostError("There is no message to send again.", 409);
+    await this.send(id, text, msg.author ? { author: msg.author } : {});
+    return { resent: true };
+  }
+
   private failTurn(id: string, text: string): void {
     const runner = this.runners.get(id);
     this.runners.delete(id);
@@ -1298,7 +1478,8 @@ export class SessionHost extends EventEmitter {
     }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
-      this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text }));
+      this.failureRow(id, text);
+      this.turnStarts.delete(id);
       this.setStatus(id, "error", true);
     });
   }
@@ -1543,6 +1724,7 @@ export class SessionHost extends EventEmitter {
       this.armTimer(id);
       return;
     }
+    if (this.autoCompactIfDue(s)) return;
     const next = this.store.dequeue(id);
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
@@ -1551,6 +1733,26 @@ export class SessionHost extends EventEmitter {
     } else {
       this.armTimer(id);
     }
+  }
+
+  /**
+   * A Claude chat whose last request was at or past its compaction point compacts now, between turns (the queued
+   * message goes after). The CLI is told the same window, which covers a long turn; this covers the turn that ended.
+   */
+  private autoCompactIfDue(s: SessionRow): boolean {
+    if (s.agent !== "claude") return false;
+    const now = Date.now();
+    if (!autoCompactDue(this.contexts.get(s.id) ?? null, this.compactThreshold(s), this.lastAutoCompact.get(s.id), now))
+      return false;
+    this.lastAutoCompact.set(s.id, now);
+    this.emitMessage(
+      this.store.appendMessage(s.id, "system", "system/note", {
+        text: "This chat is getting long. Compacting it so replies stay fast.",
+        autoCompact: true,
+      }),
+    );
+    void this.send(s.id, COMPACT_COMMAND).catch((error) => logHostError(`auto compact ${s.id}`, error));
+    return true;
   }
 
   private clearTimer(id: string): void {
@@ -1600,6 +1802,30 @@ export function logHostError(what: string, error: unknown): void {
 }
 
 /** Whether Claude Code still has a transcript for this session id, in any project folder. */
+/** An agent row that shows the model got somewhere with the request: a real reply or a tool call (not an API error). */
+export function agentProgressed(r: { kind: string; payload: unknown }): boolean {
+  if (r.kind !== "assistant") return false;
+  const p = r.payload as { error?: unknown; isApiErrorMessage?: unknown; message?: { content?: unknown } } | null;
+  if (!p || p.error || p.isApiErrorMessage) return false;
+  const c = p.message?.content;
+  return Array.isArray(c) ? c.length > 0 : typeof c === "string" && c.trim().length > 0;
+}
+
+/** The words of a stored message row, for a summary: the person's text, or the agent's text blocks. */
+export function rowText(r: { role: string; kind: string; payload: unknown }): string {
+  if (r.kind === "user/text") return String((r.payload as { text?: unknown } | null)?.text ?? "");
+  if (r.role !== "agent" || r.kind !== "assistant") return "";
+  const p = r.payload as { parent_tool_use_id?: unknown; message?: { content?: unknown } } | null;
+  if (typeof p?.parent_tool_use_id === "string") return "";
+  const c = p?.message?.content;
+  if (typeof c === "string") return c;
+  if (!Array.isArray(c)) return "";
+  return (c as { type?: string; text?: string }[])
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
+    .join("\n");
+}
+
 function transcriptExists(agentSessionId: string): boolean {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(agentSessionId)) return false;
   const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "projects");

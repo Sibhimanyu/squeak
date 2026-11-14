@@ -224,7 +224,11 @@ public struct NativeLiveState: Equatable, Sendable {
             if m.role == "user" { streamingText = ""; liveStep = nil }
             return .transcriptChanged
         case .delta(let j):
-            if let t = Self.deltaText(j) { streamingText += t }
+            if let wait = Self.waitPhase(j) {
+                // The host says the request is out and nothing has come back (or the CLI is retrying): never "Thinking…".
+                liveStep = wait.map { ActivityStep(kind: Self.waitingKind, text: $0) } ?? (liveStep?.kind == Self.waitingKind ? nil : liveStep)
+            }
+            else if let t = Self.deltaText(j) { streamingText += t }
             else if Self.startsBlock(j) { streamingText = ""; liveStep = Self.liveStep(of: j, current: liveStep) }
             return .none
         case .status(let s):
@@ -262,6 +266,22 @@ public struct NativeLiveState: Equatable, Sendable {
     }
 
     public static let thinkingText = "Thinking…"
+    /// The live step while the request is out and nothing has streamed back: "Waiting for Claude · 4m", "Retrying Claude (2)".
+    public static let waitingKind = "waiting"
+
+    /// The host's wait notice (`squeak_phase`, never persisted): its label while waiting or retrying, `.some(nil)` when the
+    /// wait ended, nil when this is not one.
+    static func waitPhase(_ j: NativeJSON) -> String?? {
+        guard j["type"]?.string == "squeak_phase" else { return nil }
+        guard let phase = j["phase"]?.string, phase != "none" else { return .some(nil) }
+        return .some(j["label"]?.string ?? (phase == "retrying" ? "Retrying Claude" : "Waiting for Claude"))
+    }
+
+    /// The wait the feed ends on, if any: the dock says it instead of "Working…".
+    public static func waitingLine(_ steps: [ActivityStep]) -> String? {
+        guard let last = steps.last, last.kind == waitingKind else { return nil }
+        return last.text
+    }
 
     /// The stream's new block as a step: thinking, or a tool call (named before its input has streamed in); a text
     /// block is the streaming text, so it holds no step. A new message with no block yet is the model thinking.

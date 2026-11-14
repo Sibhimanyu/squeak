@@ -239,7 +239,7 @@ extension AppModel {
         return result
     }
 
-    private func openWhenListed(sessionId: String) {
+    func openWhenListed(sessionId: String) {
         Task { [weak self] in
             let end = Date().addingTimeInterval(15)
             while Date() < end {

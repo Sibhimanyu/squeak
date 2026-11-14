@@ -6,6 +6,7 @@ import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
 import { terminateProcess, trackAgentProcess, untrackAgentProcess } from "./agent-procs.js";
 import { loadAgentSdk } from "./agent-sdk.js";
+import { ApiWaitTracker, STALL_DETAIL, stallMsFromEnv } from "./api-wait.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
 import { READ_ONLY_TOOLS } from "./rules.js";
@@ -102,6 +103,12 @@ export interface ClaudeRunnerOptions {
   interruptMs?: number;
   /** After the last background task reports, how long to wait for the CLI to start a turn of its own (default 5 s). */
   graceMs?: number;
+  /** No stream event for this long after a request went out: the request is abandoned and the turn fails (0 = never). */
+  stallMs?: number;
+  /** How often the wait is re-read for its label and the stall guard (default 15 s). */
+  waitTickMs?: number;
+  /** Tokens at which the CLI compacts this conversation by itself (`autoCompactWindow`); absent = the CLI's own. */
+  autoCompactWindow?: number | null;
 }
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -165,6 +172,9 @@ export class ClaudeRunner implements Runner {
   private lastStreamAt = 0;
   /** Agent/Task tool calls of the main thread not answered yet (id to a short label, oldest first): the turn is blocked on them (a steer waits). */
   private fgHelpers = new Map<string, string>();
+  /** Between a request going out and its first stream event (or the CLI's retries): what surfaces say instead of "Thinking…". */
+  private readonly wait = new ApiWaitTracker();
+  private waitTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -209,6 +219,7 @@ export class ClaudeRunner implements Runner {
     if (cliModel) options.model = cliModel;
     if (this.effort) options.effort = this.effort;
     if (this.agentSessionId) options.resume = this.agentSessionId;
+    if (this.options.autoCompactWindow) options.settings = { autoCompactWindow: this.options.autoCompactWindow };
     // Without this the SDK sends thinking as an empty block with a signature, and the transcript has nothing to show.
     options.thinking = { type: "adaptive", display: "summarized" };
     options.pathToClaudeCodeExecutable = executable;
@@ -267,6 +278,7 @@ export class ClaudeRunner implements Runner {
     this.awaited = [];
     this.held = null;
     this.turnActive = false;
+    this.endWait();
     this.setForegroundHelpers(() => this.fgHelpers.clear());
     if (this.tasks.size > 0) {
       this.tasks.clear();
@@ -280,6 +292,7 @@ export class ClaudeRunner implements Runner {
     this.lastStreamAt = Date.now();
     const reinit = type === "system" && subtype === "init" && this.initSeen;
     if (this.showsOwnTurn(type, msg, reinit)) this.beginSelfStarted(hooks);
+    if (this.turnActive && this.wait.observe(msg, this.lastStreamAt)) this.waitChanged();
     if (type === "stream_event") {
       hooks.onDelta(msg);
       return;
@@ -305,6 +318,54 @@ export class ClaudeRunner implements Runner {
     hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
     if (type === "result") this.onResult(msg);
     this.noteEcho(type, msg);
+  }
+
+  /** A request went out (a new turn's message): from now until the first stream event the turn is waiting on the API. */
+  private beginWait(): void {
+    this.wait.requestSent(Date.now());
+    this.waitChanged();
+  }
+
+  private endWait(): void {
+    const had = this.wait.state !== null;
+    this.wait.clear();
+    if (this.waitTimer) clearInterval(this.waitTimer);
+    this.waitTimer = null;
+    if (had) this.options.hooks.onDelta(this.wait.event(Date.now()));
+  }
+
+  private waitChanged(): void {
+    this.options.hooks.onDelta(this.wait.event(Date.now()));
+    if (!this.wait.state) {
+      if (this.waitTimer) clearInterval(this.waitTimer);
+      this.waitTimer = null;
+      return;
+    }
+    if (this.waitTimer) return;
+    this.waitTimer = setInterval(() => this.waitTick(), this.options.waitTickMs ?? 15_000);
+    this.waitTimer.unref();
+  }
+
+  private waitTick(): void {
+    const now = Date.now();
+    if (!this.wait.state || this.closed) return;
+    const stallMs = this.options.stallMs ?? stallMsFromEnv();
+    if (stallMs > 0 && this.wait.waitedMs(now) >= stallMs) {
+      this.stall();
+      return;
+    }
+    // the label carries minutes: say it again as they pass (surfaces redraw the same line in place)
+    this.options.hooks.onDelta(this.wait.event(now));
+  }
+
+  /** No answer for too long: the request is abandoned (the process is closed; the next message resumes) and the turn fails. */
+  private stall(): void {
+    logger.warn("claude did not answer the request in time; closing the process", {
+      waitedMs: this.wait.waitedMs(Date.now()),
+    });
+    this.clearState();
+    this.restartNow();
+    this.options.hooks.onTurnEnd("error", STALL_DETAIL);
   }
 
   private setForegroundHelpers(change: () => void): void {
@@ -525,6 +586,7 @@ export class ClaudeRunner implements Runner {
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
     this.turnActive = false;
+    this.endWait();
     if (this.tasks.size > 0) this.options.hooks.onBackground?.(this.tasks.size);
     this.options.hooks.onTurnEnd(held.outcome, held.detail);
     // A pending restart (a model change) waits until the helpers are gone too: it would kill them.
@@ -612,6 +674,7 @@ export class ClaudeRunner implements Runner {
     this.interrupting = false;
     this.held = null;
     this.options.hooks.onStatus("working");
+    this.beginWait();
     this.pushUser(text);
   }
 
@@ -720,6 +783,8 @@ export class ClaudeRunner implements Runner {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.waitTimer) clearInterval(this.waitTimer);
+    this.waitTimer = null;
     this.stopInterruptTimer();
     if (this.watchdog) clearTimeout(this.watchdog);
     this.stopGrace();

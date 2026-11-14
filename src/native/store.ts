@@ -142,6 +142,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE project_settings ADD COLUMN clone_dependencies INTEGER;
   `,
+  `
+  ALTER TABLE project_settings ADD COLUMN auto_compact_tokens INTEGER;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -644,19 +647,20 @@ export class NativeStore {
       reviewModel: (r?.review_model as string | null | undefined) ?? null,
       reviewEffort: (r?.review_effort as string | null | undefined) ?? null,
       cloneDependencies: r?.clone_dependencies === 0 ? false : r?.clone_dependencies === 1 ? true : null,
+      autoCompactTokens: typeof r?.auto_compact_tokens === "number" ? r.auto_compact_tokens : null,
       prompts,
     };
   }
   saveProjectSettings(s: ProjectSettingsRow): void {
     this.db
       .prepare(
-        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort,clone_dependencies)
-         VALUES (?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort,clone_dependencies,auto_compact_tokens)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
            archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
            merge_method=excluded.merge_method, prompts=excluded.prompts,
            review_model=excluded.review_model, review_effort=excluded.review_effort,
-           clone_dependencies=excluded.clone_dependencies`,
+           clone_dependencies=excluded.clone_dependencies, auto_compact_tokens=excluded.auto_compact_tokens`,
       )
       .run(
         s.projectId,
@@ -669,6 +673,7 @@ export class NativeStore {
         s.reviewModel,
         s.reviewEffort,
         s.cloneDependencies === null ? null : s.cloneDependencies ? 1 : 0,
+        s.autoCompactTokens,
       );
   }
 

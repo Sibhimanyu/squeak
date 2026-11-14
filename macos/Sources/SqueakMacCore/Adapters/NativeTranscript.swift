@@ -243,6 +243,12 @@ public enum NativeTranscript {
                     if NativeErrorText.isStop(t) { stopHelpers() }
                     step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
 
+            // A thread continued in a new one (both sides say so), and the host compacting a long chat by itself.
+            case "system/note":
+                if row.payload["linkedSessionId"] != nil || row.payload["autoCompact"] != nil, let t = row.payload["text"]?.string {
+                    step("note", t, row)
+                }
+
             case "system/api_retry":
                 step("retry", NativeRetry.line(row.payload), row)
 

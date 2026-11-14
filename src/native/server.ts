@@ -464,6 +464,17 @@ export class NativeServer {
     if (area === "sessions" && id && sub === "compact" && parts.length === 4 && method === "POST") {
       return this.json(res, 200, await host.compact(id));
     }
+    if (area === "sessions" && id && sub === "retry" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, await host.retry(id));
+    }
+    if (area === "sessions" && id && sub === "handoff-draft" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, await host.handoffDraft(id));
+    }
+    if (area === "sessions" && id && sub === "handoff" && parts.length === 4 && method === "POST") {
+      const summary = str((await this.body(req)).summary);
+      if (!summary) throw new HttpError(400, "summary is required");
+      return this.json(res, 201, { session: await host.handoff(id, summary) });
+    }
     if (area === "sessions" && id && sub === "mode" && method === "POST") {
       const mode = str((await this.body(req)).permissionMode);
       if (!mode) throw new HttpError(400, "permissionMode is required");

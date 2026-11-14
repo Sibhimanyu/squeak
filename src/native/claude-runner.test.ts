@@ -71,7 +71,9 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
   const h: RunnerHooks = {
     onAgentSessionId: (id) => log.ids.push(id),
     onMessage: (_r, kind, payload) => log.messages.push({ kind, payload }),
-    onDelta: () => log.deltas++,
+    onDelta: (d) => {
+      if ((d as { type?: string }).type !== "squeak_phase") log.deltas++;
+    },
     onStatus: (s) => log.statuses.push(s),
     onRequest: async (kind, payload) => {
       log.requests.push({ kind, payload: payload as Record<string, unknown> });
@@ -230,7 +232,9 @@ describe("ClaudeRunner", () => {
     const f = fakeQuery();
     const deltas: unknown[] = [];
     const { h, log } = hooks();
-    h.onDelta = (d) => deltas.push(d);
+    h.onDelta = (d) => {
+      if ((d as { type?: string }).type !== "squeak_phase") deltas.push(d);
+    };
     const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
     await r.send("hi");
     const start = { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } };
@@ -771,5 +775,92 @@ describe("ClaudeRunner", () => {
     await tick();
     expect(f.calls).toHaveLength(1);
     expect(f.inputs).toHaveLength(1);
+  });
+});
+
+describe("ClaudeRunner API wait", () => {
+  function waitRunner(extra: Partial<ConstructorParameters<typeof ClaudeRunner>[0]> = {}) {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const phases: { phase: string; label?: string }[] = [];
+    const ends: { outcome: string; detail?: string }[] = [];
+    const hh: RunnerHooks = {
+      ...h,
+      onDelta: (p) => {
+        const e = p as { type?: string; phase?: string; label?: string };
+        if (e.type === "squeak_phase") phases.push({ phase: e.phase!, ...(e.label ? { label: e.label } : {}) });
+      },
+      onTurnEnd: (outcome, detail) => ends.push({ outcome, ...(detail ? { detail } : {}) }),
+    };
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: hh,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      ...extra,
+    });
+    return { f, r, phases, ends, log };
+  }
+
+  it("says waiting once the request is out, and clears at the first stream event (sent, then thinking)", async () => {
+    const { f, r, phases } = waitRunner();
+    await r.send("hello");
+    await tick();
+    expect(phases[0]).toEqual({ phase: "waiting", label: "Waiting for Claude" });
+    f.out.push({ type: "stream_event", event: { type: "message_start" } });
+    await tick();
+    expect(phases.at(-1)).toEqual({ phase: "none" });
+  });
+
+  it("a tool result going back opens a new wait; the CLI's retries say retrying with the attempt", async () => {
+    const { f, r, phases } = waitRunner();
+    await r.send("go");
+    await tick();
+    f.out.push({ type: "stream_event", event: { type: "message_start" } });
+    f.out.push({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+    });
+    await tick();
+    expect(phases.at(-1)?.phase).toBe("waiting");
+    f.out.push({ type: "system", subtype: "api_retry", attempt: 2, max_retries: 10, retry_delay_ms: 1000 });
+    await tick();
+    expect(phases.at(-1)).toEqual({ phase: "retrying", label: "Retrying Claude (2)" });
+  });
+
+  it("a subagent's stream does not end the main thread's wait", async () => {
+    const { f, r, phases } = waitRunner();
+    await r.send("go");
+    await tick();
+    f.out.push({ type: "stream_event", parent_tool_use_id: "toolu_1", event: { type: "message_start" } });
+    await tick();
+    expect(phases.at(-1)?.phase).toBe("waiting");
+  });
+
+  it("stall guard: no stream event for stallMs abandons the request and fails the turn", async () => {
+    const { f, r, ends, phases } = waitRunner({ stallMs: 60, waitTickMs: 10 });
+    await r.send("hello");
+    await wait(200);
+    expect(ends).toEqual([{ outcome: "error", detail: "No response from Claude" }]);
+    expect(f.state.closed).toBe(true);
+    expect(phases.at(-1)).toEqual({ phase: "none" });
+  });
+
+  it("stall guard stays quiet when the stream answers in time", async () => {
+    const { f, r, ends } = waitRunner({ stallMs: 120, waitTickMs: 10 });
+    await r.send("hello");
+    await tick();
+    f.out.push({ type: "stream_event", event: { type: "message_start" } });
+    await wait(250);
+    expect(ends).toEqual([]);
+  });
+
+  it("tells the CLI the compaction window, when the project sets one", async () => {
+    const { f, r } = waitRunner({ autoCompactWindow: 200_000 });
+    await r.send("hi");
+    await tick();
+    expect(f.calls[0]!.settings).toEqual({ autoCompactWindow: 200_000 });
   });
 });

@@ -24,9 +24,10 @@ public enum ChatIndicator: Equatable, Sendable {
 
     /// The dock's line: the state's words (or the activity's, while working) and, after a dot, the model that runs
     /// ("Working… · Opus 5.5 · 1M"). The model is left out when unknown and while the message is still sending.
-    public func line(workingLabel: String, model: String?) -> String? {
+    public func line(workingLabel: String, model: String?, waiting: String? = nil) -> String? {
         guard self != .idle else { return nil }
-        let base = text ?? workingLabel
+        // While the request is out and nothing came back the host says so; "Working…" would hide a stuck request.
+        let base = (self == .working ? waiting : nil) ?? text ?? workingLabel
         guard self != .sending, let model = model?.trimmingCharacters(in: .whitespaces), !model.isEmpty else { return base }
         return "\(base) · \(model)"
     }

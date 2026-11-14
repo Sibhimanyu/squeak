@@ -209,6 +209,14 @@ struct SessionDetail: View {
             await model.loadTurns(session)
         }
         .sheet(item: Bindable(model.history).restoreAsk) { RestoreSheet(ask: $0) }
+        .sheet(isPresented: Binding(get: { model.native.handoff != nil && model.native.key == session.key },
+                                    set: { if !$0 { model.native.handoff = nil } })) {
+            if let draft = model.native.handoff {
+                HandoffSheet(draft: draft,
+                             onStart: { text in Task { await model.nativeFinishHandoff(session, text: text) } },
+                             onCancel: { model.native.handoff = nil })
+            }
+        }
         .background {
             // ⌘⌥↵ forks this chat at its latest turn.
             if isNative {
@@ -598,6 +606,19 @@ struct SessionDetail: View {
                     ReportProblemButton(problem: note, place: "Conversation", title: "Report")
                 }
                 .padding(.leading, 4)
+            }
+            // A very large chat: a calm offer, never a block. Compact first (it keeps the thread), else a fresh one.
+            if isNative, NativeChatNotice.showsLarge(session) {
+                ChatNoticeBar(text: NativeChatNotice.largeText, actions: [
+                    (NativeChatNotice.compactTitle, { Task { await model.nativeCompact(session) } }),
+                    (NativeChatNotice.continueTitle, { Task { await model.nativeBeginHandoff(session) } }),
+                ])
+            }
+            // A message lost to a dropped connection: the host says so, and Try again resends it (never twice).
+            if isNative, NativeChatNotice.showsRetry(session) {
+                ChatNoticeBar(text: NativeChatNotice.retryText, actions: [
+                    (NativeChatNotice.retryTitle, { Task { await model.nativeRetry(session) } }),
+                ])
             }
             if isNative, let note = model.native.note {
                 HStack(spacing: 8) {

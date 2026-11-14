@@ -724,7 +724,7 @@ describe("pending items (the queue stack and steers in flight)", () => {
     runners[0]!.hooks.onTurnEnd("idle");
     await tick();
     expect(await host.compact(s.id)).toEqual({ ok: true });
-    expect(runners[0]!.sent.at(-1)).toBe("/compact");
+    expect(runners[0]!.sent.at(-1)).toMatch(/^\/compact /);
   });
 
   it("compacts a Codex chat through the runner's own compact, and refuses one that has none", async () => {

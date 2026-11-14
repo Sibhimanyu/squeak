@@ -69,7 +69,8 @@ public struct ActivityFeedMerge: Equatable, Sendable {
     }
 
     static func isPlaceholder(_ s: ActivityStep) -> Bool {
-        s.kind == "thinking" && s.text == NativeLiveState.thinkingText && s.at == nil
+        (s.kind == "thinking" && s.text == NativeLiveState.thinkingText && s.at == nil)
+            || (s.kind == NativeLiveState.waitingKind && s.at == nil)
     }
 
     /// A tracker or a retry note is the newest state of something, not a row to keep: the read's word is final.

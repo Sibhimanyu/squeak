@@ -34,6 +34,13 @@ final class StreamingTextBuffer {
     func clear() { trailing?.cancel(); trailing = nil; latest = ""; if !text.isEmpty { text = "" } }
 }
 
+/// The summary of a chat being continued in a new thread, while the person edits it.
+struct NativeHandoffDraft: Equatable {
+    var text: String
+    var loading: Bool
+    var failed = false
+}
+
 /// What the open Squeak-run chat shows beyond its transcript: the host's record of it, the card that waits on
 /// the person, the text being written, the queue. One chat at a time (the one on screen).
 @MainActor @Observable
@@ -54,6 +61,8 @@ final class NativeChatModel {
     /// A quiet line under the composer: a refusal in the host's own words, never a raw error.
     var note: String?
     var queueNote: String?
+    /// "Continue in a new thread": the summary the person edits before the new thread starts; nil when not open.
+    var handoff: NativeHandoffDraft?
     var busy = false
     var flow: NativeQuestionFlow?
     /// The chat's allow rules ("Allow for this session"); nil when the host has no rules route, so the inspector hides the section.
@@ -489,6 +498,43 @@ extension AppModel {
         if case .done = r { endOptimistic(s.key) }
         if case .refused(let why) = r { native.note = why }
         if case .failed(let why) = r { native.note = why }
+    }
+
+    /// "Try again" on the failure notice: the host resends the last message unless the agent already answered it.
+    func nativeRetry(_ s: HostSession) async {
+        if demoMode { native.note = "Demo data: nothing is sent."; return }
+        guard let c = nativeControls(for: s) else { return }
+        let r = await c.retry(s)
+        switch r.result {
+        case .done: if !r.resent { native.note = NativeChatNotice.alreadyAnswered }
+        case .refused(let why), .failed(let why): native.note = why
+        }
+        await refreshNative(s)
+    }
+
+    /// Opens the summary for editing: the host's cheap model writes it; if it cannot, the field opens empty with a sentence.
+    func nativeBeginHandoff(_ s: HostSession) async {
+        if demoMode { native.note = "Demo data: no thread is started."; return }
+        guard let c = nativeControls(for: s) else { return }
+        native.handoff = NativeHandoffDraft(text: "", loading: true)
+        let text = await c.handoffDraft(s)
+        guard native.key == s.key, native.handoff != nil else { return }
+        native.handoff = NativeHandoffDraft(text: text ?? "", loading: false, failed: text == nil)
+    }
+
+    /// Starts the linked thread with the edited summary as its first message, and opens it.
+    func nativeFinishHandoff(_ s: HostSession, text: String) async {
+        guard let c = nativeControls(for: s) else { return }
+        native.handoff?.loading = true
+        let r = await c.handoff(s, summary: text)
+        switch r.result {
+        case .done:
+            native.handoff = nil
+            if let id = r.newId { openWhenListed(sessionId: NativeAdapter.keyPrefix + id) }
+        case .refused(let why), .failed(let why):
+            native.handoff?.loading = false
+            native.note = why
+        }
     }
 
     func nativeCompact(_ s: HostSession) async {
