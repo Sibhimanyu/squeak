@@ -1,8 +1,6 @@
 import type { LiveAgentProcess } from "./fleet/observers/process-liveness.js";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { SqueakAgentAdapter } from "./core/adapter.js";
-import type { FleetObservation } from "./core/adapters/fleet-ports.js";
 import type { Answerer } from "./fleet/answer-command.js";
 import type { AnswerHost } from "./fleet/answer.js";
 import type { BackgroundTask } from "./fleet/background-work.js";
@@ -278,11 +276,6 @@ export interface AddonHandle {
   phoneMedia?: AddonPhoneMedia;
   /** An app the phone's Mac controls page can show the tabs of. */
   frontApp?: FrontAppHost;
-  /** Core adapters (src/core) for the sessions this add-on's host runs. */
-  coreAdapters?(deps: {
-    observe: FleetObservation;
-    send: (target: string, text: string, onFailed: ReplyFailureHandler) => Promise<ReplyOutcome>;
-  }): SqueakAgentAdapter[];
   cli?: AddonCommand[];
   uninstall?: AddonUninstallStep;
   /** Called once the daemon is up (after every add-on is loaded and the app is built). */

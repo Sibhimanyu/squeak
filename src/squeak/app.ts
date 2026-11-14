@@ -545,21 +545,11 @@ export class SqueakApp {
       projects: this.projectInference,
       pondIdOf: (session) => this.remote?.pondIdOf(session) ?? null,
       annotator: { annotate: (sessions) => this.addons.annotateSessions(sessions) },
-      // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
-      corePorts: () =>
-        this.router && this.nativeHost
-          ? {
-              hosted: this.router,
-              terminal: { send: (session, text) => this.router.send(session.key, text, () => undefined) },
-              native: this.nativeHost,
-            }
-          : null,
       observers: () => this.addons.observers(),
       watch: () => this.addons.watchSpecs(),
       liveness: this.addons.liveness(),
       acceptHooks: () => this.externalOn(),
       stateFields: () => this.addons.stateFields(),
-      coreAdapters: (deps) => this.addons.handles().flatMap((handle) => handle.coreAdapters?.(deps) ?? []),
       cloudHosted: () => this.hosted.view(),
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
@@ -877,7 +867,6 @@ export class SqueakApp {
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
       ...answerControl(answers),
-      coreSessions: () => this.runtime.coreSessions(),
       cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
       remote: async (action, deviceId, body) => {
         // The Mac app's sign-in on Squeak's hosted cloud: `{ token }` (an account token) sets this Mac up, with or
@@ -1255,6 +1244,9 @@ export class SqueakApp {
     const onSignal = shutdownOnSignals(() => this.stop());
     process.on("SIGINT", () => onSignal("SIGINT"));
     process.on("SIGTERM", () => onSignal("SIGTERM"));
+    // The old core.db mirror is gone; drop a stale copy (and its WAL files) left in the support dir.
+    for (const suffix of ["", "-wal", "-shm"])
+      fs.rmSync(path.join(this.config.supportDir, `core.db${suffix}`), { force: true });
     // Answer first: hooks, /state and the control routes work from here on, before the slow work below.
     await this.runtime.ingress.start().catch((error: unknown) => {
       logger.warn("fleet hook ingress failed to start; falling back to polling only", {

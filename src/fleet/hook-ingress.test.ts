@@ -1950,24 +1950,3 @@ describe("HookIngressServer call busy route", () => {
     expect(await read.json()).toEqual({ busy: true, since: 5 });
   });
 });
-
-describe("HookIngressServer core sessions route", () => {
-  it("is token-gated, has no CORS header, and answers null as core off", async () => {
-    const harness = await startServer();
-    const server = servers.at(-1)!;
-    const url = `http://127.0.0.1:${harness.port}/control/core/sessions`;
-    const auth = { "x-squeak-token": harness.token };
-    server.setControl({ sessionMessage: () => null, reply: async () => null });
-    expect((await fetch(url, { headers: auth })).status).toBe(503);
-    server.setControl({ sessionMessage: () => null, reply: async () => null, coreSessions: () => null });
-    expect((await fetch(url, { headers: auth })).status).toBe(404);
-    const sessions = [{ id: "a", state: "working" }];
-    server.setControl({ sessionMessage: () => null, reply: async () => null, coreSessions: () => sessions });
-    expect((await fetch(url)).status).toBe(403);
-    expect((await fetch(url, { method: "POST", headers: auth, body: "{}" })).status).toBe(405);
-    const read = await fetch(url, { headers: auth });
-    expect(read.status).toBe(200);
-    expect(read.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await read.json()).toEqual({ sessions, schema: 1 });
-  });
-});

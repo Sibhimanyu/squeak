@@ -12,7 +12,6 @@ import { answerRelayFrom } from "./answer-relay.js";
 import { listChatModels } from "./chat-models.js";
 import { closeChat } from "./close-chat.js";
 import { conductorCliCommands } from "./cli.js";
-import { ConductorAdapter } from "./core-adapter.js";
 import { ConductorObserver } from "./observer.js";
 import { CONDUCTOR_NOT_ENABLED, WorkspacePicks, parseLinkRequest, parseWorkspaceRequest } from "./picks.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "./project-icons.js";
@@ -290,7 +289,6 @@ const addon: Addon = {
           return row ? { workspaceId: row.workspaceId, title: row.title } : null;
         },
       }),
-      coreAdapters: ({ observe, send }) => [new ConductorAdapter({ observe, replier: { send } })],
       cli: conductorCliCommands(() => ({ dbPath, config })),
       uninstall: conductorUninstallStep(supportDir),
       presentation: { hostId: "conductor", label: "Conductor" },
