@@ -36,3 +36,12 @@ public struct TimelinePresentation: Equatable, Sendable {
         return out
     }
 }
+
+/// A command output shows its first lines and offers the rest, as a diff does.
+public enum OutputCap {
+    public static let limit = 12
+    public static func visible(_ lines: [String], showAll: Bool) -> (lines: [String], hidden: Int) {
+        if showAll || lines.count <= limit { return (lines, 0) }
+        return (Array(lines.prefix(limit)), lines.count - limit)
+    }
+}

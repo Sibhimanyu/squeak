@@ -105,7 +105,7 @@ struct FoldedTurnView: View {
                 withAnimation(Motion.standard) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(verbatim: title).font(.system(size: 14).monospacedDigit()).foregroundStyle(Theme.muted).lineLimit(1)
                     Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
                     Spacer(minLength: 0)
                 }
@@ -221,7 +221,8 @@ struct ToolCallRow: View {
                     open = ask.open
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
+                .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(preview.meta.map { ", \($0)" } ?? "")\(running ? ", running" : "")")
+                .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "")
             if case .image(let path, let caption, let card)? = detail {
                 // A picture the person attached in this turn is not repeated: the label says what was read.
                 if card || !PictureLayout.isAttached(path, attached: attached) {
@@ -243,14 +244,14 @@ struct ToolCallRow: View {
             }
             Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
                 .underline(targetPath.map { linker?.isLinkable($0) == true } ?? false)
-                .truncationMode(preview.targetIsPath ? .head : .tail)
+                .truncationMode(preview.kind == .run ? .middle : (preview.targetIsPath ? .head : .tail))
                 .padding(.horizontal, 7).frame(height: 20)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                 .layoutPriority(-1)
             Spacer(minLength: 8)
             if running { DotGridLoader(size: 12) }
             if let meta = preview.meta {
-                Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
+                Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).fixedSize()
             }
             if expandable {
                 Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
@@ -317,8 +318,17 @@ struct ToolDetailView: View {
                 Spacer(minLength: 0)
                 if ok == true { Lucide(.check, size: 12, color: Theme.success) }
             }
-            ForEach(Array(tail.enumerated()), id: \.offset) { _, line in
-                Text(verbatim: line).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1)
+            let cap = OutputCap.visible(tail, showAll: showAll)
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(cap.lines.enumerated()), id: \.offset) { _, line in
+                        Text(verbatim: line).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+                    }
+                }
+            }
+            if cap.hidden > 0 {
+                Button("Show all \(tail.count) lines") { showAll = true }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, 2)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10).textSelection(.enabled)

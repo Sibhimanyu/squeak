@@ -106,3 +106,20 @@ final class TimelinePresentationTests: XCTestCase {
         XCTAssertTrue(TimelinePresentation(t, now: now).paging.reachedStart)
     }
 }
+
+final class ChatPolishTests: XCTestCase {
+    func testOutputCapShowsFirstLinesThenAll() {
+        let lines = (1...30).map(String.init)
+        let c = OutputCap.visible(lines, showAll: false)
+        XCTAssertEqual(c.lines.count, OutputCap.limit)
+        XCTAssertEqual(c.hidden, 30 - OutputCap.limit)
+        XCTAssertEqual(OutputCap.visible(lines, showAll: true).hidden, 0)
+        XCTAssertEqual(OutputCap.visible(Array(lines.prefix(5)), showAll: false).lines.count, 5)
+    }
+
+    /// The turn view skips redrawing when its models compare equal, so unchanged turns must.
+    func testUnchangedTurnsCompareEqual() {
+        let a = Log.timeline(Log.busyChat()), b = Log.timeline(Log.busyChat())
+        XCTAssertEqual(a.turns, b.turns)
+    }
+}
