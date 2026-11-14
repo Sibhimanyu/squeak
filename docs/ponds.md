@@ -1,6 +1,6 @@
 # Ponds: multiplayer Squeak (Flotilla)
 
-Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. **On for everyone** (owner, 2026-11-10); `SQUEAK_FLOTILLA=off` is the off switch. Real sharing has not been tried end to end.
+Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. **On for everyone** (owner, 2026-11-10); `SQUEAK_FLOTILLA=off` is the off switch. The whole journey (create, publish, invite, join, approve, shared thread, hold, a member's own thread, restrictions, leave) runs between two Macs over one store in `src/flotilla/journey.e2e.test.ts`; a real two-Mac and relay run has not been done.
 
 ## Every project is a pond (local ponds)
 
@@ -24,6 +24,34 @@ There is no "convert to a pond" step. The host keeps a **local pond** for every 
 - On someone else's thread a member can watch, see the diff, message, steer and answer. **Approving actions and stopping a
   thread belong to its starter**, and only on the starter's own Mac; neither exists as a command on the wire.
 - Whoever starts answering a question holds it (`hold`, 30 s, renewed while typing); others see "Aarav is answering".
+
+## Who can do what (live, 2026-11-14)
+
+Two modes, both on at once: **shared thread** (the starter's agent on the starter's Mac; members read, see changes, message
+and answer) and **own thread** (a member starts a thread with their own agent on their own Mac, git-backed ponds only;
+the pond shows it with the mark "Powered by <their Mac> · Flotilla", everyone reads it live, anyone may message it,
+approvals and Stop stay with its starter). The owner can restrict any of it at any time, with no rejoin.
+
+- **Member switches** (`MemberDoc.caps`, owner-signed, in the member's own document): `see`, `diffs`, `message`, `answer`,
+  `start`, and `muted` (read-only). Absent = the role's default (`ROLE_CAPS`: a member has all five, a viewer `see` and
+  `diffs`). Presets: **Viewer** (role viewer), **Member** (`start` off), **Collaborator** (`start` on).
+  `POST /ponds/<id>/members/<memberId>/caps { preset?, caps? }` (owner). Every change is a Ripple ("restricted Aarav from
+  messaging").
+- **Per-thread switches** (the starter's, in the thread document and the starter's `ponds.json`): `locked` (read-only for everyone
+  else), `allow` (let in despite the lock), `deny` (kept out; beats allow). `POST /ponds/<id>/threads/<tid>/access
+{ locked?, allow?, deny? }`. The starter is never restricted.
+- **Enforced on the thread's Mac, never trusted from the client**: `verifyCommand` reads the member list at that moment, so a
+  switch takes effect on the next command and a client that skips its own check is refused with a fixed sentence ("The owner
+  has turned off messaging for you in this pond."). The sender's Mac refuses early the same way, and its composer says why.
+  `hold` needs `answer`. Members stream the change live: the member document write wakes every Mac, `me.caps` and each
+  member's `caps` ride the pond view.
+- **Losing `start`**: the member's own threads keep running on their Mac, but the pond no longer shows them (every reader
+  drops a non-owner starter's thread while that starter lacks `start`) and the starter's Mac refuses to publish more. Giving
+  `start` back shows them again. Losing `see` empties the thread list for that member.
+- **Mac UI**: People menu per member (presets and switches), thread header "Who can message this thread" (lock, always let in,
+  keep out), composer disabled with the reason, rows of own threads carry the powered-by mark.
+- **Not yet**: the phone and web show a member's own thread only as their apps already list pond threads (a phone's pond page is
+  built from this Mac's own chats); no members' threads on the iPhone yet. Approvals and Stop are never grantable.
 
 ## Trust
 

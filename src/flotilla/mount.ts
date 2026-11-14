@@ -1,3 +1,4 @@
+import { CAP_PRESETS } from "./permissions.js";
 import type http from "node:http";
 
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -184,6 +185,22 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
+    // The owner's live switches for one member: a preset (viewer, member, collaborator) and/or single switches.
+    if (b === "members" && c && d === "caps" && parts.length === 5 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["preset", "caps"]);
+      const preset = str(body.preset);
+      if (preset && !(preset in CAP_PRESETS)) throw new FlotillaError("preset is viewer, member or collaborator");
+      if (body.caps !== undefined && (typeof body.caps !== "object" || body.caps === null)) {
+        throw new FlotillaError("caps must be an object of true/false switches");
+      }
+      await service.setMemberCaps(pondId, c, {
+        ...(preset ? { preset: preset as keyof typeof CAP_PRESETS } : {}),
+        ...(body.caps ? { caps: body.caps as Record<string, boolean> } : {}),
+      });
+      ctx.json(200, { ok: true });
+      return true;
+    }
     if (b === "leave" && parts.length === 3 && method === "POST") {
       this.pondBody(await ctx.body(), pondId);
       await service.leave(pondId);
@@ -322,6 +339,7 @@ export class FlotillaRoutes {
         ...(permissionMode ? { permissionMode } : {}),
         ...(agentPrefix ? { agentPrefix } : {}),
       };
+      await service.assertCanStart(pondId);
       const projectId = service.projectIdOf(pondId);
       let started = projectId && this.deps.startInProject ? await this.deps.startInProject(projectId, spec) : null;
       if (!started && workspaceId) {
@@ -343,6 +361,23 @@ export class FlotillaRoutes {
       const sessionId = str(body.sessionId);
       if (!sessionId) throw new FlotillaError("sessionId is required");
       ctx.json(201, { thread: await bridge.share(pondId, sessionId, { private: body.private === true }) });
+      return true;
+    }
+    // A thread's starter: lock it, let named members in or keep them out.
+    if (b === "threads" && c && d === "access" && parts.length === 5 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["locked", "allow", "deny"]);
+      if (body.locked !== undefined && typeof body.locked !== "boolean")
+        throw new FlotillaError("locked is true or false");
+      for (const k of ["allow", "deny"]) {
+        if (
+          body[k] !== undefined &&
+          !(Array.isArray(body[k]) && (body[k] as unknown[]).every((x) => typeof x === "string"))
+        ) {
+          throw new FlotillaError(`${k} is a list of member ids`);
+        }
+      }
+      ctx.json(200, { access: await service.setThreadAccess(pondId, c, body) });
       return true;
     }
     if (b === "threads" && c && d === "visibility" && parts.length === 5 && method === "POST") {

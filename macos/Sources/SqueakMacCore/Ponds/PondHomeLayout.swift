@@ -30,7 +30,9 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var shared: Bool { pondThread != nil }
     /// A thread its starter keeps private: it says "Private", never "Shared".
     public var isPrivate: Bool = false
-    public var visibility: String? { shared ? (isPrivate ? "Private" : "Shared \u{00B7} \(hostingLabel)") : nil }
+    /// A thread another member runs with their own agent on their own Mac (mode own, not this Mac's): marked as theirs.
+    public var poweredBy: String? = nil
+    public var visibility: String? { shared ? (isPrivate ? "Private" : (poweredBy ?? "Shared \u{00B7} \(hostingLabel)")) : nil }
     /// The starter's reported machine; absence must not invent a remote host.
     public var nest: String? = nil
     /// Background helpers still running in this Mac's chat (the sidebar row's duckling). Another Mac's thread carries none:
@@ -171,9 +173,10 @@ public struct PondHomeLayout: Sendable, Equatable {
         var flock: [PondChatRow] = []
         // A thread someone else started that this person hid is left out of their view (the starter's and the flock's are unchanged).
         for t in threads where !used.contains(t.id) && !hiddenThreads.contains(t.id) {
-            let row = PondChatRow(
+            var row = PondChatRow(
                 id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
                 mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: people(t))
+            if t.mode == .own { row.poweredBy = PondPresets.poweredBy(nest: t.nestName ?? t.nest) }
             if let b = t.branch, !b.isEmpty, let i = branches[b] {
                 cards[i].chats.append(row)
             } else if let w = t.workspace?.lowercased(), !w.isEmpty, let i = names[w] {
