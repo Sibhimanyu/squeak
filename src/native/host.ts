@@ -44,6 +44,8 @@ import {
   handoffPrompt,
   type HandoffRow,
 } from "./api-wait.js";
+import { DEFAULT_PAGE_TURNS, TimelineLog, TimelineRecorder } from "./timeline-log.js";
+import type { ReplyDelta, TimelineEvent } from "./timeline.js";
 import type { NativeStore } from "./store.js";
 import {
   ResumeFailedError,
@@ -94,6 +96,8 @@ export type HostEvent =
   | { type: "archived"; sessionId: string; archived: boolean; archivedAt: string | null }
   /** The chat's permission mode changed (a pond thread republishes whether members may message it). */
   | { type: "mode"; sessionId: string; permissionMode: string }
+  /** A timeline event (stored, with a `seq`), or the ephemeral `reply.delta` (no seq). */
+  | { type: "timeline"; sessionId: string; event: TimelineEvent | ReplyDelta }
   /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
   | {
       type: "pending";
@@ -289,10 +293,15 @@ export class SessionHost extends EventEmitter {
   beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
   private readonly warmRecentMs: number;
+  /** The chat timeline: each chat's ordered event log, the one source an open chat's feed reads (timeline.ts). */
+  readonly timeline: TimelineRecorder;
 
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
+    this.timeline = new TimelineRecorder(new TimelineLog(this.store.db), (sessionId, event) =>
+      this.emit("event", { type: "timeline", sessionId, event } satisfies HostEvent),
+    );
     this.ownerNameOf = options.ownerName ?? (() => null);
     this.factory =
       options.runnerFactory ??
@@ -326,6 +335,8 @@ export class SessionHost extends EventEmitter {
   private readonly lastAutoCompact = new Map<string, number>();
   /** Chats whose last turn failed by a lost connection and not since sent again. */
   private readonly retryable = new Set<string>();
+  /** The words of each chat's newest failure row, which its failed turn ends with in the timeline. */
+  private readonly lastFailure = new Map<string, string>();
   private readonly sizeCache = new Map<string, { at: number; bytes: number | null }>();
 
   /** The context size at which this chat compacts itself (its project's setting; 200k by default; null = off). */
@@ -398,6 +409,8 @@ export class SessionHost extends EventEmitter {
     for (const r of this.store.openRequests()) {
       this.store.resolveRequest(r.id, { decision: "deny", message: "Squeak restarted" });
     }
+    // A turn the restart cut off ends as stopped in the timeline, so no chat opens onto a turn that never finishes.
+    this.timeline.recover();
     for (const s of this.store.listSessions()) {
       const open = this.store.openTurn(s.id);
       if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
@@ -575,6 +588,7 @@ export class SessionHost extends EventEmitter {
     }
     const live = this.runners.has(s.id);
     this.setStatus(s.id, live ? "working" : "idle", !live);
+    if (!live) this.timeline.end(s.id, "stopped");
     return this.store.getSession(s.id) ?? s;
   }
 
@@ -613,6 +627,24 @@ export class SessionHost extends EventEmitter {
     return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  /**
+   * The chat's timeline log for a reader: `since` (events after a seq, for a reconnect or a gap), or whole turns
+   * (the newest `turns`, or the `turns` before `before`). A chat with no log yet has one built from its rows first.
+   */
+  timelinePage(
+    id: string,
+    q: { since?: number; turns?: number; before?: number; limit?: number },
+  ): { events: TimelineEvent[]; lastSeq: number; hasEarlier: boolean } {
+    const s = this.require(id);
+    this.timeline.ensure(id, () => this.store.messagesBefore(id, null, 2000), BUSY.has(s.status));
+    const log = this.timeline.log;
+    if (q.since !== undefined) {
+      const events = log.after(id, q.since, q.limit ?? 1000);
+      return { events, lastSeq: log.lastSeq(id), hasEarlier: false };
+    }
+    return log.turnsPage(id, q.turns ?? DEFAULT_PAGE_TURNS, q.before);
+  }
+
   /** `GET /sessions/:id/pending`. */
   pendingItems(id: string): PendingItem[] {
     this.require(id);
@@ -628,8 +660,14 @@ export class SessionHost extends EventEmitter {
     this.emit("event", { type: "pending", sessionId: id, op, id: itemId, ...extra } satisfies HostEvent);
   }
 
-  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor): void {
+  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor, clientNonce?: string): void {
     const row = this.store.enqueue(id, text, author);
+    this.timeline.ensure(
+      id,
+      () => this.store.messagesBefore(id, null, 2000),
+      BUSY.has(this.store.getSession(id)?.status ?? "idle"),
+    );
+    this.timeline.queued(id, { queuedId: row.id, text, author, clientNonce, at: row.createdAt });
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
     this.emitPending(id, "add", row.id, { item: queuedItem(row) });
   }
@@ -681,13 +719,13 @@ export class SessionHost extends EventEmitter {
   async send(
     id: string,
     text: string,
-    options: { mode?: "queue" | "steer"; author?: MessageAuthor } = {},
+    options: { mode?: "queue" | "steer"; author?: MessageAuthor; clientNonce?: string } = {},
   ): Promise<{ queued: boolean }> {
     const s = this.require(id);
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
     const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
     if (settingUp && !BUSY.has(s.status)) {
-      this.enqueueAndEmit(id, text, options.author);
+      this.enqueueAndEmit(id, text, options.author, options.clientNonce);
       return { queued: true };
     }
     if (BUSY.has(s.status)) {
@@ -697,6 +735,7 @@ export class SessionHost extends EventEmitter {
           if (await runner.steer(this.agentText(id, text, options.author))) {
             const row = this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author);
             this.emitMessage(row);
+            this.timeline.steer(id, { seq: row.seq, text, author: options.author, at: row.createdAt });
             this.noteSteered(id, text, options.author, row.seq, runner);
             return { queued: false };
           }
@@ -705,10 +744,10 @@ export class SessionHost extends EventEmitter {
           return { queued: false };
         }
       }
-      this.enqueueAndEmit(id, text, options.author);
+      this.enqueueAndEmit(id, text, options.author, options.clientNonce);
       return { queued: true };
     }
-    await this.startTurn(s, text, false, options.author);
+    await this.startTurn(s, text, false, options.author, undefined, { clientNonce: options.clientNonce });
     return { queued: false };
   }
 
@@ -883,6 +922,7 @@ export class SessionHost extends EventEmitter {
       // the agent is gone: Stop still ends in idle, with the same stop row as any interrupt
       this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
       this.setStatus(id, "idle", true);
+      this.timeline.end(id, "stopped");
     }
   }
 
@@ -1011,7 +1051,11 @@ export class SessionHost extends EventEmitter {
   /** Drops the chat's queued messages and steers, stops its turn (denying what it waits on) and waits for it to settle. */
   private async stopForArchive(id: string, timeoutMs: number): Promise<void> {
     let dropped = false;
-    for (const q of this.store.queued(id)) dropped = this.store.removeQueued(id, q.id) || dropped;
+    for (const q of this.store.queued(id)) {
+      const gone = this.store.removeQueued(id, q.id);
+      if (gone) this.timeline.dequeued(id, q.id);
+      dropped = gone || dropped;
+    }
     if (dropped) this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
     this.steerNext.delete(id);
     this.steerAuthor.delete(id);
@@ -1031,6 +1075,7 @@ export class SessionHost extends EventEmitter {
     if (now && BUSY.has(now.status)) {
       this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
       this.setStatus(id, "idle", true);
+      this.timeline.end(id, "stopped");
     }
   }
 
@@ -1083,6 +1128,7 @@ export class SessionHost extends EventEmitter {
       if ((this.steering.get(id) ?? []).some((x) => x.id === queueId)) throw new HostError("already steering", 409);
       throw new HostError("no such queued message", 404);
     }
+    this.timeline.dequeued(id, queueId);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
     this.emitPending(id, "remove", queueId, { consumed: false });
   }
@@ -1120,7 +1166,7 @@ export class SessionHost extends EventEmitter {
     if (!BUSY.has(s.status)) {
       this.store.removeQueued(id, queueId);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
-      await this.startTurn(s, item.text, false, item.author);
+      await this.startTurn(s, item.text, false, item.author, undefined, { queuedId: queueId });
       return;
     }
     const runner = this.runners.get(id);
@@ -1129,15 +1175,18 @@ export class SessionHost extends EventEmitter {
       if (!(await runner.steer(this.agentText(id, item.text, item.author)))) throw new HostError("can't steer", 409);
     } else {
       this.store.removeQueued(id, queueId);
+      this.timeline.dequeued(id, queueId);
       this.emitPending(id, "remove", queueId, { consumed: false });
       await this.steerByInterrupt(id, item.text, item.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return;
     }
     this.store.removeQueued(id, queueId);
+    this.timeline.dequeued(id, queueId);
     this.emitPending(id, "remove", queueId, { consumed: false });
     const row = this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author);
     this.emitMessage(row);
+    this.timeline.steer(id, { seq: row.seq, text: item.text, author: item.author, at: row.createdAt });
     this.noteSteered(id, item.text, item.author, row.seq, runner);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
@@ -1198,6 +1247,7 @@ export class SessionHost extends EventEmitter {
     author?: MessageAuthor;
   }): void {
     this.emit("event", { type: "message", ...m } satisfies HostEvent);
+    this.timeline.message(m.sessionId, m);
   }
 
   private setStatus(id: string, status: SessionStatus, endedTurn = false): void {
@@ -1230,8 +1280,11 @@ export class SessionHost extends EventEmitter {
     steered = false,
     author?: MessageAuthor,
     agentBody?: string,
+    extra: { clientNonce?: string | undefined; queuedId?: string | undefined } = {},
   ): Promise<void> {
     this.clearTimer(s.id);
+    // A chat that has no log yet (made before it existed) gets one from its rows first, so the new turn lands after them.
+    this.timeline.ensure(s.id, () => this.store.messagesBefore(s.id, null, 2000), false);
     const userRow = this.store.appendMessage(
       s.id,
       "user",
@@ -1240,6 +1293,16 @@ export class SessionHost extends EventEmitter {
       author,
     );
     this.emitMessage(userRow);
+    // The turn opens here, synchronously, before the agent has been started: whoever reads the timeline sees the
+    // new prompt and its (still empty) turn before anything the agent does.
+    this.timeline.begin(s.id, {
+      promptSeq: userRow.seq,
+      text,
+      author,
+      clientNonce: extra.clientNonce,
+      queuedId: extra.queuedId,
+      at: userRow.createdAt,
+    });
     const turn = this.store.addTurn(s.id, text, userRow.seq);
     if (!steered) {
       this.turnStarts.set(s.id, Date.now());
@@ -1345,7 +1408,10 @@ export class SessionHost extends EventEmitter {
         }
       },
       onContext: (c) => this.setContext(id, c),
-      onDelta: (payload) => this.emit("event", { type: "delta", sessionId: id, payload } satisfies HostEvent),
+      onDelta: (payload) => {
+        this.timeline.delta(id, payload);
+        this.emit("event", { type: "delta", sessionId: id, payload } satisfies HostEvent);
+      },
       onStatus: (status) => {
         // A request waiting on a person keeps its needs_* status until it is answered.
         if (status === "working" && this.store.openRequests(id).length > 0) return;
@@ -1392,6 +1458,11 @@ export class SessionHost extends EventEmitter {
           for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
           this.setStatus(id, outcome, true);
           if (outcome === "error") this.failureRow(id, detail ?? "error");
+          this.timeline.end(
+            id,
+            outcome === "error" ? "failed" : "done",
+            outcome === "error" ? this.lastFailure.get(id) : undefined,
+          );
           this.turnStarts.delete(id);
         }).then(() => this.afterTurn(id));
       },
@@ -1433,6 +1504,7 @@ export class SessionHost extends EventEmitter {
         }
       : { text: detail };
     if (kind) this.retryable.add(id);
+    this.lastFailure.set(id, payload.text);
     this.emitMessage(this.store.appendMessage(id, "system", "system/error", payload));
   }
 
@@ -1481,6 +1553,7 @@ export class SessionHost extends EventEmitter {
       this.failureRow(id, text);
       this.turnStarts.delete(id);
       this.setStatus(id, "error", true);
+      this.timeline.end(id, "failed", this.lastFailure.get(id));
     });
   }
 
@@ -1729,7 +1802,7 @@ export class SessionHost extends EventEmitter {
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       this.emitPending(id, "remove", next.id, { consumed: true });
-      await this.startTurn(s, next.text, false, next.author);
+      await this.startTurn(s, next.text, false, next.author, undefined, { queuedId: next.id });
     } else {
       this.armTimer(id);
     }
