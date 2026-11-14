@@ -421,7 +421,8 @@ prompt"`). Only `idle` is typed into. Its `procStart` is **UTC**, while
   reply only if a paired, unrevoked device's P-256 key signed the exact box,
   it has not expired (≤10 min), its nonce is new, it names the chat's
   _current_ turn, and it is a plain reply. Keep every check; add tests for
-  any new one. Pairing always waits for the human to approve on the Mac.
+  any new one. A device of another account or a QR pairing always waits for the human to approve on the Mac; your own
+  account's devices join by signing in (below), with no code, QR or pairing screen on any surface.
 - **One owner-chosen exception to "the Mac trusts a key, not a server":** a device signed in to the same Squeak account
   the Mac is linked to (relay `devreqs`, `userId` equal) is added without a code, because Catalyst vouches for the
   account. It is told at once (remote activity, a Telegram/Cliq card that is never muted, the Mac app's

@@ -365,6 +365,8 @@ final class AppModel {
             PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond))
         }
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
+        Notifier.shared.onApproveDevice = { [weak self] id in Task { await self?.channels.approve(id) } }
+        channels.onDeviceWaiting = { [weak self] p in Notifier.shared.postDeviceRequest(id: p.id, name: p.name, email: p.email ?? self?.channels.remote?.account?.email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
         // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.

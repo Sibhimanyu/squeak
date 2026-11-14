@@ -5,8 +5,8 @@ channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `s
 results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
 
 Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's QR and "Copy web link" use `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12, and browsers paired there pair once more): the no-install phone option with the iPhone app's features, minus Face ID
-and the same-Wi-Fi direct route. It pairs by QR (camera button) or pasted link and needs the same Firebase project
-(`SQUEAK_REMOTE_PROJECT`) as the iPhone app.
+and the same-Wi-Fi direct route. You sign in with your Squeak account and open a Mac (no code, no QR). An old Mac not yet on an account still pairs by QR (camera
+button) or pasted link, and a Firebase-hosted copy needs the same Firebase project (`SQUEAK_REMOTE_PROJECT`) as the iPhone app.
 
 ## Commands
 
@@ -76,36 +76,48 @@ is Firebase-only (its `start_url` is `/`).
 
 ## Owner accounts (Catalyst hosting)
 
-Signing in never opens a Mac by itself: the Mac approves each browser. On a Catalyst page, an unpaired start asks the page's own
-relay (`<origin>/server/squeak_relay`, same origin, `credentials: "include"`) who is signed in (`GET /me`, `guest-relay.js`
-`fetchMe`):
+Your own devices have no pairing, no code and no QR: you sign in with your Squeak account, see every Mac signed in to it and
+open one. Under the hood sign-in silently makes the browser's device key and a device request, and the Mac adds a device of
+its own account by itself (the device key stays the trust root: every `handleCommand` check is unchanged). On a Catalyst page
+the start asks the page's own relay (`<origin>/server/squeak_relay`, same origin, `credentials: "include"`) who is signed in
+(`GET /me`, `guest-relay.js` `fetchMe`):
 
-- 200: "Your Macs" from `GET /account/macs` (name, "Linked <date>", each a button) and "Pair with a QR code instead".
-- 401: "Sign in to see your Macs" (`/__catalyst/auth/login`: Zoho, Google or email) and the QR option.
+- 200: "Your Macs" from `GET /account/macs`: name and online / asleep / offline with "last seen" (`seenAt`, when the Mac's own
+  key last called the relay: online within 3 min, asleep within 12 h, offline beyond; no claim when the relay does not say).
+  Exactly one Mac and none open: it opens by itself.
+- 401: one sign-in screen (`/__catalyst/auth/login`: Zoho, Google or email), and a small "Mac not on an account yet?" link to
+  the old QR screen, for a Mac too old to sign in (`pairing-view.js`, `pairing.js`, `#pair=` links stay for it).
 - anything else (Firebase hosting, network): today's QR pairing screen only. `welcomeScreen` gets a way back to the account
   start only when there is one.
 
 `catalyst-session.js` holds what the guest page and this app share: the login path, `sdkSignOut`, `signInRedirect`,
 `accountRelayBase`. `account.js` is the account's calls and flow, `account-view.js` its screens and Settings section.
 
-Picking a Mac: the browser makes its device signing key (`generateDeviceKey`, as `pairing.js` does) and a fresh non-extractable
-P-256 ECDH key, and posts `{macId, name, publicKey, boxKey}` (`name` from `deviceNameFor`; `publicKey` = base64 x963 of the
-signing key, as a QR pairing request sends it; `boxKey` = base64 x963 of the ECDH public half, a member key as
-`guest-crypto.js` writes them). The waiting screen shows the six digits `pairingCode(publicKey)` gives (the QR pairing's code)
-and "Approve on <Mac>". It polls `GET /account/device-request?macId=&id=` every 2 s: 202 keeps waiting; the tab being hidden
+**Many Macs.** `key-store.js` keeps `devices` = `{ v: 1, active, legacy, records: { [macId]: record } }` in the one IndexedDB
+(CryptoKeys, non-extractable). The single record an older version kept under `device` becomes the first entry on the next
+load (keyed by its `channelId`, which is the Mac's id; the old key is emptied, and its unprefixed caches stay where they were
+for that Mac: `legacy`). Each other Mac's caches (`prefs`, `history`, `outbox`, `read`) live under `<macId>/<name>`, so a
+queued reply never reaches another Mac. A Mac the browser already holds opens at once from Settings; others go through the
+device request. "Remove this browser from <Mac>" deletes that Mac's record and caches (and opens the next held Mac, else
+"Your Macs"); Sign out ends the account session and wipes every record. After a removal or sign-out "Your Macs" waits for a tap
+instead of opening the only Mac again.
+
+Opening a Mac: the browser makes its device signing key (`generateDeviceKey`) and a fresh non-extractable P-256 ECDH key, and
+posts `{macId, name, publicKey, boxKey}` (`name` from `deviceNameFor`; `boxKey` = base64 x963 of the ECDH public half, a member
+key as `guest-crypto.js` writes them). The screen says "Opening <Mac>..." with no code; after 8 s without an answer it says
+"Waiting for <Mac> to approve" (the Mac may be asleep, or its owner chose "Ask before adding my own devices"; the web never
+shows a code for it). It polls `GET /account/device-request?macId=&id=` every 2 s: 202 keeps waiting; the tab being hidden
 pauses the asking until it shows again; `expiresAt`, a 410 or Cancel ends it. `{result: {box}}` is opened with
 `openFromMember` (the flotilla ECDH seal, pinned by `src/flotilla/fixtures/web-vectors.json`) into the Catalyst pairing payload
 `{v:1, c, k, n, cu, ck}`, checked by `pairing-link.js` `parsePairingPayload` (same relay host and key rules as a scanned code),
-and saved as a paired device exactly as a QR pairing is (provider `catalyst`, `relayUrl`, `relayKey`); the ECDH key is then
-dropped. The device id is the request's id (the Mac's pending id), unless the sealed payload names one in `d`. `{denied: true}`
-says "<Mac> said no."; 403 `mac` and 429 `busy` have their own sentences.
+and saved as that Mac's device (provider `catalyst`, `macId`, `relayUrl`, `relayKey`); the ECDH key is then dropped. The device
+id is the request's id, unless the sealed payload names one in `d`. `{denied: true}` says "<Mac> said no."; 403 `mac`, 429
+`busy` (that Mac has three requests waiting) and 429 `rate` (an account may make 5 device requests a minute) have their own
+sentences.
 
-Settings, "Account" (only for a browser paired to a Catalyst Mac, never on a Firebase one): signed out, "Sign in to link this
-Mac"; signed in with no `account` in the Mac's view, "Link <Mac> to your account (<email>)", which posts
-`/account/link-ticket` and sends the signed command `accountLink {ticket}` (`accountUnlink {}` unlinks; both in
-`command-shapes.js`); once the view carries `account: {email}` it reads "Linked to <email>" with Unlink. "Sign out" ends the
-account's session only (`catalyst.auth.signOut`); the paired device stays, and "Forget this browser" is unchanged.
-Tests: `web/test/account.test.js`.
+Settings, "Account" (only on a Catalyst page, never Firebase): every Mac with its status, "Open" on the others, "Remove this
+browser from <Mac>", and "Sign out". There is no "link this Mac to your account" block: a Mac links itself when it signs in.
+Tests: `web/test/account.test.js`, `web/test/format-store.test.js`.
 
 ### Sign-in look and embedded login
 

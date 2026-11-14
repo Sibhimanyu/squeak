@@ -1,7 +1,7 @@
 // An owner's account on the Catalyst relay: who is signed in, which Macs are linked to them, and asking one of those Macs
 // to let this browser in. Signing in never opens a Mac by itself: the browser makes its own device key and a fresh ECDH key,
-// asks the Mac (`POST /account/device-request`), shows the six-digit code the QR pairing shows for that key, and the Mac's
-// owner approves there. The Mac answers with the pairing payload sealed to the ECDH key (the flotilla ECDH seal, opened by
+// asks the Mac (`POST /account/device-request`) and the Mac adds it on its own, because it is the same account (only with
+// "Ask before adding my own devices" does its owner approve, and then the six-digit code is shown). The Mac answers with the pairing payload sealed to the ECDH key (the flotilla ECDH seal, opened by
 // guest-crypto.js `openFromMember`), which gets the same checks as a scanned code and is stored exactly like one.
 
 import { DEVICE_ID } from "./channel.js";
@@ -11,6 +11,7 @@ import { fetchMe, relayFetch } from "./guest-relay.js";
 import { fromBase64, toBase64, toBase64Url } from "./encoding.js";
 import { AVATAR_MAX_BYTES } from "./avatar.js";
 import { parsePairingPayload, PairingError } from "./pairing-link.js";
+import { ago } from "./format.js";
 
 export const POLL_MS = 2_000;
 const subtle = () => globalThis.crypto.subtle;
@@ -24,6 +25,7 @@ export const SENTENCES = {
   network: "Could not reach Squeak's server. Check your connection and try again.",
   gone: "That request ran out. Ask again.",
   expired: "Your Mac did not answer in time. Ask again.",
+  rate: "That was a lot of tries in a minute. Wait a moment and try again.",
   signin: "Your sign-in ran out. Sign in again.",
 };
 
@@ -42,7 +44,7 @@ export class AccountError extends Error {
 export function accountSentence(error) {
   if (error instanceof AccountError) {
     if (error.status === 403) return SENTENCES.mac;
-    if (error.status === 429) return SENTENCES.busy;
+    if (error.status === 429) return error.code === "rate" ? SENTENCES.rate : SENTENCES.busy;
     if (error.status === 401) return SENTENCES.signin;
     if (error.status === 410) return SENTENCES.gone;
     if (error.status === 400) return SENTENCES.keys;
@@ -50,6 +52,26 @@ export function accountSentence(error) {
   }
   if (error instanceof PairingError) return error.message;
   return SENTENCES.network;
+}
+
+/** Seen within this long: online. Within `ASLEEP_MS`: most likely asleep. Longer: offline. */
+export const ONLINE_MS = 3 * 60_000;
+export const ASLEEP_MS = 12 * 60 * 60_000;
+
+/**
+ * What "Your Macs" says of one Mac from its `seenAt`: `{ tone: "online" | "asleep" | "offline" | null, text }`. A Mac the
+ * relay has not heard from since it began to say so (`seenAt` null) has no tone and no claim.
+ */
+export function macStatus(mac, now = Date.now()) {
+  const seen = typeof mac?.seenAt === "number" ? mac.seenAt : null;
+  if (seen === null) return { tone: null, text: null };
+  const age = Math.max(0, now - seen);
+  if (age <= ONLINE_MS) return { tone: "online", text: "Online" };
+  const when = ago(new Date(seen).toISOString(), now);
+  const last = when === "now" ? "last seen just now" : `last seen ${when} ago`;
+  return age <= ASLEEP_MS
+    ? { tone: "asleep", text: `Asleep \u00b7 ${last}` }
+    : { tone: "offline", text: `Offline \u00b7 ${last}` };
 }
 
 /** The expiry as epoch ms, whether the relay counts seconds or milliseconds. */
@@ -95,6 +117,8 @@ export class AccountApi {
               macId: m.macId,
               name: typeof m.name === "string" && m.name ? m.name : "Your Mac",
               linkedAt: m.linkedAt ?? null,
+              // When the Mac's own key last called the relay (epoch ms); absent from a relay that does not say.
+              seenAt: typeof m.seenAt === "number" && m.seenAt > 0 ? m.seenAt : null,
             },
           ]
         : [],
@@ -312,6 +336,7 @@ export async function recordFromBox(request, box) {
   if (link.provider !== "catalyst") throw new PairingError("That Mac is not on Squeak's cloud relay.");
   return {
     state: "paired",
+    macId: request.mac.macId,
     deviceId,
     deviceName: request.name,
     channelId: link.channelId,

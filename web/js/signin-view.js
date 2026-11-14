@@ -22,7 +22,7 @@ export function signedOutScreen({ mode, signIn, mount = null, error = null, buil
           : "You’ll be sent back to the app when you’re done.",
       ),
       loginForm({ fallback: signIn, mount, build }),
-      build("p", { class: "cl-fine" }, "Squeak only learns who you are. Your Mac still approves every device."),
+      build("p", { class: "cl-fine" }, "Squeak only learns who you are."),
       calmError(error, build),
     ],
   });
@@ -36,11 +36,7 @@ export function signedInScreen({ user, error, busy, onContinue, onSignOut, build
     children: [
       calmEyebrow("Signed in", build),
       build("h1", null, "You’re in"),
-      build(
-        "p",
-        { class: "cl-lead" },
-        `Go back to Squeak to finish. It only learns who you are: your Mac still approves every device.`,
-      ),
+      build("p", { class: "cl-lead" }, `Go back to Squeak to finish. It only learns who you are.`),
       build(
         "div",
         { class: "cl-who" },

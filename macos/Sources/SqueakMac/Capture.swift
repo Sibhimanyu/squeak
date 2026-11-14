@@ -14,7 +14,6 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "menuchrome" { await runMenuChromeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "settings" { await runSettingsDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "quicknewchat" { await runQuickNewChat(prefix: prefix, model: model); return }
-        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pairing" { await runPairingDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "firstsession" { await runFirstSession(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
         if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
@@ -197,7 +196,7 @@ enum CaptureRunner {
         model.closeSettings()
         sw.orderOut(nil)
         // The two sheets, from demo data (the model is in demo mode).
-        for (name, view) in [("link-sheet", AnyView(LinkChatSheet())), ("pair-sheet", AnyView(PairSheet()))] {
+        for (name, view) in [("link-sheet", AnyView(LinkChatSheet()))] {
             let host = NSHostingView(rootView: view.environment(model))
             let fw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 500, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
             fw.contentView = host

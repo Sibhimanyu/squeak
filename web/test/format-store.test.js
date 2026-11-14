@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ago, canReply, describeResult, groups, heading, stateWord } from "../js/format.js";
-import { KeyStore } from "../js/key-store.js";
+import { KeyStore, macKey } from "../js/key-store.js";
 import { generateDeviceKey, importChannelKey, sign } from "../js/channel-crypto.js";
 import { fakeIndexedDB } from "./helpers.js";
 
@@ -106,5 +106,57 @@ describe("KeyStore", () => {
     await store.forget();
     expect(idb.databases.size).toBe(0);
     expect(await store.load()).toBeNull();
+  });
+
+  it("moves the single record an older version kept into the Mac list, keeping its caches where they were", async () => {
+    const idb = fakeIndexedDB();
+    const old = new KeyStore(idb);
+    await old.write("prefs", { grouping: "chats" });
+    // what the older version wrote: one record under "device", caches unprefixed
+    idb.databases
+      .get("squeak-web")
+      .set("device", { state: "paired", channelId: "chanA", macName: "Studio", deviceId: "d1" });
+    const store = new KeyStore(idb);
+    const all = await store.loadAll();
+    expect(Object.keys(all.records)).toEqual(["chanA"]);
+    expect(all.active).toBe("chanA");
+    expect((await store.load()).macName).toBe("Studio");
+    expect(idb.databases.get("squeak-web").get("device")).toBeNull();
+    expect(await store.read("prefs")).toEqual({ grouping: "chats" });
+    // a second load is stable
+    expect(Object.keys((await new KeyStore(idb).loadAll()).records)).toEqual(["chanA"]);
+  });
+
+  it("holds several Macs, switches between them with their own caches, and removes one", async () => {
+    const idb = fakeIndexedDB();
+    const store = new KeyStore(idb);
+    await store.save({ state: "paired", macId: "mA", macName: "A", deviceId: "d1" });
+    await store.write("prefs", { for: "A" });
+    await store.save({ state: "paired", macId: "mB", macName: "B", deviceId: "d2" });
+    expect((await store.load()).macName).toBe("B");
+    expect(await store.read("prefs")).toBeNull();
+    await store.write("prefs", { for: "B" });
+    expect(await store.activate("mA")).toBe(true);
+    expect(await store.read("prefs")).toEqual({ for: "A" });
+    expect(await store.activate("nope")).toBe(false);
+    const reopened = new KeyStore(idb);
+    expect((await reopened.loadAll()).active).toBe("mA");
+    const rest = await store.remove("mA");
+    expect(rest.active).toBe("mB");
+    expect(Object.keys(rest.records)).toEqual(["mB"]);
+    expect(await store.read("prefs")).toEqual({ for: "B" });
+    expect(idb.databases.get("squeak-web").get("mA/prefs")).toBeNull();
+    const none = await store.remove("mB");
+    expect(none.active).toBeNull();
+    expect(await store.load()).toBeNull();
+    await store.save({ state: "paired", macId: "mC" });
+    await store.forget();
+    expect(await store.loadAll()).toEqual({ active: null, records: {} });
+  });
+
+  it("names a Mac by its account id, else its channel, else its device", () => {
+    expect(macKey({ macId: "m", channelId: "c" })).toBe("m");
+    expect(macKey({ channelId: "c" })).toBe("c");
+    expect(macKey({ deviceId: "d" })).toBe("d");
   });
 });

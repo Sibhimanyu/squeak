@@ -17,7 +17,7 @@ import { agentName, groups } from "./format.js";
 import { boardColumns } from "./dashboard-logic.js";
 import { dashboardNodes, viewToggle } from "./dashboard-view.js";
 import { homeModel, homeNodes } from "./home-view.js";
-import { KeyStore } from "./key-store.js";
+import { KeyStore, macKey } from "./key-store.js";
 import { reconciled } from "./live.js";
 import { compose as composeStrip, liveness, splashShows, SPLASH_CAP_MS } from "./mac-strip.js";
 import { needsPane } from "./needs-you-view.js";
@@ -82,8 +82,13 @@ const ui = {
   /** The owner's account on a Catalyst page: "loading" | "in" | "out" | "unknown", who, their Macs, and the request in flight. */
   accountState: "loading",
   me: null,
+  /** Every Mac this browser holds a device for: `{ active, records }` (key-store.js). */
+  held: { active: null, records: {} },
   macs: null,
   macsError: null,
+  /** After a Mac was removed or this browser forgot everything, "Your Macs" waits for a tap instead of opening the only Mac. */
+  noAutoOpen: false,
+  requestSlow: false,
   qrInstead: false,
   request: null,
   accountBusy: null,
@@ -155,6 +160,8 @@ let lastSignature = "";
 const PREFS = "prefs";
 /** How often the page redraws with nothing new, so ages, "left" and "last heard" move. */
 const TICK_MS = 15_000;
+/** A Mac that has not answered a device request by now is told to be asleep or asking (account-view.js `requestScreen`). */
+const SLOW_REQUEST_MS = 8_000;
 const searchField = h("input", {
   class: "search",
   type: "search",
@@ -188,7 +195,8 @@ async function boot() {
   // Back from Zoho's consent: `#zoho-photo=<result>` is read once, applied when the account loads.
   zohoPhotoResult = takeZohoPhotoFragment(globalThis.location, globalThis.history);
   try {
-    ui.record = await store.load();
+    ui.held = await store.loadAll();
+    ui.record = (ui.held.active && ui.held.records[ui.held.active]) || null;
   } catch {
     ui.screen = "unpaired";
     ui.error = "This browser will not let Squeak store keys here (private browsing?). Pairing needs that.";
@@ -356,38 +364,57 @@ async function loadAccount() {
   ui.macs = null;
   ui.macsError = null;
   render(true);
-  if (me.state === "in" && ui.screen === "unpaired") {
+  if (me.state === "in" && (ui.screen === "unpaired" || ui.screen === "paired")) {
     try {
       ui.macs = await accountApi.macs();
     } catch (error) {
       ui.macsError = accountSentence(error);
     }
     render(true);
+    // One Mac on the account and nothing open: open it, there is nothing to pick.
+    if (ui.screen === "unpaired" && !ui.demo && !ui.noAutoOpen && ui.macs?.length === 1 && !ui.error)
+      void openMac(ui.macs[0]);
   }
 }
 
-/** A Mac picked from the list: ask it, show the code, wait for its owner, then store the device like a QR pairing. */
-async function pickMac(mac) {
+/**
+ * A Mac picked from "Your Macs" (or the Settings switcher). One this browser already holds is opened at once; otherwise
+ * the browser asks it (its own device key, silently), the Mac adds it, and it is stored like any device. Only with "Ask
+ * before adding my own devices" does the Mac wait for its owner, and then the screen says so with the code.
+ */
+async function openMac(mac) {
   ui.error = null;
+  const held = ui.held?.records?.[mac.macId];
+  if (held?.state === "paired") return switchTo(held);
   let request = null;
+  const wasPaired = ui.screen === "paired";
   try {
     request = await requestDevice(accountApi, { mac, name: deviceNameFor(navigator.userAgent) });
     const abort = new AbortController();
     ui.pairing = abort;
     ui.request = request;
-    ui.code = request.code;
+    ui.requestSlow = false;
     ui.screen = "requesting";
     render(true);
-    const answer = await awaitDevice(accountApi, { mac, request, signal: abort.signal });
+    const slow = globalThis.setTimeout(() => {
+      ui.requestSlow = true;
+      if (ui.screen === "requesting") render(true);
+    }, SLOW_REQUEST_MS);
+    const answer = await awaitDevice(accountApi, { mac, request, signal: abort.signal }).finally(() =>
+      globalThis.clearTimeout(slow),
+    );
     if (answer.cancelled) return;
     ui.pairing = null;
     if (answer.box) {
       const record = await recordFromBox(request, answer.box);
-      await store.save(record);
       request.ecdhKey = null;
-      ui.record = record;
       ui.request = null;
       ui.code = null;
+      await stopSession();
+      await store.save(record);
+      ui.held = await store.loadAll();
+      resetUi(null, { keepAccount: true });
+      ui.record = ui.held.records[macKey(record)];
       return await startPaired();
     }
     ui.error = answer.denied ? deniedSentence(mac.name) : answer.gone ? SENTENCES.gone : SENTENCES.expired;
@@ -398,8 +425,51 @@ async function pickMac(mac) {
   ui.request = null;
   ui.code = null;
   ui.pairing = null;
-  ui.screen = "unpaired";
+  ui.screen = wasPaired && ui.record ? "paired" : "unpaired";
   render(true);
+}
+
+/** Opens a Mac this browser already holds: the open session ends, the Mac's own caches and keys take over. */
+async function switchTo(record) {
+  const id = macKey(record);
+  if (ui.record && macKey(ui.record) === id) return;
+  await stopSession();
+  await store.activate(id);
+  ui.held = await store.loadAll();
+  resetUi(null, { keepAccount: true });
+  ui.record = ui.held.records[id];
+  await startPaired();
+}
+
+/** Settings: this browser leaves the Mac it has open; another held Mac opens, else "Your Macs". */
+async function removeCurrentMac() {
+  const id = ui.record ? macKey(ui.record) : null;
+  if (!id) return;
+  const name = ui.record.macName || "that Mac";
+  await stopSession();
+  const rest = await store.remove(id);
+  ui.held = rest.records ? { active: rest.active, records: rest.records } : { active: null, records: {} };
+  resetUi(null, { keepAccount: true });
+  ui.record = (ui.held.active && ui.held.records[ui.held.active]) || null;
+  ui.accountNote = `Removed this browser from ${name}. Remove it in Squeak on that Mac too if you won't use it again.`;
+  if (ui.record) return await startPaired();
+  ui.noAutoOpen = true;
+  render(true);
+  void loadAccount();
+}
+
+/** Sign out: the account's session ends and every Mac's device is wiped from this browser. */
+async function signOutEverywhere() {
+  identify(null);
+  await stopSession();
+  await store.forget().catch(() => undefined);
+  try {
+    await sdkSignOut(globalThis);
+  } catch {
+    await forget(null);
+    ui.accountNote = SENTENCES.network;
+    render(true);
+  }
 }
 
 function cancelRequest() {
@@ -410,33 +480,6 @@ function cancelRequest() {
   ui.screen = "unpaired";
   render(true);
 }
-
-/** Settings: this Mac to the account. The ticket goes to the Mac as a signed command; the Mac's view says when it is linked. */
-async function accountAction(busy, run) {
-  ui.accountBusy = busy;
-  ui.accountNote = null;
-  render(true);
-  try {
-    ui.accountNote = await run();
-  } catch (error) {
-    ui.accountNote = accountSentence(error);
-  }
-  ui.accountBusy = null;
-  render(true);
-}
-
-const linkMac = () =>
-  accountAction("link", async () => {
-    const ticket = await accountApi.linkTicket();
-    const out = await ui.commands.accountLink({ ticket });
-    return out.ok ? "Asked your Mac to link. This updates when it says so." : out.reason;
-  });
-
-const unlinkMac = () =>
-  accountAction("unlink", async () => {
-    const out = await ui.commands.accountUnlink({});
-    return out.ok ? "Asked your Mac to unlink. This updates when it says so." : out.reason;
-  });
 
 async function resumePending() {
   const { pairingCode } = await import("./channel-crypto.js");
@@ -671,7 +714,18 @@ function screenContext() {
     touch,
     selectChat: select,
     account: ui.demo
-      ? { state: "in", me: ui.me, busy: null, note: null, link() {}, unlink() {}, signIn() {}, signOut() {} }
+      ? {
+          state: "in",
+          me: ui.me,
+          busy: null,
+          note: null,
+          macs: [],
+          currentMacId: null,
+          switchTo() {},
+          removeCurrent() {},
+          signIn() {},
+          signOut() {},
+        }
       : ui.record?.provider === "catalyst" && accountApi
         ? {
             state: ui.accountState,
@@ -679,13 +733,12 @@ function screenContext() {
             busy: ui.accountBusy,
             note: ui.accountNote,
             photo: photoFor(),
-            link: linkMac,
-            unlink: unlinkMac,
+            macs: ui.macs ?? [],
+            currentMacId: ui.record ? macKey(ui.record) : null,
+            switchTo: (mac) => openMac(mac),
+            removeCurrent: () => removeCurrentMac(),
             signIn: () => signInRedirect(globalThis),
-            signOut: () => {
-              identify(null);
-              return sdkSignOut(globalThis).catch(() => accountAction(null, async () => SENTENCES.network));
-            },
+            signOut: () => signOutEverywhere(),
           }
         : null,
     settings: {
@@ -728,7 +781,8 @@ function screenNodes(id) {
   return [h("p", { class: "note", role: "status" }, "Loading…")];
 }
 
-async function forget(message = null) {
+/** Ends what is running for the open Mac: a waiting request, the sync, and every cache writer (nothing writes after this). */
+async function stopSession() {
   ui.pairing?.abort();
   ui.pairing = null;
   if (ui.sync) {
@@ -740,7 +794,20 @@ async function forget(message = null) {
   if (!ui.sync && ui.record?.state === "pending") {
     await channelFor(ui.record).cancelPairing();
   }
+}
+
+async function forget(message = null) {
+  await stopSession();
   await store.forget().catch(() => undefined);
+  ui.held = { active: null, records: {} };
+  resetUi(message);
+  ui.noAutoOpen = true;
+  render(true);
+  void loadAccount();
+}
+
+/** Back to a blank screen state (no Mac open, nothing drawn from the last one). */
+function resetUi(message, { keepAccount = false } = {}) {
   extras.reset();
   Object.assign(ui, {
     screen: "unpaired",
@@ -767,11 +834,11 @@ async function forget(message = null) {
     visible: [],
     renaming: null,
     reconciled: false,
-    accountState: "loading",
+    accountState: keepAccount ? ui.accountState : "loading",
     qrInstead: false,
     request: null,
     accountBusy: null,
-    accountNote: null,
+    accountNote: keepAccount ? ui.accountNote : null,
   });
   searchField.value = "";
   ui.expanded.clear();
@@ -782,8 +849,6 @@ async function forget(message = null) {
   ui.remembered.clear();
   ui.seen.clear();
   ui.openParts = new Set();
-  render(true);
-  void loadAccount();
 }
 
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select") || target?.isContentEditable);
@@ -1103,16 +1168,11 @@ function unpairedScreen() {
       macs: ui.macs,
       macsError: ui.macsError,
       error: ui.error,
-      pick: (mac) => pickMac(mac),
-      signOut: ui.demo
-        ? null
-        : () => {
-            identify(null);
-            void sdkSignOut(globalThis).catch(() => undefined);
-          },
+      pick: (mac) => openMac(mac),
+      signOut: ui.demo ? null : () => void signOutEverywhere(),
       signIn: () => signInRedirect(globalThis),
       mountLogin: ui.demo ? null : (box, report) => mountEmbeddedLogin(box, report),
-      qr: () => {
+      oldMac: () => {
         ui.qrInstead = true;
         ui.error = null;
         render(true);
@@ -1193,7 +1253,7 @@ function render(force = false) {
           ? requestScreen({
               macName: ui.request?.mac.name,
               deviceName: ui.request?.name,
-              code: ui.code,
+              ask: ui.requestSlow,
               cancel: cancelRequest,
             })
           : ui.screen === "unpaired"

@@ -404,6 +404,8 @@ export interface MediaCommand {
 }
 
 /** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
+/** Own-account devices added without a code per minute; the relay holds the same limit per account. */
+const AUTO_ADD_PER_MINUTE = 5;
 const PONDS_REFRESH_MS = 30_000;
 const NATIVE_ICONS_REFRESH_MS = 60_000;
 const PHONE_PONDS_MAX = 30;
@@ -1147,6 +1149,8 @@ export class RemoteBridge {
   /** The last presence answered with `state/alive`, by the phone's own stamp, and when. */
   private answeredPresence = 0;
   private aliveWrittenAt = 0;
+  /** When own-account devices were last added without a code (`AUTO_ADD_PER_MINUTE`). */
+  private autoAddTimes: number[] = [];
   private lastPublishedAt = 0;
   private lastPublished = "";
   private timer: NodeJS.Timeout | null = null;
@@ -1555,6 +1559,12 @@ export class RemoteBridge {
    * adding my own devices"): the exact approve path, then told at once (activity, Telegram/Cliq) so it can be revoked.
    */
   private async autoAddOwnDevice(config: RemoteConfig, request: PendingPairing): Promise<void> {
+    // A second wall behind the relay's per-account limit: a stolen token cannot add more than a few keys a minute. A
+    // request over the cap stays on the relay (it expires in 10 min) and is looked at again on a later pass.
+    const now = this.now();
+    this.autoAddTimes = this.autoAddTimes.filter((at) => now - at < 60_000 && at <= now);
+    if (this.autoAddTimes.length >= AUTO_ADD_PER_MINUTE) return;
+    this.autoAddTimes.push(now);
     this.pending.set(request.id, request);
     await this.approve(request.id);
     const device = config.devices.find((d) => d.id === request.id);
@@ -4406,6 +4416,9 @@ export class RemoteBridge {
     if (value) account.askOwnDevices = true;
     else delete account.askOwnDevices;
     this.save();
+    void this.accountRelay()
+      ?.setAsk?.(value)
+      .catch(() => undefined);
     return { ok: true };
   }
 

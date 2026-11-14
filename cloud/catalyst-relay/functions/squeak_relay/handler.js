@@ -84,6 +84,19 @@ const NAMES_MAX = 50;
 const APP_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_OPEN_REQUESTS = 3;
+/** Device requests one account may make per minute, across all its Macs: a stolen token cannot spray device keys. */
+const DEVREQ_PER_MINUTE = 5;
+const DEVREQ_RATE_PK = "devreq-rate";
+/** The last time a Mac's own key called the relay (`macseen/<macId>`), stamped at most this often, for "Your Macs". */
+const SEEN_PK = "macseen";
+const SEEN_STAMP_MS = 60 * 1000;
+/** Online within this long of the last call, asleep within `ASLEEP_MS`, offline beyond (the web and iPhone word it the same). */
+const ONLINE_MS = 3 * 60 * 1000;
+const ASLEEP_MS = 12 * 60 * 60 * 1000;
+/** `macask/<macId>` = `{ ask: boolean }`: the Mac's own word on "Ask before adding my own devices", for the list. */
+const ASK_PK = "macask";
+/** Per process, not per request: a request builds its own relay. */
+const seenStamped = new Map();
 const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const B64_ANY_200 = /^[A-Za-z0-9+/_-]{1,200}={0,2}$/;
 const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
@@ -445,7 +458,26 @@ function createRelay(deps) {
         const link = parseOr(await deps.store.get("maclinks", r.doc));
         if (!link || link.userId !== user.userId) continue;
         const d = parseOr(r.json);
-        if (d) macs.push({ macId: r.doc, name: d.name, linkedAt: d.linkedAt });
+        if (!d) continue;
+        // `seenAt`: when the Mac's own key last called the relay (optional; absent = not seen since this shipped).
+        const seen = parseOr(await deps.store.get(SEEN_PK, r.doc));
+        const at = seen && typeof seen.at === "number" ? seen.at : null;
+        const age = at === null ? null : Math.max(0, clock() - at);
+        const askRow = parseOr(await deps.store.get(ASK_PK, r.doc));
+        macs.push({
+          macId: r.doc,
+          name: d.name,
+          linkedAt: d.linkedAt,
+          // seenAt, lastSeenAt: epoch ms of the Mac's last call; state: online | asleep | offline (all absent until seen).
+          ...(at === null
+            ? {}
+            : {
+                seenAt: at,
+                lastSeenAt: at,
+                state: age <= ONLINE_MS ? "online" : age <= ASLEEP_MS ? "asleep" : "offline",
+              }),
+          ...(askRow && typeof askRow.ask === "boolean" ? { askOwnDevices: askRow.ask } : {}),
+        });
       }
       return out(200, { macs });
     }
@@ -463,6 +495,7 @@ function createRelay(deps) {
       }
       const link = parseOr(await deps.store.get("maclinks", body.macId));
       if (!link || link.userId !== user.userId) return out(403, { error: "mac" });
+      if (!(await spend(DEVREQ_RATE_PK, user.userId, 60 * 1000, DEVREQ_PER_MINUTE))) return out(429, { error: "rate" });
       const pk = `channels/${body.macId}/devreqs`;
       const now = Date.now();
       let open = 0;
@@ -743,11 +776,27 @@ function createRelay(deps) {
     await deps.store.put("maclinks", macId, JSON.stringify({ userId: user.userId, email: user.email }));
   }
 
+  /** Remembers that this Mac called just now (at most once a minute per instance; a failure is only a stale "last seen"). */
+  async function stampSeen(macId) {
+    const now = clock();
+    const last = seenStamped.get(macId);
+    if (last !== undefined && now >= last && now - last < SEEN_STAMP_MS) return;
+    seenStamped.set(macId, now);
+    try {
+      await deps.store.put(SEEN_PK, macId, JSON.stringify({ at: now }));
+    } catch {
+      // Nothing depends on it.
+    }
+  }
+
   /** Drops a Mac's link and pending device requests (what /account/unlink does). */
   async function unlinkMac(macId) {
     const link = parseOr(await deps.store.get("maclinks", macId));
     if (link && USER_ID.test(String(link.userId))) await gone(`accounts/${link.userId}`, macId);
     await gone("maclinks", macId);
+    await gone(SEEN_PK, macId);
+    await gone(ASK_PK, macId);
+    seenStamped.delete(macId);
     for (const kind of ["devreqs", "devresults"]) {
       const pk = `channels/${macId}/${kind}`;
       for (const r of await deps.store.list(pk)) await gone(pk, r.doc);
@@ -962,6 +1011,7 @@ function createRelay(deps) {
         mac = await tenants.authenticate(Array.isArray(macGiven) ? "" : macGiven);
         if (!mac) return send(res, 401);
         if (!(await tenants.chargeRequest(mac))) return send(res, 429, { error: "quota" });
+        await stampSeen(mac.macId);
       }
       const forbidden = () => send(res, 403, {});
       if (route === "/ponds/short/redeem") return await handleShortRedeem(req, res, method, mac);
@@ -975,6 +1025,16 @@ function createRelay(deps) {
         // a pond token is never an account
         if (req.headers["x-squeak-pond-token"] !== undefined) return send(res, 401);
         return await handleAccountCookie(req, res, url, route, method);
+      }
+      if (route === "/account/macs/ask") {
+        // The Mac's own key only: it says whether its owner asks before adding their own devices.
+        if (method !== "POST") return send(res, 405, {});
+        if (!mac) return send(res, 401);
+        const body = await readJson(req, 256);
+        if (!body || typeof body.askOwnDevices !== "boolean" || Object.keys(body).length !== 1)
+          return send(res, 400, { error: "ask" });
+        await deps.store.put(ASK_PK, mac.macId, JSON.stringify({ ask: body.askOwnDevices }));
+        return send(res, 204);
       }
       if (route === "/account/macs/cliq-token") {
         // The Mac's own key only: the operator's key and a cookie have no Mac to bind the token to.

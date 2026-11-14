@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.26.0
+
+- Settings has a Devices page, not a pairing page: the iPhones and browsers signed in to your account, how each got here, and Remove. "Pair an iPhone..." and the QR sheet are gone, and so is the note that pairing always waits for you.
+- Your own iPhone or browser joins by signing in with the same account. "Ask before adding my own devices" now means one click: a notification with Approve, or Settings > Devices. There is no code to compare.
+- Setting up Squeak no longer shows a QR code for the phone step on Squeak's cloud; it says to sign in on your iPhone. The QR step stays only for an install still on its own server.
+- A Mac can't be flooded with new device keys: it adds at most five of your own devices a minute.
+
 ## 2.25.1
 
 - A working chat no longer jitters: its steps stay on screen and only grow until the reply lands.
@@ -106,6 +113,7 @@
 - A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
 
 ## 2.23.28
+
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
 - With no pond yet, New thread and New stream take you to New pond first, with a line saying why.
