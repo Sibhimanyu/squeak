@@ -4,7 +4,10 @@ import { logger } from "../utils/logger.js";
 import { spawnClaudeProcess, STDERR_TAIL_BYTES } from "./claude-runner.js";
 
 function run(args: string[], command = process.execPath): Promise<void> {
-  const child = spawnClaudeProcess({ command, args, env: process.env });
+  // A child that prints nothing of its own: ship.sh runs with NODE_USE_ENV_PROXY=1, whose warning lands on stderr.
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: "1" };
+  delete env.NODE_USE_ENV_PROXY;
+  const child = spawnClaudeProcess({ command, args, env });
   return new Promise((resolve) => {
     child.once("close", () => setTimeout(resolve, 5));
     child.once("error", () => setTimeout(resolve, 5));
