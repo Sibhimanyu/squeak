@@ -25,6 +25,8 @@ final class OpenFile: Identifiable {
     /// What the file looked like when read; a save is refused if it changed since.
     var stamp: FileStamp
     var editing = false
+    /// Preview or Source for a Markdown file, the last pick this session (nil = Preview); Edit does not change it.
+    var markdownChoice: MarkdownPreview.Mode?
     var conflict: SaveConflict?
     var note: String?
     var saving = false

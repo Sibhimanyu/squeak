@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.26.1
+
+- A Markdown file (.md, .markdown, .mdx) opens as a rendered preview with a Preview | Source switch in its header: headings, lists, task lists, tables, code with Copy, quotes and images next to the file. Edit switches to the source and Done returns to your last pick.
+
 ## 2.26.0
 
 - Settings has a Devices page, not a pairing page: the iPhones and browsers signed in to your account, how each got here, and Remove. "Pair an iPhone..." and the QR sheet are gone, and so is the note that pairing always waits for you.
