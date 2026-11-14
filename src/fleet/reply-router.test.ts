@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EXTERNAL_NOT_ENABLED, FleetReplyRouter, replyTargetFor } from "./reply-router.js";
 import type { ReplyOutcome } from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
+import { createTerminalAddonReplier } from "./terminal-addon-replier.js";
 import { NativeReplier } from "./native-reply.js";
 import { NativeHostError } from "../native/client.js";
 import type { AddonReplier } from "../addons.js";
@@ -13,15 +14,26 @@ function session(overrides: Partial<FleetSession>): FleetSession {
     key: "claude-transcript:t1",
     conductorSessionId: null,
     origin: "terminal",
+    agent: "claude",
     ...overrides,
   } as FleetSession;
+}
+
+function external(terminal: TerminalReplier, sessions: FleetSession[]): AddonReplier {
+  return createTerminalAddonReplier({
+    hostId: "claude-external",
+    agent: "claude",
+    handsAppPath: null,
+    terminal,
+    sessions: () => sessions,
+  }) as AddonReplier;
 }
 
 function harness(sessions: FleetSession[], terminalAnswers = true) {
   const calls: string[] = [];
   const conductor: AddonReplier = {
     hostId: "conductor",
-    canHandle: (s) => Boolean(s.hostId),
+    canHandle: (s) => s.hostId === "conductor",
     ownsTarget: (target) => !target.includes(":"),
     lastTurnText: (id: string) => `conductor text for ${id}`,
     transcript: () => ({ messages: [], complete: true }),
@@ -39,7 +51,10 @@ function harness(sessions: FleetSession[], terminalAnswers = true) {
       return { status: "started", via: "terminal" };
     },
   } as unknown as TerminalReplier;
-  return { calls, router: new FleetReplyRouter({ hosts: () => [conductor], terminal, sessions: () => sessions }) };
+  return {
+    calls,
+    router: new FleetReplyRouter({ hosts: () => [conductor, external(terminal, sessions)], sessions: () => sessions }),
+  };
 }
 
 describe("replyTargetFor", () => {
@@ -53,11 +68,15 @@ describe("FleetReplyRouter with the external add-ons off", () => {
   function off(sessions: FleetSession[]) {
     const { router } = harness(sessions);
     const withFlag = new FleetReplyRouter({
-      hosts: () => [],
-      terminal: {
-        canReply: () => true,
-        send: async () => ({ status: "started", via: "terminal" }),
-      } as unknown as TerminalReplier,
+      hosts: () => [
+        external(
+          {
+            canReply: () => true,
+            send: async () => ({ status: "started", via: "terminal" }),
+          } as unknown as TerminalReplier,
+          sessions,
+        ),
+      ],
       sessions: () => sessions,
       externalOn: () => false,
     });
@@ -70,6 +89,35 @@ describe("FleetReplyRouter with the external add-ons off", () => {
     expect(await withFlag.send("claude-transcript:t1", "yes", () => undefined)).toEqual(refusal);
     expect(await withFlag.send("codex-rollout:gone", "yes", () => undefined)).toEqual(refusal);
     expect(withFlag.canReply(session({}))).toBe(false);
+  });
+});
+
+describe("FleetReplyRouter with an external add-on on", () => {
+  it("asks the add-on's replier for a session with no host, and refuses another agent's", async () => {
+    const sessions = [session({}), session({ key: "codex-rollout:c1", agent: "codex" })];
+    const typed: string[] = [];
+    const router = new FleetReplyRouter({
+      hosts: () => [
+        external(
+          {
+            canReply: () => true,
+            lastTurnText: () => "text",
+            send: async (s: FleetSession, t: string) => {
+              typed.push(`${s.key} ${t}`);
+              return { status: "started", via: "terminal" };
+            },
+          } as unknown as TerminalReplier,
+          sessions,
+        ),
+      ],
+      sessions: () => sessions,
+      externalOn: () => true,
+    });
+    expect(router.canReply(sessions[0]!)).toBe(true);
+    expect(router.canReply(sessions[1]!)).toBe(false);
+    expect((await router.send("claude-transcript:t1", "go", () => undefined)).status).toBe("started");
+    expect((await router.send("codex-rollout:c1", "go", () => undefined)).status).toBe("refused");
+    expect(typed).toEqual(["claude-transcript:t1 go"]);
   });
 });
 

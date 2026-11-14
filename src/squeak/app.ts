@@ -72,7 +72,7 @@ import { newChatControl } from "../fleet/new-chat.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
 import { AddonHost } from "../addon-host.js";
 import type { AddonConfig } from "../addons.js";
-import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
+import { lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CloudControl } from "../cloud/control.js";
@@ -585,11 +585,6 @@ export class SqueakApp {
         lastMessage: (session) =>
           session.transcriptPath ? lastAgentMessage(session.agent, session.transcriptPath) : null,
       }),
-      // Typing into Terminal goes through Squeak Hands too, which holds the
-      // Automation grant for it; without Hands, terminal agents stay watch-only.
-      terminal: config.handsAppPath
-        ? new TerminalReplier({ screen: new SqueakHandsTerminal(config.handsAppPath) })
-        : null,
       sessions: () => this.runtime.monitor.snapshot.sessions,
     });
     this.runtime.setCanReply((session) => this.router.canReply(session));

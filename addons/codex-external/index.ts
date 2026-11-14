@@ -4,6 +4,7 @@ import type { Addon, AddonContext, AddonHandle } from "../../src/addons.js";
 import { reconcileExternalHooks } from "../../src/fleet/external-hooks.js";
 import { CodexRolloutObserver } from "../../src/fleet/observers/codex-rollout.js";
 import { ProcessLivenessObserver } from "../../src/fleet/observers/process-liveness.js";
+import { createTerminalAddonReplier } from "../../src/fleet/terminal-addon-replier.js";
 import { logger } from "../../src/utils/logger.js";
 
 /**
@@ -26,7 +27,15 @@ const addon: Addon = {
         },
         () => undefined,
       );
+    // Answering a `codex` running in Terminal.app: typed into its tab through Squeak Hands (watch-only without it).
+    const replier = createTerminalAddonReplier({
+      hostId: "codex-external",
+      agent: "codex",
+      handsAppPath: context.config.handsAppPath,
+      sessions: () => context.snapshot().sessions,
+    });
     return {
+      repliers: replier ? [replier] : [],
       observers: [
         {
           source: "codex-rollout",
