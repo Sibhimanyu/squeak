@@ -5,6 +5,8 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
+import { compactPayload } from "./compact.js";
+
 import type {
   AgentKind,
   MessageRow,
@@ -775,6 +777,8 @@ export class NativeStore {
     author?: MessageAuthor,
   ): MessageRow {
     const createdAt = nowIso();
+    // Screenshots and huge outputs stay in the agent's own transcript; the row keeps what a surface draws.
+    if (role === "agent") payload = compactPayload(kind, payload) ?? payload;
     const info = this.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at,author_id,author_name) VALUES (?,?,?,?,?,?,?)",
