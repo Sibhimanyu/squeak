@@ -1,15 +1,15 @@
 {
-  "version": "2.26.1",
-  "build": "22601",
-  "fileName": "Squeak-2.26.1.dmg",
-  "downloadUrl": "https://github.com/Sibhimanyu/squeak/releases/download/v2.26.1/Squeak-2.26.1.dmg",
-  "downloadPath": "/Sibhimanyu/squeak/releases/download/v2.26.1/Squeak-2.26.1.dmg",
-  "length": 64078841,
-  "sha256": "7dcd1ea0ef70e2af0832736cf5114326c36d5aa133920fa452f7b0dbaabd19b7",
-  "edSignature": "eJAAgWzQNEg3Psi6dcU6dIrrKu0ilLp2KTpnY0/pM6tMgm0SYDD8DhCa1QiZBALNLfaUCpBzR3WENWJSOglrAQ==",
-  "publishedAt": "Sat, 14 Nov 2026 18:25:24 +0000",
+  "version": "2.26.2",
+  "build": "22602",
+  "fileName": "Squeak-2.26.2.dmg",
+  "downloadUrl": "https://github.com/Sibhimanyu/squeak/releases/download/v2.26.2/Squeak-2.26.2.dmg",
+  "downloadPath": "/Sibhimanyu/squeak/releases/download/v2.26.2/Squeak-2.26.2.dmg",
+  "length": 64158710,
+  "sha256": "9b236a193e83291cf6dde9ea6ec00f8861bdf8e713d53598901eff4be5fe7fd7",
+  "edSignature": "7F/v+zjCAzWabz4eLSrDlCi41+LVgtYj8yOX6k50qnzKamLOAOF+IkLxwsy5NiC7h/AoK6kKC6rcqhy6nfN9Dg==",
+  "publishedAt": "Sat, 14 Nov 2026 18:53:38 +0000",
   "minimumSystemVersion": "14.0",
   "releaseNotesUrl": null,
   "appcastUrl": "https://sibhimanyu.github.io/squeak/appcast.xml",
-  "checkedAt": "2026-11-14T18:30:49.767Z"
+  "checkedAt": "2026-11-14T18:59:15.109Z"
 }
