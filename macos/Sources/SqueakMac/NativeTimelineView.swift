@@ -74,7 +74,7 @@ private struct NativeTurnView<Message: View>: View, Equatable {
                 case .steer(_, let text, let author):
                     VStack(alignment: .leading, spacing: 2) {
                         if let name = TimelineLabels.author(author, me: me) {
-                            Text(verbatim: name).font(Typo.meta).foregroundStyle(Theme.muted)
+                            Text(verbatim: name).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).accessibilityLabel("From \(name)")
                         }
                         SteerCard(text: text, state: .taken, cwd: nil)
                     }

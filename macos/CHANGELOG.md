@@ -3,6 +3,7 @@
 ## 2.26.3
 
 - Chat polish: earlier turns no longer redraw when only the newest one changes, long commands shorten in the middle, durations keep their width as they tick, long command output stops at 12 lines with Show all, and steps read their duration and open state to VoiceOver.
+- A reply being written re-parses only its last block, so long replies stay smooth as they stream; teammates' names stay on one line and read "From ...".
 
 ## 2.26.2
 

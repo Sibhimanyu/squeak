@@ -183,3 +183,54 @@ struct MessageMarkupTests {
         #expect(t3 < limit, "\(t3)")
     }
 }
+
+@Suite("Streaming parse")
+struct StreamingParseTests {
+    static let doc = """
+    # Title
+
+    Intro with **bold** text
+    continued here.
+
+    - one
+    - two
+
+    ```swift
+    let a = 1
+
+    let b = 2
+    ```
+
+    > quote line
+
+    1. first
+    2. second
+
+    | a | b |
+    |---|---|
+    | 1 | 2 |
+
+    Last paragraph, still growing
+    """
+
+    /// Whatever prefix of a reply has streamed, stable + tail parses exactly as the whole does.
+    @Test func everyPrefixParsesTheSameSplitOrWhole() {
+        let text = Self.doc
+        var end = text.startIndex
+        while end < text.endIndex {
+            end = text.index(after: end)
+            let p = String(text[..<end])
+            let (s, t) = MessageMarkup.splitStable(p)
+            #expect(String(s) + String(t) == p)
+            #expect(MessageMarkup.parse(String(s)) + MessageMarkup.parse(String(t)) == MessageMarkup.parse(p), "prefix \(p.count)")
+        }
+    }
+
+    @Test func splitIsAtTheLastBlockNotInsideAFence() {
+        let (s, t) = MessageMarkup.splitStable("Para one\n\n```\ncode\n\nmore\n```\n\nTail")
+        #expect(t == "Tail")
+        #expect(s.contains("more"))
+        let open = MessageMarkup.splitStable("Para\n\n```\ncode\n\nmore")
+        #expect(open.tail.hasPrefix("```") )
+    }
+}

@@ -89,7 +89,11 @@ private enum ParseCache {
     static func blocks(_ markdown: String, letters: Bool = false) -> [MessageMarkup.Block] {
         let key = (letters ? "\u{1}" + markdown : markdown) as NSString
         if let hit = cache.object(forKey: key) { return hit.blocks }
-        let blocks = MessageMarkup.parse(markdown, letteredOptions: letters)
+        // A growing reply: the finished blocks come from the cache, only the last one is parsed.
+        let (stable, tail) = MessageMarkup.splitStable(markdown, letteredOptions: letters)
+        let blocks: [MessageMarkup.Block]
+        if stable.isEmpty { blocks = MessageMarkup.parse(markdown, letteredOptions: letters) }
+        else { blocks = Self.blocks(String(stable), letters: letters) + MessageMarkup.parse(String(tail), letteredOptions: letters) }
         cache.setObject(Entry(blocks), forKey: key)
         return blocks
     }
