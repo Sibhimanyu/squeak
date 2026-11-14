@@ -1,6 +1,6 @@
 # Squeak: current-state audit (Phase 0 of "Squeak 2.0")
 
-> **Historical (pre-2.0).** This audit describes the Electron app in `desktop/`, which
+> **Historical snapshot, not a map of today's code (pre-2.0, kept for the record).** This audit describes the Electron app in `desktop/`, which
 > has since been replaced by the native Squeak for Mac in `macos/` and retired
 > (no `com.squeak.duck` agent, no Electron process). The daemon, routes, files and
 > secrets sections still hold; every statement about Electron, `Squeak.app` as an
