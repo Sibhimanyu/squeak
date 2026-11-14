@@ -190,6 +190,7 @@ module.exports = async (req, res) => {
     },
     quotaBatch: posInt(process.env.SQUEAK_RELAY_QUOTA_BATCH) ?? 10,
     hosted: process.env.SQUEAK_RELAY_HOSTED === "1",
+    sharedNotice: process.env.SQUEAK_RELAY_SHARED_NOTICE !== "off",
     usageCache,
     ownerCache,
     log: (s) => console.error(s),

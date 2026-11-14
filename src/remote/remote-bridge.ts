@@ -716,6 +716,8 @@ export interface ChannelStore {
     onChange: () => void,
     options?: { onOpen?: () => void; onError?: (error: Error) => void },
   ): () => void;
+  /** Whether the stream is up and subscribed; then the bridge's safety pass stretches to 5 min. */
+  streamHealthy?(): boolean;
 }
 
 export interface RemoteReplier {
@@ -1027,11 +1029,20 @@ const IDLE_PUBLISH_MS = 60_000;
 /** A change publishes after this long, so a burst of snapshots becomes one write. */
 const CHANGE_PUBLISH_DELAY_MS = 300;
 /** Even change-driven publishes keep this gap, to bound Firestore writes. */
-const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
+const CHANGE_PUBLISH_MIN_GAP_MS = 1_500;
+/**
+ * A working chat's newest steps ride in the whole view, so each one used to re-seal and rewrite it (about one write per
+ * 3 s per working chat while a phone looks). A step-only change now waits this long and coalesces into one trailing
+ * write; the chat the phone has open gets every step through its own live/turn document, and a state change (working to
+ * done, a question) still publishes on the 300 ms path.
+ */
+const STEP_PUBLISH_MS = 10_000;
 /** Waits before retrying a failed change publish; after these the 60 s pass is the retry. */
 const PUBLISH_RETRY_MS = [5_000, 15_000];
 /** With a streaming store a pass runs on every change; this is only the safety net. */
 const STREAM_FALLBACK_MS = 60_000;
+/** The same safety net while the store says its stream is up and subscribed: a drop wakes a pass at once. */
+const HEALTHY_STREAM_FALLBACK_MS = 5 * 60_000;
 /** A burst of changes (a command, then its deletion) becomes one pass. */
 const WATCH_DEBOUNCE_MS = 50;
 /**
@@ -1290,7 +1301,7 @@ export class RemoteBridge {
         if (changed) {
           this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
         } else if (stepped && this.phoneOpen()) {
-          this.nudgePublish(ACTIVE_PUBLISH_MS);
+          this.nudgePublish(Math.max(STEP_PUBLISH_MS, this.activePublishMs()));
         }
       }) ?? null;
   }
@@ -1630,7 +1641,7 @@ export class RemoteBridge {
         this.dirty = false;
         this.schedule(0);
       } else if (this.watching) {
-        this.schedule(STREAM_FALLBACK_MS);
+        this.schedule(this.deps.store.streamHealthy?.() ? HEALTHY_STREAM_FALLBACK_MS : STREAM_FALLBACK_MS);
       } else {
         const active = this.phoneOpen() || this.pairingOpenUntil > this.now();
         this.schedule(active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
@@ -1690,7 +1701,11 @@ export class RemoteBridge {
       return;
     }
     this.stopWatches();
-    const onError = (error: Error) => logger.debug("remote watch dropped; reconnecting", { error: error.message });
+    const onError = (error: Error) => {
+      logger.debug("remote watch dropped; reconnecting", { error: error.message });
+      // The safety pass may be minutes away while the stream was healthy: run one now, and it re-arms the 60 s net.
+      this.wake();
+    };
     this.watching = {
       channelId: config.channelId,
       stops: [
