@@ -82,6 +82,8 @@ export interface CompactOptions {
   freeBytes?: () => number;
   /** A chat is mid-turn: wait rather than add writes. */
   busy?: () => boolean;
+  /** How often to look again while a chat works. */
+  busyPollMs?: number;
   now?: () => number;
 }
 
@@ -150,24 +152,45 @@ export async function runCompaction(o: CompactOptions): Promise<CompactJournal> 
   const sliceMs = o.sliceMs ?? 40;
   const now = o.now ?? Date.now;
   let j = readCompactJournal(o.supportDir);
-  if (j?.done) return j;
+  if (j?.done) {
+    logger.info("native.db compaction skipped: already done", { finishedAt: j.finishedAt, rows: j.rows });
+    return { ...j, skipped: "already done" };
+  }
+  logger.info("native.db compaction starting", { resumeFrom: j?.cursor ?? 0, resumed: Boolean(j) });
   if (!j) {
     j = { cursor: 0, done: false, rows: 0, bytesSaved: 0, startedAt: new Date(now()).toISOString() };
     const size = fs.statSync(o.dbPath).size;
     const free = (o.freeBytes ?? (() => freeDiskBytes(o.supportDir)))();
     if (free < size * 2) {
       // no room for the backup: nothing is touched, and the next start tries again
-      return { ...j, skipped: `needs ${Math.ceil((size * 2) / 1e9)} GB free for the backup` };
+      const skipped = `needs ${Math.ceil((size * 2) / 1e9)} GB free for the backup`;
+      logger.warn(`native.db compaction skipped: ${skipped}`, { freeBytes: free, dbBytes: size });
+      return { ...j, skipped };
     }
+    logger.info("native.db compaction: backing up first", { dbBytes: size });
     const backup = `${o.dbPath}.before-compact-${new Date(now()).toISOString().replace(/\D/g, "").slice(0, 14)}`;
     await o.db.backup(backup);
     j.backup = backup;
     writeJournal(o.supportDir, j);
+    logger.info("native.db compaction: backup done", { backup });
   }
+  const last = (o.db.prepare("SELECT MAX(seq) AS m FROM messages").get() as { m: number | null }).m ?? 0;
+  let nextPct = 5;
+  let waitingLogged = false;
   for (;;) {
-    while (o.busy?.()) await sleep(5_000);
+    while (o.busy?.()) {
+      if (!waitingLogged) logger.info("native.db compaction waiting: a chat is working");
+      waitingLogged = true;
+      await sleep(o.busyPollMs ?? 5_000);
+    }
+    waitingLogged = false;
     const more = compactSlice(o.db, j, sliceMs, now);
     writeJournal(o.supportDir, j);
+    const pct = last > 0 ? Math.floor((Math.min(j.cursor, last) / last) * 100) : 100;
+    while (pct >= nextPct && nextPct <= 100) {
+      logger.info(`native.db compaction ${nextPct}%`, { rows: j.rows, bytesSaved: j.bytesSaved });
+      nextPct += 5;
+    }
     if (!more) break;
     await sleep(o.pauseMs ?? 25);
   }

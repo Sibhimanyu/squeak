@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentTools } from "./agent-tools.js";
 import { GitActions } from "./git-actions.js";
 import { SessionHost } from "./host.js";
-import { forgetMainBranch, mainBranchOf } from "./main-place.js";
+import { forgetMainBranch, mainBranchOf, mainBranchSoon } from "./main-place.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
@@ -169,6 +169,8 @@ describe("Main, a git pond's own folder", () => {
 
   it("lists the branch the root is on with the project, a detached head as its short sha", async () => {
     const h = await start();
+    // The route never waits on git: a first ask under load may not have the branch yet, so warm it as the host does.
+    await mainBranchOf(h.root);
     const first = (await h.call("GET", "/native/projects")).json.projects.find(
       (p: { id: string }) => p.id === h.pond.id,
     );
@@ -180,6 +182,34 @@ describe("Main, a git pond's own folder", () => {
     git(h.root, "checkout", "-q", "--detach");
     forgetMainBranch();
     expect(await mainBranchOf(h.root)).toBe(sha);
+  });
+
+  it("answers /native/projects fast while git hangs, then has the branch once it returns", async () => {
+    const slow = (): Promise<string | null> => new Promise((r) => setTimeout(() => r("main"), 1500));
+    const t0 = Date.now();
+    expect(await mainBranchSoon("/hung/repo", { budgetMs: 50, run: slow })).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(500);
+    // an ask that comes while the first is still running does not start another git
+    let runs = 0;
+    const counted = (): Promise<string | null> => {
+      runs++;
+      return slow();
+    };
+    await mainBranchSoon("/hung/repo", { budgetMs: 10, run: counted });
+    expect(runs).toBe(0);
+    await new Promise((r) => setTimeout(r, 1700));
+    expect(await mainBranchSoon("/hung/repo", { budgetMs: 10, run: slow })).toBe("main");
+  });
+
+  it("serves a stale branch at once and refreshes it behind the request", async () => {
+    let branch = "a";
+    const run = async (): Promise<string | null> => branch;
+    expect(await mainBranchSoon("/stale/repo", { run })).toBe("a");
+    branch = "b";
+    const later = Date.now() + 10_000;
+    expect(await mainBranchSoon("/stale/repo", { run, now: later })).toBe("a");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await mainBranchSoon("/stale/repo", { run, now: later })).toBe("b");
   });
 
   it("reports git status by its folder: uncommitted files counted, no pull request on the default branch", async () => {

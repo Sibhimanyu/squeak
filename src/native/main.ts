@@ -44,7 +44,7 @@ export async function runHost(supportDir: string): Promise<void> {
         supportDir,
         busy: () => store.listSessions().some((s) => s.status === "working"),
       })
-        .then((j) => j.skipped && logger.warn("native.db compaction skipped", { reason: j.skipped }))
+        .then((j) => j.skipped && logger.info("native.db compaction not run", { reason: j.skipped }))
         .catch((error) => logger.warn("native.db compaction failed", { error: String(error) }));
     }, 60_000).unref();
   }
