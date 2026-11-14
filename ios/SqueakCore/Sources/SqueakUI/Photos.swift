@@ -182,9 +182,13 @@ enum SentPhotos {
         try? jpeg.write(to: url, options: [.atomic, .completeFileProtection])
     }
 
-    static func image(for ref: String) -> UIImage? {
-        if let hit = memory.object(forKey: ref as NSString) { return hit }
-        guard let url = file(for: ref), let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return nil }
+    /// Memory only, so a draw never reads a file.
+    static func image(for ref: String) -> UIImage? { memory.object(forKey: ref as NSString) }
+
+    /// From memory, else the file, read and decoded off the main actor.
+    static func load(for ref: String) async -> UIImage? {
+        if let hit = image(for: ref) { return hit }
+        guard let url = file(for: ref), let image = await ImageDecoding.decode(contentsOf: url) else { return nil }
         memory.setObject(image, forKey: ref as NSString)
         return image
     }
@@ -199,9 +203,10 @@ enum SentPhotos {
 struct SentPhotoStrip: View {
     let refs: [String]
     @State private var opened: UIImage?
+    @State private var loaded: [String: UIImage] = [:]
 
     var body: some View {
-        let known = refs.compactMap { ref in SentPhotos.image(for: ref).map { (ref, $0) } }
+        let known = refs.compactMap { ref in (SentPhotos.image(for: ref) ?? loaded[ref]).map { (ref, $0) } }
         VStack(alignment: .trailing, spacing: 6) {
             if !known.isEmpty {
                 HStack(spacing: 6) {
@@ -217,6 +222,11 @@ struct SentPhotoStrip: View {
                 }
             }
             if known.count < refs.count { PhotoPills(count: refs.count - known.count) }
+        }
+        .task(id: refs) {
+            for ref in refs where SentPhotos.image(for: ref) == nil && loaded[ref] == nil {
+                if let image = await SentPhotos.load(for: ref) { loaded[ref] = image }
+            }
         }
         .fullScreenCover(item: Binding(get: { opened.map(OpenedPhoto.init) }, set: { if $0 == nil { opened = nil } })) { photo in
             PhotoViewer(image: photo.image)

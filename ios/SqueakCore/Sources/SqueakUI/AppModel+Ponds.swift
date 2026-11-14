@@ -62,12 +62,17 @@ extension AppModel {
         pondThreadsTask?.cancel()
         pondThreadsTask = nil
         guard let id, !demo, let channel else { pondThreadsLoading = false; return }
+        perf.begin(.openPond, id)
+        if pondThreadsByPond[id] == nil, let held = pondThreadsStore?.load(id) { pondThreadsByPond[id] = held }
         pondThreadsLoading = pondThreadsByPond[id] == nil
+        if !pondThreadsLoading { perf.end(.openPond, id, cached: true) }
         pondThreadsTask = Task { @MainActor [weak self] in
             var misses = 0
             while !Task.isCancelled {
                 if let doc = try? await channel.pondThreads(pondId: id), !Task.isCancelled {
                     if self?.pondThreadsByPond[id] != doc { self?.pondThreadsByPond[id] = doc }
+                    self?.pondThreadsStore?.record(doc, for: id)
+                    self?.perf.end(.openPond, id)
                     self?.pondThreadsLoading = false
                     misses = 0
                 } else {
