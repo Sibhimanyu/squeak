@@ -347,7 +347,8 @@ struct PondDashboard: View {
         .navigationBarTitleDisplayMode(.large)
         .refreshable { Haptics.play(.refresh); await model.refresh() }
         .onAppear { model.openPond(item.id) }
-        .onDisappear { model.openPond(nil, if: item.id) }
+        // Pushing a page inside the pond (its threads, a chat) covers the dashboard but leaves the pond open here.
+        .onDisappear { if !path.contains(.pond(item.id)) { model.openPond(nil, if: item.id) } }
         .contentMargins(.bottom, 24, for: .scrollContent)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -369,7 +370,7 @@ struct PondDashboard: View {
             PondMark(item: item, size: 56)
             VStack(alignment: .leading, spacing: 3) {
                 Text(accessLine(item)).font(.subheadline).foregroundStyle(Theme.muted)
-                Text(PondList.threadCount(item.sessions.count)).font(.footnote).foregroundStyle(Theme.subtle)
+                Text(PondList.threadCount(model.pondThreads(item.id)?.total ?? item.sessions.count)).font(.footnote).foregroundStyle(Theme.subtle)
             }
             Spacer(minLength: 0)
         }
@@ -398,7 +399,7 @@ struct PondDashboard: View {
     }
 
     private func tile(_ item: PondItem, _ scope: PondScope, _ symbol: String, _ tint: Color) -> some View {
-        let count = PondList.sessions(item, scope: scope).count
+        let count = scope == .all ? (model.pondThreads(item.id)?.total ?? item.sessions.count) : PondList.sessions(item, scope: scope).count
         return Button { Haptics.play(.navigate); path.append(.scope(item.id, scope)) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -463,6 +464,42 @@ struct StreamPage: View {
     }
 }
 
+/// Every non-archived thread of a pond, as the Mac listed them (grouped and ordered there: Main first, then streams
+/// newest first, threads newest first inside). A thread the phone's view also carries draws from that copy.
+struct PondAllThreadsPage: View {
+    @Environment(AppModel.self) private var model
+    let item: PondItem
+    let all: PondThreads
+
+    var body: some View {
+        let live = Set(model.home.sessions.map(\.key))
+        List {
+            ForEach(all.streams) { stream in
+                Section {
+                    ForEach(stream.threads) { thread in
+                        NavigationLink(value: HomeRoute.session(thread.key)) {
+                            SessionRow(session: model.session(thread.key) ?? thread.asSession, recent: !live.contains(thread.key), inProject: true)
+                        }.tapHaptic(.navigate)
+                    }
+                } header: { Text(stream.name) }
+            }
+            if all.total > all.threads.count {
+                Text("Showing the newest \(all.threads.count) of \(all.total)").font(.footnote).foregroundStyle(Theme.muted)
+                    .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg.ignoresSafeArea())
+        .navigationTitle(PondScope.all.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { Haptics.play(.refresh); await model.refresh() }
+        .onAppear { model.openPond(item.id) }
+        .overlay(alignment: .bottom) { ConnectionBar() }
+        .foregroundStyle(Theme.ink)
+    }
+}
+
 /// One of the dashboard's scope tiles: the pond's threads that are waiting, working, shared, or all of them.
 struct ScopePage: View {
     @Environment(AppModel.self) private var model
@@ -470,11 +507,22 @@ struct ScopePage: View {
     let scope: PondScope
 
     var body: some View {
-        if let item = model.pondItem(pondId) {
+        if let item = model.pondItem(pondId), scope == .all, let all = model.pondThreads(pondId) {
+            PondAllThreadsPage(item: item, all: all)
+        } else if let item = model.pondItem(pondId) {
             ThreadListPage(title: scope.title, sessions: PondList.sessions(item, scope: scope),
                            emptyTitle: scope == .shared && !item.shared ? "Only you" : "Nothing here now",
                            emptyText: scope == .shared && !item.shared ? "Invite someone from Squeak on your Mac to share this pond." : "Pull down to refresh.",
                            inPond: true, newThread: NewThreadTarget(pond: item.name))
+                .overlay(alignment: .top) {
+                    // The first time only: the rest of the pond's threads are on their way from the Mac.
+                    if scope == .all, model.pondThreadsLoading {
+                        HStack(spacing: 8) { ProgressView(); Text("Loading all threads").font(.footnote).foregroundStyle(Theme.muted) }
+                            .padding(.vertical, 8).padding(.horizontal, 14)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(.top, 8)
+                    }
+                }
         } else {
             ContentUnavailableView("This pond isn't here", systemImage: "drop").background(Theme.bg.ignoresSafeArea())
         }
