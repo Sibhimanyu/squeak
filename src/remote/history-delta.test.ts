@@ -20,6 +20,13 @@ function chat(count: number, start = 1000): { rows: TranscriptMessage[]; read: T
 }
 
 describe("readHistoryAfter", () => {
+  it("resets when the cursor is beyond the newest message (the chat shrank)", () => {
+    const { rows, read } = chat(20);
+    const delta = readHistoryAfter(read, Number(rows.at(-1)!.cursor) + 500, 50);
+    expect(delta.reset).toBe(true);
+    expect(delta.entries.at(-1)!.id).toBe(rows.at(-1)!.cursor);
+  });
+
   it("returns nothing new when the cursor is the newest message", () => {
     const { rows, read } = chat(20);
     const delta = readHistoryAfter(read, Number(rows.at(-1)!.cursor), 50);

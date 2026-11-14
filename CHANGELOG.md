@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.27.3] - 2026-11-15 (iOS)
+
+- A chat whose history moved back on the Mac refreshes instead of showing stale messages; background warming repeats at most every two minutes; a locked Keychain no longer discards the history key.
+
 ## [1.27.2] - 2026-11-15 (iOS)
 
 - Archive and rename that the Mac never confirms are undone after two minutes.

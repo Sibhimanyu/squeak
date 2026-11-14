@@ -47,12 +47,22 @@ export function readHistoryAfter(read: TranscriptReader, after: number, wanted: 
   const newer = new Map<number, TranscriptResult["messages"][number]>();
   let before: number | null = null;
   let reached = false;
+  // The newest message the reader returned: a cursor beyond it names nothing the chat has any more (the file was
+  // rewritten shorter, a row deleted), so the phone must replace its tail instead of being told "nothing new".
+  let newest = -1;
+  let latest: TranscriptResult["messages"] = [];
   while (newer.size <= HISTORY_DELTA_SCAN_MAX) {
     const result = read(STEP, before);
+    if (before === null) {
+      latest = result.messages;
+    }
     for (const message of result.messages) {
       const cursor = Number(message.cursor);
       if (!message.cursor || !Number.isFinite(cursor)) {
         continue;
+      }
+      if (before === null) {
+        newest = Math.max(newest, cursor);
       }
       if (cursor > after) {
         newer.set(cursor, message);
@@ -71,6 +81,9 @@ export function readHistoryAfter(read: TranscriptReader, after: number, wanted: 
   const ordered = [...newer.entries()].sort((a, b) => a[0] - b[0]).map(([, message]) => message);
   if (!reached) {
     return { entries: condenseHistory(ordered, page), nextAfter: null, reset: true };
+  }
+  if (newer.size === 0 && newest >= 0 && after > newest) {
+    return { entries: condenseHistory(latest, page), nextAfter: null, reset: true };
   }
   const entries = condenseHistory(ordered, ordered.length);
   const slice = entries.slice(0, page);
