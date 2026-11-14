@@ -266,6 +266,17 @@ prompt"`). Only `idle` is typed into. Its `procStart` is **UTC**, while
   instead, newest turn only — role `assistant` rows there also hold tool
   calls, tool results, `result` and `system` events, and a turn that has
   just started must not resurface the previous turn's question.
+- **An open Squeak chat's feed is the host's timeline, not a guess from rows.** `src/native/timeline.ts` /
+  `timeline-log.ts`: one ordered event log per chat in `native.db` (`timeline_events`): `turn.started` (written
+  synchronously when a send is accepted, before the agent starts; carries author, `clientNonce`, `queuedId`),
+  `step.added/updated` (stable step ids: tool id or `<message id>:<block>`; api waits are one `wait-n` step),
+  `reply.done`, `turn.ended`, `prompt.queued/dequeued`; `reply.delta` is ephemeral (offset-addressed, no seq).
+  `GET /native/sessions/:id/timeline?since=|turns=&before=`, and `tl=<seq>` on the session stream adds `timeline`
+  frames. The Mac's `TurnTimeline` (SqueakMacCore) is a pure reducer over it (idempotent by seq, gaps refetched
+  with `since`, rows only grow, ended turns immutable, a press is a row reconciled by nonce); `TimelinePresentation`
+  makes everything the screens read. Pond members get the same events as `timeline` thread events (host `seq`
+  inside) and reduce them with `PondReplica`. Do not add another source of "the current turn" for these chats:
+  the activity route and transcript reads are only for other sources and hosts without the route.
 - **"What it's doing" reads the transcript, not the card.** `activity.ts`
   lists the current turn: Claude's thinking summaries (present because
   Conductor runs `--thinking-display summarized`), its notes between steps,

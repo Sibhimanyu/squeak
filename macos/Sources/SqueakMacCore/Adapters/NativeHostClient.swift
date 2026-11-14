@@ -657,6 +657,10 @@ public enum NativeEvent: Sendable, Equatable {
     /// The stream reconnected (not the first connection): the host replays its status and every open request, so what
     /// the reader holds about requests is replaced, not merged.
     case connected
+    /// A stored timeline event (`timeline` frame, with the host's `seq`): the one source an open chat's feed reduces.
+    case timeline(TimelineEvent)
+    /// The message being written (a `timeline` frame with no `seq`): live only.
+    case replyDelta(ReplyDelta)
 }
 
 struct SSEFrame: Equatable {
@@ -731,6 +735,9 @@ extension NativeEvent {
         case "reset":
             let j = try? decoder.decode(NativeJSON.self, from: bytes)
             return .reset(lastSeq: j?["lastSeq"]?.int ?? 0, prunedThrough: j?["prunedThrough"]?.int ?? 0)
+        case "timeline":
+            if let d = TimelineEvent.replyDelta(from: bytes) { return .replyDelta(d) }
+            return (try? decoder.decode(TimelineEvent.self, from: bytes)).map(NativeEvent.timeline)
         default: return nil
         }
     }
@@ -827,13 +834,16 @@ public struct NativeHostClient: Sendable {
     /// Sends a message; true when the host queued it behind a running turn. A refused connection (`hostDown`: nothing
     /// was written) is tried again twice, 300 ms and 1 s apart; anything else (a timeout, a dropped connection, any
     /// answer from the host) is final, so a message the host may have accepted is never sent twice.
-    public func send(id: String, text: String, mode: SendMode) async throws -> Bool {
+    public func send(id: String, text: String, mode: SendMode, clientNonce: String? = nil) async throws -> Bool {
         var delays = sendRetryDelays[...]
+        var body: [String: NativeJSON] = ["text": .string(text), "mode": .string(mode.rawValue)]
+        // The host echoes this on the turn it starts, so this Mac's own row meets it without a second one.
+        if let clientNonce { body["clientNonce"] = .string(clientNonce) }
         while true {
             do {
                 let r = try await call(
                     "POST", "/native/sessions/\(Self.id(id))/messages",
-                    body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20, maybeSent: true)
+                    body: .object(body), timeout: 20, maybeSent: true)
                 return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
             } catch NativeHostError.hostDown {
                 guard let wait = delays.popFirst() else { throw NativeHostError.hostDown }
@@ -846,6 +856,18 @@ public struct NativeHostClient: Sendable {
     /// Asks the host to have the chat's agent ready before the first send. An older host has no route (404): ignored.
     public func warm(id: String) async {
         _ = try? await call("POST", "/native/sessions/\(Self.id(id))/warm", body: .object([:]))
+    }
+
+    /// The chat's timeline log: `since` a seq (a reconnect, a gap), or whole turns (the newest `turns`, or the `turns`
+    /// before `before`). An older host has no route (404).
+    public func timeline(id: String, since: Int? = nil, turns: Int? = nil, before: Int? = nil, limit: Int? = nil) async throws -> TimelinePage {
+        var q: [String] = []
+        if let since { q.append("since=\(since)") }
+        if let turns { q.append("turns=\(turns)") }
+        if let before { q.append("before=\(before)") }
+        if let limit { q.append("limit=\(limit)") }
+        let path = "/native/sessions/\(Self.id(id))/timeline" + (q.isEmpty ? "" : "?" + q.joined(separator: "&"))
+        return try await decode(TimelinePage.self, try await call("GET", path))
     }
 
     /// `limit` rows after `after`, oldest first.
@@ -1170,13 +1192,14 @@ public struct NativeHostClient: Sendable {
     /// A `reset` means the host no longer has what the reader asked for: refetch, and the replay that follows is
     /// every message again, so consumers dedupe by `seq`. The stream ends only when the consumer stops iterating.
     public func stream(
-        id: String, after: Int = 0, minBackoff: Duration = .milliseconds(500), maxBackoff: Duration = .seconds(5),
+        id: String, after: Int = 0, timelineAfter: Int? = nil, minBackoff: Duration = .milliseconds(500), maxBackoff: Duration = .seconds(5),
         idleTimeout: Duration = .seconds(30),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) -> AsyncStream<NativeEvent> {
         AsyncStream { continuation in
             let task = Task {
                 var last = after
+                var lastTimeline = timelineAfter
                 var connections = 0
                 var backoff = minBackoff
                 while !Task.isCancelled {
@@ -1185,7 +1208,7 @@ public struct NativeHostClient: Sendable {
                         continue
                     }
                     let request = HTTPRequest(
-                        url: url("/native/sessions/\(Self.id(id))/stream?after=\(last)"), headers: ["x-squeak-token": token], timeout: 90)
+                        url: url("/native/sessions/\(Self.id(id))/stream?after=\(last)" + (lastTimeline.map { "&tl=\($0)" } ?? "")), headers: ["x-squeak-token": token], timeout: 90)
                     var parser = SSEParser()
                     var announced = false
                     do {
@@ -1195,6 +1218,7 @@ public struct NativeHostClient: Sendable {
                             backoff = minBackoff
                             switch event {
                             case .message(let m): last = max(last, m.seq)
+                            case .timeline(let t): lastTimeline = max(lastTimeline ?? 0, t.seq)
                             case .reset: last = 0
                             default: break
                             }

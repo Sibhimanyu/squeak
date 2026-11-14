@@ -441,7 +441,7 @@ final class AppModel {
                let last = all.last, last.role == .assistant, (last.at ?? .distantPast) > sent {
                 noteOptimistic(key) { $0.observeReply(host: s.state) }
             }
-            if key == selected {
+            if key == selected, !usesTimeline(key) {
                 transcriptReadKey = key
                 _ = publishIfChanged(self, \.messages, all)
                 _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
@@ -943,6 +943,8 @@ final class AppModel {
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
         paging = EarlierPaging()
+        // A Squeak chat's feed is the host's timeline: what this Mac held of it paints at once, so opening a chat is never a swap.
+        if let key, usesTimeline(key) { showCachedTimeline(key) }
         if demoMode {
             transcriptReadKey = key; activityReadKey = key
             if let key { messages = DemoData.transcript(for: key); activity = DemoData.activity(for: key) }
@@ -954,6 +956,7 @@ final class AppModel {
             await broker.setFocused(key)
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
+            if self.usesTimeline(key) { return }
             _ = publishIfChanged(self, \.messages, await broker.messages(for: key))
             _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
             let started = Date()
@@ -971,6 +974,7 @@ final class AppModel {
     /// through `messagesChanged`; one read at a time, a failure stays on the row for a retry.
     func loadEarlier() {
         guard let key = selected, !demoMode, paging.canLoad else { return }
+        if usesTimeline(key) { loadEarlierTurns(key); return }
         Task { [broker] in await broker.loadEarlier(for: key) }
     }
 
@@ -1002,7 +1006,7 @@ final class AppModel {
     }
 
     func refreshActivity() async {
-        guard let key = selected, !demoMode, pollGate.presence != .hidden else { return }
+        guard let key = selected, !demoMode, pollGate.presence != .hidden, !usesTimeline(key) else { return }
         let read = try? await broker.activity(for: key)
         guard key == selected else { return }
         activityReadKey = key
@@ -1507,7 +1511,11 @@ final class AppModel {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
-        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil, keepsDraft: !clearsDraft)
+        // An idle Squeak chat's press is a row of the timeline at once, named by the nonce the host echoes on its turn.
+        let clientId = UUID()
+        let onTimeline = !midTurn && usesTimeline(key) && native.key == key
+        if onTimeline { timelineSendPressed(key, nonce: clientId, text: trimmed) }
+        let result = await broker.send(trimmed, to: key, clientId: clientId, mode: mode, answersTurn: turn, echoes: localCard == nil && !onTimeline, keepsDraft: !clearsDraft)
         if let localCard {
             switch result {
             case .accepted(_, let delivery, _): native.pending.settleLocal(id: localCard, accepted: true, queued: delivery == .queued)
@@ -1518,7 +1526,9 @@ final class AppModel {
         }
         // A send that did not go: the chat is not working after all.
         switch result {
-        case .refused, .notSent: if !midTurn { optimistic[key] = nil }
+        case .refused(let why), .notSent(let why):
+            if !midTurn { optimistic[key] = nil }
+            if onTimeline { timelineSendFailed(key, nonce: clientId, reason: why) }
         default: break
         }
         if let card {
@@ -1596,7 +1606,7 @@ final class AppModel {
         guard let key = selected else { return }
         Task { [weak self] in
             guard let self else { return }
-            await broker.discardFailed(id: message.id, in: key)
+            if usesTimeline(key) { timelineDiscard(key, id: message.id) } else { await broker.discardFailed(id: message.id, in: key) }
             if draft == message.text { setDraft("") }
             _ = await send(message.text, to: key, mode: .queue)
         }
@@ -1950,6 +1960,168 @@ final class AppModel {
     var lastSyncedText: String? {
         guard let d = health?.lastSyncedAt else { return nil }
         return "Last updated " + d.formatted(.relative(presentation: .named))
+    }
+}
+
+// MARK: Native timeline
+
+extension AppModel {
+    /// Whether a chat's feed is the host's timeline: a Squeak chat, on a host that has one. Every other source, and a
+    /// host without the route, keeps the transcript and activity reads.
+    func usesTimeline(_ key: SessionKey?) -> Bool {
+        guard let key, !demoMode, !native.hostLacksTimeline else { return false }
+        return session(key)?.source == .squeak
+    }
+
+    /// The timeline a chat shows: the live one when it is the open chat, else what this Mac last held.
+    func timeline(for key: SessionKey) -> TurnTimeline {
+        native.key == key ? native.timeline : (native.timelineCache[key] ?? TurnTimeline())
+    }
+
+    /// What this Mac last held of a chat's log, shown while the chat opens (nothing is applied to the live timeline).
+    func showCachedTimeline(_ key: SessionKey) {
+        guard let t = native.timelineCache[key] else { return }
+        messages = t.chatMessages
+        turnWork = TimelineSteps.work(t.turns)
+        paging = EarlierPaging(reachedStart: !t.hasEarlier, known: true)
+    }
+
+    /// Puts the open timeline where the screens read it: messages, each turn's steps and the current turn's, paging.
+    /// Every one is written only when it changed, so a refresh with nothing new redraws nothing.
+    func showTimeline(_ key: SessionKey, markRead: Bool = true) {
+        guard key == selected, native.key == key else { return }
+        let shown = TimelinePresentation(
+            native.timeline, details: native.details, now: Date(), olderLoading: native.olderLoading, olderError: native.olderError,
+            ready: native.timelineReady)
+        _ = publishIfChanged(self, \.messages, shown.messages)
+        _ = publishIfChanged(self, \.turnWork, shown.turnWork)
+        _ = publishIfChanged(self, \.activity, shown.activity)
+        if shown.paging != paging { paging = shown.paging }
+        if native.timelineReady { transcriptReadKey = key; activityReadKey = key }
+        native.rememberTimeline(for: key)
+        if markRead, native.timelineReady {
+            selectedLoadedAt = Date()
+            markSelectedDisplayed()
+        }
+    }
+
+    /// The first read of the chat's log; false when the host has no timeline (an older one), which sends the chat down the old path.
+    func startNativeTimeline(_ s: HostSession) async -> Bool {
+        do {
+            let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: nil)
+            guard native.key == s.key else { return true }
+            native.timeline.load(page.events, hasEarlier: page.hasEarlier)
+            native.timelineReady = true
+            showTimeline(s.key)
+            await closeTimelineGap(s)
+            scheduleDetails(s)
+            return true
+        } catch let e as AdapterError {
+            if case .http(let code) = e, code == 404 || code == 400 { native.hostLacksTimeline = true; return false }
+            // Anything else (the host is down for a moment): the stream's first connection reads it again.
+            return true
+        } catch { return true }
+    }
+
+    /// Reads what the timeline is missing after `lastSeq` (a reconnect, a poll, a gap). Duplicates change nothing.
+    func resyncTimeline(_ s: HostSession) async {
+        guard native.key == s.key, native.timelineReady || native.timeline.hasBaseline else { _ = await startNativeTimeline(s); return }
+        guard let page = try? await nativeAdapter.timeline(for: s, since: native.timeline.lastSeq, turns: nil, before: nil) else { return }
+        guard native.key == s.key else { return }
+        // The host's log is behind this Mac's (its database was reset): what is held is from a log that no longer exists.
+        if page.lastSeq < native.timeline.lastSeq {
+            native.timeline = TurnTimeline()
+            native.timelineReady = false
+            _ = await startNativeTimeline(s)
+            return
+        }
+        native.timeline.load(page.events)
+        await closeTimelineGap(s)
+        showTimeline(s.key)
+    }
+
+    /// A gap the host cannot fill (it trimmed its log) is stepped over, so the chat never waits on it for good.
+    private func closeTimelineGap(_ s: HostSession) async {
+        guard native.timeline.gapSince != nil else { return }
+        if let page = try? await nativeAdapter.timeline(for: s, since: native.timeline.lastSeq, turns: nil, before: nil), native.key == s.key {
+            native.timeline.load(page.events)
+        }
+        if native.timeline.gapSince != nil { native.timeline.acceptGap() }
+    }
+
+    /// One event of the stream into the timeline, then onto the screens.
+    func applyTimelineEvent(_ e: TimelineEvent, _ s: HostSession) async {
+        guard native.key == s.key else { return }
+        let applied = native.timeline.apply(e)
+        if case .held = applied { await closeTimelineGap(s) }
+        if case .turnEnded = e.body { scheduleDetails(s) }
+        if case .step(let step) = e.body, step.status != .running { scheduleDetails(s) }
+        native.stream.push(native.timeline.current?.streaming?.text ?? "", force: true)
+        showTimeline(s.key)
+    }
+
+    func applyReplyDelta(_ d: ReplyDelta, _ s: HostSession) {
+        guard native.key == s.key else { return }
+        native.timeline.apply(d)
+        native.stream.push(native.timeline.current?.streaming?.text ?? "")
+    }
+
+    /// A press of Send on an idle chat: its row exists before anything is sent.
+    func timelineSendPressed(_ key: SessionKey, nonce: UUID, text: String) {
+        guard usesTimeline(key), native.key == key else { return }
+        native.timeline.send(nonce: nonce.uuidString, text: text, at: Date())
+        showTimeline(key)
+    }
+
+    func timelineSendFailed(_ key: SessionKey, nonce: UUID, reason: String) {
+        guard native.key == key else { return }
+        native.timeline.markNotSent(nonce: nonce.uuidString, reason: reason)
+        showTimeline(key)
+    }
+
+    func timelineDiscard(_ key: SessionKey, id: String) {
+        guard native.key == key, let m = native.timeline.chatMessages.first(where: { $0.id == id }), let c = m.clientId else { return }
+        native.timeline.discard(nonce: c.uuidString)
+        showTimeline(key)
+    }
+
+    /// The next older page of turns, placed above without moving what is shown.
+    func loadEarlierTurns(_ key: SessionKey) {
+        guard let s = session(key), native.key == key, !native.olderLoading, let before = native.timeline.oldestSeq else { return }
+        native.olderLoading = true
+        native.olderError = nil
+        showTimeline(key)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { native.olderLoading = false; if native.key == key { showTimeline(key) } }
+            do {
+                let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: before)
+                guard native.key == key else { return }
+                native.timeline.prepend(page.events, hasEarlier: page.hasEarlier)
+                scheduleDetails(s)
+            } catch {
+                native.olderError = "Couldn't load earlier messages"
+            }
+        }
+    }
+
+    /// What opens under a tool row (its output, an edit's diff) is not in the timeline: it is read from the stored rows for the
+    /// newest turns and filed by step id. It decorates steps that exist; it never adds or removes one.
+    func scheduleDetails(_ s: HostSession) {
+        guard native.detailsTask == nil, let hid = Self.hostId(s.key) else { return }
+        native.detailsTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard let self else { return }
+            defer { native.detailsTask = nil }
+            guard native.key == s.key else { return }
+            let from = native.timeline.turns.suffix(6).compactMap { $0.promptMessageId.flatMap { Int($0.dropFirst("native-".count)) } }.first
+            guard let from, let rows = try? await nativeHost.messages(id: hid, after: max(0, from - 1), limit: 3000), native.key == s.key else { return }
+            let mapped = NativeTranscript.map(rows)
+            if mapped.details != native.details.filter({ mapped.details[$0.key] != nil }) || mapped.details.count != native.details.count {
+                native.details.merge(mapped.details) { _, new in new }
+                showTimeline(s.key)
+            }
+        }
     }
 }
 

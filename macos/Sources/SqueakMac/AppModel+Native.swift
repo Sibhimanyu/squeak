@@ -94,12 +94,42 @@ final class NativeChatModel {
     /// Set by the watchdog: drop the stream and open it again from the newest seq.
     @ObservationIgnored var forceReconnect = false
     @ObservationIgnored var cutStream: (() -> Void)?
+    /// The open chat's feed: the host's ordered event log reduced (SqueakMacCore `TurnTimeline`). Everything the transcript
+    /// shows for a Squeak chat is made from this and nothing else.
+    var timeline = TurnTimeline()
+    /// The first page of the log has been read.
+    var timelineReady = false
+    var olderLoading = false
+    var olderError: String?
+    /// What opens under tool rows, by step id (decoration only; read from the stored rows).
+    var details: [String: ToolDetail] = [:]
+    @ObservationIgnored var detailsTask: Task<Void, Never>?
+    /// The host has no timeline route (an older one): chats use the transcript and activity reads. Kept until the app restarts.
+    @ObservationIgnored var hostLacksTimeline = false
+    /// What this Mac last held of each chat's log, so reopening a chat paints at once and the stream only catches up.
+    @ObservationIgnored var timelineCache: [SessionKey: TurnTimeline] = [:]
+
+    func restoreTimeline(for key: SessionKey) {
+        guard self.key != key || timeline.turns.isEmpty else { return }
+        timeline = timelineCache[key] ?? TurnTimeline()
+        timelineReady = false
+        olderLoading = false
+        olderError = nil
+        details = [:]
+    }
+
+    func rememberTimeline(for key: SessionKey) {
+        guard timeline.hasBaseline else { return }
+        timelineCache[key] = timeline
+        if timelineCache.count > 12, let drop = timelineCache.keys.first(where: { $0 != key }) { timelineCache[drop] = nil }
+    }
 
     var mode: ComposerMode? {
         modeOverride ?? info.map { NativeModes.composerMode($0.permissionMode) }
     }
 
     func reset(_ key: SessionKey?) {
+        if self.key != key, let key { restoreTimeline(for: key) }
         self.key = key; info = nil; card = nil; stream.clear(); retry = nil; pending.reset(); hostSendsPending = false; editingPendingId = nil; note = nil; queueNote = nil
         busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
     }
@@ -147,6 +177,12 @@ extension AppModel {
         }
         defer { keepAlive.cancel() }
         await refreshNative(s)
+        // The feed is the host's timeline; a host that has none (an older one) keeps the transcript and activity reads.
+        let timelineMode = await startNativeTimeline(s) && !native.hostLacksTimeline
+        if !timelineMode {
+            await broker.refreshTranscript()
+            await refreshActivity()
+        }
         if chatModels.isEmpty { chatModels = await client.chatModels() }
         let prefix = NativeAdapter.keyPrefix
         let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
@@ -176,6 +212,11 @@ extension AppModel {
                     guard let session = try? await nativeHost.session(id: hostId) else { continue }
                     // The host's own word reaches the dock and the Stop button whatever the catalog says.
                     if native.key == key { native.info = session }
+                    if timelineMode {
+                        // The safety net is the timeline's own resume: whatever it is missing after its last seq, idempotently.
+                        await resyncTimeline(s)
+                        continue
+                    }
                     let newestSeq = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
                     if NativeSyncWatchdog.mismatch(hostStatus: session.status, hostLastSeq: newestSeq, status: native.watchdog.status, lastSeq: native.lastSeq) {
                         native.forceReconnect = true
@@ -197,7 +238,9 @@ extension AppModel {
         }
         reconnects += 1
         if resumeAfter != newest { await refetchNative(s) }
-        let source = nativeAdapter.events(for: s, after: resumeAfter)
+        let source = timelineMode
+            ? nativeAdapter.events(for: s, after: resumeAfter, timelineAfter: native.timeline.lastSeq)
+            : nativeAdapter.events(for: s, after: resumeAfter)
         let events = AsyncStream<NativeEvent> { c in
             let pump = Task { for await e in source { c.yield(e) }; c.finish() }
             native.cutStream = { pump.cancel(); c.finish() }
@@ -229,14 +272,24 @@ extension AppModel {
                 native.hostSendsPending = true
                 native.pending.apply(change)
                 // A steer taken in is a plain transcript row now: read it so it shows at once.
-                if case .remove(_, true, _) = change { scheduleNativeRefresh() }
+                if case .remove(_, true, _) = change, !timelineMode { scheduleNativeRefresh() }
             }
             let effect = live.apply(event)
-            if live.liveStep != native.liveStep {
-                native.liveStep = live.liveStep
-                if selected == key, !demoMode { showLiveStep() }
+            if timelineMode {
+                // The feed is one ordered log: an event into the reducer, and from there onto the screens.
+                switch event {
+                case .timeline(let e): await applyTimelineEvent(e, s)
+                case .replyDelta(let d): applyReplyDelta(d, s)
+                case .connected, .reset: await resyncTimeline(s)
+                default: break
+                }
+            } else {
+                if live.liveStep != native.liveStep {
+                    native.liveStep = live.liveStep
+                    if selected == key, !demoMode { showLiveStep() }
+                }
+                if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             }
-            if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
             case .request, .requestResolved, .connected, .reset:
                 // After a reset or a reconnect the held requests are cleared and the host re-sends the live ones.
@@ -267,7 +320,7 @@ extension AppModel {
             default: break
             }
             switch effect {
-            case .transcriptChanged, .refetch: scheduleNativeRefresh()
+            case .transcriptChanged, .refetch: if !timelineMode { scheduleNativeRefresh() }
             case .none: break
             }
         }
@@ -291,7 +344,7 @@ extension AppModel {
     /// After a forced reconnect: read the chat's status, requests and queue and the transcript again.
     func refetchNative(_ s: HostSession) async {
         await refreshNative(s)
-        scheduleNativeRefresh()
+        if !usesTimeline(s.key) { scheduleNativeRefresh() }
     }
 
     /// Committed messages arrive through the transcript read (merged with this Mac's own sends), so a burst of
