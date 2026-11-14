@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.26.1
+
+- A stream keeps its tabs: going Home and back no longer drops thread tabs, and opening an older thread from the Dashboard, a search or a notification adds a tab beside the others instead of replacing them. Each stream's tabs also survive a relaunch.
+
 ## 2.26.0
 
 - Settings has a Devices page, not a pairing page: the iPhones and browsers signed in to your account, how each got here, and Remove. "Pair an iPhone..." and the QR sheet are gone, and so is the note that pairing always waits for you.
