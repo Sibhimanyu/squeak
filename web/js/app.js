@@ -3,7 +3,8 @@
 // from the channel is ever parsed as HTML.
 
 import { RENAME_MAX_CHARS } from "./channel.js";
-import { HistoryStore, OutboxStore, ReadStore } from "./chat-stores.js";
+import { OutboxStore, ReadStore } from "./chat-stores.js";
+import { HistoryCache } from "./history-cache.js";
 import { firstNonEmpty, isStarting, queueCards, rows as timelineRows } from "./chat-timeline.js";
 import { createExtras } from "./chat-extras.js";
 import { chatInspectorBody } from "./chat-inspector-view.js";
@@ -474,7 +475,7 @@ async function startPaired() {
   ui.loadedAt = Date.now();
   ui.lookingSince = ui.loadedAt;
   globalThis.setTimeout(touch, SPLASH_CAP_MS + 50);
-  ui.history = new HistoryStore(store);
+  ui.history = new HistoryCache(store);
   ui.lastHistory = await ui.history.load();
   ui.read = new ReadStore(store);
   await ui.read.load();
@@ -554,7 +555,21 @@ function select(key) {
   ui.stepsOpen = false;
   ui.openParts = new Set();
   ui.sync?.watch(key);
+  if (key) void openCachedHistory(key);
   render(true);
+}
+
+/** A chat is opened: its history comes from this browser's cache, then only what came after it is asked of the Mac. */
+async function openCachedHistory(key) {
+  if (!ui.lastHistory[key]) {
+    const held = await ui.history?.get(key);
+    if (held?.length && !ui.lastHistory[key] && ui.selected === key) {
+      ui.lastHistory[key] = held;
+      touch();
+    }
+  }
+  const session = findSession(key);
+  if (session) await extras.syncDelta(session);
 }
 
 async function setVerbose(on) {
@@ -736,6 +751,7 @@ async function forget(message = null) {
     ui.sync.channel.db.closeAll();
   }
   // Nothing may write after this: a late write would bring the wiped database back.
+  await ui.history?.wipe();
   await Promise.all([ui.outbox?.dispose(), ui.history?.dispose(), ui.read?.dispose()]);
   if (!ui.sync && ui.record?.state === "pending") {
     await channelFor(ui.record).cancelPairing();
@@ -883,6 +899,11 @@ const extras = createExtras({
   send: (session, text, mode) => sendFrom(session, text, mode),
   history: (key) =>
     firstNonEmpty(ui.syncState?.live?.key === key ? ui.syncState.live.history : null, ui.lastHistory[key]) ?? [],
+  cachedHistory: (key) => ui.lastHistory[key] ?? [],
+  setCachedHistory: (key, history) => {
+    ui.lastHistory[key] = history;
+    ui.history?.record(history, key);
+  },
   selected: () => ui.selected,
   select,
   view: () => ui.syncState?.view ?? null,

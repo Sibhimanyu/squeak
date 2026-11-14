@@ -37,6 +37,7 @@ import { AddonHost } from "../addon-host.js";
 import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { pondThreadsDoc, type PondThreadsDoc } from "./pond-threads.js";
+import { historyDeltaDoc } from "./history-delta.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
@@ -1087,6 +1088,117 @@ describe("RemoteBridge history pages", () => {
     await f.store.set(`${f.channel}/commands/h1`, f.historyCommand());
     await f.bridge.tick();
     expect(f.result("h1")).toMatchObject({ status: "refused" });
+  });
+});
+
+describe("RemoteBridge history cache (after a cursor)", () => {
+  const all: TranscriptMessage[] = Array.from({ length: 30 }, (_, index) => ({
+    id: `m${index}`,
+    cursor: String(100 + index),
+    role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+    text: `message ${index}`,
+    at: null,
+    turnId: null,
+  }));
+  function withDelta(caps: string[] | null) {
+    const f = fixture({
+      streaming: true,
+      transcript: (_id, limit, before) => {
+        const rows = all.filter((m) => before == null || Number(m.cursor) < before);
+        const page = rows.slice(-limit);
+        return { messages: page, nextBefore: rows.length > limit ? page[0]!.cursor! : null };
+      },
+    });
+    const caught = async () => {
+      if (caps) {
+        await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, caps }) });
+      }
+      await f.pair();
+      await f.bridge.tick();
+    };
+    const page = (id: string) => {
+      const doc = [...f.store.docs.entries()].find(([key]) => key.includes("/live/") && key.endsWith(id));
+      return doc ? open<Record<string, unknown>>(f.payload.k, doc[1].box) : null;
+    };
+    return { f, caught, page };
+  }
+
+  it("sends only what came after the cursor, oldest first, with no cursor left when it is all", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "125" }));
+    await f.bridge.tick();
+    const result = f.result("d1") as { status: string; doc: string };
+    expect(result.status).toBe("sent");
+    expect(result.doc).toBe(historyDeltaDoc("claude-transcript:s1", "125"));
+    const doc = page(result.doc) as { entries: Array<{ id: string }>; nextAfter: string | null; reset: boolean };
+    expect(doc.entries.map((e) => e.id)).toEqual(["126", "127", "128", "129"]);
+    expect(doc).toMatchObject({ nextAfter: null, reset: false });
+  });
+
+  it("pages a long delta by nextAfter and covers a message appended in between", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "100", n: 10 }));
+    await f.bridge.tick();
+    const first = page((f.result("d1") as { doc: string }).doc) as {
+      entries: Array<{ id: string }>;
+      nextAfter: string;
+    };
+    expect(first.entries).toHaveLength(10);
+    expect(first.nextAfter).toBe("110");
+    all.push({ id: "m30", cursor: "130", role: "user", text: "later", at: null, turnId: null });
+    await f.store.set(`${f.channel}/commands/d2`, f.historyCommand({ after: first.nextAfter, n: 50 }));
+    await f.bridge.tick();
+    const rest = page((f.result("d2") as { doc: string }).doc) as { entries: Array<{ id: string }>; nextAfter: null };
+    expect(rest.entries[0]!.id).toBe("111");
+    expect(rest.entries.at(-1)!.id).toBe("130");
+    expect(rest.nextAfter).toBeNull();
+    all.pop();
+  });
+
+  it("starts at the chat's first message when the cursor is older than all of it", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "1", n: 5 }));
+    await f.bridge.tick();
+    const doc = page((f.result("d1") as { doc: string }).doc) as { entries: unknown[]; reset: boolean };
+    expect(doc.reset).toBe(false);
+    expect(doc.entries).toHaveLength(5);
+  });
+
+  it("refuses after from a phone that did not name the cap, with both cursors, or a bad cursor", async () => {
+    const old = withDelta(["split"]);
+    await old.caught();
+    await old.f.store.set(`${old.f.channel}/commands/d1`, old.f.historyCommand({ after: "110" }));
+    await old.f.bridge.tick();
+    expect(old.f.result("d1")).toMatchObject({ status: "refused" });
+    const { f, caught } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d2`, f.historyCommand({ after: "110", before: "120" }));
+    await f.store.set(`${f.channel}/commands/d3`, f.historyCommand({ after: "11x" }));
+    await f.store.set(`${f.channel}/commands/d4`, f.historyCommand({ after: 110 }));
+    await f.bridge.tick();
+    for (const id of ["d2", "d3", "d4"]) {
+      expect(f.result(id)).toMatchObject({ status: "refused" });
+    }
+  });
+
+  it("still answers a plain history request for a phone with the cap, and offers delta only then", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand({}));
+    await f.bridge.tick();
+    expect(page((f.result("h1") as { doc: string }).doc)).toMatchObject({ complete: false });
+    const view = (g: typeof f) =>
+      open<{ sessions: Array<{ actions?: string[] }> }>(
+        g.payload.k,
+        g.store.docs.get(`${g.channel}/state/snapshot`)!.box,
+      );
+    expect(view(f).sessions[0]!.actions).toContain("delta");
+    const none = withDelta(null);
+    await none.caught();
+    expect(view(none.f).sessions[0]!.actions).not.toContain("delta");
   });
 });
 

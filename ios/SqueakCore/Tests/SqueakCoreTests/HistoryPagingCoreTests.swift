@@ -33,23 +33,6 @@ final class HistoryPagingCoreTests: XCTestCase {
         XCTAssertEqual(LiveTurn.historyPageDoc(for: "claude-transcript:d1", before: "4821"), handle + "-h4821")
     }
 
-    func testHistoryStoreKeepsTheNewestTwoHundredWithACursorAndRestoresIt() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hs-\(UUID().uuidString)")
-        let store = HistoryStore(directory: dir, delay: 0)
-        let entries = (1...250).map { LiveTurn.HistoryEntry(role: "user", text: "m\($0)", at: nil, id: "\($0)") }
-        store.record(ChatHistoryState(entries: entries, nextBefore: "1", complete: false), for: "k")
-        store.flush()
-        let back = HistoryStore(directory: dir, delay: 0).states()["k"]
-        XCTAssertEqual(back?.entries.count, HistoryStore.maxEntries)
-        XCTAssertEqual(back?.entries.first?.text, "m51")
-        XCTAssertEqual(back?.nextBefore, "51")
-        XCTAssertEqual(back?.complete, false)
-        // The older API still works and reads back as an entries-only state.
-        store.record([LiveTurn.HistoryEntry(role: "user", text: "solo")], for: "j")
-        XCTAssertEqual(store.all()["j"]?.first?.text, "solo")
-        try? FileManager.default.removeItem(at: dir)
-    }
-
     func testAWorkAnswerDecodesFromTheResultAndAnOlderResultHasNone() throws {
         let json = #"{"id":"c1","status":"sent","work":{"steps":[{"kind":"tool","text":"Read a.ts"},{"kind":"thinking","text":"hm"}],"more":3}}"#
         let result = try JSONDecoder().decode(CommandResult.self, from: Data(json.utf8))

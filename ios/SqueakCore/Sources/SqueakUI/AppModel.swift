@@ -111,8 +111,18 @@ final class AppModel {
     private(set) var earlierPrependedAt: [String: Date] = [:]
     /// The last timeline each chat drew, in memory, so reopening a chat shows it in its first frame (`ChatTimelineStore`).
     @ObservationIgnored private var timelineFrames = TimelineFrameCache()
-    /// Nil in the demo, which must neither read nor write the real cache.
-    @ObservationIgnored private let historyStore: HistoryStore?
+    /// The encrypted on-device history cache of the paired Mac (`ChatHistoryStore`, keyed by the channel id). Made on
+    /// first use once a channel exists; nil in the demo, which must neither read nor write the real cache.
+    @ObservationIgnored private var historyStoreBox: (macId: String, store: ChatHistoryStore)?
+    @ObservationIgnored private var historyStore: ChatHistoryStore? {
+        guard !demo, let macId = channel?.pairing.c else { return nil }
+        if let box = historyStoreBox, box.macId == macId { return box.store }
+        guard let store = ChatHistoryStore.standard(macId: macId) else { return nil }
+        historyStoreBox = (macId, store)
+        return store
+    }
+    /// Chats whose delta (what came after the held newest message) is being fetched now.
+    @ObservationIgnored private var syncingDelta: Set<String> = []
     /// The Mac's last view, kept across launches (`SnapshotStore`) so a cold launch shows it at once. Nil in the demo.
     @ObservationIgnored private let snapshotStore: SnapshotStore?
     /// A view read from disk is on screen, and no fresh one has arrived yet: the list says it is updating.
@@ -231,12 +241,8 @@ final class AppModel {
     init() {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo") || ProcessInfo.processInfo.arguments.contains("-squeak-demo-films")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
-        historyStore = demo ? nil : HistoryStore()
+        if !demo { try? FileManager.default.removeItem(at: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("squeak-history.json")) }
         snapshotStore = demo ? nil : SnapshotStore()
-        if let historyStore {
-            historyStates = historyStore.states()
-            lastHistory = historyStates.mapValues(\.entries)
-        }
         outboxStore = demo ? nil : OutboxStore()
         if let outboxStore { outbox = Self.restore(outboxStore.all()) }
         if demo {
@@ -255,7 +261,7 @@ final class AppModel {
             channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
             phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
                 code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
-            if phase == .paired { loadSavedSnapshot() }
+            if phase == .paired { loadSavedSnapshot(); preloadHistory() }
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
@@ -403,7 +409,9 @@ final class AppModel {
         catchingUp = []
         earlierLoad = [:]
         earlierPrependedAt = [:]
-        historyStore?.clear()
+        historyStoreBox?.store.wipe()
+        historyStoreBox = nil
+        ChatHistoryStore.wipeAll()
         snapshotStore?.clear()
         savedShown = false
         outboxStore?.clear()
@@ -551,6 +559,7 @@ final class AppModel {
         watching = key
         rebuild()
         restartLive()
+        if let key { Task { await openHistory(key) } }
     }
 
     /// Tell the Mac what this phone watches now, and follow that session's live turn.
@@ -682,6 +691,58 @@ final class AppModel {
         }
     }
 
+    /* ---------- the history cache ---------- */
+
+    /// Fills the in-memory history of the most recently opened chats from the device's store, off the main thread's
+    /// critical path: what is already known (a live push that got here first) wins.
+    private func preloadHistory() {
+        guard let store = historyStore else { return }
+        Task { [weak self] in
+            let held = await store.recent(limit: 10)
+            guard let self else { return }
+            for (key, state) in held where self.historyStates[key] == nil {
+                self.historyStates[key] = state
+                self.lastHistory[key] = state.entries
+            }
+            self.rebuild()
+        }
+    }
+
+    /// A chat is opened: its history comes from the device first, then only what came after its newest message is
+    /// asked of the Mac (a Mac that does not list `delta` is not asked; the live push and earlier pages do the rest).
+    private func openHistory(_ key: String) async {
+        if historyStates[key] == nil, let held = await historyStore?.load(key), historyStates[key] == nil {
+            historyStates[key] = held
+            lastHistory[key] = held.entries
+            rebuild()
+        } else if historyStates[key] != nil {
+            _ = await historyStore?.load(key) // marks it opened, for eviction
+        }
+        guard let session = session(key) else { return }
+        await syncDelta(session)
+    }
+
+    /// Pages of delta asked for at most in one run.
+    static let deltaPages = 20
+
+    /// Asks the Mac for what came after the newest message held, until it is all there. Read-only; a failure stops
+    /// quietly (the live push still lands, and the next open tries again).
+    func syncDelta(_ session: PhoneSnapshot.Session) async {
+        let key = session.key
+        guard !demo, liveAvailable, verbose, session.can(.delta), !syncingDelta.contains(key) else { return }
+        syncingDelta.insert(key)
+        defer { syncingDelta.remove(key) }
+        for _ in 0..<Self.deltaPages {
+            guard let after = historyStates[key]?.newestCursor,
+                  let delta = await fetchHistoryDelta(key: key, after: after) else { return }
+            var next = historyStates[key] ?? ChatHistoryState()
+            let more = next.applyDelta(delta)
+            setHistory(next, for: key)
+            rebuild()
+            if !more { return }
+        }
+    }
+
     /* ---------- earlier messages ---------- */
 
     private func setHistory(_ state: ChatHistoryState, for key: String) {
@@ -753,6 +814,22 @@ final class AppModel {
                   let page = try await channel.historyPage(key: key, before: before),
                   EarlierPaging.matches(page, key: key, before: before) else { return nil }
             return page
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetchHistoryDelta(key: String, after: String) async -> HistoryDelta? {
+        guard let channel else { return nil }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.historyDeltaDocument(key: key, after: after, n: 50, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel), result.sent,
+                  result.doc == LiveTurn.historyDeltaDoc(for: key, after: after) else { return nil }
+            return try await channel.historyDelta(key: key, after: after)
         } catch {
             return nil
         }
