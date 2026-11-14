@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.0
+
+- New setting in Account: "Keep recent chats in Squeak's cloud (encrypted)", on by default once you are signed in. Your iPhone and browser can then open your last 30 days of chats while this Mac sleeps, or on a new device. The copy is sealed with your key, so Squeak can't read it; turning the setting off deletes it.
+
 ## 2.26.4
 
 - A chat interrupted by a restart now closes the right turn; Markdown preview only shows images inside the workspace.

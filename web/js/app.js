@@ -625,7 +625,10 @@ async function openCachedHistory(key) {
     }
   }
   const session = findSession(key);
-  if (session) await extras.syncDelta(session);
+  if (session) {
+    await extras.syncFromCloud(session);
+    await extras.syncDelta(session);
+  }
 }
 
 async function setVerbose(on) {
@@ -979,6 +982,7 @@ const extras = createExtras({
   history: (key) =>
     firstNonEmpty(ui.syncState?.live?.key === key ? ui.syncState.live.history : null, ui.lastHistory[key]) ?? [],
   cachedHistory: (key) => ui.lastHistory[key] ?? [],
+  macAsleep: () => liveness({ aliveAt: ui.syncState?.aliveAt, lookingSince: ui.lookingSince }).kind === "silent",
   setCachedHistory: (key, history) => {
     ui.lastHistory[key] = history;
     ui.history?.record(history, key);

@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.28.0] - 2026-11-15 (iOS)
+
+- Chats open from Squeak's cloud when your Mac is asleep, and on a new iPhone: the last 30 days of each chat, sealed with your key so Squeak can't read it. When the Mac wakes it brings what came after, with nothing repeated. Turn it off in Squeak for Mac, under Account.
+
 ## [1.27.3] - 2026-11-15 (iOS)
 
 - A chat whose history moved back on the Mac refreshes instead of showing stale messages; background warming repeats at most every two minutes; a locked Keychain no longer discards the history key.

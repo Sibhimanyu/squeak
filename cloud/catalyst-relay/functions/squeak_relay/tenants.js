@@ -17,6 +17,11 @@ const CHANNEL_OWNERS = "channel-owners";
 const USAGE = "usage";
 const CLIQ_TOKENS = "cliq-tokens";
 const CLIQ_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+const HIST_TOKENS = "hist-tokens";
+const HIST_USAGE = "hist-usage";
+/** What one account may keep sealed in the cloud as history, all its Macs together. */
+const HIST_MAX_BYTES = 50 * 1024 * 1024;
+const HIST_MAX_DOCS = 4000;
 const MAX_MACS = 10;
 /** A Mac's own channel plus its ponds'. */
 const MAX_CHANNELS = 64;
@@ -156,6 +161,56 @@ function createTenants(deps) {
     return { userId: rec.userId, macId: rec.macId };
   }
 
+  /**
+   * History in the cloud (docs/remote-channel.md, "History cache" Layer 2). The sealed copy of recent chats lives under kind
+   * `hist`; only the Mac that holds the channel's write token may put or delete there (devices read with the channel's key
+   * and cannot write it). `hist-tokens` doc <channel> = {hash, macId, userId, at}; `hist-usage` doc <userId> = {bytes, docs}.
+   * POST /account/macs/hist-token {channel, token, previous?} (a Mac's own key): a Mac's own key registers or
+   * rotates the token (replacing the old one); another Mac's key cannot. `previous` is accepted and ignored.
+   */
+  async function registerHistToken(mac, body) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, body: { error: "body" } };
+    if (Object.keys(body).some((k) => k !== "channel" && k !== "token" && k !== "previous"))
+      return { status: 400, body: { error: "body" } };
+    if (typeof body.channel !== "string" || !CHANNEL.test(body.channel))
+      return { status: 400, body: { error: "channel" } };
+    if (typeof body.token !== "string" || !CLIQ_TOKEN_SHAPE.test(body.token))
+      return { status: 400, body: { error: "token" } };
+    if (!(await channelAllowed(mac, body.channel))) return { status: 403, body: { error: "channel" } };
+    // A lost token is replaced by the channel's own Mac (channelAllowed above), so a Mac can always re-register.
+    const rec = parse(await store.get(HIST_TOKENS, body.channel));
+    if (rec && rec.macId !== mac.macId) return { status: 409, body: { error: "hist-token" } };
+    await store.put(
+      HIST_TOKENS,
+      body.channel,
+      JSON.stringify({ hash: hashKey(body.token), macId: mac.macId, userId: mac.userId, at: now() }),
+    );
+    return { status: 200, body: { ok: true } };
+  }
+
+  /** The Mac behind a channel's history write token, or null (none registered, wrong token). Constant-time. */
+  async function authenticateHist(channel, given) {
+    const rec = parse(await store.get(HIST_TOKENS, channel));
+    const want = Buffer.from(rec && typeof rec.hash === "string" ? rec.hash : "", "base64url");
+    const have = Buffer.from(hashKey(typeof given === "string" ? given : ""), "base64url");
+    const same = want.length === have.length && crypto.timingSafeEqual(want, have);
+    if (!rec || !same || typeof rec.userId !== "string" || typeof rec.macId !== "string") return null;
+    return { userId: rec.userId, macId: rec.macId };
+  }
+
+  /**
+   * Changes an account's stored history by `bytes` (negative when a document shrinks or goes) and `docs`. False, with
+   * nothing changed, when it would pass the account's cap (HIST_MAX_BYTES, HIST_MAX_DOCS). Releases never fail.
+   */
+  async function histApply(userId, bytes, docs) {
+    const rec = parse(await store.get(HIST_USAGE, userId)) || {};
+    const used = { bytes: Math.max(0, Number(rec.bytes) || 0), docs: Math.max(0, Number(rec.docs) || 0) };
+    const next = { bytes: Math.max(0, used.bytes + bytes), docs: Math.max(0, used.docs + docs) };
+    if ((bytes > 0 && next.bytes > HIST_MAX_BYTES) || (docs > 0 && next.docs > HIST_MAX_DOCS)) return false;
+    await store.put(HIST_USAGE, userId, JSON.stringify(next));
+    return true;
+  }
+
   /** POST /account/macs/provision for a signed-in `user`: create or rotate the Mac's key. Returns {status, body}. */
   async function provision(user, body) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, body: { error: "body" } };
@@ -227,8 +282,11 @@ function createTenants(deps) {
     revoke,
     registerCliqToken,
     authenticateCliq,
+    registerHistToken,
+    authenticateHist,
+    histApply,
     limits,
   };
 }
 
-module.exports = { createTenants, HEADER, MAX_MACS, MAX_CHANNELS };
+module.exports = { createTenants, HEADER, MAX_MACS, MAX_CHANNELS, HIST_MAX_BYTES, HIST_MAX_DOCS };

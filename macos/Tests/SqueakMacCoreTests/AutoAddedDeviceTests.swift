@@ -20,6 +20,12 @@ import Testing
         #expect(AccountState.decode(Data(#"{"linked":true}"#.utf8))?.askOwnDevices == nil)
     }
 
+    @Test func decodesTheHistoryCloudSwitchOnlyWhenTheDaemonOffersIt() {
+        #expect(AccountState.decode(Data(#"{"linked":true,"keepHistoryInCloud":true}"#.utf8))?.keepHistoryInCloud == true)
+        #expect(AccountState.decode(Data(#"{"linked":true,"keepHistoryInCloud":false}"#.utf8))?.keepHistoryInCloud == false)
+        #expect(AccountState.decode(Data(#"{"linked":true,"email":"a@b.c"}"#.utf8))?.keepHistoryInCloud == nil)
+    }
+
     @Test func firstLoadSeedsWithoutNotifying() {
         var w = AutoAddedDeviceWatch()
         #expect(w.newlyAdded(in: status([("a", true)])).isEmpty)

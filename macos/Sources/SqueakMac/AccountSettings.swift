@@ -35,6 +35,13 @@ struct AccountSettings: View {
                         Text("Ask before adding my own devices").font(Typo.label).foregroundStyle(Theme.ink)
                     }
                     .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
+                    if let keep = m.keepHistoryInCloud {
+                        Toggle(isOn: Binding(get: { keep }, set: { v in Task { await m.setKeepHistoryInCloud(v) } })) {
+                            Text("Keep recent chats in Squeak's cloud (encrypted)").font(Typo.label).foregroundStyle(Theme.ink)
+                        }
+                        .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
+                        Footnote("Lets your iPhone and browser open your last 30 days of chats while this Mac sleeps. Sealed with your key, so Squeak can't read them; turning it off deletes the copy.")
+                    }
                     connectionStatus
                     Footnote(DeviceList.askFootnote(email: email))
                 } else if m.canSignIn {

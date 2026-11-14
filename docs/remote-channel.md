@@ -1187,7 +1187,40 @@ AES-GCM `CryptoKey` made once and stored in that database (the device keys canno
 "Forget this browser" deleting the database removes it with every chat. Same limits and eviction; `wipe()` runs on
 sign-out; the old plaintext `history` record is removed on load. `ChatExtras.syncDelta` is the web's `syncDelta`.
 
-**Not here (Layer 2, future work).** A sealed copy of the history in the cloud for a device that has never held the
-chat (a new phone, a cleared browser): sealed on the Mac under the channel key like every channel document, published only
-for chats a device asked to keep, with the same cursor so a device would fetch the cloud copy first and the Mac's delta after.
-It needs its own size budget, retention and revocation story (a removed device must not read new copies), so it is not part of this change.
+**Layer 2: a sealed copy in Squeak's cloud (2026-11-15).** So history loads while the Mac sleeps and on a device that has
+never held the chat (a new phone, a cleared browser), the Mac keeps its recent chats in Squeak's cloud, sealed with the channel
+key like every channel document: the server holds opaque boxes and cannot read them. Hosted installs only (Squeak's relay: a
+per-Mac key, an owner and a size cap exist there; a self-hosted relay or Firebase never gets it).
+
+- _What._ Chats from a host app (the ones that can page) that moved in the last 30 days, at most 100, not archived or retired,
+  clipped exactly as a history page is (`HistoryEntry`: text only, each clipped; images never leave the Mac). A chat keeps its
+  newest 7 pages of 50 entries. Code: `src/remote/history-cloud.ts` (`HistoryCloudSync`), driven by the bridge's pass in its own
+  task (30 s throttle, six chats a run, so a first upload spreads out and never holds a pass).
+- _Layout_ (kind `hist`, `channels/<id>/hist/<doc>`). `idx`: the index, `{v:1, chats:[{key, pages:[{f, t}] (oldest first),
+newest, complete, act}], seq, at}`; the only document that wakes readers (a change notice). A page: `<handle>-<f>`, where the
+  handle is the live handle of the chat key and `f` is the `id` of the page's first entry, so it lines up with Layer 1's cursor;
+  `{v:1, key, first, entries (oldest first), seq}`. A full page is never rewritten: the newest page grows, new pages are added,
+  a chat that moved on further than the reader can follow (`HISTORY_DELTA_SCAN_MAX`) is rebuilt. The index is written before
+  the pages it stopped naming are deleted.
+- _Retention._ Pages whose last entry is older than 30 days go; a chat leaves when archived, closed out of the phone's lists,
+  gone, or quiet for 30 days (its pages and index entry are deleted). Turning the setting off, unlinking the account or
+  resetting the channel deletes the whole copy.
+- _Server (relay 1.5.0)._ New kind `hist`. Reads go by id with the channel's key (`GET /doc`); `/list` of `hist` is 403 (it
+  would return every page). PUT and DELETE need `x-squeak-hist: <write token>` too: the Mac makes a random 43-character token,
+  keeps it in `remote.json` (`historyCloudToken`) and registers its hash with `POST /account/macs/hist-token` (a Mac's own key;
+  the Mac's own key registers or rotates it, so a Mac that lost its token just registers a new one), so a device that only has
+  the channel key can read and cannot write or delete. Per account (all its Macs together) 50 MB and 4000 documents of stored history
+  (`hist-usage`), 413 `{error:"cap"}` past it (the Mac then waits an hour); a replacement counts as the difference and a delete
+  frees its bytes. History writes are not charged against the daily 20 MB limit (the cap is theirs) but count as requests.
+  A phone's pairing grant carries the Mac's own key, so a phone could in principle rotate the token; sealing and the Mac's
+  next write bound that to a denial of the cloud copy, never a read of it.
+- _Setting._ "Keep recent chats in Squeak's cloud (encrypted)" in the Mac app's Account settings: on by default for a hosted,
+  signed-in Mac (`keepHistoryInCloud` absent in `remote.json`'s `account` = on, `false` = off), `POST
+/control/remote/account/settings {keepHistoryInCloud}` (strict, one key), `GET /control/remote/account` carries
+  `keepHistoryInCloud` only where the copy is possible, so the switch is hidden elsewhere and on older daemons.
+- _Devices._ iPhone and web (no new cap: presence's `caps` is already at the Mac's limit of ten, and an old Mac simply writes no index) on opening a chat, read the index and the pages they lack when the
+  chat is not held yet or the Mac is silent (`AppModel.syncFromCloud`, `ChatExtras.syncFromCloud`), then run Layer 1's `syncDelta`
+  once the Mac answers. The pages merge like a live push (`ChatHistoryState.mergeCloud`, web `mergeCloud`): over the tail, no
+  repeats, ignored when not newer than what is held, a gap recorded when they do not reach back to it (the Mac's catch-up fills
+  it); a missing page means the Mac moved on, so nothing partial is merged. An old phone ignores it; an old Mac writes none.
+  Fixture: `scripts/make-history-cloud-fixture.ts` writes the Mac's real output for the Swift and web tests.

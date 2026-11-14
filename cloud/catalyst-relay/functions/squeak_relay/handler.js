@@ -44,6 +44,10 @@
 //   POST   /account/macs/cliq-token {channel, token} (the Mac's own key) -> 200 {ok:true}: registers the Cliq ingest token of one of
 //                      that Mac's channels (its hash only); the handlers' `PUT /doc?path=channels/<channel>/cliq/<id>` then
 //                      carries x-squeak-cliq: <token> and counts against the Mac's account. The old shared CLIQ_KEY still works.
+//   POST   /account/macs/hist-token {channel, token, previous?} (the Mac's own key) -> 200 {ok:true}: the write token of the channel's
+//                      history in the cloud (kind "hist", docs/remote-channel.md "History cache" Layer 2): only a request carrying it
+//                      as x-squeak-hist may PUT or DELETE there (403 otherwise); 413 {error:"cap"} past 50 MB / 4000 documents per
+//                      account; GET by id works with the channel's key, /list is 403. A Mac's own key registers or rotates it (409 for another Mac's)
 //   DELETE /account/macs/<macId> (cookie or x-squeak-account, the owner) -> 204: revokes that key
 //   with header x-squeak-mac-key (a per-Mac key, tenants.js; /token gives the shared stream, whose hosted notices are opaque tags) instead of the relay key: /doc, /list, /ping, /token,
 //   /pond-token, /pond-revoke, /account/link, /account/unlink and GET /account/avatar?userId= for that Mac's own channels
@@ -77,6 +81,8 @@ const sameKey = (given, expected) =>
 const RELAY_OWNED_KINDS = new Set(["joinids", "devreqs", "devresults"]);
 const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
 /** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
+/** The one history document that wakes readers (the index); pages are read by id from it, so they stay quiet. */
+const HIST_INDEX = "idx";
 const NO_KEY_PUT = new Set(["joinids", "devreqs"]);
 const TICKET_TTL_MS = 10 * 60 * 1000;
 const JOIN_ATTEST_TTL_MS = 10 * 60 * 1000;
@@ -1045,6 +1051,13 @@ function createRelay(deps) {
         await deps.store.put(ASK_PK, mac.macId, JSON.stringify({ ask: body.askOwnDevices }));
         return send(res, 204);
       }
+      if (route === "/account/macs/hist-token") {
+        // The Mac's own key only, like cliq-token. The first token wins; changing it needs the current one.
+        if (method !== "POST") return send(res, 405, {});
+        if (!mac) return send(res, 401);
+        const r = await tenants.registerHistToken(mac, await readJson(req, 1024));
+        return send(res, r.status, r.body);
+      }
       if (route === "/account/macs/cliq-token") {
         // The Mac's own key only: the operator's key and a cookie have no Mac to bind the token to.
         if (method !== "POST") return send(res, 405, {});
@@ -1198,6 +1211,32 @@ function createRelay(deps) {
           if (json === null || json === undefined) return send(res, 404, {});
           return send(res, 200, { doc: JSON.parse(json) });
         }
+        if ((method === "PUT" || method === "DELETE") && parsed.kind === "hist") {
+          // History in the cloud: written and deleted only by the Mac holding the channel's write token (the operator's
+          // key too), capped per account. A device that merely holds the channel's key reads, and cannot write.
+          const hg = req.headers["x-squeak-hist"];
+          const writer = mac ? await tenants.authenticateHist(parsed.channel, Array.isArray(hg) ? "" : hg) : null;
+          if (mac && !writer) return forbidden();
+          const owner = writer ? writer.userId : null;
+          const was = await deps.store.get(parsed.pk, parsed.doc);
+          const before = was === null || was === undefined ? null : Buffer.byteLength(was);
+          if (method === "DELETE") {
+            await deps.store.del(parsed.pk, parsed.doc);
+            if (owner && before !== null) await tenants.histApply(owner, -before, -1);
+            if (parsed.doc === HIST_INDEX) await publishNotice(parsed.pk, parsed.doc);
+            return send(res, 204);
+          }
+          const body = await readJson(req, MAX_BODY);
+          if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
+          const stored = JSON.stringify(body.doc);
+          const size = Buffer.byteLength(stored);
+          if (mac && !(await tenants.chargeRequest(mac))) return send(res, 429, { error: "quota" });
+          if (owner && !(await tenants.histApply(owner, size - (before ?? 0), before === null ? 1 : 0)))
+            return send(res, 413, { error: "cap" });
+          await deps.store.put(parsed.pk, parsed.doc, stored);
+          if (parsed.doc === HIST_INDEX) await publishNotice(parsed.pk, parsed.doc);
+          return send(res, 204);
+        }
         if (method === "PUT") {
           if (NO_KEY_PUT.has(parsed.kind)) return send(res, 403, {});
           const body = await readJson(req, MAX_BODY);
@@ -1226,6 +1265,8 @@ function createRelay(deps) {
         const parsed = parseKindPath(url.searchParams.get("prefix"));
         if (!parsed) return send(res, 400, { error: "prefix" });
         if (mac && !(await tenants.channelAllowed(mac, parsed.channel))) return forbidden();
+        // Stored history is read page by page by id (the index names them); a list would return every page's box.
+        if (parsed.kind === "hist") return send(res, 403, {});
         const rows = await deps.store.list(parsed.pk);
         return send(res, 200, { items: rows.map((r) => ({ id: r.doc, doc: JSON.parse(r.json) })) });
       }

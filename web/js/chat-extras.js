@@ -63,7 +63,16 @@ import {
 import { hiddenChats, hideChange } from "./hidden-chats.js";
 import { composeMessage, fetchImage, MAX_PHOTOS, prepareImage, uploadPhoto } from "./images.js";
 import { liveHandle } from "./live.js";
-import { applyDelta, DELTA_PAGE, newestCursor, readDelta } from "./history-cache.js";
+import {
+  applyDelta,
+  cloudPagesToRead,
+  DELTA_PAGE,
+  mergeCloud,
+  newestCursor,
+  readCloudIndex,
+  readCloudPage,
+  readDelta,
+} from "./history-cache.js";
 import { chatModels, repos } from "./view-model.js";
 import { can, chatHandle, conductorUi } from "./session-api.js";
 
@@ -98,6 +107,7 @@ export class ChatExtras {
     this.earlier = new Map();
     /** chats whose delta is being fetched now */
     this.deltaBusy = new Set();
+    this.cloudBusy = new Set();
     /** The one dialog at a time: viewer, confirm, subagent or diff, each tied to a chat key. */
     this.viewer = null;
     this.confirm = null;
@@ -523,6 +533,53 @@ export class ChatExtras {
   }
 
   /* ---------- history cache: what came after the newest message held ---------- */
+
+  /**
+   * The Mac's sealed copy of this chat in Squeak's cloud (history-cloud.ts), read only when it helps: nothing of the chat
+   * is held in this browser yet, or the Mac is asleep. It lands over the held history like a live push; when the Mac
+   * wakes `syncDelta` brings what came after, with the same cursors, so nothing repeats. Read-only; no copy, a missing
+   * page or a failure stops quietly.
+   */
+  async syncFromCloud(session) {
+    const key = session.key;
+    const channel = this.app.channel();
+    if (!channel || this.cloudBusy.has(key)) return;
+    if (this.app.cachedHistory(key).length && !this.app.macAsleep?.()) return;
+    this.cloudBusy.add(key);
+    try {
+      const index = readCloudIndex(await this.#readHist("idx"));
+      const chat = index?.chats.find((c) => c.key === key);
+      if (!chat) return;
+      const refs = cloudPagesToRead(this.app.cachedHistory(key), chat);
+      if (!refs.length) return;
+      const handle = await liveHandle(key);
+      const pages = await Promise.all(
+        refs.map(async (ref) => readCloudPage(await this.#readHist(`${handle}-${ref.f}`), key, ref.f)),
+      );
+      // A page gone means the Mac moved on since the index was read: nothing partial is merged; the next open tries again.
+      if (pages.some((page) => !page)) return;
+      const merged = mergeCloud(this.app.cachedHistory(key), pages);
+      if (!merged.changed) return;
+      this.app.setCachedHistory(key, merged.history);
+      this.touch();
+    } catch {
+      // A failed read is a quiet moment: the next open tries again.
+    } finally {
+      this.cloudBusy.delete(key);
+    }
+  }
+
+  async #readHist(doc) {
+    const channel = this.app.channel();
+    if (!channel) return null;
+    const stored = await channel.db.get(channel.path("hist", doc));
+    if (!stored) return null;
+    try {
+      return open(channel.key, stored.box);
+    } catch {
+      return null;
+    }
+  }
 
   /** Pages of delta asked for at most in one run. */
   static DELTA_PAGES = 20;

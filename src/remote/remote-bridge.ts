@@ -44,6 +44,13 @@ import {
   historyDeltaDoc,
   readHistoryAfter,
 } from "./history-delta.js";
+import {
+  HistoryCloudSync,
+  newHistToken,
+  relayHistStore,
+  HIST_RETENTION_MS,
+  type HistCandidate,
+} from "./history-cloud.js";
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
@@ -126,7 +133,16 @@ export interface RemoteConfig {
   key: string;
   devices: PairedDevice[];
   /** The Catalyst owner account this Mac is linked to (web accounts); absent when unlinked. */
-  account?: { userId: string; email: string; linkedAt: string; askOwnDevices?: boolean };
+  account?: {
+    userId: string;
+    email: string;
+    linkedAt: string;
+    askOwnDevices?: boolean;
+    /** "Keep recent chats in Squeak's cloud (encrypted)": absent = on for a hosted Mac, false = off (the copy is deleted). */
+    keepHistoryInCloud?: boolean;
+  };
+  /** The write token of this channel's history in the cloud (relay `hist` kind): only this Mac holds it. */
+  historyCloudToken?: string;
 }
 
 export interface PairedDevice {
@@ -1140,6 +1156,10 @@ export class RemoteBridge {
   /** Chats whose earlier-messages page is being read now: one at a time each. */
   private readonly lastUserCache = new Map<string, { text: string; at: string | null } | null>();
   private readonly historyBusy = new Set<string>();
+  /** The cloud copy of recent history (history-cloud.ts); made when the setting is on, on Squeak's hosted relay. */
+  private historyCloud: { sync: HistoryCloudSync; channel: string; token: string } | null = null;
+  private historyCloudAt = 0;
+  private historyCloudBusy = false;
   private readonly mediaUploads = new Map<string, { media: Record<string, unknown>; expiresAt: number }>();
   /** Devices with an upload under way: one at a time each. */
   private readonly mediaBusy = new Set<string>();
@@ -1593,6 +1613,7 @@ export class RemoteBridge {
     this.live?.stop();
     this.subagentFeed?.stop();
     this.dropPondThreads(this.config);
+    void this.purgeHistoryCloud();
     // The old channel id must not stay linked on the relay.
     if (this.config?.account)
       void this.accountRelay()
@@ -1641,6 +1662,8 @@ export class RemoteBridge {
         await this.updatePondThreads(config).catch((error: unknown) =>
           logger.debug("pond threads failed", { error: error instanceof Error ? error.message : String(error) }),
         );
+        // Its own task: a first upload takes seconds and must never hold up a pass (it never throws).
+        void this.syncHistoryCloud(config);
         if (this.pairingOpenUntil > this.now()) {
           // The cloud being out of reach must not stop commands arriving on the direct path.
           await this.readPairing(config).catch((error: unknown) =>
@@ -4427,6 +4450,7 @@ export class RemoteBridge {
     linked: boolean;
     email?: string;
     askOwnDevices?: boolean;
+    keepHistoryInCloud?: boolean;
     signInUrl?: string;
     avatarAt?: number;
   } {
@@ -4441,6 +4465,7 @@ export class RemoteBridge {
           linked: true,
           email: account.email,
           askOwnDevices: account.askOwnDevices === true,
+          ...(this.historyCloudAvailable() ? { keepHistoryInCloud: this.historyCloudOn() } : {}),
           ...signInUrl,
           ...(avatarAt ? { avatarAt } : {}),
         }
@@ -4524,9 +4549,25 @@ export class RemoteBridge {
     }
   }
 
-  /** `POST /control/remote/account/settings` `{ askOwnDevices }`, strict: exactly that key, a boolean. */
+  /**
+   * `POST /control/remote/account/settings` `{ askOwnDevices }` or `{ keepHistoryInCloud }`, strict: exactly one key, a
+   * boolean. Turning the cloud copy off deletes it.
+   */
   setAccountSettings(body: unknown): { ok: boolean; reason?: string } {
     const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+    if (keys.length === 1 && keys[0] === "keepHistoryInCloud") {
+      const on = (body as { keepHistoryInCloud?: unknown }).keepHistoryInCloud;
+      const account = this.config?.account;
+      if (typeof on !== "boolean") return { ok: false, reason: "Not a setting this Mac understands." };
+      if (!account) return { ok: false, reason: "No account is linked." };
+      if (!this.historyCloudAvailable()) return { ok: false, reason: "Squeak's cloud isn't connected on this Mac." };
+      if (on) delete account.keepHistoryInCloud;
+      else account.keepHistoryInCloud = false;
+      this.save();
+      if (!on) void this.purgeHistoryCloud();
+      else this.nudgePublish(0);
+      return { ok: true };
+    }
     const value = (body as { askOwnDevices?: unknown } | null)?.askOwnDevices;
     if (keys.length !== 1 || keys[0] !== "askOwnDevices" || typeof value !== "boolean")
       return { ok: false, reason: "Not a setting this Mac understands." };
@@ -4541,6 +4582,118 @@ export class RemoteBridge {
     return { ok: true };
   }
 
+  /* ---------- history in the cloud (Layer 2, history-cloud.ts) ---------- */
+
+  /** Only on Squeak's hosted relay with a linked account: the one place a per-Mac key, an owner and a size cap exist. */
+  private historyCloudAvailable(): boolean {
+    const location = this.deps.location?.() ?? null;
+    return location?.provider === "catalyst" && location.hosted === true && Boolean(this.config?.account);
+  }
+
+  /** The owner's choice: on unless they switched it off. */
+  private historyCloudOn(): boolean {
+    return this.config?.account?.keepHistoryInCloud !== false;
+  }
+
+  /** The sync for this channel, made once its write token is registered; null when unavailable or off. */
+  private async historyCloudFor(config: RemoteConfig): Promise<{ sync: HistoryCloudSync } | null> {
+    const location = this.deps.location?.() ?? null;
+    if (!this.historyCloudAvailable() || location?.provider !== "catalyst") return null;
+    const current = this.historyCloud;
+    if (current && current.channel === config.channelId && current.token === config.historyCloudToken) return current;
+    this.historyCloud = null;
+    const first = !config.historyCloudToken;
+    const token = config.historyCloudToken ?? newHistToken();
+    const store = relayHistStore({
+      baseUrl: location.relayUrl,
+      key: location.relayKey,
+      keyHeader: "x-squeak-mac-key",
+      channel: config.channelId,
+      token,
+    });
+    // The first token wins on the relay: when this Mac has one saved, the relay already holds it.
+    if (first) {
+      await store.register();
+      config.historyCloudToken = token;
+      this.save();
+    }
+    const sync = new HistoryCloudSync({
+      store,
+      seal: (value) => this.sealForPhone(config, value),
+      open: <T>(box: string) => {
+        try {
+          return open<T>(config.key, box);
+        } catch {
+          return null;
+        }
+      },
+      candidates: () => this.historyCloudCandidates(),
+      now: () => this.now(),
+      nextSeq: () => this.nextSeq(),
+    });
+    this.historyCloud = { sync, channel: config.channelId, token };
+    return this.historyCloud;
+  }
+
+  /** The chats to keep: any a phone could list (host chats; not archived or retired) that moved within the retention window. */
+  private historyCloudCandidates(): HistCandidate[] {
+    const read = this.deps.replier.transcript;
+    if (!read) return [];
+    const snapshot = this.deps.snapshot();
+    const since = this.now() - HIST_RETENTION_MS;
+    const seen = new Set<string>();
+    const out: HistCandidate[] = [];
+    for (const session of [...snapshot.active, ...snapshot.sessions]) {
+      if (seen.has(session.key)) continue;
+      seen.add(session.key);
+      const handle = this.hostHandle(session);
+      const activityAt = Date.parse(session.lastActivityAt);
+      if (!handle || !Number.isFinite(activityAt) || activityAt < since) continue;
+      if (session.archivedAt !== undefined || (session.workspaceRetired ?? session.retired)) continue;
+      if (isUnclaimedHeadless(session) || this.historyBusy.has(session.key)) continue;
+      out.push({
+        key: session.key,
+        activityAt,
+        read: (limit, before) => read.call(this.deps.replier, handle, limit, before),
+      });
+    }
+    return out;
+  }
+
+  /** One throttled run of the cloud copy: every 30 s at most, one at a time, and never a reason to fail a pass. */
+  private async syncHistoryCloud(config: RemoteConfig): Promise<void> {
+    if (this.historyCloudBusy || this.now() - this.historyCloudAt < 30_000) return;
+    if (!this.historyCloudAvailable() || !this.historyCloudOn()) return;
+    this.historyCloudBusy = true;
+    try {
+      const target = await this.historyCloudFor(config);
+      const result = await target?.sync.run();
+      this.historyCloudAt = this.now() - (result?.more ? 30_000 : 0);
+    } catch (error) {
+      this.historyCloudAt = this.now();
+      logger.debug("history cloud failed", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.historyCloudBusy = false;
+    }
+  }
+
+  /** Deletes the whole cloud copy (setting off, account unlinked, channel reset). Best effort; never throws. */
+  private async purgeHistoryCloud(): Promise<void> {
+    const config = this.config;
+    if (!config?.historyCloudToken) return;
+    try {
+      const location = this.deps.location?.() ?? null;
+      if (location?.provider !== "catalyst" || !location.hosted) return;
+      this.historyCloud = null;
+      const target = await this.historyCloudFor(config);
+      await target?.sync.purge();
+    } catch (error) {
+      logger.debug("history cloud purge failed", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.historyCloud = null;
+    }
+  }
+
   /** Unlink (the Mac app's route and the `accountUnlink` command). The relay first: the link is only cleared if it let go. */
   async unlinkAccount(): Promise<{ ok: true } | { ok: false; reason: string }> {
     const config = this.config;
@@ -4553,6 +4706,8 @@ export class RemoteBridge {
     } catch {
       return { ok: false, reason: "The relay did not answer. Try again in a moment." };
     }
+    await this.purgeHistoryCloud();
+    delete config.historyCloudToken;
     delete config.account; // takes askOwnDevices with it
     this.removeAvatar();
     this.save();

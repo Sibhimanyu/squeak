@@ -497,3 +497,87 @@ describe("per-Mac Cliq ingest tokens", () => {
     expect(src).toMatch(/timingSafeEqual\(want, have\)/);
   });
 });
+
+describe("history in the cloud (kind hist)", () => {
+  const TOKEN = "h".repeat(43);
+  const OTHER = "g".repeat(43);
+  const reg = (f: ReturnType<typeof setup>, key: string | null, body: unknown) =>
+    call(f.deps, "POST", "/account/macs/hist-token", key ? mk(key) : {}, body);
+  const hput = (f: ReturnType<typeof setup>, key: string, token: string | null, name: string, box = "sealed") =>
+    call(
+      f.deps,
+      "PUT",
+      `/doc?path=channels/${MAC_A}/hist/${name}`,
+      { ...mk(key), ...(token ? { "x-squeak-hist": token } : {}) },
+      { doc: { box } },
+    );
+  const hdel = (f: ReturnType<typeof setup>, key: string, token: string | null, name: string) =>
+    call(f.deps, "DELETE", `/doc?path=channels/${MAC_A}/hist/${name}`, {
+      ...mk(key),
+      ...(token ? { "x-squeak-hist": token } : {}),
+    });
+
+  it("registers with the Mac's own key and lets that Mac rotate a lost token", async () => {
+    const { f, a, b } = await twoMacs();
+    expect((await reg(f, null, { channel: MAC_A, token: TOKEN })).status).toBe(401);
+    expect((await reg(f, a, { channel: MAC_A, token: "short" })).status).toBe(400);
+    expect((await reg(f, a, { channel: MAC_A, token: TOKEN, extra: 1 })).status).toBe(400);
+    expect((await reg(f, b, { channel: MAC_A, token: TOKEN })).status).toBe(403); // not that Mac's channel
+    expect((await reg(f, a, { channel: MAC_A, token: TOKEN })).status).toBe(200);
+    expect(f.rows.get(`hist-tokens|${MAC_A}`)).not.toContain(TOKEN);
+    // a Mac that lost its token re-registers with its own key, with or without `previous`; the old token stops working
+    expect((await reg(f, a, { channel: MAC_A, token: OTHER })).status).toBe(200);
+    expect((await reg(f, a, { channel: MAC_A, token: TOKEN, previous: "x".repeat(43) })).status).toBe(200);
+    expect((await reg(f, a, { channel: MAC_A, token: OTHER })).status).toBe(200);
+    expect((await hput(f, a, TOKEN, "idx")).status).toBe(403);
+    expect((await hput(f, a, OTHER, "idx")).status).toBe(204);
+  });
+
+  it("lets only the token's holder write or delete; the key alone reads, and /list is closed", async () => {
+    const { f, a, b } = await twoMacs();
+    await reg(f, a, { channel: MAC_A, token: TOKEN });
+    expect((await hput(f, a, null, "idx")).status).toBe(403);
+    expect((await hput(f, a, OTHER, "idx")).status).toBe(403);
+    expect((await hput(f, a, TOKEN, "idx", "one")).status).toBe(204);
+    const read = await call(f.deps, "GET", `/doc?path=channels/${MAC_A}/hist/idx`, mk(a));
+    expect(read.status).toBe(200);
+    expect(read.json.doc.box).toBe("one");
+    expect((await hdel(f, a, null, "idx")).status).toBe(403);
+    expect((await call(f.deps, "GET", `/list?prefix=channels/${MAC_A}/hist`, mk(a))).status).toBe(403);
+    expect((await hdel(f, a, TOKEN, "idx")).status).toBe(204);
+    expect(f.rows.has(`channels/${MAC_A}/hist|idx`)).toBe(false);
+    // another account's Mac cannot even read the channel
+    expect((await call(f.deps, "GET", `/doc?path=channels/${MAC_A}/hist/idx`, mk(b))).status).toBe(403);
+  });
+
+  it("caps an account's stored history, counts replacements as the difference and frees on delete", async () => {
+    const { f, a } = await twoMacs();
+    await reg(f, a, { channel: MAC_A, token: TOKEN });
+    const big = "x".repeat(600_000);
+    const used = () => JSON.parse(f.rows.get("hist-usage|u1") ?? '{"bytes":0,"docs":0}');
+    for (let i = 0; i < 87; i++) expect((await hput(f, a, TOKEN, `p${i}`, big)).status).toBe(204);
+    const bytes = used().bytes;
+    expect(bytes).toBeGreaterThan(45_000_000);
+    expect(used().docs).toBe(87);
+    const over = await hput(f, a, TOKEN, "p87", big);
+    expect(over.status).toBe(413);
+    expect(over.json).toEqual({ error: "cap" });
+    expect(f.rows.has(`channels/${MAC_A}/hist|p87`)).toBe(false);
+    // a replacement of the same size is not growth
+    expect((await hput(f, a, TOKEN, "p0", big)).status).toBe(204);
+    expect(used().bytes).toBe(bytes);
+    expect(used().docs).toBe(87);
+    // deleting frees the room
+    expect((await hdel(f, a, TOKEN, "p1")).status).toBe(204);
+    expect(used().docs).toBe(86);
+    expect((await hput(f, a, TOKEN, "p87", big)).status).toBe(204);
+  });
+
+  it("does not take history writes out of the account's daily byte limit", async () => {
+    const f = setup({ limits: { requests: 1000, bytes: 100 } });
+    f.state.who = U1;
+    const a = (await provision(f, MAC_A)).json.key as string;
+    await reg(f, a, { channel: MAC_A, token: TOKEN });
+    expect((await hput(f, a, TOKEN, "p1", "y".repeat(5000))).status).toBe(204);
+  });
+});

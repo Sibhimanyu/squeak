@@ -65,6 +65,7 @@ const DEVICE_ROUTES: Array<[string, string, Record<string, string>]> = [
   ["POST", "/account/link", { "x-squeak-mac-key": "k" }],
   ["POST", "/account/unlink", { "x-squeak-mac-key": "k" }],
   ["POST", "/account/macs/cliq-token", { "x-squeak-mac-key": "k" }],
+  ["POST", "/account/macs/hist-token", { "x-squeak-mac-key": "k" }],
   ["PUT", "/doc?path=channels/a/cliq/b", { "x-squeak-cliq": "k" }],
   ["GET", "/account/avatar?userId=u", { "x-squeak-relay": "k" }],
   ["GET", "/account/avatar?userId=u", { "x-squeak-mac-key": "k" }],

@@ -11,9 +11,14 @@ public struct AccountState: Decodable, Sendable, Equatable {
     public var askOwnDevices: Bool?
     /// When the account's photo last changed (ms); nil = none, or an older daemon.
     public var avatarAt: Double?
+    /// "Keep recent chats in Squeak's cloud (encrypted)": present only on Squeak's hosted cloud with a daemon that has it;
+    /// nil hides the switch (an older daemon, or a cloud of your own).
+    public var keepHistoryInCloud: Bool?
 
-    public init(linked: Bool = false, email: String? = nil, signInUrl: String? = nil, askOwnDevices: Bool? = nil, avatarAt: Double? = nil) {
+    public init(linked: Bool = false, email: String? = nil, signInUrl: String? = nil, askOwnDevices: Bool? = nil, avatarAt: Double? = nil,
+                keepHistoryInCloud: Bool? = nil) {
         self.linked = linked; self.email = email; self.signInUrl = signInUrl; self.askOwnDevices = askOwnDevices; self.avatarAt = avatarAt
+        self.keepHistoryInCloud = keepHistoryInCloud
     }
 
     public init(from decoder: Decoder) throws {
@@ -23,8 +28,9 @@ public struct AccountState: Decodable, Sendable, Equatable {
         signInUrl = (try? c.decode(String.self, forKey: .signInUrl)).flatMap { $0.isEmpty ? nil : $0 }
         askOwnDevices = try? c.decode(Bool.self, forKey: .askOwnDevices)
         avatarAt = (try? c.decode(Double.self, forKey: .avatarAt)).flatMap { $0 > 0 ? $0 : nil }
+        keepHistoryInCloud = try? c.decode(Bool.self, forKey: .keepHistoryInCloud)
     }
-    enum CodingKeys: String, CodingKey { case linked, email, signInUrl, askOwnDevices, avatarAt }
+    enum CodingKeys: String, CodingKey { case linked, email, signInUrl, askOwnDevices, avatarAt, keepHistoryInCloud }
 
     public static func decode(_ data: Data) -> AccountState? { try? JSONDecoder().decode(AccountState.self, from: data) }
 }
