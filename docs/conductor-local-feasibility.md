@@ -3,6 +3,8 @@
 Question: can an external macOS app reliably **send a prompt into, and receive
 replies from, the same pre-existing Conductor local session**?
 
+> **Note (2026-11):** the relay add-on and its CLI described here were deleted (git history); only the reversal in `relay-retire.ts` remains.
+
 **Verdict: SUPPORTED**, through the owner-authorized local relay, on an
 undocumented interface, with the caveats in sections 5 to 7. Send was observed
 end to end once. Several reliability properties are designed or covered by unit

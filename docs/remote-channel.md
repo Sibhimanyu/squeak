@@ -907,6 +907,15 @@ account in `remote.json`, cleared on unlink; `GET /control/remote/account` carri
 /control/remote/account/settings` `{ askOwnDevices: boolean }` sets it, strict) restores the code. Requests from any
 other account are still dropped, and pond guests always need the Mac's approval.
 
+**Your own devices have no pairing UI (2026-11-14).** Signing in with the account is the only visible step on the web, the Mac
+app and (separately) the iPhone: no code, no QR. "Ask before adding my own devices" now means one click to approve (a Mac
+notification with an Approve action, or Settings > Devices), never a code. The six-digit code and the QR window remain
+server-side only for an old phone or Mac that predates account sign-in, and nothing new offers them. Two limits bound a stolen
+account token: the relay allows an account 5 device requests a minute across its Macs (429 `rate`), and the Mac itself adds at
+most 5 own-account devices a minute (a request over the cap stays on the relay, never answered, and is taken on a later pass).
+`GET /account/macs` gains an optional `seenAt` per Mac (epoch ms of the last call made with that Mac's own key, stamped at most
+once a minute; dropped on unlink) for "Your Macs": the web says online (within 3 min), asleep (within 12 h) or offline.
+
 - **Link.** A paired phone sends the signed command `accountLink` with exactly `{ ticket }` (a string, at most 512
   characters), after every `handleCommand` check. The Mac calls the relay's `POST /account/link` `{ ticket, macId,
 name }` (relay key; `macId` = the channel id; `name` = the Mac's name), gets `{ userId, email }`, and saves
@@ -1108,8 +1117,9 @@ legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted
   then runs the signed `move` so paired phones follow (the old store is read for the usual window), and `legacy`
   becomes `null`. The Firebase and old-Catalyst read paths stay for phones that have not updated.
 - Self-hosting is removed: `/control/cloud/catalyst/*`, `/control/cloud/firebase/rename` and `/control/cloud/select`
-  answer 410 `{ error: "self-hosting-removed" }`. `SQUEAK_REMOTE_SHARED` and `src/remote/shared-limits.ts` remain only
-  for Macs still on the old shared server (their budget and throttles), and go once those have moved.
+  answer 410 `{ error: "self-hosting-removed" }`. The shared server's code (`SQUEAK_REMOTE_SHARED`,
+  `shared-limits.ts`, `firebase/shared/`) is removed: a Mac still configured for it logs one line at start, keeps its
+  config, reports `legacy: "shared"` and runs unthrottled like any Firebase Mac until sign-in moves it to hosted.
 
 The older Firebase and shared-server instructions are in git history (2026-10-29).
 
@@ -1137,3 +1147,47 @@ same thing the Mac's right-click menu and Chat menu (⇧⌘A) do, through one da
   shows it and an older phone ignores the action. The existing `archive` action is the workspace archive and is unchanged.
 - **Per-person hides stay on the Mac app**: a thread someone else started in a shared pond is hidden from this person's
   view only (UserDefaults `sharedThreadHides`), never from the starter or the pond; the phone has no such list.
+
+## History cache (2026-11-14)
+
+A phone or browser keeps the messages it has read on the device, so a chat opens from storage and only what
+came after its newest message crosses the channel.
+
+**Protocol (caps-gated, additive).** A client names `histdelta` in its presence `caps` (iPhone `ChannelCrypto.capabilities`,
+web `CAPABILITIES`). To a client that did, the Mac lists the `delta` action on a chat it can page (same condition as
+`earlier`). The existing signed `history` command gains `after` (digits, the `id` of the newest entry held; mutually
+exclusive with `before`; `n` 1 to 50): `{v:1, kind:"history", key, after, n?, nonce, expiresAt}`. The Mac refuses `after`
+from a phone that did not name the cap, with both cursors, or with anything but digits. The cursor is the entry `id`
+every history entry already carries (a Conductor row's rowid, a transcript file's byte offset + 1): it only grows
+within a chat, so no new sequence number was needed. The Mac reads backward with the chat's own reader (`src/remote/history-delta.ts`) until it
+passes the cursor, so it needs no reader of its own, and answers in `live/<handle>-ha<cursor>` (sealed, deleted with the other
+page documents after 30 min): `{v:1, key, after, entries (oldest first, strictly after the cursor, each clipped as
+in any history page), nextAfter (ask again from it; null = reached the newest), reset, seq}`. If the cursor is not found
+within 400 entries (the chat moved on, or the cursor no longer exists) the Mac answers `reset: true` with the newest
+page, which the client merges like a live push and leaves to the existing catch-up/"Earlier" paging. A phone that does not name the cap
+gets today's behaviour exactly; an old Mac lists no `delta` action, so the client never asks and falls back to the live
+push and `before` pages. What leaves the Mac is still only what the phone renders: the same condensed entries, the
+same per-entry clipping. Same guards as `before` pages (a chat the phone is shown, one read at a time per chat).
+
+**iPhone: `ChatHistoryStore` (SqueakCore).** One file per chat under `Application Support/ChatHistory/<hash(Mac id)>/`,
+named by a hash of the chat key, AES-256-GCM under a random key in the Keychain (`com.squeak.phone.history`, per Mac id,
+after-first-unlock, this-device-only), Data Protection `.completeUntilFirstUserAuthentication`, excluded from backup. The
+Mac id is the channel id, so P4's per-Mac list slots in by passing another id. A file holds the chat key and its
+`ChatHistoryState` (entries, paging cursor, hole), so the newest cursor is `entries.last.id`. Opening a chat loads
+from disk (async, off the main path; a launch preloads the ten most recent), marks it opened (file mtime = last
+opened), then `syncDelta` asks `after` pages until caught up (at most 20) and merges with dedupe by id
+(`ChatHistoryState.applyDelta`); the live stream's push merges the same way and is recorded too. Writes are
+coalesced to one a second and never block the UI. Eviction runs after each write: least recently opened first, down to
+200 chats and 50 MB per Mac; each chat keeps its newest 1000 entries. Removing a Mac deletes its folder and key
+(`wipe`); signing out deletes everything and every key (`wipeAll`). The earlier plaintext `squeak-history.json` in Caches is deleted at launch.
+
+**Web: `HistoryCache` (`web/js/history-cache.js`).** The same in IndexedDB beside the device keys: one value per chat
+(`hc:c:<hash>`), AES-256-GCM, plus an index of hashes, times and sealed sizes. The key is a random non-extractable
+AES-GCM `CryptoKey` made once and stored in that database (the device keys cannot be exported to derive from), so
+"Forget this browser" deleting the database removes it with every chat. Same limits and eviction; `wipe()` runs on
+sign-out; the old plaintext `history` record is removed on load. `ChatExtras.syncDelta` is the web's `syncDelta`.
+
+**Not here (Layer 2, future work).** A sealed copy of the history in the cloud for a device that has never held the
+chat (a new phone, a cleared browser): sealed on the Mac under the channel key like every channel document, published only
+for chats a device asked to keep, with the same cursor so a device would fetch the cloud copy first and the Mac's delta after.
+It needs its own size budget, retention and revocation story (a removed device must not read new copies), so it is not part of this change.

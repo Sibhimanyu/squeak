@@ -45,6 +45,7 @@ class FakeRelay implements AccountRelay {
   link = vi.fn<AccountRelay["link"]>(async () => ({ userId: "u1", email: "o@example.com" }));
   unlink = vi.fn<AccountRelay["unlink"]>(async () => undefined);
   fetchAvatar = vi.fn<AccountRelay["fetchAvatar"]>(async () => null);
+  setAsk = vi.fn<NonNullable<AccountRelay["setAsk"]>>(async () => undefined);
   async listDocs(collection: string) {
     return [...this.docs.entries()]
       .filter(([p]) => p.startsWith(`${collection}/`))
@@ -353,6 +354,22 @@ describe("web accounts: the owner's own devices", () => {
     return r;
   };
 
+  it("adds at most five own-account devices a minute; the rest wait on the relay and are taken once the minute passes", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    for (let i = 0; i < 7; i++) putReq(t, `r${i}`);
+    await t.bridge.tick();
+    const added = () =>
+      (t.bridge.status() as { devices: Array<{ id: string }> }).devices.filter((d) => /^r\d$/.test(d.id)).length;
+    expect(added()).toBe(5);
+    expect(t.relay!.docs.has(`${t.channel}/devreqs/r6`)).toBe(true); // untouched, not denied
+    expect(t.relay!.docs.has(`${t.channel}/devresults/r6`)).toBe(false);
+    t.advance(61_000);
+    for (let i = 5; i < 7; i++) putReq(t, `r${i}`, { at: NOW + 61_000 });
+    await t.bridge.tick();
+    expect(added()).toBe(7);
+  });
+
   it("adds a same-account device without a code, tells at once, and marks it", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
@@ -390,6 +407,7 @@ describe("web accounts: the owner's own devices", () => {
     expect(t.bridge.accountState()).toMatchObject({ linked: true, askOwnDevices: false });
     expect(t.bridge.setAccountSettings({ askOwnDevices: true })).toEqual({ ok: true });
     expect(t.bridge.accountState()).toMatchObject({ askOwnDevices: true });
+    expect(t.relay!.setAsk).toHaveBeenCalledWith(true); // the Macs list on the web and iPhone says so
     putReq(t, "r1");
     await t.bridge.tick();
     expect((t.bridge.status() as { pending: unknown[] }).pending).toHaveLength(1);

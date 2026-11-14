@@ -51,10 +51,7 @@ import type { LiveAgentProcess } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import { ducklingsRunning } from "./ducklings.js";
 import type { FleetDucklings, FleetSession } from "./types.js";
-import type { AgentSession } from "../core/types.js";
-import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/runtime-hook.js";
 import type { FleetObserver } from "../addons.js";
-import { logger } from "../utils/logger.js";
 import { ArchivedSessions } from "./archived-sessions.js";
 
 export interface FleetRuntimeOptions {
@@ -68,8 +65,6 @@ export interface FleetRuntimeOptions {
   watch?: () => WatchSpec[];
   /** Fields add-ons add to `/state` (which add-ons are enabled, and what each reports about itself). */
   stateFields?: () => Record<string, unknown>;
-  /** Core adapters add-ons supply for their hosts' sessions. */
-  coreAdapters?: ExtraAdapters;
   /** The hosted cloud's state for `/state` `.cloud.hosted` (cloud/hosted.ts `HostedView`); absent: no `cloud` key. */
   cloudHosted?: () => unknown;
   /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
@@ -90,8 +85,6 @@ export interface FleetRuntimeOptions {
   projects?: ProjectInference | null;
   /** The directory id of a session's pond (the phone view's own placement); undefined/null: none. Late-bound by the daemon. */
   pondIdOf?: (session: FleetSession) => string | null;
-  /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
-  corePorts?: () => CoreReplyPorts | null;
 }
 
 export interface FleetRuntime {
@@ -118,8 +111,6 @@ export interface FleetRuntime {
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
   setAwake(read: (() => AwakeView) | null): void;
-  /** Core's sessions (`GET /control/core/sessions`); null when core is off (`SQUEAK_CORE=off`) or did not open. */
-  coreSessions(): AgentSession[] | null;
 }
 
 /**
@@ -157,22 +148,6 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
   );
-
-  // Write-only mirror into core.db (SQUEAK_CORE=off disables it); never affects the fleet.
-  const core = startCoreSync({
-    monitor,
-    supportDir: options.supportDir,
-    warn: (message, detail) => logger.warn(message, detail),
-    ...(options.corePorts ? { ports: options.corePorts } : {}),
-    ...(options.coreAdapters ? { extraAdapters: options.coreAdapters } : {}),
-  });
-  if (core) {
-    const stopMonitor = monitor.stop.bind(monitor);
-    monitor.stop = () => {
-      core.stop();
-      stopMonitor();
-    };
-  }
 
   const ingress = new HookIngressServer({
     port: options.hookPort,
@@ -226,7 +201,6 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     setAwake: (next) => {
       awake = next;
     },
-    coreSessions: () => core?.sessions() ?? null,
   };
 }
 

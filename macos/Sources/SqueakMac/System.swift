@@ -35,6 +35,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// A click on "Revoke" or the body of a device-added notification.
     var onRevokeDevice: ((String) -> Void)?
     var onOpenDevices: (() -> Void)?
+    /// A click on "Approve" in a device-request notification.
+    var onApproveDevice: ((String) -> Void)?
     /// A click on a pond notification, with the pond's id.
     var onOpenPond: ((String) -> Void)?
     private var pendingUpdateClick = false
@@ -49,13 +51,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
         // Older versions registered an inline Reply action; no category means no new one carries it.
         let revoke = UNNotificationAction(identifier: Self.revokeAction, title: "Revoke", options: [.destructive])
+        let approve = UNNotificationAction(identifier: Self.approveAction, title: "Approve", options: [])
         center.setNotificationCategories([
-            UNNotificationCategory(identifier: Self.deviceCategory, actions: [revoke], intentIdentifiers: [])
+            UNNotificationCategory(identifier: Self.deviceCategory, actions: [revoke], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Self.requestCategory, actions: [approve], intentIdentifiers: []),
         ])
     }
 
     static let deviceCategory = "squeak.device-added"
     static let revokeAction = "squeak.revoke-device"
+    static let requestCategory = "squeak.device-request"
+    static let approveAction = "squeak.approve-device"
 
     /// Told the moment a device joins through the account. Names no chat, so it never reaches the composer.
     func postDeviceAdded(id: String, name: String, email: String?) {
@@ -69,6 +75,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.threadIdentifier = "squeak.devices"
         content.userInfo = ["squeakDevice": id]
         center.add(UNNotificationRequest(identifier: "device-\(id)", content: content, trigger: nil))
+    }
+
+    /// "Ask before adding my own devices" is on: a device of your own account waits for one click, here or in Settings.
+    func postDeviceRequest(id: String, name: String, email: String?) {
+        guard let center else { return }
+        configure()
+        let content = UNMutableNotificationContent()
+        content.title = "\(name) wants to open this Mac"
+        content.body = (email.map { "Signed in as \($0). " } ?? "") + "Approve it, or open Devices."
+        content.sound = .default
+        content.categoryIdentifier = Self.requestCategory
+        content.threadIdentifier = "squeak.devices"
+        content.userInfo = ["squeakDevice": id]
+        center.add(UNNotificationRequest(identifier: "device-request-\(id)", content: content, trigger: nil))
     }
 
     /// A pond event the person should know (a request to join, "You\u{2019}re in", declined, expired, removed, a thread that needs
@@ -178,6 +198,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             let action = response.actionIdentifier
             Task { @MainActor in
                 if action == Self.revokeAction { self.onRevokeDevice?(device) }
+                else if action == Self.approveAction { self.onApproveDevice?(device) }
                 else if action == UNNotificationDefaultActionIdentifier { self.onOpenDevices?() }
                 completionHandler()
             }

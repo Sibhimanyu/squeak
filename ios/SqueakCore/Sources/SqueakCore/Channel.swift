@@ -406,12 +406,42 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed, read-only document asking for what came after `after` (`HistoryDelta`).
+    public func historyDeltaDocument(key sessionKey: String, after: String, n: Int = 50, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = HistoryCommand(
+            v: 1, kind: "history", key: sessionKey, before: nil, after: after, n: n,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The delta the Mac left for `historyDeltaDocument`, or nil when it is not there (or is not for this chat and cursor).
+    public func historyDelta(key sessionKey: String, after: String) async throws -> HistoryDelta? {
+        let doc = LiveTurn.historyDeltaDoc(for: sessionKey, after: after)
+        guard let document = try await store.get(path("live", doc)) else { return nil }
+        let delta = try ChannelCrypto.open(HistoryDelta.self, box: document.box, key: pairing.k)
+        return delta.key == sessionKey && delta.after == after ? delta : nil
+    }
+
     /// The page the Mac left for `historyDocument`, or nil when it is not there (or is not for this chat and cursor).
     public func historyPage(key sessionKey: String, before: String?) async throws -> HistoryPage? {
         let doc = LiveTurn.historyPageDoc(for: sessionKey, before: before)
         guard let document = try await store.get(path("live", doc)) else { return nil }
         let page = try ChannelCrypto.open(HistoryPage.self, box: document.box, key: pairing.k)
         return page.key == sessionKey && page.before == before ? page : nil
+    }
+
+    /// The open pond's whole thread list, as the Mac wrote it for this phone; nil when it is not there (an older Mac, or
+    /// not written yet) or is for another pond.
+    public func pondThreads(pondId: String) async throws -> PondThreads? {
+        guard let document = try await store.get(path("live", PondThreads.doc(for: pondId))) else { return nil }
+        let threads = try ChannelCrypto.open(PondThreads.self, box: document.box, key: pairing.k)
+        return threads.pond == pondId ? threads : nil
     }
 
     /// The signed, read-only document asking the Mac to follow one subagent of the open chat, or (nil) to stop.
@@ -1164,7 +1194,7 @@ actor BackendRouter {
     private func cloudBackend(now: Date = Date()) async -> ChannelBackend {
         if let chosen, chosen is CloudStore { return chosen }
         if let relay = pairing.cu, let key = pairing.ck {
-            let client = CatalystClient(relayURL: relay, relayKey: key, transport: transport, sockets: sockets)
+            let client = CatalystClient(relayURL: relay, relayKey: key, channel: pairing.c, transport: transport, sockets: sockets)
             chosen = client
             return client
         }

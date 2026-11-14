@@ -8,9 +8,8 @@ import { parsePairedDevices } from "./relay-paired-devices.js";
 
 /**
  * What stays of Conductor's local relay in every build, released app included: the settings and Keychain
- * effects, and the reversal of what the relay changed. The relay itself (the `addons/conductor-relay/` add-on) redirects Conductor's
- * Remote Control host to a loopback server and adds a paired device to Conductor's Keychain item, so it is not
- * distributed (`SQUEAK_ADDONS=conductor-relay` loads it; embed-daemon.sh leaves it out of the app's bundle).
+ * effects, and the reversal of what the relay changed. The relay itself (a deleted dev-only add-on, in git history) redirected Conductor's
+ * Remote Control host to a loopback server and added a paired device to Conductor's Keychain item.
  * An install that was set up while it shipped has to be put back, which is `retireStaleRelay`.
  *
  * Nothing here returns or logs a token, a key, or a Keychain value. It imports nothing from the add-on.

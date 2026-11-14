@@ -83,7 +83,6 @@ import { SwitchableStore } from "../cloud/switchable-store.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
-import { BudgetedStore, CloudBudget } from "../remote/shared-limits.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { NativeReplier } from "../fleet/native-reply.js";
@@ -166,6 +165,7 @@ import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
+import { runStopSteps, type StopStep } from "./shutdown.js";
 import { normalizeTelegramCommand } from "../utils/telegram-command.js";
 import { openInSqueakLink } from "../fleet/open-link.js";
 import { splitMarkdown } from "../utils/tg-format.js";
@@ -294,7 +294,6 @@ export class SqueakApp {
   /** Talks to `squeak host`; calls fail with "not running" when it is down, which never breaks the daemon. */
   private readonly nativeHost: NativeHostClient;
   private readonly remote: RemoteBridge | null;
-  private readonly sharedBudget: CloudBudget | null;
   /** The phone channel's store, behind a switch so a move to Catalyst (or back) needs no restart; null when none is set up. */
   private readonly cloud: SwitchableStore | null;
   private readonly cloudControl: CloudControl;
@@ -545,21 +544,11 @@ export class SqueakApp {
       projects: this.projectInference,
       pondIdOf: (session) => this.remote?.pondIdOf(session) ?? null,
       annotator: { annotate: (sessions) => this.addons.annotateSessions(sessions) },
-      // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
-      corePorts: () =>
-        this.router && this.nativeHost
-          ? {
-              hosted: this.router,
-              terminal: { send: (session, text) => this.router.send(session.key, text, () => undefined) },
-              native: this.nativeHost,
-            }
-          : null,
       observers: () => this.addons.observers(),
       watch: () => this.addons.watchSpecs(),
       liveness: this.addons.liveness(),
       acceptHooks: () => this.externalOn(),
       stateFields: () => this.addons.stateFields(),
-      coreAdapters: (deps) => this.addons.handles().flatMap((handle) => handle.coreAdapters?.(deps) ?? []),
       cloudHosted: () => this.hosted.view(),
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
@@ -649,11 +638,6 @@ export class SqueakApp {
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
-    // Shared server: a daily byte budget under the cloud store (the direct path is above it and never pauses).
-    const sharedBudget = config.remoteShared
-      ? new CloudBudget(undefined, undefined, path.join(config.supportDir, "shared-budget.json"))
-      : null;
-    this.sharedBudget = sharedBudget;
     // cloud.json decides Firebase or Catalyst; absent, Firebase from SQUEAK_REMOTE_DATABASE_URL as always.
     const cloudFile = readCloudConfig(config.supportDir);
     const cloudLocation = activeLocation(cloudFile, config.remoteDatabaseUrl);
@@ -670,7 +654,7 @@ export class SqueakApp {
       legacy: () => {
         const location = this.cloud?.location;
         if (!location) return null;
-        if (location.provider === "firebase") return config.remoteShared ? "shared" : "firebase";
+        if (location.provider === "firebase") return config.legacyShared ? "shared" : "firebase";
         return location.hosted ? null : "catalyst-own";
       },
       channelId: () => {
@@ -709,8 +693,7 @@ export class SqueakApp {
           await this.cloud.set(movePath(relay.channel), sealAddonMove(relay.key, target, Date.now()));
       },
     });
-    const rawCloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
-    const cloudStore = rawCloudStore && sharedBudget ? new BudgetedStore(rawCloudStore, sharedBudget) : rawCloudStore;
+    const cloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
     // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
     const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
     this.remote =
@@ -734,10 +717,9 @@ export class SqueakApp {
             // A device of the linked account added without a code: always told (a security event, not muted).
             onOwnDeviceAdded: ({ text }) => this.announce(text),
             announce:
-              config.remoteDatabaseUrl && !sharedBudget && cloudLocation?.provider !== "catalyst"
+              config.remoteDatabaseUrl && cloudLocation?.provider !== "catalyst"
                 ? new FirestoreRest(bridgeProjectId)
                 : null,
-            shared: sharedBudget ? { budget: sharedBudget } : null,
             replier: this.router,
             // Squeak's own chats: the open request in full, answering it, starting a chat (src/fleet/native-phone.ts).
             native: new NativePhone({
@@ -877,7 +859,6 @@ export class SqueakApp {
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
       ...answerControl(answers),
-      coreSessions: () => this.runtime.coreSessions(),
       cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
       remote: async (action, deviceId, body) => {
         // The Mac app's sign-in on Squeak's hosted cloud: `{ token }` (an account token) sets this Mac up, with or
@@ -1021,8 +1002,7 @@ export class SqueakApp {
             return {
               ok: false as const,
               unavailable: true,
-              reason:
-                "Pairing needs the phone channel's own Firebase database (not the shared server) to be set up first.",
+              reason: "Pairing needs the phone channel's own Firebase database to be set up first.",
             };
           }
           this.gatewayClaim?.stop();
@@ -1255,6 +1235,9 @@ export class SqueakApp {
     const onSignal = shutdownOnSignals(() => this.stop());
     process.on("SIGINT", () => onSignal("SIGINT"));
     process.on("SIGTERM", () => onSignal("SIGTERM"));
+    // The old core.db mirror is gone; drop a stale copy (and its WAL files) left in the support dir.
+    for (const suffix of ["", "-wal", "-shm"])
+      fs.rmSync(path.join(this.config.supportDir, `core.db${suffix}`), { force: true });
     // Answer first: hooks, /state and the control routes work from here on, before the slow work below.
     await this.runtime.ingress.start().catch((error: unknown) => {
       logger.warn("fleet hook ingress failed to start; falling back to polling only", {
@@ -1375,30 +1358,45 @@ export class SqueakApp {
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     if (this.heatTimer) clearInterval(this.heatTimer);
     if (this.liveControlsTimer) clearInterval(this.liveControlsTimer);
-    this.controls.stop();
-    await this.heat.stop().catch(() => undefined);
-    if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
-    await this.lidActions.stop().catch(() => undefined);
-    await this.awake.stop().catch(() => undefined);
-    this.hotspot.stop();
-    this.caffeinator.stop();
-    this.remote?.stop();
-    this.hosted.stop();
-    this.sharedBudget?.flush();
-    await this.localChannel?.stop().catch(() => undefined);
-    this.cliq?.stop();
-    this.pondInvites.stop();
-    this.voice?.stop();
-    this.stopMemoInbox();
-    if (this.readinessNudge) clearTimeout(this.readinessNudge);
-    this.stopTraceWatch();
-    this.voiceSpeaker?.dispose();
-    this.naturalVoice.stop();
-    this.naturalInstaller.stop();
-    this.stopReferenceClips();
-    await this.addons.stop().catch(() => undefined);
-    await this.router.stop().catch(() => undefined);
-    await this.controller.stop().catch(() => undefined);
+    // Each step is logged by name if it fails or hangs, and the rest still run (the undo steps matter most:
+    // heat, lid actions and awake put the Mac's sleep, fans and frozen apps back). Bounded as a whole.
+    const steps: StopStep[] = [
+      { name: "controls", run: () => this.controls.stop() },
+      { name: "heat", run: () => this.heat.stop() },
+      {
+        name: "project-icons timer",
+        run: () => {
+          if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
+        },
+      },
+      { name: "lid-actions", run: () => this.lidActions.stop() },
+      { name: "awake", run: () => this.awake.stop() },
+      { name: "hotspot", run: () => this.hotspot.stop() },
+      { name: "caffeinate", run: () => this.caffeinator.stop() },
+      { name: "remote", run: () => this.remote?.stop() },
+      { name: "hosted", run: () => this.hosted.stop() },
+      { name: "local channel", run: () => this.localChannel?.stop() },
+      { name: "cliq", run: () => this.cliq?.stop() },
+      { name: "pond invites", run: () => this.pondInvites.stop() },
+      { name: "voice", run: () => this.voice?.stop() },
+      { name: "memo inbox", run: () => this.stopMemoInbox() },
+      {
+        name: "readiness nudge",
+        run: () => {
+          if (this.readinessNudge) clearTimeout(this.readinessNudge);
+        },
+      },
+      { name: "trace watch", run: () => this.stopTraceWatch() },
+      { name: "voice speaker", run: () => this.voiceSpeaker?.dispose() },
+      { name: "natural voice", run: () => this.naturalVoice.stop() },
+      { name: "natural installer", run: () => this.naturalInstaller.stop() },
+      { name: "reference clips", run: () => this.stopReferenceClips() },
+      { name: "add-ons", run: () => this.addons.stop() },
+      { name: "reply router", run: () => this.router.stop() },
+      { name: "fleet controller", run: () => this.controller.stop() },
+    ];
+    const failed = await runStopSteps(steps);
+    if (failed.length) logger.warn("squeak stopped with problems", { steps: failed });
     logger.info("squeak stopped");
   }
 
@@ -1832,8 +1830,8 @@ export class SqueakApp {
 
   /** The pairing window's owner, made on first use; null unless the phone channel's own database is set up. */
   private gatewayPairingFor(): GatewayPairing | null {
-    const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!this.cloud || remoteShared) return null;
+    const { remoteDatabaseUrl } = this.config;
+    if (!this.cloud) return null;
     this.gatewayPairing ??= new GatewayPairing({
       store: this.cloud,
       databaseUrl: remoteDatabaseUrl ?? "",
@@ -1851,10 +1849,10 @@ export class SqueakApp {
     return this.gatewayPairing;
   }
 
-  /** The short-code claim's owner; null unless the phone channel's own database is set up (never in shared mode). */
+  /** The short-code claim's owner; null unless the phone channel's own database is set up. */
   private gatewayClaimFor(): GatewayClaim | null {
-    const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!this.cloud || remoteShared) return null;
+    const { remoteDatabaseUrl } = this.config;
+    if (!this.cloud) return null;
     this.gatewayClaim ??= new GatewayClaim({
       store: new RtdbRest(RENDEZVOUS_DATABASE),
       databaseUrl: remoteDatabaseUrl ?? "",

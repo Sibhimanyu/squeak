@@ -19,3 +19,5 @@ cloud/catalyst-relay/client/*
 
 .ship-deps-stamp
 .ship-host-commit
+firepit-log.txt
+firebase/*.log

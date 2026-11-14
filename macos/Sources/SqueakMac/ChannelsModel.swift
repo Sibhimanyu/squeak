@@ -865,6 +865,7 @@ final class ChannelsModel {
             remote = r
             if let r {
                 for d in deviceWatch.newlyAdded(in: r) { onDeviceAutoAdded?(d, r.account?.email) }
+                for p in waitingWatch.newlyWaiting(in: r) { onDeviceWaiting?(p) }
             }
             remoteOutdated = r == nil && daemonReachable && channels == nil
         } catch {
@@ -1052,6 +1053,9 @@ final class ChannelsModel {
     /// Called once for each device the daemon added through the account without a code.
     @ObservationIgnored var onDeviceAutoAdded: ((RemoteStatus.Device, String?) -> Void)?
     @ObservationIgnored private var deviceWatch = AutoAddedDeviceWatch()
+    /// Called once for each account request that waits for a click ("Ask before adding my own devices" is on).
+    @ObservationIgnored var onDeviceWaiting: ((RemoteStatus.Pending) -> Void)?
+    @ObservationIgnored private var waitingWatch = PendingRequestWatch()
 
     /// Background watch so a device added while Settings is closed is still told.
     func watchDevices() async {
@@ -1137,7 +1141,7 @@ final class ChannelsModel {
         let n = remote?.activeDevices.count ?? 0
         let ph = SummaryRow(
             id: "phone", name: "iPhone",
-            value: !phoneEnabled ? "off" : n == 0 ? "not paired" : n == 1 ? "1 iPhone paired" : "\(n) iPhones paired", dot: .none)
+            value: !phoneEnabled ? "off" : n == 0 ? "no devices yet" : n == 1 ? "1 device" : "\(n) devices", dot: .none)
         return [tg, cliq, ph]
     }
 

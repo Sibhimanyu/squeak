@@ -49,14 +49,15 @@ struct SetupChecklistTests {
 
     @Test func hooksTransitions() {
         func hooks(_ tweak: (inout SetupFacts) -> Void) -> SetupStep { SetupChecklist(ready(tweak)).step(.hooks) }
-        #expect(hooks { $0.hooks = nil }.state == .todo)
-        #expect(hooks { $0.hooks = nil }.action == .installHooks)
-        #expect(hooks { $0.hooks = HooksStatus(state: .missing) }.state == .todo)
+        // Hooks only serve external Claude Code and Codex: never required, never a todo.
+        #expect(hooks { $0.hooks = nil }.state == .optional)
+        #expect(hooks { $0.hooks = nil }.action == nil)
+        #expect(hooks { $0.hooks = HooksStatus(state: .missing) }.state == .optional)
+        #expect(hooks { $0.hooks = HooksStatus(state: .missing) }.action == .installHooks)
         #expect(hooks { $0.hooks = HooksStatus(state: .partial) }.actionTitle == "Finish installing")
         #expect(hooks { $0.hooks = HooksStatus(state: .error, message: "settings.json is unreadable") }.state == .error)
         #expect(hooks { $0.hooks = HooksStatus(state: .error, message: "settings.json is unreadable") }.why == "settings.json is unreadable")
         #expect(hooks { $0.hooks = HooksStatus(state: .unknown) }.state == .error)
-        #expect(hooks { $0.hooks = nil; $0.hooksNeedUpdate = true }.why == "Update the background service")
         #expect(hooks { $0.hooks = nil; $0.hooksProblem = "Couldn't write" }.state == .error)
         #expect(hooks { _ in }.state == .done)
         #expect(hooks { $0.service = .installing }.state == .blocked)
@@ -100,8 +101,8 @@ struct SetupChecklistTests {
     }
 
     @Test func primaryIsTheFirstUnfinishedRequiredStep() {
-        #expect(SetupChecklist(ready { $0.hooks = nil }).primary == .hooks)
-        #expect(SetupChecklist(ready { $0.hooks = nil; $0.link = ConductorLinkReading(state: .pending) }).primary == .hooks)
+        #expect(SetupChecklist(ready { $0.hooks = nil }).primary == nil)
+        #expect(SetupChecklist(ready { $0.hooks = nil; $0.link = ConductorLinkReading(state: .pending) }).primary == .conductor)
         #expect(SetupChecklist(ready { $0.link = ConductorLinkReading(state: .pending) }).primary == .conductor)
         #expect(SetupChecklist(ready { $0.service = .failed("x") }).primary == .service)
     }
@@ -111,7 +112,7 @@ struct SetupChecklistTests {
         #expect(c.isComplete && c.primary == nil && c.requiredRemaining == 0)
         #expect(SetupChecklist(ready { $0.link = ConductorLinkReading(state: .pending); $0.conductorSkipped = true }).isComplete)
         #expect(SetupChecklist(ready { $0.conductorInstalled = false; $0.link = nil }).isComplete)
-        #expect(!SetupChecklist(ready { $0.hooks = nil }).isComplete)
+        #expect(SetupChecklist(ready { $0.hooks = nil }).isComplete)
     }
 
     @Test func progressCountsDoneSteps() {

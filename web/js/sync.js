@@ -19,6 +19,10 @@ export const CALLS_LEASE_MS = 90_000;
 export const SAFETY_POLL_MS = 60_000;
 export const WAKE_DEBOUNCE_MS = 50;
 export const RESULT_POLL_MS = 1_500;
+/** While the stream is up the safety pass waits this long since the last good one, and a pending command's result is
+ *  looked for this often (the stream's results notice triggers the real look at once). A down stream keeps the fast rates. */
+export const SAFETY_POLL_STREAMED_MS = 5 * 60_000;
+export const RESULT_POLL_STREAMED_MS = 15_000;
 export const RESULT_TIMEOUT_MS = 30_000;
 /** After taking a silent command back, how long a Mac that had just read it gets to answer anyway (the iPhone's 12 s). */
 export const LATE_RESULT_MS = 12_000;
@@ -66,6 +70,7 @@ export class Sync {
     this.callsUntil = 0;
     this.stopLive = null;
     this.liveKey = null;
+    this.lastResultLook = 0;
     this.state = { view: null, live: null, aliveAt: null, streamUp: false, syncedAt: null, error: null, rev: 0 };
     /** command id -> { resolve, deadline } */
     this.pending = new Map();
@@ -108,13 +113,26 @@ export class Sync {
     this.stops.push(this.channel.db.watch(this.channel.statePath, onEvent));
     this.stops.push(
       this.channel.db.watch(this.channel.resultsPath, (event) => {
-        if (event.kind === "change") this.wake();
+        // A result is news only to a command waiting for it: read it now, no full pass.
+        if (event.kind === "change") void this.#pollPending();
       }),
     );
     this.#followLive();
     this.intervals.push(this.timers.setInterval(() => void this.#presence(), PRESENCE_EVERY_MS));
-    this.intervals.push(this.timers.setInterval(() => this.wake(), SAFETY_POLL_MS));
-    this.intervals.push(this.timers.setInterval(() => void this.#pollPending(), RESULT_POLL_MS));
+    this.intervals.push(
+      this.timers.setInterval(() => {
+        const since = this.channel.now() - (this.state.syncedAt ?? 0);
+        if (this.state.streamUp && since < SAFETY_POLL_STREAMED_MS) return;
+        this.wake();
+      }, SAFETY_POLL_MS),
+    );
+    this.intervals.push(
+      this.timers.setInterval(() => {
+        if (this.pending.size === 0) return;
+        if (this.state.streamUp && this.channel.now() - this.lastResultLook < RESULT_POLL_STREAMED_MS) return;
+        void this.#pollPending();
+      }, RESULT_POLL_MS),
+    );
     void this.#presence();
     this.wake();
   }
@@ -366,6 +384,7 @@ export class Sync {
   }
 
   async #pollPending() {
+    this.lastResultLook = this.channel.now();
     for (const [id, entry] of [...this.pending]) {
       try {
         const result = await this.channel.result(id);

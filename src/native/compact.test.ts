@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { compactPayload, compactSlice, readCompactJournal, runCompaction, vacuumDatabase } from "./compact.js";
 import { NativeStore } from "./store.js";
@@ -157,6 +157,56 @@ describe("one-time compaction", () => {
     const after = (store.db.prepare("SELECT sum(length(payload)) AS n FROM messages").get() as { n: number }).n;
     expect(after).toBe(before);
     store.close();
+  });
+
+  it("logs its start, each 5 % step, a skip with its reason, and the end", async () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    try {
+      const dir = tmp();
+      const { store, dbPath } = seeded(dir);
+      await runCompaction({ db: store.db, dbPath, supportDir: dir, pauseMs: 0, sliceMs: 5 });
+      const text = lines.join("\n");
+      expect(text).toMatch(/compaction starting/);
+      expect(text).toMatch(/backing up first/);
+      expect(text).toMatch(/compaction 5%/);
+      expect(text).toMatch(/compaction 100%/);
+      expect(text).toMatch(/native\.db compacted/);
+      lines.length = 0;
+      await runCompaction({ db: store.db, dbPath, supportDir: dir });
+      expect(lines.join("\n")).toMatch(/skipped: already done/);
+      lines.length = 0;
+      const dir2 = tmp();
+      const b = seeded(dir2);
+      await runCompaction({ db: b.store.db, dbPath: b.dbPath, supportDir: dir2, freeBytes: () => 1 });
+      expect(lines.join("\n")).toMatch(/compaction skipped[\s\S]*needs/);
+      store.close();
+      b.store.close();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("says it is waiting while a chat works", async () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    try {
+      const dir = tmp();
+      const { store, dbPath } = seeded(dir);
+      let looks = 0;
+      await runCompaction({
+        db: store.db,
+        dbPath,
+        supportDir: dir,
+        pauseMs: 0,
+        busyPollMs: 1,
+        busy: () => ++looks < 3,
+      });
+      expect(lines.filter((l) => /waiting: a chat is working/.test(l))).toHaveLength(1);
+      store.close();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("vacuum shrinks the file, and refuses without 2x free", async () => {

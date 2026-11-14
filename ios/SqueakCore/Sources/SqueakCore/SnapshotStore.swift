@@ -21,9 +21,9 @@ public final class SnapshotStore: @unchecked Sendable {
     private var latest: PhoneSnapshot?
     private var pending: DispatchWorkItem?
 
-    public init(directory: URL? = nil, delay: TimeInterval = 3) {
+    public init(directory: URL? = nil, name: String? = nil, delay: TimeInterval = 3) {
         let dir = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        url = dir.appendingPathComponent("squeak-snapshot.json")
+        url = dir.appendingPathComponent("squeak-snapshot\(name.map { "-" + $0 } ?? "").json")
         self.delay = delay
     }
 

@@ -545,9 +545,8 @@ struct LinkChatSheet: View {
 
 struct IPhoneSettings: View {
     @Environment(AppModel.self) private var app
-    @State private var pairing = false
     @State private var confirmReset = false
-    @State private var revoking: RemoteStatus.Device?
+    @State private var revoking: DeviceRow?
     @State private var confirmUnlink = false
     private var m: ChannelsModel { app.channels }
 
@@ -557,7 +556,7 @@ struct IPhoneSettings: View {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
                     StatusLine(dot: m.daemonReachable ? nil : Theme.negative,
                                text: m.daemonReachable ? "Update the Squeak service" : "Squeak service is off",
-                               detail: m.daemonReachable ? "This service is older than the app and can't pair phones." : "Start it to see and pair iPhones.")
+                               detail: m.daemonReachable ? "This service is older than the app and can't add phones." : "Start it to see your devices.")
                 }
             } else if m.remote == nil {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") { StatusLine(dot: nil, text: "Checking") }
@@ -585,21 +584,20 @@ struct IPhoneSettings: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
         .task { await m.pollRemote() }
-        .sheet(isPresented: $pairing, onDismiss: { m.endPairing() }) { PairSheet().environment(app) }
-        .confirmationDialog("Disconnect this iPhone?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
-            Button("Disconnect \(d.name)", role: .destructive) { Task { await m.revoke(d.id) } }
-        } message: { _ in
-            Text("It stops getting sessions and can't reply. You can pair it again later.")
+        .confirmationDialog("Remove this device?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
+            Button("Remove \(d.name)", role: .destructive) { Task { await m.revoke(d.id) } }
+        } message: { d in
+            Text(DeviceList.removeMessage(name: d.name))
         }
         .confirmationDialog("Unlink your Squeak account?", isPresented: $confirmUnlink) {
             Button("Unlink", role: .destructive) { Task { await m.unlinkAccount() } }
         } message: {
-            Text("Browsers signed in to \(m.remote?.account?.email ?? "this account") will no longer see this Mac. Devices already paired keep working.")
+            Text("Browsers and iPhones signed in to \(m.remote?.account?.email ?? "this account") will no longer see this Mac. Devices already added keep working.")
         }
-        .confirmationDialog("Disconnect every iPhone?", isPresented: $confirmReset) {
-            Button("Disconnect all and start over", role: .destructive) { Task { await m.resetPhones() } }
+        .confirmationDialog("Remove every device?", isPresented: $confirmReset) {
+            Button("Remove all", role: .destructive) { Task { await m.resetPhones() } }
         } message: {
-            Text("The old pairing code and every paired phone stop working.")
+            Text("Every iPhone and browser stops getting sessions. Signing in on one adds it back.")
         }
     }
 
@@ -620,53 +618,51 @@ struct IPhoneSettings: View {
             }
         }
         if !pending.isEmpty {
-            SettingsCard(title: "Waiting for you", subtitle: "Match the code on your phone before approving.", symbol: "person.crop.circle.badge.questionmark") {
+            SettingsCard(title: "Waiting for you", subtitle: "Devices of your own account that want to open this Mac.", symbol: "person.crop.circle.badge.questionmark") {
                 ForEach(pending) { PendingRow(request: $0) }
-
-                Footnote("Approve only if the code matches the one on your iPhone.")
+                Footnote("One click lets it in. Reject if it isn't yours.")
             }
         }
-        SettingsCard(title: "Paired iPhones", subtitle: "Your trusted devices, connected to this Mac.", symbol: "iphone.gen3") {
-            if devices.isEmpty {
+        SettingsCard(title: "Your devices", subtitle: "The iPhones and browsers signed in to your account.", symbol: "iphone.gen3") {
+            let rows = DeviceList.rows(devices)
+            if rows.isEmpty {
                 HStack(spacing: Space.m) {
                     Image(systemName: "iphone.gen3")
                         .font(.system(size: 19, weight: .medium)).foregroundStyle(Theme.muted)
                         .frame(width: 40, height: 40)
                         .background(Theme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("No iPhone paired yet").font(Typo.label).foregroundStyle(Theme.ink)
-                        Text("Pair your phone to keep up with sessions away from your Mac.")
+                        Text("No devices yet").font(Typo.label).foregroundStyle(Theme.ink)
+                        Text(DeviceList.emptyLine(accountEmail: app.account.email))
                             .font(Typo.body).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                if app.account.email == nil {
+                    HStack {
+                        Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
+                        Spacer()
+                    }
+                }
             }
-            ForEach(devices) { d in
+            ForEach(rows) { row in
                 HStack(spacing: Space.m) {
-                    Image(systemName: "iphone.gen3")
+                    Image(systemName: row.kind.symbol)
                         .font(.system(size: 17, weight: .medium)).foregroundStyle(Color(red: 0.45, green: 0.62, blue: 1.0))
                         .frame(width: 38, height: 38)
                         .background(Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.control))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(d.name).font(Typo.label).foregroundStyle(Theme.ink)
-                        if let at = d.pairedAt {
-                            Text("Paired \(at.formatted(date: .abbreviated, time: .omitted))").font(Typo.meta).foregroundStyle(Theme.muted)
-                        }
-                        if d.isViaAccount {
-                            Text("Added through your account").font(Typo.meta).foregroundStyle(Theme.muted)
-                        }
+                        Text(row.name).font(Typo.label).foregroundStyle(Theme.ink)
+                        Text(row.line).font(Typo.meta).foregroundStyle(Theme.muted)
                     }
                     Spacer()
-                    Button("Disconnect…") { revoking = d }.buttonStyle(DestructiveButtonStyle())
+                    Button("Remove…") { revoking = row }.buttonStyle(DestructiveButtonStyle())
                 }
             }
-            HStack {
-                // One primary per screen (§8.9): Approve wins while a request waits.
-                Button("Pair an iPhone…") { pairing = true }
-                    .modifier(PrimaryUnless(pending.isEmpty ? false : true))
-                Spacer()
-                if m.remote?.configured == true {
-                    Button("Disconnect all…") { confirmReset = true }.buttonStyle(QuietButtonStyle())
+            if m.remote?.configured == true, !rows.isEmpty {
+                HStack {
+                    Spacer()
+                    Button("Remove all…") { confirmReset = true }.buttonStyle(QuietButtonStyle())
                 }
             }
 
@@ -680,17 +676,9 @@ struct IPhoneSettings: View {
                 .accessibilityElement(children: .contain)
             }
 
-            Footnote("Pairing always waits for you to approve it here. A paired iPhone can read your sessions and send replies.")
+            Footnote(DeviceList.footnote())
         }
         if let n = m.notice { SettingsCard(title: "Channel notice", subtitle: "The latest update from this connection.", symbol: "info.circle") { Footnote(n) } }
-    }
-}
-
-private struct PrimaryUnless: ViewModifier {
-    let demoted: Bool
-    init(_ demoted: Bool) { self.demoted = demoted }
-    func body(content: Content) -> some View {
-        if demoted { content.buttonStyle(SecondaryButtonStyle()) } else { content.buttonStyle(PrimaryButtonStyle()) }
     }
 }
 
@@ -700,208 +688,20 @@ struct PendingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                if request.isAccountRequest, let email = request.email {
-                    Text(verbatim: "\(request.name) · \(email)").font(.system(size: 13, weight: .medium))
-                    Text("Signed in to your Squeak account · compare the code").font(Typo.meta).foregroundStyle(Theme.muted)
+                if request.isAccountRequest {
+                    Text(verbatim: request.email.map { "\(request.name) · \($0)" } ?? request.name).font(.system(size: 13, weight: .medium))
+                    Text("Signed in to your Squeak account").font(Typo.meta).foregroundStyle(Theme.muted)
                 } else {
+                    // A request from an older phone that still pairs by QR code: the code is how you know it is yours.
                     Text(request.name).font(.system(size: 13, weight: .medium))
+                    Text(verbatim: request.code).font(.system(size: 20, weight: .semibold, design: .monospaced)).monospacedDigit()
+                        .accessibilityLabel("Code \(request.code.map(String.init).joined(separator: " "))")
+                    Text("Approve only if this matches your phone").font(Typo.meta).foregroundStyle(Theme.muted)
                 }
-                Text(verbatim: request.code).font(.system(size: 20, weight: .semibold, design: .monospaced)).monospacedDigit()
-                    .accessibilityLabel("Code \(request.code.map(String.init).joined(separator: " "))")
             }
             Spacer()
             Button("Reject") { Task { await app.channels.reject(request.id) } }.buttonStyle(SecondaryButtonStyle())
             Button("Approve") { Task { await app.channels.approve(request.id) } }.buttonStyle(PrimaryButtonStyle())
-        }
-    }
-}
-
-// MARK: - Pair sheet
-
-struct PairSheet: View {
-    @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
-    @State private var copiedCode = false
-    @State private var target: PairTarget
-    // Offline captures use an inert, realistically sized payload, never a live pairing secret.
-    private let previewPairingURL: String?
-    private var m: ChannelsModel { app.channels }
-    private var pairingURL: String? { app.demoMode ? previewPairingURL ?? m.pairingURL : m.pairingURL }
-    private var webSignInUrl: String? { app.cloud.hosted?.signInUrl ?? app.account.state?.signInUrl }
-    private var webUrl: String? { app.cloud.hosted?.webUrl }
-    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0, webSignInUrl: webSignInUrl, webUrl: webUrl) } }
-
-    init(initialTarget: PairTarget = .app, previewPairingURL: String? = nil) {
-        _target = State(initialValue: initialTarget)
-        self.previewPairingURL = previewPairingURL
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                Picker("Pair", selection: $target) {
-                    ForEach(PairTarget.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().accessibilityLabel("What to pair")
-                ScrollView {
-                    let wide = geometry.size.width >= 700
-                    let layout = wide ? AnyLayout(HStackLayout(alignment: .center, spacing: 28))
-                        : AnyLayout(VStackLayout(alignment: .center, spacing: 24))
-                    layout {
-                        PairingCodeView(text: qrText, target: target, error: m.pairingError,
-                                        size: min(360, geometry.size.width - 56, max(240, geometry.size.height - 288)))
-                        instructions.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(.vertical, 4)
-                    approval
-                    if let error = m.pairingError {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(error).font(.callout).foregroundStyle(Theme.muted)
-                            ReportProblemButton(problem: error, place: "Settings › Channels › Pairing")
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
-                    }
-                }
-                footer
-            }
-            .padding(28)
-        }
-        .frame(minWidth: 420, idealWidth: 780, maxWidth: 820, minHeight: 560, idealHeight: 650, maxHeight: 760)
-        .background(Theme.bg)
-        .task { await m.startPairing() }
-        .task { await m.pollRemote() }
-        .onDisappear { m.endPairing() }
-        .onChange(of: target) { copiedCode = false }
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            DuckMark(width: 56)
-                .frame(width: 76, height: 76)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Pair a phone").font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Text("Your agents. Away from your desk.")
-                    .font(.body).foregroundStyle(Theme.muted)
-            }
-        }
-    }
-
-    private var instructions: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(target == .app ? "Take Squeak with you" : "Squeak in your browser")
-                    .font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text(target == .app ? "Follow sessions and reply from your iPhone." : "Follow sessions and reply without installing an app.")
-                    .font(.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            }
-            if target == .app {
-                step("1", title: "Open Squeak on iPhone", detail: "Choose Pair with a Mac, then scan this code. Your Camera app works too.")
-                step("2", title: "Match the code and approve", detail: "Check that the code on your phone matches the one here on your Mac.")
-            } else {
-                step("1", title: "Scan with your camera", detail: "The code opens Squeak for Web in your browser.")
-                step("2", title: "Match the code and approve", detail: "Check that the code in your browser matches the one here on your Mac.")
-            }
-            if pairingURL != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button(action: copyPairingCode) {
-                        Label(copiedCode ? "Copied" : target.copyLabel, systemImage: copiedCode ? "checkmark" : "doc.on.doc")
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(qrText == nil)
-                    if target == .web {
-                        Text("Or open \(RemotePairing.webAppAddress(signInUrl: webSignInUrl, webUrl: webUrl)) and paste the link.")
-                            .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-        }
-    }
-
-    private func step(_ number: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(number).font(.callout.weight(.semibold)).foregroundStyle(Theme.ink)
-                .frame(width: 28, height: 28).background(Theme.surfaceRaised, in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.ink)
-                Text(detail).font(.callout).foregroundStyle(Theme.muted)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder private var approval: some View {
-        let pending = m.remote?.pending ?? []
-        if !pending.isEmpty {
-            Divider().padding(.vertical, 14)
-            ForEach(pending) { PendingRow(request: $0) }
-        } else if let paired = m.remote?.activeDevices.last, pairingURL != nil,
-                  paired.pairedAt.map({ Date().timeIntervalSince($0) < 120 }) == true {
-            Divider().padding(.vertical, 14)
-            Label("\(paired.name) is paired.", systemImage: "checkmark.circle")
-                .foregroundStyle(Theme.muted)
-        }
-    }
-
-    private var footer: some View {
-        HStack(alignment: .center, spacing: 20) {
-            Label {
-                Text("Keep this code private. You approve every pairing on this Mac.")
-                    .fixedSize(horizontal: false, vertical: true)
-            } icon: {
-                Image(systemName: "lock.shield").accessibilityHidden(true)
-            }
-            .font(.caption).foregroundStyle(Theme.muted)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        }
-        .padding(.top, 16)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
-    }
-
-    private func copyPairingCode() {
-        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0, webSignInUrl: webSignInUrl, webUrl: webUrl) }) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        copiedCode = true
-        Task { try? await Task.sleep(for: .seconds(2)); copiedCode = false }
-    }
-}
-
-private struct PairingCodeView: View {
-    @Environment(\.displayScale) private var displayScale
-    let text: String?
-    let target: PairTarget
-    let error: String?
-    let size: CGFloat
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Group {
-                if let text, let image = QRCode.image(for: text, points: size - 24, displayScale: displayScale) {
-                    // Keep the exact raster size: each module occupies an integer number of backing pixels.
-                    Image(nsImage: image).interpolation(.none)
-                        .frame(width: image.size.width, height: image.size.height)
-                        .accessibilityLabel(target == .app ? "Pairing QR code for the iPhone app" : "Pairing QR code for Squeak for Web")
-                        .accessibilityHint("Scan with your phone, or use the copy button.")
-                } else if error != nil {
-                    Label("Code unavailable", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(Color.black)
-                } else {
-                    ProgressView("Preparing pairing code…").tint(.black).foregroundStyle(Color.black)
-                }
-            }
-            .frame(width: size, height: size)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Theme.lineStrong))
-            Label("Scan to pair", systemImage: "qrcode.viewfinder")
-                .font(.callout.weight(.medium)).foregroundStyle(Theme.muted)
-                .accessibilityHidden(true)
         }
     }
 }

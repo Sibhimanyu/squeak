@@ -29,6 +29,8 @@ export interface AccountRelay {
   deleteDoc(path: string): Promise<void>;
   /** The linked user's profile photo (a JPEG of at most 64 KB), or null when the account has none. */
   fetchAvatar(userId: string): Promise<Buffer | null>;
+  /** Tells the relay whether this Mac asks before adding its owner's own devices (for the Macs list). Best effort. */
+  setAsk?(askOwnDevices: boolean): Promise<void>;
 }
 
 /** The most the relay keeps and the Mac accepts for a profile photo. */
@@ -120,6 +122,11 @@ export class HttpAccountRelay implements AccountRelay {
     const bytes = Buffer.from(await response.arrayBuffer());
     if (!isAvatarJpeg(bytes)) throw new Error("catalyst avatar: unexpected answer");
     return bytes;
+  }
+
+  async setAsk(askOwnDevices: boolean): Promise<void> {
+    const response = await this.post("/account/macs/ask", { askOwnDevices });
+    if (!response.ok) throw new Error(`catalyst account ask failed: ${response.status}`);
   }
 
   async unlink(macId: string): Promise<void> {

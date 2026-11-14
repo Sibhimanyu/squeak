@@ -22,7 +22,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case .connections: "Connections"
         case .telegram: "Telegram"
         case .cliq: "Zoho Cliq"
-        case .iphone: "iPhone"
+        case .iphone: "Devices"
         case .voice: "Phone calls"
         case .privacy: "Privacy"
         case .about: "About"
@@ -79,6 +79,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case "sending", "send": self = .messages
         case "diagnostics", "service", "background service", "daemon": self = .service
         case "addons", "add-ons", "addon", "add-on", "integrations", "integration", "extension", "extensions": self = .addons
+        case "devices", "device", "browser", "web": self = .iphone
         case "cliq", "zoho": self = .cliq
         case "calls", "phone", "3cx": self = .voice
         default:

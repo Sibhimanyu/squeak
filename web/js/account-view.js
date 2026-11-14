@@ -2,8 +2,8 @@
 
 import { photoPicker } from "./avatar-view.js";
 import { h } from "./dom.js";
-import { account as linkedAccount } from "./view-model.js";
-import { logInIcon, qrIcon } from "./icons.js";
+import { macStatus } from "./account.js";
+import { logInIcon } from "./icons.js";
 import {
   calmButton,
   calmEyebrow,
@@ -26,8 +26,9 @@ export function linkedLine(value) {
 }
 
 /**
- * The unpaired start when the relay has accounts. `state` is "in" or "out"; `macs` is the list (null while loading);
- * `qr()` opens the QR pairing screen instead; `signOut` (optional) adds Sign out to the identity chip.
+ * The start when no Mac is open. Signed out it is one sign-in screen. Signed in it is "Your Macs": every Mac on the account
+ * (`macs`, null while loading) with whether it is online, asleep or offline; `pick` opens one. `oldMac()` (optional) is the
+ * small "Mac not on an account yet?" link for a Mac too old to sign in; `signOut` (optional) adds Sign out to the identity chip.
  */
 export function accountStartScreen({
   state,
@@ -37,7 +38,7 @@ export function accountStartScreen({
   error,
   pick,
   signIn,
-  qr,
+  oldMac = null,
   signOut = null,
   photo = null,
   mountLogin = null,
@@ -59,13 +60,19 @@ export function accountStartScreen({
         build(
           "div",
           { class: "wl-macs" },
-          macs.map((mac) => macCard({ mac, line: linkedLine(mac.linkedAt), pick, build })),
+          macs.map((mac) =>
+            macCard({
+              mac: { ...mac, status: macStatus(mac) },
+              line: linkedLine(mac.linkedAt),
+              pick,
+              build,
+            }),
+          ),
         ),
-        build("div", { class: "wl-actions" }, wlButton("Pair with a QR code instead", qr, { quiet: true, build })),
       );
     } else if (!macsError) {
       parts.push(
-        build("p", { class: "wl-lead" }, "No Mac is linked to this account yet. Two ways forward:"),
+        build("p", { class: "wl-lead" }, "No Mac is signed in to this account yet."),
         build(
           "div",
           { class: "wl-options" },
@@ -74,32 +81,29 @@ export function accountStartScreen({
             { class: "wl-opt" },
             build("span", { class: "wl-opt-icon", "aria-hidden": "true" }, real ? logInIcon() : null),
             build("strong", null, "Sign in on your Mac"),
-            build("span", { class: "wl-note" }, "Squeak \u203a Settings \u203a Account \u203a Sign in"),
-          ),
-          build(
-            "button",
-            { class: "wl-opt action", type: "button", onclick: qr },
-            build("span", { class: "wl-opt-icon", "aria-hidden": "true" }, real ? qrIcon() : null),
-            build("strong", null, "Pair with a QR code"),
-            build("span", { class: "wl-note" }, "Scan the code your Mac shows"),
+            build(
+              "span",
+              { class: "wl-note" },
+              "Squeak \u203a Settings \u203a Account \u203a Sign in, with this account",
+            ),
           ),
         ),
       );
-    } else {
-      parts.push(
-        build("div", { class: "wl-actions" }, wlButton("Pair with a QR code instead", qr, { quiet: true, build })),
-      );
     }
+    const actions = [
+      !macs?.length && oldMac ? wlButton("Mac not on an account yet?", oldMac, { quiet: true, build }) : null,
+    ].filter(Boolean);
+    if (actions.length) parts.push(build("div", { class: "wl-actions" }, ...actions));
   } else {
-    // Signed out: the calm card (direction A), the sign-in form inside it.
+    // Signed out: the calm card (direction A), the sign-in form inside it, and nothing else to choose.
     return calmLayout({
       build,
       children: [
         calmEyebrow("Squeak for Web", build),
         build("h1", null, "Sign in to Squeak"),
-        build("p", { class: "cl-lead" }, "Your agents, in view. Your Mac still approves every browser you sign in on."),
+        build("p", { class: "cl-lead" }, "Your agents, in view. Sign in with your Squeak account to see your Macs."),
         loginForm({ fallback: signIn, mount: mountLogin, build }),
-        calmButton("Pair with a QR code instead", qr, { kind: "link", build }),
+        oldMac ? calmButton("Mac not on an account yet?", oldMac, { kind: "link", build }) : null,
         calmError(macsError, build),
         calmError(error, build),
       ],
@@ -123,66 +127,75 @@ export function accountLoadingScreen(build = h) {
 }
 
 /**
- * "Adding this browser to <Mac>\u2026": the Mac adds a browser of its own account without a code, so the code is small
- * and only for the owner who chose "Ask before adding my own devices". The result arrives the same way either way.
+ * "Opening <Mac>\u2026": the Mac adds a browser of its own account by itself, so there is nothing to approve and no code.
+ * When it has not answered after a few seconds (`ask`: it may be asleep, or its owner chose "Ask before adding my own
+ * devices") the screen says it is waiting and what to do. The result arrives the same way either way.
  */
-export function requestScreen({ macName, deviceName, code, cancel, build = h }) {
+export function requestScreen({ macName, deviceName, ask = false, cancel, build = h }) {
   const mac = macName || "your Mac";
   return welcomeLayout({
     build,
     children: [
       build("p", { class: "wl-eyebrow" }, mac),
-      build("h1", null, `Adding this browser to ${mac}\u2026`),
-      build("p", { class: "wl-lead", role: "status" }, `${deviceName || "This browser"} asked to join ${mac}.`),
-      wlProgress(build),
+      build("h1", null, ask ? `Waiting for ${mac} to approve\u2026` : `Opening ${mac}\u2026`),
       build(
         "p",
-        { class: "wl-note" },
-        `If your Mac asks, check it shows `,
-        build("span", { class: "wl-code small", "aria-label": "Pairing code to compare" }, code ?? ""),
-        ".",
+        { class: "wl-lead", role: "status" },
+        ask
+          ? `If ${mac} asks, approve ${deviceName || "this browser"} in Squeak there. A sleeping Mac answers when it wakes.`
+          : `Signing ${deviceName || "this browser"} in to ${mac}.`,
       ),
+      wlProgress(build),
       build("div", { class: "wl-actions" }, wlButton("Cancel", cancel, { build })),
     ],
   });
 }
 
 /**
- * Settings, "Account": only for a browser paired to a Catalyst Mac (`ctx.account` is null otherwise, so a Firebase app
- * shows nothing). Signed out: sign in. Signed in: link this Mac (or its "Linked to" line and Unlink), and Sign out, which
- * ends the account's session only; this browser stays paired.
+ * Settings, "Your Macs": for a browser signed in on a Catalyst page (`ctx.account` is null otherwise, so a Firebase app
+ * shows nothing). Signed out: sign in. Signed in: every Mac on the account (the open one marked, the others open on a tap),
+ * "Remove this browser from <Mac>", and Sign out, which removes this browser from every Mac.
  */
 export function accountSection(ctx) {
   const a = ctx.account;
   if (!a || a.state === "unknown" || a.state === "loading") return null;
-  const mac = ctx.view?.mac || ctx.record?.macName || "this Mac";
+  const current = ctx.record?.macName || ctx.view?.mac || "this Mac";
   const note = a.note ? h("p", { class: "note", role: "status" }, a.note) : null;
   if (a.state !== "in") {
     return [
-      h("p", { class: "note" }, "Sign in to link this Mac to your account, and open it from any browser you approve."),
-      h("button", { class: "btn", type: "button", onclick: () => a.signIn() }, "Sign in to link this Mac"),
+      h("p", { class: "note" }, "Sign in with your Squeak account to see every Mac on it."),
+      h("button", { class: "btn", type: "button", onclick: () => a.signIn() }, "Sign in"),
     ];
   }
-  const linked = linkedAccount(ctx.view);
-  const email = a.me?.email || a.me?.name || "your account";
   const label = a.me?.name || a.me?.email || "";
+  const macs = Array.isArray(a.macs) ? a.macs : [];
+  const rows = macs.map((mac) => {
+    const open = a.currentMacId === mac.macId;
+    const status = macStatus(mac).text;
+    return h(
+      "div",
+      { class: "row-actions", "data-mac": mac.macId },
+      h("span", null, status ? `${mac.name} \u00b7 ${status}` : mac.name),
+      open
+        ? h("span", { class: "note" }, "Open now")
+        : h(
+            "button",
+            { class: "btn quiet", type: "button", disabled: Boolean(a.busy), onclick: () => void a.switchTo(mac) },
+            "Open",
+          ),
+    );
+  });
   return [
     a.photo ? photoPicker({ label, photo: a.photo }) : null,
-    linked
-      ? [
-          h("p", null, `Linked to ${linked.email}`),
-          h(
-            "button",
-            { class: "btn quiet", type: "button", disabled: Boolean(a.busy), onclick: () => void a.unlink() },
-            "Unlink",
-          ),
-        ]
-      : h(
-          "button",
-          { class: "btn", type: "button", disabled: Boolean(a.busy), onclick: () => void a.link() },
-          `Link ${mac} to your account (${email})`,
-        ),
+    macs.length ? h("p", { class: "note" }, "Your Macs") : null,
+    ...rows,
+    h(
+      "button",
+      { class: "btn quiet", type: "button", disabled: Boolean(a.busy), onclick: () => void a.removeCurrent() },
+      `Remove this browser from ${current}`,
+    ),
     note,
     h("button", { class: "btn quiet", type: "button", onclick: () => void a.signOut() }, "Sign out"),
+    h("p", { class: "note" }, "Signing out removes this browser from every Mac."),
   ].flat();
 }

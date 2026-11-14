@@ -14,6 +14,7 @@ import { squeakPluginPath } from "./agent-plugin.js";
 import { requireAgentBinary } from "./binaries.js";
 import { NO_CHECKPOINTS } from "./version-history.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
+import { closeWithin } from "./agent-procs.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
@@ -442,13 +443,20 @@ export class SessionHost extends EventEmitter {
     return pruned;
   }
 
+  /** Closes a chat's agent process, bounded and logged: a failed close is a leaked `claude`/`codex`. */
+  private closeRunner(id: string, runner: Runner): Promise<boolean> {
+    return closeWithin(`agent of chat ${id}`, () => runner.close());
+  }
+
   async stop(): Promise<void> {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
+    const closing: Promise<boolean>[] = [];
     for (const [id, runner] of this.runners) {
       this.runners.delete(id);
-      await runner.close();
+      closing.push(this.closeRunner(id, runner));
     }
+    await Promise.all(closing);
   }
 
   /** Cold context replays (300 message rows each, payloads can be megabytes) one list call may do before it answers. */
@@ -728,7 +736,7 @@ export class SessionHost extends EventEmitter {
       if (!runner || BUSY.has(s.status)) continue;
       this.runners.delete(s.id);
       this.clearTimer(s.id);
-      await runner.close().catch(() => undefined);
+      await this.closeRunner(s.id, runner);
     }
   }
 
@@ -755,7 +763,7 @@ export class SessionHost extends EventEmitter {
         logHostError(`warm ${id}`, error);
         this.runners.delete(id);
         this.warmed.delete(id);
-        void runner.close().catch(() => undefined);
+        void this.closeRunner(id, runner);
         throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
       }
     }
@@ -994,7 +1002,7 @@ export class SessionHost extends EventEmitter {
     if (runner) {
       this.runners.delete(id);
       this.clearTimer(id);
-      await runner.close().catch(() => undefined);
+      await this.closeRunner(id, runner);
     }
     this.warmed.delete(id);
     this.emit("event", { type: "archived", sessionId: id, archived: true, archivedAt: at } satisfies HostEvent);
@@ -1018,7 +1026,7 @@ export class SessionHost extends EventEmitter {
     // It will not settle: the chat is being archived, so the agent is closed and the turn ends as a stop.
     const runner = this.runners.get(id);
     this.runners.delete(id);
-    await runner?.close().catch(() => undefined);
+    if (runner) await this.closeRunner(id, runner);
     const now = this.store.getSession(id);
     if (now && BUSY.has(now.status)) {
       this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
@@ -1458,7 +1466,7 @@ export class SessionHost extends EventEmitter {
   private failTurn(id: string, text: string): void {
     const runner = this.runners.get(id);
     this.runners.delete(id);
-    void runner?.close().catch(() => undefined);
+    if (runner) void this.closeRunner(id, runner);
     const steer = this.steerNext.get(id);
     if (steer !== undefined) {
       // the words meant for the next turn are not lost: they join the queue
@@ -1763,7 +1771,7 @@ export class SessionHost extends EventEmitter {
         if (s && runner && !BUSY.has(s.status)) {
           this.runners.delete(id);
           this.warmed.delete(id);
-          void runner.close().catch(() => undefined);
+          void this.closeRunner(id, runner);
         }
       },
       this.warmed.has(id) ? Math.max(this.idleMs, WARM_IDLE_MS) : this.idleMs,

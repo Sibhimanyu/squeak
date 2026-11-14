@@ -120,6 +120,68 @@ describe("Sync", () => {
     expect(channel.reads).toBe(before);
   });
 
+  it("stretches the safety pass to 5 min while the stream is up, and keeps 60 s while it is down", async () => {
+    let clock = 1_000_000;
+    const channel = fakeChannel();
+    channel.now = () => clock;
+    channel.next = { v: 1, sessions: [], seq: 1 };
+    const fns = {};
+    const fake = { ...timers, setInterval: (fn, ms) => ((fns[ms] = fn), 0) };
+    const sync = new Sync({ channel, signingKey: null, onState: () => {}, timers: fake });
+    sync.start();
+    await tick();
+    const base = channel.reads;
+    channel.emit("state", { kind: "open" });
+    await tick();
+    const afterOpen = channel.reads;
+    clock += 60_000;
+    fns[60_000]();
+    await tick();
+    expect(channel.reads).toBe(afterOpen); // up and fresh: no pass
+    clock += 5 * 60_000;
+    fns[60_000]();
+    await tick();
+    expect(channel.reads).toBe(afterOpen + 1); // five minutes since the last good pass
+    sync.stop();
+    expect(base).toBeLessThanOrEqual(afterOpen);
+  });
+
+  it("polls for a result every 15 s, not 1.5 s, while the stream is up, and reads it at once on the results notice", async () => {
+    let clock = 1_000_000;
+    const reads = [];
+    const channel = {
+      ...fakeChannel(),
+      now: () => clock,
+      replyDocument: async () => ({ id: "cmd-1", document: { box: "b" } }),
+      send: async () => {},
+      result: async (id) => (reads.push(id), null),
+      deleteResult: async () => {},
+      deleteCommand: async () => true,
+    };
+    const fns = {};
+    const fake = { ...timers, setInterval: (fn, ms) => ((fns[ms] = fn), 0) };
+    const sync = new Sync({ channel, signingKey: null, onState: () => {}, timers: fake });
+    sync.start();
+    channel.emit("state", { kind: "open" });
+    const pending = sync.reply({}, "hi");
+    await tick(10);
+    const afterSend = reads.length;
+    clock += 1_500;
+    fns[1_500]();
+    await tick(10);
+    expect(reads.length).toBe(afterSend); // stream up: no 1.5 s polling
+    channel.emit("results", { kind: "change" });
+    await tick(10);
+    expect(reads.length).toBe(afterSend + 1); // the notice reads it now
+    clock += 15_000;
+    fns[1_500]();
+    await tick(10);
+    expect(reads.length).toBe(afterSend + 2); // the slow safety look
+    channel.emit("state", { kind: "dropped" });
+    sync.stop(); // down: the 1.5 s rate is back (stop sets streamUp false)
+    void pending;
+  });
+
   it("tracks whether the stream is up", async () => {
     const channel = fakeChannel();
     const sync = new Sync({ channel, signingKey: null, onState: () => {}, timers });

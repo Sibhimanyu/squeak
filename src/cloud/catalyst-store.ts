@@ -48,6 +48,8 @@ export interface CatalystStoreOptions {
   socket?: (url: string) => StreamSocket;
   /** The safety poll, 60 s as with the Realtime Database's callers. */
   pollMs?: number;
+  /** The safety poll while the stream is healthy (default 5 min). */
+  healthyPollMs?: number;
   retryMinMs?: number;
   retryMaxMs?: number;
 }
@@ -55,6 +57,8 @@ export interface CatalystStoreOptions {
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 60_000;
 const POLL_MS = 60_000;
+/** While the stream is up and has said hello, a watcher's safety poll stretches to this: a notice carries the news. */
+const HEALTHY_POLL_MS = 5 * 60_000;
 const KEEPALIVE_MS = 15_000;
 const PING_MS = 60_000;
 /** Silence this long (the keepalive pongs come every 15 s) means the socket is dead. */
@@ -92,9 +96,11 @@ export class CatalystStore implements CloudStore {
       retryMaxMs: options.retryMaxMs ?? RETRY_MAX_MS,
     });
     this.pollMs = options.pollMs ?? POLL_MS;
+    this.healthyPollMs = options.healthyPollMs ?? HEALTHY_POLL_MS;
   }
 
   private readonly pollMs: number;
+  private readonly healthyPollMs: number;
   private readonly joinAttest: string | undefined;
 
   async get(path: string): Promise<ChannelDoc | null> {
@@ -162,13 +168,19 @@ export class CatalystStore implements CloudStore {
    */
   watch(path: string, onChange: (source?: WatchSource) => void, options: CloudWatchOptions = {}): () => void {
     let stopped = false;
+    let lastWake = Date.now();
     const wake = (source: WatchSource = "stream"): void => {
+      lastWake = Date.now();
       if (!stopped) onChange(source);
     };
     const release = this.hub.add({ path, wake, options });
     const first = setTimeout(() => wake("first"), 0);
     first.unref?.();
-    const poll = setInterval(() => wake("poll"), options.pollMs ?? this.pollMs);
+    const poll = setInterval(() => {
+      // Stream healthy: a notice carries the news, so the safety poll waits out the slower interval since the last wake.
+      if (this.hub.healthy() && Date.now() - lastWake < this.healthyPollMs) return;
+      wake("poll");
+    }, options.pollMs ?? this.pollMs);
     poll.unref?.();
     return () => {
       stopped = true;
@@ -176,6 +188,11 @@ export class CatalystStore implements CloudStore {
       clearInterval(poll);
       release();
     };
+  }
+
+  /** Whether the stream is up and subscribed: a caller may then poll far less (the bridge's own safety pass does). */
+  streamHealthy(): boolean {
+    return this.hub.healthy();
   }
 
   /** Stops the subscriber (a store that is being replaced); watchers still registered get no more notices. */
@@ -200,9 +217,16 @@ export class CatalystStore implements CloudStore {
   private async token(): Promise<{ url: string; key: string; wssId: string }> {
     // A fresh connection name each time: one live session per name, and the old one is released separately.
     const name = `sq${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36).slice(-6)}`.slice(0, 20);
+    // The channel being watched, when there is exactly one: the relay then gives a stream of its own to that channel (its
+    // own writes only wake its own watchers) and falls back to the shared one when it has none or this field is absent.
+    const channel = this.scoped ? undefined : this.hub.singleChannel();
     const response = await this.call(
       this.scoped ? "/pond-stream" : "/token",
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) },
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, ...(channel ? { channel } : {}) }),
+      },
       10_000,
     );
     await ensureOk(response, "token");
@@ -273,11 +297,28 @@ class StreamHub {
   private timers: NodeJS.Timeout[] = [];
   private stall: NodeJS.Timeout | null = null;
   private unsubscribeNetwork: (() => void) | null = null;
+  /** True from the server's hello (authenticated, subscribed) until the socket is dropped. */
+  private ready = false;
   /** Release of the previous session, awaited before a new token is asked for. */
   private released: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: HubOptions) {
     this.retryMs = options.retryMinMs;
+  }
+
+  healthy(): boolean {
+    return this.running && this.ready && this.socket !== null;
+  }
+
+  /** The one channel id every watcher's path names, else undefined. */
+  singleChannel(): string | undefined {
+    const ids = new Set<string>();
+    for (const watcher of this.watchers) {
+      const id = /^channels\/([A-Za-z0-9_-]{22,64})(?:\/|$)/.exec(watcher.path)?.[1];
+      if (!id) return undefined;
+      ids.add(id);
+    }
+    return ids.size === 1 ? [...ids][0] : undefined;
   }
 
   add(watcher: Watcher): () => void {
@@ -366,6 +407,7 @@ class StreamHub {
           // Authenticated: subscribe live ('0'), then keep the line alive.
           socket.send(JSON.stringify({ type: "con", value: "subscribe", streamingId: "0" }));
           this.keepAlive(socket, generation);
+          this.ready = true;
           this.retryMs = this.options.retryMinMs;
           for (const watcher of this.watchers) watcher.options.onOpen?.();
           // What happened before the subscription is read through the store.
@@ -463,6 +505,7 @@ class StreamHub {
   private drop(deliberate: boolean): void {
     const socket = this.socket;
     this.socket = null;
+    this.ready = false;
     this.clearTimers();
     if (this.stall) clearTimeout(this.stall);
     this.stall = null;

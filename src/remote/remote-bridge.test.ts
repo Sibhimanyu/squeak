@@ -1,4 +1,3 @@
-import { CloudBudget } from "./shared-limits.js";
 import type { Answerer } from "../fleet/answer-command.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -37,6 +36,8 @@ import { open, pairingCode, seal } from "./remote-crypto.js";
 import { AddonHost } from "../addon-host.js";
 import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
+import { pondThreadsDoc, type PondThreadsDoc } from "./pond-threads.js";
+import { historyDeltaDoc } from "./history-delta.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
@@ -130,7 +131,6 @@ function fixture(
     image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
     claudeAccounts?: RemoteBridgeDependencies["claudeAccounts"];
-    shared?: RemoteBridgeDependencies["shared"];
     addonPhone?: RemoteAddonPhone | null;
     renamer?: RemoteBridgeDependencies["renamer"];
     closer?: RemoteBridgeDependencies["closer"];
@@ -155,6 +155,7 @@ function fixture(
       messageId: string,
     ) => { steps: Array<{ kind: "tool" | "thinking"; text: string }>; more: number } | null;
     verbose?: boolean;
+    activity?: RemoteBridgeDependencies["activity"];
     sendDefault?: RemoteBridgeDependencies["sendDefault"];
     native?: RemoteBridgeDependencies["native"];
     projectIcons?: RemoteBridgeDependencies["projectIcons"];
@@ -229,6 +230,7 @@ function fixture(
     native: options.native ?? null,
     ...(options.projectIcons ? { projectIcons: options.projectIcons } : {}),
     ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
+    ...(options.activity ? { activity: options.activity } : {}),
     answerer: options.answerer ?? null,
     sendDefault: options.sendDefault ?? null,
     diff: options.diff ?? null,
@@ -241,7 +243,6 @@ function fixture(
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     claudeAccounts: options.claudeAccounts ?? null,
-    shared: options.shared ?? null,
     addonPhone: options.addonPhone ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
@@ -937,17 +938,6 @@ describe("RemoteBridge Claude account", () => {
     await none.bridge.tick();
     expect(none.result("c1")).toMatchObject({ status: "refused" });
   });
-
-  it("is refused on the shared server", async () => {
-    const a = accounts();
-    const f = fixture({ claudeAccounts: a, shared: { budget: new CloudBudget() } });
-    await f.pair();
-    expect(f.bridge.phoneView()).not.toHaveProperty("claudeAccounts");
-    await f.store.set(`${f.channel}/commands/c1`, f.claudeAccountCommand());
-    await f.bridge.tick();
-    expect(f.result("c1")).toMatchObject({ status: "refused" });
-    expect(a.apply).not.toHaveBeenCalled();
-  });
 });
 
 describe("RemoteBridge image", () => {
@@ -1098,6 +1088,117 @@ describe("RemoteBridge history pages", () => {
     await f.store.set(`${f.channel}/commands/h1`, f.historyCommand());
     await f.bridge.tick();
     expect(f.result("h1")).toMatchObject({ status: "refused" });
+  });
+});
+
+describe("RemoteBridge history cache (after a cursor)", () => {
+  const all: TranscriptMessage[] = Array.from({ length: 30 }, (_, index) => ({
+    id: `m${index}`,
+    cursor: String(100 + index),
+    role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+    text: `message ${index}`,
+    at: null,
+    turnId: null,
+  }));
+  function withDelta(caps: string[] | null) {
+    const f = fixture({
+      streaming: true,
+      transcript: (_id, limit, before) => {
+        const rows = all.filter((m) => before == null || Number(m.cursor) < before);
+        const page = rows.slice(-limit);
+        return { messages: page, nextBefore: rows.length > limit ? page[0]!.cursor! : null };
+      },
+    });
+    const caught = async () => {
+      if (caps) {
+        await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, caps }) });
+      }
+      await f.pair();
+      await f.bridge.tick();
+    };
+    const page = (id: string) => {
+      const doc = [...f.store.docs.entries()].find(([key]) => key.includes("/live/") && key.endsWith(id));
+      return doc ? open<Record<string, unknown>>(f.payload.k, doc[1].box) : null;
+    };
+    return { f, caught, page };
+  }
+
+  it("sends only what came after the cursor, oldest first, with no cursor left when it is all", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "125" }));
+    await f.bridge.tick();
+    const result = f.result("d1") as { status: string; doc: string };
+    expect(result.status).toBe("sent");
+    expect(result.doc).toBe(historyDeltaDoc("claude-transcript:s1", "125"));
+    const doc = page(result.doc) as { entries: Array<{ id: string }>; nextAfter: string | null; reset: boolean };
+    expect(doc.entries.map((e) => e.id)).toEqual(["126", "127", "128", "129"]);
+    expect(doc).toMatchObject({ nextAfter: null, reset: false });
+  });
+
+  it("pages a long delta by nextAfter and covers a message appended in between", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "100", n: 10 }));
+    await f.bridge.tick();
+    const first = page((f.result("d1") as { doc: string }).doc) as {
+      entries: Array<{ id: string }>;
+      nextAfter: string;
+    };
+    expect(first.entries).toHaveLength(10);
+    expect(first.nextAfter).toBe("110");
+    all.push({ id: "m30", cursor: "130", role: "user", text: "later", at: null, turnId: null });
+    await f.store.set(`${f.channel}/commands/d2`, f.historyCommand({ after: first.nextAfter, n: 50 }));
+    await f.bridge.tick();
+    const rest = page((f.result("d2") as { doc: string }).doc) as { entries: Array<{ id: string }>; nextAfter: null };
+    expect(rest.entries[0]!.id).toBe("111");
+    expect(rest.entries.at(-1)!.id).toBe("130");
+    expect(rest.nextAfter).toBeNull();
+    all.pop();
+  });
+
+  it("starts at the chat's first message when the cursor is older than all of it", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d1`, f.historyCommand({ after: "1", n: 5 }));
+    await f.bridge.tick();
+    const doc = page((f.result("d1") as { doc: string }).doc) as { entries: unknown[]; reset: boolean };
+    expect(doc.reset).toBe(false);
+    expect(doc.entries).toHaveLength(5);
+  });
+
+  it("refuses after from a phone that did not name the cap, with both cursors, or a bad cursor", async () => {
+    const old = withDelta(["split"]);
+    await old.caught();
+    await old.f.store.set(`${old.f.channel}/commands/d1`, old.f.historyCommand({ after: "110" }));
+    await old.f.bridge.tick();
+    expect(old.f.result("d1")).toMatchObject({ status: "refused" });
+    const { f, caught } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/d2`, f.historyCommand({ after: "110", before: "120" }));
+    await f.store.set(`${f.channel}/commands/d3`, f.historyCommand({ after: "11x" }));
+    await f.store.set(`${f.channel}/commands/d4`, f.historyCommand({ after: 110 }));
+    await f.bridge.tick();
+    for (const id of ["d2", "d3", "d4"]) {
+      expect(f.result(id)).toMatchObject({ status: "refused" });
+    }
+  });
+
+  it("still answers a plain history request for a phone with the cap, and offers delta only then", async () => {
+    const { f, caught, page } = withDelta(["histdelta"]);
+    await caught();
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand({}));
+    await f.bridge.tick();
+    expect(page((f.result("h1") as { doc: string }).doc)).toMatchObject({ complete: false });
+    const view = (g: typeof f) =>
+      open<{ sessions: Array<{ actions?: string[] }> }>(
+        g.payload.k,
+        g.store.docs.get(`${g.channel}/state/snapshot`)!.box,
+      );
+    expect(view(f).sessions[0]!.actions).toContain("delta");
+    const none = withDelta(null);
+    await none.caught();
+    expect(view(none.f).sessions[0]!.actions).not.toContain("delta");
   });
 });
 
@@ -2049,6 +2150,54 @@ describe("RemoteBridge snapshot", () => {
     }
   });
 
+  it("a busy minute of step changes with a phone looking publishes a handful of snapshots, not one per 3 s", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const f = fixture({
+        streaming: true,
+        activity: () => ({
+          total: n,
+          steps: [{ kind: "tool" as const, text: `step ${n}`, at: "2026-09-25T02:59:00.000Z" }],
+        }),
+      });
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const working = (at: number) =>
+        session({
+          state: "working",
+          lastActivityAt: new Date(Date.parse("2026-09-25T03:00:00.000Z") + at).toISOString(),
+        });
+      f.emit([working(0)]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      const snapshots = () => f.store.docs.get(`${f.channel}/state/snapshot`)?.box;
+      let writes = 0;
+      const set = f.store.set.bind(f.store);
+      vi.spyOn(f.store, "set").mockImplementation(async (key, value) => {
+        if (key.endsWith("/state/snapshot")) writes += 1;
+        return set(key, value);
+      });
+      // The phone pings every 20 s; a step lands every second for a minute.
+      for (let second = 1; second <= 60; second++) {
+        if (second % 20 === 1) {
+          await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: second }) });
+          await f.bridge.tick();
+        }
+        n = second;
+        f.advance(1_000);
+        f.emit([working(second * 1_000)]);
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      // Before: 14 writes in this minute (one per 3 s step nudge plus the pings' passes).
+      expect(snapshots()).toBeDefined();
+      expect(writes).toBeLessThanOrEqual(6);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a change only in the Recent list publishes promptly too", async () => {
     vi.useFakeTimers();
     try {
@@ -2149,8 +2298,8 @@ describe("RemoteBridge snapshot", () => {
       f.emit([session({ state: "finished" })]); // 350 ms after the last write
       await vi.advanceTimersByTimeAsync(400);
       expect(sets).not.toHaveBeenCalled();
-      f.advance(1_000);
-      await vi.advanceTimersByTimeAsync(1_000);
+      f.advance(1_500);
+      await vi.advanceTimersByTimeAsync(1_500);
       expect(sets).toHaveBeenCalledTimes(1);
       f.bridge.stop();
     } finally {
@@ -6382,5 +6531,102 @@ describe("RemoteBridge generic chats (add-on split)", () => {
       await f.bridge.tick();
       expect((f.result("t") as { tabs?: { kind: string } }).tabs?.kind).toBe(kind);
     }
+  });
+});
+
+describe("RemoteBridge pond threads (the open pond's whole list)", () => {
+  const pond = {
+    id: "proj-green",
+    name: "greenroom",
+    shared: false,
+    members: [],
+    projectId: "proj-green",
+    folder: "/repos/greenroom",
+    streams: [{ id: "w-hk", name: "Hong Kong", branch: "hong-kong" }],
+  };
+  const native = {
+    projects: () => [],
+    models: () => [],
+    allowBypass: () => false,
+    ponds: async () => [pond],
+  } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+  const at = (days: number) => new Date(NOW - days * 86_400_000).toISOString();
+  const native1 = (id: string, over: Partial<FleetSession>) =>
+    session({
+      key: `squeak-native:${id}`,
+      sourceId: id,
+      conductorSessionId: null,
+      origin: "squeak",
+      projectId: "proj-green",
+      ...over,
+    });
+  const threads = [
+    // 15 older threads in the Hong Kong stream, one in Main, one archived, one in another pond.
+    ...Array.from({ length: 15 }, (_, i) =>
+      native1(`hk${i}`, {
+        cwd: "/repos/greenroom/.ws/hk",
+        branch: "hong-kong",
+        title: `HK ${i}`,
+        lastActivityAt: at(3 + i),
+      }),
+    ),
+    native1("main1", { cwd: "/repos/greenroom", branch: "main", title: "Main thread", lastActivityAt: at(40) }),
+    native1("gone", {
+      cwd: "/repos/greenroom/.ws/hk",
+      branch: "hong-kong",
+      title: "Archived",
+      archivedAt: at(1),
+      lastActivityAt: at(1),
+    }),
+    native1("other", { projectId: "proj-other", cwd: "/repos/other", title: "Elsewhere", lastActivityAt: at(2) }),
+  ];
+  const presence = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...extra }) });
+  const read = async (f: ReturnType<typeof fixture>) => {
+    const doc = await f.store.get(`${f.channel}/live/${pondThreadsDoc("proj-green")}`);
+    return doc ? (open(f.payload.k, doc.box as string) as PondThreadsDoc) : null;
+  };
+  const make = async () => {
+    const f = fixture({ native, streaming: true });
+    f.emit(threads, threads);
+    await f.pair();
+    return f;
+  };
+
+  it("publishes every non-archived thread, Main first, streams then threads newest first, only while open", async () => {
+    const f = await make();
+    await presence(f, { caps: ["ponds2", "pondthreads"] });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+
+    await presence(f, { caps: ["ponds2", "pondthreads"], pond: "proj-green" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const doc = await read(f);
+    expect(doc?.total).toBe(16);
+    expect(doc?.streams.map((s) => [s.name, s.main ?? false, s.threads.length])).toEqual([
+      ["Main", true, 1],
+      ["Hong Kong", false, 15],
+    ]);
+    const hk = doc!.streams[1]!.threads;
+    expect(hk[0]!.title).toBe("HK 0");
+    expect(hk.map((t) => t.at)).toEqual([...hk.map((t) => t.at)].sort().reverse());
+    expect(JSON.stringify(doc)).not.toContain("Archived");
+    expect(Object.keys(hk[0]!).sort()).toEqual(["at", "key", "state", "title"]);
+
+    // The phone leaves the pond: the document goes.
+    await presence(f, { caps: ["ponds2", "pondthreads"] });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+
+  it("publishes nothing for a phone that does not name pondthreads", async () => {
+    const f = await make();
+    await presence(f, { caps: ["ponds2"], pond: "proj-green" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
   });
 });

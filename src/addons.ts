@@ -1,8 +1,6 @@
 import type { LiveAgentProcess } from "./fleet/observers/process-liveness.js";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { SqueakAgentAdapter } from "./core/adapter.js";
-import type { FleetObservation } from "./core/adapters/fleet-ports.js";
 import type { Answerer } from "./fleet/answer-command.js";
 import type { AnswerHost } from "./fleet/answer.js";
 import type { BackgroundTask } from "./fleet/background-work.js";
@@ -27,7 +25,7 @@ import { logger } from "./utils/logger.js";
  *    one self-contained bundle) beside the daemon, or run from source with tsx.
  *  - A `distributed` add-on ships in every build and is loaded at every start, inert until the owner enables it
  *    (`addons.json` in the support dir, `GET/POST /control/addons`). Any other add-on is for development: it loads
- *    only when `SQUEAK_ADDONS=name,name` names it (`SQUEAK_CONDUCTOR_RELAY=on` is an alias for `conductor-relay`).
+ *    only when `SQUEAK_ADDONS=name,name` names it.
  *  - A manifest's `requires` names add-ons that must be loaded and enabled for it to activate this run.
  *  - A missing, unreadable or throwing add-on is logged and skipped; startup never fails for one.
  */
@@ -278,11 +276,6 @@ export interface AddonHandle {
   phoneMedia?: AddonPhoneMedia;
   /** An app the phone's Mac controls page can show the tabs of. */
   frontApp?: FrontAppHost;
-  /** Core adapters (src/core) for the sessions this add-on's host runs. */
-  coreAdapters?(deps: {
-    observe: FleetObservation;
-    send: (target: string, text: string, onFailed: ReplyFailureHandler) => Promise<ReplyOutcome>;
-  }): SqueakAgentAdapter[];
   cli?: AddonCommand[];
   uninstall?: AddonUninstallStep;
   /** Called once the daemon is up (after every add-on is loaded and the app is built). */
@@ -300,13 +293,12 @@ export interface Addon {
 
 const ADDON_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** Names asked for in `SQUEAK_ADDONS` (comma separated) plus the older `SQUEAK_CONDUCTOR_RELAY=on` alias. */
+/** Names asked for in `SQUEAK_ADDONS` (comma separated). */
 export function requestedAddons(env: NodeJS.ProcessEnv = process.env): string[] {
   const names = (env.SQUEAK_ADDONS ?? "")
     .split(",")
     .map((name) => name.trim().toLowerCase())
     .filter((name) => ADDON_NAME.test(name));
-  if (env.SQUEAK_CONDUCTOR_RELAY?.trim().toLowerCase() === "on") names.push("conductor-relay");
   return [...new Set(names)];
 }
 

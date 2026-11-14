@@ -38,15 +38,12 @@ import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { PhoneImageResult } from "./phone-image.js";
 import {
-  SHARED_ACTIVE_POLL_MS,
-  SHARED_ACTIVE_PUBLISH_MS,
-  SHARED_BOX_MAX_CHARS,
-  SHARED_CHANGE_PUBLISH_MIN_GAP_MS,
-  SHARED_IDLE_POLL_MS,
-  SHARED_IDLE_PUBLISH_MS,
-  SHARED_RECENT_MIN_GAP_MS,
-  type CloudBudget,
-} from "./shared-limits.js";
+  HISTORY_DELTA_ACTION,
+  HISTORY_DELTA_CAP,
+  HISTORY_DELTA_PAGE_MAX,
+  historyDeltaDoc,
+  readHistoryAfter,
+} from "./history-delta.js";
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
@@ -87,6 +84,7 @@ import {
   liveHistoryHandle,
   LiveTurnPublisher,
 } from "./live-turn.js";
+import { buildPondThreads, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
 import {
@@ -404,6 +402,8 @@ export interface MediaCommand {
 }
 
 /** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
+/** Own-account devices added without a code per minute; the relay holds the same limit per account. */
+const AUTO_ADD_PER_MINUTE = 5;
 const PONDS_REFRESH_MS = 30_000;
 const NATIVE_ICONS_REFRESH_MS = 60_000;
 const PHONE_PONDS_MAX = 30;
@@ -500,6 +500,11 @@ export interface HistoryCommand {
   key: string;
   /** A cursor from an earlier page (`nextBefore`, or an entry's `id`): digits only. Absent: the newest page. */
   before?: string;
+  /**
+   * History cache: instead of `before`, the cursor of the newest message the phone holds; the Mac answers with what
+   * came after it (history-delta.ts). Only for a phone whose caps name `histdelta`. Digits only.
+   */
+  after?: string;
   /** Entries wanted, 1 to HISTORY_PAGE_MAX; more is clamped. */
   n?: number;
   nonce: string;
@@ -726,6 +731,8 @@ export interface ChannelStore {
     onChange: () => void,
     options?: { onOpen?: () => void; onError?: (error: Error) => void },
   ): () => void;
+  /** Whether the stream is up and subscribed; then the bridge's safety pass stretches to 5 min. */
+  streamHealthy?(): boolean;
 }
 
 export interface RemoteReplier {
@@ -870,7 +877,7 @@ export interface RemoteBridgeDependencies {
   } | null;
   /**
    * The saved Claude accounts (fleet/claude-accounts.ts). `state()` is null unless this Mac can switch; it never
-   * carries a token. Absent or null: phones hide the section, and a switch is refused. Never on the shared server.
+   * carries a token. Absent or null: phones hide the section, and a switch is refused.
    */
   claudeAccounts?: {
     state(): unknown;
@@ -986,11 +993,6 @@ export interface RemoteBridgeDependencies {
   liveActivity?: ((session: FleetSession, limit: number, stepChars: number) => Activity | null) | null;
   verbose?: boolean;
   /**
-   * The shared server (SQUEAK_REMOTE_SHARED, shared-limits.ts): slower poll and publish, `recent` rarely and
-   * trimmed, no live turns or films, and cloud traffic stops while `budget` is exceeded (the direct path goes on).
-   */
-  shared?: { budget: CloudBudget } | null;
-  /**
    * One subagent's steps (fleet/subagent-activity.ts) for the phone's subagent feed; null when the session has
    * no such task. Same gates as `liveActivity`. Absent: the `subagent` command is refused.
    */
@@ -1042,11 +1044,20 @@ const IDLE_PUBLISH_MS = 60_000;
 /** A change publishes after this long, so a burst of snapshots becomes one write. */
 const CHANGE_PUBLISH_DELAY_MS = 300;
 /** Even change-driven publishes keep this gap, to bound Firestore writes. */
-const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
+const CHANGE_PUBLISH_MIN_GAP_MS = 1_500;
+/**
+ * A working chat's newest steps ride in the whole view, so each one used to re-seal and rewrite it (about one write per
+ * 3 s per working chat while a phone looks). A step-only change now waits this long and coalesces into one trailing
+ * write; the chat the phone has open gets every step through its own live/turn document, and a state change (working to
+ * done, a question) still publishes on the 300 ms path.
+ */
+const STEP_PUBLISH_MS = 10_000;
 /** Waits before retrying a failed change publish; after these the 60 s pass is the retry. */
 const PUBLISH_RETRY_MS = [5_000, 15_000];
 /** With a streaming store a pass runs on every change; this is only the safety net. */
 const STREAM_FALLBACK_MS = 60_000;
+/** The same safety net while the store says its stream is up and subscribed: a drop wakes a pass at once. */
+const HEALTHY_STREAM_FALLBACK_MS = 5 * 60_000;
 /** A burst of changes (a command, then its deletion) becomes one pass. */
 const WATCH_DEBOUNCE_MS = 50;
 /**
@@ -1147,6 +1158,8 @@ export class RemoteBridge {
   /** The last presence answered with `state/alive`, by the phone's own stamp, and when. */
   private answeredPresence = 0;
   private aliveWrittenAt = 0;
+  /** When own-account devices were last added without a code (`AUTO_ADD_PER_MINUTE`). */
+  private autoAddTimes: number[] = [];
   private lastPublishedAt = 0;
   private lastPublished = "";
   private timer: NodeJS.Timeout | null = null;
@@ -1160,6 +1173,10 @@ export class RemoteBridge {
   private announcedFor = "";
   /** The session the phone's last presence said it is watching in verbose mode. */
   private presenceWatching: string | null = null;
+  /** The pond whose thread list is published for the phone (`pond-threads.ts`), with what was last written. */
+  private pondThreadsOut: { pond: string; last: string } | null = null;
+  /** The keys in that list: chats a phone may open from it though they are not active or Recent. */
+  private pondThreadKeys = new Set<string>();
   /** How many recent chats the phone asked for ("Show more"); a view preference, not a command. */
   private recentWanted = PHONE_RECENT_LIMIT;
   private readonly attachments = new PhoneAttachments();
@@ -1176,8 +1193,6 @@ export class RemoteBridge {
   /** The counter every published document carries as `seq`, so a phone keeps only the newest. */
   private seq = 0;
   private lastRecentPublished = "";
-  private lastRecentWrittenAt = 0;
-  private budgetPaused = false;
   /** A history document may exist, so clearing the live turn deletes it too. */
   private historyWritten = false;
   private changeTimer: NodeJS.Timeout | null = null;
@@ -1190,7 +1205,7 @@ export class RemoteBridge {
     this.config = readConfig(deps.configPath);
     // Verbose needs the Realtime Database: a write a second is what it is
     // cheap at, and Firestore's rules have no `live` collection.
-    const liveActivity = deps.store.watch && !deps.shared ? deps.liveActivity : null;
+    const liveActivity = deps.store.watch ? deps.liveActivity : null;
     this.live = liveActivity
       ? new LiveTurnPublisher({
           read: (key) => {
@@ -1255,7 +1270,7 @@ export class RemoteBridge {
           },
         })
       : null;
-    const subagentActivity = deps.store.watch && !deps.shared ? deps.subagentActivity : null;
+    const subagentActivity = deps.store.watch ? deps.subagentActivity : null;
     this.subagentFeed = subagentActivity
       ? new SubagentFeedPublisher({
           read: (key, taskId) => {
@@ -1307,7 +1322,7 @@ export class RemoteBridge {
         if (changed) {
           this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
         } else if (stepped && this.phoneOpen()) {
-          this.nudgePublish(this.activePublishMs());
+          this.nudgePublish(Math.max(STEP_PUBLISH_MS, ACTIVE_PUBLISH_MS));
         }
       }) ?? null;
   }
@@ -1343,10 +1358,7 @@ export class RemoteBridge {
     if (this.stopped || !config || !config.devices.some((device) => !device.revokedAt)) {
       return;
     }
-    const wait =
-      this.lastPublishedAt +
-      (this.deps.shared ? SHARED_CHANGE_PUBLISH_MIN_GAP_MS : CHANGE_PUBLISH_MIN_GAP_MS) -
-      this.now();
+    const wait = this.lastPublishedAt + CHANGE_PUBLISH_MIN_GAP_MS - this.now();
     if (wait > 0 || this.publishing) {
       this.nudgePublish(Math.max(wait, CHANGE_PUBLISH_DELAY_MS));
       return;
@@ -1365,28 +1377,6 @@ export class RemoteBridge {
       if (retry !== undefined) {
         this.nudgePublish(retry);
       }
-    }
-  }
-
-  private activePublishMs(): number {
-    return this.deps.shared ? SHARED_ACTIVE_PUBLISH_MS : ACTIVE_PUBLISH_MS;
-  }
-
-  /**
-   * Shared server: after the day's budget ran out nothing reaches the cloud (the store skips it), so what the
-   * bridge thinks it published is not there. When the budget is back, forget it, so the next pass writes again.
-   */
-  private watchBudget(): void {
-    const budget = this.deps.shared?.budget;
-    if (!budget) {
-      return;
-    }
-    if (budget.exceeded()) {
-      this.budgetPaused = true;
-    } else if (this.budgetPaused) {
-      this.budgetPaused = false;
-      this.lastPublished = "";
-      this.lastRecentPublished = "";
     }
   }
 
@@ -1411,6 +1401,7 @@ export class RemoteBridge {
     this.avatarTimer = null;
     this.live?.stop();
     this.subagentFeed?.stop();
+    this.dropPondThreads(this.config);
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -1467,14 +1458,6 @@ export class RemoteBridge {
       })),
       ...(config?.account ? { account: { email: config.account.email } } : {}),
       activity: this.activity.slice(-20).reverse(),
-      ...(this.deps.shared
-        ? {
-            shared: true,
-            usedBytes: this.deps.shared.budget.usedBytes,
-            budgetBytes: this.deps.shared.budget.budgetBytes,
-            pausedUntil: this.deps.shared.budget.pausedUntil,
-          }
-        : {}),
     };
   }
 
@@ -1555,6 +1538,12 @@ export class RemoteBridge {
    * adding my own devices"): the exact approve path, then told at once (activity, Telegram/Cliq) so it can be revoked.
    */
   private async autoAddOwnDevice(config: RemoteConfig, request: PendingPairing): Promise<void> {
+    // A second wall behind the relay's per-account limit: a stolen token cannot add more than a few keys a minute. A
+    // request over the cap stays on the relay (it expires in 10 min) and is looked at again on a later pass.
+    const now = this.now();
+    this.autoAddTimes = this.autoAddTimes.filter((at) => now - at < 60_000 && at <= now);
+    if (this.autoAddTimes.length >= AUTO_ADD_PER_MINUTE) return;
+    this.autoAddTimes.push(now);
     this.pending.set(request.id, request);
     await this.approve(request.id);
     const device = config.devices.find((d) => d.id === request.id);
@@ -1603,6 +1592,7 @@ export class RemoteBridge {
     // Before the config goes, so the live document can still be deleted.
     this.live?.stop();
     this.subagentFeed?.stop();
+    this.dropPondThreads(this.config);
     // The old channel id must not stay linked on the relay.
     if (this.config?.account)
       void this.accountRelay()
@@ -1644,11 +1634,13 @@ export class RemoteBridge {
     try {
       const config = this.config;
       this.ensureWatches();
-      this.watchBudget();
       if (config) {
         await this.announceTransport(config);
         await this.readPresence(config);
         this.updateLive();
+        await this.updatePondThreads(config).catch((error: unknown) =>
+          logger.debug("pond threads failed", { error: error instanceof Error ? error.message : String(error) }),
+        );
         if (this.pairingOpenUntil > this.now()) {
           // The cloud being out of reach must not stop commands arriving on the direct path.
           await this.readPairing(config).catch((error: unknown) =>
@@ -1681,18 +1673,10 @@ export class RemoteBridge {
         this.dirty = false;
         this.schedule(0);
       } else if (this.watching) {
-        this.schedule(STREAM_FALLBACK_MS);
+        this.schedule(this.deps.store.streamHealthy?.() ? HEALTHY_STREAM_FALLBACK_MS : STREAM_FALLBACK_MS);
       } else {
         const active = this.phoneOpen() || this.pairingOpenUntil > this.now();
-        this.schedule(
-          this.deps.shared
-            ? active
-              ? SHARED_ACTIVE_POLL_MS
-              : SHARED_IDLE_POLL_MS
-            : active
-              ? ACTIVE_POLL_MS
-              : IDLE_POLL_MS,
-        );
+        this.schedule(active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
       }
     }
   }
@@ -1707,7 +1691,6 @@ export class RemoteBridge {
   private updateLive(): void {
     const key = this.presenceWatching;
     const allowed =
-      !this.deps.shared &&
       this.deps.verbose !== false &&
       key !== null &&
       this.phoneOpen() &&
@@ -1733,7 +1716,66 @@ export class RemoteBridge {
     }
     const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     const session = recent.find((candidate) => candidate.key === key);
-    return session && this.handleOf(session) ? { session, active: false } : null;
+    if (session && this.handleOf(session)) return { session, active: false };
+    // An older thread listed on the pond page the phone has open: opened like a Recent chat (history and queue).
+    if (this.pondThreadKeys.has(key)) {
+      const listed = snapshot.sessions.find((candidate) => candidate.key === key);
+      if (listed && this.handleOf(listed)) return { session: listed, active: false };
+    }
+    return null;
+  }
+
+  /**
+   * A pond's whole thread list, only while a phone that reads it has that pond open and this Mac knows the pond:
+   * written when it changes, deleted the moment the phone leaves, closes, or the Mac stops.
+   */
+  private async updatePondThreads(config: RemoteConfig): Promise<void> {
+    const pondId = this.presencePond;
+    const pond = pondId ? this.pondsCache.value?.find((candidate) => candidate.id === pondId) : undefined;
+    const allowed =
+      Boolean(this.deps.store.watch) &&
+      pond !== undefined &&
+      this.phoneCaps.includes(PHONE_POND_THREADS_CAP) &&
+      this.phoneOpen() &&
+      this.hasPairedPhone();
+    const out = this.pondThreadsOut;
+    if (!allowed || !pond) {
+      // The document goes at once; the keys stay while the phone is open, since opening a thread from the page
+      // leaves the pond page (an older thread opens through history, which needs its key to be known).
+      if (!this.phoneOpen()) this.pondThreadKeys = new Set();
+      if (out) {
+        this.pondThreadsOut = null;
+        await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
+      }
+      return;
+    }
+    if (out && out.pond !== pond.id) {
+      await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
+    }
+    const doc = buildPondThreads(
+      pond,
+      this.deps.snapshot().sessions,
+      (session) => this.pondOf(session)?.id === pond.id,
+      (session) => chatTitle(session) ?? sessionLabel(session),
+      (session) => isUnclaimedHeadless(session),
+    );
+    this.pondThreadKeys = new Set(doc.streams.flatMap((stream) => stream.threads.map((thread) => thread.key)));
+    const body = JSON.stringify(doc);
+    if (out?.pond === pond.id && out.last === body) return;
+    this.pondThreadsOut = { pond: pond.id, last: body };
+    await this.deps.store.set(this.channel(config, "live", pondThreadsDoc(pond.id)), {
+      box: this.sealForPhone(config, { ...doc, seq: this.nextSeq() }),
+      at: this.now(),
+    });
+  }
+
+  /** Delete a published pond thread list (stop, reset); best effort. */
+  private dropPondThreads(config: RemoteConfig | null): void {
+    const out = this.pondThreadsOut;
+    this.pondThreadsOut = null;
+    this.pondThreadKeys = new Set();
+    if (out && config)
+      void this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond))).catch(() => undefined);
   }
 
   /* ---------- streaming (Realtime Database) ---------- */
@@ -1750,7 +1792,11 @@ export class RemoteBridge {
       return;
     }
     this.stopWatches();
-    const onError = (error: Error) => logger.debug("remote watch dropped; reconnecting", { error: error.message });
+    const onError = (error: Error) => {
+      logger.debug("remote watch dropped; reconnecting", { error: error.message });
+      // The safety pass may be minutes away while the stream was healthy: run one now, and it re-arms the 60 s net.
+      this.wake();
+    };
     this.watching = {
       channelId: config.channelId,
       stops: [
@@ -1772,7 +1818,7 @@ export class RemoteBridge {
   /** At most every 30 s, and never longer than 3 s: a down host or Ponds off leaves the fields absent. */
   private async refreshPonds(): Promise<void> {
     const native = this.deps.native;
-    if (!native?.ponds || this.deps.shared || this.now() - this.pondsCache.at < PONDS_REFRESH_MS) return;
+    if (!native?.ponds || this.now() - this.pondsCache.at < PONDS_REFRESH_MS) return;
     this.pondsCache.at = this.now();
     try {
       const value = await Promise.race([
@@ -1803,7 +1849,7 @@ export class RemoteBridge {
   /** Squeak's own project icons: at most every 60 s, never longer than 3 s; a failure keeps the last good set. */
   private async refreshNativeIcons(): Promise<void> {
     const native = this.deps.native;
-    if (!native?.projectIcons || this.deps.shared || this.now() - this.nativeIconsCache.at < NATIVE_ICONS_REFRESH_MS) {
+    if (!native?.projectIcons || this.now() - this.nativeIconsCache.at < NATIVE_ICONS_REFRESH_MS) {
       return;
     }
     this.nativeIconsCache.at = this.now();
@@ -1822,7 +1868,7 @@ export class RemoteBridge {
   private async refreshPondDetail(force = false): Promise<void> {
     const native = this.deps.native;
     const id = this.presencePond;
-    if (!native?.pondDetail || this.deps.shared || !id || !this.phoneCaps.includes(PHONE_PONDS2_CAP)) {
+    if (!native?.pondDetail || !id || !this.phoneCaps.includes(PHONE_PONDS2_CAP)) {
       this.pondDetailCache = null;
       return;
     }
@@ -2020,7 +2066,7 @@ export class RemoteBridge {
         this.nudgePublish(0);
       }
       const caps = Array.isArray(presence.caps)
-        ? presence.caps.filter((cap): cap is string => typeof cap === "string" && cap.length <= 20).slice(0, 10)
+        ? presence.caps.filter((cap): cap is string => typeof cap === "string" && cap.length <= 20).slice(0, 16)
         : [];
       if (caps.join(",") !== this.phoneCaps.join(",")) {
         // A phone that reads more (or an older one that reads less) is in front now: write everything again in its format.
@@ -3047,7 +3093,7 @@ export class RemoteBridge {
     }
     const native = this.deps.native;
     const ponds = this.pondsCache.value;
-    if (!native || !ponds || this.deps.shared) return refuse("This Mac can't change ponds from a phone.");
+    if (!native || !ponds) return refuse("This Mac can't change ponds from a phone.");
     // One id space: the directory id (a project's id, or a joined pond's own).
     const key = (pond: PhonePond): string => pond.id;
     try {
@@ -3269,7 +3315,7 @@ export class RemoteBridge {
       return refuse("Not a request this Mac understands.");
     }
     const read = this.deps.replier.workBetween;
-    if (!read || this.deps.shared || this.deps.verbose === false) {
+    if (!read || this.deps.verbose === false) {
       return refuse("This Mac isn't showing a chat's steps on a phone.");
     }
     if (!this.shownSession(command.sessionId)) {
@@ -3313,6 +3359,18 @@ export class RemoteBridge {
     const before = parseCursor(command.before);
     if (before === "invalid") {
       return refuse("Not a request this Mac understands.");
+    }
+    if (command.after !== undefined) {
+      const after = typeof command.after === "string" ? parseCursor(command.after) : "invalid";
+      if (
+        typeof after !== "number" ||
+        command.before !== undefined ||
+        !this.phoneCaps.includes(HISTORY_DELTA_CAP) ||
+        (command.n !== undefined && (typeof command.n !== "number" || !Number.isFinite(command.n)))
+      ) {
+        return refuse("Not a request this Mac understands.");
+      }
+      return this.handleHistoryAfter(config, device, id, command.key, command.after, after, command.n, now);
     }
     if (command.n !== undefined && (typeof command.n !== "number" || !Number.isFinite(command.n))) {
       return refuse("Not a request this Mac understands.");
@@ -3358,6 +3416,68 @@ export class RemoteBridge {
       return refuse("This Mac couldn't read that chat.");
     } finally {
       this.historyBusy.delete(command.key);
+    }
+  }
+
+  /**
+   * The delta of the history cache: what came after the cursor the phone holds, in `live/<handle>-ha<cursor>`.
+   * Same guards as `handleHistory` (a chat the phone is shown, from the Mac's own snapshot; one read at a time).
+   */
+  private async handleHistoryAfter(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    key: string,
+    afterRaw: string,
+    after: number,
+    n: number | undefined,
+    now: number,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `history delta: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const read = this.deps.replier.transcript;
+    if (!read || !this.deps.store.watch) {
+      return refuse("This Mac can't send earlier messages to a phone.");
+    }
+    const watched = this.watchableSession(key)?.session;
+    const handle = watched ? this.hostHandle(watched) : null;
+    if (!handle) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (this.historyBusy.has(key)) {
+      return refuse("Still reading this chat's messages. Try again in a moment.");
+    }
+    this.historyBusy.add(key);
+    try {
+      const delta = readHistoryAfter(
+        (limit, before) => read.call(this.deps.replier, handle, limit, before),
+        after,
+        n ?? HISTORY_DELTA_PAGE_MAX,
+      );
+      const doc = historyDeltaDoc(key, afterRaw);
+      const path = this.channel(config, "live", doc);
+      await this.deps.store.set(path, {
+        box: this.sealForPhone(config, {
+          v: 1,
+          key,
+          after: afterRaw,
+          entries: delta.entries,
+          nextAfter: delta.nextAfter,
+          reset: delta.reset,
+          seq: this.nextSeq(),
+        }),
+        at: this.now(),
+      });
+      this.rememberMedia([path], now + MEDIA_TTL_MS);
+      this.log(device.name, "sent", `new messages of ${handle.slice(0, 8)}`);
+      return { write: true, result: { id, status: "sent", doc } };
+    } catch (error) {
+      logger.warn("history delta failed", { error: error instanceof Error ? error.message : String(error) });
+      return refuse("This Mac couldn't read that chat.");
+    } finally {
+      this.historyBusy.delete(key);
     }
   }
 
@@ -3582,9 +3702,6 @@ export class RemoteBridge {
     ) {
       return refuse("Not a request this Mac understands.");
     }
-    if (this.deps.shared) {
-      return refuse("The shared server doesn't carry films.");
-    }
     if (!this.deps.store.watch) {
       return refuse("This Mac can't send films to a phone.");
     }
@@ -3692,7 +3809,7 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "refused", reason } };
     };
     const voice = this.deps.voice;
-    if (!voice?.preview || !this.deps.store.watch || this.deps.shared || command.v !== 1) {
+    if (!voice?.preview || !this.deps.store.watch || command.v !== 1) {
       return refuse("This Mac can't send a voice sample to a phone.", "not available");
     }
     // `engine` is optional (an older phone sends none): the sample is of that engine, else of the current one.
@@ -3896,7 +4013,10 @@ export class RemoteBridge {
       }
       if (replier.queue && replier.queueAction) actions.push("queue");
       actions.push("photos");
-      if (replier.transcript && this.deps.store.watch) actions.push("earlier");
+      if (replier.transcript && this.deps.store.watch) {
+        actions.push("earlier");
+        if (this.phoneCaps.includes(HISTORY_DELTA_CAP)) actions.push(HISTORY_DELTA_ACTION);
+      }
     }
     // Archive hides a chat in Squeak only; a working or waiting one is refused by the daemon, so it is not offered.
     if (
@@ -4081,8 +4201,8 @@ export class RemoteBridge {
   /**
    * Switch the Claude account: `{ v: 1, kind: "claudeAccount", use: name, nonce, expiresAt }`, exactly these keys.
    * Signature, freshness and nonce have already held; the name is checked against the saved list again in
-   * fleet/claude-accounts.ts, and it ends in the same function as the Mac app's route. Refused on the shared
-   * server. The result names the account now in use; a refusal is one of the switcher's fixed sentences.
+   * fleet/claude-accounts.ts, and it ends in the same function as the Mac app's route.
+   * The result names the account now in use; a refusal is one of the switcher's fixed sentences.
    */
   private async handleClaudeAccount(
     device: PairedDevice,
@@ -4094,7 +4214,7 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "refused", reason } };
     };
     const accounts = this.deps.claudeAccounts;
-    if (!accounts || this.deps.shared || command.v !== 1 || accounts.state() === null) {
+    if (!accounts || command.v !== 1 || accounts.state() === null) {
       return refuse("This Mac can't switch Claude accounts from a phone.", "not available");
     }
     const keys = Object.keys(command).sort().join(",");
@@ -4406,6 +4526,9 @@ export class RemoteBridge {
     if (value) account.askOwnDevices = true;
     else delete account.askOwnDevices;
     this.save();
+    void this.accountRelay()
+      ?.setAsk?.(value)
+      .catch(() => undefined);
     return { ok: true };
   }
 
@@ -4688,7 +4811,7 @@ export class RemoteBridge {
   }
 
   private claudeAccountsView(): { claudeAccounts?: unknown } {
-    if (this.deps.shared || !this.deps.claudeAccounts) return {};
+    if (!this.deps.claudeAccounts) return {};
     const state = this.deps.claudeAccounts.state();
     return state ? { claudeAccounts: state } : {};
   }
@@ -4749,11 +4872,7 @@ export class RemoteBridge {
 
   /** The phone's whole view, encrypted. Written only when it changed. */
   private async publish(config: RemoteConfig, force = false): Promise<void> {
-    const interval = this.phoneOpen()
-      ? this.activePublishMs()
-      : this.deps.shared
-        ? SHARED_IDLE_PUBLISH_MS
-        : IDLE_PUBLISH_MS;
+    const interval = this.phoneOpen() ? ACTIVE_PUBLISH_MS : IDLE_PUBLISH_MS;
     if (this.publishing || (!force && this.now() - this.lastPublishedAt < interval)) {
       return;
     }
@@ -4813,8 +4932,7 @@ export class RemoteBridge {
       // The recent list and the workspaces change rarely and are most of the
       // view's size, so a phone that reads them apart gets them only when
       // they change. Written first, so the view never names a list not there.
-      const recentDue = !this.deps.shared || this.now() - this.lastRecentWrittenAt >= SHARED_RECENT_MIN_GAP_MS;
-      if (kind + lists !== this.lastRecentPublished && recentDue) {
+      if (kind + lists !== this.lastRecentPublished) {
         const box = this.sealTrimmed(
           config,
           (keep) => ({
@@ -4832,7 +4950,6 @@ export class RemoteBridge {
         await this.deps.store.set(this.channel(config, "state", "recent"), { box, at: this.now() });
         logger.debug("remote recent published", { bytes: box.length });
         this.lastRecentPublished = kind + lists;
-        this.lastRecentWrittenAt = this.now();
       }
     } else {
       this.lastRecentPublished = "";
@@ -4883,20 +5000,10 @@ export class RemoteBridge {
   }
 
   /**
-   * Seals a document, and on the shared server drops the oldest recent chats (the list is newest first) until the
-   * box is under SHARED_BOX_MAX_CHARS. Elsewhere it is one plain seal.
+   * Seals a document built for the whole list of `total` recent chats.
    */
   private sealTrimmed(config: RemoteConfig, build: (keep: number) => unknown, total: number): string {
-    let keep = total;
-    let box = this.sealForPhone(config, build(keep));
-    if (!this.deps.shared) {
-      return box;
-    }
-    while (box.length >= SHARED_BOX_MAX_CHARS && keep > 0) {
-      keep = Math.floor(keep * 0.8);
-      box = this.sealForPhone(config, build(keep));
-    }
-    return box;
+    return this.sealForPhone(config, build(total));
   }
 
   private sealForPhone(config: RemoteConfig, value: unknown): string {
@@ -4953,7 +5060,7 @@ export class RemoteBridge {
       ...(this.deps.addons ? { addons: this.deps.addons() } : {}),
       // What an unlabelled reply to a working chat does: queue or steer. Absent on an older Mac.
       ...(this.deps.sendDefault ? { sendDefault: this.deps.sendDefault.state() } : {}),
-      // Saved Claude accounts (claude-swap), only when this Mac can switch and is not the shared server.
+      // Saved Claude accounts (claude-swap), only when this Mac can switch .
       ...this.claudeAccountsView(),
       // The shared new chat presets (what a person changed; absent keys mean the built-in rule). Absent on an older Mac.
       ...(this.deps.presets ? { presets: this.deps.presets.state() } : {}),
@@ -4969,9 +5076,7 @@ export class RemoteBridge {
       ...(this.deps.stats ? { usageStats: true } : {}),
       // The steps behind a "Worked" row can be read on demand (`work` command). Absent on an older Mac, and when
       // verbose is off here: rows stay plain.
-      ...(this.deps.replier.workBetween && !this.deps.shared && this.deps.verbose !== false
-        ? { workSteps: true as const }
-        : {}),
+      ...(this.deps.replier.workBetween && this.deps.verbose !== false ? { workSteps: true as const } : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.
       ...(this.deps.controls ? { macControls: this.deps.controls.state() } : {}),
       // Where this Mac listens on the local network, for the direct path; absent when it does not.
@@ -5041,7 +5146,7 @@ export class RemoteBridge {
 
   /** `natural.sample: true` when a phone may ask for a voice sample (Realtime Database, own server, a preview here). */
   private withSampleOffer(voice: NonNullable<RemoteBridgeDependencies["voice"]>, state: unknown): unknown {
-    if (!voice.preview || !this.deps.store.watch || this.deps.shared) return state;
+    if (!voice.preview || !this.deps.store.watch) return state;
     if (typeof state !== "object" || state === null) return state;
     const natural = (state as { natural?: unknown }).natural;
     if (typeof natural !== "object" || natural === null) return state;

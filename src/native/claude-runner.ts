@@ -1,8 +1,10 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
+import { terminateProcess, trackAgentProcess, untrackAgentProcess } from "./agent-procs.js";
 import { loadAgentSdk } from "./agent-sdk.js";
 import { ApiWaitTracker, STALL_DETAIL, stallMsFromEnv } from "./api-wait.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
@@ -147,6 +149,8 @@ export class ClaudeRunner implements Runner {
   private turnActive = false;
   private interrupting = false;
   private closed = false;
+  /** The `claude` process this runner spawned itself (real SDK only), so close() can make sure it is gone. */
+  private child: ChildProcess | null = null;
   private mode: string;
   private model: string;
   private effort: string | null;
@@ -219,6 +223,8 @@ export class ClaudeRunner implements Runner {
     // Without this the SDK sends thinking as an empty block with a signature, and the transcript has nothing to show.
     options.thinking = { type: "adaptive", display: "summarized" };
     options.pathToClaudeCodeExecutable = executable;
+    // Our own spawn (what the SDK does locally) so the pid is known: close() ends it, a dead host's is reaped.
+    if (!this.options.queryFn) options.spawnClaudeCodeProcess = (o: SpawnArgs) => this.spawnAgent(o);
     if (this.options.contextNote) {
       options.systemPrompt = { type: "preset", preset: "claude_code", append: this.options.contextNote };
     }
@@ -769,6 +775,12 @@ export class ClaudeRunner implements Runner {
     if (cliModel && this.query.setModel) await this.query.setModel(cliModel);
   }
 
+  private spawnAgent(o: SpawnArgs): ChildProcess {
+    const child = spawnClaudeProcess(o);
+    this.child = child;
+    return child;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     if (this.waitTimer) clearInterval(this.waitTimer);
@@ -780,5 +792,57 @@ export class ClaudeRunner implements Runner {
     this.query?.close();
     this.query = null;
     this.input = null;
+    const child = this.child;
+    this.child = null;
+    // query.close() asks politely; a CLI that does not leave is ended here (SIGTERM, then SIGKILL after a grace).
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      await terminateProcess(child.pid, 3000, undefined, `claude ${child.pid}`);
+    }
   }
+}
+
+/** How much of the CLI's stderr is kept (its last part) to be logged when it fails. */
+export const STDERR_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Starts the `claude` CLI the way the SDK does locally, with its pid tracked. Its stderr is read, never ignored (a failed
+ * start would say nothing), into a bounded buffer that is logged when the process exits non-zero or cannot be spawned.
+ */
+export function spawnClaudeProcess(o: SpawnArgs): ChildProcess {
+  const child = spawn(o.command, o.args, {
+    cwd: o.cwd,
+    env: o.env as NodeJS.ProcessEnv,
+    stdio: ["pipe", "pipe", "pipe"],
+    signal: o.signal,
+    windowsHide: true,
+  });
+  let kept = Buffer.alloc(0);
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    kept = Buffer.concat([kept, typeof chunk === "string" ? Buffer.from(chunk) : chunk]);
+    if (kept.length > STDERR_TAIL_BYTES) kept = kept.subarray(kept.length - STDERR_TAIL_BYTES);
+  });
+  child.once("error", (error) => {
+    logger.warn("claude could not be started", {
+      command: o.command,
+      error: error.message,
+      stderr: kept.toString("utf8"),
+    });
+  });
+  trackAgentProcess(child.pid, o.command);
+  child.once("close", (code, signal) => {
+    untrackAgentProcess(child.pid);
+    // Ended on purpose (SIGTERM from close()) is not a failure; any other non-zero exit is.
+    if (code !== 0 && !(code === null && signal === "SIGTERM")) {
+      logger.warn("claude exited with an error", { pid: child.pid, code, signal, stderr: kept.toString("utf8") });
+    }
+  });
+  return child;
+}
+
+interface SpawnArgs {
+  command: string;
+  args: string[];
+  cwd?: string | undefined;
+  env: Record<string, string | undefined>;
+  signal?: AbortSignal | undefined;
 }

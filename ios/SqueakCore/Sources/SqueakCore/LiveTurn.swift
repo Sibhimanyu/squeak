@@ -80,6 +80,11 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         handle(for: sessionKey) + "-h" + (before ?? "latest")
     }
 
+    /// The `live` document of the messages after a cursor (history cache): the chat's handle, `-ha`, the cursor.
+    public static func historyDeltaDoc(for sessionKey: String, after: String) -> String {
+        handle(for: sessionKey) + "-ha" + after
+    }
+
     /// The document id for a session: the same as the Mac's `liveHandle`.
     public static func handle(for sessionKey: String) -> String {
         let digest = SHA256.hash(data: Data(sessionKey.utf8))
@@ -173,11 +178,30 @@ public struct HistoryPage: Codable, Equatable, Sendable {
     }
 }
 
+/// What came after the newest message the phone holds (`live/<handle>-ha<cursor>`, the Mac's history-delta.ts),
+/// sealed like the live turn. `entries` are oldest first and contiguous with the cursor, unless `reset`: the cursor
+/// was out of the Mac's reach, and `entries` are the chat's newest page, to merge like a live push.
+public struct HistoryDelta: Codable, Equatable, Sendable {
+    public let v: Int
+    public let key: String
+    public let after: String
+    public let entries: [LiveTurn.HistoryEntry]
+    /// What to send as the next `after`; nil when this page reaches the newest message.
+    public let nextAfter: String?
+    public let reset: Bool
+    public var seq: Int64? = nil
+
+    public init(v: Int = 1, key: String, after: String, entries: [LiveTurn.HistoryEntry], nextAfter: String?, reset: Bool, seq: Int64? = nil) {
+        self.v = v; self.key = key; self.after = after; self.entries = entries
+        self.nextAfter = nextAfter; self.reset = reset; self.seq = seq
+    }
+}
+
 /// What the phone holds of one chat's history: the newest eight the Mac pushes live, and the older pages asked
 /// for since. Pure, so CI can test the merging: the live push lands over the tail instead of replacing it, and an
 /// older page lands in front without repeating anything.
 public struct ChatHistoryState: Codable, Equatable, Sendable {
-    /// In memory this many entries are kept per chat (the oldest go first); on disk `HistoryStore.maxEntries`.
+    /// In memory this many entries are kept per chat (the oldest go first); on disk `ChatHistoryStore.maxEntries`.
     public static let memoryCap = 1000
 
     /// Oldest first.
@@ -260,6 +284,25 @@ public struct ChatHistoryState: Codable, Equatable, Sendable {
         }
         trim()
         return gap == nil
+    }
+
+    /// The cursor to ask the Mac for what came after: the newest held entry's id. Nil when nothing is held or the
+    /// newest entry has no id (an older Mac), in which case the live push alone fills the tail.
+    public var newestCursor: String? { entries.last?.id }
+
+    /// A delta page (`HistoryDelta`): entries after the cursor join the tail, minus what is already held (the live
+    /// push may have brought some). A `reset` page does not join the cursor, so it merges like a live push and
+    /// leaves a hole for the usual catch-up. True when more follows (ask again from `newestCursor`).
+    @discardableResult
+    public mutating func applyDelta(_ delta: HistoryDelta) -> Bool {
+        if delta.reset {
+            mergeLatest(delta.entries)
+            return false
+        }
+        let fresh = delta.entries.filter { e in !entries.contains { $0.isSame(as: e) } }
+        entries.append(contentsOf: fresh)
+        trim()
+        return delta.nextAfter != nil && !fresh.isEmpty
     }
 
     /// An older page, from `HistoryPage`: it goes in front, minus what is already held.

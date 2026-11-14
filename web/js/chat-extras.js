@@ -63,6 +63,7 @@ import {
 import { hiddenChats, hideChange } from "./hidden-chats.js";
 import { composeMessage, fetchImage, MAX_PHOTOS, prepareImage, uploadPhoto } from "./images.js";
 import { liveHandle } from "./live.js";
+import { applyDelta, DELTA_PAGE, newestCursor, readDelta } from "./history-cache.js";
 import { chatModels, repos } from "./view-model.js";
 import { can, chatHandle, conductorUi } from "./session-api.js";
 
@@ -95,6 +96,8 @@ export class ChatExtras {
     this.images = new Map();
     /** chat key -> { state, load } */
     this.earlier = new Map();
+    /** chats whose delta is being fetched now */
+    this.deltaBusy = new Set();
     /** The one dialog at a time: viewer, confirm, subagent or diff, each tied to a chat key. */
     this.viewer = null;
     this.confirm = null;
@@ -517,6 +520,42 @@ export class ChatExtras {
     this.viewer = { key: session.key, uri: state.uri, name: image.alt || image.source.split("/").pop() || "Image" };
     this.touch();
     this.#focusDialog();
+  }
+
+  /* ---------- history cache: what came after the newest message held ---------- */
+
+  /** Pages of delta asked for at most in one run. */
+  static DELTA_PAGES = 20;
+
+  /**
+   * Asks the Mac for what came after the newest held message until it is all there. Only for a chat the Mac lists
+   * `delta` for (a Mac that does not, or an old one, is not asked) and only with a cursor to ask from. Read-only; a
+   * failure stops quietly and the live push still lands.
+   */
+  async syncDelta(session) {
+    const key = session.key;
+    if (!this.commands || !can(session, "delta") || !this.app.verbose() || this.deltaBusy.has(key)) return;
+    this.deltaBusy.add(key);
+    try {
+      for (let page = 0; page < ChatExtras.DELTA_PAGES; page += 1) {
+        const held = this.app.cachedHistory(key);
+        const after = newestCursor(held);
+        if (!after) return;
+        const out = await this.commands.history({ key, after, n: DELTA_PAGE });
+        const expected = `${await liveHandle(key)}-ha${after}`;
+        if (!out.ok || out.result?.doc !== expected) return;
+        const delta = readDelta(await this.#readLive(expected), key, after);
+        if (!delta) return;
+        const joined = applyDelta(this.app.cachedHistory(key), delta);
+        this.app.setCachedHistory(key, joined.history);
+        this.touch();
+        if (!joined.more) return;
+      }
+    } catch {
+      // A failed delta is a quiet moment: the next open tries again.
+    } finally {
+      this.deltaBusy.delete(key);
+    }
   }
 
   /* ---------- earlier history ---------- */

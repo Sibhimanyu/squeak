@@ -4,7 +4,7 @@ import Foundation
 import Security
 import SqueakCore
 
-/// The phone's secrets: the pairing (it carries the channel key) and the
+/// The phone's secrets: the Macs it holds (each pairing carries a channel key) and the
 /// signing key. Keychain, this-device-only, never in backups. The signing
 /// key is made in the Secure Enclave, so what is stored is only an encrypted
 /// handle the Enclave will accept back — the key itself never leaves it.
@@ -57,9 +57,16 @@ enum KeyStore {
 
     /// Forget the pairing and the key: the Mac's approval of this key is worthless afterwards.
     static func wipe() {
-        for account in ["pairing", "device-id", "enclave-key", "software-key"] {
+        for account in ["macs", "pairing", "device-id", "approved", "enclave-key", "software-key"] {
             delete(account: account)
         }
     }
+}
+
+/// The Keychain as `MacRegistryStore` reads it.
+final class KeychainSecrets: SecretStore {
+    func load(account: String) -> Data? { KeyStore.load(account: account) }
+    func save(_ data: Data, account: String) { KeyStore.save(data, account: account) }
+    func delete(account: String) { KeyStore.delete(account: account) }
 }
 #endif

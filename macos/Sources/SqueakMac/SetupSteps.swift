@@ -254,7 +254,9 @@ struct PhoneStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
             stepTitle("Your phone", "Optional. Follow your agents and answer them from your iPhone.")
-            if model.account.email != nil { signedIn } else { pairing }
+            if model.account.email != nil { signedIn }
+            else if model.cloud.hosted?.legacy != nil { legacyPairing }
+            else { PhoneChannelGate { signedIn } }
         }
     }
 
@@ -273,7 +275,9 @@ struct PhoneStep: View {
         }
     }
 
-    private var pairing: some View {
+    /// Only an install still on its own Firebase or the old shared server, which has no account to sign in with: the QR
+    /// code stays for it until it moves. A Mac on Squeak's cloud never sees this.
+    private var legacyPairing: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.s) {
                 Text("Needs iOS 18 or later.").font(Typo.body).foregroundStyle(Theme.muted)

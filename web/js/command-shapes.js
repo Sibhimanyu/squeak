@@ -428,17 +428,22 @@ const SHAPES = {
   },
 
   history(input) {
-    only(input, ["key", "before", "n"], "A history page");
+    only(input, ["key", "before", "after", "n"], "A history page");
     if (!isString(input.key) || input.key === "" || input.key.length > 200) bad("Not a chat.");
     if (input.before !== undefined && input.before !== null && !(isString(input.before) && CURSOR.test(input.before))) {
       bad("Bad cursor.");
     }
+    // History cache: what came after the newest message held (a Mac that named the `delta` action answers it).
+    if (input.after !== undefined && input.after !== null) {
+      if (!(isString(input.after) && CURSOR.test(input.after)) || (input.before ?? null) !== null) bad("Bad cursor.");
+    }
+    const after = input.after ?? undefined;
     let n = input.n;
     if (n !== undefined && n !== null) {
       if (typeof n !== "number" || !Number.isFinite(n)) bad("Bad page size.");
-      n = Math.min(HISTORY_PAGE_MAX, Math.max(1, Math.floor(n)));
+      n = Math.min(after ? 50 : HISTORY_PAGE_MAX, Math.max(1, Math.floor(n)));
     }
-    return defined({ key: input.key, before: input.before ?? undefined, n: n ?? undefined });
+    return defined({ key: input.key, before: input.before ?? undefined, after, n: n ?? undefined });
   },
 
   subagent(input) {

@@ -76,9 +76,7 @@ add-on: it reads conductor.db, lists Conductor's workspaces for the picker and o
 until the person adds it in Settings › Add-ons (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
 it live, sources and file watcher included). Core's side is `AppAddon` (`SqueakMacCore/Addons`): session sources, a
 settings page (`AddonPage`, with switch lists), Connections rows, file watching, project icons, uninstall note.
-Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The Conductor relay is a
-development add-on on top (`Addons/ConductorRelay/`, see its README): its page shows under Conductor's in Add-ons and its
-setup step appears only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither (dev-only, never distributed). Sparkle updates have
+Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The dev-only Conductor relay add-on is deleted. Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 
 The release is signed with the Apple Development identity (not notarized), so macOS keeps its
@@ -117,7 +115,6 @@ macos/Sources/
     Broker/        Broker actor + BrokerClock
     Storage/       KeyStore (FileKeyStore), EncryptedCache, DraftStore
     Policy/        SessionOrdering, SearchIndex, NotificationPolicy
-    Relay/         Swift port of addons/conductor-relay (not wired in)
   SqueakMac/       App, AppModel, PopoverView, ConversationWindow,
                    QuickComposer, ComposerField, SettingsView, Onboarding,
                    HotKey (Carbon), Theme, Components, System, Capture, Updater (Sparkle),
@@ -155,7 +152,7 @@ macos/Sources/
 
 Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Extensions (one group: an overview with every extension as the same card, status and Add/Remove, the daemon's
 add-ons (Conductor, RasanAI) and the built-ins Telegram, Zoho Cliq and Phone calls; each added one also gets its own
-sidebar row and page: Conductor's workspace picker, and in a dev relay build the relay's status),
+sidebar row and page: Conductor's workspace picker),
 Connections, iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
 readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
@@ -321,11 +318,6 @@ hand: never `AttributedString(markdown:)`, never HTML. Links are untrusted:
 the label is shown with its address in a muted style and is not clickable.
 Text stays selectable.
 
-### Development only: the Swift relay
-
-`Relay/` is a Swift port of the dev-only Node relay in `addons/conductor-relay/`. It is not distributed, not used by
-the app and not wired in; see `Addons/ConductorRelay/README.md`.
-
 ## Build and run
 
 From `macos/`:
@@ -465,8 +457,7 @@ Next steps:
 1. Owner runs the feasibility doc section 7 tests, starting with 7.1
    two-session isolation, and a first supervised live send from the native app.
 2. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
-3. (Dev only) The Swift relay port stays unwired.
-4. Sign with a Developer ID and notarize, if wider distribution is wanted.
+3. Sign with a Developer ID and notarize, if wider distribution is wanted.
 
 ## The background service (daemon)
 

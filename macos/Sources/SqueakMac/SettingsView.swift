@@ -70,7 +70,7 @@ private extension SettingsSection {
         case .connections: "See the services and channels Squeak can reach."
         case .telegram: "Send updates to a private Telegram chat."
         case .cliq: "Send updates and receive replies through Zoho Cliq."
-        case .iphone: "Pair a phone to follow sessions and reply on the go."
+        case .iphone: "The iPhones and browsers signed in to your account, and what they can do."
         case .voice: "Choose where Squeak rings when an agent is waiting for you."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."
@@ -92,7 +92,7 @@ private extension SettingsSection {
         case .connections: ["status", "connection"]
         case .telegram: ["channel", "bot"]
         case .cliq: ["zoho", "channel", "bot"]
-        case .iphone: ["phone", "pair", "mobile"]
+        case .iphone: ["phone", "iphone", "browser", "web", "mobile", "device", "remove", "approve"]
         case .voice: ["call", "ring", "phone"]
         case .privacy: ["cache", "messages", "data", "delete"]
         case .about: ["version", "credits", "updates", "update", "feedback", "uninstall", "remove"]

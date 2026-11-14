@@ -289,12 +289,6 @@ export interface IngressControl {
    */
   voiceBusy?(): { busy: boolean; since?: number };
   /**
-   * `GET /control/core/sessions` (src/core/): the provider-neutral sessions, newest first, with attention, as
-   * `{ sessions, schema: 1 }`. Token-gated, no CORS header, 405 for other methods; 503 when not wired, 404 when
-   * this returns null (`SQUEAK_CORE=off`, or core.db did not open).
-   */
-  coreSessions?(): unknown[] | null;
-  /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
    * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
    */
@@ -1573,31 +1567,6 @@ export class HookIngressServer {
       return;
     }
 
-    if ((request.url ?? "").split("?")[0] === "/control/core/sessions") {
-      request.resume();
-      if (request.method !== "GET") {
-        respond(response, 405, "method not allowed");
-        return;
-      }
-      if (!control.coreSessions) {
-        respond(response, 503, "core unavailable");
-        return;
-      }
-      let sessions: unknown[] | null;
-      try {
-        sessions = control.coreSessions();
-      } catch {
-        respond(response, 500, "core sessions failed");
-        return;
-      }
-      if (!sessions) {
-        respond(response, 404, "core is off");
-        return;
-      }
-      respondJson(response, 200, { sessions, schema: 1 });
-      return;
-    }
-
     if ((request.url ?? "").split("?")[0] === "/control/voice/busy") {
       request.resume();
       if (request.method !== "GET") {
@@ -2525,9 +2494,12 @@ export class HookIngressServer {
 
     if (hookPid !== null && event.sessionId && this.options.onSpawn) {
       try {
-        void Promise.resolve(this.options.onSpawn(event.sessionId, hookPid)).catch(() => undefined);
-      } catch {
-        // Best effort: a hook is never worth failing over.
+        void Promise.resolve(this.options.onSpawn(event.sessionId, hookPid)).catch((error) => {
+          logger.warn("hook onSpawn failed", { error: error instanceof Error ? error.message : String(error) });
+        });
+      } catch (error) {
+        // A hook is never worth failing over, but a spawn the daemon missed means no pid for that session: logged.
+        logger.warn("hook onSpawn threw", { error: error instanceof Error ? error.message : String(error) });
       }
     }
   }

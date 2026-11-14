@@ -120,7 +120,7 @@ struct RootView: View {
 
     var body: some View {
         switch model.phase {
-        case .unpaired: PairView().onAppear { screen.report?("Pairing") }
+        case .unpaired: UnpairedView().onAppear { screen.report?("Sign in") }
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
         case .paired:
             if let mac = model.pairingCelebration {

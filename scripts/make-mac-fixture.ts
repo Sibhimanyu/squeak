@@ -16,6 +16,7 @@ import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import type { FleetSession } from "../src/fleet/types.js";
 import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js";
 import { seal } from "../src/remote/remote-crypto.js";
+import { buildPondThreads } from "../src/remote/pond-threads.js";
 import { realDirectorDeps } from "../addons/rasanai/director.js";
 import { FilmService } from "../addons/rasanai/films.js";
 import { RasanaiProvider } from "../addons/rasanai/provider.js";
@@ -395,6 +396,42 @@ fs.writeFileSync(
           key: "claude-transcript:s2",
           seq: 1790305200004,
           history: [{ role: "user", text: "Fix the timer", at: null }],
+        },
+        z,
+      ),
+      // A pond's whole thread list (the real builder): Main first, then streams, newest first.
+      pondThreadsBox: seal(
+        key,
+        {
+          ...buildPondThreads(
+            { id: "p-green", name: "greenroom", shared: false, members: [], folder: "/r/green", streams: [] },
+            [
+              session({
+                key: "squeak-native:a",
+                cwd: "/r/green",
+                branch: "main",
+                title: "Plan",
+                lastActivityAt: "2026-09-01T00:00:00.000Z",
+              }),
+              session({
+                key: "squeak-native:b",
+                cwd: "/r/green/ws/hk",
+                branch: "hong-kong",
+                title: "Menu",
+                lastActivityAt: "2026-09-20T00:00:00.000Z",
+              }),
+              session({
+                key: "squeak-native:c",
+                cwd: "/r/green/ws/hk",
+                branch: "hong-kong",
+                title: "Old",
+                lastActivityAt: "2026-08-01T00:00:00.000Z",
+              }),
+            ],
+            () => true,
+            (s) => s.title ?? "Untitled",
+          ),
+          seq: 1790305200005,
         },
         z,
       ),

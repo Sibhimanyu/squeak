@@ -204,13 +204,18 @@ export function identityChip({ label, signOut, photo = null, build = h }) {
   );
 }
 
-/** A Mac as a card: icon, name, linked date, a status dot when the data says whether it is online, a chevron. */
-export function macCard({ mac, line, pick, build = h }) {
-  const dot = typeof mac.online === "boolean" ? mac.online : null;
+/**
+ * A Mac as a card: icon, name, a line (its status when the relay says whether it is online, else when it was linked),
+ * a status dot, a chevron. `mac.status` is `{ tone: "online" | "asleep" | "offline" | null, text }` (account.js `macStatus`);
+ * `current` marks the Mac this browser has open.
+ */
+export function macCard({ mac, line, pick, current = false, build = h }) {
+  const tone = mac.status?.tone ?? null;
   const real = build === h;
+  const dotClass = tone === "online" ? "d-working" : tone === "asleep" ? "d-idle" : "d-off";
   return build(
     "button",
-    { class: "wl-mac", type: "button", onclick: () => void pick(mac) },
+    { class: current ? "wl-mac current" : "wl-mac", type: "button", onclick: () => void pick(mac) },
     build("span", { class: "wl-mac-icon", "aria-hidden": "true" }, real ? laptopIcon() : null),
     build(
       "span",
@@ -219,8 +224,8 @@ export function macCard({ mac, line, pick, build = h }) {
       build(
         "span",
         { class: "wl-note" },
-        dot === null ? null : build("span", { class: `dot ${dot ? "d-working" : "d-idle"}`, "aria-hidden": "true" }),
-        dot === null ? line : `${dot ? "Online" : "Offline"} · ${line}`,
+        tone === null ? null : build("span", { class: `dot ${dotClass}`, "aria-hidden": "true" }),
+        current ? `Open now \u00b7 ${mac.status?.text ?? line}` : (mac.status?.text ?? line),
       ),
     ),
     build("span", { class: "wl-chev", "aria-hidden": "true" }, real ? chevronRight() : null),

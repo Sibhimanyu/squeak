@@ -1,6 +1,0 @@
-{
-  "id": "conductor-relay",
-  "name": "Conductor relay",
-  "blurb": "Development only: a loopback relay into Conductor's own composer.",
-  "requires": ["conductor"]
-}
