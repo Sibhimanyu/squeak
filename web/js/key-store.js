@@ -83,6 +83,18 @@ export class KeyStore {
     }
   }
 
+  /** Deletes one named value (the chat caches' own records). */
+  async remove(name) {
+    const db = await openDatabase(this.factory);
+    try {
+      const transaction = db.transaction(STORE, "readwrite");
+      transaction.objectStore(STORE).delete(name);
+      await done(transaction);
+    } finally {
+      db.close();
+    }
+  }
+
   /** Wipes every key and every trace of the pairing from this browser. */
   forget() {
     return new Promise((resolve, reject) => {

@@ -47,6 +47,13 @@ import {
   SHARED_RECENT_MIN_GAP_MS,
   type CloudBudget,
 } from "./shared-limits.js";
+import {
+  HISTORY_DELTA_ACTION,
+  HISTORY_DELTA_CAP,
+  HISTORY_DELTA_PAGE_MAX,
+  historyDeltaDoc,
+  readHistoryAfter,
+} from "./history-delta.js";
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
@@ -500,6 +507,11 @@ export interface HistoryCommand {
   key: string;
   /** A cursor from an earlier page (`nextBefore`, or an entry's `id`): digits only. Absent: the newest page. */
   before?: string;
+  /**
+   * History cache: instead of `before`, the cursor of the newest message the phone holds; the Mac answers with what
+   * came after it (history-delta.ts). Only for a phone whose caps name `histdelta`. Digits only.
+   */
+  after?: string;
   /** Entries wanted, 1 to HISTORY_PAGE_MAX; more is clamped. */
   n?: number;
   nonce: string;
@@ -2020,7 +2032,7 @@ export class RemoteBridge {
         this.nudgePublish(0);
       }
       const caps = Array.isArray(presence.caps)
-        ? presence.caps.filter((cap): cap is string => typeof cap === "string" && cap.length <= 20).slice(0, 10)
+        ? presence.caps.filter((cap): cap is string => typeof cap === "string" && cap.length <= 20).slice(0, 16)
         : [];
       if (caps.join(",") !== this.phoneCaps.join(",")) {
         // A phone that reads more (or an older one that reads less) is in front now: write everything again in its format.
@@ -3314,6 +3326,18 @@ export class RemoteBridge {
     if (before === "invalid") {
       return refuse("Not a request this Mac understands.");
     }
+    if (command.after !== undefined) {
+      const after = typeof command.after === "string" ? parseCursor(command.after) : "invalid";
+      if (
+        typeof after !== "number" ||
+        command.before !== undefined ||
+        !this.phoneCaps.includes(HISTORY_DELTA_CAP) ||
+        (command.n !== undefined && (typeof command.n !== "number" || !Number.isFinite(command.n)))
+      ) {
+        return refuse("Not a request this Mac understands.");
+      }
+      return this.handleHistoryAfter(config, device, id, command.key, command.after, after, command.n, now);
+    }
     if (command.n !== undefined && (typeof command.n !== "number" || !Number.isFinite(command.n))) {
       return refuse("Not a request this Mac understands.");
     }
@@ -3358,6 +3382,68 @@ export class RemoteBridge {
       return refuse("This Mac couldn't read that chat.");
     } finally {
       this.historyBusy.delete(command.key);
+    }
+  }
+
+  /**
+   * The delta of the history cache: what came after the cursor the phone holds, in `live/<handle>-ha<cursor>`.
+   * Same guards as `handleHistory` (a chat the phone is shown, from the Mac's own snapshot; one read at a time).
+   */
+  private async handleHistoryAfter(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    key: string,
+    afterRaw: string,
+    after: number,
+    n: number | undefined,
+    now: number,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `history delta: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const read = this.deps.replier.transcript;
+    if (!read || !this.deps.store.watch) {
+      return refuse("This Mac can't send earlier messages to a phone.");
+    }
+    const watched = this.watchableSession(key)?.session;
+    const handle = watched ? this.hostHandle(watched) : null;
+    if (!handle) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (this.historyBusy.has(key)) {
+      return refuse("Still reading this chat's messages. Try again in a moment.");
+    }
+    this.historyBusy.add(key);
+    try {
+      const delta = readHistoryAfter(
+        (limit, before) => read.call(this.deps.replier, handle, limit, before),
+        after,
+        n ?? HISTORY_DELTA_PAGE_MAX,
+      );
+      const doc = historyDeltaDoc(key, afterRaw);
+      const path = this.channel(config, "live", doc);
+      await this.deps.store.set(path, {
+        box: this.sealForPhone(config, {
+          v: 1,
+          key,
+          after: afterRaw,
+          entries: delta.entries,
+          nextAfter: delta.nextAfter,
+          reset: delta.reset,
+          seq: this.nextSeq(),
+        }),
+        at: this.now(),
+      });
+      this.rememberMedia([path], now + MEDIA_TTL_MS);
+      this.log(device.name, "sent", `new messages of ${handle.slice(0, 8)}`);
+      return { write: true, result: { id, status: "sent", doc } };
+    } catch (error) {
+      logger.warn("history delta failed", { error: error instanceof Error ? error.message : String(error) });
+      return refuse("This Mac couldn't read that chat.");
+    } finally {
+      this.historyBusy.delete(key);
     }
   }
 
@@ -3896,7 +3982,10 @@ export class RemoteBridge {
       }
       if (replier.queue && replier.queueAction) actions.push("queue");
       actions.push("photos");
-      if (replier.transcript && this.deps.store.watch) actions.push("earlier");
+      if (replier.transcript && this.deps.store.watch) {
+        actions.push("earlier");
+        if (this.phoneCaps.includes(HISTORY_DELTA_CAP)) actions.push(HISTORY_DELTA_ACTION);
+      }
     }
     // Archive hides a chat in Squeak only; a working or waiting one is refused by the daemon, so it is not offered.
     if (

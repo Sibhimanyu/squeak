@@ -95,6 +95,10 @@ export function fakeIndexedDB() {
                   data.set(key, structuredClone(value));
                   later(() => tx.oncomplete?.());
                 },
+                delete(key) {
+                  data.delete(key);
+                  later(() => tx.oncomplete?.());
+                },
                 get(key) {
                   const get = {};
                   later(() => {

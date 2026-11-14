@@ -72,7 +72,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     }
 
     public enum SessionAction: String, Sendable, CaseIterable {
-        case reply, stop, rename, close, model, archive, archiveChat, queue, photos, diff, earlier
+        case reply, stop, rename, close, model, archive, archiveChat, queue, photos, diff, earlier, delta
     }
 
     public struct Session: Codable, Equatable, Sendable, Identifiable {
@@ -1616,7 +1616,10 @@ public struct HistoryCommand: Codable, Equatable, Sendable {
     public let key: String
     /// A cursor from an earlier page (digits). Absent: the newest page.
     public let before: String?
-    /// Entries wanted, 1 to 12.
+    /// History cache: instead of `before`, the newest cursor held; the Mac answers with what came after (`HistoryDelta`).
+    /// Only sent to a Mac that listed the `delta` action, and absent from the JSON otherwise.
+    public var after: String? = nil
+    /// Entries wanted, 1 to 12 (1 to 50 for `after`).
     public let n: Int?
     public let nonce: String
     /// Epoch milliseconds.
