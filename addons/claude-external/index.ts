@@ -6,6 +6,7 @@ import { ClaudeCoworkObserver } from "../../src/fleet/observers/claude-cowork.js
 import { ClaudeTranscriptObserver } from "../../src/fleet/observers/claude-transcript.js";
 import { ProcessLivenessObserver } from "../../src/fleet/observers/process-liveness.js";
 import { readClaudeSessionFiles } from "../../src/fleet/terminal-process.js";
+import { createTerminalAddonReplier } from "../../src/fleet/terminal-addon-replier.js";
 import { logger } from "../../src/utils/logger.js";
 
 /**
@@ -31,7 +32,15 @@ const addon: Addon = {
         },
         () => undefined,
       );
+    // Answering a `claude` running in Terminal.app: typed into its tab through Squeak Hands (watch-only without it).
+    const replier = createTerminalAddonReplier({
+      hostId: "claude-external",
+      agent: "claude",
+      handsAppPath: context.config.handsAppPath,
+      sessions: () => context.snapshot().sessions,
+    });
     return {
+      repliers: replier ? [replier] : [],
       // Same sources as core's claimed pass: merge keys on the agent's session id, and core skips ids read here.
       observers: [
         {

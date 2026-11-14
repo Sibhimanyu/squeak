@@ -3,14 +3,7 @@ import { readFileTranscript } from "./file-transcript.js";
 import type { WorkSteps } from "./work-steps.js";
 import type { FleetReplier } from "./fleet-controller.js";
 import type { AddonReplier } from "../addons.js";
-import {
-  STEER_UNAVAILABLE_NOTE,
-  type ReplyFailureHandler,
-  type ReplyOptions,
-  type ReplyOutcome,
-  type QueueAction,
-} from "./reply-types.js";
-import type { TerminalReplier } from "./terminal-reply.js";
+import { type ReplyFailureHandler, type ReplyOptions, type ReplyOutcome, type QueueAction } from "./reply-types.js";
 import { NATIVE_HOST_DOWN, isNativeKey, type NativeReplier } from "./native-reply.js";
 import { logger } from "../utils/logger.js";
 import type { FleetSession } from "./types.js";
@@ -38,10 +31,11 @@ export const EXTERNAL_NOT_ENABLED =
 export interface FleetReplyRouterDependencies {
   /** Whether an external-agent add-on is on; without it (tests) the terminal replier is used as before. */
   externalOn?: () => boolean;
-  /** The host repliers add-ons supply, enabled ones only, looked up at call time. */
+  /**
+   * The repliers add-ons supply, enabled ones only, looked up at call time. A session with a `hostId` goes to a host's;
+   * one without (a Terminal agent) to the external add-on whose `canHandle` accepts it.
+   */
   hosts: () => AddonReplier[];
-  /** Without it only host chats can be answered, as before. */
-  terminal?: TerminalReplier | null;
   /** Squeak's own session host's chats; without it they are watch-only. */
   native?: NativeReplier | null;
   /** The monitor's current view, to resolve a fleet key back to its session. */
@@ -74,7 +68,7 @@ export class FleetReplyRouter implements FleetReplier {
     if (this.deps.externalOn && !this.deps.externalOn()) {
       return false;
     }
-    return this.deps.terminal?.canReply(session) ?? false;
+    return this.hostFor(session) !== null;
   }
 
   lastTurnText(target: string): string | null {
@@ -85,7 +79,8 @@ export class FleetReplyRouter implements FleetReplier {
     if (isNativeKey(target)) {
       return session ? (this.deps.native?.lastTurnText(session) ?? null) : null;
     }
-    return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnText(session) : null;
+    const external = session && !session.hostId ? this.hostFor(session) : null;
+    return external?.lastTurnText(target) ?? null;
   }
 
   /**
@@ -104,7 +99,8 @@ export class FleetReplyRouter implements FleetReplier {
     if (isNativeKey(target)) {
       return null;
     }
-    return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnId(session) : null;
+    const external = session && !session.hostId ? this.hostFor(session) : null;
+    return external?.lastTurnId?.(target) ?? null;
   }
 
   /** Why a host chat's newest turn failed. Terminal agents have no such record. */
@@ -235,28 +231,16 @@ export class FleetReplyRouter implements FleetReplier {
       // The host queues while the chat works and answers a blocked one: nothing to refuse here.
       return this.deps.native.send(session, text, { ...options, mode: options.urgent ? "steer" : "queue" });
     }
-    // A session a host app adopted since the card was sent goes through that host.
+    if (!session.hostId && this.deps.externalOn && !this.deps.externalOn()) {
+      return { status: "refused", reason: EXTERNAL_NOT_ENABLED };
+    }
+    // A session a host app adopted since the card was sent goes through that host; one with no host is an external
+    // agent (Terminal), answered by the enabled add-on that proves every link and types into it.
     const hosted = this.hostFor(session);
     if (hosted) {
       return hosted.send(session.hostSessionId ?? session.conductorSessionId ?? target, text, onFailed, options);
     }
-    if (this.deps.externalOn && !this.deps.externalOn()) {
-      return { status: "refused", reason: EXTERNAL_NOT_ENABLED };
-    }
-    if (!this.deps.terminal?.canReply(session)) {
-      return { status: "refused", reason: "That session cannot be replied to from here." };
-    }
-    // A terminal agent is only typed into when idle, so there is nothing to
-    // queue or steer; say so if steering was asked for.
-    const outcome = await this.deps.terminal.send(session, text);
-    if (outcome.status !== "started") {
-      return outcome;
-    }
-    return {
-      ...outcome,
-      delivery: "sent",
-      ...(options.mode === "steer" ? { note: STEER_UNAVAILABLE_NOTE } : {}),
-    };
+    return { status: "refused", reason: "That session cannot be replied to from here." };
   }
 
   private resolve(key: string): FleetSession | null {
