@@ -11,7 +11,6 @@ const site = resolve(here, "..");
 const repo = resolve(site, "..");
 const brand = join(repo, "brand");
 const releasePage = join(repo, ".context/release-pages/squeak");
-const captures = join(site, "capture-sources");
 const out = join(site, "assets");
 
 const WEBP = { quality: 86, effort: 6 };
@@ -35,16 +34,14 @@ await webp(join(releasePage, "assets/duck-working.png"), "duck-working.webp");
 await webp(join(releasePage, "assets/duck-needs_you.png"), "duck-needs_you.webp");
 await webp(join(releasePage, "assets/duck-celebrating.png"), "duck-celebrating.webp");
 await webp(join(releasePage, "assets/duck-asleep.png"), "duck-asleep.webp");
-await webp(join(releasePage, "assets/duck-panel.png"), "duck-panel.webp");
 
-// Current product captures from the offline Mac and iPhone demo apps.
-await webp(join(captures, "mac-decision.png"), "mac-decision.webp", 1600);
-await webp(join(captures, "mac-activity.png"), "mac-activity.webp", 1600);
-await webp(join(captures, "iphone-activity.png"), "iphone-activity.webp", 700);
+// The Mac and iPhone windows on the page are HTML replicas, so there are no product captures.
 
 // Vector brand artwork, copied byte for byte.
 await copy(join(brand, "logo/svg/squeak-duck-full-color.svg"), "duck-brand.svg");
 await copy(join(brand, "logo/svg/squeak-lockup-horizontal-ink.svg"), "logo.svg");
+// The thread duck (DESIGN.md 6.5): a template silhouette the page tints with CSS.
+await copy(join(brand, "logo/png/duckThread.png"), "duck-thread.png");
 
 // Icons from the existing release page (already the shipped favicon sizes).
 await copy(join(releasePage, "favicon.png"), "favicon.png");

@@ -40,6 +40,13 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
 <script src="./motion.js" defer></script>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-tri" viewBox="0 0 16 16"><path d="M8 1.9 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6.3v3.4M8 11.6v.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-q" viewBox="0 0 16 16"><path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c.9 0 1.7-.2 2.4-.5l3.1.9-.9-2.9A6.2 6.2 0 0 0 8 1.8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.4 6.3c.2-1.7 3.3-1.8 3.3.2 0 1.2-1.7 1.3-1.7 2.5M8 11v.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="i-load" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="8" cy="3" r="1.4" opacity=".55"/><circle cx="13" cy="3" r="1.4" opacity=".3"/><circle cx="3" cy="8" r="1.4" opacity=".55"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4" opacity=".55"/><circle cx="3" cy="13" r="1.4" opacity=".3"/><circle cx="8" cy="13" r="1.4" opacity=".55"/><circle cx="13" cy="13" r="1.4"/></g></symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="4" cy="3.5" r="1.7"/><circle cx="4" cy="12.5" r="1.7"/><circle cx="12" cy="5.5" r="1.7"/><path d="M4 5.2v5.6M12 7.2c0 3-8 1.6-8 3.6"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="m3 8.5 3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
 <a class="skip" href="#content">{{nav.skip}}</a>
 
 <header class="hero" id="top">
@@ -81,16 +88,17 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
       <nav class="nav" aria-label="{{nav.mainLabel}}">
         <a class="nav__brand" href="./" aria-label="{{nav.homeLabel}}"><img src="./assets/logo-paper.svg" width="100" height="30" alt="{{nav.logoAlt}}"></a>
         <ul class="nav__links">
-          <li><a href="{{nav.conductor_href}}">{{nav.conductor}}</a></li>
-          <li><a href="{{nav.calls_href}}">{{nav.calls}}</a></li>
-          <li><a href="{{nav.mac_href}}">{{nav.mac}}</a></li>
+          <li><a href="{{nav.threads_href}}">{{nav.threads}}</a></li>
+          <li><a href="{{nav.needs_href}}">{{nav.needs}}</a></li>
+          <li><a href="{{nav.ponds_href}}">{{nav.ponds}}</a></li>
+          <li><a href="{{nav.away_href}}">{{nav.away}}</a></li>
           <li><a class="nav__cta" href="{{nav.download_href}}" data-magnet>{{nav.download}}<span class="nav__dot" aria-hidden="true"></span></a></li>
         </ul>
       </nav>
 
       <div class="hero__text" data-hero-text>
         <p class="hero__kicker" data-hero-in>{{hero.kicker}}</p>
-        <h1 class="hero__title" data-hero-title><span class="hero__line">{{hero.line1}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line2}}</span></span></h1>
+        <h1 class="hero__title" data-hero-title><span class="hero__line">{{hero.line1}}</span> <span class="hero__line">{{hero.line2}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line3}}</span></span></h1>
         <div class="hero__copy">
           <p class="hero__lede" data-hero-in>{{hero.lede}}</p>
           <div class="hero__cta" data-hero-in>
@@ -105,12 +113,12 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
 
       <figure class="agents" data-panel aria-label="{{hero.previewLabel}}">
         <img class="agents__perch" data-duck="mood" data-perch src="./assets/duck-needs_you.webp" width="240" height="240" alt="">
-        <div class="agents__head"><span class="agents__title">{{hero.previewTitle}}</span><span class="agents__status">{{hero.previewStatus}}</span></div>
+        <div class="agents__head"><span class="agents__title">{{hero.previewTitle}}</span><span class="agents__status"><svg class="mk" aria-hidden="true"><use href="#i-tri"/></svg>{{hero.previewStatus}}</span></div>
         <ul class="agents__list">
-          <li class="row row--needs"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span>{{sessions.payment.needs}}</span></span><span class="row__age">{{sessions.payment.age}}</span></li>
-          <li class="row row--working"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span><span class="row__age">{{sessions.atlas.age}}</span></li>
-          <li class="row row--working"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span><span class="row__age">{{sessions.compass.age}}</span></li>
-          <li class="row row--working"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span><span class="row__age">{{sessions.squeak.age}}</span></li>
+          <li class="row row--needs"><span class="td" style="--h:330" aria-hidden="true"></span><span class="row__text"><b>{{sessions.payment.title}}</b><span>{{sessions.payment.needs}}</span></span><span class="row__side"><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg><span class="row__age">{{sessions.payment.age}}</span></span></li>
+          <li class="row row--working"><span class="td" style="--h:170" aria-hidden="true"></span><span class="row__text"><b>{{sessions.search.title}}</b><span>{{sessions.search.working}}</span></span><span class="row__side"><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg><span class="row__age">{{sessions.search.age}}</span></span></li>
+          <li class="row row--working"><span class="td" style="--h:265" aria-hidden="true"></span><span class="row__text"><b>{{sessions.onboarding.title}}</b><span>{{sessions.onboarding.working}}</span></span><span class="row__side"><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg><span class="row__age">{{sessions.onboarding.age}}</span></span></li>
+          <li class="row row--working"><span class="td" style="--h:140" aria-hidden="true"></span><span class="row__text"><b>{{sessions.webhook.title}}</b><span>{{sessions.webhook.working}}</span></span><span class="row__side"><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg><span class="row__age">{{sessions.webhook.age}}</span></span></li>
         </ul>
         <figcaption class="agents__note">{{hero.previewNote}}</figcaption>
       </figure>
@@ -120,58 +128,231 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
 
 <main id="content">
 
-<section class="conductor" id="conductor" aria-labelledby="conductor-h">
-  <div class="wrap">
-    <header class="conductor__head">
-      <div>
-        <p class="kicker">{{conductor.kicker}}</p>
-        <h2 id="conductor-h">{{conductor.heading}}</h2>
-        <p class="conductor__lede">{{conductor.lede}}</p>
-      </div>
-      <a class="conductor__brand" href="{{conductor.markHref}}" aria-label="{{conductor.mark}} — {{conductor.markHref}}">
-        <img src="./assets/conductor-wordmark-light.webp" width="2400" height="369" alt="{{conductor.markAlt}}" loading="lazy">
-      </a>
-    </header>
-    <ol class="conductor__points">
-      <li><span>01</span><h3>{{conductor.p1.title}}</h3><p>{{conductor.p1.body}}</p></li>
-      <li><span>02</span><h3>{{conductor.p2.title}}</h3><p>{{conductor.p2.body}}</p></li>
-      <li><span>03</span><h3>{{conductor.p3.title}}</h3><p>{{conductor.p3.body}}</p></li>
-    </ol>
-    <p class="conductor__thanks">{{conductor.thanks}} <a href="{{conductor.personHref}}">{{conductor.person}}</a> {{conductor.thanksBody}}</p>
-  </div>
-</section>
-
-<!-- The Mac app: a window that tilts flat as you arrive -->
-<section class="section mac" id="mac" aria-labelledby="mac-h">
+<!-- 01 Threads: the Mac window, an HTML replica, tilts flat as you arrive -->
+<section class="section mac" id="threads" aria-labelledby="threads-h">
   <div class="wrap">
     <header class="section__head">
-      <p class="kicker">{{mac.kicker}}</p>
-      <h2 id="mac-h">{{mac.heading}}</h2>
-      <p class="section__lede">{{mac.lede}}</p>
+      <p class="kicker">{{threads.kicker}}</p>
+      <h2 id="threads-h">{{threads.heading}}</h2>
+      <p class="section__lede">{{threads.lede}}</p>
     </header>
     <div class="mac__stage" data-mac>
       <div class="mac__plane" data-plane>
-        <figure class="shot shot--b" aria-hidden="true" data-shot-b>
-          <img src="./assets/mac-activity.webp" width="1600" height="1067" alt="" loading="lazy">
-        </figure>
-        <figure class="shot shot--a" data-shot-a>
-          <img src="./assets/mac-decision.webp" width="1600" height="1067" alt="{{mac.imageAlt}}" loading="lazy">
-          <span class="pin pin--1" aria-hidden="true">{{mac.c1.n}}</span>
-          <span class="pin pin--2" aria-hidden="true">{{mac.c2.n}}</span>
-          <span class="pin pin--3" aria-hidden="true">{{mac.c3.n}}</span>
+        <span class="mac__plate" aria-hidden="true" data-plate></span>
+        <figure class="win win--full" role="img" aria-label="{{threads.windowLabel}}" data-win>
+          <div class="win__side">
+            <p class="win__h">{{threads.win.pondsLabel}}</p>
+            <ul class="win__ponds">
+              <li class="is-open"><span class="pt" style="--h:205"></span><b>{{threads.win.pond1}}</b>
+                <ul>
+                  <li class="is-sel"><svg class="ic" aria-hidden="true"><use href="#i-branch"/></svg><span><b>{{threads.win.stream1}}</b><small>{{threads.win.branch1}}</small></span><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg></li>
+                  <li><svg class="ic" aria-hidden="true"><use href="#i-branch"/></svg><span><b>{{threads.win.stream2}}</b><small>{{threads.win.branch2}}</small></span><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg></li>
+                </ul>
+              </li>
+              <li><span class="pt" style="--h:150"></span><b>{{threads.win.pond2}}</b></li>
+              <li><span class="pt" style="--h:300"></span><b>{{threads.win.pond3}}</b></li>
+            </ul>
+            <p class="win__create">+ {{threads.win.create}}</p>
+            <span class="pin pin--1">{{threads.c1.n}}</span>
+          </div>
+          <div class="win__main">
+            <div class="win__bar">
+              <span class="crumb">{{threads.win.barPond}} / <b>{{threads.win.barStream}}</b></span>
+              <span class="chip"><svg class="ic" aria-hidden="true"><use href="#i-branch"/></svg>{{threads.win.barBranch}}</span>
+              <span class="diff">{{threads.win.barDiff}}</span>
+            </div>
+            <div class="win__feed">
+              <p class="msg msg--you">{{threads.win.you}}</p>
+              <p class="msg">{{threads.win.said}}</p>
+              <p class="tool"><span class="tool__v">{{threads.win.toolEditVerb}}</span><span class="tool__t">{{threads.win.toolEditTarget}}</span><span class="tool__m">{{threads.win.toolEditMeta}}</span></p>
+              <p class="tool"><span class="tool__v">{{threads.win.toolRunVerb}}</span><span class="tool__t">{{threads.win.toolRunTarget}}</span><span class="tool__m">{{threads.win.toolRunMeta}}</span></p>
+              <div class="card card--approve">
+                <p class="card__head"><b>{{threads.win.cardTitle}}</b><span class="chip">{{threads.win.cardChip}}</span></p>
+                <p class="card__code">{{threads.win.cardCommand}}</p>
+                <p class="card__why">{{threads.win.cardReason}}</p>
+                <p class="card__acts"><span class="btn-r btn-r--primary">{{threads.win.allowOnce}} <kbd>{{threads.win.allowOnceKey}}</kbd></span><span class="btn-r">{{threads.win.allowThread}} <kbd>{{threads.win.allowThreadKey}}</kbd></span><span class="btn-r">{{threads.win.deny}}</span></p>
+                <span class="pin pin--2">{{threads.c2.n}}</span>
+              </div>
+            </div>
+            <div class="win__dock">
+              <p class="bg"><b>{{threads.win.bgLabel}}</b><span class="bgchip"><span class="td td--s" style="--h:205"></span>{{threads.win.duck1}} · {{threads.win.duck1Age}}</span><span class="bgchip"><span class="td td--s" style="--h:205"></span>{{threads.win.duck2}} · {{threads.win.duck2Age}}</span></p>
+              <div class="composer">
+                <p class="composer__in">{{threads.win.placeholder}}</p>
+                <p class="composer__row"><span class="pill">{{threads.win.model}}</span><span class="pill">{{threads.win.mode}}</span><span class="composer__sp"></span><span class="composer__ctx">{{threads.win.context}}</span></p>
+              </div>
+              <p class="composer__hint">{{threads.win.hint}}</p>
+              <span class="pin pin--3">{{threads.c3.n}}</span>
+            </div>
+          </div>
+          <aside class="win__panel">
+            <p class="tabs"><b>{{threads.win.panelPond}}</b><span>{{threads.win.panelCode}}</span></p>
+            <div class="pcard"><p class="pcard__h">{{threads.win.panelHere}}</p><p class="pcard__r"><span class="av">A</span>{{threads.win.panelYou}} · {{threads.win.panelNest}}</p><p class="pcard__r pcard__r--m">{{threads.win.panelAgent}}</p></div>
+            <div class="pcard"><p class="pcard__h">{{threads.win.panelNeeds}}</p><p class="pcard__r pcard__r--w"><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg>{{threads.win.panelNeedsRow}}</p></div>
+            <div class="pcard"><p class="pcard__h">{{threads.win.panelChanged}}</p><p class="pcard__r pcard__r--m">{{threads.win.panelChangedRow}}</p></div>
+          </aside>
         </figure>
       </div>
     </div>
-    <p class="shot__link"><a class="textlink" href="{{mac.viewFullHref}}">{{mac.viewFull}}</a></p>
-    <ol class="callouts" aria-label="{{mac.calloutsLabel}}">
-      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c1.n}}</span><h3>{{mac.c1.title}}</h3><p>{{mac.c1.body}}</p></li>
-      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c2.n}}</span><h3>{{mac.c2.title}}</h3><p>{{mac.c2.body}}</p></li>
-      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c3.n}}</span><h3>{{mac.c3.title}}</h3><p>{{mac.c3.body}}</p></li>
+    <ol class="callouts" aria-label="{{threads.windowLabel}}">
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{threads.c1.n}}</span><h3>{{threads.c1.title}}</h3><p>{{threads.c1.body}}</p></li>
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{threads.c2.n}}</span><h3>{{threads.c2.title}}</h3><p>{{threads.c2.body}}</p></li>
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{threads.c3.n}}</span><h3>{{threads.c3.title}}</h3><p>{{threads.c3.body}}</p></li>
     </ol>
+    <div class="tools">
+      <div class="tools__lead"><h3>{{threads.toolsTitle}}</h3><p>{{threads.toolsBody}}</p></div>
+      <div class="tools__also">
+        <p class="tools__label">{{threads.alsoLabel}}</p>
+        <ul class="chips">
+          <li>{{threads.also.i1}}</li><li>{{threads.also.i2}}</li><li>{{threads.also.i3}}</li><li>{{threads.also.i4}}</li>
+          <li>{{threads.also.i5}}</li><li>{{threads.also.i6}}</li><li>{{threads.also.i7}}</li><li>{{threads.also.i8}}</li>
+          <li>{{threads.also.i9}}</li><li>{{threads.also.i10}}</li><li>{{threads.also.i11}}</li><li>{{threads.also.i12}}</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 
-<!-- Away from the desk: cards that stack and settle -->
+<!-- 02 Needs you: a pinned, scrubbed example. Four beats, each with its own small window -->
+<section class="moment" id="needs" aria-labelledby="needs-h">
+  <div class="wrap">
+    <header class="section__head">
+      <p class="kicker">{{needs.kicker}}</p>
+      <h2 id="needs-h">{{needs.heading}}</h2>
+      <p class="section__lede">{{needs.lede}}</p>
+    </header>
+  </div>
+  <div class="moment__pin" data-moment>
+    <div class="wrap moment__inner">
+      <ol class="beats" data-beats>
+        <li class="beat" data-beat>
+          <div class="beat__copy"><p class="beat__n">{{needs.b1.n}}</p><h3>{{needs.b1.title}}</h3><p>{{needs.b1.body}}</p></div>
+          <div class="win win--lite" aria-hidden="true">
+            <div class="win__main">
+              <div class="win__bar"><span class="crumb">{{needs.stream}}</span><span class="chip"><svg class="ic"><use href="#i-branch"/></svg>{{needs.branch}}</span><span class="state state--working"><svg class="mk mk--working"><use href="#i-load"/></svg>{{needs.status.working}}</span></div>
+              <div class="win__feed">
+                <p class="msg msg--you">{{needs.w1.you}}</p>
+                <p class="msg">{{needs.w1.said}}</p>
+                <p class="tool"><span class="tool__v">{{needs.w1.toolVerb}}</span><span class="tool__t">{{needs.w1.toolTarget}}</span><span class="tool__m">{{needs.w1.toolMeta}}</span></p>
+                <p class="live"><svg class="mk mk--working"><use href="#i-load"/></svg>{{needs.w1.live}}</p>
+              </div>
+              <div class="win__dock"><div class="composer"><p class="composer__in">{{needs.w1.placeholder}}</p></div></div>
+            </div>
+          </div>
+        </li>
+        <li class="beat" data-beat>
+          <div class="beat__copy"><p class="beat__n">{{needs.b2.n}}</p><h3>{{needs.b2.title}}</h3><p>{{needs.b2.body}}</p></div>
+          <div class="win win--lite" aria-hidden="true">
+            <div class="win__main">
+              <div class="win__bar"><span class="crumb">{{needs.stream}}</span><span class="chip"><svg class="ic"><use href="#i-branch"/></svg>{{needs.branch}}</span><span class="state state--needs"><svg class="mk mk--needs"><use href="#i-q"/></svg>{{needs.status.question}}</span></div>
+              <div class="win__feed">
+                <p class="msg">{{needs.w2.said}}</p>
+                <div class="card card--ask">
+                  <p class="card__head"><b>{{needs.w2.cardTitle}}</b></p>
+                  <p class="opt"><span class="opt__k">A</span><span class="opt__t">{{needs.w2.optA}}</span><span class="opt__r">{{needs.w2.optARec}}</span></p>
+                  <p class="opt"><span class="opt__k">B</span><span class="opt__t">{{needs.w2.optB}}</span></p>
+                  <p class="opt opt--other"><span class="opt__k">0</span><span class="opt__t">{{needs.w2.other}}</span></p>
+                </div>
+              </div>
+              <div class="win__dock"><div class="composer composer--off"><p class="composer__in">{{needs.w2.placeholder}}</p></div></div>
+            </div>
+            <p class="toast"><span class="td" style="--h:330"></span><span><b>{{needs.w2.toastLabel}}</b>{{needs.w2.toast}}</span></p>
+          </div>
+        </li>
+        <li class="beat" data-beat>
+          <div class="beat__copy"><p class="beat__n">{{needs.b3.n}}</p><h3>{{needs.b3.title}}</h3><p>{{needs.b3.body}}</p></div>
+          <div class="win win--lite" aria-hidden="true">
+            <div class="win__main">
+              <div class="win__bar"><span class="crumb">{{needs.stream}}</span><span class="chip"><svg class="ic"><use href="#i-branch"/></svg>{{needs.branch}}</span><span class="state state--working"><svg class="mk mk--working"><use href="#i-load"/></svg>{{needs.status.answered}}</span></div>
+              <div class="win__feed">
+                <p class="msg">{{needs.w3.said}}</p>
+                <p class="receipt"><svg class="ic"><use href="#i-check"/></svg><b>{{needs.w3.receipt}}</b><span>{{needs.w3.receiptOpt}}</span></p>
+                <p class="live"><svg class="mk mk--working"><use href="#i-load"/></svg>{{needs.w3.live}}</p>
+              </div>
+              <div class="win__dock"><div class="composer"><p class="composer__in">{{needs.w3.placeholder}}</p></div></div>
+            </div>
+          </div>
+        </li>
+        <li class="beat" data-beat>
+          <div class="beat__copy"><p class="beat__n">{{needs.b4.n}}</p><h3>{{needs.b4.title}}</h3><p>{{needs.b4.body}}</p></div>
+          <div class="win win--lite" aria-hidden="true">
+            <div class="win__main">
+              <div class="win__bar"><span class="crumb">{{needs.stream}}</span><span class="chip"><svg class="ic"><use href="#i-branch"/></svg>{{needs.branch}}</span><span class="state state--done"><span class="udot"></span>{{needs.status.finished}}</span></div>
+              <div class="win__feed">
+                <p class="msg">{{needs.w4.said}}</p>
+                <p class="tool"><span class="tool__v">{{needs.w4.toolVerb}}</span><span class="tool__t">{{needs.w4.toolTarget}}</span><span class="tool__m">{{needs.w4.toolMeta}}</span></p>
+                <p class="foot">{{needs.w4.footer}}</p>
+                <p class="changed">{{needs.w4.changed}}</p>
+              </div>
+              <div class="win__dock"><div class="composer"><p class="composer__in">{{needs.w4.placeholder}}</p></div></div>
+            </div>
+            <p class="toast"><span class="td" style="--h:330"></span><span><b>{{needs.w4.toastLabel}}</b>{{needs.w4.toast}}<small>{{needs.w4.toastBody}}</small></span></p>
+          </div>
+        </li>
+      </ol>
+      <div class="moment__foot">
+        <ol class="steps" data-steps aria-hidden="true"><li></li><li></li><li></li><li></li></ol>
+        <p class="moment__note">{{needs.note}}</p>
+        <button class="btn btn--ghost moment__replay" type="button" data-replay>{{needs.replay}}</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 03 Ponds -->
+<section class="ponds" id="ponds" aria-labelledby="ponds-h">
+  <div class="wrap">
+    <header class="ponds__head">
+      <p class="kicker">{{ponds.kicker}}</p>
+      <h2 id="ponds-h">{{ponds.heading}}</h2>
+      <p class="ponds__lede">{{ponds.lede}}</p>
+    </header>
+    <div class="ponds__grid">
+      <figure class="home" role="img" aria-label="{{ponds.homeLabel}}" data-home>
+        <div class="home__id">
+          <span class="home__tile" style="--h:205"><span class="td td--l" style="--h:205"></span></span>
+          <div><p class="home__kind">{{ponds.home.kind}}</p><p class="home__name">{{ponds.home.title}}</p></div>
+          <span class="home__invite">{{ponds.home.invite}}</span>
+        </div>
+        <p class="home__access">{{ponds.home.access}}</p>
+        <div class="home__cols">
+          <div class="home__streams">
+            <p class="home__h">{{ponds.home.streamsLabel}}</p>
+            <div class="stream"><p class="stream__h"><svg class="ic"><use href="#i-branch"/></svg><b>{{ponds.home.stream1}}</b><small>{{ponds.home.stream1Branch}}</small></p>
+              <p class="trow"><span class="td" style="--h:330"></span><span class="trow__t"><b>{{ponds.home.thread1}}</b><span>{{ponds.home.thread1State}}</span><small>{{ponds.home.thread1Who}}</small></span><svg class="mk mk--needs"><use href="#i-q"/></svg></p>
+              <p class="trow"><span class="td" style="--h:30"></span><span class="trow__t"><b>{{ponds.home.thread2}}</b><span>{{ponds.home.thread2State}}</span><small>{{ponds.home.thread2Who}}</small></span><svg class="mk mk--needs"><use href="#i-tri"/></svg></p>
+            </div>
+            <div class="stream"><p class="stream__h"><svg class="ic"><use href="#i-branch"/></svg><b>{{ponds.home.stream2}}</b><small>{{ponds.home.stream2Branch}}</small></p>
+              <p class="trow"><span class="td" style="--h:170"></span><span class="trow__t"><b>{{ponds.home.thread3}}</b><span>{{ponds.home.thread3State}}</span><small>{{ponds.home.thread3Who}}</small></span><svg class="mk mk--working"><use href="#i-load"/></svg></p>
+            </div>
+          </div>
+          <div class="home__flock">
+            <p class="home__h">{{ponds.home.flock}}</p>
+            <p class="mem"><span class="av av--1">A</span><span><b>{{ponds.home.m1}}</b><small>{{ponds.home.m1Where}}</small></span></p>
+            <p class="mem"><span class="av av--2">R</span><span><b>{{ponds.home.m2}}</b><small>{{ponds.home.m2Where}}</small></span></p>
+            <p class="mem"><span class="av av--3">M</span><span><b>{{ponds.home.m3}}</b><small>{{ponds.home.m3Where}}</small></span></p>
+          </div>
+        </div>
+      </figure>
+      <dl class="glossary" aria-label="{{ponds.glossaryLabel}}">
+        <div><dt>{{ponds.g.pond.term}}</dt><dd>{{ponds.g.pond.body}}</dd></div>
+        <div><dt>{{ponds.g.flock.term}}</dt><dd>{{ponds.g.flock.body}}</dd></div>
+        <div><dt>{{ponds.g.stream.term}}</dt><dd>{{ponds.g.stream.body}}</dd></div>
+        <div><dt>{{ponds.g.thread.term}}</dt><dd>{{ponds.g.thread.body}}</dd></div>
+        <div><dt>{{ponds.g.duckling.term}}</dt><dd>{{ponds.g.duckling.body}}</dd></div>
+        <div><dt>{{ponds.g.nest.term}}</dt><dd>{{ponds.g.nest.body}}</dd></div>
+      </dl>
+    </div>
+    <div class="ways" role="group" aria-label="{{ponds.ways.label}}">
+      <article><h3>{{ponds.ways.own.title}}</h3><p>{{ponds.ways.own.body}}</p></article>
+      <article><h3>{{ponds.ways.shared.title}}</h3><p>{{ponds.ways.shared.body}}</p></article>
+    </div>
+    <ul class="rules">
+      <li>{{ponds.rules.r1}}</li><li>{{ponds.rules.r2}}</li><li>{{ponds.rules.r3}}</li><li>{{ponds.rules.r4}}</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 04 Away from your desk: cards that stack and settle -->
 <section class="away" id="away" aria-labelledby="away-h">
   <div class="away__pin" data-away>
     <div class="wrap away__grid">
@@ -184,14 +365,22 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
         <div class="stack" data-stack>
           <span class="stack__plate stack__plate--1" aria-hidden="true"></span>
           <span class="stack__plate stack__plate--2" aria-hidden="true"></span>
-          <figure class="phone" data-phone>
-            <img src="./assets/iphone-activity.webp" width="700" height="1521" alt="{{away.phoneAlt}}" loading="lazy">
-            <figcaption>{{away.phoneCaption}}</figcaption>
+          <figure class="phone" data-phone role="img" aria-label="{{away.phoneLabel}}">
+            <div class="phone__screen">
+              <p class="phone__top"><span>{{away.phone.time}}</span><span class="phone__notch"></span></p>
+              <p class="phone__pond">{{away.phone.pond}}</p>
+              <p class="phone__label"><svg class="mk mk--needs"><use href="#i-tri"/></svg>{{away.phone.needsLabel}}</p>
+              <div class="phone__card"><p class="phone__t"><span class="td td--s" style="--h:330"></span><b>{{away.phone.title}}</b></p><p class="phone__q">{{away.phone.question}}</p><p class="phone__a">{{away.phone.optA}}</p><p class="phone__a">{{away.phone.optB}}</p></div>
+              <p class="phone__label"><svg class="mk mk--working"><use href="#i-load"/></svg>{{away.phone.workingLabel}}</p>
+              <p class="phone__row"><span class="td td--s" style="--h:170"></span>{{away.phone.working1}}</p>
+              <p class="phone__row"><span class="td td--s" style="--h:265"></span>{{away.phone.working2}}</p>
+              <p class="phone__tabs"><span class="is-on">{{away.phone.tabHome}}</span><span>{{away.phone.tabThreads}}</span><span>{{away.phone.tabNeeds}}</span><span>{{away.phone.tabSettings}}</span></p>
+            </div>
           </figure>
           <figure class="tg" role="group" aria-label="{{away.telegramLabel}}" data-tg>
             <p class="tg__from">{{away.telegram.from}}</p>
             <div class="tg__msg">
-              <p class="tg__title"><span class="dot dot--needs" aria-hidden="true"></span><b>{{away.telegram.title}}</b></p>
+              <p class="tg__title"><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg><b>{{away.telegram.title}}</b></p>
               <p class="tg__state">{{away.telegram.state}}</p>
               <p>{{away.telegram.question}}</p>
               <p class="tg__changed">{{away.telegram.changed}}</p>
@@ -204,34 +393,23 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
           </figure>
         </div>
       </div>
-      <div class="away__more">
-        <ul class="points">
-          <li data-point><h3>{{away.p1.title}}</h3><p>{{away.p1.body}}</p></li>
-        </ul>
-        <p class="away__req" data-point>{{away.requirement}}</p>
-      <p class="away__link" data-point><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span><a class="textlink" href="{{away.webHref}}">{{away.webLink}}</a></p>
-      </div>
     </div>
+  </div>
+  <div class="wrap away__rest">
+    <ul class="ways2" aria-label="{{away.listLabel}}">
+      <li data-point><h3>{{away.iphone.title}}</h3><p>{{away.iphone.body}}</p></li>
+      <li data-point><h3>{{away.web.title}}</h3><p>{{away.web.body}}</p></li>
+      <li data-point><h3>{{away.cards.title}}</h3><p>{{away.cards.body}}</p></li>
+      <li data-point><h3>{{away.calls.title}}</h3><p>{{away.calls.body}} <a class="textlink" href="{{away.callsDocsHref}}">{{away.callsDocs}}</a></p></li>
+      <li data-point><h3>{{away.awake.title}}</h3><p>{{away.awake.body}}</p></li>
+      <li data-point><h3>{{away.path.title}}</h3><p>{{away.path.body}}</p></li>
+    </ul>
+    <p class="away__req" data-point>{{away.requirement}}</p>
+    <p class="away__link" data-point><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span><a class="textlink" href="{{away.webHref}}">{{away.webLink}}</a></p>
   </div>
 </section>
 
-<section class="calls" id="calls" aria-labelledby="calls-h">
-  <div class="wrap calls__grid">
-    <header class="calls__head">
-      <p class="kicker">{{calls.kicker}}</p>
-      <h2 id="calls-h">{{calls.heading}}</h2>
-      <p>{{calls.lede}}</p>
-    </header>
-    <div class="calls__cards">
-      <article><span class="calls__label">{{calls.outbound.label}}</span><h3>{{calls.outbound.title}}</h3><p>{{calls.outbound.body}}</p></article>
-      <article><span class="calls__label">{{calls.inbound.label}}</span><h3>{{calls.inbound.title}}</h3><p>{{calls.inbound.body}}</p></article>
-    </div>
-    <p class="calls__setup">{{calls.setup}}</p>
-    <p class="calls__docs"><a class="textlink" href="{{calls.docsHref}}">{{calls.docs}}</a></p>
-  </div>
-</section>
-
-<!-- 5. Trust: big statements, one line at a time -->
+<!-- 05 Trust: big statements, one line at a time -->
 <section class="trust" id="trust" aria-labelledby="trust-h">
   <div class="wrap">
     <header class="trust__head">
@@ -252,27 +430,46 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
           <li><h3>{{trust.more.d2.title}}</h3><p>{{trust.more.d2.body}}</p></li>
           <li><h3>{{trust.more.d3.title}}</h3><p>{{trust.more.d3.body}}</p></li>
         </ul>
-        <div class="table-wrap">
-          <table class="compat">
-            <caption>{{trust.table.caption}}</caption>
-            <thead>
-              <tr><th scope="col">{{trust.table.colTool}}</th><th scope="col">{{trust.table.colWatch}}</th><th scope="col">{{trust.table.colReply}}</th></tr>
-            </thead>
-            <tbody>
-              <tr><th scope="row">{{trust.table.r1.tool}}<small>{{trust.table.r1.note}}</small></th><td class="is-yes">{{trust.table.r1.watch}}</td><td class="is-yes">{{trust.table.r1.reply}}</td></tr>
-              <tr><th scope="row">{{trust.table.r2.tool}}<small>{{trust.table.r2.note}}</small></th><td class="is-yes">{{trust.table.r2.watch}}</td><td class="is-yes">{{trust.table.r2.reply}}</td></tr>
-              <tr><th scope="row">{{trust.table.r3.tool}}<small>{{trust.table.r3.note}}</small></th><td class="is-yes">{{trust.table.r3.watch}}</td><td>{{trust.table.r3.reply}}</td></tr>
-              <tr><th scope="row">{{trust.table.r4.tool}}<small>{{trust.table.r4.note}}</small></th><td class="is-yes">{{trust.table.r4.watch}}</td><td>{{trust.table.r4.reply}}</td></tr>
-              <tr><th scope="row">{{trust.table.r5.tool}}</th><td class="is-yes">{{trust.table.r5.watch}}</td><td>{{trust.table.r5.reply}}</td></tr>
-            </tbody>
-          </table>
-        </div>
       </div>
     </details>
   </div>
 </section>
 
-<!-- 6. Install: Duck Yellow, with a small pile that pours in -->
+<!-- Extensions: a small strip -->
+<section class="ext" id="extensions" aria-labelledby="ext-h">
+  <div class="wrap ext__row">
+    <div class="ext__lead">
+      <p class="kicker">{{extensions.kicker}}</p>
+      <h2 id="ext-h">{{extensions.heading}}</h2>
+      <p>{{extensions.body}}</p>
+    </div>
+    <ul class="ext__list">
+      <li><h3>{{extensions.e1.title}}</h3><p>{{extensions.e1.body}}</p></li>
+      <li><h3>{{extensions.e2.title}}</h3><p>{{extensions.e2.body}}</p></li>
+    </ul>
+  </div>
+</section>
+
+<!-- Where it's going: plans, clearly not shipped -->
+<section class="next" id="next" aria-labelledby="next-h">
+  <div class="wrap">
+    <header class="next__head">
+      <p class="kicker">{{next.kicker}}</p>
+      <h2 id="next-h">{{next.heading}}</h2>
+      <p class="section__lede">{{next.lede}}</p>
+    </header>
+    <ul class="next__list">
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i1.title}}</h3><p>{{next.i1.body}}</p></li>
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i2.title}}</h3><p>{{next.i2.body}}</p></li>
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i3.title}}</h3><p>{{next.i3.body}}</p></li>
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i4.title}}</h3><p>{{next.i4.body}}</p></li>
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i5.title}}</h3><p>{{next.i5.body}}</p></li>
+      <li><span class="badge">{{next.badge}}</span><h3>{{next.i6.title}}</h3><p>{{next.i6.body}}</p></li>
+    </ul>
+  </div>
+</section>
+
+<!-- Install: Duck Yellow, with a small pile that pours in -->
 <section class="install" id="install" aria-labelledby="install-h">
   <div class="wrap install__grid">
     <div class="install__copy">
@@ -319,6 +516,7 @@ window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go
       <li><a href="{{footer.webHref}}">{{footer.web}}</a></li>
     </ul>
     <p>{{footer.note}}</p>
+    <p class="footer__thanks">{{footer.thanksPre}} <a href="{{footer.personHref}}">{{footer.person}}</a> {{footer.thanksPost}}</p>
   </div>
 </footer>
 </body>

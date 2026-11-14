@@ -57,12 +57,11 @@ Requirements: Node 22 or later. `npm run verify` needs the Playwright Chromium b
 
 Regenerate with `node scripts/prepare-assets.mjs`. Sources:
 
-- Duck artwork and the panel come from the read-only release page under
-  `.context/release-pages/squeak/` (the mood PNGs are 240 px, the panel 760x1000).
-- Product screenshots are captured from the offline Mac and iPhone demo apps and kept in
-  `capture-sources/`; they use demo content, not live user sessions. `prepare-assets.mjs`
-  resizes and converts them to WebP. The generated assets are the inputs for
-  `npm ci && npm run build`.
+- The duck mood artwork comes from the read-only release page under
+  `.context/release-pages/squeak/` (the mood PNGs are 240 px).
+- The Mac window, the iPhone screen, the Telegram card and the pond page are HTML replicas
+  (`index.template.html`, `styles.css`), not screenshots, so they never show a stale product.
+  `duck-thread.png` is the brand's thread-duck silhouette (DESIGN.md 6.5), tinted by CSS.
 - `duck-brand.svg` and `logo.svg` come from `brand/logo/svg/`.
 - `og.png` (1200x630) is rendered from the approved lockup and duck with Figtree from the
   installed brand font.
@@ -91,14 +90,15 @@ the check uses the downloaded bytes rather than `Content-Length` from `HEAD`.
 
 ## Verification
 
-Run `npm run build`, start `npm run dev`, then run `npm run verify`. The browser checks exercise
-1440px desktop, 834px tablet and 390px phone layouts; verify the Conductor-first section order,
-Mac download CTA, the separate calling options and setup notes, the web link, no horizontal overflow,
-keyboard skip link, reduced-motion and no-JavaScript readability, static metadata, and release files.
-It writes screenshots and `results.json` to `.context/squeak-redesign/verify/`.
-
-The page has no pinned story. Its scroll score records the measured page heights and section order in
-`scroll-score.json`; page length is evidence rather than a pass/fail limit.
+Run `npm run build`, start `npm run dev`, then run `npm run verify` (a few minutes). It checks the built HTML
+(tokens, story order, the Conductor-as-extension rule, the glossary, plans marked Coming, no old screenshots,
+metadata, JSON-LD), then in headless Chromium at 1440x900, 1280x720, 834x1112, 390x844 and 360x740: no horizontal
+overflow (also while scrolling the whole page), the live duck pile and WebGL backdrop, Lenis, the Mac window
+tilting flat, each of the four pinned beats alone and fully on screen, the step marker, Replay, the pin releasing,
+the phone and Telegram cards settling inside the screen, the install pond, 44 px targets, 15 px reading text and
+the skip link. It also covers reduced motion and no JavaScript. Screenshots and `results.json` go to
+`shots/verify/` (git-ignored). `npx tsx scripts/shots.ts [d1440 d1280 t834 m390 m360]` takes a set of looking
+screenshots into `shots/`.
 
 ## Build-generated JSON-LD
 
