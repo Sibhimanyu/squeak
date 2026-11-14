@@ -37,7 +37,7 @@ const PREFIX = /^\/server\/squeak_relay/;
  * Catalyst can say who the user is; on AppSail the cookie is meaningless and no x-zc-* header is ever trusted for identity.
  *   tokenOnly   a Squeak account token (x-squeak-account, signed by the relay, never a Catalyst session) is the only way in
  *   tokenOrKey  the same, or the relay/Mac key (GET /account/avatar?userId=, PUT/DELETE by a Mac)
- * Everything else (/doc /list /ping /token /pond-* /account/link /account/unlink /account/macs/cliq-token, a Cliq PUT) is
+ * Everything else (/doc /list /ping /token /pond-* /account/link /account/unlink /account/macs/cliq-token, /account/macs/hist-token, a Cliq PUT) is
  * device traffic: it proves itself with a key, a pond token or a signed token, never with Catalyst identity.
  */
 const COOKIE_ONLY = new Set([
@@ -62,7 +62,7 @@ function needsCatalystUser(req) {
     route === "/account/device-request"
   )
     return !token;
-  if (route === "/account/macs/cliq-token") return false;
+  if (route === "/account/macs/cliq-token" || route === "/account/macs/hist-token") return false;
   if (route.startsWith("/account/macs/")) return !token;
   if (route === "/account/avatar") return !token && !key;
   if (route === "/ponds/short/redeem") return !token && !key;

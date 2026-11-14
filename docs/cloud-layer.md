@@ -238,3 +238,12 @@ shows only the existing Firebase settings. DESIGN.md applies.
 - The CLI never names the data centre; `dc` defaults to `in` and is a setting (`CatalystSetup.setConfig`).
 - Function env vars come only from `deployment.env_variables` in the function's `catalyst-config.json` (a deploy overwrites console-set ones); setup writes `RELAY_KEY` there in its private copy `<support>/catalyst-relay`, never in the repo.
 - Assumed, not run (a deploy changes a real project): `catalyst deploy --only functions:squeak_relay -ni`, and that the CLI ships the function's `node_modules` (setup runs `npm ci --omit=dev` first).
+
+## History in the cloud (relay 1.5.0)
+
+Kind `hist` (`channels/<id>/hist/<doc>`): a sealed copy of the Mac's recent chats for a device that cannot ask the Mac
+(asleep, or new). Reads by id with the channel's key; `GET /list` of `hist` is 403. `PUT` and `DELETE` also need
+`x-squeak-hist: <token>`, whose hash the Mac registered with `POST /account/macs/hist-token {channel, token, previous?}` (its own
+key; first wins, a change needs `previous`, else 409). A store write over the account's cap (50 MB, 4000 documents, kept in
+`hist-usage/<userId>`; a replacement counts as the difference) answers 413 `{error:"cap"}`. Only the index document `idx`
+sends a change notice. Design and client behaviour: docs/remote-channel.md, "History cache", Layer 2.

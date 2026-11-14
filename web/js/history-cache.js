@@ -237,3 +237,82 @@ export function applyDelta(held, delta) {
     more: delta.nextAfter !== null && fresh.length > 0,
   };
 }
+
+/* ---------- Layer 2: the Mac's sealed copy of recent chats in Squeak's cloud (history-cloud.ts) ---------- */
+
+const CURSOR = /^[1-9]\d{0,15}$/;
+const cursorNumber = (id) => (typeof id === "string" && CURSOR.test(id) ? Number(id) : null);
+
+const cleanEntries = (list) =>
+  (Array.isArray(list) ? list : [])
+    .filter(
+      (e) =>
+        e &&
+        (e.role === "user" || e.role === "assistant") &&
+        typeof e.text === "string" &&
+        typeof e.id === "string" &&
+        e.id !== "",
+    )
+    .map((e) => {
+      const out = { role: e.role, text: e.text, at: typeof e.at === "string" ? e.at : null, id: e.id };
+      if (typeof e.workBefore === "number" && e.workBefore > 0) out.workBefore = e.workBefore;
+      return out;
+    });
+
+/** The cloud index (`hist/idx`): one entry per chat naming its pages, or null when it is not a v1 index. */
+export function readCloudIndex(value) {
+  if (!value || typeof value !== "object" || value.v !== 1 || !Array.isArray(value.chats)) return null;
+  const chats = value.chats
+    .filter((c) => c && typeof c.key === "string" && Array.isArray(c.pages) && typeof c.newest === "string")
+    .map((c) => ({
+      key: c.key,
+      pages: c.pages
+        .filter((p) => p && typeof p.f === "string" && cursorNumber(p.f) !== null)
+        .map((p) => ({ f: p.f, t: Number(p.t) || 0 })),
+      newest: c.newest,
+      complete: c.complete === true,
+    }));
+  return { chats };
+}
+
+/** One page checked against what was asked: this chat, this first entry. Null otherwise. */
+export function readCloudPage(value, key, first) {
+  if (!value || typeof value !== "object" || value.v !== 1 || value.key !== key || value.first !== first) return null;
+  return { first, entries: cleanEntries(value.entries) };
+}
+
+/** The pages worth reading: all when nothing is held, else from the one holding the newest held entry; none when current. */
+export function cloudPagesToRead(held, chat) {
+  if (!chat.pages.length) return [];
+  const newest = cursorNumber(newestCursor(held));
+  if (newest === null) return held?.length ? [] : chat.pages;
+  const cloudNewest = cursorNumber(chat.newest);
+  if (cloudNewest === null || cloudNewest <= newest) return [];
+  let start = 0;
+  chat.pages.forEach((p, i) => {
+    if (Number(p.f) <= newest) start = i;
+  });
+  return chat.pages.slice(start);
+}
+
+/**
+ * The held history with the cloud pages (oldest first) landed over its tail, like the Mac's live push: nothing repeated,
+ * and a copy that is not newer than what is held changes nothing. `changed` says whether anything did.
+ */
+export function mergeCloud(held, pages) {
+  const incoming = pages.flatMap((p) => p.entries);
+  const last = cursorNumber(incoming.at(-1)?.id);
+  if (!incoming.length || last === null) return { history: held, changed: false };
+  const newest = cursorNumber(newestCursor(held));
+  if (held.length && (newest === null || last <= newest)) return { history: held, changed: false };
+  if (!held.length) return { history: incoming.slice(-MAX_CACHED_ENTRIES), changed: true };
+  const i = held.findIndex((e) => same(e, incoming[0]));
+  let history;
+  if (i >= 0) history = [...held.slice(0, i), ...incoming];
+  else {
+    const first = incoming[0].at ? Date.parse(incoming[0].at) : NaN;
+    const older = Number.isFinite(first) ? held.filter((e) => e.at && Date.parse(e.at) < first) : held;
+    history = [...older, ...incoming];
+  }
+  return { history: history.slice(-MAX_CACHED_ENTRIES), changed: true };
+}

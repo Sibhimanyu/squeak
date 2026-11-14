@@ -77,7 +77,14 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-async function setup(options: { location?: CloudLocation; relay?: FakeRelay | null } = {}) {
+async function setup(
+  options: {
+    location?: CloudLocation;
+    relay?: FakeRelay | null;
+    snapshot?: () => FleetSnapshot;
+    transcript?: (id: string, limit: number, before: number | null) => unknown;
+  } = {},
+) {
   const added: Array<{ name: string; email: string; text: string }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-account-"));
   dirs.push(dir);
@@ -89,8 +96,15 @@ async function setup(options: { location?: CloudLocation; relay?: FakeRelay | nu
     configPath: path.join(dir, "remote.json"),
     projectId: "squeak-test",
     store,
-    replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
-    snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+    replier: {
+      lastTurnText: () => null,
+      lastTurnId: () => null,
+      send: vi.fn(),
+      ...(options.transcript ? { transcript: options.transcript } : {}),
+    } as never,
+    snapshot:
+      options.snapshot ??
+      (() => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot),
     location: () => location,
     accountRelay: () => relay,
     onOwnDeviceAdded: (info) => added.push(info),
@@ -548,5 +562,137 @@ describe("web accounts: profile photo", () => {
     await flush();
     expect(fs.existsSync(file(t))).toBe(true);
     t.bridge.stop();
+  });
+});
+
+describe("history in the cloud: the setting and the sync", () => {
+  const HOSTED: CloudLocation = { ...CATALYST, hosted: true };
+  const NEWEST = new Date(NOW - 60_000).toISOString();
+  const rows = Array.from({ length: 6 }, (_, i) => ({
+    id: `m${i}`,
+    cursor: String(100 + i * 3),
+    role: i % 2 ? "assistant" : "user",
+    text: `hello ${i}`,
+    at: NEWEST,
+    turnId: null,
+  }));
+  const session = (over: Record<string, unknown> = {}) =>
+    ({
+      key: "conductor:s1",
+      conductorSessionId: "s1",
+      lastActivityAt: NEWEST,
+      retired: false,
+      state: "idle",
+      ...over,
+    }) as never;
+  const relayFetch = () => {
+    const docs = new Map<string, string>();
+    const seen: Array<{ method: string; path: string; hist?: string | undefined }> = [];
+    const fake = vi.fn(async (url: string, init: RequestInit) => {
+      const u = new URL(url);
+      const headers = init.headers as Record<string, string>;
+      if (u.pathname.endsWith("/account/macs/hist-token")) {
+        seen.push({ method: "POST", path: "hist-token" });
+        return new Response("{}", { status: 200 });
+      }
+      const p = u.searchParams.get("path")!;
+      seen.push({ method: String(init.method), path: p, hist: headers["x-squeak-hist"] });
+      if (init.method === "GET") {
+        const box = docs.get(p);
+        return box
+          ? new Response(JSON.stringify({ doc: { box } }), { status: 200 })
+          : new Response("{}", { status: 404 });
+      }
+      if (init.method === "PUT") docs.set(p, JSON.parse(String(init.body)).doc.box);
+      else docs.delete(p);
+      return new Response(null, { status: 204 });
+    });
+    return { docs, seen, fake };
+  };
+  const reader = (id: string, limit: number, before: number | null) => {
+    const eligible = rows.filter((m) => before === null || Number(m.cursor) < before);
+    const page = eligible.slice(-limit);
+    return { messages: page, nextBefore: eligible.length > limit ? page[0]!.cursor : null };
+  };
+  const snap = (sessions: unknown[]) => () =>
+    ({ sessions, active: [], attention: [], generatedAt: "", codexUsage: null }) as unknown as FleetSnapshot;
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is strict, needs a linked account on the hosted relay, and shows its default (on)", async () => {
+    const t = await setup({ location: HOSTED });
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: false })).toEqual({
+      ok: false,
+      reason: "No account is linked.",
+    });
+    await t.run({ kind: "accountLink", ticket: "T" });
+    expect(t.bridge.accountState().keepHistoryInCloud).toBe(true);
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: "no" }).ok).toBe(false);
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: false, askOwnDevices: true }).ok).toBe(false);
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: false })).toEqual({ ok: true });
+    expect(t.bridge.accountState().keepHistoryInCloud).toBe(false);
+    expect(t.config().account.keepHistoryInCloud).toBe(false);
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: true })).toEqual({ ok: true });
+    expect(t.config().account.keepHistoryInCloud).toBeUndefined();
+    // not hosted (a self-hosted relay or Firebase): there is nothing to turn on
+    const own = await setup();
+    await own.run({ kind: "accountLink", ticket: "T" });
+    expect(own.bridge.accountState()).not.toHaveProperty("keepHistoryInCloud");
+    expect(own.bridge.setAccountSettings({ keepHistoryInCloud: true }).ok).toBe(false);
+  });
+
+  it("uploads a chat sealed with the write token, then deletes everything when turned off", async () => {
+    const relay = relayFetch();
+    vi.stubGlobal("fetch", relay.fake);
+    const t = await setup({ location: HOSTED, snapshot: snap([session()]), transcript: reader });
+    await t.run({ kind: "accountLink", ticket: "T" });
+    await t.bridge.tick();
+    await vi.waitFor(() => expect(relay.docs.size).toBe(2));
+    expect(relay.seen[0]).toEqual({ method: "POST", path: "hist-token" });
+    const token = t.config().historyCloudToken as string;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const written = [...relay.docs.keys()].map((p) => p.split("/").pop()!);
+    expect(written).toContain("idx");
+    expect(written).toHaveLength(2);
+    for (const call of relay.seen.filter((c) => c.method === "PUT")) expect(call.hist).toBe(token);
+    for (const box of relay.docs.values()) expect(box).not.toContain("hello");
+    expect(t.bridge.setAccountSettings({ keepHistoryInCloud: false })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(relay.docs.size).toBe(0));
+  });
+
+  it("keeps nothing of an archived chat or one with no host", async () => {
+    const relay = relayFetch();
+    vi.stubGlobal("fetch", relay.fake);
+    const t = await setup({
+      location: HOSTED,
+      snapshot: snap([
+        session({ key: "a", archivedAt: NEWEST }),
+        session({ key: "b", conductorSessionId: null, hostId: undefined }),
+        session({ key: "c", lastActivityAt: new Date(NOW - 40 * 86_400_000).toISOString() }),
+      ]),
+      transcript: reader,
+    });
+    await t.run({ kind: "accountLink", ticket: "T" });
+    await t.bridge.tick();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect([...relay.docs.keys()].filter((p) => !p.endsWith("/idx"))).toEqual([]);
+  });
+
+  it("writes nothing while the setting is off, and unlinking deletes the copy", async () => {
+    const relay = relayFetch();
+    vi.stubGlobal("fetch", relay.fake);
+    const t = await setup({ location: HOSTED, snapshot: snap([session()]), transcript: reader });
+    await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ keepHistoryInCloud: false });
+    await t.bridge.tick();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(relay.docs.size).toBe(0);
+    t.bridge.setAccountSettings({ keepHistoryInCloud: true });
+    t.advance(60_000);
+    await t.bridge.tick();
+    await vi.waitFor(() => expect(relay.docs.size).toBe(2));
+    await t.bridge.unlinkAccount();
+    expect(relay.docs.size).toBe(0);
+    expect(t.config().historyCloudToken).toBeUndefined();
   });
 });

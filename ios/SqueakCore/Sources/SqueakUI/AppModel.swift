@@ -848,6 +848,7 @@ final class AppModel {
             perf.end(.openChat, key, cached: true)
         }
         guard let session = session(key) else { perf.end(.openChat, key); return }
+        await syncFromCloud(session)
         await syncDelta(session)
         warmedAt[key] = Date()
         perf.end(.openChat, key)
@@ -901,6 +902,55 @@ final class AppModel {
             }
             self?.prefetching = false
             self?.perf.end(.prefetch)
+        }
+    }
+
+    /// The cloud index of recent chats, read at most once a minute (the Mac rewrites it as chats move).
+    @ObservationIgnored private var cloudIndex: (index: HistoryCloudIndex, at: Date)?
+    @ObservationIgnored private var cloudSyncing: Set<String> = []
+
+    /// Whether the Mac is known to be asleep, off or unreachable (it has not answered for a while).
+    private var macAsleep: Bool {
+        if case .silent = macLiveness() { return true }
+        return false
+    }
+
+    /// Reads the Mac's sealed copy of this chat's history from Squeak's cloud (`HistoryCloud`), only when it helps: nothing of
+    /// the chat is on this device yet (a new phone), or the Mac is asleep and cannot answer a delta. What it reads lands in the
+    /// same history the Mac's delta fills, with the same cursors, so when the Mac wakes `syncDelta` brings what came after
+    /// and repeats nothing. Read-only; a failure or no copy stops quietly.
+    func syncFromCloud(_ session: PhoneSnapshot.Session, now: Date = Date()) async {
+        let key = session.key
+        guard !demo, !phoneOffline, let channel, !cloudSyncing.contains(key) else { return }
+        guard (historyStates[key]?.entries.isEmpty ?? true) || macAsleep else { return }
+        cloudSyncing.insert(key)
+        defer { cloudSyncing.remove(key) }
+        for attempt in 0..<2 {
+            var index = cloudIndex.flatMap { now.timeIntervalSince($0.at) < 60 && attempt == 0 ? $0.index : nil }
+            if index == nil, let fresh = try? await channel.historyCloudIndex() {
+                cloudIndex = (fresh, now)
+                index = fresh
+            }
+            guard let chat = index?.chat(key) else { return }
+            let refs = HistoryCloud.pagesToRead(held: historyStates[key], chat: chat)
+            guard !refs.isEmpty else { return }
+            let pages: [HistoryCloudPage] = await withTaskGroup(of: (Int, HistoryCloudPage?).self) { group in
+                for (i, ref) in refs.enumerated() {
+                    group.addTask { (i, try? await channel.historyCloudPage(key: key, first: ref.f)) }
+                }
+                var out: [(Int, HistoryCloudPage)] = []
+                for await (i, page) in group { if let page { out.append((i, page)) } }
+                return out.sorted { $0.0 < $1.0 }.map(\.1)
+            }
+            // A page gone means the Mac moved on since the index was read: read the index again, once.
+            if pages.count < refs.count { cloudIndex = nil; if attempt == 0 { continue } }
+            guard !pages.isEmpty, pages.count == refs.count else { return }
+            var next = historyStates[key] ?? ChatHistoryState()
+            if next.mergeCloud(pages, chat: chat) {
+                setHistory(next, for: key)
+                rebuild()
+            }
+            return
         }
     }
 

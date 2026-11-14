@@ -638,6 +638,17 @@ public struct DaemonClient: Sendable {
         return (try? JSONDecoder().decode(Ok.self, from: r.body))?.ok ?? false
     }
 
+    /// Saves "Keep recent chats in Squeak's cloud (encrypted)"; turning it off deletes the cloud copy. False when the
+    /// daemon could not (or is older: its strict settings route refuses the key).
+    public func remoteHistoryCloud(_ on: Bool) async throws -> Bool {
+        let body = try JSONEncoder().encode(["keepHistoryInCloud": on])
+        let r = try await post("/control/remote/account/settings", body: body)
+        if r.status == 404 { return false }
+        try Self.check(r.status)
+        struct Ok: Decodable { var ok: Bool? }
+        return (try? JSONDecoder().decode(Ok.self, from: r.body))?.ok ?? false
+    }
+
     /// Unlinks the Squeak account. `reason` is the daemon's sentence when it could not.
     public func remoteAccountUnlink() async throws -> (ok: Bool, reason: String?) {
         let r = try await post("/control/remote/account/unlink")

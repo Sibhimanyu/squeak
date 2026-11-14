@@ -428,6 +428,22 @@ public struct Channel: Sendable {
         return delta.key == sessionKey && delta.after == after ? delta : nil
     }
 
+    /// The cloud index of recent chats, or nil when the Mac keeps none (an older Mac, the setting off, a cloud that has no
+    /// such kind). Another channel's or an unreadable document is nil too.
+    public func historyCloudIndex() async throws -> HistoryCloudIndex? {
+        guard let document = try await store.get(path(HistoryCloud.kind, HistoryCloud.indexDoc)) else { return nil }
+        guard let index = try? ChannelCrypto.open(HistoryCloudIndex.self, box: document.box, key: pairing.k), index.v == 1 else { return nil }
+        return index
+    }
+
+    /// One page of a chat's cloud copy, or nil when it is gone (the Mac moved on since the index was read) or not for this chat.
+    public func historyCloudPage(key sessionKey: String, first: String) async throws -> HistoryCloudPage? {
+        guard let document = try await store.get(path(HistoryCloud.kind, HistoryCloud.pageDoc(for: sessionKey, first: first))) else { return nil }
+        guard let page = try? ChannelCrypto.open(HistoryCloudPage.self, box: document.box, key: pairing.k),
+              page.key == sessionKey, page.first == first else { return nil }
+        return page
+    }
+
     /// The page the Mac left for `historyDocument`, or nil when it is not there (or is not for this chat and cursor).
     public func historyPage(key sessionKey: String, before: String?) async throws -> HistoryPage? {
         let doc = LiveTurn.historyPageDoc(for: sessionKey, before: before)

@@ -150,6 +150,19 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         await refresh()
     }
 
+    /// nil = not offered (an older daemon, or a cloud that is not Squeak's own).
+    var keepHistoryInCloud: Bool? { state?.keepHistoryInCloud }
+
+    func setKeepHistoryInCloud(_ on: Bool) async {
+        let before = state?.keepHistoryInCloud
+        state?.keepHistoryInCloud = on
+        if demo { return }
+        do {
+            if try await client.remoteHistoryCloud(on) { notice = nil } else { state?.keepHistoryInCloud = before; notice = "Couldn't save that. Update the Squeak service." }
+        } catch { state?.keepHistoryInCloud = before; notice = "Couldn't reach the Squeak service to save that." }
+        await refresh()
+    }
+
     // MARK: Signing in
 
     /// Every sign-in entry (Settings, an invite, setup, the Mac menu) goes straight to the sign-in window over the window
