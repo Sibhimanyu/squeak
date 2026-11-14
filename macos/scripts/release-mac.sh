@@ -43,6 +43,8 @@ RELEASE_DL="https://github.com/Sibhimanyu/squeak/releases/download"
 # The version of the live appcast's newest item, and its enclosure URL.
 appcast_version() { curl -fsS --max-time 15 "$PAGES/appcast.xml?$RANDOM" 2>/dev/null | sed -n 's/.*<sparkle:shortVersionString>\([^<]*\)<.*/\1/p' | head -1 || true; }
 appcast_enclosure() { curl -fsS --max-time 15 "$PAGES/appcast.xml?$RANDOM" 2>/dev/null | sed -n 's/.*<enclosure url="\([^"]*\)".*/\1/p' | head -1 || true; }
+# Does a local appcast.xml carry this version?
+local_appcast_has() { [ -f "$1" ] && grep -q "<sparkle:shortVersionString>$2<" "$1"; }
 # Size of a download URL, redirects followed (a release asset redirects to objects.githubusercontent.com): HEAD, and if
 # the storage host refuses HEAD, a one-byte range GET and the total from Content-Range. The redirect can take ~75 s
 # through a proxy, so this is only a warning check; the pass/fail check is release_asset_ok (GitHub's API).
@@ -76,8 +78,14 @@ if [ "$FINISH" = 1 ]; then
   [ -f "$BUILD/$DMG" ] || { echo "No built $DMG to verify." >&2; exit 1; }
   COMMIT="$(gh api "repos/Sibhimanyu/squeak/git/ref/tags/v$VERSION" --jq .object.sha)"
   [ "$(git -C "$REL" rev-parse HEAD)" = "$COMMIT" ] || { echo "Release checkout does not match v$VERSION." >&2; exit 1; }
+  # If the live appcast is older and the local build has this version, the appcast was simply never published
+  # (the release path stopped before it): publish it now, then wait for Pages like the normal path.
+  live_version="$(appcast_version)"
+  if [ "$live_version" != "$VERSION" ] && local_appcast_has "$BUILD/appcast.xml" "$VERSION"; then
+    step "Pages: appcast (live is '$live_version', the local build has $VERSION)"
+    (cd "$REL/macos" && ./scripts/publish-pages.sh "$VERSION")
+  fi
   # The appcast may have been published a moment ago and Pages not deployed yet: wait up to 15 minutes, like the normal path.
-  live_version=""
   for _ in $(seq 1 180); do
     live_version="$(appcast_version)"; [ "$live_version" = "$VERSION" ] && break; sleep 5
   done
