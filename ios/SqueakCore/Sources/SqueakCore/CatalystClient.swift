@@ -48,8 +48,9 @@ public final class URLSessionWebSockets: WebSocketTransport, @unchecked Sendable
 public struct CatalystTiming: Sendable {
     public var keepAlive: Double = 15
     public var ping: Double = 60
-    /// While watching, everything is told to re-read this often, as the Realtime Database's safety poll is.
-    public var safetyPoll: Double = 60
+    /// While watching, everything is told to re-read this often. A notice carries the news and a (re)connect re-reads
+    /// at once, so this is only the net under a lost notice: 5 minutes, not the Realtime Database's 60 s.
+    public var safetyPoll: Double = 300
     public var retryMin: Double = 1
     public var retryMax: Double = 10
     /// Nothing heard for this long (a pong comes back to every ping) is a half-open socket: reconnect.

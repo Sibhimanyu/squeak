@@ -11,6 +11,7 @@ interface Fake {
   url: string;
   docs: Map<string, unknown>;
   requests: string[];
+  tokenBodies: Array<Record<string, unknown>>;
   stop(): Promise<void>;
 }
 
@@ -18,6 +19,7 @@ interface Fake {
 async function fakeRelay(): Promise<Fake> {
   const docs = new Map<string, unknown>();
   const requests: string[] = [];
+  const tokenBodies: Array<Record<string, unknown>> = [];
   const server = http.createServer((req, res) => {
     const url = new URL((req.url ?? "/").replace("/server/squeak_relay", ""), "http://relay");
     requests.push(`${req.method} ${url.pathname}`);
@@ -57,8 +59,10 @@ async function fakeRelay(): Promise<Fake> {
       }
       if (url.pathname === "/pond-stream" && asPond)
         return json(200, { url: "in1-dms.zoho.in", key: "pk", wssId: `pw-${String(body.name)}` });
-      if (url.pathname === "/token")
+      if (url.pathname === "/token") {
+        tokenBodies.push(body);
         return json(200, { url: "in1-dms.zoho.in", key: "tk", wssId: `w-${String(body.name)}` });
+      }
       res.writeHead(404);
       res.end();
     });
@@ -68,6 +72,7 @@ async function fakeRelay(): Promise<Fake> {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/server/squeak_relay`,
     docs,
     requests,
+    tokenBodies,
     stop: async () => {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -248,6 +253,59 @@ describe("CatalystStore watch", () => {
     stopResults();
     expect(sockets[0]!.sent.at(-1)).toBe(JSON.stringify({ type: "con", value: "unsubscribe" }));
     await until(() => sockets[0]!.closed);
+  });
+
+  it("names its one watched channel to /token, and polls on the slow clock only while the stream is up", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const sockets: FakeSocket[] = [];
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      relayKey: KEY,
+      socket: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      pollMs: 20,
+      healthyPollMs: 400,
+    });
+    const channel = "C".repeat(22);
+    let polls = 0;
+    const stopA = store.watch(`channels/${channel}/commands`, (source) => {
+      if (source === "poll") polls += 1;
+    });
+    const stopB = store.watch(`channels/${channel}/state/presence`, () => undefined);
+    await until(() => sockets.length === 1);
+    expect(relay.tokenBodies[0]).toMatchObject({ channel });
+    // Down (no hello yet): the fast poll runs.
+    expect(store.streamHealthy()).toBe(false);
+    await until(() => polls >= 3);
+    sockets[0]!.say([{ mtype: "0", msg: { sid: "s", uid: "u" } }]);
+    expect(store.streamHealthy()).toBe(true);
+    const at = polls;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(polls).toBe(at); // up: the 20 ms poll is held back until 400 ms have passed since the last wake
+    await until(() => polls > at, 1500);
+    stopA();
+    stopB();
+  });
+
+  it("sends no channel when watchers span two channels", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      relayKey: KEY,
+      socket: (url) => new FakeSocket(url),
+      pollMs: 60_000,
+    });
+    const stopA = store.watch(`channels/${"D".repeat(22)}/commands`, () => undefined);
+    const stopB = store.watch(`channels/${"E".repeat(22)}/commands`, () => undefined);
+    await until(() => relay.tokenBodies.length === 1);
+    expect(relay.tokenBodies[0]).not.toHaveProperty("channel");
+    stopA();
+    stopB();
   });
 
   it("releases and takes a fresh token when the server drops the session, then wakes everyone", async () => {

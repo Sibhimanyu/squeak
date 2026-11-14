@@ -375,6 +375,45 @@ describe("/token", () => {
     expect((await call(deps, "POST", "/token", { body: { name: "x".repeat(20) } })).status).toBe(200);
   });
 
+  describe("per-channel streams (F10)", () => {
+    const CH = "A".repeat(22);
+    const rig = () => {
+      const f = fakes();
+      const tokenFor: string[] = [];
+      const original = (f.deps.streams as any).token;
+      (f.deps.streams as any).token = async (id: string, name: string) => (tokenFor.push(id), original(id, name));
+      (f.deps.streams as any).pondChannelId = async (c: string) => (c === CH ? "own-chan" : null);
+      return { f, tokenFor };
+    };
+
+    it("gives a client that names its channel the stream of its own, and the shared one when it has none or sends none", async () => {
+      const { f, tokenFor } = rig();
+      expect((await call(f.deps, "POST", "/token", { body: { name: "a", channel: CH } })).status).toBe(200);
+      expect((await call(f.deps, "POST", "/token", { body: { name: "b", channel: "B".repeat(22) } })).status).toBe(200);
+      expect((await call(f.deps, "POST", "/token", { body: { name: "c" } })).status).toBe(200);
+      expect((await call(f.deps, "POST", "/token", { body: { name: "d", channel: "../x" } })).status).toBe(200);
+      expect(tokenFor).toEqual(["own-chan", "chan-1", "chan-1", "chan-1"]);
+    });
+
+    it("stops announcing a channel on the shared stream once SQUEAK_RELAY_SHARED_NOTICE is off, but only if it has its own", async () => {
+      const { f } = rig();
+      (f.deps as any).sharedNotice = false;
+      const put = (c: string) =>
+        call(f.deps, "PUT", `/doc?path=channels/${c}/state/snapshot`, { body: { doc: doc() } });
+      await put(CH);
+      expect(f.published.map(([id]) => id)).toEqual(["own-chan"]);
+      f.published.length = 0;
+      await put("B".repeat(22));
+      expect(f.published.map(([id]) => id)).toEqual(["chan-1"]);
+    });
+
+    it("keeps announcing on both while the switch is on (older clients still listen on the shared stream)", async () => {
+      const { f } = rig();
+      await call(f.deps, "PUT", `/doc?path=channels/${CH}/state/snapshot`, { body: { doc: doc() } });
+      expect(f.published.map(([id]) => id).sort()).toEqual(["chan-1", "own-chan"]);
+    });
+  });
+
   it("answers 503 while the channel does not exist", async () => {
     const r = await call(fakes({ channel: null }).deps, "POST", "/token", { body: { name: "n" } });
     expect(r.status).toBe(503);

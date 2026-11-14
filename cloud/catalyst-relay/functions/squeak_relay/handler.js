@@ -211,10 +211,16 @@ function createRelay(deps) {
     // A pond's writes also wake that pond's own stream, the only one a web guest may subscribe to. The two publishes are
     // independent (the write already happened), so they run together; a failure only costs the watchers the safety poll.
     const pondId = pk.split("/")[1];
+    // The lookup is cached with the channel list (channels-cache.js), so it costs no admin call on a warm instance.
+    let pondStream = null;
+    try {
+      pondStream = deps.streams.pondChannelId ? await deps.streams.pondChannelId(pondId, false) : null;
+    } catch {
+      log("pond notice not published");
+    }
     await Promise.allSettled([
       (async () => {
         try {
-          const pondStream = deps.streams.pondChannelId ? await deps.streams.pondChannelId(pondId, false) : null;
           if (pondStream) await deps.streams.publish(pondStream, text);
         } catch {
           log("pond notice not published");
@@ -222,6 +228,9 @@ function createRelay(deps) {
       })(),
       (async () => {
         try {
+          // With SQUEAK_RELAY_SHARED_NOTICE=off (once every client sends `channel` to /token) a channel that has its own
+          // stream is not also announced on the shared one, which is the O(tenants x clients) fan-out.
+          if (deps.sharedNotice === false && pondStream) return;
           const channelId = await deps.streams.channelId();
           if (channelId) await deps.streams.publish(channelId, text);
         } catch {
@@ -1106,7 +1115,15 @@ function createRelay(deps) {
         if (method !== "POST") return send(res, 405, {});
         const body = await readJson(req, 1024);
         if (typeof body.name !== "string" || !NAME.test(body.name)) return send(res, 400, { error: "name" });
-        const channelId = await deps.streams.channelId();
+        // `channel` (optional; an old client sends none and gets the shared stream): the caller's own channel id. When that
+        // channel has a stream of its own (a name from scoped.pondStreamName, made in the console, cached with the list),
+        // the token is for it, so the client is woken by its own writes only and not by every tenant's. Otherwise shared.
+        let own = null;
+        if (typeof body.channel === "string" && scoped.POND.test(body.channel) && deps.streams.pondChannelId) {
+          if (mac && !(await tenants.channelAllowed(mac, body.channel))) return forbidden();
+          own = await deps.streams.pondChannelId(body.channel, false).catch(() => null);
+        }
+        const channelId = own ?? (await deps.streams.channelId());
         if (!channelId) return send(res, 503, { error: "channel" });
         const pair = await deps.streams.token(channelId, body.name);
         return send(res, 200, { url: pair.url, key: pair.key, wssId: pair["wss-id"] });

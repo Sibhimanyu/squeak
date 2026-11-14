@@ -155,6 +155,7 @@ function fixture(
       messageId: string,
     ) => { steps: Array<{ kind: "tool" | "thinking"; text: string }>; more: number } | null;
     verbose?: boolean;
+    activity?: RemoteBridgeDependencies["activity"];
     sendDefault?: RemoteBridgeDependencies["sendDefault"];
     native?: RemoteBridgeDependencies["native"];
     projectIcons?: RemoteBridgeDependencies["projectIcons"];
@@ -229,6 +230,7 @@ function fixture(
     native: options.native ?? null,
     ...(options.projectIcons ? { projectIcons: options.projectIcons } : {}),
     ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
+    ...(options.activity ? { activity: options.activity } : {}),
     answerer: options.answerer ?? null,
     sendDefault: options.sendDefault ?? null,
     diff: options.diff ?? null,
@@ -2043,6 +2045,54 @@ describe("RemoteBridge snapshot", () => {
       f.emit([session({ state: "working", lastActivityAt: "2026-09-25T03:00:01.000Z" })]);
       await vi.advanceTimersByTimeAsync(500);
       expect(f.store.docs.get(`${f.channel}/state/snapshot`)!.box).toBe(before);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a busy minute of step changes with a phone looking publishes a handful of snapshots, not one per 3 s", async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const f = fixture({
+        streaming: true,
+        activity: () => ({
+          total: n,
+          steps: [{ kind: "tool" as const, text: `step ${n}`, at: "2026-09-25T02:59:00.000Z" }],
+        }),
+      });
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const working = (at: number) =>
+        session({
+          state: "working",
+          lastActivityAt: new Date(Date.parse("2026-09-25T03:00:00.000Z") + at).toISOString(),
+        });
+      f.emit([working(0)]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      const snapshots = () => f.store.docs.get(`${f.channel}/state/snapshot`)?.box;
+      let writes = 0;
+      const set = f.store.set.bind(f.store);
+      vi.spyOn(f.store, "set").mockImplementation(async (key, value) => {
+        if (key.endsWith("/state/snapshot")) writes += 1;
+        return set(key, value);
+      });
+      // The phone pings every 20 s; a step lands every second for a minute.
+      for (let second = 1; second <= 60; second++) {
+        if (second % 20 === 1) {
+          await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: second }) });
+          await f.bridge.tick();
+        }
+        n = second;
+        f.advance(1_000);
+        f.emit([working(second * 1_000)]);
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      // Before: 14 writes in this minute (one per 3 s step nudge plus the pings' passes).
+      expect(snapshots()).toBeDefined();
+      expect(writes).toBeLessThanOrEqual(6);
       f.bridge.stop();
     } finally {
       vi.useRealTimers();
