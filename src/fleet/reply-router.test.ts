@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FleetReplyRouter, replyTargetFor } from "./reply-router.js";
+import { EXTERNAL_NOT_ENABLED, FleetReplyRouter, replyTargetFor } from "./reply-router.js";
 import type { ReplyOutcome } from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import { NativeReplier } from "./native-reply.js";
@@ -46,6 +46,30 @@ describe("replyTargetFor", () => {
   it("addresses a Conductor chat by its id and anything else by its fleet key", () => {
     expect(replyTargetFor(session({ conductorSessionId: "c1", key: "claude-transcript:t1" }))).toBe("c1");
     expect(replyTargetFor(session({}))).toBe("claude-transcript:t1");
+  });
+});
+
+describe("FleetReplyRouter with the external add-ons off", () => {
+  function off(sessions: FleetSession[]) {
+    const { router } = harness(sessions);
+    const withFlag = new FleetReplyRouter({
+      hosts: () => [],
+      terminal: {
+        canReply: () => true,
+        send: async () => ({ status: "started", via: "terminal" }),
+      } as unknown as TerminalReplier,
+      sessions: () => sessions,
+      externalOn: () => false,
+    });
+    return { router, withFlag };
+  }
+
+  it("refuses a terminal reply with a clear sentence, for a tracked session and for a card sent earlier", async () => {
+    const { withFlag } = off([session({})]);
+    const refusal = { status: "refused", reason: EXTERNAL_NOT_ENABLED };
+    expect(await withFlag.send("claude-transcript:t1", "yes", () => undefined)).toEqual(refusal);
+    expect(await withFlag.send("codex-rollout:gone", "yes", () => undefined)).toEqual(refusal);
+    expect(withFlag.canReply(session({}))).toBe(false);
   });
 });
 

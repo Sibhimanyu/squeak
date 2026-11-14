@@ -53,6 +53,19 @@ afterEach(() => {
 describe("ClaudeTranscriptObserver", () => {
   const now = Date.parse("2026-09-20T12:00:00.000Z");
 
+  it("claimed mode reads only the named sessions' transcripts", () => {
+    const projectsDir = makeProjectsDir();
+    for (const id of ["session-a", "session-b"]) {
+      writeTranscript(projectsDir, id, [userEntry("2026-09-20T11:58:00.000Z", "hi")]);
+    }
+    const observer = new ClaudeTranscriptObserver({ projectsDir, now: () => now });
+    expect(observer.observe({ ids: new Set(["session-b"]) }).map((session) => session.agentSessionId)).toEqual([
+      "session-b",
+    ]);
+    expect(observer.observe({ ids: new Set() })).toEqual([]);
+    expect(observer.observe()).toHaveLength(2);
+  });
+
   it("reports a completed turn as finished and previews the reply", () => {
     const projectsDir = makeProjectsDir();
     writeTranscript(projectsDir, "session-a", [

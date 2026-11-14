@@ -127,11 +127,12 @@ public struct SetupFlow: Sendable, Equatable {
     /// macOS has Squeak's background item switched off: the step asks for it before anything starts.
     public var serviceNeedsApproval: Bool { facts.setup.service == .needsApproval }
 
-    /// The person already has a working Squeak: the service answers and the hooks are in.
+    /// The person already has a working Squeak: the service answers and the hooks are in (an install from before hooks
+    /// became the external-agent add-ons'). A new person without hooks still sees Welcome; hooks no longer hold any step.
     public var isReturning: Bool { serviceRunning && hooksInstalled }
 
-    /// The service runs and the hooks are in for every agent found (or none was found, which only explains).
-    public var connectReady: Bool { serviceRunning && (hooksInstalled || agentsFound.isEmpty) }
+    /// The service runs. Hooks are optional now (only the "(external)" add-ons use them), so they never hold the step.
+    public var connectReady: Bool { serviceRunning }
 
     /// The agents to name: those found here, else those the daemon's reading found.
     public var agentsFound: [String] {
@@ -170,7 +171,6 @@ public struct SetupFlow: Sendable, Equatable {
         }
         let state: ConnectRowState
         if hooksInstalled { state = .done }
-        else if s.hooksNeedUpdate { state = .failed(ServiceSentence.updateService) }
         else if let p = s.hooksProblem, !p.isEmpty { state = .failed(p) }
         else if s.hooks?.state == .error || s.hooks?.state == .unknown {
             let m = s.hooks?.message ?? ""
@@ -193,10 +193,6 @@ public struct SetupFlow: Sendable, Equatable {
             if s.service == .needsApproval { return nil }
             return attempted.contains(.service) ? nil : .service
         }
-        if !agentsFound.isEmpty, !hooksInstalled {
-            if s.hooksNeedUpdate || attempted.contains(.hooks) { return nil }
-            return .hooks
-        }
         return nil
     }
 
@@ -206,7 +202,7 @@ public struct SetupFlow: Sendable, Equatable {
         switch s {
         case .welcome: progress.started || isReturning
         case .service: serviceRunning
-        case .agents: serviceRunning && hooksInstalled
+        case .agents: serviceRunning
         case .account: facts.signedIn
         case .phone: facts.phonePaired
         case .done: progress.finished

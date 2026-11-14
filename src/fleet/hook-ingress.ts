@@ -37,6 +37,11 @@ export interface HookIngressOptions {
   stateWaitMs?: number;
   /** The agent that sent a hook, by its pid: who started it is worked out after the reply, never on its time. */
   onSpawn?: (sessionId: string, hookPid: number) => Promise<void> | void;
+  /**
+   * Whether an agent hook's event is used at all. False (neither external add-on is on): a hook is answered 200 and
+   * dropped, so a script left in an agent's settings never sees an error. Absent: always used.
+   */
+  acceptEvents?: () => boolean;
 }
 
 /**
@@ -147,6 +152,8 @@ export interface IngressControl {
    * 400 bad JSON; fixed sentences and event names only, never a path, token or file content.
    */
   hooks?: {
+    /** False while neither external add-on (Claude Code, Codex) is enabled: every hooks route answers 404. */
+    enabled?(): boolean;
     status(): unknown;
     install(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
     uninstall(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
@@ -477,6 +484,12 @@ export class HookIngressServer {
     const agent = normalizeAgentHeader(headerValue(request, AGENT_HEADER));
     if (!agent) {
       respond(response, 400, "unknown agent");
+      request.resume();
+      return;
+    }
+
+    if (this.options.acceptEvents && !this.options.acceptEvents()) {
+      respond(response, 200, "ok");
       request.resume();
       return;
     }
@@ -1074,6 +1087,15 @@ export class HookIngressServer {
       if (!hooks) {
         request.resume();
         respond(response, 503, "hooks setup unavailable");
+        return;
+      }
+      if (hooks.enabled && !hooks.enabled()) {
+        request.resume();
+        respond(
+          response,
+          404,
+          "hooks are part of the Claude Code (external) and Codex (external) add-ons, which are off",
+        );
         return;
       }
       if (!verb) {

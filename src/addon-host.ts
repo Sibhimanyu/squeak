@@ -16,6 +16,7 @@ import {
   type LoadedAddon,
 } from "./addons.js";
 import type { ChatModel } from "./fleet/chat-models.js";
+import type { LiveAgentProcess } from "./fleet/observers/process-liveness.js";
 import type { FleetSnapshot } from "./fleet/fleet-monitor.js";
 import type { FleetSession } from "./fleet/types.js";
 import type { FrontAppHost } from "./fleet/window-tabs.js";
@@ -46,6 +47,11 @@ const EMPTY_SNAPSHOT: FleetSnapshot = {
   generatedAt: new Date(0).toISOString(),
   codexUsage: null,
 };
+
+/** Which add-ons `addons.json` in `supportDir` enables, read from disk now (an add-on asking about another one). */
+export function enabledAddonIds(supportDir: string): string[] {
+  return Object.keys(readFile(path.join(supportDir, "addons.json")).enabled);
+}
 
 function readFile(file: string): AddonsFile {
   try {
@@ -265,7 +271,21 @@ export class AddonHost {
 
   /** Files whose change should refresh the fleet, from every loaded add-on's observers. */
   watchSpecs(): WatchSpec[] {
-    return this.loaded.flatMap((entry) => (entry.handle.observers ?? []).flatMap((observer) => observer.watch ?? []));
+    return this.active().flatMap((entry) => (entry.handle.observers ?? []).flatMap((observer) => observer.watch ?? []));
+  }
+
+  /** Process liveness from enabled add-ons that supply it (the external agents'); `[]` when none is on. */
+  liveness(): { observe(): Promise<LiveAgentProcess[]> } {
+    return {
+      observe: async () => {
+        const found = await Promise.all(
+          this.active().map((entry) =>
+            entry.handle.liveness ? entry.handle.liveness.observe().catch(() => []) : Promise.resolve([]),
+          ),
+        );
+        return found.flat();
+      },
+    };
   }
 
   /** Repliers of enabled add-ons. */

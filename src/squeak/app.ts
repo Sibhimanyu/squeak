@@ -57,6 +57,7 @@ import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, isPowerChoice, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { answerControl } from "../fleet/answer.js";
 import { HooksSetup } from "../fleet/hooks-setup.js";
+import { externalHookAgents } from "../fleet/external-hooks.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { HandsGrantsReader } from "../fleet/hands-grants.js";
 import { readActivity } from "../fleet/activity.js";
@@ -232,6 +233,8 @@ export function addonConfigFor(
     | "codexBin"
     | "handsAppPath"
     | "activeWindowMs"
+    | "hookPort"
+    | "idleAfterMs"
   >,
 ): AddonConfig {
   return {
@@ -244,6 +247,8 @@ export function addonConfigFor(
     codexBin: config.codexBin,
     handsAppPath: config.handsAppPath,
     activeWindowMs: config.activeWindowMs,
+    hookPort: config.hookPort,
+    idleAfterMs: config.idleAfterMs,
     nativeDbPath: path.join(config.supportDir, "native.db"),
   };
 }
@@ -550,7 +555,9 @@ export class SqueakApp {
             }
           : null,
       observers: () => this.addons.observers(),
-      watch: this.addons.watchSpecs(),
+      watch: () => this.addons.watchSpecs(),
+      liveness: this.addons.liveness(),
+      acceptHooks: () => this.externalOn(),
       stateFields: () => this.addons.stateFields(),
       coreAdapters: (deps) => this.addons.handles().flatMap((handle) => handle.coreAdapters?.(deps) ?? []),
       cloudHosted: () => this.hosted.view(),
@@ -572,6 +579,7 @@ export class SqueakApp {
     });
     // Enabling or disabling an add-on shows on the next refresh, which this asks for now.
     this.addons.onChange(() => {
+      this.runtime.monitor.rewatch();
       this.router.attachListeners();
       void this.refreshProjectIcons();
       this.remote?.changed();
@@ -582,6 +590,7 @@ export class SqueakApp {
     });
     this.router = new FleetReplyRouter({
       hosts: () => this.addons.repliers(),
+      externalOn: () => this.externalOn(),
       native: new NativeReplier({
         client: this.nativeHost,
         lastMessage: (session) =>
@@ -1396,12 +1405,27 @@ export class SqueakApp {
   /** Hotspot failover's one entry: the phone's signed command and the Mac app's control route both end here. */
   /** Agent hooks from the Mac app (fleet/hooks-setup.ts) for the ingress's `/control/hooks*` routes. */
   private hooksSetup(): NonNullable<IngressControl["hooks"]> {
-    const setup = new HooksSetup({ supportDir: this.config.supportDir, port: this.config.hookPort });
+    const setup = new HooksSetup({
+      supportDir: this.config.supportDir,
+      port: this.config.hookPort,
+      agents: () => this.externalAgents(),
+    });
     return {
+      enabled: () => this.externalOn(),
       status: () => setup.status(),
       install: () => setup.install(),
       uninstall: () => setup.uninstall(),
     };
+  }
+
+  /** Which external agents (Claude Code, Codex) the owner turned on: hooks and hook events exist only for these. */
+  private externalAgents(): { claude: boolean; codex: boolean } {
+    return externalHookAgents(this.addons.enabledIds());
+  }
+
+  private externalOn(): boolean {
+    const agents = this.externalAgents();
+    return agents.claude || agents.codex;
   }
 
   /** A session's change list for the Mac inspector, by fleet key (or its Conductor / agent id); null when unknowable. */

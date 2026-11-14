@@ -168,31 +168,30 @@ public struct SetupChecklist: Sendable, Equatable {
 
     private static func serviceReady(_ f: SetupFacts) -> Bool { f.service == .running }
 
+    /// Agent hooks only serve Claude Code and Codex started outside Squeak, which are the "(external)" add-ons: the
+    /// step is never required, and a daemon that answers 404 to `/control/hooks` (both add-ons off) is not an old one.
     private static func hooks(_ f: SetupFacts) -> SetupStep {
         let title = "Agent hooks"
-        let why = "Lets Claude Code and Codex tell Squeak when they are waiting for you. Edits ~/.claude/settings.json with a backup; you can undo it."
+        let why = "Only for Claude Code and Codex started outside Squeak: lets them tell Squeak when they are waiting for you. Edits ~/.claude/settings.json with a backup; you can undo it."
+        let off = "Not needed for Squeak's own chats. To also see Claude Code or Codex started outside Squeak, turn on Claude Code (external) or Codex (external) in Settings › Extensions."
         guard serviceReady(f) else {
-            return .init(id: .hooks, title: title, why: "Needs the background service first.", state: .blocked, required: true)
-        }
-        if f.hooksNeedUpdate {
-            return .init(id: .hooks, title: title, why: ServiceSentence.updateService, state: .error, required: true,
-                         action: .repairService, actionTitle: "Update service")
+            return .init(id: .hooks, title: title, why: "Needs the background service first.", state: .blocked, required: false)
         }
         guard let h = f.hooks else {
             if let p = f.hooksProblem {
-                return .init(id: .hooks, title: title, why: p, state: .error, required: true, action: .installHooks, actionTitle: "Try again")
+                return .init(id: .hooks, title: title, why: p, state: .error, required: false, action: .installHooks, actionTitle: "Try again")
             }
-            return .init(id: .hooks, title: title, why: why, state: .todo, required: true, action: .installHooks, actionTitle: "Install hooks")
+            return .init(id: .hooks, title: title, why: off, state: .optional, required: false)
         }
         switch h.state {
         case .installed:
-            return .init(id: .hooks, title: title, why: h.message.isEmpty ? "Installed." : h.message, state: .done, required: true)
+            return .init(id: .hooks, title: title, why: h.message.isEmpty ? "Installed." : h.message, state: .done, required: false)
         case .partial, .missing:
-            return .init(id: .hooks, title: title, why: why, state: .todo, required: true, action: .installHooks,
+            return .init(id: .hooks, title: title, why: why, state: .optional, required: false, action: .installHooks,
                          actionTitle: h.state == .partial ? "Finish installing" : "Install hooks")
         case .error, .unknown:
             return .init(id: .hooks, title: title, why: h.message.isEmpty ? "Squeak couldn't read the hooks." : h.message,
-                         state: .error, required: true, action: .installHooks, actionTitle: "Try again")
+                         state: .error, required: false, action: .installHooks, actionTitle: "Try again")
         }
     }
 

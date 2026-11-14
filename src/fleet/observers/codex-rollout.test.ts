@@ -48,6 +48,17 @@ afterEach(() => {
 describe("CodexRolloutObserver", () => {
   const now = Date.parse("2026-09-20T12:00:00.000Z");
 
+  it("claimed mode reads only the named threads' rollouts", () => {
+    const codexHome = makeCodexHome();
+    const entries = [meta("aaaa"), event("2026-09-20T11:30:00.000Z", { type: "task_started" })];
+    writeRollout(codexHome, "aaaa", entries);
+    writeRollout(codexHome, "bbbb", [meta("bbbb"), ...entries.slice(1)]);
+    const observer = new CodexRolloutObserver({ codexHome, now: () => now });
+    expect(observer.observe({ ids: new Set(["bbbb"]) }).map((session) => session.agentSessionId)).toEqual(["bbbb"]);
+    expect(observer.observe({ ids: new Set() })).toEqual([]);
+    expect(observer.observe()).toHaveLength(2);
+  });
+
   it("reads a completed task and keeps the final message as the preview", () => {
     const codexHome = makeCodexHome();
     writeRollout(codexHome, "thread-a", [

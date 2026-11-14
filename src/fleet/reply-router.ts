@@ -30,7 +30,13 @@ function isFleetKey(target: string): boolean {
 
 export const HOST_NOT_ENABLED = "That chat's app isn't added to Squeak. Add it in Squeak › Settings › Extensions.";
 
+/** What a reply to a Claude Code or Codex session started outside Squeak hears while their add-on is off. */
+export const EXTERNAL_NOT_ENABLED =
+  "Claude Code and Codex chats started outside Squeak are off. Turn them on in Squeak › Settings › Extensions.";
+
 export interface FleetReplyRouterDependencies {
+  /** Whether an external-agent add-on is on; without it (tests) the terminal replier is used as before. */
+  externalOn?: () => boolean;
   /** The host repliers add-ons supply, enabled ones only, looked up at call time. */
   hosts: () => AddonReplier[];
   /** Without it only host chats can be answered, as before. */
@@ -63,6 +69,9 @@ export class FleetReplyRouter implements FleetReplier {
     }
     if (session.origin === "squeak") {
       return this.deps.native?.canReply(session) ?? false;
+    }
+    if (this.deps.externalOn && !this.deps.externalOn()) {
+      return false;
     }
     return this.deps.terminal?.canReply(session) ?? false;
   }
@@ -206,6 +215,10 @@ export class FleetReplyRouter implements FleetReplier {
     }
     const session = this.resolve(target);
     if (!session) {
+      // A card sent while an external add-on was on: the session is gone from the radar because the add-on is off.
+      if (!isNativeKey(target) && this.deps.externalOn && !this.deps.externalOn()) {
+        return { status: "refused", reason: EXTERNAL_NOT_ENABLED };
+      }
       return { status: "refused", reason: "That session is no longer being tracked." };
     }
     if (isNativeKey(target)) {
@@ -219,6 +232,9 @@ export class FleetReplyRouter implements FleetReplier {
     const hosted = this.hostFor(session);
     if (hosted) {
       return hosted.send(session.hostSessionId ?? session.conductorSessionId ?? target, text, onFailed, options);
+    }
+    if (this.deps.externalOn && !this.deps.externalOn()) {
+      return { status: "refused", reason: EXTERNAL_NOT_ENABLED };
     }
     if (!this.deps.terminal?.canReply(session)) {
       return { status: "refused", reason: "That session cannot be replied to from here." };

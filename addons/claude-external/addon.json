@@ -1,0 +1,6 @@
+{
+  "id": "claude-external",
+  "name": "Claude Code (external)",
+  "blurb": "Also show Claude Code chats started outside Squeak: Terminal, the Claude desktop app and Cowork. Turning this on adds Squeak's hooks to Claude Code's settings; turning it off takes them out again.",
+  "distributed": true
+}
