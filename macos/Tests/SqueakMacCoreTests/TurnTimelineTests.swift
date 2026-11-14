@@ -429,6 +429,15 @@ final class TurnTimelineTests: XCTestCase {
         XCTAssertEqual(t.turns[0].state, .ended(.stopped))
     }
 
+    func testTheStreamsTimelineFramesBecomeEvents() {
+        let step = #"{"type":"step.added","seq":4,"turnId":"t1","stepId":"a","kind":"tool","label":"Run ls","status":"running","at":"2026-11-14T10:00:00.000Z"}"#
+        guard case .timeline(let e)? = NativeEvent.from(SSEFrame(event: "timeline", data: step, id: "4")) else { return XCTFail("a stored event") }
+        XCTAssertEqual(e.seq, 4)
+        let delta = #"{"type":"reply.delta","turnId":"t1","blockKey":"m:0","offset":0,"text":"hi"}"#
+        XCTAssertEqual(NativeEvent.from(SSEFrame(event: "timeline", data: delta, id: nil)), .replyDelta(ReplyDelta(turnId: "t1", blockKey: "m:0", offset: 0, text: "hi")))
+        XCTAssertNil(NativeEvent.from(SSEFrame(event: "timeline", data: "not json", id: nil)))
+    }
+
     func testDecodesAReplyDeltaFrame() {
         let d = TimelineEvent.replyDelta(from: Data(#"{"type":"reply.delta","turnId":"t1","blockKey":"m:0","offset":3,"text":"lo"}"#.utf8))
         XCTAssertEqual(d, ReplyDelta(turnId: "t1", blockKey: "m:0", offset: 3, text: "lo"))

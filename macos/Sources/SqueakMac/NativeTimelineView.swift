@@ -15,7 +15,7 @@ struct InsertFade: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(shown ? 1 : 0)
-            .onAppear { if !shown { withAnimation(.easeOut(duration: 0.15)) { shown = true } } }
+            .onAppear { if !shown { withAnimation(Motion.quick) { shown = true } } }
     }
 }
 

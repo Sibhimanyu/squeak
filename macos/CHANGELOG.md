@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.26.1
+
+- The chat is rebuilt: a new message never shows old work, steps only grow in place, and the view stays where you left it.
+
 ## 2.26.0
 
 - Settings has a Devices page, not a pairing page: the iPhones and browsers signed in to your account, how each got here, and Remove. "Pair an iPhone..." and the QR sheet are gone, and so is the note that pairing always waits for you.
