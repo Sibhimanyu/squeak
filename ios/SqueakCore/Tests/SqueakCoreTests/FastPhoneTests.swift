@@ -99,6 +99,17 @@ final class FastPhoneTests: XCTestCase {
         XCTAssertEqual(shown.sessions.last?.title, "C")
     }
 
+    func testExpiredEditsAreNotAppliedBeforeReconcile() {
+        var view = PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0), sessions: [], recent: [])
+        view.sessions = [PhoneSnapshot.Session(key: "a", conductorSessionId: nil, label: "repo", agent: "claude", state: "idle",
+                                               lastActivityAt: "2026-11-14T10:00:00Z", detail: nil, git: nil, contextPercent: nil, turnId: nil,
+                                               message: nil, choices: nil, title: "A")]
+        view.recent = nil
+        var edits = OptimisticEdits()
+        edits.archive("a", now: now(-OptimisticEdits.ttl - 1))
+        XCTAssertEqual(edits.apply(to: view).sessions.map(\.key), ["a"])
+    }
+
     /// Real cache costs at the Mac's own caps (a pond sends its newest 200 threads): what a first frame pays instead of a
     /// channel round trip. Printed as `fast-phone-timing` lines so a run can be read; the bounds are loose on purpose.
     func testCachedPathCostsMillisecondsNotARoundTrip() {

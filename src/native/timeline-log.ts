@@ -268,11 +268,8 @@ export class TimelineRecorder {
 
   /** At start: turns a restart left open end as stopped. */
   recover(): void {
-    for (const { sessionId } of this.log.openTurns()) {
-      const events = this.log.turnsPage(sessionId, 1).events;
-      const started = events.find((e) => e.type === "turn.started");
-      if (!started || !("turnId" in started)) continue;
-      this.store(sessionId, [{ type: "turn.ended", turnId: started.turnId, outcome: "stopped", at: isoNow() }]);
+    for (const { sessionId, turnId } of this.log.openTurns()) {
+      this.store(sessionId, [{ type: "turn.ended", turnId, outcome: "stopped", at: isoNow() }]);
     }
   }
 

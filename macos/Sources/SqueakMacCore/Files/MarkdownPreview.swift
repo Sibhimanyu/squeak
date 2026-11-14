@@ -26,11 +26,18 @@ public enum MarkdownPreview {
     }
 
     /// An image's source in the Markdown, resolved against the file's folder. Remote and `data:` sources are not fetched.
-    public static func localImageURL(source: String, fileURL: URL) -> URL? {
+    /// With a `root` (the workspace folder) a source that resolves outside it (`../../x.png`, an absolute path, a
+    /// symlink out) is refused, so a Markdown file cannot make the viewer read other folders.
+    public static func localImageURL(source: String, fileURL: URL, root: URL? = nil) -> URL? {
         let s = source.trimmingCharacters(in: .whitespaces)
         guard !s.isEmpty, !s.contains("://"), !s.hasPrefix("data:"), !s.hasPrefix("//") else { return nil }
         let decoded = s.removingPercentEncoding ?? s
-        if decoded.hasPrefix("/") { return URL(fileURLWithPath: decoded) }
-        return URL(fileURLWithPath: decoded, relativeTo: fileURL.deletingLastPathComponent()).standardizedFileURL
+        let url: URL = decoded.hasPrefix("/")
+            ? URL(fileURLWithPath: decoded).standardizedFileURL
+            : URL(fileURLWithPath: decoded, relativeTo: fileURL.deletingLastPathComponent()).standardizedFileURL
+        guard let root else { return url }
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let real = url.resolvingSymlinksInPath().standardizedFileURL.path
+        return real == base || real.hasPrefix(base.hasSuffix("/") ? base : base + "/") ? url : nil
     }
 }
