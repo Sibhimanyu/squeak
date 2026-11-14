@@ -614,6 +614,8 @@ public struct ThreadEvent: Sendable, Equatable, Identifiable, Decodable {
         case resolved(requestId: String)
         case state(String)
         case changed(files: Int, added: Int, removed: Int, paths: [String])
+        /// One event of the starter's chat timeline (its own `seq` inside): folded by `PondReplica`, never read as a row on its own.
+        case timeline(TimelineEvent)
         case other(String)
     }
 
@@ -623,7 +625,7 @@ public struct ThreadEvent: Sendable, Equatable, Identifiable, Decodable {
     public var id: Int { seq }
 
     enum CodingKeys: String, CodingKey {
-        case seq, at, type, by, text, label, state, requestId, options, files, added, removed, paths
+        case seq, at, type, by, text, label, state, requestId, options, files, added, removed, paths, ev
     }
 
     public init(from decoder: Decoder) throws {
@@ -649,6 +651,8 @@ public struct ThreadEvent: Sendable, Equatable, Identifiable, Decodable {
             kind = .changed(
                 files: c.lenient(Int.self, .files) ?? 0, added: c.lenient(Int.self, .added) ?? 0, removed: c.lenient(Int.self, .removed) ?? 0,
                 paths: c.lenient([String].self, .paths) ?? [])
+        case "timeline":
+            if let e = c.lenient(TimelineEvent.self, .ev) { kind = .timeline(e) } else { kind = .other(type) }
         default: kind = .other(type)
         }
     }

@@ -383,7 +383,20 @@ async function loadAccount() {
  * the browser asks it (its own device key, silently), the Mac adds it, and it is stored like any device. Only with "Ask
  * before adding my own devices" does the Mac wait for its owner, and then the screen says so with the code.
  */
+let openingMac = false;
 async function openMac(mac) {
+  // A second tap (or Enter) while one Mac is being opened must not start a second request: it would orphan the first
+  // one's poll and its abort controller.
+  if (openingMac) return;
+  openingMac = true;
+  try {
+    return await openMacNow(mac);
+  } finally {
+    openingMac = false;
+  }
+}
+
+async function openMacNow(mac) {
   ui.error = null;
   const held = ui.held?.records?.[mac.macId];
   if (held?.state === "paired") return switchTo(held);

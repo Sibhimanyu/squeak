@@ -40,7 +40,11 @@ final class AccountModel {
     @ObservationIgnored private let anchor = PresentationAnchor()
     @ObservationIgnored private var task: Task<Void, Never>?
 
-    init() { session = tokens.current(); HostSignals.account(email: session?.email, name: session?.name) }
+    init() {
+        session = tokens.current()
+        HostSignals.account(email: session?.email, name: session?.name)
+        if session != nil { macs = AccountMacsDisk.load() }
+    }
 
     private func api(_ app: AppModel, _ session: AccountSession) -> AccountAPI {
         AccountAPI(appURL: AccountEndpoints.appURL(fromRelay: app.pairedRelayURL), token: session.token)
@@ -48,6 +52,9 @@ final class AccountModel {
 
     /// A 401 from any account call: forget the sign-in and say so.
     private func fail(_ error: Error) {
+        // A call this model cancelled itself (another Mac chosen, Cancel, sign-out) is not a failure: it must not
+        // report the network down or drop the step the newer call has just set.
+        if Task.isCancelled || error is CancellationError { return }
         if let error = error as? AccountError {
             if error == .signedOut { signOut(); message = error.sentence } else { message = error.sentence }
         } else {
@@ -61,6 +68,8 @@ final class AccountModel {
         tokens.signOut()
         session = nil
         avatar = nil
+        AvatarDisk.clear()
+        AccountMacsDisk.clear()
         avatarPhase = .idle
         macs = []
         step = .idle
@@ -77,9 +86,15 @@ final class AccountModel {
     func loadAvatar(_ app: AppModel) {
         guard let session, avatar == nil else { return }
         let api = api(app, session)
+        let token = session.token
         Task { [weak self] in
+            if let held = await AvatarDisk.load(), self?.avatar == nil { self?.avatar = held }
             do {
-                if let data = try await api.avatar(), let image = UIImage(data: data) { self?.avatar = image }
+                // Signed out (or into another account) while the photo was in flight: it is not this account's.
+                if let data = try await api.avatar(), let image = await ImageDecoding.decode(data), self?.session?.token == token {
+                    AvatarDisk.save(data)
+                    self?.avatar = image
+                }
             } catch { if (error as? AccountError) == .signedOut { self?.signOut(); self?.message = AccountError.signedOut.sentence } }
         }
     }
@@ -93,7 +108,8 @@ final class AccountModel {
         Task { [weak self] in
             do {
                 if let sentence = try await api.putAvatar(jpeg) { self?.avatarPhase = .failed(sentence); return }
-                self?.avatar = UIImage(data: jpeg)
+                AvatarDisk.save(jpeg)
+                self?.avatar = await ImageDecoding.decode(jpeg)
                 self?.avatarPhase = .idle
             } catch { self?.photoFail(error) }
         }
@@ -146,14 +162,18 @@ final class AccountModel {
 
     func loadMacs(_ app: AppModel) {
         guard let session else { return }
-        step = .loadingMacs
+        // Never cancel an open in progress to refresh the list.
+        if case .waiting = step { return }
+        if macs.isEmpty { step = .loadingMacs }
         let api = api(app, session)
         task?.cancel()
         task = Task { [weak self] in
             do {
                 let list = try await api.macs()
+                if Task.isCancelled { return }
                 self?.macs = list
-                self?.step = .idle
+                AccountMacsDisk.save(list)
+                if self?.step == .loadingMacs { self?.step = .idle }
             } catch { self?.fail(error) }
         }
     }
@@ -175,6 +195,8 @@ final class AccountModel {
                 let request = try await AccountPairing.request(api: api, mac: mac, deviceName: name, publicKeyX963: publicKey, boxKey: boxKey)
                 let outcome = try await AccountPairing.await(api: api, request: request, boxKey: boxKey)
                 guard let self else { return }
+                // Cancelled, and maybe another Mac already opening: leave its step alone.
+                if Task.isCancelled { return }
                 self.step = .idle
                 switch outcome {
                 case let .approved(pairing, deviceId): app.adopt(pairing, deviceId: deviceId)

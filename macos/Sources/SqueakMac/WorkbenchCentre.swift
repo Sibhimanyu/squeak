@@ -236,13 +236,7 @@ private struct WorkbenchTabs: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showHistory = false
 
-    private var chats: [HostSession] {
-        let keys = model.workspaceTabOrder.ordered(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
-        let byKey = Dictionary(workspace.chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
-        // Tabs the person closed stay off the strip (⇧⌘T brings the last back), unless one is the chat on screen.
-        let closed = WorkbenchPrefs.shared.closed
-        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || ($0.key == model.selected && !fileShowing) }
-    }
+    private var chats: [HostSession] { model.streamThreads(workspace) }
 
     private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
@@ -287,8 +281,8 @@ private struct WorkbenchTabs: View {
         }
         .frame(height: Metrics.tabStrip)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
-        .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
-        .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
+        .task(id: model.allSessions.count) { model.pruneStreamTabs() }
+        .task(id: model.selected) { if let key = model.selected { model.ensureTab(for: key) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             let box = note.object as? CloseTabAction.Box
             if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
@@ -301,7 +295,7 @@ private struct WorkbenchTabs: View {
             let current = files?.activePath == nil && files?.review.isOpen != true ? model.selected : nil
             if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
         }
-        // A chat opened some other way (the sidebar, a notification) is no longer closed.
+        // A chat opened some other way (the sidebar, a notification) is no longer closed, and has its tab.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
         .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .animation(Motion.standard, value: model.selected)
@@ -313,16 +307,16 @@ private struct WorkbenchTabs: View {
     private func closeTab(_ s: HostSession) {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
+        let wasOpen = s.key == model.selected
+        WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
+        let next = model.closeStreamTab(s.key, in: workspace.id)
         if shown.count == 1 {
-            WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
-            if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage,
-               let pond = PondsModel.shared.key(of: s) {
+            if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage, let pond = PondsModel.shared.key(of: s) {
                 WorkbenchNav.openProject(model, key: pond)
             }
             return
         }
-        if let next = ChatTabs.selectionAfterClosing(s.key, selected: model.selected, shown: shown.map(\.key)) { model.select(next) }
-        WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
+        if wasOpen, let next { model.select(next) }
     }
 
     private func reopenTab() {

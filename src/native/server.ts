@@ -67,6 +67,14 @@ function safeEquals(left: string, right: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function decodeKey(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new HttpError(400, "bad project key");
+  }
+}
+
 class HttpError extends Error {
   constructor(
     readonly status: number,
@@ -451,8 +459,33 @@ export class NativeServer {
         const text = str(b.text);
         if (!text) throw new HttpError(400, "text is required");
         const mode = b.mode === "steer" ? "steer" : "queue";
-        return this.json(res, 200, await host.send(id, text, { mode }));
+        const clientNonce = str(b.clientNonce)?.slice(0, 80);
+        return this.json(res, 200, await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}) }));
       }
+    }
+    if (area === "sessions" && id && sub === "timeline" && parts.length === 4 && method === "GET") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const num = (k: string): number | undefined => {
+        const v = url.searchParams.get(k);
+        if (v === null || v === "") return undefined;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${k} must be a number`);
+        return n;
+      };
+      const since = num("since");
+      const turns = num("turns");
+      const before = num("before");
+      const limit = num("limit");
+      return this.json(
+        res,
+        200,
+        host.timelinePage(id, {
+          ...(since !== undefined ? { since } : {}),
+          ...(turns !== undefined ? { turns } : {}),
+          ...(before !== undefined ? { before } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        }),
+      );
     }
     if (area === "sessions" && id && sub === "warm" && parts.length === 4 && method === "POST") {
       return this.json(res, 200, { ok: true, ...(await host.warm(id)) });
@@ -664,7 +697,14 @@ export class NativeServer {
       return this.json(res, 200, { ok: true, ...(await this.git.runAction(id, action as GitAction)) });
     }
     if (area === "sessions" && id && sub === "stream" && method === "GET") {
-      return this.stream(req, res, id, Number(url.searchParams.get("after") ?? 0) || 0);
+      const tl = url.searchParams.get("tl");
+      return this.stream(
+        req,
+        res,
+        id,
+        Number(url.searchParams.get("after") ?? 0) || 0,
+        tl === null ? null : Number(tl) || 0,
+      );
     }
     if (area === "requests" && id && parts.length === 3 && method === "POST") {
       const b = await this.body(req);
@@ -717,7 +757,7 @@ export class NativeServer {
     if (area === "projects" && id && id !== "clone" && (sub === "prefs" || sub === "icon") && parts.length === 4) {
       const { prefs } = this;
       if (!prefs) throw new HttpError(404, "not found");
-      const key = decodeURIComponent(id);
+      const key = decodeKey(id);
       if (key.length > 300) throw new HttpError(400, "bad project key");
       if (sub === "prefs" && method === "PATCH") {
         prefs.patch(key, await this.body(req));
@@ -754,7 +794,7 @@ export class NativeServer {
     }
     if (area === "projects" && id && id !== "clone" && !sub && method === "DELETE") {
       // "Remove from Squeak": the project and its workspace rows go; chats keep their history; no file or git is touched.
-      const key = decodeURIComponent(id);
+      const key = decodeKey(id);
       if (!store.getProject(key)) throw new HttpError(404, "no such project");
       const busy = store.busySessionsOfProject(key);
       if (busy.length > 0)
@@ -1020,7 +1060,13 @@ export class NativeServer {
   }
 
   /** Replays from `after`, then goes live. Synchronous replay then subscribe: nothing can land between. */
-  private stream(req: http.IncomingMessage, res: http.ServerResponse, id: string, after: number): void {
+  private stream(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    id: string,
+    after: number,
+    timelineAfter: number | null,
+  ): void {
     const { host, store } = this.options;
     const session = store.getSession(id);
     if (!session) throw new HttpError(404, "no such session");
@@ -1050,9 +1096,23 @@ export class NativeServer {
       ...(now?.context ? { context: now.context } : {}),
     });
     for (const r of store.openRequests(id)) send("request", r);
+    // A reader that asks for the timeline (`tl=<last seq it holds>`) gets every event after that, then live ones.
+    if (timelineAfter !== null) {
+      let cursor = timelineAfter;
+      for (;;) {
+        const page = host.timelinePage(id, { since: cursor, limit: 1000 });
+        for (const e of page.events) send("timeline", e, e.seq);
+        if (page.events.length < 1000) break;
+        cursor = page.events[page.events.length - 1]!.seq;
+      }
+    }
 
     const onEvent = (e: HostEvent): void => {
       if (e.sessionId !== id) return;
+      if (e.type === "timeline") {
+        if (timelineAfter !== null) send("timeline", e.event, "seq" in e.event ? e.event.seq : undefined);
+        return;
+      }
       if (e.type === "message") send("message", { ...e, type: undefined }, e.seq);
       else if (e.type === "delta") send("delta", e.payload);
       else if (e.type === "status")

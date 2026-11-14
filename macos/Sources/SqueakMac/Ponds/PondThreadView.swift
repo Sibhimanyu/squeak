@@ -17,6 +17,9 @@ struct PondThreadView: View {
     let threadId: String
     @Environment(AppModel.self) private var model
     @State private var events: [ThreadEvent] = []
+    /// The starter's timeline as the pond relays it, reduced by the same reducer the starter's Mac uses (`PondReplica`):
+    /// prompts with their authors, the work and the agent's words come from here once the starter's Mac sends it.
+    @State private var replica = PondReplica()
     @State private var draft = ""
     @State private var sending = false
     @State private var focusToken = 0
@@ -36,7 +39,9 @@ struct PondThreadView: View {
     private var members: [FlockMember] { detail?.members ?? [] }
     private var me: String? { detail?.meMember?.id ?? detail?.me?.id }
     private var role: PondRole { detail?.myRole ?? .viewer }
-    private var rows: [ThreadRow] { ThreadTimeline.rows(events) }
+    private var rows: [ThreadRow] {
+        replica.hasTimeline ? ThreadTimeline.rows(events, replica: replica, starter: thread?.starter ?? "") : ThreadTimeline.rows(events)
+    }
     private var state: PondThreadState { ThreadTimeline.latestState(events) ?? PondThreadState(raw: thread?.state ?? "") }
     private var working: Bool { state == .working }
     private var access: ThreadAccess { ThreadAccess(role: role, starter: thread?.starter ?? "", me: me, starterName: starterName, asks: thread?.asks, caps: detail?.me?.caps, locked: thread?.locked ?? false, allow: thread?.allow ?? [], deny: thread?.deny ?? []) }
@@ -91,10 +96,16 @@ struct PondThreadView: View {
     private func readEvents() async {
         // Pages until the host has nothing after what is held.
         for _ in 0..<20 {
-            guard let page = await ponds.events(pond: pondId, thread: threadId, after: ThreadTimeline.resumeSeq(events)), !page.events.isEmpty else { return }
+            guard let page = await ponds.events(pond: pondId, thread: threadId, after: ThreadTimeline.resumeSeq(events)) else { return }
+            if page.events.isEmpty { replica.settle(); return }
             events = ThreadTimeline.merge(events, page.events)
+            replica.ingest(page.events)
             ponds.outbox[threadId] = PondOutbox.settle(ponds.outbox[threadId] ?? [], events: events, me: me)
-            if page.lastSeq <= ThreadTimeline.resumeSeq(events) { return }
+            if page.lastSeq <= ThreadTimeline.resumeSeq(events) {
+                // Everything the pond holds is read: a host seq still missing was never relayed, so the replica goes on past it.
+                replica.settle()
+                return
+            }
         }
     }
 

@@ -51,6 +51,10 @@ public protocol NativeChatControls: Sendable {
     func activityFeed(for session: HostSession) async throws -> NativeActivityFeed
     /// Live events from the newest seq the caller holds; reconnects itself.
     func events(for session: HostSession, after: Int) -> AsyncStream<NativeEvent>
+    /// The same, with the chat's timeline events after `timelineAfter` replayed first and then live (nil: none).
+    func events(for session: HostSession, after: Int, timelineAfter: Int?) -> AsyncStream<NativeEvent>
+    /// The chat's timeline log (see `NativeHostClient.timeline`); throws for a host that has none.
+    func timeline(for session: HostSession, since: Int?, turns: Int?, before: Int?) async throws -> TimelinePage
 }
 
 public struct NativeActivityFeed: Sendable, Equatable {
@@ -283,7 +287,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let id = Self.nativeId(session) else { return .notSent(reason: "Squeak has no way to reply to this session") }
         do {
-            let queued = try await host.send(id: id, text: text, mode: mode)
+            let queued = try await host.send(id: id, text: text, mode: mode, clientNonce: clientId.uuidString)
             // Claude cannot take text mid-turn: steering it queued instead, and the result says so.
             let note = mode == .steer && queued ? "Queued: this chat can't take a message mid-turn." : nil
             return .accepted(via: "native", delivery: queued ? .queued : .sent, note: note)
@@ -446,8 +450,17 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     }
 
     public func events(for session: HostSession, after: Int) -> AsyncStream<NativeEvent> {
+        events(for: session, after: after, timelineAfter: nil)
+    }
+
+    public func events(for session: HostSession, after: Int, timelineAfter: Int?) -> AsyncStream<NativeEvent> {
         guard let id = Self.nativeId(session) else { return AsyncStream { $0.finish() } }
-        return host.stream(id: id, after: after)
+        return host.stream(id: id, after: after, timelineAfter: timelineAfter)
+    }
+
+    public func timeline(for session: HostSession, since: Int?, turns: Int?, before: Int?) async throws -> TimelinePage {
+        guard let id = Self.nativeId(session) else { throw AdapterError.badResponse("not a native chat") }
+        return try await call { try await host.timeline(id: id, since: since, turns: turns, before: before) }
     }
 
     // MARK: Plumbing

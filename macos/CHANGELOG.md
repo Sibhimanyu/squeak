@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.26.2
+
+- Multiplayer: members can message and answer shared threads and run their own agents, shown as "Powered by ... · Flotilla".
+- The owner controls what each member may do, and what each thread allows, from the People menu and the thread's lock menu.
+- Changes apply live, without restarting a thread.
+
+## 2.26.1
+
+- The chat is rebuilt: a new message never shows old work, steps only grow in place, the view stays where you left it, and shared threads show everyone's messages in one order.
+- A stream keeps its tabs: going Home and back no longer drops thread tabs, and opening an older thread from the Dashboard, a search or a notification adds a tab beside the others instead of replacing them. Each stream's tabs also survive a relaunch.
+- A Markdown file (.md, .markdown, .mdx) opens as a rendered preview with a Preview | Source switch in its header: headings, lists, task lists, tables, code with Copy, quotes and images next to the file. Edit switches to the source and Done returns to your last pick.
+
 ## 2.26.0
 
 - Settings has a Devices page, not a pairing page: the iPhones and browsers signed in to your account, how each got here, and Remove. "Pair an iPhone..." and the QR sheet are gone, and so is the note that pairing always waits for you.
