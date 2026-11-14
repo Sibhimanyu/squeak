@@ -2028,6 +2028,13 @@ extension AppModel {
         guard native.key == s.key, native.timelineReady || native.timeline.hasBaseline else { _ = await startNativeTimeline(s); return }
         guard let page = try? await nativeAdapter.timeline(for: s, since: native.timeline.lastSeq, turns: nil, before: nil) else { return }
         guard native.key == s.key else { return }
+        // The host's log is behind this Mac's (its database was reset): what is held is from a log that no longer exists.
+        if page.lastSeq < native.timeline.lastSeq {
+            native.timeline = TurnTimeline()
+            native.timelineReady = false
+            _ = await startNativeTimeline(s)
+            return
+        }
         native.timeline.load(page.events)
         await closeTimelineGap(s)
         showTimeline(s.key)
