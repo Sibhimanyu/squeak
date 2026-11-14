@@ -12,6 +12,7 @@ import {
 } from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import { NATIVE_HOST_DOWN, isNativeKey, type NativeReplier } from "./native-reply.js";
+import { logger } from "../utils/logger.js";
 import type { FleetSession } from "./types.js";
 
 /**
@@ -200,7 +201,13 @@ export class FleetReplyRouter implements FleetReplier {
   }
 
   async stop(): Promise<void> {
-    for (const replier of this.deps.hosts()) await replier.stop?.().catch(() => undefined);
+    for (const replier of this.deps.hosts()) {
+      await replier.stop?.().catch((error) => {
+        logger.warn("a replier did not stop cleanly", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
   }
 
   async send(

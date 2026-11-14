@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
+
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { ProjectPrefs } from "./project-prefs.js";
 import { logger } from "../utils/logger.js";
@@ -20,6 +22,15 @@ export async function runHost(supportDir: string): Promise<void> {
   // Before anything starts an agent or a script: they inherit this PATH.
   logger.info("squeak host PATH", { from: adoptLoginShellPath() });
   startSystemProxy();
+  // A host that died hard leaves its `claude`/`codex` children running: end them before starting our own.
+  const agentLedger = path.join(supportDir, "host-agents.json");
+  try {
+    const reaped = await reapOrphanedAgents(agentLedger);
+    if (reaped.length) logger.warn("squeak host reaped orphaned agent processes", { pids: reaped });
+  } catch (error) {
+    logger.warn("squeak host could not reap orphaned agents", { error: String(error) });
+  }
+  setAgentLedger(agentLedger);
   void new ProjectPrefs(supportDir).migrateIcons().catch(() => undefined);
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.

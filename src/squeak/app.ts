@@ -165,6 +165,7 @@ import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
+import { runStopSteps, type StopStep } from "./shutdown.js";
 import { normalizeTelegramCommand } from "../utils/telegram-command.js";
 import { openInSqueakLink } from "../fleet/open-link.js";
 import { splitMarkdown } from "../utils/tg-format.js";
@@ -1357,29 +1358,45 @@ export class SqueakApp {
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     if (this.heatTimer) clearInterval(this.heatTimer);
     if (this.liveControlsTimer) clearInterval(this.liveControlsTimer);
-    this.controls.stop();
-    await this.heat.stop().catch(() => undefined);
-    if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
-    await this.lidActions.stop().catch(() => undefined);
-    await this.awake.stop().catch(() => undefined);
-    this.hotspot.stop();
-    this.caffeinator.stop();
-    this.remote?.stop();
-    this.hosted.stop();
-    await this.localChannel?.stop().catch(() => undefined);
-    this.cliq?.stop();
-    this.pondInvites.stop();
-    this.voice?.stop();
-    this.stopMemoInbox();
-    if (this.readinessNudge) clearTimeout(this.readinessNudge);
-    this.stopTraceWatch();
-    this.voiceSpeaker?.dispose();
-    this.naturalVoice.stop();
-    this.naturalInstaller.stop();
-    this.stopReferenceClips();
-    await this.addons.stop().catch(() => undefined);
-    await this.router.stop().catch(() => undefined);
-    await this.controller.stop().catch(() => undefined);
+    // Each step is logged by name if it fails or hangs, and the rest still run (the undo steps matter most:
+    // heat, lid actions and awake put the Mac's sleep, fans and frozen apps back). Bounded as a whole.
+    const steps: StopStep[] = [
+      { name: "controls", run: () => this.controls.stop() },
+      { name: "heat", run: () => this.heat.stop() },
+      {
+        name: "project-icons timer",
+        run: () => {
+          if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
+        },
+      },
+      { name: "lid-actions", run: () => this.lidActions.stop() },
+      { name: "awake", run: () => this.awake.stop() },
+      { name: "hotspot", run: () => this.hotspot.stop() },
+      { name: "caffeinate", run: () => this.caffeinator.stop() },
+      { name: "remote", run: () => this.remote?.stop() },
+      { name: "hosted", run: () => this.hosted.stop() },
+      { name: "local channel", run: () => this.localChannel?.stop() },
+      { name: "cliq", run: () => this.cliq?.stop() },
+      { name: "pond invites", run: () => this.pondInvites.stop() },
+      { name: "voice", run: () => this.voice?.stop() },
+      { name: "memo inbox", run: () => this.stopMemoInbox() },
+      {
+        name: "readiness nudge",
+        run: () => {
+          if (this.readinessNudge) clearTimeout(this.readinessNudge);
+        },
+      },
+      { name: "trace watch", run: () => this.stopTraceWatch() },
+      { name: "voice speaker", run: () => this.voiceSpeaker?.dispose() },
+      { name: "natural voice", run: () => this.naturalVoice.stop() },
+      { name: "natural installer", run: () => this.naturalInstaller.stop() },
+      { name: "reference clips", run: () => this.stopReferenceClips() },
+      { name: "add-ons", run: () => this.addons.stop() },
+      { name: "reply router", run: () => this.router.stop() },
+      { name: "fleet controller", run: () => this.controller.stop() },
+    ];
+    const failed = await runStopSteps(steps);
+    if (failed.length) logger.warn("squeak stopped with problems", { steps: failed });
     logger.info("squeak stopped");
   }
 

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { withSystemProxyEnv } from "../squeak/system-proxy.js";
+import { trackAgentProcess, terminateProcess, untrackAgentProcess } from "../native/agent-procs.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 
@@ -144,6 +145,7 @@ export class CodexAppServerAdapter extends EventEmitter {
       env: withSystemProxyEnv(buildCodexChildEnv(process.env)),
     });
     this.process = child;
+    trackAgentProcess(child.pid, this.codexBin);
 
     child.stderr.on("data", (buf) => {
       const text = buf.toString("utf8").trim();
@@ -173,6 +175,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     });
 
     child.on("exit", (code, signal) => {
+      untrackAgentProcess(child.pid);
       logger.warn("codex app-server exited", { code, signal });
       this.emit("exit", { code, signal });
       rl.close();
@@ -205,8 +208,12 @@ export class CodexAppServerAdapter extends EventEmitter {
     if (!this.process) {
       return;
     }
-    this.process.kill("SIGTERM");
+    const child = this.process;
     this.process = null;
+    // SIGTERM, then SIGKILL after a grace: an app-server that ignores TERM would otherwise outlive the chat.
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      await terminateProcess(child.pid, 3000, undefined, `codex app-server ${child.pid}`);
+    }
   }
 
   async startThread(options: StartThreadOptions): Promise<string> {

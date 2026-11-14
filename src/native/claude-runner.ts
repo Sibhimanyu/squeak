@@ -1,8 +1,10 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
+import { terminateProcess, trackAgentProcess, untrackAgentProcess } from "./agent-procs.js";
 import { loadAgentSdk } from "./agent-sdk.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
@@ -140,6 +142,8 @@ export class ClaudeRunner implements Runner {
   private turnActive = false;
   private interrupting = false;
   private closed = false;
+  /** The `claude` process this runner spawned itself (real SDK only), so close() can make sure it is gone. */
+  private child: ChildProcess | null = null;
   private mode: string;
   private model: string;
   private effort: string | null;
@@ -208,6 +212,8 @@ export class ClaudeRunner implements Runner {
     // Without this the SDK sends thinking as an empty block with a signature, and the transcript has nothing to show.
     options.thinking = { type: "adaptive", display: "summarized" };
     options.pathToClaudeCodeExecutable = executable;
+    // Our own spawn (what the SDK does locally) so the pid is known: close() ends it, a dead host's is reaped.
+    if (!this.options.queryFn) options.spawnClaudeCodeProcess = (o: SpawnArgs) => this.spawnAgent(o);
     if (this.options.contextNote) {
       options.systemPrompt = { type: "preset", preset: "claude_code", append: this.options.contextNote };
     }
@@ -706,6 +712,20 @@ export class ClaudeRunner implements Runner {
     if (cliModel && this.query.setModel) await this.query.setModel(cliModel);
   }
 
+  private spawnAgent(o: SpawnArgs): ChildProcess {
+    const child = spawn(o.command, o.args, {
+      cwd: o.cwd,
+      env: o.env as NodeJS.ProcessEnv,
+      stdio: ["pipe", "pipe", "ignore"],
+      signal: o.signal,
+      windowsHide: true,
+    });
+    this.child = child;
+    trackAgentProcess(child.pid, o.command);
+    child.once("exit", () => untrackAgentProcess(child.pid));
+    return child;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     this.stopInterruptTimer();
@@ -715,5 +735,19 @@ export class ClaudeRunner implements Runner {
     this.query?.close();
     this.query = null;
     this.input = null;
+    const child = this.child;
+    this.child = null;
+    // query.close() asks politely; a CLI that does not leave is ended here (SIGTERM, then SIGKILL after a grace).
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      await terminateProcess(child.pid, 3000, undefined, `claude ${child.pid}`);
+    }
   }
+}
+
+interface SpawnArgs {
+  command: string;
+  args: string[];
+  cwd?: string | undefined;
+  env: Record<string, string | undefined>;
+  signal?: AbortSignal | undefined;
 }

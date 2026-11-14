@@ -2494,9 +2494,12 @@ export class HookIngressServer {
 
     if (hookPid !== null && event.sessionId && this.options.onSpawn) {
       try {
-        void Promise.resolve(this.options.onSpawn(event.sessionId, hookPid)).catch(() => undefined);
-      } catch {
-        // Best effort: a hook is never worth failing over.
+        void Promise.resolve(this.options.onSpawn(event.sessionId, hookPid)).catch((error) => {
+          logger.warn("hook onSpawn failed", { error: error instanceof Error ? error.message : String(error) });
+        });
+      } catch (error) {
+        // A hook is never worth failing over, but a spawn the daemon missed means no pid for that session: logged.
+        logger.warn("hook onSpawn threw", { error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
