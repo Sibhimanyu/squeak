@@ -200,9 +200,13 @@ public enum HistoryKeychain {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecAttrAccount as String: macId, kSecReturnData as String: true]
         var item: CFTypeRef?
-        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data, data.count == 32 {
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess, let data = item as? Data, data.count == 32 {
             return SymmetricKey(data: data)
         }
+        // A key that exists but cannot be read right now (device not yet unlocked after a reboot) is not a lost key:
+        // replacing it would make every cached chat unreadable. No store this time; the cache is just not used.
+        guard status == errSecItemNotFound || status == errSecSuccess else { return nil }
         let fresh = SymmetricKey(size: .bits256)
         let data = fresh.withUnsafeBytes { Data($0) }
         var add = query

@@ -27,6 +27,21 @@ const cache = (kv, options = {}) => new HistoryCache(kv, { timers, ...options })
 const chatRecords = (kv) => [...kv.data.entries()].filter(([name]) => name.startsWith("hc:c:"));
 
 describe("HistoryCache", () => {
+  it("survives a storage quota error without losing the other chats", async () => {
+    const kv = memoryKv();
+    const realWrite = kv.write;
+    kv.write = async (name, value) => {
+      if (name.startsWith("hc:c:") && kv.data.size > 2) throw new DOMException("full", "QuotaExceededError");
+      return realWrite(name, value);
+    };
+    const c = cache(kv);
+    c.record(entries(1, 3), "a");
+    c.record(entries(1, 3), "b");
+    c.record(entries(1, 3), "c");
+    await expect(c.flush()).resolves.toBeUndefined();
+    expect(await c.get("a")).toHaveLength(3);
+  });
+
   it("round-trips a chat across instances and reads the newest cursor", async () => {
     const kv = memoryKv();
     const a = cache(kv);

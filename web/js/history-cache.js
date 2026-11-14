@@ -155,7 +155,12 @@ export class HistoryCache {
       const hash = await hashOf(key);
       const record = await this.#seal({ v: 1, key, history });
       if (this.disposed) return;
-      await this.kv.write(chatName(hash), record);
+      try {
+        await this.kv.write(chatName(hash), record);
+      } catch {
+        // Storage is full or refused the write (quota): this chat just is not cached; the rest carry on.
+        continue;
+      }
       const size = record.ct.byteLength;
       const entry = this.index.find((c) => c.h === hash);
       if (entry) Object.assign(entry, { at: this.now(), size });
@@ -169,7 +174,13 @@ export class HistoryCache {
       bytes -= dropped.size ?? 0;
       await this.kv.delete(chatName(dropped.h));
     }
-    if (!this.disposed) await this.kv.write(INDEX, { v: 1, chats: this.index });
+    if (!this.disposed) {
+      try {
+        await this.kv.write(INDEX, { v: 1, chats: this.index });
+      } catch {
+        // An index that did not save only costs a re-read of what is on disk next time.
+      }
+    }
   }
 
   /** Deletes every cached chat and the key (sign out, forget). The caller then disposes. */
