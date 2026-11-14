@@ -12,7 +12,7 @@ enum ActivityList {
         switch step.kind {
         case "thinking": return .brain
         case "note", "text": return .alignLeft
-        case "background": return .history
+        case "background", "waiting": return .history
         default:
             let l = step.text.lowercased()
             if l.hasPrefix("read") { return .fileText }

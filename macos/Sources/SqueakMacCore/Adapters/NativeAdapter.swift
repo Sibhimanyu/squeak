@@ -8,6 +8,12 @@ public protocol NativeChatControls: Sendable {
     func interrupt(_ session: HostSession) async -> NativeActionResult
     /// Compacts the chat's context through the host; `.refused` while it works, `.failed` from a host that lacks the route.
     func compact(_ session: HostSession) async -> NativeActionResult
+    /// "Try again": resend the last message after a connection failure. `resent` false = the agent had already replied.
+    func retry(_ session: HostSession) async -> (result: NativeActionResult, resent: Bool)
+    /// The editable opening message for a new thread that continues this chat; nil when the host cannot write one.
+    func handoffDraft(_ session: HostSession) async -> String?
+    /// Creates the linked thread with `summary` as its first message; the new chat's id on success.
+    func handoff(_ session: HostSession, summary: String) async -> (result: NativeActionResult, newId: String?)
     /// Answers an open request: allow or deny, with the person's words (a deny's reason, "tell it what to do instead")
     /// and, for an AskUserQuestion, the chosen answers.
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
@@ -124,7 +130,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             discover: .supported, readTranscript: .supported, send: .supported, activity: .supported, approve: .supported,
             openInHost: .unsupported("This chat is Squeak's own"),
             attachments: s.cwd.isEmpty ? .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there") : .supported)
-        return HostSession(
+        var h = HostSession(
             key: SessionKey(provider: "\(s.agent)-squeak", workspaceId: nil, hostSessionId: target),
             title: DaemonAdapter.nonEmpty(s.title) ?? d?.title ?? "",
             distinctTitle: DaemonAdapter.nonEmpty(d?.distinctTitle),
@@ -150,6 +156,9 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             contextTokens: s.contextTokens, contextLimit: s.contextLimit, ducklings: s.ducklings,
             archivedAt: s.archivedAt
         )
+        h.largeChat = s.isLarge ? true : nil
+        h.retryable = s.retryable && state == .error ? true : nil
+        return h
     }
 
     /// The row for a chat the host just created, before the list shows it.
@@ -320,6 +329,23 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func compact(_ session: HostSession) async -> NativeActionResult {
         await act(session) { id in try await host.compact(id: id) }
+    }
+
+    public func retry(_ session: HostSession) async -> (result: NativeActionResult, resent: Bool) {
+        var resent = false
+        let r = await act(session) { id in resent = try await host.retry(id: id).resent }
+        return (r, resent)
+    }
+
+    public func handoffDraft(_ session: HostSession) async -> String? {
+        guard let id = Self.nativeId(session) else { return nil }
+        return try? await host.handoffDraft(id: id)
+    }
+
+    public func handoff(_ session: HostSession, summary: String) async -> (result: NativeActionResult, newId: String?) {
+        var newId: String?
+        let r = await act(session) { id in newId = try await host.handoff(id: id, summary: summary).id }
+        return (r, newId)
     }
 
     public func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult {

@@ -10,6 +10,7 @@ import {
   type ProjectSettingsRow,
 } from "./types.js";
 import type { NativeStore } from "./store.js";
+import { DEFAULT_AUTO_COMPACT_TOKENS } from "./api-wait.js";
 
 export type SettingSource = "project" | "conductor.json" | "default";
 
@@ -112,6 +113,8 @@ export interface EffectiveSettings {
   reviewEffort: string | null;
   /** New streams clone the pond's ignored dependency folders (default on). */
   cloneDependencies: boolean;
+  /** Context tokens at which a Claude chat compacts itself: 200000 by default, 0 = off. */
+  autoCompactTokens: number;
   prompts: Record<GitAction, string>;
 }
 
@@ -152,6 +155,7 @@ export function resolveSettings(store: NativeStore, project: ProjectRow, gitUser
       reviewModel: settings.reviewModel,
       reviewEffort: settings.reviewEffort,
       cloneDependencies: settings.cloneDependencies !== false,
+      autoCompactTokens: settings.autoCompactTokens ?? DEFAULT_AUTO_COMPACT_TOKENS,
       prompts,
     },
     sources: {
@@ -191,6 +195,7 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     "reviewModel",
     "reviewEffort",
     "cloneDependencies",
+    "autoCompactTokens",
     "prompts",
   ]);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw new SettingsError(`Unknown setting: ${k}.`);
@@ -241,6 +246,15 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     const v = body.cloneDependencies;
     // Lenient: a boolean, or null/"" for the default (on).
     next.cloneDependencies = typeof v === "boolean" ? v : null;
+  }
+  if ("autoCompactTokens" in body) {
+    const v = body.autoCompactTokens;
+    // null = the default; 0 or "off" = never; otherwise 100k..1M tokens.
+    if (v === null || v === "") next.autoCompactTokens = null;
+    else if (v === 0 || v === "off") next.autoCompactTokens = 0;
+    else if (typeof v === "number" && Number.isFinite(v) && v >= 100_000 && v <= 1_000_000)
+      next.autoCompactTokens = Math.round(v);
+    else throw new SettingsError("autoCompactTokens must be 0 (off), or 100000 to 1000000.");
   }
   if ("prompts" in body) {
     const p = body.prompts;

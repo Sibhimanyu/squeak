@@ -78,6 +78,10 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var ducklings: DucklingSet?
     /// The host says background helpers keep the chat working although its turn ended (its rule, `helpersKeepWorking`); false from an older host.
     public var helpersWorking: Bool = false
+    /// The host says the chat is very large (slow, may fail); false from an older host.
+    public var isLarge: Bool = false
+    /// The last turn failed in a way "Try again" can resend; false from an older host.
+    public var retryable: Bool = false
     /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
     public var contextTokens: Int?
     public var contextLimit: Int?
@@ -86,11 +90,12 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable
     }
 
     private struct Background: Decodable { var count: Int? }
     private struct Context: Decodable { var used: Int?; var limit: Int? }
+    private struct Large: Decodable { var reason: String? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -112,6 +117,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         backgroundCount = c.lenient(Background.self, .background)?.count
         ducklings = c.lenient(DucklingSet.self, .ducklings)
         helpersWorking = c.lenient(Bool.self, .helpersWorking) ?? false
+        isLarge = c.lenient(Large.self, .large) != nil
+        retryable = c.lenient(Bool.self, .retryable) ?? false
         let ctx = c.lenient(Context.self, .context)
         contextTokens = ctx?.used
         contextLimit = ctx?.limit
@@ -859,6 +866,25 @@ public struct NativeHostClient: Sendable {
     /// Has the agent compact its context (Claude: `/compact`, Codex: its own thread compaction). 409 while it works.
     public func compact(id: String) async throws {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/compact", body: .object([:]))
+    }
+
+    /// "Try again" after a failed turn: the host sends the last message once more, unless the agent already got somewhere
+    /// with it (then `resent` is false and `reason` says so).
+    public func retry(id: String) async throws -> (resent: Bool, reason: String?) {
+        let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/retry", body: .object([:]), timeout: 30))
+        return (j["resent"]?.bool ?? false, j["reason"]?.string)
+    }
+
+    /// The opening message for a new thread that continues this chat: a cheap model's summary, which the person edits.
+    public func handoffDraft(id: String) async throws -> String {
+        let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/handoff-draft", body: .object([:]), timeout: 60))
+        return j["summary"]?.string ?? ""
+    }
+
+    /// Creates the linked thread (same workspace and model) and sends `summary` as its first message.
+    public func handoff(id: String, summary: String) async throws -> NativeSession {
+        struct Out: Decodable { var session: NativeSession }
+        return try await decode(Out.self, try await call("POST", "/native/sessions/\(Self.id(id))/handoff", body: .object(["summary": .string(summary)]), timeout: 30)).session
     }
 
     public func setMode(id: String, permissionMode: String) async throws {
