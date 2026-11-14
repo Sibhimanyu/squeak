@@ -3,11 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { NativeStore } from "./store.js";
 import { cloneUrl, repoName, RepoPickers, slug, WorkspaceSources, type Runner } from "./workspace-sources.js";
 import { WorkspaceManager } from "./workspaces.js";
+
+// Real git on this Mac stalls ~3 s per launch (endpoint security), so a test that spawns a dozen git processes
+// outruns the 20 s default; it still fails, just not early.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
 

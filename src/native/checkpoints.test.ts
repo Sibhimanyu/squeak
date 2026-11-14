@@ -3,9 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Checkpointer, checkpointRef } from "./checkpoints.js";
+
+// Real git on this Mac stalls ~3 s per launch (endpoint security), so a test that spawns a dozen git processes
+// outruns the 20 s default; it still fails, just not early.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const dirs: string[] = [];
 afterEach(() => {
