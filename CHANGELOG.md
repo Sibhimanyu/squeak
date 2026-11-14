@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.27.2] - 2026-11-15 (iOS)
+
+- Archive and rename that the Mac never confirms are undone after two minutes.
+
 ## [1.27.1] - 2026-11-15 (iOS)
 
 - A pond shows the flock's threads, and who can message each one.

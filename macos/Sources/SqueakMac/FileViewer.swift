@@ -21,7 +21,7 @@ struct FileViewer: View {
             if file.conflict != nil { conflictBanner }
             switch file.content {
             case .text where MarkdownPreview.showsPreview(path: file.path, editing: file.editing, choice: file.markdownChoice):
-                MarkdownFilePreview(text: file.edited, fileURL: files.url(for: file.path)).id(file.path)
+                MarkdownFilePreview(text: file.edited, fileURL: files.url(for: file.path), root: URL(fileURLWithPath: files.root)).id(file.path)
             case .text:
                 CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
                     .id(file.path).clipped()
@@ -173,6 +173,7 @@ struct FileCloseGuard: ViewModifier {
 struct MarkdownFilePreview: View {
     let text: String
     let fileURL: URL?
+    var root: URL? = nil
 
     private var style: MessageStyle {
         var s = MessageStyle.reading
@@ -194,8 +195,9 @@ struct MarkdownFilePreview: View {
 
     private var imageView: MessageImageView {
         let base = fileURL
+        let root = root
         return { alt, source in
-            guard let base, let url = MarkdownPreview.localImageURL(source: source, fileURL: base),
+            guard let base, let url = MarkdownPreview.localImageURL(source: source, fileURL: base, root: root),
                 let image = NSImage(contentsOf: url)
             else { return AnyView(Text(verbatim: "[image: \(alt.isEmpty ? source : alt)]").foregroundStyle(Theme.muted)) }
             return AnyView(Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: image.size.width, alignment: .leading)

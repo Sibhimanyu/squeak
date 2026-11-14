@@ -36,11 +36,14 @@ public struct OptimisticEdits: Equatable, Sendable {
     }
 
     /// `view` as the phone draws it with the edits in place. Order and ids are untouched (a rename keeps the row).
-    public func apply(to view: PhoneSnapshot) -> PhoneSnapshot {
+    /// An edit older than `ttl` is not applied even before the next `reconcile`, so a quiet Mac cannot keep a chat hidden.
+    public func apply(to view: PhoneSnapshot, now: Date = Date()) -> PhoneSnapshot {
         guard !isEmpty else { return view }
+        let live = archived.filter { now.timeIntervalSince($0.value) < Self.ttl }
+        let liveTitles = titles.filter { now.timeIntervalSince($0.value.at) < Self.ttl }
         var out = view
-        out.sessions = Self.edit(view.sessions, archived: archived, titles: titles)
-        if let recent = view.recent { out.recent = Self.edit(recent, archived: archived, titles: titles) }
+        out.sessions = Self.edit(view.sessions, archived: live, titles: liveTitles)
+        if let recent = view.recent { out.recent = Self.edit(recent, archived: live, titles: liveTitles) }
         return out
     }
 

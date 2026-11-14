@@ -30,4 +30,13 @@ struct MarkdownPreviewTests {
         #expect(MarkdownPreview.localImageURL(source: "https://e.com/x.png", fileURL: file) == nil)
         #expect(MarkdownPreview.localImageURL(source: "data:image/png;base64,AA", fileURL: file) == nil)
     }
+
+    @Test func imagesOutsideTheWorkspaceRootAreRefused() {
+        let file = URL(fileURLWithPath: "/w/docs/guide.md")
+        let root = URL(fileURLWithPath: "/w")
+        #expect(MarkdownPreview.localImageURL(source: "../../etc/x.png", fileURL: file, root: root) == nil)
+        #expect(MarkdownPreview.localImageURL(source: "/Users/me/secret.png", fileURL: file, root: root) == nil)
+        #expect(MarkdownPreview.localImageURL(source: "../x.png", fileURL: file, root: root)?.path == "/w/x.png")
+        #expect(MarkdownPreview.localImageURL(source: "/w/img/a.png", fileURL: file, root: root)?.path == "/w/img/a.png")
+    }
 }
