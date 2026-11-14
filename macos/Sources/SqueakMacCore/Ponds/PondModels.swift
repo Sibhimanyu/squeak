@@ -148,7 +148,34 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     }
 }
 
+/// What a person may do in a pond right now: their role's defaults and the owner's switches, as the host worked them out.
+/// The host enforces it on every command; this only decides what the screen offers and what it says.
+public struct PondCaps: Sendable, Equatable, Decodable {
+    public var see: Bool
+    public var diffs: Bool
+    public var message: Bool
+    public var answer: Bool
+    public var start: Bool
+
+    public init(see: Bool = true, diffs: Bool = true, message: Bool = true, answer: Bool = true, start: Bool = true) {
+        self.see = see; self.diffs = diffs; self.message = message; self.answer = answer; self.start = start
+    }
+
+    enum CodingKeys: String, CodingKey { case see, diffs, message, answer, start }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        see = c.lenient(Bool.self, .see) ?? true
+        diffs = c.lenient(Bool.self, .diffs) ?? true
+        message = c.lenient(Bool.self, .message) ?? true
+        answer = c.lenient(Bool.self, .answer) ?? true
+        start = c.lenient(Bool.self, .start) ?? true
+    }
+}
+
 public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
+    /// The owner's switches for this person; nil from an older host.
+    public var caps: PondCaps? = nil
+    public var muted: Bool = false
     public var id: String
     public var name: String
     public var role: PondRole
@@ -161,11 +188,13 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     public var client: String?
     public var lastSeenAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, name, role, nest, online, you, nestName, client, lastSeenAt }
+    enum CodingKeys: String, CodingKey { case id, name, role, nest, online, you, nestName, client, lastSeenAt, caps, muted }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        caps = c.lenient(PondCaps.self, .caps)
+        muted = c.lenient(Bool.self, .muted) ?? false
         name = c.lenient(String.self, .name) ?? ""
         role = PondRole(raw: c.lenient(String.self, .role))
         nest = c.lenient(String.self, .nest)
@@ -246,10 +275,14 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     /// A thread a member asked the owner's Mac to start: the id their Mac made the request under (`PondStartRequest`).
     /// Nil on every other thread and from an older host.
     public var requestId: String?
+    /// The starter's switches for everyone else: locked (read-only), and members let in or kept out by id.
+    public var locked: Bool = false
+    public var allow: [String] = []
+    public var deny: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, permissionMode, updatedAt, workspace, branch, participants
-        case asks, starterOnline, nestName, stateLine, waitingOn, requester
+        case asks, starterOnline, nestName, stateLine, waitingOn, requester, locked, allow, deny
     }
     private enum RequesterKeys: String, CodingKey { case requestId }
     private enum PrivateKey: String, CodingKey { case `private` }
@@ -272,6 +305,9 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
         branch = c.lenient(String.self, .branch)
         participants = c.list(PondParticipant.self, .participants)
         asks = c.lenient(Bool.self, .asks)
+        locked = c.lenient(Bool.self, .locked) ?? false
+        allow = (try? c.decodeIfPresent([String].self, forKey: .allow)) ?? []
+        deny = (try? c.decodeIfPresent([String].self, forKey: .deny)) ?? []
         starterOnline = c.lenient(Bool.self, .starterOnline)
         nestName = c.lenient(String.self, .nestName)
         stateLine = c.lenient(String.self, .stateLine).flatMap { $0.isEmpty ? nil : $0 }
@@ -445,12 +481,14 @@ public struct PondMe: Sendable, Equatable, Decodable {
     public var name: String
     public var role: PondRole
     public var nest: String?
+    public var caps: PondCaps? = nil
 
-    enum CodingKeys: String, CodingKey { case id, name, role, nest }
+    enum CodingKeys: String, CodingKey { case id, name, role, nest, caps }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        caps = c.lenient(PondCaps.self, .caps)
         name = c.lenient(String.self, .name) ?? ""
         role = PondRole(raw: c.lenient(String.self, .role))
         nest = c.lenient(String.self, .nest)

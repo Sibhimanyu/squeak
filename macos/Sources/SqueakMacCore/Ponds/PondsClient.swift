@@ -184,6 +184,23 @@ public struct PondsClient: Sendable {
     }
 
     /// Starter only.
+    /// Owner: a preset (`viewer`, `member`, `collaborator`) and/or single switches, live, no rejoin.
+    public func setMemberCaps(pond: String, member: String, preset: String? = nil, caps: [String: Bool] = [:]) async throws {
+        var body: [String: NativeJSON] = [:]
+        if let preset { body["preset"] = .string(preset) }
+        if !caps.isEmpty { body["caps"] = .object(caps.mapValues { NativeJSON.bool($0) }) }
+        _ = try await host.call("POST", "\(Self.p(pond))/members/\(NativeHostClient.id(member))/caps", body: .object(body), timeout: 60)
+    }
+
+    /// A thread's starter: lock it, and let members in or keep them out.
+    public func setThreadAccess(pond: String, thread: String, locked: Bool? = nil, allow: [String]? = nil, deny: [String]? = nil) async throws {
+        var body: [String: NativeJSON] = [:]
+        if let locked { body["locked"] = .bool(locked) }
+        if let allow { body["allow"] = .array(allow.map { NativeJSON.string($0) }) }
+        if let deny { body["deny"] = .array(deny.map { NativeJSON.string($0) }) }
+        _ = try await host.call("POST", "\(Self.t(pond, thread))/access", body: .object(body))
+    }
+
     public func setPrivate(pond: String, thread: String, isPrivate: Bool) async throws {
         _ = try await host.call("POST", "\(Self.t(pond, thread))/visibility", body: .object(["private": .bool(isPrivate)]))
     }

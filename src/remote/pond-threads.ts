@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { PhonePond } from "../fleet/native-phone.js";
+import type { PhoneFlockThread, PhonePond } from "../fleet/native-phone.js";
 import type { FleetSession } from "../fleet/types.js";
 import { liveHandle } from "./live-turn.js";
 
@@ -38,6 +38,10 @@ export interface PondThreadsDoc {
   pond: string;
   total: number;
   streams: PondThreadStream[];
+  /** Other members' threads in this pond (read-only on the phone), when the pond is shared. Optional: older phones skip it. */
+  flock?: PhoneFlockThread[];
+  /** Whether this person may message in the pond right now, and the calm reason when not. Optional. */
+  access?: { canMessage: boolean; reason?: string };
 }
 
 /** The `live` document id of a pond's threads: the pond id hashed like a session key, under its own prefix. */

@@ -3,6 +3,7 @@
  * applies to a document it opened. A document that fails its check is dropped, never repaired.
  */
 
+import { readCapsPatch, type CapsPatch } from "./permissions.js";
 import { readTimelineEvent, type TimelineEvent } from "../native/timeline.js";
 
 export type Role = "owner" | "member" | "viewer";
@@ -35,6 +36,8 @@ export interface MemberDoc {
   addedAt: number;
   /** A seam for Catalyst sign-in; unused today. */
   accountId?: string;
+  /** What the owner lets this member do beyond their role's default (`effectiveCaps`); signed with the document. */
+  caps?: CapsPatch;
 }
 
 export interface JoinRequestDoc {
@@ -50,6 +53,10 @@ export interface JoinRequestDoc {
 }
 
 export interface PondThread {
+  /** The starter's overrides for everyone else (`threadWriteDecision`): locked, and who is let in or kept out. */
+  locked?: boolean;
+  allow?: string[];
+  deny?: string[];
   id: string;
   title: string;
   /** The starter's member id. */
@@ -282,6 +289,7 @@ export function readMember(v: unknown): MemberDoc | null {
     ...(v.client ? { client: v.client } : {}),
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
+    ...(readCapsPatch(v.caps) ? { caps: readCapsPatch(v.caps)! } : {}),
   };
 }
 
@@ -334,6 +342,9 @@ export function readThread(v: unknown): PondThread | null {
     ...(s(v.branch, 250) ? { branch: v.branch } : {}),
     ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
     ...(v.waitingFor === "approval" || v.waitingFor === "question" ? { waitingFor: v.waitingFor } : {}),
+    ...(v.locked === true ? { locked: true } : {}),
+    ...(Array.isArray(v.allow) ? { allow: v.allow.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
+    ...(Array.isArray(v.deny) ? { deny: v.deny.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
     ...(rec(v.requester) && s(v.requester.memberId, 64) && s(v.requester.requestId, 80)
       ? { requester: { memberId: v.requester.memberId, requestId: v.requester.requestId } }
       : {}),

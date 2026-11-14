@@ -1760,6 +1760,15 @@ export class RemoteBridge {
       (session) => isUnclaimedHeadless(session),
     );
     this.pondThreadKeys = new Set(doc.streams.flatMap((stream) => stream.threads.map((thread) => thread.key)));
+    // Other members' threads and this person's switches, from the pond itself (Flotilla), bounded like every host read.
+    const flock = await Promise.race([
+      this.deps.native?.pondFlock?.(pond.pondId ?? pond.id).catch(() => null) ?? Promise.resolve(null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000).unref()),
+    ]);
+    if (flock) {
+      if (flock.threads.length) doc.flock = flock.threads;
+      doc.access = { canMessage: flock.canMessage, ...(flock.reason ? { reason: flock.reason } : {}) };
+    }
     const body = JSON.stringify(doc);
     if (out?.pond === pond.id && out.last === body) return;
     this.pondThreadsOut = { pond: pond.id, last: body };

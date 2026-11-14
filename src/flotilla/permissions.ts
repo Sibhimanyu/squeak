@@ -196,3 +196,70 @@ export function readGrant(v: unknown): MachineGrant | null {
     updatedAt: v.updatedAt,
   };
 }
+
+// MARK: Per-member capabilities (owner-set, live) and per-thread overrides (starter-set)
+
+/**
+ * What the owner lets one member do in the pond, on top of their role. Stored in the member's own document (signed by
+ * the owner), so a change reaches every Mac with the next member read and is enforced where the thread runs: the
+ * starter's Mac checks it for every command, whatever the sender's client says. Absent keys take the role's default.
+ */
+export const CAPS = ["see", "diffs", "message", "answer", "start"] as const;
+export type Cap = (typeof CAPS)[number];
+export type Caps = Record<Cap, boolean>;
+export type CapsPatch = Partial<Caps> & { muted?: boolean };
+
+/** Role defaults: a member does everything but approve and stop (those are never grantable); a viewer only reads. */
+export const ROLE_CAPS: Record<Role, Caps> = {
+  owner: { see: true, diffs: true, message: true, answer: true, start: true },
+  member: { see: true, diffs: true, message: true, answer: true, start: true },
+  viewer: { see: true, diffs: true, message: false, answer: false, start: false },
+};
+
+/** Presets the Mac's People page offers: Viewer reads, Member talks in shared threads, Collaborator also brings an agent. */
+export const CAP_PRESETS = {
+  viewer: { role: "viewer", caps: {} },
+  member: { role: "member", caps: { start: false } },
+  collaborator: { role: "member", caps: { start: true } },
+} as const satisfies Record<string, { role: Role; caps: CapsPatch }>;
+
+/** The caps a member really has: role defaults, then the owner's patch; muted and viewers never write. */
+export function effectiveCaps(role: Role, patch?: CapsPatch): Caps {
+  const out = { ...ROLE_CAPS[role] };
+  if (role === "owner") return out;
+  if (role === "member" && patch) {
+    for (const k of CAPS) if (typeof patch[k] === "boolean") out[k] = patch[k] as boolean;
+    if (patch.muted === true) {
+      out.message = false;
+      out.answer = false;
+      out.start = false;
+    }
+  }
+  if (!out.see) return { see: false, diffs: false, message: false, answer: false, start: false };
+  return out;
+}
+
+export function readCapsPatch(v: unknown): CapsPatch | undefined {
+  if (!rec(v)) return undefined;
+  const out: CapsPatch = {};
+  for (const k of [...CAPS, "muted"] as const) if (typeof v[k] === "boolean") out[k] = v[k] as boolean;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** A thread starter's own switches for others: locked (read-only for everyone else), and named members let in or kept out. */
+export interface ThreadAccess {
+  locked?: boolean;
+  allow?: string[];
+  deny?: string[];
+}
+
+export const LOCKED = "This thread is read-only: its starter locked it.";
+export const DENIED = "Its starter doesn't let you message this thread.";
+
+/** May `who` write (message or answer) in a thread, under its starter's overrides? The starter always may. */
+export function threadWriteDecision(who: string, starter: string, access: ThreadAccess | undefined): Decision {
+  if (who === starter || !access) return yes;
+  if (access.deny?.includes(who)) return no(DENIED);
+  if (access.locked && !access.allow?.includes(who)) return no(LOCKED);
+  return yes;
+}

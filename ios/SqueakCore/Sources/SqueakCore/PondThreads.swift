@@ -41,15 +41,45 @@ public struct PondThreads: Codable, Equatable, Sendable {
         }
     }
 
+    /// Another member's thread in this pond (read-only here: it runs on their Mac). `poweredBy` marks one a member runs with
+    /// their own agent ("Powered by <their Mac> · Flotilla"). Absent from an older Mac.
+    public struct FlockThread: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let title: String
+        public let state: String
+        public let at: String
+        public let by: String
+        public let mode: String
+        public var poweredBy: String? = nil
+        public var locked: Bool? = nil
+
+        public var date: Date? { ISO8601DateFormatter.squeakParse(at) }
+
+        public init(id: String, title: String, state: String, at: String, by: String, mode: String, poweredBy: String? = nil, locked: Bool? = nil) {
+            self.id = id; self.title = title; self.state = state; self.at = at; self.by = by; self.mode = mode
+            self.poweredBy = poweredBy; self.locked = locked
+        }
+    }
+
+    /// Whether this person may message in the pond now; `reason` is the calm sentence when not. Absent from an older Mac.
+    public struct Access: Codable, Equatable, Sendable {
+        public let canMessage: Bool
+        public var reason: String? = nil
+        public init(canMessage: Bool, reason: String? = nil) { self.canMessage = canMessage; self.reason = reason }
+    }
+
     public let v: Int
     public let pond: String
     /// How many threads the pond has; `streams` holds the newest 200 of them.
     public let total: Int
     public var seq: Int64? = nil
     public let streams: [Stream]
+    public var flock: [FlockThread]? = nil
+    public var access: Access? = nil
 
-    public init(v: Int = 1, pond: String, total: Int, seq: Int64? = nil, streams: [Stream]) {
+    public init(v: Int = 1, pond: String, total: Int, seq: Int64? = nil, streams: [Stream], flock: [FlockThread]? = nil, access: Access? = nil) {
         self.v = v; self.pond = pond; self.total = total; self.seq = seq; self.streams = streams
+        self.flock = flock; self.access = access
     }
 
     public var threads: [Thread] { streams.flatMap(\.threads) }

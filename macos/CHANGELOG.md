@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.26.2
+
+- Multiplayer: members can message and answer shared threads and run their own agents, shown as "Powered by ... · Flotilla".
+- The owner controls what each member may do, and what each thread allows, from the People menu and the thread's lock menu.
+- Changes apply live, without restarting a thread.
+
 ## 2.26.1
 
 - The chat is rebuilt: a new message never shows old work, steps only grow in place, the view stays where you left it, and shared threads show everyone's messages in one order.

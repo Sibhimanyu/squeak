@@ -31,6 +31,14 @@ import {
   type Actor,
   type Context,
   type MachineGrant,
+  CAP_PRESETS,
+  effectiveCaps,
+  readCapsPatch,
+  threadWriteDecision,
+  type Cap,
+  type Caps,
+  type CapsPatch,
+  type ThreadAccess,
 } from "./permissions.js";
 import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import { joinWords } from "./join-words.js";
@@ -86,6 +94,24 @@ const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
   start: "start-thread",
 };
 
+/** Which of the owner's switches each command needs. */
+const COMMAND_CAP: Record<(typeof COMMAND_KINDS)[number], Cap | null> = {
+  message: "message",
+  steer: "message",
+  answer: "answer",
+  diff: "diffs",
+  start: "start",
+};
+
+/** What a refusal says when the owner switched something off: calm, fixed, and never a command's content. */
+const CAP_REFUSAL: Record<Cap, string> = {
+  see: "The owner has hidden this pond's threads from you.",
+  diffs: "The owner has turned off seeing changes for you.",
+  message: "The owner has turned off messaging for you in this pond.",
+  answer: "The owner has turned off answering questions for you in this pond.",
+  start: "The owner has turned off starting your own threads in this pond.",
+};
+
 /** What a Mac keeps about one thread it starts: the session behind it never leaves this file. */
 export interface LocalThread {
   sessionId: string;
@@ -109,6 +135,8 @@ export interface LocalThread {
   requester?: { memberId: string; requestId: string };
   /** The "shared <title>" Ripple, so making the thread private can take it away again (a title must not linger). */
   rippleId?: string;
+  /** The starter's switches for everyone else (lock, allow, deny); republished with the thread document. */
+  access?: ThreadAccess;
   /** The last seq handed out. */
   seq: number;
   /** [first, last] seq of each batch in the cloud, oldest first. */
@@ -366,6 +394,10 @@ export interface MemberView {
   /** The member's machine's name (null for a browser). */
   nestName: string | null;
   client: "mac" | "web";
+  /** What this member may do right now (role defaults, then the owner's switches). Absent from an older host. */
+  caps?: Caps;
+  /** The owner muted them: read-only until unmuted. */
+  muted?: boolean;
   /** Presence heartbeat younger than 45 s. */
   online: boolean;
   /** Unix ms of the last heartbeat, when there is one. */
@@ -423,7 +455,7 @@ export interface PondView {
   joins: JoinView[];
   /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
   invites?: InviteView[];
-  me: { id: string; name: string; role: Role; nest: string | null };
+  me: { id: string; name: string; role: Role; nest: string | null; caps?: Caps };
   /** The relay could not be reached: this is the last known pond, read-only. */
   offline?: true;
   /** Unix ms of the last good read; present only with `offline`. */
@@ -2145,6 +2177,107 @@ export class FlotillaService extends EventEmitter {
     }
   }
 
+  /** Throws the calm refusal when the owner has switched this Mac's starting threads off (before anything is started). */
+  async assertCanStart(pondId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role === "owner" || pond.local) return;
+    if (!this.capsIn(pond, await this.members(pond), this.identity.id).start)
+      throw new FlotillaError(CAP_REFUSAL.start, 403);
+  }
+
+  /** What a member may do in this pond now, from the member list this Mac last read (the owner always may). */
+  private capsIn(pond: LocalPond, members: Map<string, MemberDoc>, memberId: string): Caps {
+    if (pond.role === "owner" && memberId === this.identity.id) return effectiveCaps("owner");
+    const m = members.get(memberId);
+    return effectiveCaps(m?.role ?? pond.role, m?.caps);
+  }
+
+  /**
+   * Owner: set what one member may do (a preset, or single switches), at any time and without a rejoin. The member's
+   * document is signed again; every Mac reads it on its next member read and the starter's Mac checks it on every
+   * command. Said in the Ripples.
+   */
+  async setMemberCaps(
+    pondId: string,
+    memberId: string,
+    input: { preset?: keyof typeof CAP_PRESETS; caps?: CapsPatch },
+  ): Promise<void> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "remove-member", {}, "Only an owner can change what a member may do.");
+    if (memberId === this.identity.id) throw new FlotillaError("An owner's access can't be changed.");
+    if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
+    const found = (await this.members(pond)).get(memberId);
+    if (!found) throw new FlotillaError("No such member.", 404);
+    let role = found.role;
+    let patch: CapsPatch = { ...(found.caps ?? {}) };
+    if (input.preset) {
+      const preset = CAP_PRESETS[input.preset];
+      if (!preset) throw new FlotillaError("Unknown preset.");
+      role = preset.role;
+      patch = { ...preset.caps };
+    }
+    if (input.caps) {
+      const asked = readCapsPatch(input.caps);
+      if (!asked) throw new FlotillaError("Nothing to change.");
+      patch = { ...patch, ...asked };
+    }
+    const before = effectiveCaps(found.role, found.caps);
+    const after = effectiveCaps(role, patch);
+    const next: MemberDoc = { ...found, role, ...(Object.keys(patch).length ? { caps: patch } : {}) };
+    if (!Object.keys(patch).length) delete next.caps;
+    await this.writeMember(pond, next);
+    const words: Record<Cap, [string, string]> = {
+      see: ["seeing this pond's threads", "see this pond's threads again"],
+      diffs: ["seeing what changed", "see what changed again"],
+      message: ["messaging", "message again"],
+      answer: ["answering questions", "answer questions again"],
+      start: ["starting their own threads", "start their own threads again"],
+    };
+    const lines: string[] = [];
+    for (const k of Object.keys(words) as Cap[]) {
+      if (before[k] && !after[k]) lines.push(`restricted ${found.name} from ${words[k][0]}`);
+      else if (!before[k] && after[k]) lines.push(`let ${found.name} ${words[k][1]}`);
+    }
+    if (found.role !== role) lines.push(`made ${found.name} ${role === "viewer" ? "a viewer" : "a member"}`);
+    for (const line of lines.slice(0, 3)) await this.ripple(pondId, line).catch(() => undefined);
+    this.emit("changed", pondId);
+  }
+
+  /**
+   * A thread's starter: lock it (read-only for everyone else) and let named members in or keep them out. The thread
+   * document carries it, and this Mac enforces it on every command.
+   */
+  async setThreadAccess(pondId: string, threadId: string, input: ThreadAccess): Promise<ThreadAccess> {
+    const pond = this.activePond(pondId);
+    const local = pond.threads[threadId];
+    this.allow(pond, "set-private", { thread: { starter: local ? this.identity.id : "", private: false } });
+    if (!local) throw new FlotillaError("no such thread", 404);
+    const ids = (v: unknown) =>
+      Array.isArray(v)
+        ? [...new Set(v.filter((x): x is string => typeof x === "string" && x.length <= 64))].slice(0, 50)
+        : [];
+    const next: ThreadAccess = { ...(local.access ?? {}) };
+    if (input.locked !== undefined) next.locked = input.locked === true;
+    if (input.allow !== undefined) next.allow = ids(input.allow);
+    if (input.deny !== undefined) next.deny = ids(input.deny);
+    const members = pond.local ? new Map<string, MemberDoc>() : await this.members(pond);
+    const nameOf = (id: string) => members.get(id)?.name ?? "a member";
+    const was = local.access ?? {};
+    local.access = next;
+    this.save();
+    if (!local.private) {
+      await this.put(pond, "threads", threadId, this.threadDoc(pond, threadId, local.state ?? "idle"));
+      const say = async (text: string) => void (await this.ripple(pondId, text).catch(() => undefined));
+      if (!!was.locked !== !!next.locked) await say(`${next.locked ? "locked" : "unlocked"} ${local.title}`);
+      for (const id of next.deny ?? [])
+        if (!was.deny?.includes(id)) await say(`stopped ${nameOf(id)} messaging ${local.title}`);
+      for (const id of next.allow ?? [])
+        if (!was.allow?.includes(id)) await say(`let ${nameOf(id)} message ${local.title}`);
+    }
+    this.emit("changed", pondId);
+    return next;
+  }
+
   /** Owner: a member becomes a viewer or a member. Their member document is signed again; the key does not change. */
   async changeRole(pondId: string, memberId: string, role: Role): Promise<void> {
     const pond = this.activePond(pondId);
@@ -2679,11 +2812,18 @@ export class FlotillaService extends EventEmitter {
   private async threadsOf(pond: LocalPond, known?: Map<string, MemberDoc>): Promise<PondThread[]> {
     const members = known ?? (await this.members(pond));
     const out: PondThread[] = [];
-    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/threads`)) {
+    // Someone the owner hid the pond's threads from reads none (their own threads' list below still shows to them).
+    const mineCaps = this.capsIn(pond, members, this.identity.id);
+    const hidden = !mineCaps.see;
+    for (const { id, doc } of hidden ? [] : await this.storeOf(pond).list(`channels/${pond.id}/threads`)) {
       const read = this.readSigned(pond, "threads", id, doc, (d) => members.get(d)?.publicKey ?? null);
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read!.device || thread.private) continue;
       const mine = this.localThread(pond.id, id);
+      // A member the owner took the right to start from has no threads in the pond: theirs keep running on their Mac
+      // but are not shown or accepted here (docs/ponds.md, "Who can do what").
+      const starter = members.get(thread.starter);
+      if (starter && starter.role !== "owner" && !effectiveCaps(starter.role, starter.caps).start) continue;
       // Your own threads carry the freshest running set; someone else's carries what their Mac last published.
       out.push(
         mine
@@ -2943,6 +3083,8 @@ export class FlotillaService extends EventEmitter {
         nest: m.nest,
         nestName: m.nest,
         client: m.client ?? (m.nest === null ? "web" : "mac"),
+        caps: effectiveCaps(m.role, m.caps),
+        ...(m.caps?.muted ? { muted: true } : {}),
         online: online.has(m.id),
         ...(m.id === me.id ? { lastSeenAt: now } : beat.has(m.id) ? { lastSeenAt: beat.get(m.id)! } : {}),
         you: m.id === me.id,
@@ -2970,7 +3112,13 @@ export class FlotillaService extends EventEmitter {
         },
       ),
       ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
-      me: { id: me.id, name: this.nameIn(pond), role: pond.role, nest: me.nest },
+      me: {
+        id: me.id,
+        name: this.nameIn(pond),
+        role: pond.role,
+        nest: me.nest,
+        caps: this.capsIn(pond, members, me.id),
+      },
     };
   }
 
@@ -3125,6 +3273,7 @@ export class FlotillaService extends EventEmitter {
     this.allow(pond, "answer-question", { thread: { starter: "", private: false } }, "Viewers can read but not send.");
     const me = this.identity;
     const members = await this.members(pond);
+    if (!this.capsIn(pond, members, me.id).answer) throw new FlotillaError(CAP_REFUSAL.answer, 403);
     const existing = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
     if (existing && existing.by !== me.id) return { ok: false, heldBy: existing.byName };
     const mine: Hold = { requestId, by: me.id, byName: this.nameIn(pond), until: this.now() + HOLD_MS };
@@ -3195,6 +3344,9 @@ export class FlotillaService extends EventEmitter {
   ): Promise<PondThread> {
     const pond = this.activePond(pondId);
     this.allow(pond, "start-thread", {}, VIEWERS_READ);
+    if (pond.role !== "owner" && !this.capsIn(pond, await this.members(pond), this.identity.id).start) {
+      throw new FlotillaError(CAP_REFUSAL.start, 403);
+    }
     if (this.identity.nest === null) throw new FlotillaError("A web guest has no machine to run a thread on.", 403);
     const threadId = randomId(10);
     pond.threads[threadId] = {
@@ -3261,8 +3413,13 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** The fields a thread carries beyond its basics: workspace, branch and who has taken part (newest first). */
-  private shape(local: LocalThread): Pick<PondThread, "workspace" | "branch" | "participants" | "requester"> {
+  private shape(
+    local: LocalThread,
+  ): Pick<PondThread, "workspace" | "branch" | "participants" | "requester" | "locked" | "allow" | "deny"> {
     return {
+      ...(local.access?.locked ? { locked: true } : {}),
+      ...(local.access?.allow?.length ? { allow: local.access.allow } : {}),
+      ...(local.access?.deny?.length ? { deny: local.access.deny } : {}),
       ...(local.workspace ? { workspace: local.workspace } : {}),
       ...(local.branch ? { branch: local.branch } : {}),
       ...(local.requester ? { requester: local.requester } : {}),
@@ -3459,6 +3616,13 @@ export class FlotillaService extends EventEmitter {
     const thread = threads.find((t) => t.id === threadId);
     if (!thread || thread.private) throw new FlotillaError("That thread is no longer shared with the pond.", 404);
     if (thread.starter === me.id) throw new FlotillaError("That is your own thread.");
+    const members = await this.members(pond);
+    const need = COMMAND_CAP[input.kind];
+    if (need && !this.capsIn(pond, members, me.id)[need]) throw new FlotillaError(CAP_REFUSAL[need], 403);
+    if (input.kind === "message" || input.kind === "steer" || input.kind === "answer") {
+      const w = threadWriteDecision(me.id, thread.starter, thread);
+      if (!w.ok) throw new FlotillaError(w.reason, 403);
+    }
     if ((input.kind === "message" || input.kind === "steer") && !FlotillaService.asks(thread.permissionMode)) {
       throw new FlotillaError(noMessageWithoutAsking(thread.starterName), 403, { refused: true });
     }
@@ -3687,6 +3851,14 @@ export class FlotillaService extends EventEmitter {
       thread: { starter: this.identity.id, private: false },
     });
     if (!verdict.ok) return VIEWERS_READ;
+    // The owner's live switches and the starter's own, read from the member list now: a client that skips its own
+    // composer check is still refused here.
+    const need = COMMAND_CAP[cmd.kind];
+    if (need && from.role !== "owner" && !effectiveCaps(from.role, from.caps)[need]) return CAP_REFUSAL[need];
+    if (thread && (cmd.kind === "message" || cmd.kind === "steer" || cmd.kind === "answer")) {
+      const w = threadWriteDecision(from.id, this.identity.id, thread.access);
+      if (!w.ok) return w.reason;
+    }
     const now = this.now();
     if (cmd.expiresAt <= now) return "expired";
     if (cmd.expiresAt - cmd.issuedAt > MAX_COMMAND_LIFE_MS) return "lives too long";
