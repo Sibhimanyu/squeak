@@ -38,6 +38,7 @@ struct NativeTurnsContent<Message: View>: View {
     var body: some View {
         ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
             NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn), message: message)
+                .equatable()
                 .insertFade(followsEnd && index >= (fadeFrom ?? Int.max))
                 .padding(.top, index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
                 .id(turn.id)
@@ -45,7 +46,13 @@ struct NativeTurnsContent<Message: View>: View {
     }
 }
 
-private struct NativeTurnView<Message: View>: View {
+/// Equatable on what it draws (the turn, the tool details, the viewer, the files line; never the message builder), so
+/// a refresh that changed only the newest turn leaves every earlier turn's body unevaluated.
+private struct NativeTurnView<Message: View>: View, Equatable {
+    nonisolated static func == (a: NativeTurnView, b: NativeTurnView) -> Bool {
+        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details
+    }
+
     let turn: TimelineTurn
     let details: [String: ToolDetail]
     let me: String?
@@ -67,7 +74,7 @@ private struct NativeTurnView<Message: View>: View {
                 case .steer(_, let text, let author):
                     VStack(alignment: .leading, spacing: 2) {
                         if let name = TimelineLabels.author(author, me: me) {
-                            Text(verbatim: name).font(Typo.meta).foregroundStyle(Theme.muted)
+                            Text(verbatim: name).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).accessibilityLabel("From \(name)")
                         }
                         SteerCard(text: text, state: .taken, cwd: nil)
                     }

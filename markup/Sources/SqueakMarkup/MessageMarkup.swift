@@ -67,6 +67,41 @@ public enum MessageMarkup {
         return parseBlocks(lines, depth: 0, letters: letteredOptions)
     }
 
+    /// Parse by a stable prefix and a live tail: the prefix ends at the last blank line outside a code fence whose next
+    /// line starts at column 0 and is not a quote, list item, table row or fence, so it parses the same alone. A
+    /// streaming reply then re-parses only its last block; the prefix is a cache hit each token.
+    public static func splitStable(_ text: String, letteredOptions: Bool = false) -> (stable: Substring, tail: Substring) {
+        var inFence = false
+        var lineStart = text.startIndex
+        var split: String.Index?
+        var blankBefore = false
+        var i = text.startIndex
+        while i < text.endIndex {
+            let end = text[i...].firstIndex(of: "\n") ?? text.endIndex
+            let line = text[i..<end]
+            let t = line.drop(while: { $0 == " " || $0 == "\t" })
+            if t.hasPrefix("```") || t.hasPrefix("~~~") {
+                if !inFence, blankBefore, line.first != " ", line.first != "\t" { split = i }
+                inFence.toggle(); blankBefore = false
+            }
+            else if !inFence {
+                if t.isEmpty { blankBefore = true }
+                else {
+                    if blankBefore, line.first != " ", line.first != "\t", let c = line.first,
+                       !">-*+|#".contains(c), !(c.isNumber), !(letteredOptions && c.isLetter && line.dropFirst().first == ")") {
+                        split = i
+                    }
+                    blankBefore = false
+                }
+            }
+            lineStart = i
+            i = end < text.endIndex ? text.index(after: end) : text.endIndex
+        }
+        _ = lineStart
+        guard let split else { return (text[text.startIndex..<text.startIndex], text[...]) }
+        return (text[text.startIndex..<split], text[split...])
+    }
+
     static let maxQuoteDepth = 3
 
     private static func parseBlocks(_ lines: [Substring], depth quoteDepth: Int, letters: Bool = false) -> [Block] {
