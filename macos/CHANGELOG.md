@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.25.1
+
+- A working chat no longer jitters: its steps stay on screen and only grow until the reply lands.
+
 ## 2.25.0
 
 - The pond page no longer flashes "Refreshing" or stutters while it updates.
