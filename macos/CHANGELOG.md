@@ -11,6 +11,9 @@
 - The New chat project list opens faster, no longer waiting on git.
 - Squeak writes less to the cloud while you watch a working chat, and re-checks less often while its live connection is healthy.
 - The old shared server and the Conductor relay test add-on are gone; no setting changes.
+- A chat waiting on Claude says "Waiting for Claude" instead of a stuck "Thinking...".
+- Very large chats offer Compact or Continue in a new thread, and compact automatically at 200k tokens.
+- A dropped connection shows a clear failure with Try again.
 
 ## 2.25.1
 
