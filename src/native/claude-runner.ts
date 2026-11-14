@@ -713,16 +713,8 @@ export class ClaudeRunner implements Runner {
   }
 
   private spawnAgent(o: SpawnArgs): ChildProcess {
-    const child = spawn(o.command, o.args, {
-      cwd: o.cwd,
-      env: o.env as NodeJS.ProcessEnv,
-      stdio: ["pipe", "pipe", "ignore"],
-      signal: o.signal,
-      windowsHide: true,
-    });
+    const child = spawnClaudeProcess(o);
     this.child = child;
-    trackAgentProcess(child.pid, o.command);
-    child.once("exit", () => untrackAgentProcess(child.pid));
     return child;
   }
 
@@ -742,6 +734,44 @@ export class ClaudeRunner implements Runner {
       await terminateProcess(child.pid, 3000, undefined, `claude ${child.pid}`);
     }
   }
+}
+
+/** How much of the CLI's stderr is kept (its last part) to be logged when it fails. */
+export const STDERR_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Starts the `claude` CLI the way the SDK does locally, with its pid tracked. Its stderr is read, never ignored (a failed
+ * start would say nothing), into a bounded buffer that is logged when the process exits non-zero or cannot be spawned.
+ */
+export function spawnClaudeProcess(o: SpawnArgs): ChildProcess {
+  const child = spawn(o.command, o.args, {
+    cwd: o.cwd,
+    env: o.env as NodeJS.ProcessEnv,
+    stdio: ["pipe", "pipe", "pipe"],
+    signal: o.signal,
+    windowsHide: true,
+  });
+  let kept = Buffer.alloc(0);
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    kept = Buffer.concat([kept, typeof chunk === "string" ? Buffer.from(chunk) : chunk]);
+    if (kept.length > STDERR_TAIL_BYTES) kept = kept.subarray(kept.length - STDERR_TAIL_BYTES);
+  });
+  child.once("error", (error) => {
+    logger.warn("claude could not be started", {
+      command: o.command,
+      error: error.message,
+      stderr: kept.toString("utf8"),
+    });
+  });
+  trackAgentProcess(child.pid, o.command);
+  child.once("close", (code, signal) => {
+    untrackAgentProcess(child.pid);
+    // Ended on purpose (SIGTERM from close()) is not a failure; any other non-zero exit is.
+    if (code !== 0 && !(code === null && signal === "SIGTERM")) {
+      logger.warn("claude exited with an error", { pid: child.pid, code, signal, stderr: kept.toString("utf8") });
+    }
+  });
+  return child;
 }
 
 interface SpawnArgs {
