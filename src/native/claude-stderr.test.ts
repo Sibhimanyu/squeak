@@ -24,7 +24,8 @@ describe("claude process stderr", () => {
 
   it("keeps only the last 64 KB of a long stderr", async () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
-    await run(["-e", "process.exitCode = 1; process.stderr.write('x'.repeat(200000) + 'END')"]);
+    // Exit only once the write has flushed: a pipe write on macOS is asynchronous.
+    await run(["-e", "process.stderr.write('x'.repeat(200000) + 'END', () => process.exit(1))"]);
     const call = warn.mock.calls.find(([message]) => message === "claude exited with an error");
     const stderr = (call?.[1] as { stderr: string }).stderr;
     expect(stderr.length).toBeLessThanOrEqual(STDERR_TAIL_BYTES);
