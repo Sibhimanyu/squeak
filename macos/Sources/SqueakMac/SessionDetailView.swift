@@ -84,6 +84,8 @@ struct SessionDetail: View {
     @State private var reachedBottom = false
     /// Rows at or past this index arrived after the chat loaded: only those rise in, and only while following.
     @State private var liveFloor: Int?
+    /// The same for a timeline chat, in turns: turns at or past this index arrived after the chat loaded.
+    @State private var liveTurnFloor: Int?
     @State private var viewportHeight: CGFloat = 0
     /// The scroll view's width, read once; the column below is given exactly this (capped), never measured at ideal size.
     @State private var viewportWidth: CGFloat = 0
@@ -156,6 +158,9 @@ struct SessionDetail: View {
             }, newestTurn: newestTurnId, working: isWorking || model.native.pending.hasSteer, turnWork: model.turnWork, activity: model.activity)
     }
     private var isNative: Bool { session.source == .squeak }
+    /// A Squeak chat's transcript is drawn from the host's timeline (`NativeTurnsContent`); the transcript and activity reads
+    /// are only for other sources and for a host that has no timeline.
+    private var usesTimelineView: Bool { isNative && model.usesTimeline(session.key) }
     /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
     private var turnFilesLine: String? {
         guard isNative, !isWorking else { return nil }
@@ -228,6 +233,7 @@ struct SessionDetail: View {
         }
         // The turn's steps: read once on opening (a finished turn folds to "Worked · N steps"), and every 2 s while it works.
         .task(id: "\(session.key.stringValue)-\(isWorking)") {
+            if model.usesTimeline(session.key) { return }
             await model.refreshActivity()
             guard isWorking else { return }
             while !Task.isCancelled {
@@ -260,7 +266,7 @@ struct SessionDetail: View {
                                 .onAppear { topVisible = true; pageUp() }
                                 .onDisappear { topVisible = false }
                         }
-                        turnAndRows()
+                        if usesTimelineView { timelineTurns() } else { turnAndRows() }
                         if nativeCard != nil {
                             // A Squeak chat's request is pinned above the composer (the dock), never lost in the scroll.
                         } else if let display = model.askCardDisplay(for: session.key) {
@@ -305,7 +311,7 @@ struct SessionDetail: View {
                         }
                 }
                 .onChange(of: model.transcriptPhase, initial: true) { _, _ in markLive() }
-                .onChange(of: session.key) { _, _ in liveFloor = nil; markLive() }
+                .onChange(of: session.key) { _, _ in liveFloor = nil; liveTurnFloor = nil; markLive() }
                 .onChange(of: rowIDs.isEmpty) { _, empty in
                     // Rows arriving into an empty chat start the window at the newest rows, never at a stale row.
                     if !empty { windowStart = nil; keepAnchor = nil }
@@ -354,6 +360,7 @@ struct SessionDetail: View {
     /// The scroll driver's word on whether the newest end is followed. Reaching it once lets the top page older rows in.
     private func markLive() {
         if model.transcriptPhase != .loading, liveFloor == nil { liveFloor = rows.count }
+        if model.transcriptPhase != .loading, liveTurnFloor == nil { liveTurnFloor = model.timeline(for: session.key).turns.count }
     }
 
     private func followChanged(_ following: Bool) {
@@ -413,6 +420,30 @@ struct SessionDetail: View {
         }
         // What the agent is writing right now; the persisted message replaces it.
         if isNative, model.native.key == session.key {
+            StreamingRow(buffer: model.native.stream) { text in
+                rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
+            }
+            .id("native-streaming")
+        }
+    }
+
+    /// The open Squeak chat: one block per turn of the host's timeline, then what is not a turn yet (steers waiting, the text being written).
+    @ViewBuilder private func timelineTurns() -> some View {
+        let timeline = model.timeline(for: session.key)
+        let footers = footers
+        let attached = PictureLayout.attachedPaths(inTexts: timeline.turns.map(\.prompt))
+        NativeTurnsContent(
+            turns: timeline.turns, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
+            filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
+            message: { m in rowView(.message(m, muted: false), footers: footers) }
+        )
+        .environment(\.attachedPictures, attached)
+        if model.native.key == session.key {
+            ForEach(model.native.pending.inlineSteers) { card in
+                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper ? (card.helper ?? "helper") : nil), cwd: nil,
+                          sendNow: card.canSendNow ? { await model.nativeSendSteerNow(session, card.id) } : nil)
+                    .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
+            }
             StreamingRow(buffer: model.native.stream) { text in
                 rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
             }
@@ -483,6 +514,14 @@ struct SessionDetail: View {
     private func pageUp(fromHost: Bool = false) {
         guard reachedBottom, fromHost || !model.paging.loading else { return }
         let ids = rowIDs
+        if usesTimelineView {
+            // Every loaded turn is drawn; the next page goes above while the reader's place is held.
+            if !fromHost, model.paging.canLoad, model.paging.known, let first = ids.first {
+                keepAnchor = first
+                model.loadEarlier()
+            }
+            return
+        }
         if let e = TranscriptWindow.expanded(rowIDs: ids, start: windowStart) {
             keepAnchor = e.anchor
             windowStart = e.start

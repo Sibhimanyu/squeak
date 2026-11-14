@@ -51,6 +51,8 @@ public struct TimelineTurn: Equatable, Identifiable, Sendable {
     public var replyMessageId: String?
     public var streaming: Streaming?
     public var queuedId: String?
+    /// The host seq of the event that started it: where an earlier page ends.
+    public var startSeq: Int?
 
     public var isRunning: Bool {
         switch state {
@@ -163,6 +165,9 @@ public struct TurnTimeline: Equatable, Sendable {
     /// Set while events wait behind a missing one.
     public var gapSince: Int? { held.isEmpty ? nil : lastSeq }
 
+    /// The seq an earlier page is asked before: the oldest turn held started there.
+    public var oldestSeq: Int? { turns.compactMap(\.startSeq).min() }
+
     public var current: TimelineTurn? { turns.last(where: { $0.isRunning }) }
     public var isWorking: Bool { current != nil }
 
@@ -247,6 +252,7 @@ public struct TurnTimeline: Equatable, Sendable {
                 turns[i].queuedId = nil
                 turns[i].state = .running
                 turns[i].startedAt = e.at
+                turns[i].startSeq = e.seq
                 turns[i].author = author
                 queued.removeAll { $0.id == queuedId || ($0.clientNonce != nil && $0.clientNonce == nonce) }
                 return
@@ -256,7 +262,8 @@ public struct TurnTimeline: Equatable, Sendable {
             queued.removeAll { $0.id == queuedId }
             let turn = TimelineTurn(
                 id: turnId, turnId: turnId, promptMessageId: promptId, prompt: text, author: author, clientNonce: nonce, auto: auto,
-                steps: [], state: .running, startedAt: e.at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil)
+                steps: [], state: .running, startedAt: e.at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil,
+                startSeq: e.seq)
             // Host order is the order: a turn the host started goes above any of our presses it has not named yet.
             let at = turns.firstIndex(where: { $0.turnId == nil }) ?? turns.count
             turns.insert(turn, at: at)
@@ -339,7 +346,7 @@ public struct TurnTimeline: Equatable, Sendable {
         guard !turns.contains(where: { $0.clientNonce == nonce }) else { return }
         turns.append(TimelineTurn(
             id: "send-\(nonce)", turnId: nil, promptMessageId: nil, prompt: text, author: author, clientNonce: nonce, auto: false, steps: [],
-            state: .sending, startedAt: at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil))
+            state: .sending, startedAt: at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil, startSeq: nil))
     }
 
     /// The send did not go: the row stays, saying so, until the person discards or resends it.
@@ -357,24 +364,38 @@ public struct TurnTimeline: Equatable, Sendable {
 
     /// The turns as chat messages (a prompt, then each text message of the turn in order), for what still reads messages:
     /// the dock, the turn footers and history. Ids are the transcript's (`native-<seq>`), so they match.
-    public var chatMessages: [ChatMessage] {
+    public var chatMessages: [ChatMessage] { messages(me: nil) }
+
+    /// `me`: the viewer's own member id when this is read through a pond, so their own prompts carry no name.
+    public func messages(me: String?) -> [ChatMessage] {
         var out: [ChatMessage] = []
         for t in turns {
-            let tid = t.turnId ?? t.id
-            if !t.auto {
-                var m = ChatMessage(
-                    id: t.promptMessageId ?? "local-\(t.clientNonce ?? t.id)", role: .user, text: t.prompt, at: t.startedAt, turnId: tid,
-                    authorName: t.author?.name)
-                switch t.state {
-                case .sending, .queued: m.state = .pending
-                case .notSent(let why): m.state = .notSent(reason: why)
-                default: break
-                }
-                out.append(m)
-            }
-            for s in t.steps where s.isMessage { out.append(ChatMessage(id: s.id, role: .assistant, text: s.label, at: s.at, turnId: tid)) }
+            if let p = t.promptMessage(me: me) { out.append(p) }
+            for s in t.steps where s.isMessage { out.append(t.message(for: s)) }
         }
         return out
+    }
+}
+
+extension TimelineTurn {
+    /// The person's words that opened the turn; nil for a turn the agent began by itself.
+    public func promptMessage(me: String? = nil) -> ChatMessage? {
+        guard !auto else { return nil }
+        var m = ChatMessage(
+            id: promptMessageId ?? "local-\(clientNonce ?? id)", role: .user, text: prompt, at: startedAt, turnId: turnId ?? id,
+            authorName: TimelineLabels.author(author, me: me))
+        m.clientId = clientNonce.flatMap(UUID.init(uuidString:))
+        switch state {
+        case .sending, .queued: m.state = .pending
+        case .notSent(let why): m.state = .notSent(reason: why)
+        default: break
+        }
+        return m
+    }
+
+    /// One of the agent's text messages of this turn.
+    public func message(for step: TimelineStep) -> ChatMessage {
+        ChatMessage(id: step.id, role: .assistant, text: step.label, at: step.at, turnId: turnId ?? id)
     }
 }
 

@@ -249,6 +249,9 @@ public struct NativeLiveState: Equatable, Sendable {
         case .pending:
             // Applied to the pending stack by the app, which owns the Mac's own just-sent cards.
             return .none
+        case .timeline, .replyDelta:
+            // The timeline reducer's (`TurnTimeline`); this state keeps only what is not in it.
+            return .none
         case .reset:
             // The replay that follows is every message again, and the host sends every open request again too.
             lastSeq = 0
