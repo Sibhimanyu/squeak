@@ -4,10 +4,13 @@
 # fetched, the new tree is built in the index from the real tree plus exactly this one path, the commit is checked to
 # change nothing else, and it is pushed fast-forward only. If the page is byte-identical to the live one, nothing is pushed.
 # Refuses a build without the PageSense snippet (id="pagesenseCode") or, when EXPECT_VERSION is set, without that version.
-# Usage: publish-site.sh <path-to-built-index.html>     PAGES_BRANCH=main, EXPECT_VERSION=2.12.27, DRY_PUSH=1 builds and checks but does not push.
+# Usage: publish-site.sh <path-to-built-index.html | website/dist directory>
+#   A directory publishes every file in it to squeak/<same path> (added or changed only, never deleted, never a .dmg).
+#   PAGES_BRANCH=main, EXPECT_VERSION=2.12.27, DRY_PUSH=1 builds and checks but does not push.
 set -euo pipefail
-FILE="${1:?usage: publish-site.sh <path-to-built-index.html>}"
-FILE="$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")"   # absolute: the script works in a temp dir
+ARG="${1:?usage: publish-site.sh <path-to-built-index.html | dist directory>}"
+if [ -d "$ARG" ]; then SRC_DIR="$(cd "$ARG" && pwd)"; FILE="$SRC_DIR/index.html"
+else SRC_DIR=""; FILE="$(cd "$(dirname "$ARG")" && pwd)/$(basename "$ARG")"; fi   # absolute: the script works in a temp dir
 URL="https://github.com/Sibhimanyu/Sibhimanyu.github.io.git"
 BRANCH="${PAGES_BRANCH:-main}"
 DEST="squeak/index.html"
@@ -31,17 +34,30 @@ BASE="$(git rev-parse FETCH_HEAD)"
 export GIT_NO_LAZY_FETCH=1
 git read-tree "$BASE"
 
-BLOB="$(git hash-object -w "$FILE")"
-LIVE="$(git rev-parse -q --verify "$BASE:$DEST" 2>/dev/null || true)"
-if [ "$BLOB" = "$LIVE" ]; then echo "publish-site: $DEST unchanged; nothing to publish"; exit 0; fi
-git update-index --add --cacheinfo "100644,$BLOB,$DEST"
+: > "$WORK/allowed.txt"
+add_file() { # <absolute source> <path in the Pages repo>
+  local blob live
+  blob="$(git hash-object -w "$1")"
+  live="$(git rev-parse -q --verify "$BASE:$2" 2>/dev/null || true)"
+  [ "$blob" = "$live" ] && return 0
+  git update-index --add --cacheinfo "100644,$blob,$2"
+  echo "$2" >> "$WORK/allowed.txt"
+}
+if [ -n "$SRC_DIR" ]; then
+  if (cd "$SRC_DIR" && find . -type f -iname '*.dmg' | grep -q .); then echo "publish-site: $SRC_DIR contains a DMG; nothing published" >&2; exit 1; fi
+  while IFS= read -r rel; do add_file "$SRC_DIR/$rel" "squeak/$rel"; done < <(cd "$SRC_DIR" && find . -type f ! -name '.DS_Store' | sed 's|^\./||' | LC_ALL=C sort)
+else
+  add_file "$FILE" "$DEST"
+fi
+if [ ! -s "$WORK/allowed.txt" ]; then echo "publish-site: nothing changed; nothing to publish"; exit 0; fi
 
 TREE="$(git write-tree --missing-ok)"
 COMMIT="$(printf 'Squeak site%s\n' "${EXPECT_VERSION:+ $EXPECT_VERSION}" | git commit-tree "$TREE" -p "$BASE")"
 
-# Before anything is live: the commit may change only the one page.
-git diff-tree -r --name-only "$BASE" "$COMMIT" > "$WORK/changed.txt"
-if [ -s "$WORK/changed.txt" ] && [ "$(cat "$WORK/changed.txt")" != "$DEST" ]; then
+# Before anything is live: the commit may only add or change the files named above, and delete nothing.
+git diff-tree -r --name-only "$BASE" "$COMMIT" | LC_ALL=C sort > "$WORK/changed.txt"
+LC_ALL=C sort -o "$WORK/allowed.txt" "$WORK/allowed.txt"
+if [ -n "$(git diff-tree -r --diff-filter=D --name-only "$BASE" "$COMMIT")" ] || ! cmp -s "$WORK/changed.txt" "$WORK/allowed.txt"; then
   echo "publish-site: the commit would change files it should not; nothing was pushed:" >&2
   cat "$WORK/changed.txt" >&2
   exit 1
