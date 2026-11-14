@@ -67,6 +67,14 @@ function safeEquals(left: string, right: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function decodeKey(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new HttpError(400, "bad project key");
+  }
+}
+
 class HttpError extends Error {
   constructor(
     readonly status: number,
@@ -717,7 +725,7 @@ export class NativeServer {
     if (area === "projects" && id && id !== "clone" && (sub === "prefs" || sub === "icon") && parts.length === 4) {
       const { prefs } = this;
       if (!prefs) throw new HttpError(404, "not found");
-      const key = decodeURIComponent(id);
+      const key = decodeKey(id);
       if (key.length > 300) throw new HttpError(400, "bad project key");
       if (sub === "prefs" && method === "PATCH") {
         prefs.patch(key, await this.body(req));
@@ -754,7 +762,7 @@ export class NativeServer {
     }
     if (area === "projects" && id && id !== "clone" && !sub && method === "DELETE") {
       // "Remove from Squeak": the project and its workspace rows go; chats keep their history; no file or git is touched.
-      const key = decodeURIComponent(id);
+      const key = decodeKey(id);
       if (!store.getProject(key)) throw new HttpError(404, "no such project");
       const busy = store.busySessionsOfProject(key);
       if (busy.length > 0)
