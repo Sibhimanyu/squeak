@@ -83,7 +83,6 @@ import { SwitchableStore } from "../cloud/switchable-store.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
-import { BudgetedStore, CloudBudget } from "../remote/shared-limits.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { NativeReplier } from "../fleet/native-reply.js";
@@ -294,7 +293,6 @@ export class SqueakApp {
   /** Talks to `squeak host`; calls fail with "not running" when it is down, which never breaks the daemon. */
   private readonly nativeHost: NativeHostClient;
   private readonly remote: RemoteBridge | null;
-  private readonly sharedBudget: CloudBudget | null;
   /** The phone channel's store, behind a switch so a move to Catalyst (or back) needs no restart; null when none is set up. */
   private readonly cloud: SwitchableStore | null;
   private readonly cloudControl: CloudControl;
@@ -639,11 +637,6 @@ export class SqueakApp {
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
-    // Shared server: a daily byte budget under the cloud store (the direct path is above it and never pauses).
-    const sharedBudget = config.remoteShared
-      ? new CloudBudget(undefined, undefined, path.join(config.supportDir, "shared-budget.json"))
-      : null;
-    this.sharedBudget = sharedBudget;
     // cloud.json decides Firebase or Catalyst; absent, Firebase from SQUEAK_REMOTE_DATABASE_URL as always.
     const cloudFile = readCloudConfig(config.supportDir);
     const cloudLocation = activeLocation(cloudFile, config.remoteDatabaseUrl);
@@ -660,7 +653,7 @@ export class SqueakApp {
       legacy: () => {
         const location = this.cloud?.location;
         if (!location) return null;
-        if (location.provider === "firebase") return config.remoteShared ? "shared" : "firebase";
+        if (location.provider === "firebase") return config.legacyShared ? "shared" : "firebase";
         return location.hosted ? null : "catalyst-own";
       },
       channelId: () => {
@@ -699,8 +692,7 @@ export class SqueakApp {
           await this.cloud.set(movePath(relay.channel), sealAddonMove(relay.key, target, Date.now()));
       },
     });
-    const rawCloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
-    const cloudStore = rawCloudStore && sharedBudget ? new BudgetedStore(rawCloudStore, sharedBudget) : rawCloudStore;
+    const cloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
     // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
     const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
     this.remote =
@@ -724,10 +716,9 @@ export class SqueakApp {
             // A device of the linked account added without a code: always told (a security event, not muted).
             onOwnDeviceAdded: ({ text }) => this.announce(text),
             announce:
-              config.remoteDatabaseUrl && !sharedBudget && cloudLocation?.provider !== "catalyst"
+              config.remoteDatabaseUrl && cloudLocation?.provider !== "catalyst"
                 ? new FirestoreRest(bridgeProjectId)
                 : null,
-            shared: sharedBudget ? { budget: sharedBudget } : null,
             replier: this.router,
             // Squeak's own chats: the open request in full, answering it, starting a chat (src/fleet/native-phone.ts).
             native: new NativePhone({
@@ -1010,8 +1001,7 @@ export class SqueakApp {
             return {
               ok: false as const,
               unavailable: true,
-              reason:
-                "Pairing needs the phone channel's own Firebase database (not the shared server) to be set up first.",
+              reason: "Pairing needs the phone channel's own Firebase database to be set up first.",
             };
           }
           this.gatewayClaim?.stop();
@@ -1376,7 +1366,6 @@ export class SqueakApp {
     this.caffeinator.stop();
     this.remote?.stop();
     this.hosted.stop();
-    this.sharedBudget?.flush();
     await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();
     this.pondInvites.stop();
@@ -1824,8 +1813,8 @@ export class SqueakApp {
 
   /** The pairing window's owner, made on first use; null unless the phone channel's own database is set up. */
   private gatewayPairingFor(): GatewayPairing | null {
-    const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!this.cloud || remoteShared) return null;
+    const { remoteDatabaseUrl } = this.config;
+    if (!this.cloud) return null;
     this.gatewayPairing ??= new GatewayPairing({
       store: this.cloud,
       databaseUrl: remoteDatabaseUrl ?? "",
@@ -1843,10 +1832,10 @@ export class SqueakApp {
     return this.gatewayPairing;
   }
 
-  /** The short-code claim's owner; null unless the phone channel's own database is set up (never in shared mode). */
+  /** The short-code claim's owner; null unless the phone channel's own database is set up. */
   private gatewayClaimFor(): GatewayClaim | null {
-    const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!this.cloud || remoteShared) return null;
+    const { remoteDatabaseUrl } = this.config;
+    if (!this.cloud) return null;
     this.gatewayClaim ??= new GatewayClaim({
       store: new RtdbRest(RENDEZVOUS_DATABASE),
       databaseUrl: remoteDatabaseUrl ?? "",

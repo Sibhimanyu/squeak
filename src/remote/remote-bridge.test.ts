@@ -1,4 +1,3 @@
-import { CloudBudget } from "./shared-limits.js";
 import type { Answerer } from "../fleet/answer-command.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -130,7 +129,6 @@ function fixture(
     image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
     claudeAccounts?: RemoteBridgeDependencies["claudeAccounts"];
-    shared?: RemoteBridgeDependencies["shared"];
     addonPhone?: RemoteAddonPhone | null;
     renamer?: RemoteBridgeDependencies["renamer"];
     closer?: RemoteBridgeDependencies["closer"];
@@ -241,7 +239,6 @@ function fixture(
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     claudeAccounts: options.claudeAccounts ?? null,
-    shared: options.shared ?? null,
     addonPhone: options.addonPhone ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
@@ -936,17 +933,6 @@ describe("RemoteBridge Claude account", () => {
     await none.store.set(`${none.channel}/commands/c1`, none.claudeAccountCommand());
     await none.bridge.tick();
     expect(none.result("c1")).toMatchObject({ status: "refused" });
-  });
-
-  it("is refused on the shared server", async () => {
-    const a = accounts();
-    const f = fixture({ claudeAccounts: a, shared: { budget: new CloudBudget() } });
-    await f.pair();
-    expect(f.bridge.phoneView()).not.toHaveProperty("claudeAccounts");
-    await f.store.set(`${f.channel}/commands/c1`, f.claudeAccountCommand());
-    await f.bridge.tick();
-    expect(f.result("c1")).toMatchObject({ status: "refused" });
-    expect(a.apply).not.toHaveBeenCalled();
   });
 });
 

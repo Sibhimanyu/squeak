@@ -25,7 +25,7 @@ import { logger } from "./utils/logger.js";
  *    one self-contained bundle) beside the daemon, or run from source with tsx.
  *  - A `distributed` add-on ships in every build and is loaded at every start, inert until the owner enables it
  *    (`addons.json` in the support dir, `GET/POST /control/addons`). Any other add-on is for development: it loads
- *    only when `SQUEAK_ADDONS=name,name` names it (`SQUEAK_CONDUCTOR_RELAY=on` is an alias for `conductor-relay`).
+ *    only when `SQUEAK_ADDONS=name,name` names it.
  *  - A manifest's `requires` names add-ons that must be loaded and enabled for it to activate this run.
  *  - A missing, unreadable or throwing add-on is logged and skipped; startup never fails for one.
  */
@@ -293,13 +293,12 @@ export interface Addon {
 
 const ADDON_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** Names asked for in `SQUEAK_ADDONS` (comma separated) plus the older `SQUEAK_CONDUCTOR_RELAY=on` alias. */
+/** Names asked for in `SQUEAK_ADDONS` (comma separated). */
 export function requestedAddons(env: NodeJS.ProcessEnv = process.env): string[] {
   const names = (env.SQUEAK_ADDONS ?? "")
     .split(",")
     .map((name) => name.trim().toLowerCase())
     .filter((name) => ADDON_NAME.test(name));
-  if (env.SQUEAK_CONDUCTOR_RELAY?.trim().toLowerCase() === "on") names.push("conductor-relay");
   return [...new Set(names)];
 }
 
