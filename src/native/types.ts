@@ -127,6 +127,10 @@ export interface SessionRow {
   busy?: boolean;
   /** Added by the host: how full the context window is; absent when unknown. */
   context?: { used: number; limit: number; percent: number };
+  /** Added by the host when the chat is very large (slow, may fail): the Mac offers a new thread. Absent otherwise. */
+  /** Added by the host: the last turn failed by a lost connection, so "Try again" can resend it. Absent otherwise. */
+  retryable?: boolean;
+  large?: { reason: "context" | "transcript"; transcriptBytes: number | null };
 }
 
 export interface MessageRow {
@@ -238,6 +242,8 @@ export interface ProjectSettingsRow {
   reviewEffort: string | null;
   /** Clone dependency folders into a new stream (copy-on-write). null = the default, on. */
   cloneDependencies: boolean | null;
+  /** Context tokens at which a Claude chat compacts itself. null = the default (200k), 0 = off. */
+  autoCompactTokens: number | null;
   prompts: Partial<Record<GitAction, string>>;
 }
 

@@ -66,6 +66,10 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var looping: DaemonLoop?
     /// When the person archived this Squeak chat; nil for a chat in the list. Archived chats leave every list.
     public var archivedAt: Date?
+    /// The host says this Squeak chat is very large: replies are slow and may fail (the notice above the composer).
+    public var largeChat: Bool? = nil
+    /// This Squeak chat's last turn failed in a way "Try again" can resend.
+    public var retryable: Bool? = nil
 
     public var id: SessionKey { key }
 

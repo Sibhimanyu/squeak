@@ -75,3 +75,29 @@ public enum NativeErrorText {
         return raw
     }
 }
+
+/// The calm notices above the composer and their buttons, fixed sentences. The host decides when they show
+/// (`large`, `retryable` on the chat); this only words them.
+public enum NativeChatNotice {
+    public static let largeText = "This chat is very large — replies will be slow and may fail."
+    public static let compactTitle = "Compact this chat"
+    public static let continueTitle = "Continue in a new thread"
+    public static let retryText = "The last message didn't go through."
+    public static let retryTitle = "Try again"
+    public static let draftTitle = "First message of the new thread"
+    public static let draftHelp = "A short summary of this chat. Edit it, then send."
+    public static let draftSend = "Start new thread"
+    public static let draftFailed = "Couldn't write a summary. Write the first message yourself."
+    /// The host's refusal when the agent already answered the message.
+    public static let alreadyAnswered = "Claude already replied to that message."
+
+    /// Large chats offer both ways out; only an idle chat can take either (the host refuses while it works).
+    public static func showsLarge(_ s: HostSession) -> Bool {
+        s.largeChat == true && s.state != .working && s.state != .blocked
+    }
+
+    public static func showsRetry(_ s: HostSession) -> Bool { s.retryable == true && s.state == .error }
+
+    /// The line a link note shows: "Continued from …" and "Continued in …" arrive as the host's own sentence.
+    public static func isLinkNote(_ text: String) -> Bool { text.hasPrefix("Continued from ") || text.hasPrefix("Continued in ") }
+}
