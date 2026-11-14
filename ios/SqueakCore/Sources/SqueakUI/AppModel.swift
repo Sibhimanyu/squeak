@@ -945,7 +945,7 @@ final class AppModel {
     /// A session by key, active or recent, and for a short while after the Mac moved it between the two
     /// lists, so the chat on screen does not go blank in between.
     func session(_ key: String) -> PhoneSnapshot.Session? {
-        sessionStore.session(key) ?? seenSessions.session(key)
+        sessionStore.session(key) ?? seenSessions.session(key) ?? pondThreadSession(key)
     }
 
     /// Streamed: keep presence inside the Mac's window. No re-read: a quiet
@@ -2947,6 +2947,11 @@ final class AppModel {
     var pondOrderLocal: PondOrderMode?
     /// The pond whose dashboard is open (presence names it so the Mac sends its detail).
     var openPondId: String?
+    /// Each opened pond's whole thread list as the Mac last wrote it (`pondthreads`); kept, so reopening shows it at once.
+    var pondThreadsByPond: [String: PondThreads] = [:]
+    /// The open pond's list has been asked for and has not come yet (a calm loading line, only the first time).
+    var pondThreadsLoading = false
+    @ObservationIgnored var pondThreadsTask: Task<Void, Never>?
 
     func hideHere(_ session: PhoneSnapshot.Session) { hiddenHere[session.key] = Date().timeIntervalSince1970 }
     func showHiddenAgain() { hiddenHere = [:] }

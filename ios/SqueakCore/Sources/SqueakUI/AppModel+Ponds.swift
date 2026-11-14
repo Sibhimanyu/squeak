@@ -49,9 +49,46 @@ extension AppModel {
         if let current, openPondId != current { return }
         guard openPondId != id else { return }
         openPondId = id
+        watchPondThreads(id)
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond
         Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond); await refresh() }
+    }
+
+    /// The open pond's whole thread list: the Mac writes it only while this pond is open here, so ask on open and read it
+    /// as it changes (every few seconds; sooner while it has not come). An older Mac never writes one, and the page
+    /// keeps today's list after a few tries.
+    func watchPondThreads(_ id: String?) {
+        pondThreadsTask?.cancel()
+        pondThreadsTask = nil
+        guard let id, !demo, let channel else { pondThreadsLoading = false; return }
+        pondThreadsLoading = pondThreadsByPond[id] == nil
+        pondThreadsTask = Task { @MainActor [weak self] in
+            var misses = 0
+            while !Task.isCancelled {
+                if let doc = try? await channel.pondThreads(pondId: id), !Task.isCancelled {
+                    if self?.pondThreadsByPond[id] != doc { self?.pondThreadsByPond[id] = doc }
+                    self?.pondThreadsLoading = false
+                    misses = 0
+                } else {
+                    misses += 1
+                    if misses >= 5 { self?.pondThreadsLoading = false }
+                }
+                let wait: UInt64 = self?.pondThreadsByPond[id] == nil ? 2_000_000_000 : 5_000_000_000
+                try? await Task.sleep(nanoseconds: wait)
+            }
+        }
+    }
+
+    /// The whole list of a pond, when the Mac has sent one.
+    func pondThreads(_ id: String) -> PondThreads? { pondThreadsByPond[id] }
+
+    /// A bare session for an older thread that only the pond's list carries, so it opens like a Recent chat.
+    func pondThreadSession(_ key: String) -> PhoneSnapshot.Session? {
+        for doc in pondThreadsByPond.values {
+            if let thread = doc.threads.first(where: { $0.key == key }) { return thread.asSession }
+        }
+        return nil
     }
 
     func pondDetail(_ id: String) -> PondDetailInfo? {

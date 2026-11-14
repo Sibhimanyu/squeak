@@ -77,6 +77,7 @@ import {
   liveHistoryHandle,
   LiveTurnPublisher,
 } from "./live-turn.js";
+import { buildPondThreads, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
 import {
@@ -1156,6 +1157,10 @@ export class RemoteBridge {
   private announcedFor = "";
   /** The session the phone's last presence said it is watching in verbose mode. */
   private presenceWatching: string | null = null;
+  /** The pond whose thread list is published for the phone (`pond-threads.ts`), with what was last written. */
+  private pondThreadsOut: { pond: string; last: string } | null = null;
+  /** The keys in that list: chats a phone may open from it though they are not active or Recent. */
+  private pondThreadKeys = new Set<string>();
   /** How many recent chats the phone asked for ("Show more"); a view preference, not a command. */
   private recentWanted = PHONE_RECENT_LIMIT;
   private readonly attachments = new PhoneAttachments();
@@ -1380,6 +1385,7 @@ export class RemoteBridge {
     this.avatarTimer = null;
     this.live?.stop();
     this.subagentFeed?.stop();
+    this.dropPondThreads(this.config);
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -1564,6 +1570,7 @@ export class RemoteBridge {
     // Before the config goes, so the live document can still be deleted.
     this.live?.stop();
     this.subagentFeed?.stop();
+    this.dropPondThreads(this.config);
     // The old channel id must not stay linked on the relay.
     if (this.config?.account)
       void this.accountRelay()
@@ -1609,6 +1616,9 @@ export class RemoteBridge {
         await this.announceTransport(config);
         await this.readPresence(config);
         this.updateLive();
+        await this.updatePondThreads(config).catch((error: unknown) =>
+          logger.debug("pond threads failed", { error: error instanceof Error ? error.message : String(error) }),
+        );
         if (this.pairingOpenUntil > this.now()) {
           // The cloud being out of reach must not stop commands arriving on the direct path.
           await this.readPairing(config).catch((error: unknown) =>
@@ -1684,7 +1694,67 @@ export class RemoteBridge {
     }
     const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     const session = recent.find((candidate) => candidate.key === key);
-    return session && this.handleOf(session) ? { session, active: false } : null;
+    if (session && this.handleOf(session)) return { session, active: false };
+    // An older thread listed on the pond page the phone has open: opened like a Recent chat (history and queue).
+    if (this.pondThreadKeys.has(key)) {
+      const listed = snapshot.sessions.find((candidate) => candidate.key === key);
+      if (listed && this.handleOf(listed)) return { session: listed, active: false };
+    }
+    return null;
+  }
+
+  /**
+   * A pond's whole thread list, only while a phone that reads it has that pond open and this Mac knows the pond:
+   * written when it changes, deleted the moment the phone leaves, closes, or the Mac stops. Never for a shared relay.
+   */
+  private async updatePondThreads(config: RemoteConfig): Promise<void> {
+    const pondId = this.presencePond;
+    const pond = pondId ? this.pondsCache.value?.find((candidate) => candidate.id === pondId) : undefined;
+    const allowed =
+      !this.deps.shared &&
+      Boolean(this.deps.store.watch) &&
+      pond !== undefined &&
+      this.phoneCaps.includes(PHONE_POND_THREADS_CAP) &&
+      this.phoneOpen() &&
+      this.hasPairedPhone();
+    const out = this.pondThreadsOut;
+    if (!allowed || !pond) {
+      // The document goes at once; the keys stay while the phone is open, since opening a thread from the page
+      // leaves the pond page (an older thread opens through history, which needs its key to be known).
+      if (!this.phoneOpen()) this.pondThreadKeys = new Set();
+      if (out) {
+        this.pondThreadsOut = null;
+        await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
+      }
+      return;
+    }
+    if (out && out.pond !== pond.id) {
+      await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
+    }
+    const doc = buildPondThreads(
+      pond,
+      this.deps.snapshot().sessions,
+      (session) => this.pondOf(session)?.id === pond.id,
+      (session) => chatTitle(session) ?? sessionLabel(session),
+      (session) => isUnclaimedHeadless(session),
+    );
+    this.pondThreadKeys = new Set(doc.streams.flatMap((stream) => stream.threads.map((thread) => thread.key)));
+    const body = JSON.stringify(doc);
+    if (out?.pond === pond.id && out.last === body) return;
+    this.pondThreadsOut = { pond: pond.id, last: body };
+    await this.deps.store.set(this.channel(config, "live", pondThreadsDoc(pond.id)), {
+      box: this.sealForPhone(config, { ...doc, seq: this.nextSeq() }),
+      at: this.now(),
+    });
+  }
+
+  /** Delete a published pond thread list (stop, reset); best effort. */
+  private dropPondThreads(config: RemoteConfig | null): void {
+    const out = this.pondThreadsOut;
+    this.pondThreadsOut = null;
+    this.pondThreadKeys = new Set();
+    if (out && config)
+      void this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond))).catch(() => undefined);
   }
 
   /* ---------- streaming (Realtime Database) ---------- */

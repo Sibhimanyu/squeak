@@ -414,6 +414,14 @@ public struct Channel: Sendable {
         return page.key == sessionKey && page.before == before ? page : nil
     }
 
+    /// The open pond's whole thread list, as the Mac wrote it for this phone; nil when it is not there (an older Mac, or
+    /// not written yet) or is for another pond.
+    public func pondThreads(pondId: String) async throws -> PondThreads? {
+        guard let document = try await store.get(path("live", PondThreads.doc(for: pondId))) else { return nil }
+        let threads = try ChannelCrypto.open(PondThreads.self, box: document.box, key: pairing.k)
+        return threads.pond == pondId ? threads : nil
+    }
+
     /// The signed, read-only document asking the Mac to follow one subagent of the open chat, or (nil) to stop.
     public func subagentDocument(key sessionKey: String, taskId: String?, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)

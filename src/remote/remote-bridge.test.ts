@@ -36,6 +36,7 @@ import { open, pairingCode, seal } from "./remote-crypto.js";
 import { AddonHost } from "../addon-host.js";
 import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
+import { pondThreadsDoc, type PondThreadsDoc } from "./pond-threads.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
@@ -6418,5 +6419,102 @@ describe("RemoteBridge generic chats (add-on split)", () => {
       await f.bridge.tick();
       expect((f.result("t") as { tabs?: { kind: string } }).tabs?.kind).toBe(kind);
     }
+  });
+});
+
+describe("RemoteBridge pond threads (the open pond's whole list)", () => {
+  const pond = {
+    id: "proj-green",
+    name: "greenroom",
+    shared: false,
+    members: [],
+    projectId: "proj-green",
+    folder: "/repos/greenroom",
+    streams: [{ id: "w-hk", name: "Hong Kong", branch: "hong-kong" }],
+  };
+  const native = {
+    projects: () => [],
+    models: () => [],
+    allowBypass: () => false,
+    ponds: async () => [pond],
+  } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+  const at = (days: number) => new Date(NOW - days * 86_400_000).toISOString();
+  const native1 = (id: string, over: Partial<FleetSession>) =>
+    session({
+      key: `squeak-native:${id}`,
+      sourceId: id,
+      conductorSessionId: null,
+      origin: "squeak",
+      projectId: "proj-green",
+      ...over,
+    });
+  const threads = [
+    // 15 older threads in the Hong Kong stream, one in Main, one archived, one in another pond.
+    ...Array.from({ length: 15 }, (_, i) =>
+      native1(`hk${i}`, {
+        cwd: "/repos/greenroom/.ws/hk",
+        branch: "hong-kong",
+        title: `HK ${i}`,
+        lastActivityAt: at(3 + i),
+      }),
+    ),
+    native1("main1", { cwd: "/repos/greenroom", branch: "main", title: "Main thread", lastActivityAt: at(40) }),
+    native1("gone", {
+      cwd: "/repos/greenroom/.ws/hk",
+      branch: "hong-kong",
+      title: "Archived",
+      archivedAt: at(1),
+      lastActivityAt: at(1),
+    }),
+    native1("other", { projectId: "proj-other", cwd: "/repos/other", title: "Elsewhere", lastActivityAt: at(2) }),
+  ];
+  const presence = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...extra }) });
+  const read = async (f: ReturnType<typeof fixture>) => {
+    const doc = await f.store.get(`${f.channel}/live/${pondThreadsDoc("proj-green")}`);
+    return doc ? (open(f.payload.k, doc.box as string) as PondThreadsDoc) : null;
+  };
+  const make = async () => {
+    const f = fixture({ native, streaming: true });
+    f.emit(threads, threads);
+    await f.pair();
+    return f;
+  };
+
+  it("publishes every non-archived thread, Main first, streams then threads newest first, only while open", async () => {
+    const f = await make();
+    await presence(f, { caps: ["ponds2", "pondthreads"] });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+
+    await presence(f, { caps: ["ponds2", "pondthreads"], pond: "proj-green" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const doc = await read(f);
+    expect(doc?.total).toBe(16);
+    expect(doc?.streams.map((s) => [s.name, s.main ?? false, s.threads.length])).toEqual([
+      ["Main", true, 1],
+      ["Hong Kong", false, 15],
+    ]);
+    const hk = doc!.streams[1]!.threads;
+    expect(hk[0]!.title).toBe("HK 0");
+    expect(hk.map((t) => t.at)).toEqual([...hk.map((t) => t.at)].sort().reverse());
+    expect(JSON.stringify(doc)).not.toContain("Archived");
+    expect(Object.keys(hk[0]!).sort()).toEqual(["at", "key", "state", "title"]);
+
+    // The phone leaves the pond: the document goes.
+    await presence(f, { caps: ["ponds2", "pondthreads"] });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+
+  it("publishes nothing for a phone that does not name pondthreads", async () => {
+    const f = await make();
+    await presence(f, { caps: ["ponds2"], pond: "proj-green" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
   });
 });
