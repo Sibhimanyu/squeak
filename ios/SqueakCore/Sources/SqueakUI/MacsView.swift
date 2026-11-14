@@ -122,7 +122,7 @@ struct YourMacsList: View {
                 ReportProblemButton(problem: message, place: "Your Macs", title: "Report")
             }
         }
-        .task { if account.session != nil, account.macs.isEmpty, account.step == .idle { account.loadMacs(model) } }
+        .task { if account.session != nil, account.step == .idle { account.loadMacs(model) } }
     }
 
     @ViewBuilder

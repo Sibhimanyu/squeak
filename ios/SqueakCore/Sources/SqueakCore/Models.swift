@@ -78,9 +78,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public struct Session: Codable, Equatable, Sendable, Identifiable {
         public let key: String
         public let conductorSessionId: String?
-        public let label: String
+        public var label: String
         /// The chat's own title, when the Mac sends it (optional: an older Mac does not).
-        public let title: String?
+        public var title: String?
         public let agent: String
         public var state: String
         public let lastActivityAt: String
@@ -410,7 +410,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public struct Workspace: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         /// "repo · branch"
-        public let label: String
+        public var label: String
         /// "claude" or "codex": what that workspace last used.
         public let defaultAgent: String
         public init(id: String, label: String, defaultAgent: String) {
@@ -425,7 +425,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let id: String
         /// "claude" or "codex".
         public let agent: String
-        public let label: String
+        public var label: String
         /// Lowest first; empty for a model with no thinking level.
         public let levels: [String]
         /// The level Conductor's picker starts it at.
@@ -439,7 +439,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// A Claude model a chat can hand work to (the Agent tool's `model`: "sonnet", "haiku", …).
     public struct SplitWorker: Codable, Equatable, Sendable, Identifiable {
         public let id: String
-        public let label: String
+        public var label: String
         public init(id: String, label: String) { self.id = id; self.label = label }
     }
 
@@ -1073,7 +1073,7 @@ public struct Workflow: Codable, Equatable, Sendable {
     public struct Option: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         /// "Sure" / "Bold" / "Wild".
-        public let label: String
+        public var label: String
         public let title: String
         public let summary: String?
         public let why: String?

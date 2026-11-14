@@ -129,6 +129,15 @@ final class AppModel {
     @ObservationIgnored private var syncingDelta: Set<String> = []
     /// The Mac's last view, kept across launches (`SnapshotStore`) so a cold launch shows it at once. Nil in the demo.
     @ObservationIgnored private var snapshotStore: SnapshotStore?
+    /// Each pond's last thread list, per Mac, so opening a pond draws at once (`PondThreadsStore`). Nil in the demo.
+    @ObservationIgnored var pondThreadsStore: PondThreadsStore?
+    /// When each chat's history was last warmed or opened, so a prefetch does not repeat itself (`PrefetchPlan`).
+    @ObservationIgnored private var warmedAt: [String: Date] = [:]
+    @ObservationIgnored private var prefetching = false
+    @ObservationIgnored private var scrollWarms: [Date] = []
+    /// Archive and rename drawn at the tap, settled by the Mac (`OptimisticEdits`).
+    @ObservationIgnored private var optimistic = OptimisticEdits()
+    @ObservationIgnored let perf = PerfLog.shared
     /// A view read from disk is on screen, and no fresh one has arrived yet: the list says it is updating.
     private var savedShown = false
     /// When the phone came back from a long absence; the view on screen is old until a fresh one lands after it.
@@ -202,10 +211,15 @@ final class AppModel {
             UserDefaults.standard.set(replySeen, forKey: "squeak.replySeen")
         }
     }
+    /// Bumped when an icon finishes decoding, so the rows that asked for it draw it.
+    private(set) var iconRevision = 0
+    @ObservationIgnored private var iconDecoding: Set<String> = []
     @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage, fit: LogoFit)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     /// True while this iPhone has no usable network (NWPathMonitor unsatisfied). Outranks every other status.
     private(set) var phoneOffline = false
+    /// Low Data Mode is on for the current path: no background warming.
+    @ObservationIgnored private var pathConstrained = false
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
     private(set) var recentWanted = 10
@@ -249,7 +263,9 @@ final class AppModel {
         if !demo { try? FileManager.default.removeItem(at: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("squeak-history.json")) }
         let held = demo ? MacRegistry() : macStore.load()
         let cacheName = held.active?.cacheKey
+        perf.begin(.launchToContent)
         snapshotStore = demo ? nil : SnapshotStore(name: cacheName)
+        pondThreadsStore = demo ? nil : PondThreadsStore(name: cacheName)
         outboxStore = demo ? nil : OutboxStore(name: cacheName)
         if let outboxStore { outbox = Self.restore(outboxStore.all()) }
         if demo {
@@ -271,12 +287,14 @@ final class AppModel {
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
+            let constrained = path.isConstrained
             let interfaces = path.availableInterfaces.map(\.type)
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 // Back online: the Mac's last answer is from before the gap, so give it the open grace again.
                 if self.phoneOffline && satisfied { self.lookingSince = Date() }
                 self.phoneOffline = !satisfied
+                self.pathConstrained = constrained
                 self.networkChanged(satisfied: satisfied, interfaces: interfaces)
             }
         }
@@ -293,6 +311,7 @@ final class AppModel {
             guard let self, let saved, self.snapshot == nil, self.freshSnapshotAt == nil, self.phase == .paired else { return }
             self.snapshot = saved
             self.savedShown = true
+            self.perf.end(.launchToContent, cached: true)
         }
     }
 
@@ -510,6 +529,9 @@ final class AppModel {
         guard !demo else { return }
         let name = entry?.cacheKey
         snapshotStore = entry == nil ? nil : SnapshotStore(name: name)
+        pondThreadsStore = entry == nil ? nil : PondThreadsStore(name: name)
+        warmedAt = [:]
+        perf.begin(.openMac)
         outboxStore = entry == nil ? nil : OutboxStore(name: name)
         outbox = outboxStore.map { Self.restore($0.all()) } ?? [:]
     }
@@ -518,6 +540,7 @@ final class AppModel {
     private func clearCaches(of entry: MacEntry) {
         ChatHistoryStore.standard(macId: entry.pairing.c)?.wipe()
         SnapshotStore(name: entry.cacheKey).clear()
+        PondThreadsStore(name: entry.cacheKey).clear()
         OutboxStore(name: entry.cacheKey).clear()
     }
 
@@ -814,15 +837,71 @@ final class AppModel {
     /// A chat is opened: its history comes from the device first, then only what came after its newest message is
     /// asked of the Mac (a Mac that does not list `delta` is not asked; the live push and earlier pages do the rest).
     private func openHistory(_ key: String) async {
+        perf.begin(.openChat, key)
         if historyStates[key] == nil, let held = await historyStore?.load(key), historyStates[key] == nil {
             historyStates[key] = held
             lastHistory[key] = held.entries
             rebuild()
+            perf.end(.openChat, key, cached: true)
         } else if historyStates[key] != nil {
             _ = await historyStore?.load(key) // marks it opened, for eviction
+            perf.end(.openChat, key, cached: true)
         }
-        guard let session = session(key) else { return }
+        guard let session = session(key) else { perf.end(.openChat, key); return }
         await syncDelta(session)
+        warmedAt[key] = Date()
+        perf.end(.openChat, key)
+    }
+
+    /// A chat row scrolled near the viewport: warm its history delta too, same bounds as the launch prefetch and
+    /// at most four in ten seconds. Nothing runs for a chat already warm or open.
+    func prefetchNear(_ session: PhoneSnapshot.Session) {
+        guard !demo, watching == nil, historyStore != nil else { return }
+        let now = Date()
+        scrollWarms = scrollWarms.filter { now.timeIntervalSince($0) < PrefetchPlan.scrollWindow }
+        guard PrefetchPlan.scrollAllowed(
+            key: session.key, canDelta: session.can(.delta), warmedAt: warmedAt, recentScrollWarms: scrollWarms, now: now,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, constrained: pathConstrained,
+            macReachable: liveAvailable && !phoneOffline) else { return }
+        scrollWarms.append(now)
+        warmedAt[session.key] = now
+        Task { [weak self] in
+            guard let self else { return }
+            if self.historyStates[session.key] == nil, let held = await self.historyStore?.load(session.key), self.historyStates[session.key] == nil {
+                self.historyStates[session.key] = held
+                self.lastHistory[session.key] = held.entries
+            }
+            await self.syncDelta(session)
+        }
+    }
+
+    /// Warms the newest few chats' history deltas in the background, one at a time, so opening one draws from the
+    /// device with nothing left to fetch. Skipped in Low Power Mode, on a constrained path or when the Mac is not
+    /// answering (`PrefetchPlan`); never while a chat is open (its own sync is running).
+    func prefetchRecent() {
+        guard !demo, !prefetching, watching == nil, let snapshot else { return }
+        let candidates = (snapshot.sessions + (snapshot.recent ?? [])).map {
+            PrefetchPlan.Candidate(key: $0.key, canDelta: $0.can(.delta), lastActivityAt: $0.lastActivityAt)
+        }
+        let keys = PrefetchPlan.keys(from: candidates, warmedAt: warmedAt, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
+                                     constrained: pathConstrained,
+                                     macReachable: liveAvailable && !phoneOffline)
+        guard !keys.isEmpty else { return }
+        prefetching = true
+        perf.begin(.prefetch)
+        Task { [weak self] in
+            for key in keys {
+                guard let self, self.watching == nil, let session = self.session(key) else { break }
+                self.warmedAt[key] = Date()
+                if self.historyStates[key] == nil, let held = await self.historyStore?.load(key), self.historyStates[key] == nil {
+                    self.historyStates[key] = held
+                    self.lastHistory[key] = held.entries
+                }
+                await self.syncDelta(session)
+            }
+            self?.prefetching = false
+            self?.perf.end(.prefetch)
+        }
     }
 
     /// Pages of delta asked for at most in one run.
@@ -996,6 +1075,9 @@ final class AppModel {
         if let next, !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) {
             baseSnapshot = next
             freshSnapshotAt = Date()
+            perf.end(.launchToContent)
+            perf.end(.openMac)
+            prefetchRecent()
             learnLocal(from: next)
             rebuild()
         }
@@ -1052,15 +1134,17 @@ final class AppModel {
         guard let base = baseSnapshot else { return }
         let recent = recentDoc
         let live = watching.flatMap { liveTurns[$0] }
+        optimistic.reconcile(with: base.merged(with: recent))
+        let edits = optimistic
         let previousView = snapshot, previous = publishedSlices
         rebuildGeneration += 1
         let generation = rebuildGeneration
         guard previousView != nil else {
-            publish(SnapshotPlan.make(view: base.merged(with: recent).reconciled(with: live), previousView: nil, previous: previous))
+            publish(SnapshotPlan.make(view: edits.apply(to: base.merged(with: recent).reconciled(with: live)), previousView: nil, previous: previous))
             return
         }
         Task.detached(priority: .userInitiated) { [weak self] in
-            let plan = SnapshotPlan.make(view: base.merged(with: recent).reconciled(with: live), previousView: previousView, previous: previous)
+            let plan = SnapshotPlan.make(view: edits.apply(to: base.merged(with: recent).reconciled(with: live)), previousView: previousView, previous: previous)
             await MainActor.run { [weak self] in
                 guard let self, generation == self.rebuildGeneration, self.baseSnapshot != nil else { return }
                 self.publish(plan)
@@ -1115,10 +1199,19 @@ final class AppModel {
     func projectLogo(_ name: String) -> (image: UIImage, fit: LogoFit)? {
         guard let base64 = snapshot?.projectIcons?[name] else { return nil }
         if let cached = iconCache[name], cached.length == base64.count { return (cached.image, cached.fit) }
-        guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { return nil }
-        let fit = LogoFit.of(image)
-        iconCache[name] = (base64.count, image, fit)
-        return (image, fit)
+        _ = iconRevision // a finished decode redraws the rows that asked
+        guard iconDecoding.insert(name).inserted else { return nil }
+        Task { [weak self] in
+            let decoded = await Task.detached(priority: .userInitiated) { () -> (UIImage, LogoFit)? in
+                guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { return nil }
+                let prepared = await image.byPreparingForDisplay() ?? image
+                return (prepared, LogoFit.of(prepared))
+            }.value
+            guard let self else { return }
+            self.iconDecoding.remove(name)
+            if let (image, fit) = decoded { self.iconCache[name] = (base64.count, image, fit); self.iconRevision += 1 }
+        }
+        return nil
     }
 
     /// Whether the Mac is answering, so a "working" mark is not drawn moving for a Mac that went quiet.
@@ -1248,7 +1341,9 @@ final class AppModel {
             finish(sentId, !working ? .sent : mode == .steer ? .steered : .queued(agent: agent, steerUnavailable: false), for: session)
             return true
         }
+        perf.begin(.sendReply, "\(sentId)")
         await deliver(sentId, to: session, mode: mode)
+        perf.end(.sendReply, "\(sentId)")
         return true
     }
 
@@ -2970,7 +3065,12 @@ final class AppModel {
     /// Gives a chat a new name, in Conductor too. Nil when the Mac did it, else why not. The new name
     /// shows once the Mac's next view carries it, a second or two later.
     func rename(_ session: PhoneSnapshot.Session, to title: String) async -> String? {
-        await tracking(session, "Renaming…") { await renameNow(session, to: title) }
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let valid = !name.isEmpty && name.count <= RenameCommand.maxLength && session.can(.rename)
+        if valid, inFlight[session.key] == nil { optimistic.rename(session.key, to: name); rebuild() }
+        let failure = await tracking(session, "Renaming…") { await renameNow(session, to: title) }
+        if failure != nil { optimistic.rollback(session.key); rebuild() }
+        return failure
     }
 
     private func renameNow(_ session: PhoneSnapshot.Session, to title: String) async -> String? {
@@ -2996,7 +3096,10 @@ final class AppModel {
     /// Archives a chat in Squeak (it leaves every list; nothing in Conductor or the agent's files changes). Nil when the
     /// Mac did it, else why not. It leaves the list once the Mac's next view omits it.
     func archive(_ session: PhoneSnapshot.Session) async -> String? {
-        await tracking(session, "Archiving…") { await archiveNow(session) }
+        if session.can(.archiveChat), inFlight[session.key] == nil { optimistic.archive(session.key); rebuild() }
+        let failure = await tracking(session, "Archiving…") { await archiveNow(session) }
+        if failure != nil { optimistic.rollback(session.key); rebuild() }
+        return failure
     }
 
     private func archiveNow(_ session: PhoneSnapshot.Session) async -> String? {

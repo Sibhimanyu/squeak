@@ -321,6 +321,7 @@ struct SessionRow: View {
         .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
         .renameMenu(session, model: model)
+        .onAppear { model.prefetchNear(session) }
     }
 
     private var unread: Bool { inProject ? model.isProjectUnread(session) : model.isUnread(session) }

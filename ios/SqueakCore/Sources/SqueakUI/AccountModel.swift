@@ -40,7 +40,11 @@ final class AccountModel {
     @ObservationIgnored private let anchor = PresentationAnchor()
     @ObservationIgnored private var task: Task<Void, Never>?
 
-    init() { session = tokens.current(); HostSignals.account(email: session?.email, name: session?.name) }
+    init() {
+        session = tokens.current()
+        HostSignals.account(email: session?.email, name: session?.name)
+        if session != nil { macs = AccountMacsDisk.load() }
+    }
 
     private func api(_ app: AppModel, _ session: AccountSession) -> AccountAPI {
         AccountAPI(appURL: AccountEndpoints.appURL(fromRelay: app.pairedRelayURL), token: session.token)
@@ -64,6 +68,8 @@ final class AccountModel {
         tokens.signOut()
         session = nil
         avatar = nil
+        AvatarDisk.clear()
+        AccountMacsDisk.clear()
         avatarPhase = .idle
         macs = []
         step = .idle
@@ -82,9 +88,13 @@ final class AccountModel {
         let api = api(app, session)
         let token = session.token
         Task { [weak self] in
+            if let held = await AvatarDisk.load(), self?.avatar == nil { self?.avatar = held }
             do {
                 // Signed out (or into another account) while the photo was in flight: it is not this account's.
-                if let data = try await api.avatar(), let image = UIImage(data: data), self?.session?.token == token { self?.avatar = image }
+                if let data = try await api.avatar(), let image = await ImageDecoding.decode(data), self?.session?.token == token {
+                    AvatarDisk.save(data)
+                    self?.avatar = image
+                }
             } catch { if (error as? AccountError) == .signedOut { self?.signOut(); self?.message = AccountError.signedOut.sentence } }
         }
     }
@@ -98,7 +108,8 @@ final class AccountModel {
         Task { [weak self] in
             do {
                 if let sentence = try await api.putAvatar(jpeg) { self?.avatarPhase = .failed(sentence); return }
-                self?.avatar = UIImage(data: jpeg)
+                AvatarDisk.save(jpeg)
+                self?.avatar = await ImageDecoding.decode(jpeg)
                 self?.avatarPhase = .idle
             } catch { self?.photoFail(error) }
         }
@@ -153,7 +164,7 @@ final class AccountModel {
         guard let session else { return }
         // Never cancel an open in progress to refresh the list.
         if case .waiting = step { return }
-        step = .loadingMacs
+        if macs.isEmpty { step = .loadingMacs }
         let api = api(app, session)
         task?.cancel()
         task = Task { [weak self] in
@@ -161,7 +172,8 @@ final class AccountModel {
                 let list = try await api.macs()
                 if Task.isCancelled { return }
                 self?.macs = list
-                self?.step = .idle
+                AccountMacsDisk.save(list)
+                if self?.step == .loadingMacs { self?.step = .idle }
             } catch { self?.fail(error) }
         }
     }
