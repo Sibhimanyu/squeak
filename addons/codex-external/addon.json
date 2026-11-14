@@ -1,0 +1,6 @@
+{
+  "id": "codex-external",
+  "name": "Codex (external)",
+  "blurb": "Also show Codex chats started outside Squeak: Terminal and the Codex desktop app. Turning this on adds Squeak's hooks to Codex's settings; turning it off takes them out again.",
+  "distributed": true
+}

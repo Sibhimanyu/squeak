@@ -76,6 +76,8 @@ function addonConfigFor(config: import("./config.js").SqueakConfig): import("../
     codexBin: config.codexBin,
     handsAppPath: config.handsAppPath,
     activeWindowMs: config.activeWindowMs,
+    hookPort: config.hookPort,
+    idleAfterMs: config.idleAfterMs,
     nativeDbPath: path.join(config.supportDir, "native.db"),
   };
 }
@@ -249,6 +251,16 @@ export async function main(argv: string[]): Promise<void> {
         console.log(`\nSQUEAK_ASK_FORMAT=off: removed the ask format from ${ask.changed.join(", ")}`);
       }
       console.log("\nHooks never block: they background the request, time out after 2s, and always exit 0.");
+      const { enabledAddonIds } = await import("../addon-host.js");
+      const { externalHookAgents } = await import("../fleet/external-hooks.js");
+      const wanted = externalHookAgents(enabledAddonIds(path.dirname(resolveSqueakEnvPath())));
+      if (!wanted.claude && !wanted.codex) {
+        console.log(
+          "\nNote: Squeak does not read Claude Code or Codex sessions started outside it unless you turn on\n" +
+            "Claude Code (external) or Codex (external) in Squeak › Settings › Extensions. Until then these hooks do\n" +
+            "nothing, and the daemon removes them at its next start.",
+        );
+      }
       return;
     }
     case "uninstall-hooks": {

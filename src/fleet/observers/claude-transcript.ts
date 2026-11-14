@@ -64,11 +64,16 @@ export class ClaudeTranscriptObserver {
     this.now = options.now ?? Date.now;
   }
 
-  observe(): ObservedSession[] {
+  /**
+   * Every recent transcript, or with `ids` only those sessions' (`<id>.jsonl`): "claimed" mode, where core reads
+   * the transcripts that Squeak's own chats and a host's chats name, and nothing else on the Mac.
+   */
+  observe(options: { ids?: ReadonlySet<string> } = {}): ObservedSession[] {
     const cutoff = this.now() - this.activeWithinMs;
     const sessions: ObservedSession[] = [];
+    if (options.ids && options.ids.size === 0) return sessions;
 
-    for (const transcriptPath of this.listRecentTranscripts(cutoff)) {
+    for (const transcriptPath of this.listRecentTranscripts(cutoff, options.ids)) {
       const session = this.readSession(transcriptPath);
       if (session) {
         sessions.push(session);
@@ -78,7 +83,7 @@ export class ClaudeTranscriptObserver {
     return sessions;
   }
 
-  private listRecentTranscripts(cutoffMs: number): string[] {
+  private listRecentTranscripts(cutoffMs: number, ids?: ReadonlySet<string>): string[] {
     let projectDirs: fs.Dirent[];
     try {
       projectDirs = fs.readdirSync(this.projectsDir, { withFileTypes: true });
@@ -100,6 +105,9 @@ export class ClaudeTranscriptObserver {
       }
       for (const entry of entries) {
         if (!entry.endsWith(".jsonl")) {
+          continue;
+        }
+        if (ids && !ids.has(entry.slice(0, -".jsonl".length))) {
           continue;
         }
         const filePath = path.join(dirPath, entry);

@@ -1,3 +1,4 @@
+import type { LiveAgentProcess } from "./fleet/observers/process-liveness.js";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { SqueakAgentAdapter } from "./core/adapter.js";
@@ -55,6 +56,8 @@ export type AddonConfig = Pick<
   | "codexBin"
   | "handsAppPath"
   | "activeWindowMs"
+  | "hookPort"
+  | "idleAfterMs"
 > & {
   /** Squeak's own session host's database; an add-on that imports chats reads it. */
   nativeDbPath: string;
@@ -247,6 +250,8 @@ export interface AddonHandle {
   /** Runs at every start, enabled or not (it puts back what the add-on once changed, so an install stays safe). */
   maintenance?(): Promise<void> | void;
   observers?: FleetObserver[];
+  /** Which agent processes are alive (asked at every refresh while enabled); the external add-ons' liveness. */
+  liveness?: { observe(): Promise<LiveAgentProcess[]> };
   repliers?: AddonReplier[];
   /** New chats: the host's workspaces, its models and the way to start one. */
   newChat?: NewChatHost;

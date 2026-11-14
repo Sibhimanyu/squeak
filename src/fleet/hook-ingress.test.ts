@@ -854,6 +854,58 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(`${base}/reset`, { method: "POST", headers: auth })).status).toBe(200);
   });
 
+  it("answers a hook 200 and drops it while no external add-on is on", async () => {
+    const dir = makeDir();
+    const tokenPath = path.join(dir, "hook-token");
+    const port = await freePort();
+    const events: HookEvent[] = [];
+    let on = false;
+    const server = new HookIngressServer({
+      port,
+      tokenPath,
+      onEvent: (event) => events.push(event),
+      acceptEvents: () => on,
+    });
+    await server.start();
+    servers.push(server);
+    const token = fs.readFileSync(tokenPath, "utf8").trim();
+    const post = () =>
+      fetch(`http://127.0.0.1:${port}/hook`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-squeak-token": token, "x-squeak-agent": "claude" },
+        body: JSON.stringify({ hook_event_name: "Stop", session_id: "abc" }),
+      });
+    expect((await post()).status).toBe(200);
+    await settle();
+    expect(events).toEqual([]);
+    // The token is still checked while off.
+    const noToken = await fetch(`http://127.0.0.1:${port}/hook`, { method: "POST", body: "{}" });
+    expect(noToken.status).toBe(403);
+    on = true;
+    expect((await post()).status).toBe(200);
+    await waitFor(() => events.length > 0);
+    expect(events).toHaveLength(1);
+  });
+
+  it("answers the hooks routes 404 while the add-ons that own them are off", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const base = `http://127.0.0.1:${harness.port}/control/hooks`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      hooks: {
+        enabled: () => false,
+        status: () => ({ state: "missing" }),
+        install: async () => ({ ok: true, status: {} }),
+        uninstall: async () => ({ ok: true, status: {} }),
+      },
+    });
+    expect((await fetch(base, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/install`, { method: "POST", headers: auth, body: "{}" })).status).toBe(404);
+  });
+
   it("serves the hooks routes only with the token, 503 unwired, 405/400, 409 on refusal, no CORS", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

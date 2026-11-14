@@ -35,6 +35,11 @@ export interface HookInstallPaths {
   tokenPath: string;
   claudeSettingsPath: string;
   codexHooksPath: string;
+  /**
+   * The script does nothing unless this file exists: the add-ons that want hooks write it when enabled and remove
+   * it when disabled, so a hook left in an agent's settings is inert while nothing wants it. Absent: no check.
+   */
+  enabledPath?: string;
 }
 
 export function defaultHookInstallPaths(supportDir: string, homeDir = os.homedir()): HookInstallPaths {
@@ -43,6 +48,7 @@ export function defaultHookInstallPaths(supportDir: string, homeDir = os.homedir
     tokenPath: path.join(supportDir, "hook-token"),
     claudeSettingsPath: path.join(homeDir, ".claude", "settings.json"),
     codexHooksPath: path.join(homeDir, ".codex", "hooks.json"),
+    enabledPath: path.join(supportDir, "hooks", "enabled"),
   };
 }
 
@@ -58,11 +64,17 @@ export interface HookInstallResult {
  * 0. A bridge that is down, slow, or missing must be indistinguishable from no
  * hook at all — nobody's agent should ever stall because this is installed.
  */
-export function renderHookScript(params: { agent: AgentKind; port: number; tokenPath: string }): string {
+export function renderHookScript(params: {
+  agent: AgentKind;
+  port: number;
+  tokenPath: string;
+  enabledPath?: string;
+}): string {
+  const gate = params.enabledPath ? `[ -f "${params.enabledPath}" ] || exit 0\n` : "";
   return `#!/bin/sh
 # Installed by Squeak (${HOOK_MARKER}). Reports agent state to the local
 # Telegram bridge. Fire-and-forget by design: never blocks, never fails a turn.
-payload=$(cat)
+${gate}payload=$(cat)
 url="\${SQUEAK_HOOK_URL:-http://127.0.0.1:${params.port}/hook}"
 token=$(cat "${params.tokenPath}" 2>/dev/null)
 [ -n "$token" ] || exit 0
@@ -215,23 +227,58 @@ export function writeJsonObject(filePath: string, value: Record<string, unknown>
   fs.renameSync(temporaryPath, filePath);
 }
 
-export function installFleetHooks(params: { paths: HookInstallPaths; port: number }): HookInstallResult {
+/** Which agents' settings an install touches (default both). A de-selected agent has our entries removed. */
+export interface HookAgents {
+  claude: boolean;
+  codex: boolean;
+}
+
+export function installFleetHooks(params: {
+  paths: HookInstallPaths;
+  port: number;
+  agents?: HookAgents;
+}): HookInstallResult {
   const { paths, port } = params;
+  const agents = params.agents ?? { claude: true, codex: true };
   const changed: string[] = [];
   const skipped: string[] = [];
 
   fs.mkdirSync(path.dirname(paths.scriptPath), { recursive: true });
   // The agent is passed per-hook via the environment, so one script serves both.
-  fs.writeFileSync(paths.scriptPath, renderHookScript({ agent: "claude", port, tokenPath: paths.tokenPath }), {
-    mode: 0o755,
-  });
+  fs.writeFileSync(
+    paths.scriptPath,
+    renderHookScript({
+      agent: "claude",
+      port,
+      tokenPath: paths.tokenPath,
+      ...(paths.enabledPath ? { enabledPath: paths.enabledPath } : {}),
+    }),
+    {
+      mode: 0o755,
+    },
+  );
 
   const targets: { file: string; events: readonly string[]; agent: AgentKind }[] = [
     { file: paths.claudeSettingsPath, events: CLAUDE_HOOK_EVENTS, agent: "claude" },
     { file: paths.codexHooksPath, events: CODEX_HOOK_EVENTS, agent: "codex" },
   ];
 
+  if (paths.enabledPath) {
+    fs.mkdirSync(path.dirname(paths.enabledPath), { recursive: true });
+    fs.writeFileSync(paths.enabledPath, "1\n");
+  }
+
   for (const target of targets) {
+    if (!agents[target.agent === "claude" ? "claude" : "codex"]) {
+      if (fs.existsSync(target.file)) {
+        const removed = removeHookConfig(readJsonObject(target.file));
+        if (removed.changed) {
+          writeJsonObject(target.file, removed.config);
+          changed.push(target.file);
+        }
+      }
+      continue;
+    }
     const existing = readJsonObject(target.file);
     const result = mergeHookConfig(existing, target.events, hookCommandFor(paths.scriptPath, target.agent));
     if (result.changed) {
@@ -261,6 +308,7 @@ export function uninstallFleetHooks(paths: HookInstallPaths): { changed: string[
 
   try {
     fs.rmSync(paths.scriptPath, { force: true });
+    if (paths.enabledPath) fs.rmSync(paths.enabledPath, { force: true });
   } catch {
     // Leaving the script behind is harmless once nothing references it.
   }

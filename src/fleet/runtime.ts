@@ -29,7 +29,6 @@ export interface AwakeView {
   /** What a message to a working chat does when it names no mode (fleet/send-default.ts). */
   sendDefault?: "queue" | "steer";
 }
-import os from "node:os";
 import path from "node:path";
 import type { ClaudeLimits } from "./claude-limits.js";
 import { CodexUsageReader } from "./codex-usage.js";
@@ -45,11 +44,10 @@ import { HookIngressServer } from "./hook-ingress.js";
 import { isLooping, isStalled } from "./attention.js";
 import { SpawnParents } from "./spawn-parents.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
-import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { SqueakNativeObserver } from "./observers/squeak-native.js";
-import { ProcessLivenessObserver } from "./observers/process-liveness.js";
+import type { LiveAgentProcess } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import { ducklingsRunning } from "./ducklings.js";
 import type { FleetDucklings, FleetSession } from "./types.js";
@@ -58,13 +56,16 @@ import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/
 import type { FleetObserver } from "../addons.js";
 import { logger } from "../utils/logger.js";
 import { ArchivedSessions } from "./archived-sessions.js";
-import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
   /** Observers add-ons supply (a host app's chats), read at every refresh; each is inert while its add-on is off. */
   observers?: () => FleetObserver[];
+  /** Which agent processes are alive (the external add-ons'); absent: none is known to be. */
+  liveness?: { observe(): Promise<LiveAgentProcess[]> };
+  /** Whether agent hook events are used (an external add-on is on); false: answered 200 and dropped. */
+  acceptHooks?: () => boolean;
   /** More files whose change should refresh the fleet at once (an add-on host's database). */
-  watch?: WatchSpec[];
+  watch?: () => WatchSpec[];
   /** Fields add-ons add to `/state` (which add-ons are enabled, and what each reports about itself). */
   stateFields?: () => Record<string, unknown>;
   /** Core adapters add-ons supply for their hosts' sessions. */
@@ -142,9 +143,8 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       ...(options.observers ? { observers: options.observers } : {}),
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
-      cowork: new ClaudeCoworkObserver(observerWindow),
       native: options.nativeDbPath ? new SqueakNativeObserver({ dbPath: options.nativeDbPath }) : null,
-      liveness: new ProcessLivenessObserver({ claudeSessions: () => readClaudeSessionFiles() }),
+      liveness: options.liveness ?? null,
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
       claudeCost: new ClaudeCostReader(),
@@ -152,7 +152,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     },
     {
       pollIntervalMs: options.pollIntervalMs,
-      watch: [...watchSpecsFor(os.homedir(), options.nativeDbPath), ...(options.watch ?? [])],
+      watch: () => [...watchSpecsFor(options.nativeDbPath), ...(options.watch?.() ?? [])],
       contextPressurePercent: options.contextPressurePercent,
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
@@ -178,6 +178,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     port: options.hookPort,
     tokenPath: defaultHookInstallPaths(options.supportDir).tokenPath,
     onEvent: (event) => monitor.ingestHookEvent(event),
+    ...(options.acceptHooks ? { acceptEvents: options.acceptHooks } : {}),
     onSpawn: async (sessionId, hookPid) => {
       if (await spawnParents.observeHook(sessionId, hookPid)) void monitor.refresh();
     },
@@ -407,15 +408,11 @@ export function serializeState(
 
 /**
  * What to watch so a change is seen in a quarter second, not at the next poll:
- * Squeak's own session host's database and the folders agents append transcripts to (an add-on adds its host's). The periodic poll remains the safety net.
+ * Squeak's own session host's database (an enabled add-on adds its own folders, which `rewatch()` picks up). The periodic poll remains the safety net.
  */
-export function watchSpecsFor(home: string = os.homedir(), nativeDbPath?: string): WatchSpec[] {
+export function watchSpecsFor(nativeDbPath?: string): WatchSpec[] {
   const native = nativeDbPath
     ? [{ dir: path.dirname(nativeDbPath), names: [path.basename(nativeDbPath), `${path.basename(nativeDbPath)}-wal`] }]
     : [];
-  return [
-    ...native,
-    { dir: path.join(home, ".claude", "projects"), recursive: true },
-    { dir: path.join(home, ".codex", "sessions"), recursive: true },
-  ];
+  return [...native];
 }

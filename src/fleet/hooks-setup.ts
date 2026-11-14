@@ -17,6 +17,7 @@ import {
   CODEX_HOOK_EVENTS,
   defaultHookInstallPaths,
   installFleetHooks,
+  type HookAgents,
   mergeHookConfig,
   renderHookScript,
   uninstallFleetHooks,
@@ -56,6 +57,8 @@ export interface HooksSetupOptions {
   port: number;
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
+  /** Which agents the enabled add-ons want hooks for, now. Absent: both (the `squeak install-hooks` behaviour). */
+  agents?: () => HookAgents;
 }
 
 type Parsed = { ok: true; value: Record<string, unknown>; found: boolean } | { ok: false };
@@ -105,8 +108,13 @@ export class HooksSetup {
     this.askPaths = defaultAskFormatPaths(options.supportDir, home, this.env);
   }
 
+  private wanted(): HookAgents {
+    return this.options.agents?.() ?? { claude: true, codex: true };
+  }
+
   /** Read-only: touches no file. */
   status(): HooksStatus {
+    const wanted = this.wanted();
     const claudeFile = parseJsonFile(this.hookPaths.claudeSettingsPath);
     const codexFile = parseJsonFile(this.hookPaths.codexHooksPath);
     const agentsText = readText(this.askPaths.codexAgentsPath);
@@ -129,16 +137,27 @@ export class HooksSetup {
     const script = this.hookPaths.scriptPath;
     const scriptCurrent =
       readText(script) ===
-        renderHookScript({ agent: "claude", port: this.options.port, tokenPath: this.hookPaths.tokenPath }) &&
-      fs.existsSync(this.hookPaths.tokenPath);
+        renderHookScript({
+          agent: "claude",
+          port: this.options.port,
+          tokenPath: this.hookPaths.tokenPath,
+          ...(this.hookPaths.enabledPath ? { enabledPath: this.hookPaths.enabledPath } : {}),
+        }) &&
+      fs.existsSync(this.hookPaths.tokenPath) &&
+      (!this.hookPaths.enabledPath || fs.existsSync(this.hookPaths.enabledPath));
 
-    const missing = CLAUDE_HOOK_EVENTS.filter(
+    const allClaudeMissing = CLAUDE_HOOK_EVENTS.filter(
       (event) => mergeHookConfig(claudeFile.value, [event], claudeCommandFor(script)).changed,
     );
-    const codexMissing = CODEX_HOOK_EVENTS.filter(
+    const allCodexMissing = CODEX_HOOK_EVENTS.filter(
       (event) => mergeHookConfig(codexFile.value, [event], codexCommandFor(script)).changed,
     );
-    const claudeHooks = missing.length === 0 && scriptCurrent;
+    // An agent nobody wants hooks for should have none of ours; one that is wanted should have all of them.
+    const missing = wanted.claude ? allClaudeMissing : [];
+    const codexMissing = wanted.codex ? allCodexMissing : [];
+    const claudeLeftover = !wanted.claude && allClaudeMissing.length < CLAUDE_HOOK_EVENTS.length;
+    const codexLeftover = !wanted.codex && allCodexMissing.length < CODEX_HOOK_EVENTS.length;
+    const claudeHooks = missing.length === 0 && (scriptCurrent || !(wanted.claude || wanted.codex));
 
     const wantAsk = askFormatEnabled(this.env);
     const askScript = this.askPaths.scriptPath;
@@ -149,16 +168,17 @@ export class HooksSetup {
     const codexAskAny = agentsText !== null && removeAskFormatBlock(agentsText) !== agentsText;
 
     const anyOurs =
-      missing.length < CLAUDE_HOOK_EVENTS.length ||
-      codexMissing.length < CODEX_HOOK_EVENTS.length ||
+      allClaudeMissing.length < CLAUDE_HOOK_EVENTS.length ||
+      allCodexMissing.length < CODEX_HOOK_EVENTS.length ||
       claudeAskAny ||
       codexAskAny;
+    const askClaudeOk = wanted.claude && wantAsk ? claudeAskPresent : !claudeAskAny;
+    const askCodexOk = wanted.codex && wantAsk ? codexAskPresent : !codexAskAny;
     const complete =
-      claudeHooks &&
-      codexMissing.length === 0 &&
-      (wantAsk ? claudeAskPresent && codexAskPresent : !claudeAskAny && !codexAskAny);
+      claudeHooks && codexMissing.length === 0 && !claudeLeftover && !codexLeftover && askClaudeOk && askCodexOk;
 
-    const state: HooksState = complete ? "installed" : anyOurs ? "partial" : "missing";
+    const noneWanted = !wanted.claude && !wanted.codex;
+    const state: HooksState = complete && !noneWanted ? "installed" : anyOurs ? "partial" : "missing";
     const message =
       state === "installed"
         ? "Agent hooks are installed."
@@ -198,9 +218,15 @@ export class HooksSetup {
     }
     try {
       HookIngressServer.ensureToken(this.hookPaths.tokenPath);
-      installFleetHooks({ paths: this.hookPaths, port: this.options.port });
-      if (askFormatEnabled(this.env)) installAskFormat(this.askPaths);
-      else uninstallAskFormat(this.askPaths);
+      const wanted = this.wanted();
+      if (!wanted.claude && !wanted.codex) {
+        uninstallFleetHooks(this.hookPaths);
+        uninstallAskFormat(this.askPaths);
+      } else {
+        installFleetHooks({ paths: this.hookPaths, port: this.options.port, agents: wanted });
+        if (askFormatEnabled(this.env)) installAskFormat(this.askPaths, wanted);
+        else uninstallAskFormat(this.askPaths);
+      }
     } catch {
       return { ok: false, status: this.status(), reason: "Squeak could not write the agent settings." };
     }

@@ -220,30 +220,60 @@ export function applyAskFormat(paths: AskFormatPaths, env: NodeJS.ProcessEnv = p
   return askFormatEnabled(env) ? installAskFormat(paths) : uninstallAskFormat(paths);
 }
 
-export function installAskFormat(paths: AskFormatPaths): AskFormatResult {
+export function installAskFormat(
+  paths: AskFormatPaths,
+  agents: { claude: boolean; codex: boolean } = { claude: true, codex: true },
+): AskFormatResult {
   const changed: string[] = [];
   const skipped: string[] = [];
 
-  fs.mkdirSync(path.dirname(paths.scriptPath), { recursive: true });
-  fs.writeFileSync(paths.scriptPath, renderAskFormatScript(), { mode: 0o755 });
-
-  const settings = mergeAskFormatHook(readJsonObject(paths.claudeSettingsPath), paths.scriptPath);
-  if (settings.changed) {
-    writeJsonObject(paths.claudeSettingsPath, settings.config);
-    changed.push(paths.claudeSettingsPath);
+  if (agents.claude) {
+    fs.mkdirSync(path.dirname(paths.scriptPath), { recursive: true });
+    fs.writeFileSync(paths.scriptPath, renderAskFormatScript(), { mode: 0o755 });
+    const settings = mergeAskFormatHook(readJsonObject(paths.claudeSettingsPath), paths.scriptPath);
+    if (settings.changed) {
+      writeJsonObject(paths.claudeSettingsPath, settings.config);
+      changed.push(paths.claudeSettingsPath);
+    } else {
+      skipped.push(paths.claudeSettingsPath);
+    }
   } else {
-    skipped.push(paths.claudeSettingsPath);
+    removeClaudeAsk(paths, changed);
+    fs.rmSync(paths.scriptPath, { force: true });
   }
 
-  const current = fs.existsSync(paths.codexAgentsPath) ? fs.readFileSync(paths.codexAgentsPath, "utf8") : "";
-  const updated = upsertAskFormatBlock(current);
+  if (agents.codex) {
+    const current = fs.existsSync(paths.codexAgentsPath) ? fs.readFileSync(paths.codexAgentsPath, "utf8") : "";
+    const updated = upsertAskFormatBlock(current);
+    if (updated !== current) {
+      backupAndWrite(paths.codexAgentsPath, updated);
+      changed.push(paths.codexAgentsPath);
+    } else {
+      skipped.push(paths.codexAgentsPath);
+    }
+  } else {
+    removeCodexAsk(paths, changed);
+  }
+  return { changed, skipped };
+}
+
+function removeClaudeAsk(paths: AskFormatPaths, changed: string[]): void {
+  if (!fs.existsSync(paths.claudeSettingsPath)) return;
+  const result = removeAskFormatHook(readJsonObject(paths.claudeSettingsPath));
+  if (result.changed) {
+    writeJsonObject(paths.claudeSettingsPath, result.config);
+    changed.push(paths.claudeSettingsPath);
+  }
+}
+
+function removeCodexAsk(paths: AskFormatPaths, changed: string[]): void {
+  if (!fs.existsSync(paths.codexAgentsPath)) return;
+  const current = fs.readFileSync(paths.codexAgentsPath, "utf8");
+  const updated = removeAskFormatBlock(current);
   if (updated !== current) {
     backupAndWrite(paths.codexAgentsPath, updated);
     changed.push(paths.codexAgentsPath);
-  } else {
-    skipped.push(paths.codexAgentsPath);
   }
-  return { changed, skipped };
 }
 
 export function uninstallAskFormat(paths: AskFormatPaths): AskFormatResult {

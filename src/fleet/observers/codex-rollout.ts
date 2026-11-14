@@ -42,12 +42,18 @@ export class CodexRolloutObserver {
     this.now = options.now ?? Date.now;
   }
 
-  observe(): ObservedSession[] {
+  /**
+   * Every recent rollout, or with `ids` only the rollouts of those thread ids ("claimed" mode: core reads the
+   * rollouts that Squeak's own chats and a host's chats name, and nothing else on the Mac).
+   */
+  observe(options: { ids?: ReadonlySet<string> } = {}): ObservedSession[] {
     const cutoff = this.now() - this.activeWithinMs;
+    const ids = options.ids;
+    if (ids && ids.size === 0) return [];
     const titles = this.readThreadTitles();
     const sessions: ObservedSession[] = [];
 
-    for (const rolloutPath of this.listRecentRollouts(cutoff)) {
+    for (const rolloutPath of this.listRecentRollouts(cutoff, ids)) {
       const session = this.readSession(rolloutPath, titles);
       if (session) {
         sessions.push(session);
@@ -78,7 +84,7 @@ export class CodexRolloutObserver {
    * working one saying "Starting…" on the phone for good). A chat can run for days in the folder of the day it began,
    * so a day folder is read for `ROLLOUT_LOOKBACK_DAYS`, and the file's own mtime says whether it is recent.
    */
-  private listRecentRollouts(cutoffMs: number): string[] {
+  private listRecentRollouts(cutoffMs: number, ids?: ReadonlySet<string>): string[] {
     const root = path.join(this.codexHome, "sessions");
     const oldestDay = cutoffMs - ROLLOUT_LOOKBACK_DAYS * DAY_MS;
     const found: string[] = [];
@@ -103,6 +109,7 @@ export class CodexRolloutObserver {
           if (Date.UTC(year.n, month.n - 1, day.n + 1) < oldestDay) continue;
           for (const entry of children(day.path)) {
             if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+            if (ids && ![...ids].some((id) => entry.name.endsWith(`${id}.jsonl`))) continue;
             const file = path.join(day.path, entry.name);
             try {
               if (fs.statSync(file).mtimeMs >= cutoffMs) found.push(file);

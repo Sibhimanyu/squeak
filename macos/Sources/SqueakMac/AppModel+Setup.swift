@@ -83,7 +83,9 @@ final class SetupModel {
                     hooksNeedUpdate = false
                     if s != hooks { hooks = s }
                 } else {
-                    hooksNeedUpdate = true
+                    // 404: the external-agent add-ons that own the hooks routes are off. Not an old service.
+                    hooksNeedUpdate = false
+                    if hooks != nil { hooks = nil }
                 }
             } catch {
                 // Daemon down or token trouble: keep what was last read.

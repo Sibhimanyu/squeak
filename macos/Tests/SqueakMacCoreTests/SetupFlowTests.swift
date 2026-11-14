@@ -48,7 +48,7 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertFalse(down.canContinue(.agents))
         let upNoHooks = SetupFlow(facts(hooks: HooksStatus(state: .missing)))
         XCTAssertTrue(upNoHooks.canContinue(.service))
-        XCTAssertFalse(upNoHooks.canContinue(.agents))
+        XCTAssertTrue(upNoHooks.canContinue(.agents)) // hooks belong to the external-agent add-ons
         XCTAssertTrue(SetupFlow(facts(hooks: installed)).canContinue(.agents))
         for s in [SetupStage.welcome, .account, .phone, .done] { XCTAssertTrue(down.canContinue(s)); XCTAssertTrue(down.canDismiss(s)) }
     }
@@ -60,7 +60,7 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertTrue(text.contains("Install Claude Code or Codex"))
         XCTAssertTrue(f.canContinue(.agents))
         XCTAssertNil(f.nextConnectAction(attempted: []))
-        XCTAssertFalse(f.isDone(.agents)) // explained, not connected
+        XCTAssertTrue(f.isDone(.agents)) // hooks are optional now
     }
 
     func testFreshStartsAtWelcomeThenService() {
@@ -79,9 +79,9 @@ final class SetupFlowTests: XCTestCase {
 
     func testResumeAtTheRightStage() {
         var progress = SetupProgress(started: true)
-        // Service up, hooks not yet: resumes at Your agents.
+        // Service up, no hooks: hooks are optional now, so it resumes at Your account.
         let f = SetupFlow(facts(hooks: HooksStatus(state: .missing)), progress: progress)
-        XCTAssertEqual(f.startStage, .agents)
+        XCTAssertEqual(f.startStage, .account)
         // Required steps remembered done, account skipped: resumes at Your phone.
         progress.completed = ["service", "agents"]; progress.skipped = ["account"]
         let g = SetupFlow(facts(service: .notInstalled), progress: progress)
@@ -136,7 +136,7 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertEqual(notRunning.nextConnectAction(attempted: []), .service)
         XCTAssertNil(notRunning.nextConnectAction(attempted: [.service]))
         let hooksNext = SetupFlow(facts(hooks: HooksStatus(state: .missing)))
-        XCTAssertEqual(hooksNext.nextConnectAction(attempted: [.service]), .hooks)
+        XCTAssertNil(hooksNext.nextConnectAction(attempted: [.service])) // never installs hooks by itself
         XCTAssertNil(hooksNext.nextConnectAction(attempted: [.hooks]))
         XCTAssertNil(SetupFlow(facts(hooks: HooksStatus(state: .missing), busy: true)).nextConnectAction(attempted: []))
         let failed = SetupFlow(facts(service: .failed("Port 8477 is taken.")))

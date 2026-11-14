@@ -26,7 +26,7 @@ import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ArchivedSessions } from "./archived-sessions.js";
-import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
+import type { LiveAgentProcess } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetDucklings, FleetSession, HookEvent, ObservedSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
 
@@ -48,13 +48,19 @@ export interface FleetMonitorDependencies {
    * add-on is enabled. Absent: only the built-in sources are read.
    */
   observers?: (() => FleetObserver[]) | null;
+  /**
+   * Core reads these in claimed mode only: the transcripts and rollouts that Squeak's own chats and a host's chats
+   * name by session id, for their path, stall and loop signals. Everything else on the Mac is an external agent,
+   * seen only through an enabled add-on's observers (addons/claude-external, addons/codex-external).
+   */
   claude: ClaudeTranscriptObserver;
   codex: CodexRolloutObserver;
   /** Optional: without it Claude Desktop's Cowork sessions are simply not seen. */
   cowork?: ClaudeCoworkObserver | null;
   /** Optional: without it Squeak's own session host's chats are simply not seen. */
   native?: SqueakNativeObserver | null;
-  liveness: ProcessLivenessObserver;
+  /** Optional: which agent processes are alive, from the external add-ons; without it none is known to be. */
+  liveness?: { observe(): Promise<LiveAgentProcess[]> } | null | undefined;
   /** Optional: Squeak-side archive for threads Squeak does not run (archived-sessions.ts); without it none is hidden. */
   archived?: ArchivedSessions | null;
   /** Optional: who started which agent (spawn-parents.ts); without it nothing is nested or hidden. */
@@ -93,7 +99,8 @@ export interface FleetMonitorOptions {
    * Files whose changes should trigger a refresh right away (Conductor's
    * database, transcript folders). The periodic poll stays as the safety net.
    */
-  watch?: WatchSpec[];
+  /** Folders to watch; a function is read again by `rewatch()` (an add-on turned on or off changes what to watch). */
+  watch?: WatchSpec[] | (() => WatchSpec[]);
   /** Burst window before a watched change refreshes. */
   watchDelayMs?: number;
   /** Never refresh from watch events more often than this. */
@@ -141,7 +148,7 @@ export class FleetMonitor {
   private readonly contextPressurePercent: number;
   private readonly codexQuotaWarnPercent: number;
   private readonly now: () => number;
-  private readonly watchSpecs: WatchSpec[];
+  private readonly watchSpecs: () => WatchSpec[];
   private readonly watchDelayMs: number;
   private readonly watchMinGapMs: number;
   private readonly stopFollowUpsMs: number[];
@@ -172,6 +179,7 @@ export class FleetMonitor {
   private refreshing = false;
   private refreshQueued = false;
   private stopped = false;
+  private started = false;
 
   private readonly backgroundWork = new BackgroundWorkReader();
 
@@ -183,7 +191,8 @@ export class FleetMonitor {
     this.contextPressurePercent = options.contextPressurePercent ?? DEFAULT_CONTEXT_PRESSURE_PERCENT;
     this.codexQuotaWarnPercent = options.codexQuotaWarnPercent ?? DEFAULT_CODEX_QUOTA_WARN_PERCENT;
     this.now = options.now ?? Date.now;
-    this.watchSpecs = options.watch ?? [];
+    const watch = options.watch ?? [];
+    this.watchSpecs = typeof watch === "function" ? watch : () => watch;
     this.watchDelayMs = options.watchDelayMs ?? DEFAULT_WATCH_DELAY_MS;
     this.watchMinGapMs = options.watchMinGapMs ?? DEFAULT_WATCH_MIN_GAP_MS;
     this.stopFollowUpsMs = options.stopFollowUpsMs ?? DEFAULT_STOP_FOLLOW_UPS_MS;
@@ -240,6 +249,7 @@ export class FleetMonitor {
 
   start(): void {
     this.stopped = false;
+    this.started = true;
     void this.refresh();
     this.pollTimer = setInterval(() => {
       void this.refresh();
@@ -253,8 +263,19 @@ export class FleetMonitor {
     this.watchCoalescer?.poke();
   }
 
+  /** Reads the watch list again and watches that (after an add-on is turned on or off). No-op unless running. */
+  rewatch(): void {
+    if (this.stopped || !this.started) return;
+    this.watcher?.close();
+    this.watcher = null;
+    this.watchCoalescer?.close();
+    this.watchCoalescer = null;
+    this.startWatching();
+  }
+
   private startWatching(): void {
-    if (this.watcher || this.watchSpecs.length === 0) {
+    const specs = this.watchSpecs();
+    if (this.watcher || specs.length === 0) {
       return;
     }
     this.watchCoalescer = new Coalescer(() => void this.refresh(), {
@@ -262,7 +283,7 @@ export class FleetMonitor {
       minGapMs: this.watchMinGapMs,
       timers: this.timers,
     });
-    this.watcher = watchFiles(this.watchSpecs, () => this.requestRefresh(), this.watchDeps);
+    this.watcher = watchFiles(specs, () => this.requestRefresh(), this.watchDeps);
   }
 
   stop(): void {
@@ -431,15 +452,31 @@ export class FleetMonitor {
     const observedAt = new Date(this.now()).toISOString();
 
     const hostObservers = this.deps.observers?.() ?? [];
-    const observations: ObservedSession[] = [
+    const owned: ObservedSession[] = [
       ...hostObservers.flatMap((observer) => safeObserve(() => observer.observe(), observer.source)),
-      ...safeObserve(() => this.deps.claude.observe(), "claude-transcript"),
-      ...safeObserve(() => this.deps.codex.observe(), "codex-rollout"),
-      ...safeObserve(() => this.deps.cowork?.observe() ?? [], "claude-cowork"),
       ...safeObserve(() => this.deps.native?.observe() ?? [], "squeak-native"),
     ];
+    // Claimed mode: the transcript of a chat something else already names, unless an enabled external add-on's
+    // full scan has read it (those rows carry the same sources).
+    const claimed = (agent: "claude" | "codex", source: string): Set<string> => {
+      const scanned = new Set(owned.filter((row) => row.source === source).map((row) => row.agentSessionId));
+      return new Set(
+        owned
+          .filter((row) => row.agent === agent && row.agentSessionId && !scanned.has(row.agentSessionId))
+          .map((row) => row.agentSessionId as string),
+      );
+    };
+    const observations: ObservedSession[] = [
+      ...owned,
+      ...safeObserve(
+        () => this.deps.claude.observe({ ids: claimed("claude", "claude-transcript") }),
+        "claude-transcript",
+      ),
+      ...safeObserve(() => this.deps.codex.observe({ ids: claimed("codex", "codex-rollout") }), "codex-rollout"),
+      ...safeObserve(() => this.deps.cowork?.observe() ?? [], "claude-cowork"),
+    ];
 
-    const processes = await this.deps.liveness.observe();
+    const processes = (await this.deps.liveness?.observe()) ?? [];
     const ducklings = await this.nativeDucklings();
     const sessions = this.annotateAsks(
       this.annotateSessions(
