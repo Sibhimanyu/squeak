@@ -79,7 +79,6 @@ final class NativeChatModel {
     @ObservationIgnored var refreshTask: Task<Void, Never>?
     /// The step the stream says the model is on, and the transcript's steps it is shown after (SqueakMacCore `NativeLiveState`).
     @ObservationIgnored var liveStep: ActivityStep?
-    @ObservationIgnored var persistedSteps: [ActivityStep] = []
     @ObservationIgnored var refreshAgain = false
     /// Silence after a send, and the safety poll (SqueakMacCore `NativeSyncWatchdog`).
     @ObservationIgnored var watchdog = NativeSyncWatchdog()
