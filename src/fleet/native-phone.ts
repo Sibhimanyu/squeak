@@ -121,6 +121,27 @@ export interface PhonePondOrder {
   ids: string[];
 }
 
+/** Another member's thread in a pond, as the phone draws it (read-only: it runs on their Mac). */
+export interface PhoneFlockThread {
+  id: string;
+  title: string;
+  state: string;
+  at: string;
+  /** The starter's name. */
+  by: string;
+  mode: "own" | "shared";
+  /** "Powered by <their Mac> · Flotilla" on a thread a member runs with their own agent. */
+  poweredBy?: string;
+  locked?: true;
+}
+
+/** What this person may do in the pond right now (the owner's switches), and why not when they may not. */
+export interface PhoneFlock {
+  threads: PhoneFlockThread[];
+  canMessage: boolean;
+  reason?: string;
+}
+
 /** What a pond's page shows beyond the list: pending invites, people waiting to join, recent activity. */
 export interface PhonePondDetail {
   id: string;
@@ -206,6 +227,8 @@ export interface RemoteNative {
   pondOrder?(): Promise<PhonePondOrder | null>;
   /** One pond's page (`GET /native/ponds/<id>`); null when unknown. */
   pondDetail?(pondId: string): Promise<PhonePondDetail | null>;
+  /** The pond's threads other members started, and this person's switches (`GET /native/ponds/<id>`); null when unknown. */
+  pondFlock?(pondId: string): Promise<PhoneFlock | null>;
   /** Hide or show a pond's project in the sidebar (`PATCH /native/projects/<key>/prefs`, what the Mac's Hide does). */
   setPondHidden?(key: string, hidden: boolean): Promise<void>;
   /** `PUT /native/pond-order`: manual with these keys, or back to newest first. */
@@ -385,6 +408,46 @@ export class NativePhone implements RemoteNative {
     } catch {
       return null;
     }
+  }
+
+  async pondFlock(pondId: string): Promise<PhoneFlock | null> {
+    let view: Record<string, unknown>;
+    try {
+      view = await this.call("GET", `/native/ponds/${encodeURIComponent(pondId)}`);
+    } catch {
+      return null;
+    }
+    const rec = (v: unknown): Record<string, unknown> | null =>
+      typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    const me = rec(view.me);
+    const caps = rec(me?.caps);
+    const myId = typeof me?.id === "string" ? me.id : "";
+    const role = me?.role;
+    const canMessage = role !== "viewer" && caps?.message !== false;
+    const reason = canMessage
+      ? undefined
+      : role === "viewer"
+        ? "You can watch this pond"
+        : "The owner has turned off messaging for you in this pond.";
+    const threads: PhoneFlockThread[] = [];
+    for (const raw of Array.isArray(view.threads) ? view.threads : []) {
+      const t = rec(raw);
+      if (!t || typeof t.id !== "string" || t.starter === myId || t.private === true) continue;
+      const mode = t.mode === "own" ? "own" : "shared";
+      const nest = clip(t.nestName ?? t.nest, 100);
+      threads.push({
+        id: t.id,
+        title: clip(t.title, 200) ?? "Untitled thread",
+        state: typeof t.state === "string" ? t.state : "idle",
+        at: typeof t.updatedAt === "number" ? new Date(t.updatedAt).toISOString() : new Date(0).toISOString(),
+        by: clip(t.starterName, 100) ?? "A teammate",
+        mode,
+        ...(mode === "own" ? { poweredBy: `Powered by ${nest ?? "their Mac"} · Flotilla` } : {}),
+        ...(t.locked === true ? { locked: true as const } : {}),
+      });
+    }
+    threads.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id));
+    return { threads: threads.slice(0, 100), canMessage, ...(reason ? { reason } : {}) };
   }
 
   async pondDetail(pondId: string): Promise<PhonePondDetail | null> {

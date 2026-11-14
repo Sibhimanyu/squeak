@@ -50,8 +50,8 @@ approvals and Stop stay with its starter). The owner can restrict any of it at a
   `start` back shows them again. Losing `see` empties the thread list for that member.
 - **Mac UI**: People menu per member (presets and switches), thread header "Who can message this thread" (lock, always let in,
   keep out), composer disabled with the reason, rows of own threads carry the powered-by mark.
-- **Not yet**: the phone and web show a member's own thread only as their apps already list pond threads (a phone's pond page is
-  built from this Mac's own chats); no members' threads on the iPhone yet. Approvals and Stop are never grantable.
+- **Phone and web**: the phone's pond-threads doc (`pondthreads`) now also carries optional `flock` (other members' threads: title, state, `by`, `mode`, `poweredBy`, `locked`) and `access` (`canMessage`, `reason`), read by the Mac from the pond itself (`NativePhone.pondFlock`); they are listed read-only under "From the flock" with the reason as the footer. The web guest page decodes `caps`/`locked`/`allow`/`deny`, hides what the owner hid, disables the composer with the reason and shows the powered-by mark. Approvals and Stop are never grantable.
+- **Journey test** also covers the account-based invite: a short code through the relay double, a signed-in member (named from the account), approval, then a message.
 
 ## Trust
 

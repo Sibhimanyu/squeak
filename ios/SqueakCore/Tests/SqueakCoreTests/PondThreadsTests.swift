@@ -29,6 +29,17 @@ final class PondThreadsTests: XCTestCase {
         XCTAssertEqual(doc.streams.last?.threads.map(\.title), ["Menu", "Old"])
         XCTAssertEqual(doc.threads.count, 3)
         XCTAssertNotNil(doc.threads.first?.date)
+        // Another member's own thread, marked as theirs, and the owner's switch for this person.
+        XCTAssertEqual(doc.flock?.first?.by, "Aarav")
+        XCTAssertEqual(doc.flock?.first?.poweredBy, "Powered by Aarav-mac \u{00B7} Flotilla")
+        XCTAssertEqual(doc.flock?.first?.locked, true)
+        XCTAssertEqual(doc.access, PondThreads.Access(canMessage: false, reason: "The owner has turned off messaging for you in this pond."))
+    }
+
+    func testAnOlderMacsDocumentHasNoFlockOrAccess() throws {
+        let doc = try JSONDecoder().decode(PondThreads.self, from: Data(#"{"v":1,"pond":"p","total":0,"streams":[]}"#.utf8))
+        XCTAssertNil(doc.flock)
+        XCTAssertNil(doc.access)
     }
 
     func testAnOlderThreadBecomesABareSessionTheRowAndHistoryCanUse() {

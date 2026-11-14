@@ -11,6 +11,7 @@ import {
   awayLine,
   changedLine,
   composerBlock,
+  poweredBy,
   flockLine,
   groupThreads,
   hueOf,
@@ -259,7 +260,11 @@ export function pondScreen({ view, now, onOpen, onLeave }) {
                     "span",
                     { class: "g-card-main" },
                     h("strong", null, t.title),
-                    h("small", null, `${t.starterName} · ${agentName(t.agent)}`),
+                    h(
+                      "small",
+                      null,
+                      [`${t.starterName} · ${agentName(t.agent)}`, poweredBy(t)].filter(Boolean).join(" · "),
+                    ),
                   ),
                   markNode(t.state),
                   h("small", { class: "g-age" }, ago(iso(t.updatedAt), now)),
@@ -427,9 +432,11 @@ export function createThreadScreen(handlers) {
       ? document.scrollingElement.scrollHeight - document.scrollingElement.scrollTop - window.innerHeight < 160
       : true;
     title.textContent = m.thread.title;
-    sub.textContent = `${m.thread.starterName} · ${agentName(m.thread.agent)}`;
+    sub.textContent = [`${m.thread.starterName} · ${agentName(m.thread.agent)}`, poweredBy(m.thread)]
+      .filter(Boolean)
+      .join(" · ");
     markSlot.replaceChildren(...[markNode(m.state)].filter(Boolean));
-    const blocked = composerBlock(m.role, m.thread);
+    const blocked = composerBlock(m.role, m.thread, m.me);
     block.hidden = !blocked;
     block.textContent = blocked ?? "";
     composer.hidden = Boolean(blocked);

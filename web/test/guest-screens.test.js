@@ -4,6 +4,7 @@ import {
   answeringLine,
   changedLine,
   composerBlock,
+  poweredBy,
   flockLine,
   foldEvents,
   groupThreads,
@@ -70,6 +71,19 @@ describe("what the guest screens say", () => {
       /Only Sibhi can message this thread while it runs without asking/,
     );
     expect(composerBlock("member", { permissionMode: "default" })).toBeNull();
+  });
+
+  it("respects the owner's switches and a thread's lock, and marks a member's own thread", () => {
+    const me = { id: "m", caps: { message: false } };
+    expect(composerBlock("member", { starter: "s" }, me)).toMatch(/turned off messaging/);
+    expect(composerBlock("member", { starter: "s", locked: true }, { id: "m", caps: {} })).toMatch(/locked/);
+    expect(composerBlock("member", { starter: "s", locked: true, allow: ["m"] }, { id: "m", caps: {} })).toBeNull();
+    expect(composerBlock("member", { starter: "s", deny: ["m"], starterName: "Aarav" }, { id: "m", caps: {} })).toMatch(
+      /Aarav doesn't let you/,
+    );
+    expect(composerBlock("member", { starter: "m", locked: true }, me)).toBeNull();
+    expect(poweredBy({ mode: "own", nest: "Aarav-mac" })).toBe("Powered by Aarav-mac · Flotilla");
+    expect(poweredBy({ mode: "shared", nest: "x" })).toBeNull();
   });
 
   it("folds events into rows: tool steps group, a question closes when resolved, an approval stays read-only", () => {

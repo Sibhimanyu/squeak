@@ -24,6 +24,7 @@ import {
   verifyText,
 } from "./guest-crypto.js";
 import {
+  effectiveCaps,
   HOLD_MS,
   MAX_COMMAND_LIFE_MS,
   ONLINE_MS,
@@ -397,6 +398,13 @@ export class GuestPond {
       const read = await this.readSigned("threads", id, doc, memberKey);
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read.device || thread.private) continue;
+      // A member the owner took "start" from has no threads in the pond; one hidden from threads sees none.
+      const starter = members.get(thread.starter);
+      if (starter && starter.role !== "owner" && !effectiveCaps(starter.role, starter.caps).start) continue;
+      if (
+        !effectiveCaps(members.get(this.record.memberId)?.role ?? "viewer", members.get(this.record.memberId)?.caps).see
+      )
+        continue;
       out.push(thread);
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt || a.title.localeCompare(b.title));
@@ -443,7 +451,12 @@ export class GuestPond {
     });
     return {
       pond: { id: r.pondId, name: r.pondName },
-      me: { id: r.memberId, name: r.displayName, role: members.get(r.memberId).role },
+      me: {
+        id: r.memberId,
+        name: r.displayName,
+        role: members.get(r.memberId).role,
+        caps: effectiveCaps(members.get(r.memberId).role, members.get(r.memberId).caps),
+      },
       members: [...members.values()].map((m) => ({
         id: m.id,
         name: m.name,
