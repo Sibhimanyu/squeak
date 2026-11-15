@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.27.2
+
+- A message sent while the agent is working (or a pond member's) now waits in the chat itself, dimmed under its author at the end of the transcript, with Steer, Edit and Remove; when its turn starts, that same row becomes the prompt in place, with no second row and no jump. The stack above the composer no longer repeats it (a small "N queued" note stays when two or more wait).
+- File tabs are remembered: the files you had open in a stream come back after a relaunch, in the order you opened them among the threads, if the file still exists.
+- Switching a Markdown file between Preview and Source keeps your place instead of jumping to the top.
+
 ## 2.27.1
 
 - A chat no longer says "very large" because its transcript file is big: the notice and the context popover now follow what is actually sent, and the popover says where the chat compacts ("Compacts automatically at 200k tokens"). Over that point the notice reads "Compacting soon to keep replies fast".

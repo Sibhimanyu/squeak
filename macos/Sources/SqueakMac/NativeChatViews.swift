@@ -8,6 +8,8 @@ import SwiftUI
 /// the glyph until the agent takes it in, then it moves into the transcript.
 struct NativeQueueStack: View {
     let session: HostSession
+    /// Queued messages the transcript already shows as dimmed rows (with their own Steer / Edit / Remove): not drawn twice here.
+    var inTranscript: Set<String> = []
     @Environment(AppModel.self) private var model
     @State private var busyId: String?
     @State private var editingId: String?
@@ -16,10 +18,16 @@ struct NativeQueueStack: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let cards = model.native.key == session.key ? model.native.pending.stackCards : []
+        let all = model.native.key == session.key ? model.native.pending.stackCards : []
+        let cards = all.filter { !($0.kind == .queued && inTranscript.contains($0.id)) }
+        let waiting = all.count - cards.count
         Group {
-            if !cards.isEmpty {
+            if !cards.isEmpty || waiting > 1 {
                 VStack(alignment: .leading, spacing: 6) {
+                    if waiting > 1 {
+                        Text(verbatim: "\(waiting) queued").font(Typo.meta).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 4).accessibilityLabel("\(waiting) messages queued, shown in the chat")
+                    }
                     ForEach(cards) { card in row(card) }
                     if let note = model.native.queueNote {
                         Text(verbatim: note).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
@@ -144,6 +152,96 @@ struct NativeQueueStack: View {
         guard busyId == nil else { return }
         busyId = card.id
         Task { await work(); busyId = nil }
+    }
+}
+
+/// Steer, Edit and Remove under a queued prompt's dimmed row in the transcript (the same host calls as the queue
+/// stack's cards). Edit holds the message on the host and opens it in place; Esc leaves it as it was.
+struct NativeQueuedRowActions: View {
+    let session: HostSession
+    let queuedId: String
+    let text: String
+    @Environment(AppModel.self) private var model
+    @State private var busy = false
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if editing { editor } else { actions }
+        }
+        .onDisappear { if editing { editing = false; Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) } } }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if busy {
+                DotGridLoader(size: 14)
+            } else {
+                Button("Steer") { run { await model.nativeSteerQueued(session, queuedId) } }
+                    .buttonStyle(SecondaryButtonStyle()).help("Steer: send this into the turn now")
+                Button("Edit") { edit() }.buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+                Button("Remove") { run { _ = await model.nativeDeleteQueued(session, queuedId) } }
+                    .buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var editor: some View {
+        let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            TextField("Message", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1...6)
+                .focused($focused)
+                .onKeyPress(.escape) { cancel(); return .handled }
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    save(steer: press.modifiers.contains(.command))
+                    return .handled
+                }
+            HStack(spacing: 8) {
+                Button("Save") { save(steer: false) }.buttonStyle(SecondaryButtonStyle()).disabled(empty)
+                Button("Save and steer") { save(steer: true) }.buttonStyle(SecondaryButtonStyle()).disabled(empty)
+                Button("Cancel") { cancel() }.buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
+        .onAppear { focused = true }
+    }
+
+    private func run(_ work: @escaping () async -> Void) {
+        guard !busy else { return }
+        busy = true
+        Task { await work(); busy = false }
+    }
+
+    private func edit() {
+        guard !busy else { return }
+        busy = true
+        Task {
+            let held = await model.nativeHoldQueued(session, queuedId)
+            busy = false
+            if held { draft = text; editing = true }
+        }
+    }
+
+    private func cancel() {
+        editing = false
+        Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) }
+    }
+
+    private func save(steer: Bool) {
+        let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        editing = false
+        Task {
+            if await model.nativeReleaseQueued(session, queuedId, text: t), steer { await model.nativeSteerQueued(session, queuedId) }
+        }
     }
 }
 

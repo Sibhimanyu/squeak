@@ -27,6 +27,8 @@ final class OpenFile: Identifiable {
     var editing = false
     /// Preview or Source for a Markdown file, the last pick this session (nil = Preview); Edit does not change it.
     var markdownChoice: MarkdownPreview.Mode?
+    /// The source line at the top of a Markdown file as last read, so Preview and Source open at the same place.
+    @ObservationIgnored var markdownTopLine = 1
     var conflict: SaveConflict?
     var note: String?
     var saving = false
@@ -38,6 +40,8 @@ final class OpenFile: Identifiable {
     /// Opened by its full path from outside the chat's folder: read-only, never saved or watched.
     var outside: Bool { path.hasPrefix("/") }
     var dirty: Bool { edited != original }
+    /// A folder listing is a tab of the moment: not saved with the strip.
+    var isListing: Bool { if case .listing = content { true } else { false } }
 
     init(path: String, content: Content, text: String, stamp: FileStamp) {
         self.path = path; self.content = content; self.original = text; self.edited = text; self.stamp = stamp
@@ -152,28 +156,55 @@ final class FilesModel {
             if let line { existing.jump = LineJump(line: line) }
             return
         }
+        Task { await loadFile(path, line: line, activate: true) }
+    }
+
+    /// Reads a file into its tab. `activate` false is a restored tab: it appears without taking the centre.
+    private func loadFile(_ path: String, line: Int?, activate: Bool) async {
         let root = root
-        Task {
-            let result = await Task.detached(priority: .userInitiated) { FileDisk.load(root: root, relative: path) }.value
-            switch result {
-            case .text(let text, let stamp):
-                let file = OpenFile(path: path, content: .text, text: text, stamp: stamp)
-                if let line { file.jump = LineJump(line: line) }
-                if !open.contains(where: { $0.path == path }) { open.append(file) }
-                activePath = path
-            case .image(let data, let stamp):
-                guard let image = NSImage(data: data) else { note = "Squeak can't show \(ChangesPresentation.fileName(path))."; return }
-                if !open.contains(where: { $0.path == path }) { open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp)) }
-                activePath = path
-            case .external:
-                if let url = FileDisk.resolve(root: root, relative: path), !open.contains(where: { $0.path == path }) {
-                    open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
-                }
-                activePath = path
-            case .failed(let why):
-                note = why
+        let result = await Task.detached(priority: .userInitiated) { FileDisk.load(root: root, relative: path) }.value
+        switch result {
+        case .text(let text, let stamp):
+            let file = OpenFile(path: path, content: .text, text: text, stamp: stamp)
+            if let line { file.jump = LineJump(line: line) }
+            if !open.contains(where: { $0.path == path }) { open.append(file) }
+            if activate { activePath = path }
+        case .image(let data, let stamp):
+            guard let image = NSImage(data: data) else { if activate { note = "Squeak can't show \(ChangesPresentation.fileName(path))." }; return }
+            if !open.contains(where: { $0.path == path }) { open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp)) }
+            if activate { activePath = path }
+        case .external:
+            if let url = FileDisk.resolve(root: root, relative: path), !open.contains(where: { $0.path == path }) {
+                open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
+            }
+            if activate { activePath = path }
+        case .failed(let why):
+            if activate { note = why }
+        }
+    }
+
+    /// Whether a saved file tab's file is still there (a path in the folder, or a full path outside it).
+    func fileExists(_ path: String) -> Bool {
+        if path.hasPrefix("/") { return FileManager.default.fileExists(atPath: path) }
+        return FileDisk.resolve(root: root, relative: path) != nil
+    }
+
+    @ObservationIgnored private(set) var restoredTabs = false
+
+    /// The file tabs saved for this stream, back in their order without taking the centre; `active` (the saved selection)
+    /// is shown only if it came back. Once per run: a tab the person closed is never brought back.
+    func restoreTabs(_ paths: [String], active: String?) async {
+        guard !restoredTabs else { return }
+        restoredTabs = true
+        for path in paths where !open.contains(where: { $0.path == path }) {
+            if path.hasPrefix("/") {
+                let url = URL(fileURLWithPath: path)
+                await openOutsideQuietly(url)
+            } else {
+                await loadFile(path, line: nil, activate: false)
             }
         }
+        if let active, activePath == nil, open.contains(where: { $0.path == active }) { activePath = active }
     }
 
     /// Closes the tab; with unsaved edits it asks first (`closeAsk`) unless `force`.
@@ -251,28 +282,33 @@ final class FilesModel {
             if let line { existing.jump = LineJump(line: line) }
             return
         }
-        Task {
-            let result = await Task.detached(priority: .userInitiated) { FileDisk.load(url: url) }.value
-            if open.contains(where: { $0.path == path }) { activePath = path; return }
-            switch result {
-            case .text(let text, let stamp):
-                let file = OpenFile(path: path, content: .text, text: text, stamp: stamp)
-                if let line { file.jump = LineJump(line: line) }
-                open.append(file)
-            case .image(let data, let stamp):
-                if let image = NSImage(data: data) {
-                    open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp))
-                } else {
-                    open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: stamp))
-                }
-            case .external:
-                open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
-            case .failed(let why):
-                showToast(why)
-                return
+        Task { await loadOutside(url, line: line, activate: true) }
+    }
+
+    private func openOutsideQuietly(_ url: URL) async { await loadOutside(url, line: nil, activate: false) }
+
+    private func loadOutside(_ url: URL, line: Int?, activate: Bool) async {
+        let path = url.path
+        let result = await Task.detached(priority: .userInitiated) { FileDisk.load(url: url) }.value
+        if open.contains(where: { $0.path == path }) { if activate { activePath = path }; return }
+        switch result {
+        case .text(let text, let stamp):
+            let file = OpenFile(path: path, content: .text, text: text, stamp: stamp)
+            if let line { file.jump = LineJump(line: line) }
+            open.append(file)
+        case .image(let data, let stamp):
+            if let image = NSImage(data: data) {
+                open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp))
+            } else {
+                open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: stamp))
             }
-            activePath = path
+        case .external:
+            open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
+        case .failed(let why):
+            if activate { showToast(why) }
+            return
         }
+        if activate { activePath = path }
     }
 
     /// A folder outside the chat's folder: a listing tab (names; a click on one opens it the same way).

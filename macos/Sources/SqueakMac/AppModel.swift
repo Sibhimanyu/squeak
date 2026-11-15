@@ -279,6 +279,34 @@ final class AppModel {
         saveStreamTabs()
     }
 
+    /// A file tab opened in the stream joins the saved strip where it was opened (after the selected tab), once; a tab
+    /// restored from the strip is already there and is left alone.
+    func fileTabOpened(_ path: String, in workspace: SidebarWorkspace) {
+        let tab = StreamTab.file(path)
+        guard !streamTabs.tabs(workspace.id).contains(tab) else { return }
+        let closed = WorkbenchPrefs.shared.closed
+        let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+        streamTabs.open(tab, in: workspace.id, seed: seed)
+        saveStreamTabs()
+    }
+
+    func fileTabClosed(_ path: String, in workspace: SidebarWorkspace) {
+        guard streamTabs.tabs(workspace.id).contains(.file(path)) else { return }
+        streamTabs.close(.file(path), in: workspace.id)
+        saveStreamTabs()
+    }
+
+    func fileTabSelected(_ path: String, in workspace: SidebarWorkspace) {
+        if streamTabs.select(.file(path), in: workspace.id) { saveStreamTabs() }
+    }
+
+    /// A saved file tab whose file is gone is forgotten when the stream's tabs are restored.
+    func forgetFileTabs(_ paths: [String], in workspace: SidebarWorkspace) {
+        guard !paths.isEmpty else { return }
+        let gone = Set(paths)
+        if streamTabs.prune(exists: { $0.kind != .file || !gone.contains($0.id) }) { saveStreamTabs() }
+    }
+
     func closeStreamTab(_ key: SessionKey, in workspace: String) -> SessionKey? {
         let next = streamTabs.close(.thread(key.stringValue), in: workspace)
         saveStreamTabs()

@@ -24,7 +24,7 @@ extension View {
 }
 
 /// The turns of the open chat. `message` draws a chat message (the prompt or one of the agent's) as the rest of the chat does.
-struct NativeTurnsContent<Message: View>: View {
+struct NativeTurnsContent<Message: View, Queued: View>: View {
     let turns: [TimelineTurn]
     let details: [String: ToolDetail]
     /// The viewer's own member id in a pond (their prompts carry no name); nil on the owner's own Mac.
@@ -34,10 +34,12 @@ struct NativeTurnsContent<Message: View>: View {
     var followsEnd: Bool
     var filesLine: (TimelineTurn) -> String?
     @ViewBuilder let message: (ChatMessage) -> Message
+    /// The actions under a prompt still waiting in the queue (Steer / Edit / Remove).
+    @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
         ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn), message: message)
+            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn), message: message, queuedActions: queuedActions)
                 .equatable()
                 .insertFade(followsEnd && index >= (fadeFrom ?? Int.max))
                 .padding(.top, index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
@@ -48,8 +50,8 @@ struct NativeTurnsContent<Message: View>: View {
 
 /// Equatable on what it draws (the turn, the tool details, the viewer, the files line; never the message builder), so
 /// a refresh that changed only the newest turn leaves every earlier turn's body unevaluated.
-private struct NativeTurnView<Message: View>: View, Equatable {
-    nonisolated static func == (a: NativeTurnView, b: NativeTurnView) -> Bool {
+private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
+    nonisolated static func == (a: NativeTurnView<Message, Queued>, b: NativeTurnView<Message, Queued>) -> Bool {
         a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details
     }
 
@@ -58,11 +60,13 @@ private struct NativeTurnView<Message: View>: View, Equatable {
     let me: String?
     let filesLine: String?
     @ViewBuilder let message: (ChatMessage) -> Message
+    @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
         let segments = TimelineSteps.segments(of: turn, details: details)
         VStack(alignment: .leading, spacing: 0) {
             if let prompt = turn.promptMessage(me: me) { message(prompt) }
+            if turn.state == .queued, turn.queuedId != nil { queuedActions(turn).padding(.top, 6) }
             ForEach(segments) { segment in
                 switch segment {
                 case .work(_, let steps, let live):

@@ -61,6 +61,9 @@ public struct TimelineTurn: Equatable, Identifiable, Sendable {
         }
     }
 
+    /// A prompt the host holds behind a running turn and has not started.
+    public var waitsInQueue: Bool { turnId == nil && state == .queued }
+
     public var isEnded: Bool { if case .ended = state { true } else { false } }
 
     /// The final text of an ended turn, drawn outside its steps.
@@ -168,7 +171,8 @@ public struct TurnTimeline: Equatable, Sendable {
     /// The seq an earlier page is asked before: the oldest turn held started there.
     public var oldestSeq: Int? { turns.compactMap(\.startSeq).min() }
 
-    public var current: TimelineTurn? { turns.last(where: { $0.isRunning }) }
+    /// The turn the agent is working on. A prompt waiting behind it is a row after it but never "the current turn".
+    public var current: TimelineTurn? { turns.last(where: { $0.state == .running }) ?? turns.last(where: { $0.isRunning }) }
     public var isWorking: Bool { current != nil }
 
     // MARK: Loading
@@ -188,7 +192,8 @@ public struct TurnTimeline: Equatable, Sendable {
         var older = TurnTimeline()
         older.load(events)
         let known = Set(turns.compactMap(\.turnId))
-        turns = older.turns.filter { $0.turnId.map { !known.contains($0) } ?? true } + turns
+        // A prompt that was only waiting in an older page has long since started or gone: it is not a row.
+        turns = older.turns.filter { !$0.waitsInQueue && ($0.turnId.map { !known.contains($0) } ?? true) } + turns
         hasEarlier = more
     }
 
@@ -272,15 +277,25 @@ public struct TurnTimeline: Equatable, Sendable {
             if let n = nonce, let i = turns.firstIndex(where: { $0.clientNonce == n && $0.turnId == nil }) {
                 turns[i].state = .queued
                 turns[i].queuedId = id
+            } else if nonce == nil, author == nil, !turns.contains(where: { $0.queuedId == id }),
+                      let i = turns.firstIndex(where: { $0.turnId == nil && $0.state == .sending && $0.prompt == text }) {
+                // Our own press whose nonce was lost on the way: the one press of the same words.
+                turns[i].state = .queued
+                turns[i].queuedId = id
+            } else if !turns.contains(where: { $0.queuedId == id }) {
+                // Someone else's prompt (a pond member's), or ours from another surface: a dimmed row at the end of the
+                // transcript under its author, which becomes the turn's prompt in place when the host starts it.
+                turns.append(TimelineTurn(
+                    id: "queued-\(id)", turnId: nil, promptMessageId: nil, prompt: text, author: author, clientNonce: nonce, auto: false,
+                    steps: [], state: .queued, startedAt: e.at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: id,
+                    startSeq: nil))
             }
             if !queued.contains(where: { $0.id == id }) { queued.append(TimelineQueued(id: id, text: text, author: author, clientNonce: nonce)) }
 
         case .promptDequeued(let id):
             queued.removeAll { $0.id == id }
-            if let i = turns.firstIndex(where: { $0.queuedId == id && $0.turnId == nil }) {
-                turns[i].state = .notSent("Taken out of the queue")
-                turns[i].queuedId = nil
-            }
+            // Taken out (deleted, or steered into the running turn): the waiting row goes; nothing else moves.
+            turns.removeAll { $0.queuedId == id && $0.turnId == nil && $0.state == .queued }
 
         case .step(let s):
             guard let i = openIndex(s.turnId) else { return }

@@ -41,3 +41,64 @@ public enum MarkdownPreview {
         return real == base || real.hasPrefix(base.hasSuffix("/") ? base : base + "/") ? url : nil
     }
 }
+
+/// Where the reader is in a Markdown file, kept as a source line so Preview and Source can hand the place to each
+/// other. The rendered side's height is not known here, so each source line carries a weight for about how much room
+/// it takes rendered (a heading is taller than a blank line, an image far taller than a line of code, a long
+/// paragraph line wraps); the position is the weight above the line over the weight of the whole file. Good enough to
+/// land near the same heading or paragraph, never a pixel promise.
+public enum MarkdownAnchor {
+    /// Rendered weight of every line, in source order.
+    public static func weights(_ text: String) -> [Double] {
+        var inFence = false
+        return text.split(separator: "\n", omittingEmptySubsequences: false).map { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") || line.hasPrefix("~~~") { inFence.toggle(); return 0.6 }
+            if inFence { return 0.9 }
+            if line.isEmpty { return 0.35 }
+            if line.hasPrefix("#") {
+                let level = line.prefix { $0 == "#" }.count
+                return level <= 1 ? 3.2 : level == 2 ? 2.6 : 2.0
+            }
+            if line.hasPrefix("![") { return 10 }
+            if line.hasPrefix("|") { return 1.3 }
+            if line.hasPrefix("---") || line.hasPrefix("***") || line.hasPrefix("___") { return 1.0 }
+            return max(1.0, (Double(line.count) / 95).rounded(.up))
+        }
+    }
+
+    /// 0...1: how far down the file the top of `line` (1-based) sits.
+    public static func fraction(ofLine line: Int, in text: String) -> Double {
+        let w = weights(text)
+        let total = w.reduce(0, +)
+        guard total > 0, line > 1 else { return 0 }
+        let above = w.prefix(min(line - 1, w.count)).reduce(0, +)
+        return min(1, above / total)
+    }
+
+    /// The 1-based line whose top is at `fraction` of the way down: the inverse of `fraction(ofLine:in:)`.
+    public static func line(atFraction fraction: Double, in text: String) -> Int {
+        let w = weights(text)
+        let total = w.reduce(0, +)
+        guard total > 0, fraction > 0 else { return 1 }
+        let target = min(1, fraction) * total
+        var acc = 0.0
+        for (i, x) in w.enumerated() {
+            if acc + x > target { return i + 1 }
+            acc += x
+        }
+        return max(1, w.count)
+    }
+
+    /// The nearest heading at or above `line`, for a caller that can place headings exactly.
+    public static func heading(atOrAbove line: Int, in text: String) -> (line: Int, title: String)? {
+        var found: (Int, String)?
+        var inFence = false
+        for (i, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() where i < line {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("```") || t.hasPrefix("~~~") { inFence.toggle(); continue }
+            if !inFence, t.hasPrefix("#") { found = (i + 1, t.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)) }
+        }
+        return found
+    }
+}

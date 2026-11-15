@@ -435,7 +435,10 @@ struct SessionDetail: View {
         NativeTurnsContent(
             turns: timeline.turns, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
-            message: { m in rowView(.message(m, muted: false), footers: footers) }
+            message: { m in rowView(.message(m, muted: false), footers: footers) },
+            queuedActions: { t in
+                if let q = t.queuedId { NativeQueuedRowActions(session: session, queuedId: q, text: t.prompt) }
+            }
         )
         .environment(\.attachedPictures, attached)
         if model.native.key == session.key {
@@ -670,7 +673,7 @@ struct SessionDetail: View {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
             } else if isNative {
-                NativeQueueStack(session: session)
+                NativeQueueStack(session: session, inTranscript: Set(model.timeline(for: session.key).turns.compactMap { $0.turnId == nil && $0.state == .queued ? $0.queuedId : nil }))
             }
             if let card = nativeCard, !ThreadArchive.composerReplaced(session) { pinnedCard(card) }
             if ThreadArchive.composerReplaced(session) {
