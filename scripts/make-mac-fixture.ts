@@ -16,6 +16,7 @@ import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import type { FleetSession } from "../src/fleet/types.js";
 import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js";
 import { seal } from "../src/remote/remote-crypto.js";
+import { buildFlockThreadDoc, reduceFlockEvents } from "../src/remote/flock-thread.js";
 import { buildPondThreads } from "../src/remote/pond-threads.js";
 import { realDirectorDeps } from "../addons/rasanai/director.js";
 import { FilmService } from "../addons/rasanai/films.js";
@@ -446,6 +447,34 @@ fs.writeFileSync(
           ],
           access: { canMessage: false, reason: "The owner has turned off messaging for you in this pond." },
           seq: 1790305200005,
+        },
+        z,
+      ),
+      // A pond member's open thread (the real reducer and builder), read-only with the owner's reason.
+      flockThreadBox: seal(
+        key,
+        {
+          ...buildFlockThreadDoc(
+            "p-green",
+            {
+              id: "t-aarav",
+              title: "Add tests",
+              state: "working",
+              at: "2026-09-24T00:00:00.000Z",
+              by: "Aarav",
+              mode: "own",
+              poweredBy: "Powered by Aarav-mac · Flotilla",
+              locked: true,
+            },
+            { canMessage: false, reason: "The owner has turned off messaging for you in this pond." },
+            reduceFlockEvents({ entries: [], state: null, lastSeq: 0 }, [
+              { seq: 1, at: 1, type: "user", by: "m1", byName: "Aarav", text: "Add tests for the menu" },
+              { seq: 2, at: 2, type: "tool", id: "t1", label: "Read menu.ts", state: "done" },
+              { seq: 3, at: 3, type: "agent", text: "Writing them now." },
+              { seq: 4, at: 4, type: "approval", requestId: "r1", label: "Run npm test" },
+            ]),
+          ),
+          seq: 1790305200006,
         },
         z,
       ),

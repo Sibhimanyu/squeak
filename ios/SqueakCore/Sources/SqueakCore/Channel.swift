@@ -253,9 +253,9 @@ public struct Channel: Sendable {
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
     /// `pond` names the pond whose page is open (`PhoneSnapshot.Pond.id`); the Mac then sends `pondDetail` for it.
-    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, pond: String? = nil, now: Date = Date()) async throws {
+    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, pond: String? = nil, flock: String? = nil, now: Date = Date()) async throws {
         let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent,
-                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []), pond: pond)
+                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []), pond: pond, flock: flock)
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
@@ -454,6 +454,13 @@ public struct Channel: Sendable {
 
     /// The open pond's whole thread list, as the Mac wrote it for this phone; nil when it is not there (an older Mac, or
     /// not written yet) or is for another pond.
+    /// An open pond member's thread, while this phone's presence names it (`flock`); nil until the Mac has written it.
+    public func flockThread(_ threadId: String) async throws -> FlockThreadDoc? {
+        guard let document = try await store.get(path("live", FlockThreadDoc.doc(for: threadId))) else { return nil }
+        let doc = try ChannelCrypto.open(FlockThreadDoc.self, box: document.box, key: pairing.k)
+        return doc.thread == threadId ? doc : nil
+    }
+
     public func pondThreads(pondId: String) async throws -> PondThreads? {
         guard let document = try await store.get(path("live", PondThreads.doc(for: pondId))) else { return nil }
         let threads = try ChannelCrypto.open(PondThreads.self, box: document.box, key: pairing.k)
@@ -724,6 +731,8 @@ public struct Channel: Sendable {
         case orderManual(ids: [String])
         /// Back to newest first.
         case orderNewest
+        /// A message into a pond member's thread (`PondThreads.FlockThread.id`), through the pond.
+        case message(pondId: String, threadId: String, text: String)
     }
 
     /// The signed document for a `pond` command.
@@ -741,6 +750,9 @@ public struct Channel: Sendable {
             command = PondCommand(v: 1, kind: "pond", op: "order", ids: ids, nonce: nonceHex, expiresAt: expires)
         case .orderNewest:
             command = PondCommand(v: 1, kind: "pond", op: "order", mode: "newest", nonce: nonceHex, expiresAt: expires)
+        case .message(let pondId, let threadId, let text):
+            guard !text.isEmpty, text.count <= PondCommand.maxText else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "message", pondId: pondId, threadId: threadId, text: text, nonce: nonceHex, expiresAt: expires)
         }
         let box = try ChannelCrypto.seal(command, key: pairing.k)
         let id = UUID().uuidString.lowercased()

@@ -129,7 +129,7 @@ export class SqueakNativeObserver {
   }
 }
 
-function toFleetState(status: string, lastTurnEndedAt: string | null): FleetState {
+export function toFleetState(status: string, lastTurnEndedAt: string | null): FleetState {
   switch (status) {
     // The old names (cancelling, needs_*) are read for older data and the released Mac app.
     case "working":

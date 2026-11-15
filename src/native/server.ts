@@ -1,4 +1,5 @@
 import { buildDirectory, mapOrder, type DirSession, type PondDirectory } from "../flotilla/directory.js";
+import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -846,6 +847,32 @@ export class NativeServer {
         if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
         throw error;
       }
+    }
+    if (area === "projects" && id && sub === "threads" && parts.length === 4 && method === "GET") {
+      // Every non-archived chat of one project, newest first (the phone's pond page; the fleet snapshot only holds the
+      // newest 100 native chats). Rows carry only what a thread row and its stream need.
+      const project = store.getProject(id);
+      if (!project) throw new HttpError(404, "no such project");
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 200));
+      const streams = new Map(store.listWorkspaces(id).map((w) => [w.id, w] as const));
+      const rows = store
+        .listSessions()
+        .filter((s) => !s.archivedAt && (s.workspaceId ? streams.has(s.workspaceId) : s.cwd === project.rootPath))
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
+      return this.json(res, 200, {
+        total: rows.length,
+        threads: rows.slice(0, limit).map((s) => {
+          const w = s.workspaceId ? streams.get(s.workspaceId) : undefined;
+          return {
+            key: `squeak-native:${s.id}`,
+            title: s.title ?? "",
+            state: toFleetState(s.status, s.lastTurnEndedAt),
+            updatedAt: s.updatedAt,
+            cwd: s.cwd,
+            ...(w ? { workspaceTitle: w.title, branch: w.branch } : {}),
+          };
+        }),
+      });
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       // Archiving a gone stream happens in the background: the list never waits on a slow `git` start.

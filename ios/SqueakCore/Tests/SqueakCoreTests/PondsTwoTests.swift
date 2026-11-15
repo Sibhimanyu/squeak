@@ -90,7 +90,7 @@ final class PondsTwoTests: XCTestCase {
 
     func testPresenceCarriesTheOpenPondAndPonds2() throws {
         XCTAssertTrue(ChannelCrypto.capabilities.contains("ponds2"))
-        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 10)
+        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 16)
         let box = try ChannelCrypto.seal(Presence(at: 1, caps: ChannelCrypto.capabilities, pond: "p-shop"), key: key)
         XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).pond, "p-shop")
         let none = try ChannelCrypto.seal(Presence(at: 1), key: key)

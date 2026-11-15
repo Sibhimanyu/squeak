@@ -479,15 +479,19 @@ struct PondAllThreadsPage: View {
             if let flock = all.flock, !flock.isEmpty {
                 Section {
                     ForEach(flock) { thread in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(thread.title).font(.body).lineLimit(2)
-                            Text([thread.by, thread.poweredBy, thread.locked == true ? "Locked" : nil].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                                .font(.footnote).foregroundStyle(Theme.muted)
-                        }
-                        .accessibilityElement(children: .combine)
+                        NavigationLink {
+                            FlockThreadView(pondId: item.id, thread: thread)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(thread.title).font(.body).lineLimit(2)
+                                Text([thread.by, thread.poweredBy, thread.locked == true ? "Locked" : nil].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                                    .font(.footnote).foregroundStyle(Theme.muted)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }.tapHaptic(.navigate)
                     }
                 } header: { Text("From the flock") } footer: {
-                    Text(all.access?.canMessage == false ? (all.access?.reason ?? "You can read these but not message them.") : "These run on their starters' Macs. Open them in Squeak on your Mac.")
+                    Text(all.access?.canMessage == false ? (all.access?.reason ?? "You can read these but not message them.") : "These run on their starters' Macs. You can read them here and message the ones you're let into.")
                 }
             }
             if all.total > all.threads.count {

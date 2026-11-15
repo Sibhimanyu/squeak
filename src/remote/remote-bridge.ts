@@ -77,6 +77,7 @@ import {
   PHONE_NATIVE_CAP,
   type NativeProjectChoice,
   type PhoneNativeRequest,
+  type PhoneHostThread,
   type PhonePond,
   type PhonePondDetail,
   type PhonePondOrder,
@@ -94,6 +95,14 @@ import {
   liveHistoryHandle,
   LiveTurnPublisher,
 } from "./live-turn.js";
+import {
+  buildFlockThreadDoc,
+  flockThreadDoc,
+  FLOCK_MESSAGE_MAX,
+  PHONE_FLOCK_THREAD_CAP,
+  reduceFlockEvents,
+  type FlockReduction,
+} from "./flock-thread.js";
 import { buildPondThreads, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
@@ -426,6 +435,36 @@ const AUTO_ADD_PER_MINUTE = 5;
 const PONDS_REFRESH_MS = 30_000;
 const NATIVE_ICONS_REFRESH_MS = 60_000;
 const PHONE_PONDS_MAX = 30;
+/** A bare Squeak chat for a host-listed thread the snapshot lacks: enough to open it for history and queue, nothing more. */
+function hostThreadSession(thread: PhoneHostThread, pond: PhonePond): FleetSession {
+  return {
+    key: thread.key,
+    source: "squeak-native",
+    agent: "claude",
+    origin: "squeak",
+    sourceId: thread.key.replace(/^squeak-native:/, ""),
+    agentSessionId: null,
+    conductorSessionId: null,
+    cwd: thread.cwd,
+    repoName: pond.name,
+    ...(pond.projectId ? { projectId: pond.projectId } : {}),
+    branch: thread.branch ?? null,
+    title: thread.title || null,
+    state: thread.state as FleetSession["state"],
+    detail: null,
+    lastActivityAt: thread.at,
+    transcriptPath: null,
+    contextPercent: null,
+    retired: false,
+    baseRef: null,
+    costUsd: null,
+    pid: null,
+    alive: false,
+    git: null,
+    stateSource: "squeak",
+  } as FleetSession;
+}
+
 /** A phone whose presence caps name this reads a pond's prefs, streams, the order and the open pond's page. */
 export const PHONE_PONDS2_CAP = "ponds2";
 /** The pond a phone has open is read at most this often, and never for longer than 3 s. */
@@ -1207,6 +1246,12 @@ export class RemoteBridge {
   private pondThreadsOut: { pond: string; last: string } | null = null;
   /** The keys in that list: chats a phone may open from it though they are not active or Recent. */
   private pondThreadKeys = new Set<string>();
+  /** The member's thread the phone has open (`flock` in its presence), and the rows reduced from the pond's events. */
+  private presenceFlock: string | null = null;
+  private flockOut: { pond: string; thread: string; reduced: FlockReduction; readAt: number; last: string } | null =
+    null;
+  /** Host-listed chats the fleet snapshot lacks (older than its newest 100), so they can be opened from the pond page. */
+  private pondHostSessions = new Map<string, FleetSession>();
   /** How many recent chats the phone asked for ("Show more"); a view preference, not a command. */
   private recentWanted = PHONE_RECENT_LIMIT;
   private readonly attachments = new PhoneAttachments();
@@ -1434,6 +1479,7 @@ export class RemoteBridge {
     this.live?.stop();
     this.subagentFeed?.stop();
     this.dropPondThreads(this.config);
+    this.dropFlockThread(this.config);
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -1625,6 +1671,7 @@ export class RemoteBridge {
     this.live?.stop();
     this.subagentFeed?.stop();
     this.dropPondThreads(this.config);
+    this.dropFlockThread(this.config);
     void this.purgeHistoryCloud();
     // The old channel id must not stay linked on the relay.
     if (this.config?.account)
@@ -1673,6 +1720,9 @@ export class RemoteBridge {
         this.updateLive();
         await this.updatePondThreads(config).catch((error: unknown) =>
           logger.debug("pond threads failed", { error: error instanceof Error ? error.message : String(error) }),
+        );
+        await this.updateFlockThread(config).catch((error: unknown) =>
+          logger.debug("flock thread failed", { error: error instanceof Error ? error.message : String(error) }),
         );
         // Its own task: a first upload takes seconds and must never hold up a pass (it never throws).
         void this.syncHistoryCloud(config);
@@ -1754,7 +1804,7 @@ export class RemoteBridge {
     if (session && this.handleOf(session)) return { session, active: false };
     // An older thread listed on the pond page the phone has open: opened like a Recent chat (history and queue).
     if (this.pondThreadKeys.has(key)) {
-      const listed = snapshot.sessions.find((candidate) => candidate.key === key);
+      const listed = snapshot.sessions.find((candidate) => candidate.key === key) ?? this.pondHostSessions.get(key);
       if (listed && this.handleOf(listed)) return { session: listed, active: false };
     }
     return null;
@@ -1777,7 +1827,10 @@ export class RemoteBridge {
     if (!allowed || !pond) {
       // The document goes at once; the keys stay while the phone is open, since opening a thread from the page
       // leaves the pond page (an older thread opens through history, which needs its key to be known).
-      if (!this.phoneOpen()) this.pondThreadKeys = new Set();
+      if (!this.phoneOpen()) {
+        this.pondThreadKeys = new Set();
+        this.pondHostSessions = new Map();
+      }
       if (out) {
         this.pondThreadsOut = null;
         await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
@@ -1787,12 +1840,26 @@ export class RemoteBridge {
     if (out && out.pond !== pond.id) {
       await this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond)));
     }
+    // The host's own list of the project's chats (bounded like every host read); a down host adds nothing.
+    const hostThreads = pond.projectId
+      ? ((await Promise.race([
+          this.deps.native?.projectThreads?.(pond.projectId).catch(() => null) ?? Promise.resolve(null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000).unref()),
+        ])) ?? [])
+      : [];
     const doc = buildPondThreads(
       pond,
       this.deps.snapshot().sessions,
       (session) => this.pondOf(session)?.id === pond.id,
       (session) => chatTitle(session) ?? sessionLabel(session),
       (session) => isUnclaimedHeadless(session),
+      hostThreads,
+    );
+    const known = new Set(this.deps.snapshot().sessions.map((candidate) => candidate.key));
+    this.pondHostSessions = new Map(
+      hostThreads
+        .filter((thread) => !known.has(thread.key))
+        .map((thread) => [thread.key, hostThreadSession(thread, pond)] as const),
     );
     this.pondThreadKeys = new Set(doc.streams.flatMap((stream) => stream.threads.map((thread) => thread.key)));
     // Other members' threads and this person's switches, from the pond itself (Flotilla), bounded like every host read.
@@ -1813,11 +1880,82 @@ export class RemoteBridge {
     });
   }
 
+  /** Events of an open member thread are read at most this often. */
+  private static readonly FLOCK_READ_MS = 2_000;
+
+  /**
+   * A pond member's thread the phone has open: its events read through the pond (never from the starter's files),
+   * reduced to rows and written sealed into `live` when they change, deleted the moment the phone leaves, closes or
+   * loses `see`. Messaging is a separate signed `pond` command; nothing here can write to the thread.
+   */
+  private async updateFlockThread(config: RemoteConfig): Promise<void> {
+    const pondId = this.presencePond;
+    const pond = pondId ? this.pondsCache.value?.find((candidate) => candidate.id === pondId) : undefined;
+    const thread = this.presenceFlock;
+    const native = this.deps.native;
+    const allowed =
+      Boolean(this.deps.store.watch) &&
+      pond !== undefined &&
+      thread !== null &&
+      Boolean(native?.flockThread && native.flockEvents) &&
+      this.phoneCaps.includes(PHONE_FLOCK_THREAD_CAP) &&
+      this.phoneOpen() &&
+      this.hasPairedPhone();
+    const out = this.flockOut;
+    if (!allowed || !pond || !thread || !native?.flockThread || !native.flockEvents) {
+      if (out) {
+        this.flockOut = null;
+        await this.deps.store.delete(this.channel(config, "live", flockThreadDoc(out.thread)));
+      }
+      return;
+    }
+    const hostId = pond.pondId ?? pond.id;
+    if (out && out.thread !== thread) {
+      await this.deps.store.delete(this.channel(config, "live", flockThreadDoc(out.thread)));
+    }
+    const current = out && out.thread === thread && out.pond === pond.id ? out : null;
+    if (current && this.now() - current.readAt < RemoteBridge.FLOCK_READ_MS) return;
+    const bounded = <T>(promise: Promise<T | null>): Promise<T | null> =>
+      Promise.race([
+        promise.catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+      ]);
+    const found = await bounded(native.flockThread(hostId, thread));
+    if (!found) {
+      // Not theirs to see (any more): nothing is published, and what was is taken back.
+      if (out) {
+        this.flockOut = null;
+        await this.deps.store.delete(this.channel(config, "live", flockThreadDoc(out.thread)));
+      }
+      return;
+    }
+    const before: FlockReduction = current?.reduced ?? { entries: [], state: null, lastSeq: 0 };
+    const read = await bounded(native.flockEvents(hostId, thread, before.lastSeq));
+    const reduced = read ? reduceFlockEvents(before, read.events) : before;
+    const doc = buildFlockThreadDoc(pond.id, found.thread, found.access, reduced);
+    const body = JSON.stringify(doc);
+    const unchanged = current !== null && current.last === body;
+    this.flockOut = { pond: pond.id, thread, reduced, readAt: this.now(), last: body };
+    if (unchanged) return;
+    await this.deps.store.set(this.channel(config, "live", flockThreadDoc(thread)), {
+      box: this.sealForPhone(config, { ...doc, seq: this.nextSeq() }),
+      at: this.now(),
+    });
+  }
+
+  private dropFlockThread(config: RemoteConfig | null): void {
+    const out = this.flockOut;
+    this.flockOut = null;
+    if (out && config)
+      void this.deps.store.delete(this.channel(config, "live", flockThreadDoc(out.thread))).catch(() => undefined);
+  }
+
   /** Delete a published pond thread list (stop, reset); best effort. */
   private dropPondThreads(config: RemoteConfig | null): void {
     const out = this.pondThreadsOut;
     this.pondThreadsOut = null;
     this.pondThreadKeys = new Set();
+    this.pondHostSessions = new Map();
     if (out && config)
       void this.deps.store.delete(this.channel(config, "live", pondThreadsDoc(out.pond))).catch(() => undefined);
   }
@@ -2109,6 +2247,9 @@ export class RemoteBridge {
       const openPond = (presence as { pond?: unknown }).pond;
       this.presencePond =
         typeof openPond === "string" && openPond.length > 0 && openPond.length <= 200 ? openPond : null;
+      const openFlock = (presence as { flock?: unknown }).flock;
+      this.presenceFlock =
+        typeof openFlock === "string" && openFlock.length > 0 && openFlock.length <= 200 ? openFlock : null;
       this.presenceWatching =
         typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
       const wanted =
@@ -3141,8 +3282,24 @@ export class RemoteBridge {
       this.log(device.name, "rejected", `pond: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    const allowed = new Set(["v", "kind", "op", "pondId", "hidden", "ids", "mode", "nonce", "expiresAt"]);
+    const allowed = new Set([
+      "v",
+      "kind",
+      "op",
+      "pondId",
+      "hidden",
+      "ids",
+      "mode",
+      "threadId",
+      "text",
+      "nonce",
+      "expiresAt",
+    ]);
     if (command.v !== 1 || Object.keys(command).some((key) => !allowed.has(key))) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.op === "message") return this.handleFlockMessage(device, id, command, refuse);
+    if (command.threadId !== undefined || command.text !== undefined) {
       return refuse("Not a request this Mac understands.");
     }
     const native = this.deps.native;
@@ -3199,6 +3356,62 @@ export class RemoteBridge {
     await this.refreshPonds();
     this.nudgePublish(0);
     return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * A message from the phone into a pond member's thread: `{ op: "message", pondId, threadId, text }`, exactly those
+   * keys. The thread must be one this Mac lists for the pond right now (never a made-up id), and this person's switches
+   * are checked before it goes; it then travels Mac to pond to the starter's host, which enforces them again.
+   */
+  private async handleFlockMessage(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+    refuse: (reason: string) => { write: boolean; result: Record<string, unknown> },
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const native = this.deps.native;
+    if (!native?.flockThread || !native.flockMessage)
+      return refuse("This Mac can't message a pond thread from a phone.");
+    if (
+      typeof command.pondId !== "string" ||
+      typeof command.threadId !== "string" ||
+      typeof command.text !== "string" ||
+      command.hidden !== undefined ||
+      command.ids !== undefined ||
+      command.mode !== undefined ||
+      command.threadId.length === 0 ||
+      command.threadId.length > 200
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const text = command.text.trim();
+    if (!text || text.length > FLOCK_MESSAGE_MAX) return refuse("A message is 1 to 4000 characters.");
+    const pond = this.pondsCache.value?.find((candidate) => candidate.id === command.pondId);
+    if (!pond) return refuse("That pond isn't on your phone any more.");
+    const hostId = pond.pondId ?? pond.id;
+    try {
+      const found = await native.flockThread(hostId, command.threadId);
+      if (!found) return refuse("That thread isn't in the pond any more.");
+      if (!found.access.canMessage)
+        return refuse(found.access.reason ?? "You can read this thread but not message it.");
+      const sent = await native.flockMessage(hostId, command.threadId, text);
+      if (!sent.ok) return refuse(sent.line);
+      this.log(device.name, "sent", `message to ${found.thread.by.slice(0, 24)}'s thread`);
+      this.flockOut = this.flockOut ? { ...this.flockOut, readAt: 0 } : null;
+      this.nudgePublish(0);
+      return { write: true, result: { id, status: "sent", ...(sent.line ? { reason: sent.line } : {}) } };
+    } catch (error) {
+      logger.debug("could not message a pond thread", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return refuse(
+        error instanceof NativeHostError && error.kind === "down"
+          ? "Squeak's session host isn't running."
+          : error instanceof NativeHostError && error.status === 403
+            ? error.message
+            : "The Mac didn't take that message.",
+      );
+    }
   }
 
   /**

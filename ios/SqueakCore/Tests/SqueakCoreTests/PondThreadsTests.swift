@@ -11,7 +11,7 @@ final class PondThreadsTests: XCTestCase {
 
     func testPresenceNamesPondthreads() {
         XCTAssertTrue(ChannelCrypto.capabilities.contains("pondthreads"))
-        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 10)
+        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 16)
         XCTAssertTrue(ChannelCrypto.capabilities.allSatisfy { $0.count <= 20 })
     }
 
@@ -49,5 +49,40 @@ final class PondThreadsTests: XCTestCase {
         XCTAssertEqual(session.title, "Menu")
         XCTAssertEqual(session.state, "finished")
         XCTAssertNil(session.message)
+    }
+
+    func testFlockThreadDocumentIdMatchesTheMacs() {
+        // node: sha256("flock:t-aarav") base64url, first 22 characters, then "-f".
+        XCTAssertEqual(FlockThreadDoc.doc(for: "t-aarav"), "2CxkItxZ1hQBNjTh0WqaZt-f")
+        XCTAssertTrue(ChannelCrypto.capabilities.contains("flockthread"))
+    }
+
+    func testDecodesAnOpenFlockThreadAsReadOnlyWithTheReason() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "mac-made", withExtension: "json", subdirectory: "Fixtures"))
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        let payload = try PairingPayload.parse(raw["pairingURL"] as! String)
+        let doc = try ChannelCrypto.open(FlockThreadDoc.self, box: raw["flockThreadBox"] as! String, key: payload.k)
+        XCTAssertEqual(doc.thread, "t-aarav")
+        XCTAssertEqual(doc.entries.map(\.role), ["user", "tool", "agent", "approval"])
+        XCTAssertEqual(doc.entries.first?.by, "Aarav")
+        XCTAssertEqual(doc.entries[1].done, true)
+        XCTAssertFalse(doc.access.canMessage)
+        XCTAssertEqual(doc.readOnlyReason, "The owner has turned off messaging for you in this pond.")
+        XCTAssertEqual(doc.locked, true)
+    }
+
+    func testAMessageableThreadHasNoReadOnlyReason() {
+        let doc = FlockThreadDoc(pond: "p", thread: "t", title: "T", by: "A", state: "idle", mode: "shared",
+                                 access: .init(canMessage: true), entries: [])
+        XCTAssertNil(doc.readOnlyReason)
+    }
+
+    func testAMessageCommandCarriesExactlyTheKeysTheMacChecks() throws {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        let c = Channel(pairing: PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac"), deviceId: "phone-1", transport: FakeTransport())
+        let (_, doc) = try c.pondDocument(.message(pondId: "p", threadId: "t", text: "go on"), signer: SoftwareSigner())
+        let json = try ChannelCrypto.open([String: AnyCodable].self, box: doc.box, key: key)
+        XCTAssertEqual(Set(json.keys), ["v", "kind", "op", "pondId", "threadId", "text", "nonce", "expiresAt"])
+        XCTAssertThrowsError(try c.pondDocument(.message(pondId: "p", threadId: "t", text: ""), signer: SoftwareSigner()))
     }
 }

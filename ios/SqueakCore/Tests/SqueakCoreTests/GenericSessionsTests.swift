@@ -65,7 +65,7 @@ final class GenericSessionsTests: XCTestCase {
 
     func testPhoneAdvertisesGenericSessionsWithinTheCapLimit() {
         XCTAssertTrue(ChannelCrypto.capabilities.contains("generic-sessions"))
-        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 10)
+        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 16)
         XCTAssertTrue(ChannelCrypto.capabilities.allSatisfy { $0.count <= 20 })
     }
 

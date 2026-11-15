@@ -1528,18 +1528,23 @@ public struct SetupCommand: Codable, Equatable, Sendable {
 public struct PondCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
-    /// "hide" or "order".
+    /// "hide", "order" or "message".
     public let op: String
     public var pondId: String? = nil
     public var hidden: Bool? = nil
     public var ids: [String]? = nil
     /// "newest" (with op "order" and no ids).
     public var mode: String? = nil
+    /// "message": the member's thread and the text to send into it.
+    public var threadId: String? = nil
+    public var text: String? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
     /// The Mac refuses a longer list.
     public static let maxIds = 200
+    /// The Mac refuses a longer message.
+    public static let maxText = 4000
 }
 
 /// Close a Conductor chat's tab, as closing it in Conductor does. The Mac refuses a chat that is working.

@@ -2,7 +2,9 @@
 
 ## [1.28.1] - 2026-11-15 (iOS)
 
+- Squeak chats now show their history, your prompts and the queue (a member's queued messages carry their name), and an empty chat loads the newest page at once.
 - A pond row shows what its threads are doing where the count was: a working glyph, the needs-you count, or an error mark. Streams get a dot-grid glyph that flows while a thread works, and stays still when idle, steady for needs you and errors (still under Reduce Motion). Decided by your Mac, so every surface agrees.
+- Open a pond member's thread from "From the flock": read it live and, where the owner and its starter allow, message it (otherwise it is read-only, with the reason). A pond's thread list now holds every thread of the project, not just the newest 100.
 
 ## [1.28.0] - 2026-11-15 (iOS)
 
