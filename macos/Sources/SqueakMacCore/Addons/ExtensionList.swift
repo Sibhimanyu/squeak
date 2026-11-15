@@ -50,17 +50,14 @@ public enum ExtensionList {
 
     /// Daemon add-ons first, then the built-ins. A nil channel answer reads as not added, never as an error.
     public static func items(
-        addons: [AddonInfo], telegram: ChannelsStatus.Telegram?, cliq: ChannelsStatus.Cliq?, voice: VoiceSettings?,
-        builtInAddons: Set<String>? = nil
+        addons: [AddonInfo], telegram: ChannelsStatus.Telegram?, cliq: ChannelsStatus.Cliq?, voice: VoiceSettings?
     ) -> [ExtensionItem] {
         var out = addons.map { info -> ExtensionItem in
             let status: ExtensionStatus = info.enabled ? (info.available ? .added : .needsAttention) : .notAdded
-            let missing = builtInAddons.map { !$0.contains(info.id) } ?? false
-            var item = ExtensionItem(
+            let item = ExtensionItem(
                 id: info.id, name: info.name, blurb: info.blurb, kind: .addon, status: status, section: section(forAddon: info.id),
-                canAdd: info.available && !missing,
+                canAdd: info.available,
                 note: info.available ? nil : "\(info.name) isn't installed on this Mac.")
-            item.notInThisBuild = missing && !info.enabled
             return item
         }
         let tgStatus: ExtensionStatus = telegram.map { $0.configured ? ($0.polling == .error ? .needsAttention : .added) : .notAdded } ?? .notAdded
