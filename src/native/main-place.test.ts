@@ -3,7 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { vi, afterEach, describe, expect, it } from "vitest";
+
+// Every git launch can stall ~3 s on this Mac (endpoint security), so these git-heavy tests get room.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 import { AgentTools } from "./agent-tools.js";
 import { GitActions } from "./git-actions.js";

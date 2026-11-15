@@ -5,6 +5,9 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+// Every git launch can stall ~3 s on this Mac (endpoint security), so these git-heavy tests get room.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
+
 import { type CommandRunner, planClones, runCommand } from "./clone-deps.js";
 import { NativeStore } from "./store.js";
 import type { WorkspaceRow } from "./types.js";
