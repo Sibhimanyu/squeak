@@ -52,7 +52,7 @@ extension AppModel {
         watchPondThreads(id)
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond
-        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond); await refresh() }
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: presenceFlock); await refresh() }
     }
 
     /// The open pond's whole thread list: the Mac writes it only while this pond is open here, so ask on open and read it
@@ -102,6 +102,49 @@ extension AppModel {
             invites: (detail.invites ?? []).map { .init(label: $0.label, expiresAt: $0.expiresAt) },
             waiting: (detail.waiting ?? []).map(\.name),
             ripples: (detail.ripples ?? []).map { .init(text: $0.text, at: $0.at, who: $0.who) })
+    }
+
+    /// The member's thread open on screen, for presence: the Mac then publishes its rows.
+    var presenceFlock: String? { openFlockId }
+
+    /// Opens (or, with nil, leaves) a pond member's thread: presence names it so the Mac writes its rows, which are read
+    /// while it stays open (sooner while the first has not come). An older Mac never writes one; the page then says so.
+    func openFlock(_ id: String?) {
+        guard openFlockId != id else { return }
+        openFlockId = id
+        flockTask?.cancel()
+        flockTask = nil
+        guard !demo, let channel else { return }
+        let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: id) }
+        guard let id else { return }
+        flockLoaded = flockDocs[id] != nil
+        flockTask = Task { @MainActor [weak self] in
+            var misses = 0
+            while !Task.isCancelled {
+                if let doc = try? await channel.flockThread(id), !Task.isCancelled {
+                    if self?.flockDocs[id] != doc { self?.flockDocs[id] = doc }
+                    self?.flockLoaded = true
+                    misses = 0
+                } else {
+                    misses += 1
+                    if misses >= 8 { self?.flockLoaded = true }
+                }
+                let wait: UInt64 = self?.flockDocs[id] == nil ? 1_500_000_000 : 2_500_000_000
+                try? await Task.sleep(nanoseconds: wait)
+            }
+        }
+    }
+
+    func flockDoc(_ id: String) -> FlockThreadDoc? { flockDocs[id] }
+
+    /// Sends a message into a member's thread through the pond. Returns nil when the Mac took it, else the reason.
+    func sendFlockMessage(pondId: String, threadId: String, text: String) async -> String? {
+        if demo { return "Not available in the demo." }
+        guard let channel else { return "Not connected to your Mac." }
+        let result = try? await channel.sendPond(.message(pondId: pondId, threadId: threadId, text: text), signer: signer)
+        guard let result else { return "Your Mac didn't answer in time." }
+        return result.sent ? nil : (result.reason ?? "The Mac didn't take that message.")
     }
 
     func sendPondHidden(_ id: String, _ hidden: Bool) {

@@ -266,6 +266,20 @@ describe("NativeServer", () => {
     ).toBe(409);
   });
 
+  it("lists one project's chats newest first for the phone's pond page", async () => {
+    const h = await start();
+    const p = h.store.createProject({ name: "app", rootPath: "/tmp/app", defaultBranch: "main" });
+    const ws = h.store.createWorkspace({ projectId: p.id, name: "teal", path: "/tmp/app-teal", branch: "me/teal" });
+    const a = await call(h, "POST", "/native/sessions", { workspaceId: ws.id, agent: "claude", model: "opus-5-1m" });
+    expect(a.status).toBe(201);
+    const r = await call(h, "GET", `/native/projects/${p.id}/threads?limit=5`);
+    expect(r.status).toBe(200);
+    expect(r.json.total).toBe(1);
+    expect(r.json.threads[0]).toMatchObject({ key: `squeak-native:${a.json.session.id}`, branch: "me/teal" });
+    expect((await call(h, "GET", "/native/projects/nope/threads")).status).toBe(404);
+    expect((await call(h, "GET", `/native/projects/${p.id}/threads`, undefined, null)).status).toBe(401);
+  });
+
   it("validates input: JSON only, required fields, unknown ids", async () => {
     const h = await start();
     const notJson = await fetch(h.base + "/native/sessions", {

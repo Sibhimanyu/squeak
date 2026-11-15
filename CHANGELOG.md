@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.28.1] - 2026-11-15 (iOS)
+
+- Open a pond member's thread from "From the flock": read it live and, where the owner and its starter allow, message it (otherwise it is read-only, with the reason). A pond's thread list now holds every thread of the project, not just the newest 100.
+
 ## [1.28.0] - 2026-11-15 (iOS)
 
 - Chats open from Squeak's cloud when your Mac is asleep, and on a new iPhone: the last 30 days of each chat, sealed with your key so Squeak can't read it. When the Mac wakes it brings what came after, with nothing repeated. Turn it off in Squeak for Mac, under Account.

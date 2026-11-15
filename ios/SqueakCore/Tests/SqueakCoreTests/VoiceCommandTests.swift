@@ -312,7 +312,7 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertFalse(ChannelCrypto.capabilities.contains("calls"))
         XCTAssertEqual(ChannelCrypto.callsCapability, "calls")
         XCTAssertLessThanOrEqual(ChannelCrypto.callsCapability.count, 20)
-        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 10)
+        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 16)
     }
 
     func testCallTextWords() {

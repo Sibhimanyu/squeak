@@ -36,6 +36,7 @@ import { open, pairingCode, seal } from "./remote-crypto.js";
 import { AddonHost } from "../addon-host.js";
 import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
+import { flockThreadDoc, reduceFlockEvents, type FlockThreadDoc } from "./flock-thread.js";
 import { pondThreadsDoc, type PondThreadsDoc } from "./pond-threads.js";
 import { historyDeltaDoc } from "./history-delta.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
@@ -6627,6 +6628,217 @@ describe("RemoteBridge pond threads (the open pond's whole list)", () => {
     await f.bridge.tick();
     await f.bridge.tick();
     expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+});
+
+describe("RemoteBridge pond threads from the host's own list", () => {
+  const pond = {
+    id: "proj-green",
+    name: "greenroom",
+    shared: false,
+    members: [],
+    projectId: "proj-green",
+    folder: "/repos/greenroom",
+    streams: [] as Array<{ id: string; name: string; branch?: string }>,
+  };
+  // 120 chats the snapshot knows (the newest 100 of a bigger set) and 30 older ones only the host lists.
+  const hostRows = Array.from({ length: 30 }, (_, i) => ({
+    key: `squeak-native:old${i}`,
+    title: `Old ${i}`,
+    state: "finished",
+    at: new Date(NOW - (200 + i) * 86_400_000).toISOString(),
+    cwd: "/repos/greenroom",
+  }));
+  const native = {
+    projects: () => [],
+    models: () => [],
+    allowBypass: () => false,
+    ponds: async () => [pond],
+    projectThreads: async () => hostRows,
+  } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+  const snap = Array.from({ length: 100 }, (_, i) =>
+    session({
+      key: `squeak-native:new${i}`,
+      sourceId: `new${i}`,
+      conductorSessionId: null,
+      origin: "squeak",
+      projectId: "proj-green",
+      cwd: "/repos/greenroom",
+      title: `New ${i}`,
+      lastActivityAt: new Date(NOW - i * 3_600_000).toISOString(),
+    }),
+  );
+
+  it("lists threads older than the snapshot's newest 100, and opens one", async () => {
+    const f = fixture({ native, streaming: true });
+    f.emit(snap, snap);
+    await f.pair();
+    await f.store.set(`${f.channel}/state/presence`, {
+      box: seal(f.payload.k, { at: NOW, caps: ["ponds2", "pondthreads"], pond: "proj-green" }),
+    });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const doc = await f.store.get(`${f.channel}/live/${pondThreadsDoc("proj-green")}`);
+    const body = open(f.payload.k, doc!.box as string) as PondThreadsDoc;
+    expect(body.total).toBe(130);
+    const keys = body.streams.flatMap((s) => s.threads.map((t) => t.key));
+    expect(keys).toContain("squeak-native:old29");
+    expect(keys).toContain("squeak-native:new0");
+    expect(keys).toHaveLength(130);
+    f.bridge.stop();
+  });
+});
+
+describe("flock thread rows", () => {
+  const ev = (seq: number, body: Record<string, unknown>) => ({ seq, at: seq, ...body });
+
+  it("reduces the pond's events to rows, in any order and with repeats", () => {
+    const events = [
+      ev(3, { type: "tool", id: "t1", label: "Read a.ts", state: "running" }),
+      ev(1, { type: "user", by: "m1", byName: "Aarav", text: "hello" }),
+      ev(2, { type: "agent", text: "hi" }),
+      ev(4, { type: "tool", id: "t1", label: "Read a.ts", state: "done" }),
+      ev(5, { type: "question", requestId: "r1", text: "Which one?", options: [] }),
+      ev(6, { type: "resolved", requestId: "r1" }),
+      ev(7, { type: "state", state: "waiting" }),
+      ev(8, { type: "timeline", ev: { seq: 1 } }),
+    ];
+    const once = reduceFlockEvents({ entries: [], state: null, lastSeq: 0 }, events);
+    const twice = reduceFlockEvents(once, events);
+    expect(twice).toEqual(once);
+    expect(once.entries.map((e) => [e.role, e.text, e.done ?? false])).toEqual([
+      ["user", "hello", false],
+      ["agent", "hi", false],
+      ["tool", "Read a.ts", true],
+      ["question", "Which one?", true],
+    ]);
+    expect(once.entries[0]!.by).toBe("Aarav");
+    expect(once.state).toBe("waiting");
+    expect(once.lastSeq).toBe(8);
+  });
+});
+
+describe("RemoteBridge open flock thread", () => {
+  const pond = { id: "pond-x", name: "shared", shared: true, members: [], kind: "joined", pondId: "pond-x" };
+  const thread = {
+    id: "th1",
+    title: "Aarav's thread",
+    state: "working",
+    at: new Date(NOW).toISOString(),
+    by: "Aarav",
+    mode: "shared" as const,
+  };
+  const make = (access: { canMessage: boolean; reason?: string }, sent: string[] = []) => {
+    const native = {
+      projects: () => [],
+      models: () => [],
+      allowBypass: () => false,
+      ponds: async () => [pond],
+      flockThread: async (_p: string, t: string) => (t === "th1" ? { thread, access } : null),
+      flockEvents: async () => ({
+        events: [
+          { seq: 1, at: 1, type: "user", by: "m", byName: "Aarav", text: "go" },
+          { seq: 2, at: 2, type: "agent", text: "working on it" },
+        ],
+        lastSeq: 2,
+      }),
+      flockMessage: async (_p: string, _t: string, text: string) => {
+        sent.push(text);
+        return { ok: true, line: "Waiting for Aarav's Mac to pick it up." };
+      },
+    } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+    return fixture({ native, streaming: true });
+  };
+  const presence = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...extra }) });
+  const read = async (f: ReturnType<typeof fixture>) => {
+    const doc = await f.store.get(`${f.channel}/live/${flockThreadDoc("th1")}`);
+    return doc ? (open(f.payload.k, doc.box as string) as FlockThreadDoc) : null;
+  };
+  const caps = ["ponds2", "pondthreads", "flockthread"];
+
+  it("serves the thread's rows and the access, only while open", async () => {
+    const f = make({ canMessage: true });
+    await f.pair();
+    await presence(f, { caps, pond: "pond-x" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    await presence(f, { caps, pond: "pond-x", flock: "th1" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const doc = await read(f);
+    expect(doc?.entries.map((e) => [e.role, e.text])).toEqual([
+      ["user", "go"],
+      ["agent", "working on it"],
+    ]);
+    expect(doc?.access).toEqual({ canMessage: true });
+    await presence(f, { caps, pond: "pond-x" });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+
+  it("serves nothing for a phone that does not name flockthread", async () => {
+    const f = make({ canMessage: true });
+    await f.pair();
+    await presence(f, { caps: ["ponds2", "pondthreads"], pond: "pond-x", flock: "th1" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+
+  const message = async (f: ReturnType<typeof fixture>, over: Record<string, unknown> = {}) => {
+    await f.bridge.tick();
+    await f.store.set(
+      `${f.channel}/commands/m1`,
+      f.pondCommand({
+        op: "message",
+        pondId: "pond-x",
+        threadId: "th1",
+        text: "please continue",
+        hidden: undefined,
+        ...over,
+      }),
+    );
+    await f.bridge.tick();
+    return f.result("m1") as { status: string; reason?: string };
+  };
+
+  it("sends a message through the pond when this person may", async () => {
+    const sent: string[] = [];
+    const f = make({ canMessage: true }, sent);
+    await f.pair();
+    await presence(f, { caps, pond: "pond-x" });
+    const result = await message(f);
+    expect(result.status).toBe("sent");
+    expect(sent).toEqual(["please continue"]);
+    f.bridge.stop();
+  });
+
+  it("refuses with the reason when the owner or the starter switched messaging off", async () => {
+    const sent: string[] = [];
+    const f = make({ canMessage: false, reason: "The owner has turned off messaging for you in this pond." }, sent);
+    await f.pair();
+    await presence(f, { caps, pond: "pond-x" });
+    const result = await message(f);
+    expect(result).toMatchObject({
+      status: "refused",
+      reason: "The owner has turned off messaging for you in this pond.",
+    });
+    expect(sent).toEqual([]);
+    f.bridge.stop();
+  });
+
+  it("refuses an unknown thread, an empty text and extra keys", async () => {
+    const sent: string[] = [];
+    const f = make({ canMessage: true }, sent);
+    await f.pair();
+    await presence(f, { caps, pond: "pond-x" });
+    expect((await message(f, { threadId: "nope" })).status).toBe("refused");
+    expect(sent).toEqual([]);
     f.bridge.stop();
   });
 });

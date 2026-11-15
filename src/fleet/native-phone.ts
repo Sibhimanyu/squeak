@@ -135,6 +135,23 @@ export interface PhoneFlockThread {
   locked?: true;
 }
 
+/** One chat of a project as the host lists it (`GET /native/projects/<id>/threads`): what a thread row and its stream need. */
+export interface PhoneHostThread {
+  key: string;
+  title: string;
+  state: string;
+  at: string;
+  cwd: string;
+  workspaceTitle?: string;
+  branch?: string;
+}
+
+/** Whether this person may message one thread right now (the member switches and the starter's own), and why not. */
+export interface PhoneFlockAccess {
+  canMessage: boolean;
+  reason?: string;
+}
+
 /** What this person may do in the pond right now (the owner's switches), and why not when they may not. */
 export interface PhoneFlock {
   threads: PhoneFlockThread[];
@@ -229,6 +246,17 @@ export interface RemoteNative {
   pondDetail?(pondId: string): Promise<PhonePondDetail | null>;
   /** The pond's threads other members started, and this person's switches (`GET /native/ponds/<id>`); null when unknown. */
   pondFlock?(pondId: string): Promise<PhoneFlock | null>;
+  /** Every non-archived thread of a project (the host's own list, newest 200), for a pond's whole thread page. */
+  projectThreads?(projectId: string): Promise<PhoneHostThread[] | null>;
+  /** One member's thread and what this person may do in it; null when it is not (or no longer) theirs to see. */
+  flockThread?(
+    pondId: string,
+    threadId: string,
+  ): Promise<{ thread: PhoneFlockThread; access: PhoneFlockAccess } | null>;
+  /** The thread's events after `after` through the pond (`GET /native/ponds/<id>/threads/<tid>/events`); null when unknown. */
+  flockEvents?(pondId: string, threadId: string, after: number): Promise<{ events: unknown[]; lastSeq: number } | null>;
+  /** Sends a message to a member's thread through the pond; the starter's host enforces. `ok: false` carries the reason. */
+  flockMessage?(pondId: string, threadId: string, text: string): Promise<{ ok: boolean; line: string }>;
   /** Hide or show a pond's project in the sidebar (`PATCH /native/projects/<key>/prefs`, what the Mac's Hide does). */
   setPondHidden?(key: string, hidden: boolean): Promise<void>;
   /** `PUT /native/pond-order`: manual with these keys, or back to newest first. */
@@ -410,6 +438,29 @@ export class NativePhone implements RemoteNative {
     }
   }
 
+  async projectThreads(projectId: string): Promise<PhoneHostThread[] | null> {
+    try {
+      const body = await this.call("GET", `/native/projects/${encodeURIComponent(projectId)}/threads?limit=200`);
+      if (!Array.isArray(body.threads)) return null;
+      return (body.threads as Array<Record<string, unknown>>).flatMap((t): PhoneHostThread[] => {
+        if (typeof t.key !== "string" || typeof t.updatedAt !== "string" || typeof t.cwd !== "string") return [];
+        return [
+          {
+            key: t.key,
+            title: typeof t.title === "string" ? t.title : "",
+            state: typeof t.state === "string" ? t.state : "idle",
+            at: t.updatedAt,
+            cwd: t.cwd,
+            ...(typeof t.workspaceTitle === "string" ? { workspaceTitle: t.workspaceTitle } : {}),
+            ...(typeof t.branch === "string" ? { branch: t.branch } : {}),
+          },
+        ];
+      });
+    } catch {
+      return null;
+    }
+  }
+
   async pondFlock(pondId: string): Promise<PhoneFlock | null> {
     let view: Record<string, unknown>;
     try {
@@ -417,6 +468,10 @@ export class NativePhone implements RemoteNative {
     } catch {
       return null;
     }
+    return this.pondFlockOf(view);
+  }
+
+  private pondFlockOf(view: Record<string, unknown>): PhoneFlock {
     const rec = (v: unknown): Record<string, unknown> | null =>
       typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
     const me = rec(view.me);
@@ -448,6 +503,68 @@ export class NativePhone implements RemoteNative {
     }
     threads.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id));
     return { threads: threads.slice(0, 100), canMessage, ...(reason ? { reason } : {}) };
+  }
+
+  async flockThread(
+    pondId: string,
+    threadId: string,
+  ): Promise<{ thread: PhoneFlockThread; access: PhoneFlockAccess } | null> {
+    let view: Record<string, unknown>;
+    try {
+      view = await this.call("GET", `/native/ponds/${encodeURIComponent(pondId)}`);
+    } catch {
+      return null;
+    }
+    const flock = this.pondFlockOf(view);
+    const thread = flock.threads.find((t) => t.id === threadId);
+    if (!thread) return null;
+    const rec = (v: unknown): Record<string, unknown> | null =>
+      typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    const raw = (Array.isArray(view.threads) ? view.threads : []).map(rec).find((t) => t?.id === threadId) ?? null;
+    const myId = typeof rec(view.me)?.id === "string" ? (rec(view.me)?.id as string) : "";
+    let access: PhoneFlockAccess = {
+      canMessage: flock.canMessage,
+      ...(flock.reason ? { reason: flock.reason } : {}),
+    };
+    if (access.canMessage && raw) {
+      const strings = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+      if (strings(raw.deny).includes(myId)) {
+        access = { canMessage: false, reason: "Its starter doesn't let you message this thread." };
+      } else if (raw.locked === true && !strings(raw.allow).includes(myId)) {
+        access = { canMessage: false, reason: "This thread is read-only: its starter locked it." };
+      }
+    }
+    return { thread, access };
+  }
+
+  async flockEvents(
+    pondId: string,
+    threadId: string,
+    after: number,
+  ): Promise<{ events: unknown[]; lastSeq: number } | null> {
+    try {
+      const body = await this.call(
+        "GET",
+        `/native/ponds/${encodeURIComponent(pondId)}/threads/${encodeURIComponent(threadId)}/events?after=${Math.max(0, Math.trunc(after))}`,
+      );
+      if (!Array.isArray(body.events)) return null;
+      return { events: body.events, lastSeq: typeof body.lastSeq === "number" ? body.lastSeq : after };
+    } catch {
+      return null;
+    }
+  }
+
+  async flockMessage(pondId: string, threadId: string, text: string): Promise<{ ok: boolean; line: string }> {
+    const body = await this.call(
+      "POST",
+      `/native/ponds/${encodeURIComponent(pondId)}/threads/${encodeURIComponent(threadId)}/messages`,
+      { text },
+    );
+    return {
+      ok: body.ok === true,
+      line: typeof body.line === "string" ? body.line : body.ok === true ? "Sent." : "Refused.",
+    };
   }
 
   async pondDetail(pondId: string): Promise<PhonePondDetail | null> {

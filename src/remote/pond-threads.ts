@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { PhoneFlockThread, PhonePond } from "../fleet/native-phone.js";
+import type { PhoneFlockThread, PhoneHostThread, PhonePond } from "../fleet/native-phone.js";
 import type { FleetSession } from "../fleet/types.js";
 import { liveHandle } from "./live-turn.js";
 
@@ -49,13 +49,25 @@ export function pondThreadsDoc(pondId: string): string {
   return `${liveHandle(`pond:${pondId}`)}-p`;
 }
 
-function time(session: FleetSession): number {
-  return Date.parse(session.lastActivityAt) || 0;
+interface Item {
+  key: string;
+  title: string;
+  state: string;
+  at: string;
+  cwd: string;
+  workspaceTitle?: string;
+  branch?: string;
+}
+
+function time(item: { at: string }): number {
+  return Date.parse(item.at) || 0;
 }
 
 /**
- * The pond's threads, from the Mac's own snapshot. `inPond` is the one placement of a chat in a pond; `titleOf` the
- * row headline. Archived and `skip`ped runs are left out; nothing else is, however old.
+ * The pond's threads, from the Mac's own snapshot plus the host's own per-project list (`hostThreads`: every
+ * non-archived native chat of the project, which the snapshot, holding only the newest 100, can miss). The snapshot's
+ * row wins when both name a chat. `inPond` is the one placement of a chat in a pond; `titleOf` the row headline.
+ * Archived and `skip`ped runs are left out; nothing else is, however old.
  */
 export function buildPondThreads(
   pond: PhonePond,
@@ -63,21 +75,37 @@ export function buildPondThreads(
   inPond: (session: FleetSession) => boolean,
   titleOf: (session: FleetSession) => string,
   skip: (session: FleetSession) => boolean = () => false,
+  hostThreads: PhoneHostThread[] = [],
 ): PondThreadsDoc {
-  const mine = sessions
-    .filter((session) => session.archivedAt === undefined && !skip(session) && inPond(session))
-    .sort((a, b) => time(b) - time(a) || a.key.localeCompare(b.key));
+  const items = new Map<string, Item>();
+  for (const session of sessions) {
+    if (session.archivedAt !== undefined || skip(session) || !inPond(session)) continue;
+    items.set(session.key, {
+      key: session.key,
+      title: titleOf(session),
+      state: session.state,
+      at: session.lastActivityAt,
+      cwd: session.cwd ?? "",
+      ...(session.workspaceTitle?.trim() ? { workspaceTitle: session.workspaceTitle.trim() } : {}),
+      ...(session.branch ? { branch: session.branch } : {}),
+    });
+  }
+  for (const host of hostThreads) {
+    if (items.has(host.key)) continue;
+    items.set(host.key, { ...host, title: host.title.trim() || "Untitled chat" });
+  }
+  const mine = [...items.values()].sort((a, b) => time(b) - time(a) || a.key.localeCompare(b.key));
   const shown = mine.slice(0, POND_THREADS_MAX);
   const folder = pond.folder ? path.resolve(pond.folder) : null;
   const groups = new Map<string, PondThreadStream>();
-  for (const session of shown) {
-    const isMain = folder !== null && Boolean(session.cwd) && path.resolve(session.cwd ?? "") === folder;
+  for (const item of shown) {
+    const isMain = folder !== null && Boolean(item.cwd) && path.resolve(item.cwd) === folder;
     let id = "main";
     let name = "Main";
     if (!isMain) {
-      const label = session.workspaceTitle?.trim() || session.branch || path.basename(session.cwd || "") || "Other";
+      const label = item.workspaceTitle || item.branch || path.basename(item.cwd || "") || "Other";
       const known = pond.streams?.find(
-        (stream) => (session.branch && stream.branch === session.branch) || stream.name === label,
+        (stream) => (item.branch && stream.branch === item.branch) || stream.name === label,
       );
       id = known?.id ?? label;
       name = known?.name ?? label;
@@ -87,12 +115,7 @@ export function buildPondThreads(
       group = { id, name, ...(isMain ? { main: true as const } : {}), threads: [] };
       groups.set(id, group);
     }
-    group.threads.push({
-      key: session.key,
-      title: titleOf(session),
-      state: session.state,
-      at: session.lastActivityAt,
-    });
+    group.threads.push({ key: item.key, title: item.title, state: item.state, at: item.at });
   }
   // `shown` is newest first, so each group's threads are, and a group's first thread is its newest.
   const streams = [...groups.values()].sort((a, b) => {
