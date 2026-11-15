@@ -52,7 +52,7 @@ public enum ContextFormat {
         public static let workingReason = "The chat is working. Compact it when it finishes."
         public static let compactHint = "Compact now: the agent summarises the chat to free room"
 
-        public static func make(tokens: Int?, limit: Int?, percent: Double?, canCompact: Bool, working: Bool) -> Popover {
+        public static func make(tokens: Int?, limit: Int?, percent: Double?, canCompact: Bool, working: Bool, autoCompactAt: Int?? = nil) -> Popover {
             let p = Self.percent(tokens: tokens, limit: limit) ?? percent
             let usage: String? = {
                 guard let tokens else { return nil }
@@ -66,8 +66,17 @@ public enum ContextFormat {
                 fraction: min(max(p ?? 0, 0), 100) / 100,
                 level: level(p),
                 windowLine: limit.flatMap { $0 > 0 ? "Window: \(Self.tokens($0)) tokens" : nil },
-                autoLine: "Compacts automatically near the limit",
+                autoLine: autoLine(autoCompactAt),
                 compact: state)
+        }
+
+        /// The real rule: the chat compacts at its threshold; an older host that did not say keeps the vague line.
+        public static func autoLine(_ at: Int??) -> String {
+            switch at {
+            case .none: return "Compacts automatically near the limit"
+            case .some(.none): return "Automatic compaction is off"
+            case .some(.some(let n)): return "Compacts automatically at \(ContextFormat.tokens(n)) tokens"
+            }
         }
 
         private static func tokens(_ n: Int) -> String { ContextFormat.tokens(n) }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.1
+
+- A chat no longer says "very large" because its transcript file is big: the notice and the context popover now follow what is actually sent, and the popover says where the chat compacts ("Compacts automatically at 200k tokens"). Over that point the notice reads "Compacting soon to keep replies fast".
+
 ## 2.27.0
 
 - New setting in Account: "Keep recent chats in Squeak's cloud (encrypted)", on by default once you are signed in. Your iPhone and browser can then open your last 30 days of chats while this Mac sleeps, or on a new device. The copy is sealed with your key, so Squeak can't read it; turning the setting off deletes it.

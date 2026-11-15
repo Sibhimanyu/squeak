@@ -358,7 +358,7 @@ export class SessionHost extends EventEmitter {
 
   /** How large the chat is: very large ones get a notice and a way to continue in a new thread. */
   sizeOf(s: SessionRow): ReturnType<typeof chatSize> {
-    return chatSize(this.contextOf(s), this.transcriptBytesOf(s));
+    return chatSize(this.contextOf(s), this.transcriptBytesOf(s), this.compactThreshold(s));
   }
 
   /** What this thread's agent is told about Squeak and about who may write (built when its agent starts). */
@@ -563,7 +563,10 @@ export class SessionHost extends EventEmitter {
     const size = s.agent === "claude" && ctx ? this.sizeOf(s) : null;
     const row: SessionRow = {
       ...(s.status === "error" && this.retryable.has(s.id) ? { retryable: true } : {}),
-      ...(size?.large && size.reason ? { large: { reason: size.reason, transcriptBytes: size.transcriptBytes } } : {}),
+      ...(size?.large && size.reason
+        ? { large: { reason: size.reason, transcriptBytes: size.transcriptBytes, compacting: size.compacting } }
+        : {}),
+      ...(s.agent === "claude" ? { autoCompactAt: this.compactThreshold(s) } : {}),
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
       ...(ducklings && ducklings.items.length > 0 ? { ducklings } : {}),
       ...(ctx ? { context: ctx } : {}),

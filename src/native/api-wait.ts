@@ -166,33 +166,44 @@ export const STALL_DETAIL = "No response from Claude";
 // ---- how big a chat is
 
 export interface SizeLimits {
-  /** Share of the model's window (0-100) above which the chat is "very large". */
+  /** Share of the model's window (0-100) that counts as "very large" when auto-compaction is off. */
   percent: number;
-  transcriptBytes: number;
 }
-export const SIZE_LIMITS: SizeLimits = { percent: 60, transcriptBytes: 20 * 1024 * 1024 };
+export const SIZE_LIMITS: SizeLimits = { percent: 60 };
 
 export interface ChatSize {
   contextTokens: number | null;
   contextPercent: number | null;
   transcriptBytes: number | null;
   large: boolean;
-  reason: "context" | "transcript" | null;
+  reason: "context" | null;
+  /** Tokens at which the chat is "large": its auto-compact threshold, else 60% of the window. */
+  threshold: number | null;
+  /** Auto-compaction is on, so a large chat is about to compact itself. */
+  compacting: boolean;
 }
 
+/**
+ * Large = what the last request sent (input + cache read + cache creation, which `ContextUsage.used` is) has reached
+ * the chat's auto-compact threshold. The transcript's size says nothing: it keeps all history after a compaction.
+ */
 export function chatSize(
   context: ContextUsage | null,
   transcriptBytes: number | null,
+  compactThreshold: number | null = null,
   limits: SizeLimits = SIZE_LIMITS,
 ): ChatSize {
-  const byContext = context !== null && context.percent > limits.percent;
-  const byBytes = transcriptBytes !== null && transcriptBytes > limits.transcriptBytes;
+  const compacting = compactThreshold !== null;
+  const threshold = compactThreshold ?? (context ? Math.round((context.limit * limits.percent) / 100) : null);
+  const large = context !== null && threshold !== null && context.used >= threshold;
   return {
     contextTokens: context?.used ?? null,
     contextPercent: context?.percent ?? null,
     transcriptBytes,
-    large: byContext || byBytes,
-    reason: byContext ? "context" : byBytes ? "transcript" : null,
+    large,
+    reason: large ? "context" : null,
+    threshold,
+    compacting,
   };
 }
 

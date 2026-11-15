@@ -80,6 +80,10 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var helpersWorking: Bool = false
     /// The host says the chat is very large (slow, may fail); false from an older host.
     public var isLarge: Bool = false
+    /// With `isLarge`: auto-compaction is on, so the chat compacts itself soon.
+    public var largeCompacting: Bool = false
+    /// Context tokens at which the chat compacts itself: .none = an older host did not say, .some(nil) = automatic compaction is off.
+    public var autoCompactAt: Int?? = .none
     /// The last turn failed in a way "Try again" can resend; false from an older host.
     public var retryable: Bool = false
     /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
@@ -90,12 +94,12 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable, autoCompactAt
     }
 
     private struct Background: Decodable { var count: Int? }
     private struct Context: Decodable { var used: Int?; var limit: Int? }
-    private struct Large: Decodable { var reason: String? }
+    private struct Large: Decodable { var reason: String?; var compacting: Bool? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -117,7 +121,10 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         backgroundCount = c.lenient(Background.self, .background)?.count
         ducklings = c.lenient(DucklingSet.self, .ducklings)
         helpersWorking = c.lenient(Bool.self, .helpersWorking) ?? false
-        isLarge = c.lenient(Large.self, .large) != nil
+        let large = c.lenient(Large.self, .large)
+        isLarge = large != nil
+        largeCompacting = large?.compacting ?? false
+        if c.contains(.autoCompactAt) { autoCompactAt = .some(c.lenient(Int.self, .autoCompactAt)) }
         retryable = c.lenient(Bool.self, .retryable) ?? false
         let ctx = c.lenient(Context.self, .context)
         contextTokens = ctx?.used

@@ -80,6 +80,10 @@ public enum NativeErrorText {
 /// (`large`, `retryable` on the chat); this only words them.
 public enum NativeChatNotice {
     public static let largeText = "This chat is very large — replies will be slow and may fail."
+    public static let compactingSoonText = "Compacting soon to keep replies fast"
+
+    /// Over the auto-compact threshold with automatic compaction on, the chat is about to compact itself; otherwise it is just large.
+    public static func largeText(for s: HostSession) -> String { s.largeCompacting == true ? compactingSoonText : largeText }
     public static let compactTitle = "Compact this chat"
     public static let continueTitle = "Continue in a new thread"
     public static let retryText = "The last message didn't go through."
