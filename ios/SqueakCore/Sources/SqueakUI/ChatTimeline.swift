@@ -192,6 +192,8 @@ enum ChatQueue {
         let pending: Bool
         /// Steer now, Edit and Delete work: the Mac can read and change this chat's queue.
         let actionable: Bool
+        /// A pond member's name, for a queued message they wrote.
+        var author: String? = nil
     }
 
     /// Long enough for the Mac to publish a message it has just queued.
@@ -223,7 +225,9 @@ enum ChatQueue {
         let mine = sends.filter { isQueued($0, session: session, live: live, now: now) }
         var cards: [Card] = []
         if let queue = live?.queue {
-            cards = queue.map { Card(id: $0.id, text: $0.text, pending: false, actionable: true) }
+            // A Squeak chat's queue is shown; it is changed on the Mac (the Mac lists `queue` only where it can).
+            let changeable = session.can(.queue)
+            cards = queue.map { Card(id: $0.id, text: $0.text, pending: false, actionable: changeable, author: $0.author) }
         }
         let known = Set(cards.map(\.id))
         cards += mine.filter { !known.contains($0.messageId) }.map {

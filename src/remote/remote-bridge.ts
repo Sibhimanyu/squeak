@@ -31,6 +31,7 @@ import { type NewChatAgent, type StartChatOutcome } from "../fleet/chat-starter.
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import { resolveSendMode, type SendDefault } from "../fleet/send-default.js";
 import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/reply-types.js";
+import type { TranscriptResult } from "../fleet/transcript.js";
 import { replyTargetFor } from "../fleet/reply-router.js";
 import { workFolder as sessionWorkFolder } from "../fleet/session-folder.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
@@ -81,6 +82,7 @@ import {
   type RemoteNative,
 } from "../fleet/native-phone.js";
 import { NativeHostError } from "../native/client.js";
+import { isNativeKey, nativeSessionId } from "../fleet/native-reply.js";
 import { MainRepoFinder, matchPond } from "./pond-match.js";
 import {
   condenseHistory,
@@ -1255,21 +1257,23 @@ export class RemoteBridge {
               });
             }
           },
-          history: deps.replier.transcript
-            ? (key) => {
-                const found = this.watchableSession(key)?.session;
-                const handle = found ? this.hostHandle(found) : null;
-                const read = handle ? this.deps.replier.transcript?.(handle, 40) : null;
-                return read ? condenseHistory(read.messages) : null;
-              }
-            : null,
-          queue: deps.replier.queue
-            ? async (key) => {
-                const found = this.watchableSession(key)?.session;
-                const handle = found ? this.hostHandle(found) : null;
-                return handle ? ((await this.deps.replier.queue?.(handle)) ?? null) : null;
-              }
-            : null,
+          history:
+            deps.replier.transcript || deps.native?.history
+              ? (key) => {
+                  const found = this.watchableSession(key)?.session;
+                  const reader = found ? this.historyReader(found) : null;
+                  const read = reader ? reader(40) : null;
+                  return read ? condenseHistory(read.messages) : null;
+                }
+              : null,
+          queue:
+            deps.replier.queue || deps.native?.queue
+              ? async (key) => {
+                  const found = this.watchableSession(key)?.session;
+                  const reader = found ? this.queueReader(found) : null;
+                  return reader ? ((await reader()) ?? null) : null;
+                }
+              : null,
           write: async (handle, turn) => {
             const config = this.config;
             if (config) {
@@ -3408,22 +3412,22 @@ export class RemoteBridge {
       return refuse("Not a request this Mac understands.");
     }
     const wanted = Math.min(HISTORY_PAGE_MAX, Math.max(1, Math.floor(command.n ?? HISTORY_PAGE_MAX)));
-    const read = this.deps.replier.transcript;
-    if (!read || !this.deps.store.watch) {
+    if (!this.deps.store.watch) {
       return refuse("This Mac can't send earlier messages to a phone.");
     }
     const watched = this.watchableSession(command.key)?.session;
-    const conductorSessionId = watched ? this.hostHandle(watched) : null;
-    if (!conductorSessionId) {
+    const readHistory = watched ? this.historyReader(watched) : null;
+    if (!watched || !readHistory) {
       return refuse("That chat isn't on your phone any more.");
     }
+    const conductorSessionId = this.handleOf(watched) ?? command.key;
     if (this.historyBusy.has(command.key)) {
       return refuse("Still reading this chat's earlier messages. Try again in a moment.");
     }
     this.historyBusy.add(command.key);
     try {
       // More raw messages than entries: a run of agent messages condenses to one entry.
-      const page = read.call(this.deps.replier, conductorSessionId, wanted * 5, before);
+      const page = readHistory(wanted * 5, before);
       const condensed = condenseHistoryPage(page.messages, wanted);
       const nextBefore = condensed.hasMore ? condensed.oldestCursor : (page.nextBefore ?? null);
       const doc = historyPageDoc(command.key, command.before ?? null);
@@ -3469,13 +3473,13 @@ export class RemoteBridge {
       this.log(device.name, "rejected", `history delta: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    const read = this.deps.replier.transcript;
-    if (!read || !this.deps.store.watch) {
+    if (!this.deps.store.watch) {
       return refuse("This Mac can't send earlier messages to a phone.");
     }
     const watched = this.watchableSession(key)?.session;
-    const handle = watched ? this.hostHandle(watched) : null;
-    if (!handle) {
+    const readHistory = watched ? this.historyReader(watched) : null;
+    const handle = watched ? this.handleOf(watched) : null;
+    if (!readHistory || !handle) {
       return refuse("That chat isn't on your phone any more.");
     }
     if (this.historyBusy.has(key)) {
@@ -3483,11 +3487,7 @@ export class RemoteBridge {
     }
     this.historyBusy.add(key);
     try {
-      const delta = readHistoryAfter(
-        (limit, before) => read.call(this.deps.replier, handle, limit, before),
-        after,
-        n ?? HISTORY_DELTA_PAGE_MAX,
-      );
+      const delta = readHistoryAfter((limit, before) => readHistory(limit, before), after, n ?? HISTORY_DELTA_PAGE_MAX);
       const doc = historyDeltaDoc(key, afterRaw);
       const path = this.channel(config, "live", doc);
       await this.deps.store.set(path, {
@@ -4011,6 +4011,42 @@ export class RemoteBridge {
     return session.origin === "squeak" ? session.key : null;
   }
 
+  /**
+   * How a chat's readable messages are read, or null when this Mac cannot: a host app's chat through its replier, a
+   * Squeak chat through its own database (`RemoteNative.history`). Both page by `before` with the same cursors.
+   */
+  private historyReader(
+    session: FleetSession,
+  ): ((limit: number, before?: number | null) => Pick<TranscriptResult, "messages" | "nextBefore">) | null {
+    const handle = this.hostHandle(session);
+    const transcript = this.deps.replier.transcript;
+    if (handle && transcript) {
+      return (limit, before) =>
+        before === undefined
+          ? transcript.call(this.deps.replier, handle, limit)
+          : transcript.call(this.deps.replier, handle, limit, before);
+    }
+    const native = this.deps.native;
+    if (!handle && session.origin === "squeak" && isNativeKey(session.key) && native?.history) {
+      const id = nativeSessionId(session.key);
+      return (limit, before) => native.history!(id, limit, before);
+    }
+    return null;
+  }
+
+  /** The chat's queued messages, in order: the host app's, or a Squeak chat's from the session host. */
+  private queueReader(session: FleetSession): (() => Promise<QueueItem[] | null>) | null {
+    const handle = this.hostHandle(session);
+    const queue = this.deps.replier.queue;
+    if (handle && queue) return () => queue.call(this.deps.replier, handle);
+    const native = this.deps.native;
+    if (!handle && session.origin === "squeak" && isNativeKey(session.key) && native?.queue) {
+      const id = nativeSessionId(session.key);
+      return () => native.queue!(id);
+    }
+    return null;
+  }
+
   /** The handle of a host app's chat; null for a Squeak chat or a session no host owns (history and queue are the host's). */
   private hostHandle(session: FleetSession): string | null {
     return session.hostId || session.conductorSessionId ? this.handleOf(session) : null;
@@ -4046,6 +4082,13 @@ export class RemoteBridge {
       if (replier.queue && replier.queueAction) actions.push("queue");
       actions.push("photos");
       if (replier.transcript && this.deps.store.watch) {
+        actions.push("earlier");
+        if (this.phoneCaps.includes(HISTORY_DELTA_CAP)) actions.push(HISTORY_DELTA_ACTION);
+      }
+    }
+    // A Squeak chat's history and queue come from its own database and the session host.
+    if (!hosted && session.origin === "squeak") {
+      if (this.deps.native?.history && this.deps.store.watch) {
         actions.push("earlier");
         if (this.phoneCaps.includes(HISTORY_DELTA_CAP)) actions.push(HISTORY_DELTA_ACTION);
       }
@@ -4637,8 +4680,6 @@ export class RemoteBridge {
 
   /** The chats to keep: any a phone could list (host chats; not archived or retired) that moved within the retention window. */
   private historyCloudCandidates(): HistCandidate[] {
-    const read = this.deps.replier.transcript;
-    if (!read) return [];
     const snapshot = this.deps.snapshot();
     const since = this.now() - HIST_RETENTION_MS;
     const seen = new Set<string>();
@@ -4646,15 +4687,15 @@ export class RemoteBridge {
     for (const session of [...snapshot.active, ...snapshot.sessions]) {
       if (seen.has(session.key)) continue;
       seen.add(session.key);
-      const handle = this.hostHandle(session);
+      const read = this.historyReader(session);
       const activityAt = Date.parse(session.lastActivityAt);
-      if (!handle || !Number.isFinite(activityAt) || activityAt < since) continue;
+      if (!read || !Number.isFinite(activityAt) || activityAt < since) continue;
       if (session.archivedAt !== undefined || (session.workspaceRetired ?? session.retired)) continue;
       if (isUnclaimedHeadless(session) || this.historyBusy.has(session.key)) continue;
       out.push({
         key: session.key,
         activityAt,
-        read: (limit, before) => read.call(this.deps.replier, handle, limit, before),
+        read: (limit, before) => read(limit, before),
       });
     }
     return out;

@@ -15,6 +15,13 @@ final class LiveTurnTests: XCTestCase {
         XCTAssertNil(turn.steps[0].at)
     }
 
+    func testQueuedMessageCarriesAPondMembersName() throws {
+        let json = #"{"v":1,"key":"s1","working":true,"total":0,"steps":[],"queue":[{"id":"q1","text":"hi","mode":"queue","position":1,"author":"Ada"},{"id":"q2","text":"yo","mode":"queue","position":2}]}"#
+        let turn = try JSONDecoder().decode(LiveTurn.self, from: Data(json.utf8))
+        XCTAssertEqual(turn.queue?.map(\.author), ["Ada", nil])
+        XCTAssertEqual(turn.queue?.map(\.position), [1, 2])
+    }
+
     func testPresenceAsksForMoreRecentOnlyWhenTold() throws {
         let asked = String(data: try JSONEncoder().encode(Presence(at: 5, recent: 30)), encoding: .utf8)!
         XCTAssertTrue(asked.contains(#""recent":30"#))

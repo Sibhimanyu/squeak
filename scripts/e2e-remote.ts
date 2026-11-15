@@ -80,6 +80,21 @@ const bridge = new RemoteBridge({
   replier: {
     lastTurnText: () => "**D1 — Arm it?**\n\n**A) Now.** a\n**B) Later.** b\n**C) Never.** c",
     lastTurnId: () => "turn-1",
+    // History for a phone that opens the chat with an empty cache: the person's prompts and the replies, in order.
+    transcript: () => ({
+      messages: [
+        { id: "101", cursor: "101", role: "user", text: "e2e prompt one", at: null, turnId: null },
+        { id: "102", cursor: "102", role: "assistant", text: "e2e reply one", at: null, turnId: null },
+        { id: "103", cursor: "103", role: "user", text: "e2e prompt two", at: null, turnId: null },
+        { id: "104", cursor: "104", role: "assistant", text: "e2e reply two", at: null, turnId: null },
+      ],
+      complete: true,
+      nextBefore: null,
+    }),
+    // The chat's queue, with a pond member's author, shown on the phone's open chat.
+    queue: async () => [
+      { id: "q1", text: "queued while it works", mode: "queue" as const, position: 1, author: "Ada" },
+    ],
     send: async (id, text, _onFailed, options) => {
       sends.push([id, text, options?.mode]);
       return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
