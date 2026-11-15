@@ -4,6 +4,10 @@
 
 - Settings › Extensions no longer says "Not in this build" for Claude Code (external), Codex (external) and RasanAI: an add-on is unavailable only when the daemon says so, not when the app has no page for it.
 - "Download automatically" is now off by default: Squeak checks for updates on its own but asks before downloading. Installs that had it switched on by an earlier version are reset once; turn it on again in Settings, About if you want it.
+- A message sent while the agent is working (or a pond member's) now waits in the chat itself, dimmed under its author at the end of the transcript, with Steer, Edit and Remove; when its turn starts, that same row becomes the prompt in place, with no second row and no jump. The stack above the composer no longer repeats it (a small "N queued" note stays when two or more wait).
+- Fixed a message sent while the agent was working showing twice, once solid and once dimmed: the host now keeps the send's id with the queued or steered message, so the dimmed row always becomes the real one.
+- File tabs are remembered: the files you had open in a stream come back after a relaunch, in the order you opened them among the threads, if the file still exists.
+- Switching a Markdown file between Preview and Source keeps your place instead of jumping to the top.
 
 ## 2.27.1
 

@@ -26,6 +26,20 @@ public struct StreamTabs: Codable, Equatable, Sendable {
     public func tabs(_ workspace: String) -> [StreamTab] { strips[workspace]?.tabs ?? [] }
     public func selected(_ workspace: String) -> StreamTab? { strips[workspace]?.selected }
 
+    /// The saved file tabs of a stream, in the order they sit among its threads.
+    public func fileTabs(_ workspace: String) -> [String] {
+        tabs(workspace).compactMap { $0.kind == .file ? $0.id : nil }
+    }
+
+    /// The strip as it is drawn: saved order, threads where `hasThread` says they resolve, files where `isOpen` says
+    /// they are open; a file open but not saved yet goes last. Threads that are not saved are the caller's.
+    public func strip(_ workspace: String, hasThread: (String) -> Bool, isOpen: (String) -> Bool, openFiles: [String]) -> [StreamTab] {
+        var out = tabs(workspace).filter { $0.kind == .thread ? hasThread($0.id) : isOpen($0.id) }
+        let seen = Set(out.filter { $0.kind == .file }.map(\.id))
+        out += openFiles.filter { !seen.contains($0) }.map(StreamTab.file)
+        return out
+    }
+
     /// Opens `tab` in the stream: appended after the selected tab when it is not there yet (a re-open only selects
     /// the one that is), then selected. `seed` is the strip a stream starts with the first time it is touched.
     public mutating func open(_ tab: StreamTab, in workspace: String, seed: [StreamTab] = []) {

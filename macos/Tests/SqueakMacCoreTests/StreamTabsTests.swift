@@ -79,3 +79,40 @@ final class StreamTabsTests: XCTestCase {
         XCTAssertEqual(t.tabs("w"), [c, a, b])
     }
 }
+
+final class StreamTabsFileTests: XCTestCase {
+    func testFileTabsKeepTheirPlaceAmongThreadsAcrossRelaunch() throws {
+        var t = StreamTabs()
+        t.open(.thread("a"), in: "w")
+        t.open(.file("docs/x.md"), in: "w")
+        t.open(.thread("b"), in: "w")
+        t.open(.file("/tmp/y.txt"), in: "w")
+        let back = try JSONDecoder().decode(StreamTabs.self, from: JSONEncoder().encode(t))
+        XCTAssertEqual(back.tabs("w"), [.thread("a"), .file("docs/x.md"), .thread("b"), .file("/tmp/y.txt")])
+        XCTAssertEqual(back.fileTabs("w"), ["docs/x.md", "/tmp/y.txt"])
+        XCTAssertEqual(back.selected("w"), .file("/tmp/y.txt"))
+    }
+
+    func testAFileThatIsGoneIsForgottenOnRestoreAndTheRestKeepOrder() {
+        var t = StreamTabs()
+        for tab in [StreamTab.thread("a"), .file("gone.md"), .file("kept.md"), .thread("b")] { t.open(tab, in: "w") }
+        t.select(.file("gone.md"), in: "w")
+        t.prune(exists: { $0.kind != .file || $0.id != "gone.md" })
+        XCTAssertEqual(t.tabs("w"), [.thread("a"), .file("kept.md"), .thread("b")])
+        XCTAssertEqual(t.selected("w"), .file("kept.md"))
+    }
+
+    func testStripResolvesSavedOrderAndAppendsUnsavedOpenFiles() {
+        var t = StreamTabs()
+        for tab in [StreamTab.thread("a"), .file("x.md"), .thread("gone"), .thread("b")] { t.open(tab, in: "w") }
+        let strip = t.strip("w", hasThread: { $0 != "gone" }, isOpen: { $0 == "x.md" || $0 == "new.md" }, openFiles: ["x.md", "new.md"])
+        XCTAssertEqual(strip, [.thread("a"), .file("x.md"), .thread("b"), .file("new.md")])
+    }
+
+    func testReopeningASavedFileDoesNotMoveIt() {
+        var t = StreamTabs()
+        for tab in [StreamTab.file("x.md"), .thread("a")] { t.open(tab, in: "w") }
+        t.open(.file("x.md"), in: "w")
+        XCTAssertEqual(t.tabs("w"), [.file("x.md"), .thread("a")])
+    }
+}

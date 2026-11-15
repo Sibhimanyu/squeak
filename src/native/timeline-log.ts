@@ -201,7 +201,16 @@ export class TimelineRecorder {
     this.store(sessionId, this.projector(sessionId).begin(input));
   }
 
-  steer(sessionId: string, input: { seq: number; text: string; author?: MessageAuthor | undefined; at: string }): void {
+  steer(
+    sessionId: string,
+    input: {
+      seq: number;
+      text: string;
+      author?: MessageAuthor | undefined;
+      clientNonce?: string | undefined;
+      at: string;
+    },
+  ): void {
     this.store(sessionId, this.projector(sessionId).steer(input));
   }
 

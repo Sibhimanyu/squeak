@@ -153,6 +153,9 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX timeline_turn ON timeline_events(session_id, turn_id);
   `,
+  `
+  ALTER TABLE queue ADD COLUMN client_nonce TEXT;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -986,13 +989,15 @@ export class NativeStore {
   }
 
   // queue
-  enqueue(sessionId: string, text: string, author?: MessageAuthor): QueueRow {
+  enqueue(sessionId: string, text: string, author?: MessageAuthor, clientNonce?: string): QueueRow {
     const id = randomUUID();
     const createdAt = nowIso();
     this.db
-      .prepare("INSERT INTO queue (id,session_id,text,created_at,author_id,author_name) VALUES (?,?,?,?,?,?)")
-      .run(id, sessionId, text, createdAt, author?.id ?? null, author?.name ?? null);
-    return { id, sessionId, text, createdAt, ...(author ? { author } : {}) };
+      .prepare(
+        "INSERT INTO queue (id,session_id,text,created_at,author_id,author_name,client_nonce) VALUES (?,?,?,?,?,?,?)",
+      )
+      .run(id, sessionId, text, createdAt, author?.id ?? null, author?.name ?? null, clientNonce ?? null);
+    return { id, sessionId, text, createdAt, ...(author ? { author } : {}), ...(clientNonce ? { clientNonce } : {}) };
   }
   queued(sessionId: string): QueueRow[] {
     return (
@@ -1003,6 +1008,7 @@ export class NativeStore {
       text: r.text as string,
       createdAt: r.created_at as string,
       ...(r.held === 1 ? { held: true } : {}),
+      ...(typeof r.client_nonce === "string" && r.client_nonce ? { clientNonce: r.client_nonce } : {}),
       ...authorOf(r),
     }));
   }

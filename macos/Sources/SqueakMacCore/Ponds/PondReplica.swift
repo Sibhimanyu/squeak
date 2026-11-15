@@ -55,7 +55,7 @@ public struct PondReplica: Equatable, Sendable {
     }
 
     private mutating func note(outer: Int) {
-        for t in timeline.turns {
+        for t in timeline.turns where !t.waitsInQueue {
             let key = "t:\(t.id)"
             if origin[key] == nil { origin[key] = outer }
             let seen = stepsSeen[t.id] ?? 0
@@ -70,7 +70,8 @@ public struct PondReplica: Equatable, Sendable {
     public func rows(starter: String) -> [ThreadRow] {
         var out: [ThreadRow] = []
         func id(_ key: String) -> Int { origin[key] ?? 0 }
-        for t in timeline.turns {
+        // A prompt still waiting in the queue is not a row of the pond's thread yet: it takes its place when it starts.
+        for t in timeline.turns where !t.waitsInQueue {
             if !t.auto { out.append(.user(id: id("t:\(t.id)"), by: t.author?.id ?? starter, text: t.prompt, at: t.startedAt)) }
             for seg in TimelineSteps.segments(of: t) {
                 switch seg {

@@ -21,9 +21,13 @@ struct FileViewer: View {
             if file.conflict != nil { conflictBanner }
             switch file.content {
             case .text where MarkdownPreview.showsPreview(path: file.path, editing: file.editing, choice: file.markdownChoice):
-                MarkdownFilePreview(text: file.edited, fileURL: files.url(for: file.path), root: URL(fileURLWithPath: files.root)).id(file.path)
+                MarkdownFilePreview(text: file.edited, fileURL: files.url(for: file.path), root: URL(fileURLWithPath: files.root),
+                                    startLine: file.markdownTopLine, onLine: { file.markdownTopLine = $0 }).id(file.path)
             case .text:
-                CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
+                // A Markdown file keeps its place when the side changes: the top line goes to and comes from the preview.
+                let markdown = MarkdownPreview.isMarkdown(path: file.path)
+                CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump,
+                             startLine: markdown ? file.markdownTopLine : 1, onTopLine: markdown ? { file.markdownTopLine = $0 } : nil)
                     .id(file.path).clipped()
             case .image(let image):
                 ImageCanvas(image: image, name: file.name)
@@ -174,6 +178,9 @@ struct MarkdownFilePreview: View {
     let text: String
     let fileURL: URL?
     var root: URL? = nil
+    /// The source line at the top when the preview opens (the Source side's place), and where the person scrolls to.
+    var startLine = 1
+    var onLine: (Int) -> Void = { _ in }
 
     private var style: MessageStyle {
         var s = MessageStyle.reading
@@ -189,6 +196,11 @@ struct MarkdownFilePreview: View {
                 .frame(maxWidth: 820, alignment: .leading)
                 .padding(.horizontal, Space.l).padding(.vertical, Space.m)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .background(
+                    ScrollAnchorProbe(restoreTo: startLine > 1 ? MarkdownAnchor.fraction(ofLine: startLine, in: text) : nil) { share in
+                        onLine(MarkdownAnchor.line(atFraction: share, in: text))
+                    }
+                )
         }
         .background(Theme.bg)
     }
@@ -213,6 +225,9 @@ struct CodeTextView: NSViewRepresentable {
     @Binding var text: String
     let editable: Bool
     var jump: LineJump?
+    /// A Markdown file's place: the line to open at, and a report of the top line as the person scrolls.
+    var startLine = 1
+    var onTopLine: ((Int) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -246,6 +261,7 @@ struct CodeTextView: NSViewRepresentable {
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = true
         Self.apply(jump, to: tv, context.coordinator)
+        context.coordinator.track(scroll, tv, startLine: jump == nil ? startLine : 1)
         return scroll
     }
 
@@ -290,7 +306,53 @@ struct CodeTextView: NSViewRepresentable {
         var parent: CodeTextView
         var updating = false
         var lastJump: UUID?
+        nonisolated(unsafe) private var observer: NSObjectProtocol?
+        private var settling = true
         init(_ parent: CodeTextView) { self.parent = parent }
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+
+        /// Opens at `startLine` and reports the top line afterwards (only when the owner asked for it).
+        func track(_ scroll: NSScrollView, _ tv: NSTextView, startLine: Int) {
+            guard parent.onTopLine != nil else { return }
+            scroll.contentView.postsBoundsChangedNotifications = true
+            observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self, weak tv, weak scroll] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.settling, let tv, let scroll else { return }
+                    self.parent.onTopLine?(Self.topLine(tv, scroll))
+                }
+            }
+            DispatchQueue.main.async { [weak self, weak tv, weak scroll] in
+                if startLine > 1, let tv, let scroll { Self.scroll(tv, scroll, toLine: startLine) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.settling = false }
+            }
+        }
+
+        static func scroll(_ tv: NSTextView, _ scroll: NSScrollView, toLine line: Int) {
+            guard let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+            let ns = tv.string as NSString
+            var idx = 0, n = 1
+            while n < line, idx < ns.length { idx = NSMaxRange(ns.lineRange(for: NSRange(location: idx, length: 0))); n += 1 }
+            let r = NSRange(location: min(idx, ns.length), length: 0)
+            lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: min(ns.length, r.location + 1)))
+            let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: ns.lineRange(for: r), actualCharacterRange: nil), in: tc)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + tv.textContainerOrigin.y)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+
+        static func topLine(_ tv: NSTextView, _ scroll: NSScrollView) -> Int {
+            guard let lm = tv.layoutManager, let tc = tv.textContainer else { return 1 }
+            let origin = scroll.contentView.bounds.origin
+            let p = NSPoint(x: 0, y: max(0, origin.y - tv.textContainerOrigin.y))
+            let idx = lm.characterIndex(for: p, in: tc, fractionOfDistanceBetweenInsertionPoints: nil)
+            let ns = tv.string as NSString
+            var line = 1, i = 0
+            while i < min(idx, ns.length) {
+                let end = NSMaxRange(ns.lineRange(for: NSRange(location: i, length: 0)))
+                if end > idx { break }
+                line += 1; i = end
+            }
+            return line
+        }
 
         func textDidChange(_ notification: Notification) {
             guard !updating, let tv = notification.object as? NSTextView else { return }

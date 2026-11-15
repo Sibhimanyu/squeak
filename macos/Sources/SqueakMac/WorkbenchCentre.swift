@@ -238,6 +238,31 @@ private struct WorkbenchTabs: View {
 
     private var chats: [HostSession] { model.streamThreads(workspace) }
 
+    private enum StripItem: Identifiable {
+        case chat(HostSession), file(OpenFile)
+        var id: String {
+            switch self {
+            case .chat(let s): "chat-\(s.key.stringValue)"
+            case .file(let f): "file-\(f.id.uuidString)"
+            }
+        }
+    }
+
+    /// Threads and files in the order they were opened (the saved strip); before the stream has one, threads then files.
+    private var stripItems: [StripItem] {
+        let open = files?.open.filter { !$0.isListing } ?? []
+        guard model.streamTabs.hasStrip(workspace.id) else { return chats.map(StripItem.chat) + open.map(StripItem.file) }
+        let byKey = Dictionary(chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { a, _ in a })
+        let byPath = Dictionary(open.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        let order = model.streamTabs.strip(workspace.id, hasThread: { byKey[$0] != nil }, isOpen: { byPath[$0] != nil }, openFiles: open.map(\.path))
+        var out = order.compactMap { t -> StripItem? in
+            t.kind == .thread ? byKey[t.id].map(StripItem.chat) : byPath[t.id].map(StripItem.file)
+        }
+        // A listing tab is not saved: it sits at the end.
+        out += (files?.open ?? []).filter(\.isListing).map(StripItem.file)
+        return out
+    }
+
     private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
     @State private var stripWidth: Double = 0
@@ -249,10 +274,11 @@ private struct WorkbenchTabs: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(chats) { s in tab(s).transition(.opacity) }
-                    if let files, !files.open.isEmpty {
-                        Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
-                        ForEach(files.open) { f in FileTab(files: files, file: f) }
+                    ForEach(stripItems) { item in
+                        switch item {
+                        case .chat(let s): tab(s).transition(.opacity)
+                        case .file(let f): if let files { FileTab(files: files, file: f) }
+                        }
                     }
                     Button {
                         if let native = model.nativeWorkspace(of: workspace) {
@@ -282,6 +308,22 @@ private struct WorkbenchTabs: View {
         .frame(height: Metrics.tabStrip)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
         .task(id: model.allSessions.count) { model.pruneStreamTabs() }
+        // File tabs are saved with the strip: brought back once per run, if the file is still there.
+        .task(id: files?.root) {
+            guard let files, !files.restoredTabs else { return }
+            let saved = model.streamTabs.fileTabs(workspace.id)
+            let gone = saved.filter { !files.fileExists($0) }
+            model.forgetFileTabs(gone, in: workspace)
+            let selected = model.streamTabs.selected(workspace.id)
+            let active = selected.flatMap { $0.kind == .file ? $0.id : nil }
+            await files.restoreTabs(saved.filter { !gone.contains($0) }, active: active)
+        }
+        .onChange(of: files?.open.filter { !$0.isListing }.map(\.path) ?? []) { old, new in
+            guard files?.restoredTabs == true else { return }
+            for p in new where !old.contains(p) { model.fileTabOpened(p, in: workspace) }
+            for p in old where !new.contains(p) { model.fileTabClosed(p, in: workspace) }
+        }
+        .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
         .task(id: model.selected) { if let key = model.selected { model.ensureTab(for: key) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             let box = note.object as? CloseTabAction.Box

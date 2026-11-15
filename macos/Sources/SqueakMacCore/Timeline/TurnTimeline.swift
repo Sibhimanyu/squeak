@@ -61,6 +61,9 @@ public struct TimelineTurn: Equatable, Identifiable, Sendable {
         }
     }
 
+    /// A prompt the host holds behind a running turn and has not started.
+    public var waitsInQueue: Bool { turnId == nil && state == .queued }
+
     public var isEnded: Bool { if case .ended = state { true } else { false } }
 
     /// The final text of an ended turn, drawn outside its steps.
@@ -168,7 +171,8 @@ public struct TurnTimeline: Equatable, Sendable {
     /// The seq an earlier page is asked before: the oldest turn held started there.
     public var oldestSeq: Int? { turns.compactMap(\.startSeq).min() }
 
-    public var current: TimelineTurn? { turns.last(where: { $0.isRunning }) }
+    /// The turn the agent is working on. A prompt waiting behind it is a row after it but never "the current turn".
+    public var current: TimelineTurn? { turns.last(where: { $0.state == .running }) ?? turns.last(where: { $0.isRunning }) }
     public var isWorking: Bool { current != nil }
 
     // MARK: Loading
@@ -188,7 +192,8 @@ public struct TurnTimeline: Equatable, Sendable {
         var older = TurnTimeline()
         older.load(events)
         let known = Set(turns.compactMap(\.turnId))
-        turns = older.turns.filter { $0.turnId.map { !known.contains($0) } ?? true } + turns
+        // A prompt that was only waiting in an older page has long since started or gone: it is not a row.
+        turns = older.turns.filter { !$0.waitsInQueue && ($0.turnId.map { !known.contains($0) } ?? true) } + turns
         hasEarlier = more
     }
 
@@ -246,7 +251,7 @@ public struct TurnTimeline: Equatable, Sendable {
         switch e.body {
         case .turnStarted(let turnId, let promptId, let nonce, let text, let author, let queuedId, let auto):
             guard !turns.contains(where: { $0.turnId == turnId }) else { return }
-            if let i = pendingIndex(nonce: nonce, text: text, author: author, queuedId: queuedId) {
+            if let i = pendingIndex(nonce: nonce, text: text, author: author, queuedId: queuedId, at: e.at ?? Date()) {
                 turns[i].turnId = turnId
                 turns[i].promptMessageId = promptId
                 turns[i].queuedId = nil
@@ -272,17 +277,34 @@ public struct TurnTimeline: Equatable, Sendable {
             if let n = nonce, let i = turns.firstIndex(where: { $0.clientNonce == n && $0.turnId == nil }) {
                 turns[i].state = .queued
                 turns[i].queuedId = id
+            } else if nonce == nil, author == nil, !turns.contains(where: { $0.queuedId == id }),
+                      let i = turns.firstIndex(where: { $0.turnId == nil && $0.state == .sending && $0.prompt == text }) {
+                // Our own press whose nonce was lost on the way: the one press of the same words.
+                turns[i].state = .queued
+                turns[i].queuedId = id
+            } else if !turns.contains(where: { $0.queuedId == id }), let i = staleIndex(text: text, author: author, at: e.at ?? Date()) {
+                turns[i].state = .queued
+                turns[i].queuedId = id
+            } else if !turns.contains(where: { $0.queuedId == id }) {
+                // Someone else's prompt (a pond member's), or ours from another surface: a dimmed row at the end of the
+                // transcript under its author, which becomes the turn's prompt in place when the host starts it.
+                turns.append(TimelineTurn(
+                    id: "queued-\(id)", turnId: nil, promptMessageId: nil, prompt: text, author: author, clientNonce: nonce, auto: false,
+                    steps: [], state: .queued, startedAt: e.at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: id,
+                    startSeq: nil))
             }
             if !queued.contains(where: { $0.id == id }) { queued.append(TimelineQueued(id: id, text: text, author: author, clientNonce: nonce)) }
 
         case .promptDequeued(let id):
             queued.removeAll { $0.id == id }
-            if let i = turns.firstIndex(where: { $0.queuedId == id && $0.turnId == nil }) {
-                turns[i].state = .notSent("Taken out of the queue")
-                turns[i].queuedId = nil
-            }
+            // Taken out (deleted, or steered into the running turn): the waiting row goes; nothing else moves.
+            turns.removeAll { $0.queuedId == id && $0.turnId == nil && $0.state == .queued }
 
         case .step(let s):
+            // A steer our composer sent: the host took it into the turn, so the row we showed for the press is that step.
+            if s.kind == .steer, case .string(let n)? = s.detail["clientNonce"] {
+                turns.removeAll { $0.clientNonce == n && $0.turnId == nil && ($0.state == .sending || $0.state == .queued) }
+            }
             guard let i = openIndex(s.turnId) else { return }
             upsert(TimelineStep(
                 id: s.stepId, kind: s.kind, label: s.label, detail: s.detail, status: s.status, at: e.at, author: s.author, isMessage: false),
@@ -316,15 +338,25 @@ public struct TurnTimeline: Equatable, Sendable {
         return i
     }
 
-    private func pendingIndex(nonce: String?, text: String, author: TimelineAuthor?, queuedId: String?) -> Int? {
+    private func pendingIndex(nonce: String?, text: String, author: TimelineAuthor?, queuedId: String?, at: Date) -> Int? {
         let open = turns.indices.filter { turns[$0].turnId == nil && (turns[$0].state == .sending || turns[$0].state == .queued) }
         if let nonce, let i = open.first(where: { turns[$0].clientNonce == nonce }) { return i }
         if let queuedId, let i = open.first(where: { turns[$0].queuedId == queuedId }) { return i }
         // A prompt whose nonce was lost on the way (a restarted host's queue): the one press of the same words, only
         // when it is our own (a teammate's prompt is never taken for it).
         if nonce == nil, author == nil, let i = open.first(where: { turns[$0].prompt == text }) { return i }
-        return nil
+        return staleIndex(text: text, author: author, at: at)
     }
+
+    /// An optimistic row nothing named for a while (a nonce lost on the way) and the same author's identical prompt: one row.
+    private func staleIndex(text: String, author: TimelineAuthor?, at: Date) -> Int? {
+        turns.indices.first { i in
+            turns[i].turnId == nil && turns[i].state == .sending && turns[i].prompt == text && turns[i].author == author
+                && (turns[i].startedAt.map { at.timeIntervalSince($0) > Self.staleAfter } ?? false)
+        }
+    }
+
+    private static let staleAfter: TimeInterval = 10
 
     private mutating func upsert(_ step: TimelineStep, in i: Int) {
         if let j = turns[i].steps.firstIndex(where: { $0.id == step.id }) {

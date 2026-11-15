@@ -170,6 +170,8 @@ export interface QueueRow {
   author?: MessageAuthor;
   /** Being edited on a surface: not sent until released. */
   held?: boolean;
+  /** The composer that sent it: carried to the timeline so its optimistic row reconciles. */
+  clientNonce?: string;
 }
 
 /** What is waiting beside a chat's running turn: a queued message, or a steer the agent has not taken in yet. */
