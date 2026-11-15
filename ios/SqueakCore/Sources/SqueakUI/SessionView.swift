@@ -1364,6 +1364,9 @@ private struct QueueCard: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
             VStack(alignment: .leading, spacing: 2) {
+                if let author = card.author {
+                    Text(author).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+                }
                 Text(card.text).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(stacked ? 3 : 2)
                 if let problem {
                     Text(problem).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)

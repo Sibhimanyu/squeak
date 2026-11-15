@@ -5805,6 +5805,59 @@ describe("RemoteBridge native chats from the phone", () => {
     return { f, ...n };
   };
 
+  it("answers a Squeak chat's history (prompts and replies), delta and queue from the host's own reads", async () => {
+    const rows: TranscriptMessage[] = [
+      { id: "1", cursor: "1", role: "user", text: "old prompt", at: null, turnId: null },
+      { id: "2", cursor: "2", role: "assistant", text: "old reply", at: null, turnId: null },
+      { id: "3", cursor: "3", role: "user", text: "new prompt", at: null, turnId: null },
+    ];
+    const n = fakeNative();
+    Object.assign(n.native, {
+      history: (_id: string, limit: number, before?: number | null) => {
+        const kept = rows.filter((m) => before == null || Number(m.cursor) < before);
+        const page = kept.slice(-limit);
+        return {
+          messages: page,
+          complete: kept.length <= limit,
+          nextBefore: kept.length > limit ? page[0]!.cursor! : null,
+        };
+      },
+      queue: async () => [{ id: "q1", text: "queued one", mode: "queue", position: 1, author: "Ada" }],
+    });
+    const f = fixture({
+      native: n.native,
+      streaming: true,
+      session: nativeSession({ state: "idle", nativeRequest: null }) as unknown as Partial<FleetSession>,
+    });
+    await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, caps: ["histdelta"] }) });
+    await f.pair();
+    await f.bridge.tick();
+    const live = (id: string) => {
+      const doc = [...f.store.docs.entries()].find(([key]) => key.includes("/live/") && key.endsWith(id));
+      return doc ? open<Record<string, unknown>>(f.payload.k, doc[1].box) : null;
+    };
+    const view = open<{ sessions: Array<{ key: string; actions?: string[] }> }>(
+      f.payload.k,
+      f.store.docs.get(`${f.channel}/state/snapshot`)!.box,
+    );
+    const actions = view.sessions.find((s) => s.key === KEY)?.actions ?? [];
+    expect(actions).toEqual(expect.arrayContaining(["earlier", "delta"]));
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand({ key: KEY }));
+    await f.bridge.tick();
+    const latest = f.result("h1") as { status: string; doc: string };
+    expect(latest.status).toBe("sent");
+    const page = live(latest.doc) as { entries: Array<{ role: string; text: string }> };
+    expect(page.entries.map((e) => [e.role, e.text])).toEqual([
+      ["user", "old prompt"],
+      ["assistant", "old reply"],
+      ["user", "new prompt"],
+    ]);
+    await f.store.set(`${f.channel}/commands/h2`, f.historyCommand({ key: KEY, after: "2" }));
+    await f.bridge.tick();
+    const delta = live((f.result("h2") as { doc: string }).doc) as { entries: Array<{ text: string }> };
+    expect(delta.entries.map((e) => e.text)).toEqual(["new prompt"]);
+  });
+
   it("allows the current request, once or for the chat", async () => {
     const { f, responds } = await setup();
     expect(await go(f, f.nativeCommand(respond()))).toMatchObject({ status: "sent" });

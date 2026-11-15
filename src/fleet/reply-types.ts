@@ -57,6 +57,8 @@ export interface QueueItem {
   text: string;
   mode: ReplyMode;
   position: number;
+  /** Who wrote it, for a Squeak chat's pond member (the owner's own messages carry none). */
+  author?: string;
 }
 
 export type QueueAction = "promote" | "cancel";

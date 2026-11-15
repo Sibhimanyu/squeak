@@ -63,9 +63,11 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         public let text: String
         public let mode: String?
         public let position: Int?
+        /// Who wrote it, when it was a pond member (a Squeak chat); absent for the owner's own.
+        public let author: String?
 
-        public init(id: String, text: String, mode: String? = nil, position: Int? = nil) {
-            self.id = id; self.text = text; self.mode = mode; self.position = position
+        public init(id: String, text: String, mode: String? = nil, position: Int? = nil, author: String? = nil) {
+            self.id = id; self.text = text; self.mode = mode; self.position = position; self.author = author
         }
     }
 

@@ -141,6 +141,19 @@ if streamed {
     let gone = try await poll("live turn deleted", seconds: 10) { try await channel.liveTurn(for: session.key) == nil ? true : nil }
     print("phone: live turn deleted after leaving: \(gone)")
     liveOk = longest > 200 && gone
+    // The queue the Mac read for the open chat reaches the phone with its order and author.
+    let queueOk = turn?.queue?.first?.text == "queued while it works" && turn?.queue?.first?.author == "Ada" && turn?.queue?.first?.position == 1
+    print("phone: queue on the open chat: \(queueOk)")
+    // A chat opened with an empty cache: the newest page holds the person's prompts and the replies, in order.
+    let (historyId, historyDocument) = try channel.historyDocument(key: session.key, before: nil, n: 12, signer: signer)
+    try await channel.send(historyDocument, id: historyId)
+    let historyAnswer = try await verdict(historyId, "history result")
+    let historyPage = try await channel.historyPage(key: session.key, before: nil)
+    let texts = historyPage?.entries.map(\.text) ?? []
+    let historyOk = historyAnswer.sent && texts == ["e2e prompt one", "e2e reply one", "e2e prompt two", "e2e reply two"]
+        && historyPage?.entries.map(\.role) == ["user", "assistant", "user", "assistant"]
+    print("phone: history from an empty cache, prompts in order with replies: \(historyOk) \(texts)")
+    liveOk = liveOk && queueOk && historyOk
 }
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
 var allOk = usageOk && liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42

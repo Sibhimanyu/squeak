@@ -964,6 +964,19 @@ final class AppModel {
         guard !demo, liveAvailable, verbose, session.can(.delta), !syncingDelta.contains(key) else { return }
         syncingDelta.insert(key)
         defer { syncingDelta.remove(key) }
+        // Nothing held (a new phone, a chat never opened, a cache that came back empty): there is no cursor to ask
+        // "after" from, so the newest page is asked for instead. Without this an empty cache never fetched anything.
+        if historyStates[key]?.newestCursor == nil {
+            guard let page = await fetchHistoryPage(key: key, before: nil), !page.entries.isEmpty else { return }
+            var seeded = historyStates[key] ?? ChatHistoryState()
+            if seeded.entries.isEmpty {
+                seeded.prepend(page)
+            } else {
+                seeded.mergeLatest(page.entries)
+            }
+            setHistory(seeded, for: key)
+            rebuild()
+        }
         for _ in 0..<Self.deltaPages {
             guard let after = historyStates[key]?.newestCursor,
                   let delta = await fetchHistoryDelta(key: key, after: after) else { return }

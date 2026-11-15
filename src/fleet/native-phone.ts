@@ -6,6 +6,9 @@ import { NATIVE_HOST_DOWN, NativeHostError, tokenFromFile } from "../native/clie
 import type { PondDirectory } from "../flotilla/directory.js";
 import type { ChatModel } from "./chat-models.js";
 import { shrinkWithSips, type Shrink } from "./icon-shrink.js";
+import { searchableText } from "../native/store.js";
+import type { QueueItem } from "./reply-types.js";
+import type { TranscriptResult } from "./transcript.js";
 import type { NativeRequestSummary } from "./types.js";
 
 /**
@@ -215,6 +218,14 @@ export interface RemoteNative {
   models(): ChatModel[];
   /** Whether a phone may start a chat that skips approvals (a Mac-side setting, off by default). */
   allowBypass(): boolean;
+  /**
+   * A Squeak chat's readable messages for the phone's history (the person's prompts and the agent's words, oldest
+   * first, cursor = the row's seq), paged like Conductor's: the newest `limit` before `before`. Read from native.db
+   * read-only. Optional: tests omit it.
+   */
+  history?(nativeSessionId: string, limit: number, before?: number | null): TranscriptResult;
+  /** A Squeak chat's queued messages and steers in flight, oldest first, from the host; null when it cannot say. */
+  queue?(nativeSessionId: string): Promise<QueueItem[] | null>;
   /** The host's own newest open request for the session, or null: the only thing a respond is matched against. */
   currentRequest(nativeSessionId: string): Promise<NativeOpenRequest | null>;
   respond(requestId: string, body: NativeRespondBody): Promise<void>;
@@ -274,6 +285,76 @@ export class NativePhone implements RemoteNative {
     ) as Row | undefined;
     const payload = row ? parsePayload(row.payload) : {};
     return describeRequest(summary, payload);
+  }
+
+  history(nativeSessionId: string, limit: number, before: number | null = null): TranscriptResult {
+    const empty: TranscriptResult = { messages: [], complete: false, nextBefore: null };
+    return (
+      this.query((db) => {
+        const want = Math.max(1, Math.min(limit, 2000));
+        const found: TranscriptResult["messages"] = [];
+        let cursor = before ?? Number.MAX_SAFE_INTEGER;
+        let more = false;
+        // Rows that carry no text (tool calls, results, thinking) are skipped; read on until `want` messages are had.
+        for (let pass = 0; pass < 20 && found.length < want; pass++) {
+          const rows = db
+            .prepare(
+              "SELECT seq, role, kind, payload, created_at FROM messages WHERE session_id=? AND seq<? AND kind IN ('user/text','assistant','item/agentMessage') ORDER BY seq DESC LIMIT ?",
+            )
+            .all(nativeSessionId, cursor, 200) as Row[];
+          if (rows.length === 0) {
+            more = false;
+            break;
+          }
+          more = rows.length === 200;
+          for (const row of rows) {
+            cursor = row.seq as number;
+            const text = searchableText(row.kind as string, parsePayload(row.payload)).trim();
+            if (!text) continue;
+            found.push({
+              id: String(row.seq),
+              role: row.role === "user" ? "user" : "assistant",
+              text,
+              at: typeof row.created_at === "string" ? row.created_at : null,
+              turnId: null,
+              cursor: String(row.seq),
+            });
+            if (found.length >= want) {
+              more = true;
+              break;
+            }
+          }
+        }
+        found.reverse();
+        const oldest = found[0]?.cursor;
+        return {
+          messages: found,
+          complete: !more,
+          nextBefore: more && oldest ? oldest : null,
+        } satisfies TranscriptResult;
+      }) ?? empty
+    );
+  }
+
+  async queue(nativeSessionId: string): Promise<QueueItem[] | null> {
+    try {
+      const body = await this.call("GET", `/native/sessions/${encodeURIComponent(nativeSessionId)}/pending`);
+      const items = Array.isArray(body.pending) ? (body.pending as Row[]) : [];
+      return items
+        .filter((item) => typeof item.id === "string" && typeof item.text === "string")
+        .map((item, index) => {
+          const author = item.author as { name?: unknown } | undefined;
+          return {
+            id: item.id as string,
+            text: item.text as string,
+            mode: item.state === "queued" ? ("queue" as const) : ("steer" as const),
+            position: index + 1,
+            ...(typeof author?.name === "string" ? { author: author.name } : {}),
+          };
+        });
+    } catch {
+      return null;
+    }
   }
 
   projects(): NativeProjectFull[] {

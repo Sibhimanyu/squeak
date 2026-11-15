@@ -301,6 +301,7 @@ export class LiveTurnPublisher {
           text: clipText(item.text, LIVE_QUEUE_TEXT_CHARS),
           mode: item.mode,
           position: item.position,
+          ...(item.author ? { author: item.author } : {}),
         }));
       }
       const serialized = JSON.stringify(turn);
