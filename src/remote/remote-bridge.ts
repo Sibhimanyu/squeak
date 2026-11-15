@@ -4021,7 +4021,10 @@ export class RemoteBridge {
     const handle = this.hostHandle(session);
     const transcript = this.deps.replier.transcript;
     if (handle && transcript) {
-      return (limit, before) => transcript.call(this.deps.replier, handle, limit, before);
+      return (limit, before) =>
+        before === undefined
+          ? transcript.call(this.deps.replier, handle, limit)
+          : transcript.call(this.deps.replier, handle, limit, before);
     }
     const native = this.deps.native;
     if (!handle && session.origin === "squeak" && isNativeKey(session.key) && native?.history) {
