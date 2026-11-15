@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.2
+
+- "Download automatically" is now off by default: Squeak checks for updates on its own but asks before downloading. Installs that had it switched on by an earlier version are reset once; turn it on again in Settings, About if you want it.
+
 ## 2.27.1
 
 - A chat no longer says "very large" because its transcript file is big: the notice and the context popover now follow what is actually sent, and the popover says where the chat compacts ("Compacts automatically at 200k tokens"). Over that point the notice reads "Compacting soon to keep replies fast".

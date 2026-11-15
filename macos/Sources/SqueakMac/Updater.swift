@@ -15,7 +15,7 @@ import SwiftUI
 ///
 /// Squeak is a menu-bar app, so Sparkle's own scheduled alert would open behind whatever is in front and never be
 /// seen. Scheduled updates are therefore "gentle": a banner in the panel and Settings says "Update 2.x available".
-/// With automatic installs on (the default) Sparkle's automatic driver downloads without ever calling the user
+/// With automatic downloads on (off by default) Sparkle's automatic driver downloads without ever calling the user
 /// driver, so those sessions are followed through the updater delegate (`willDownloadUpdate`, `willExtractUpdate`,
 /// `willInstallUpdateOnQuit`, errors) and show the same progress. Sparkle gives no handle to cancel or join that
 /// kind of session, and `checkForUpdates()` is a silent no-op while one runs: so a press while it runs attaches to
@@ -92,10 +92,13 @@ final class AppUpdater {
 
     func start(enabled: Bool) {
         guard enabled, updater == nil, Bundled.isApp, Bundle.main.bundleIdentifier == "com.squeak.mac" else { return }
-        // Before the updater reads it: Sparkle's own default is off, and the Settings text promises installs.
-        if UserDefaults.standard.object(forKey: "SUAutomaticallyUpdate") == nil {
-            UserDefaults.standard.set(true, forKey: "SUAutomaticallyUpdate")
+        // Before the updater reads it: downloads stay off unless the person turns them on; reset the old app-written true once.
+        let ud = UserDefaults.standard
+        let stored = ud.object(forKey: "SUAutomaticallyUpdate") == nil ? nil : ud.bool(forKey: "SUAutomaticallyUpdate")
+        if let v = AutoDownloadDefault.migratedValue(stored: stored, markerSet: ud.bool(forKey: AutoDownloadDefault.markerKey)) {
+            ud.set(v, forKey: "SUAutomaticallyUpdate")
         }
+        ud.set(true, forKey: AutoDownloadDefault.markerKey)
         let d = UpdateDelegate(owner: self)
         delegate = d
         let ui = UpdateUserDriver(owner: self)

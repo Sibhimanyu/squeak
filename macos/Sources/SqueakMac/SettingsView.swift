@@ -921,13 +921,13 @@ private struct AboutSettings: View {
                         Text("Tell me when an update is available").frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Toggle(isOn: Binding(get: { model.updater.automaticallyInstalls }, set: { model.updater.automaticallyInstalls = $0 })) {
-                        Text("Download and install updates automatically").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Download updates automatically").frame(maxWidth: .infinity, alignment: .leading)
                     }
                         .disabled(!model.updater.isActive)
                     UpdateBanner(updater: model.updater, style: .settings).id("updateCard")
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
-                    SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
+                    SectionFootnote("Squeak checks once a day and asks before downloading. Turn on automatic downloads and it installs a new version when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
                 }
                 if SqueakMacApp.reportsEnabled {
                     SettingsCard(title: "Help make Squeak better", subtitle: "Your feedback reaches a person.", symbol: "bubble.left") {

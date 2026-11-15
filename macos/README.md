@@ -235,7 +235,7 @@ Squeak uses Sparkle 2 (`Sparkle.framework` in `Contents/Frameworks`, started by
 or `swift run`). Info.plist carries `SUFeedURL`
 (`https://sibhimanyu.github.io/squeak/appcast.xml`), `SUPublicEDKey`,
 `SUEnableAutomaticChecks`, `SUScheduledCheckInterval` (86400) and
-`SUAllowsAutomaticUpdates`; the user can turn automatic checks off in Settings, About.
+`SUAllowsAutomaticUpdates`; the user can turn automatic checks off in Settings, About. "Download automatically" (`SUAutomaticallyUpdate`) is off by default; builds before 2.27.2 wrote `true`, reset once (marker `SqueakUpdatesDownloadDefaultV2`, `AutoDownloadDefault`).
 
 - **One state machine, three surfaces.** What the update is doing lives in `UpdateFlow` (`SqueakMacCore/Updates`,
   pure, tested, injectable clock): idle, checking, available, downloading, extracting, readyToInstall, installing,
