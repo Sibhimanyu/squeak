@@ -68,9 +68,11 @@ describe("connection failures", () => {
 describe("size threshold", () => {
   const ctx = (used: number, limit = 1_000_000) => ({ used, limit, percent: Math.round((used / limit) * 1000) / 10 });
   it("large above 60% of the window or above 20 MB of transcript", () => {
-    expect(chatSize(ctx(660_000), null)).toMatchObject({ large: true, reason: "context" });
-    expect(chatSize(ctx(300_000), 45 * 1024 * 1024)).toMatchObject({ large: true, reason: "transcript" });
-    expect(chatSize(ctx(300_000), 5 * 1024 * 1024).large).toBe(false);
+    expect(chatSize(ctx(660_000), null, 200_000)).toMatchObject({ large: true, reason: "context", compacting: true });
+    expect(chatSize(ctx(132_000), 45 * 1024 * 1024, 200_000).large).toBe(false);
+    expect(chatSize(ctx(210_000), null, 200_000).large).toBe(true);
+    expect(chatSize(ctx(300_000), null, null).large).toBe(false);
+    expect(chatSize(ctx(660_000), null, null)).toMatchObject({ large: true, compacting: false });
     expect(chatSize(null, null).large).toBe(false);
   });
 

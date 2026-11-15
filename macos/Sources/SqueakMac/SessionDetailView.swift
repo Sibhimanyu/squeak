@@ -648,7 +648,7 @@ struct SessionDetail: View {
             }
             // A very large chat: a calm offer, never a block. Compact first (it keeps the thread), else a fresh one.
             if isNative, NativeChatNotice.showsLarge(session) {
-                ChatNoticeBar(text: NativeChatNotice.largeText, actions: [
+                ChatNoticeBar(text: NativeChatNotice.largeText(for: session), actions: [
                     (NativeChatNotice.compactTitle, { Task { await model.nativeCompact(session) } }),
                     (NativeChatNotice.continueTitle, { Task { await model.nativeBeginHandoff(session) } }),
                 ])
@@ -829,7 +829,8 @@ struct SessionDetail: View {
             contextUsed: session.contextPercent,
             contextPopover: session.contextPercent == nil ? nil : ContextFormat.Popover.make(
                 tokens: session.contextTokens, limit: session.contextLimit, percent: session.contextPercent,
-                canCompact: isNative && model.native.key == session.key, working: working),
+                canCompact: isNative && model.native.key == session.key, working: working,
+                autoCompactAt: session.autoCompactAt),
             onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
             picker: pickerSource
         ) {

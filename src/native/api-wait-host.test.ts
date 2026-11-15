@@ -161,8 +161,17 @@ describe("auto-compaction in the host", () => {
   it("the very large chat carries a large flag for the Mac's notice", async () => {
     const { host, s, store } = await big(660_000);
     const row = host.list().find((x) => x.id === s.id)!;
-    expect(row.large).toMatchObject({ reason: "context" });
+    expect(row.large).toMatchObject({ reason: "context", compacting: true });
+    expect(row.autoCompactAt).toBe(200_000);
     void store;
+  });
+
+  it("132k on a 1M window is not large, however big its transcript; 210k is", async () => {
+    const small = await big(132_000);
+    const row = small.host.list().find((x) => x.id === small.s.id)!;
+    expect(row.large).toBeUndefined();
+    const over = await big(210_000);
+    expect(over.host.list().find((x) => x.id === over.s.id)!.large).toMatchObject({ reason: "context" });
   });
 });
 

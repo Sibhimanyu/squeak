@@ -68,6 +68,10 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var archivedAt: Date?
     /// The host says this Squeak chat is very large: replies are slow and may fail (the notice above the composer).
     public var largeChat: Bool? = nil
+    /// With `largeChat`: automatic compaction is on, so the chat compacts itself soon.
+    public var largeCompacting: Bool? = nil
+    /// The context size at which the chat compacts itself: nil = unknown (older host), .some(nil) = automatic compaction is off.
+    public var autoCompactAt: Int?? = nil
     /// This Squeak chat's last turn failed in a way "Try again" can resend.
     public var retryable: Bool? = nil
 
