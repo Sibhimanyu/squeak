@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.2
+
+- Settings › Extensions no longer says "Not in this build" for Claude Code (external), Codex (external) and RasanAI: an add-on is unavailable only when the daemon says so, not when the app has no page for it.
+
 ## 2.27.1
 
 - A chat no longer says "very large" because its transcript file is big: the notice and the context popover now follow what is actually sent, and the popover says where the chat compacts ("Compacts automatically at 200k tokens"). Over that point the notice reads "Compacting soon to keep replies fast".

@@ -33,14 +33,16 @@ import Testing
         #expect(fast)
     }
 
-    @Test func notInThisBuildOffersNoAdd() {
+    @Test func daemonOnlyAddonsOfferAddWhenAvailable() {
         let addons = [
             AddonInfo(id: "conductor", name: "Conductor", blurb: "", available: true, enabled: false),
-            AddonInfo(id: "rasanai", name: "RasanAI", blurb: "", available: true, enabled: false),
+            AddonInfo(id: "codex", name: "Codex (external)", blurb: "", available: true, enabled: false),
+            AddonInfo(id: "gone", name: "Gone", blurb: "", available: false, enabled: false),
         ]
-        let items = ExtensionList.items(addons: addons, telegram: nil, cliq: nil, voice: nil, builtInAddons: ["conductor"])
+        let items = ExtensionList.items(addons: addons, telegram: nil, cliq: nil, voice: nil)
         #expect(items[0].offersAdd && !items[0].notInThisBuild)
-        #expect(items[1].notInThisBuild && !items[1].offersAdd && !items[1].canAdd)
-        #expect(items[2].offersAdd)
+        #expect(items[1].offersAdd && items[1].canAdd && !items[1].notInThisBuild)
+        #expect(!items[2].canAdd)
+        #expect(items[3].offersAdd)
     }
 }

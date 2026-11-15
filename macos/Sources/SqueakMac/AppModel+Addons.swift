@@ -28,8 +28,7 @@ extension AppModel {
     /// Every extension, add-ons and built-in channels merged; what the Extensions page and the sidebar draw.
     var extensionItems: [ExtensionItem] {
         let c = channels.channels
-        return ExtensionList.items(addons: addonCatalogue, telegram: c?.telegram, cliq: c?.cliq, voice: channels.voice,
-                                   builtInAddons: Set(AddonRegistry.shared.apps.map(\.id)))
+        return ExtensionList.items(addons: addonCatalogue, telegram: c?.telegram, cliq: c?.cliq, voice: channels.voice)
     }
 
     /// Sidebar rows under Extensions: the overview and each added extension's page.
