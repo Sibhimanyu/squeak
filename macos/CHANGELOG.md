@@ -3,6 +3,7 @@
 ## 2.27.2
 
 - Settings › Extensions no longer says "Not in this build" for Claude Code (external), Codex (external) and RasanAI: an add-on is unavailable only when the daemon says so, not when the app has no page for it.
+- "Download automatically" is now off by default: Squeak checks for updates on its own but asks before downloading. Installs that had it switched on by an earlier version are reset once; turn it on again in Settings, About if you want it.
 
 ## 2.27.1
 
