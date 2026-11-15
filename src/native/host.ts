@@ -664,7 +664,7 @@ export class SessionHost extends EventEmitter {
   }
 
   private enqueueAndEmit(id: string, text: string, author?: MessageAuthor, clientNonce?: string): void {
-    const row = this.store.enqueue(id, text, author);
+    const row = this.store.enqueue(id, text, author, clientNonce);
     this.timeline.ensure(
       id,
       () => this.store.messagesBefore(id, null, 2000),
@@ -738,7 +738,13 @@ export class SessionHost extends EventEmitter {
           if (await runner.steer(this.agentText(id, text, options.author))) {
             const row = this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author);
             this.emitMessage(row);
-            this.timeline.steer(id, { seq: row.seq, text, author: options.author, at: row.createdAt });
+            this.timeline.steer(id, {
+              seq: row.seq,
+              text,
+              author: options.author,
+              clientNonce: options.clientNonce,
+              at: row.createdAt,
+            });
             this.noteSteered(id, text, options.author, row.seq, runner);
             return { queued: false };
           }
@@ -1169,7 +1175,10 @@ export class SessionHost extends EventEmitter {
     if (!BUSY.has(s.status)) {
       this.store.removeQueued(id, queueId);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
-      await this.startTurn(s, item.text, false, item.author, undefined, { queuedId: queueId });
+      await this.startTurn(s, item.text, false, item.author, undefined, {
+        queuedId: queueId,
+        clientNonce: item.clientNonce,
+      });
       return;
     }
     const runner = this.runners.get(id);
@@ -1805,7 +1814,10 @@ export class SessionHost extends EventEmitter {
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       this.emitPending(id, "remove", next.id, { consumed: true });
-      await this.startTurn(s, next.text, false, next.author, undefined, { queuedId: next.id });
+      await this.startTurn(s, next.text, false, next.author, undefined, {
+        queuedId: next.id,
+        clientNonce: next.clientNonce,
+      });
     } else {
       this.armTimer(id);
     }

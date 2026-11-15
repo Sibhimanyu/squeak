@@ -203,7 +203,13 @@ export class TimelineProjector {
   }
 
   /** A message the agent took in mid-turn: a step of that turn, by its author. */
-  steer(input: { seq: number; text: string; author?: MessageAuthor | undefined; at: string }): TimelineBody[] {
+  steer(input: {
+    seq: number;
+    text: string;
+    author?: MessageAuthor | undefined;
+    clientNonce?: string | undefined;
+    at: string;
+  }): TimelineBody[] {
     const t = this.turn;
     if (!t) return [];
     const author = authorOf(input.author);
@@ -214,7 +220,11 @@ export class TimelineProjector {
         stepId: `steer-${input.seq}`,
         kind: "steer",
         label: clip(input.text, 400),
-        detail: { text: input.text, messageId: `native-${input.seq}` },
+        detail: {
+          text: input.text,
+          messageId: `native-${input.seq}`,
+          ...(input.clientNonce ? { clientNonce: input.clientNonce } : {}),
+        },
         status: "done",
         ...(author ? { author } : {}),
         at: input.at,

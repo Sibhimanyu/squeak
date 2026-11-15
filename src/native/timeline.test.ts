@@ -189,6 +189,25 @@ describe("timeline event log", () => {
     expect(log.indexOf(queued)).toBeLessThan(log.indexOf(started[1]!));
   });
 
+  it("an owner's queued prompts keep their nonce through queue and start (twice, in order)", async () => {
+    const { host, runners, timeline } = setup();
+    const s = await host.create({ ...spec, text: "first" });
+    await host.send(s.id, "one", { clientNonce: "n1" });
+    await host.send(s.id, "two", { clientNonce: "n2" });
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    runners[runners.length - 1]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    const log = timeline(s.id);
+    const queued = log.filter((e) => e.type === "prompt.queued") as Extract<TimelineEvent, { type: "prompt.queued" }>[];
+    expect(queued.map((q) => q.clientNonce)).toEqual(["n1", "n2"]);
+    const started = log.filter((e) => e.type === "turn.started") as Extract<TimelineEvent, { type: "turn.started" }>[];
+    expect(started.slice(1).map((t) => [t.text, t.clientNonce, t.queuedId])).toEqual([
+      ["one", "n1", queued[0]!.queuedId],
+      ["two", "n2", queued[1]!.queuedId],
+    ]);
+  });
+
   it("a queued prompt that is removed says so", async () => {
     const { host, timeline } = setup();
     const s = await host.create({ ...spec, text: "first" });

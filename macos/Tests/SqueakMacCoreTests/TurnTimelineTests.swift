@@ -322,6 +322,40 @@ final class TurnTimelineTests: XCTestCase {
         XCTAssertTrue(t.queued.isEmpty)
     }
 
+    func testTwoQueuedPressesStayTwoRowsInOrder() {
+        var t = Log.timeline([Log.start(1, "t1", "first")])
+        t.send(nonce: "a", text: "one", at: Log.at(10))
+        t.send(nonce: "b", text: "two", at: Log.at(11))
+        t.apply(Log.queued(2, "q1", "one", nonce: "a"))
+        t.apply(Log.queued(3, "q2", "two", nonce: "b"))
+        t.apply(Log.end(4, "t1"))
+        t.apply(Log.start(5, "t5", "one", nonce: "a", queued: "q1"))
+        t.apply(Log.end(6, "t5"))
+        t.apply(Log.start(7, "t7", "two", nonce: "b", queued: "q2"))
+        XCTAssertEqual(t.turns.map(\.prompt), ["first", "one", "two"])
+        XCTAssertFalse(t.turns.contains { $0.state == .sending || $0.state == .queued })
+    }
+
+    func testASteerCarryingOurNonceRemovesTheOptimisticRow() {
+        var t = Log.timeline([Log.start(1, "t1", "first")])
+        t.send(nonce: "s", text: "also this", at: Log.at(10))
+        t.apply(Log.step(2, "t1", "steer-2", .steer, "also this", .done, detail: ["clientNonce": .string("s")]))
+        XCTAssertEqual(t.turns.count, 1)
+        XCTAssertEqual(t.turns[0].steps.count, 1)
+    }
+
+    func testAStaleOptimisticRowMergesWithTheSameWordsWhenTheNonceIsLost() {
+        var t = Log.timeline([Log.start(1, "t1", "first")])
+        t.send(nonce: "lost", text: "second", at: Log.at(-60))
+        t.apply(Log.queued(2, "q1", "second", nonce: "other"))
+        XCTAssertEqual(t.turns.count, 2)
+        XCTAssertEqual(t.turns[1].state, .queued)
+        t.apply(Log.end(3, "t1"))
+        t.apply(Log.start(4, "t4", "second", queued: "q1"))
+        XCTAssertEqual(t.turns.count, 2)
+        XCTAssertEqual(t.turns[1].state, .running)
+    }
+
     func testAuthorsAreSetOnceAndLabelsDoNotFlicker() {
         var t = Log.timeline([Log.start(1, "t1", "mine"), Log.end(2, "t1"), Log.start(3, "t3", "theirs", author: Log.aarav)])
         let authors = t.turns.map(\.author)
