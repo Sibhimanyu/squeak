@@ -8,6 +8,8 @@
 - Fixed a message sent while the agent was working showing twice, once solid and once dimmed: the host now keeps the send's id with the queued or steered message, so the dimmed row always becomes the real one.
 - File tabs are remembered: the files you had open in a stream come back after a relaunch, in the order you opened them among the threads, if the file still exists.
 - Switching a Markdown file between Preview and Source keeps your place instead of jumping to the top.
+- You can see what is working at a glance: a folded or open pond shows the working glyph where its count sits when any thread inside is working, the needs-you count (wins over working) or an error mark; the count returns when it is quiet.
+- Streams use a new dot-grid glyph instead of the three waves: still and dim when idle, a soft brightness wave while a thread works, steady amber for needs you and red for an error. It holds one frame under Reduce Motion, and VoiceOver reads "greenroom, 1 working, 1 needs you".
 
 ## 2.27.1
 

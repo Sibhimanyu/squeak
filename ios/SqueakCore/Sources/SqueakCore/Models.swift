@@ -549,6 +549,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Newest first, at most 20.
         public var streams: [Stream]? = nil
         public var archivedStreams: Int? = nil
+        /// The Mac's status rollup of the pond's chats (`working`, `needs_you`, `error`, `idle`) and its counts; an older Mac sends none.
+        public var activity: String? = nil
+        public var working: Int? = nil
+        public var needsYou: Int? = nil
         public struct Member: Codable, Equatable, Sendable {
             public let name: String
             public let online: Bool
@@ -561,6 +565,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             public var pinned: Bool? = nil
             public var archived: Bool? = nil
             public var lastActivityAt: String? = nil
+            /// The same rollup, for this stream.
+            public var activity: String? = nil
+            public var working: Int? = nil
+            public var needsYou: Int? = nil
             public init(id: String, name: String, branch: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, lastActivityAt: String? = nil) {
                 self.id = id; self.name = name; self.branch = branch; self.pinned = pinned; self.archived = archived; self.lastActivityAt = lastActivityAt
             }

@@ -1,15 +1,15 @@
-import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// A stream's icon: Lucide `waves` redrawn as three sine lines (same 24 grid, 1.5 pt round stroke) so it can move.
-/// idle is `muted` and still; working is a rolling swell in ocean blue (`StreamGlyphMotion`: the lines out of step);
-/// waiting is amber with a small dot and a ripple every ~3 s; failed is red; unread is the duck's yellow. The state comes from the daemon's data (`StreamGlyphState`); this only draws it.
+/// A stream's icon (DESIGN.md §8.1, "Stream glyph"): a 3 x 6 grid of dots on three gentle wave lines, drawn in the
+/// dot-grid loader's language. idle is `muted`, dim and still; working sends a soft brightness wave left to right in
+/// `working` (`StreamDotGlyph`, 1.6 s a pass); waiting is steady `warning`; failed steady `negative`; unread steady
+/// `done`. The state comes from the daemon's data (`StreamGlyphState`); this only draws it.
 ///
-/// Cost: only a working or waiting glyph owns a `TimelineView`, ticking 30 times a second at most; every other state
-/// is one static `Canvas` with no timeline. SwiftUI stops a timeline while its window is hidden or occluded, a row scrolled
-/// out of its lazy stack is not built, and Reduce Motion or an inactive window draws the still glyph in its colour. The
-/// phase is the wall clock's (`StreamGlyphMotion`), so glyphs turn in step with no shared object.
+/// Cost: only a working glyph owns a `TimelineView` (20 ticks a second at most); every other state is one static
+/// `Canvas`. SwiftUI stops a timeline while its window is hidden or occluded, a row scrolled out of its lazy stack is
+/// not built, and Reduce Motion or an inactive window holds one frame of the wave. The phase is the wall clock's, so
+/// glyphs flow in step with no shared object. The footprint is the old icon's: `size` square.
 struct StreamGlyph: View {
     let state: StreamGlyphState
     var size: CGFloat = 15
@@ -30,35 +30,29 @@ struct StreamGlyph: View {
 
     var body: some View {
         Group {
-            if (state == .working || state == .waiting), !reduceMotion, scenePhase == .active {
-                TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: 1 / StreamGlyphGeometry.framesPerSecond)) { ctx in
-                    let t = ctx.date.timeIntervalSinceReferenceDate
-                    waves(lines: StreamGlyphMotion.lines(working: state == .working, waiting: state == .waiting, at: t, animated: true),
-                          dotScale: state == .waiting ? StreamGlyphMotion.dotScale(at: t) : 1)
+            if StreamDotGlyph.flows(state), !reduceMotion, scenePhase == .active {
+                TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: 1 / StreamDotGlyph.framesPerSecond)) { ctx in
+                    dots(time: ctx.date.timeIntervalSinceReferenceDate, animated: true)
                 }
             } else {
-                waves(lines: StreamGlyphMotion.rest, dotScale: 1)
+                dots(time: 0, animated: false)
             }
         }
         .frame(width: size, height: size)
         .modifier(StreamGlyphSpeech(name: name, state: state))
     }
 
-    private func waves(lines: [StreamGlyphMotion.Line], dotScale: Double) -> some View {
+    private func dots(time: TimeInterval, animated: Bool) -> some View {
         Canvas(rendersAsynchronously: false) { context, canvas in
-            let scale = min(canvas.width, canvas.height) / 24
-            let style = StrokeStyle(lineWidth: Lucide.strokeWidth, lineCap: .round, lineJoin: .round)
-            for row in lines.indices {
-                var path = Path()
-                for (i, p) in StreamGlyphMotion.points(row: row, line: lines[row]).enumerated() {
-                    let q = CGPoint(x: p.x * scale, y: p.y * scale)
-                    if i == 0 { path.move(to: q) } else { path.addLine(to: q) }
+            let side = min(canvas.width, canvas.height)
+            let radius = side / CGFloat(StreamDotGlyph.columns) * 0.36
+            for row in 0..<StreamDotGlyph.rows {
+                for col in 0..<StreamDotGlyph.columns {
+                    let c = StreamDotGlyph.centre(row: row, column: col)
+                    let level = StreamDotGlyph.level(state: state, row: row, column: col, time: time, animated: animated)
+                    let rect = CGRect(x: c.x * side - radius, y: c.y * side - radius, width: radius * 2, height: radius * 2)
+                    context.fill(Path(ellipseIn: rect), with: .color(colour.opacity(level)))
                 }
-                context.stroke(path, with: .color(colour), style: style)
-            }
-            if state == .waiting {
-                let r = 2.4 * scale * dotScale
-                context.fill(Path(ellipseIn: CGRect(x: 21 * scale - r, y: 3 * scale - r, width: 2 * r, height: 2 * r)), with: .color(colour))
             }
         }
     }

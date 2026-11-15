@@ -269,6 +269,12 @@ struct WorkbenchSidebar: View {
         .help(PondWords.createTooltip)
     }
 
+    /// A pond's status at a glance, from every thread in its streams (the daemon's rollup, same precedence).
+    private func pondRollup(_ workspaces: [SidebarWorkspace]) -> StatusRollup {
+        let chats = workspaces.flatMap(\.chats).map { model.withHostBackground($0) }
+        return StatusRollup.of(marks: chats.map { model.mark(for: $0) }, ducklingsRunning: chats.map(\.backgroundRunning))
+    }
+
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no
     /// polling for rows nobody looks at.
     private func diffStat(_ workspace: SidebarWorkspace) -> (added: Int, removed: Int)? {
@@ -362,6 +368,7 @@ struct WorkbenchSidebar: View {
                 onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New thread in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == key,
                 needs: PondsModel.shared.badge(pondRecord),
+                rollup: pondRollup(workspaces),
                 onDisclose: { toggleFold(key) },
                 folded: projectFolded,
                 pondId: pondRecord?.id, projectId: entry?.projectId
@@ -622,6 +629,8 @@ private struct FoldRow: View {
     /// Ponds: this project's home is open; what in it waits on you; the chevron that folds the threads; whether folded.
     var homeSelected = false
     var needs = 0
+    /// A pond row's status rollup (working / needs you / error), drawn in the count's slot; nil = the count as before.
+    var rollup: StatusRollup?
     var onDisclose: (() -> Void)?
     var folded = false
     /// The pond behind a project row: its icon sits on the pond's tint.
@@ -634,7 +643,26 @@ private struct FoldRow: View {
     @State private var hovering = false
     @FocusState private var focused: Bool
 
-    var body: some View {
+    /// The count's slot, 24pt wide for the glyphs so a row never changes size: needs-you badge wins, then the working
+    /// glyph, then the error mark; idle (or no rollup) is the count.
+    @ViewBuilder private var pondMark: some View {
+        let r = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
+        switch PondRowMark.of(r, count: count) {
+        case .needsYou(let n):
+            Text("\(needs > 0 ? needs : n)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
+                .frame(minWidth: 24, alignment: .trailing).accessibilityHidden(true)
+        case .working:
+            WorkingGlyph(width: 20, height: 12).frame(width: 24, alignment: .trailing)
+        case .error:
+            Lucide(.circleX, size: 13, color: Theme.negative).frame(width: 24, alignment: .trailing)
+        case .count(let n):
+            Text("\(n)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
+        case nil:
+            EmptyView()
+        }
+    }
+
+        var body: some View {
         ZStack(alignment: .trailing) { row; HStack(spacing: 0) { disclosure; plus } }
             .onHover { hovering = $0 }
             .modifier(RowKeys(onKey: onKey, focused: $focused))
@@ -698,14 +726,7 @@ private struct FoldRow: View {
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     .truncationMode(.tail)
-                if depth == 0, let count {
-                    Text("\(count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
-                        .accessibilityLabel("\(count) streams")
-                }
-                if depth == 0, needs > 0 {
-                    Text("\(needs)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
-                        .accessibilityLabel("\(needs) waiting on you")
-                }
+                if depth == 0 { pondMark }
                 if conductor { ConductorMarker(size: 12) }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)
@@ -725,7 +746,8 @@ private struct FoldRow: View {
         .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
         .pointerHand()
-        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", depth == 0 ? (running ? "Working" : (unread ? "Finished, not opened yet" : nil)) : streamState.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(depth == 0 && rollup != nil && (rollup!.working > 0 || rollup!.needsYou > 0)
+            ? rollup!.label(for: title) : [title, depth == 0 ? "pond" : "stream", depth == 0 ? (running ? "Working" : (unread ? "Finished, not opened yet" : nil)) : streamState.words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
     }

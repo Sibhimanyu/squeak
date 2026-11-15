@@ -55,6 +55,7 @@ import {
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
+import { rollupStatus, type RollupActivity, type StatusRollup } from "../fleet/status-rollup.js";
 import { isLooping, isStalled } from "../fleet/attention.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
@@ -451,8 +452,15 @@ export interface PhoneViewPond {
     pinned?: true;
     archived?: true;
     lastActivityAt?: string;
+    activity?: RollupActivity;
+    working?: number;
+    needsYou?: number;
   }>;
   archivedStreams?: number;
+  /** Server-side rollup of this pond's chats (`status-rollup.ts`); absent from an older Mac. */
+  activity?: RollupActivity;
+  working?: number;
+  needsYou?: number;
 }
 
 /**
@@ -1949,9 +1957,17 @@ export class RemoteBridge {
     if (!ponds || ponds.length === 0) return {};
     const newest = new Map<string, number>();
     const newestByBranch = new Map<string, number>();
+    const byPond = new Map<string, FleetSession[]>();
+    const byBranch = new Map<string, FleetSession[]>();
+    const roll = (r: StatusRollup) => ({ activity: r.activity, working: r.working, needsYou: r.needsYou });
     for (const session of sessions) {
       const pond = this.pondOf(session);
       if (!pond) continue;
+      byPond.set(pond.id, [...(byPond.get(pond.id) ?? []), session]);
+      if (session.branch) {
+        const k = `${pond.id}\u0000${session.branch}`;
+        byBranch.set(k, [...(byBranch.get(k) ?? []), session]);
+      }
       const at = Date.parse(session.lastActivityAt) || 0;
       newest.set(pond.id, Math.max(newest.get(pond.id) ?? 0, at));
       if (session.branch) {
@@ -1989,6 +2005,7 @@ export class RemoteBridge {
                   ...(stream.branch ? { branch: stream.branch } : {}),
                   ...(stream.pinned ? { pinned: true as const } : {}),
                   ...(at ? { lastActivityAt: at } : {}),
+                  ...roll(rollupStatus(byBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`) ?? [])),
                 },
               };
             })
@@ -2002,6 +2019,7 @@ export class RemoteBridge {
             ...(pond.colour ? { colour: pond.colour } : {}),
             ...(pond.labels && pond.labels.length > 0 ? { labels: pond.labels } : {}),
             ...(last ? { lastActivityAt: last } : {}),
+            ...roll(rollupStatus(byPond.get(pond.id) ?? [])),
             ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
             ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
           };

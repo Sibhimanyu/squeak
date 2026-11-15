@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.28.1] - 2026-11-15 (iOS)
+
+- A pond row shows what its threads are doing where the count was: a working glyph, the needs-you count, or an error mark. Streams get a dot-grid glyph that flows while a thread works, and stays still when idle, steady for needs you and errors (still under Reduce Motion). Decided by your Mac, so every surface agrees.
+
 ## [1.28.0] - 2026-11-15 (iOS)
 
 - Chats open from Squeak's cloud when your Mac is asleep, and on a new iPhone: the last 30 days of each chat, sealed with your key so Squeak can't read it. When the Mac wakes it brings what came after, with nothing repeated. Turn it off in Squeak for Mac, under Account.

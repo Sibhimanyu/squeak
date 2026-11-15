@@ -10,6 +10,8 @@ struct PondMeta: Equatable, Sendable {
     /// nil = the Mac sent no streams; they are then derived from the chats' workspaces.
     var streams: [StreamMeta]?
     var archivedStreams = 0
+    /// The Mac's rollup of the pond's chats; nil from an older Mac.
+    var rollup: StatusRollup?
 }
 
 struct StreamMeta: Equatable, Sendable, Identifiable {
@@ -19,6 +21,7 @@ struct StreamMeta: Equatable, Sendable, Identifiable {
     var pinned = false
     var archived = false
     var lastActivityAt: String?
+    var rollup: StatusRollup?
 }
 
 /// One pond on the Ponds tab: the Mac's pond (or, from an older Mac, a repo) with the chats in it.
@@ -34,8 +37,10 @@ struct PondItem: Equatable, Identifiable {
     var hidden: Bool { meta.hidden }
     var joined: Bool { pond?.isJoined == true }
     var shared: Bool { pond?.shared == true }
-    var needsYou: Int { Presentation.needsYouCount(sessions) }
-    var working: Int { sessions.filter { $0.state == "working" && !$0.needsYou }.count }
+    /// The Mac's word when it sent one, else the chats folded by the same rule.
+    var rollup: StatusRollup { meta.rollup ?? StatusRollup(sessions: sessions) }
+    var needsYou: Int { rollup.needsYou }
+    var working: Int { rollup.working }
     var online: Int { pond?.members.filter(\.online).count ?? 0 }
     /// The newest of the Mac's stamp and the chats'.
     var lastActivity: Date? {
@@ -50,6 +55,8 @@ struct StreamItem: Equatable, Identifiable {
     let pinned: Bool
     let sessions: [PhoneSnapshot.Session]
     let lastActivity: Date?
+    var meta: StreamMeta? = nil
+    var rollup: StatusRollup { meta?.rollup ?? StatusRollup(sessions: sessions) }
 }
 
 enum PondScope: String, Hashable, CaseIterable {
@@ -191,7 +198,7 @@ enum PondList {
         let live = meta.filter { !$0.archived }.map { stream -> StreamItem in
             let chats = Presentation.newestFirst(item.sessions.filter { belongs($0, stream) })
             let newest = ([date(stream.lastActivityAt)] + chats.map { Age.date($0.lastActivityAt) }).compactMap { $0 }.max()
-            return StreamItem(id: stream.id, name: stream.name, branch: stream.branch, pinned: stream.pinned, sessions: chats, lastActivity: newest)
+            return StreamItem(id: stream.id, name: stream.name, branch: stream.branch, pinned: stream.pinned, sessions: chats, lastActivity: newest, meta: stream)
         }
         let archived = max(item.meta.archivedStreams, meta.filter(\.archived).count)
         return (sortStreams(live), archived)
@@ -310,8 +317,9 @@ extension PhoneSnapshot.Pond {
     /// What the Mac added in `ponds2`; empty from a Mac that did not.
     var meta: PondMeta {
         PondMeta(hidden: isHidden, colour: colour, labels: labels ?? [], lastActivityAt: lastActivityAt,
-                 streams: streams?.map { StreamMeta(id: $0.id, name: $0.name, branch: $0.branch, pinned: $0.pinned == true, archived: $0.archived == true, lastActivityAt: $0.lastActivityAt) },
-                 archivedStreams: archivedStreams ?? 0)
+                 streams: streams?.map { StreamMeta(id: $0.id, name: $0.name, branch: $0.branch, pinned: $0.pinned == true, archived: $0.archived == true, lastActivityAt: $0.lastActivityAt,
+                                              rollup: StatusRollup(activity: $0.activity, working: $0.working, needsYou: $0.needsYou)) },
+                 archivedStreams: archivedStreams ?? 0, rollup: StatusRollup(activity: activity, working: working, needsYou: needsYou))
     }
 }
 
