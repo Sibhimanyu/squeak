@@ -208,7 +208,7 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 | ---------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `warning`  | `#E0A030` | `#A16207` | An approval's or a plan's triangle, a card's left edge, the duck's attention count. Never a dot, fill or body text (§3.1).                                                                          |
 | `negative` | `#F87171` | `#DC2626` | A failed chat's circle-x, error text, the Stop button, a destructive Deny, a diff removal. (Was `needs-you`.)                                                                                       |
-| `working`  | `#4C8DFF` | `#1D4ED8` | A chat at work: the stream waves icon's swell, a working mark. Ocean blue (2026-11-12). Dark 4.56 to 5.87:1 on `bg`, `sidebar`, `surface`, `selected`; light 5.79 to 6.70:1.                        |
+| `working`  | `#4C8DFF` | `#1D4ED8` | A chat at work: the stream glyph's travelling brightness wave, a working mark. Ocean blue (2026-11-12). Dark 4.56 to 5.87:1 on `bg`, `sidebar`, `surface`, `selected`; light 5.79 to 6.70:1.                        |
 | `done`     | `#FFDA1A` | `#8A5A00` | Unread (finished, not opened yet): the dot, the duck's unread count. The duck's yellow on dark; `duck-text` on light, since `duck` is 1.37:1 on white. Dark 10.63 to 13.69:1, light 5.12 to 5.93:1. |
 | `success`  | `#4ADE80` | `#16A249` | A diff addition, a check, an "on" switch. Green never marks a chat's state. (Was `working`.)                                                                                                        |
 | `info`     | `#38BDF8` | `#0369A1` | Links and neutral confirmation. (Was `done`'s blue.)                                                                                                                                                |
@@ -216,7 +216,7 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 | `offline`  | `#52525B` | `#A1A1AA` | The duck and the footer when Squeak is not running.                                                                                                                                                 |
 
 - The violet `error` token is retired (the duck's own `needs_you` pulse stays); failures are red (`negative`) and are not pushed. Red marks failure and the destructive, never "waiting": a screen with nothing failed has none.
-- **Working is ocean blue; unread is the duck's yellow (owner decision, 2026-11-12, replacing finished-is-blue of 2026-11-09 and green working).** Water means work: the stream waves icon and every working mark draw from `working`, a blue (`#4C8DFF` / `#1D4ED8`) well apart from `info` sky, `success` green, `warning` amber and `negative` red. A yellow dot is something new for you: unread is `done`, the duck's own yellow (`duck-text` on light). This amends the rule that the duck's yellow marks unread only: **yellow marks unread and nothing else** (the primary button and the selected-pond accent stay brand, not state). The waves icon moves: working is a rolling swell (the three lines out of step, amplitude breathing), waiting is an amber ripple every 3 s; both still under Reduce Motion. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
+- **Working is ocean blue; unread is the duck's yellow (owner decision, 2026-11-12, replacing finished-is-blue of 2026-11-09 and green working).** Water means work: the stream dot-grid glyph and every working mark draw from `working`, a blue (`#4C8DFF` / `#1D4ED8`) well apart from `info` sky, `success` green, `warning` amber and `negative` red. A yellow dot is something new for you: unread is `done`, the duck's own yellow (`duck-text` on light). This amends the rule that the duck's yellow marks unread only: **yellow marks unread and nothing else** (the primary button and the selected-pond accent stay brand, not state). The stream glyph moves (§8.1, "Stream glyph"; the old three-line waves icon is retired, 2026-11-15): working is a soft brightness wave through its dots, needs-you and error are steady. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
 - A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text. Cards: 3pt `warning` edge for an approval or a plan, `subtle` for a question; a failed chat has no card.
 - Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
 - Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` (yellow) count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
@@ -593,6 +593,22 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - **Search** (the dock): chips **Waiting**, **Unread**, **Working**, **Failed**, **Claude**, **Codex** and up to five projects; the line is read as filters (the four state words, `claude`, `codex`, `today`, `yesterday`, `this week`, `project:` / `in:`) and free words; legacy synonyms are accepted but not offered. **Waiting** opens the decision cards page, titled "Waiting for you", whose cards carry no state header either (§8.10).
 - The chat header on the phone is title, then `pond · stream · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
 - **Motion means working**: the loader is the only thing in a list that moves.
+
+- **Stream glyph (owner, 2026-11-15; replaces the three-line waves icon everywhere, Mac and iPhone).** A **3 rows x 6 columns grid of dots**
+  (`StreamDotGlyph`, one reusable `StreamGlyph(state:)` per platform) whose rows each sit on a gentle sine, so the dots trace
+  three wave lines (dot centre: row pitch 1/3 of the glyph, offset up to 26% of a pitch, one period over the 6 columns); dot
+  radius 36% of a column pitch; square footprint of the old icon (Mac 15pt in a 20pt column, 11-14pt in cards and chips; iPhone 22pt
+  in a 24pt column), so rows never shift. **Idle:** static, `muted` at 45% opacity. **Working:** a soft brightness wave
+  travels left to right through the dots in `working`, 30%-100% opacity, one pass per **1.6 s**, a row lagging the one above by
+  0.35 of a column (the wall clock's phase, so glyphs on screen flow in step), 20 ticks a second at most, only the working glyph owns a timeline.
+  **Needs you:** steady `warning`, 100%. **Error:** steady `negative`. **Unread** (Mac): steady `done`. **Reduce Motion** (or an
+  inactive window, or a Mac that stopped answering on the phone): the working glyph holds one frame of the wave, a lit pattern, never the dim idle one.
+  VoiceOver says the name and the rollup ("greenroom, 1 working, 1 needs you").
+  **One rollup decides every mark:** the daemon gives each pond and each stream `activity` (`working`, `needs_you`, `error`,
+  `idle`; needs you beats working beats error beats idle; a chat held by a running duckling counts as working) with `working` and
+  `needsYou` counts (phone view `ponds[]` and `streams[]`; `/state.pondStatus`); the surfaces draw it and decide nothing. A **pond row**
+  shows it in the count's slot (24pt Mac, 34x20pt iPhone): the needs-you count in `warning` wins, then the working matrix, then the
+  error mark; idle keeps the count. A **stream row, a pond page's stream card and the New thread "In:" chip** carry the stream glyph.
 
 - **Project chat list and matrix activity** (owner-approved, 2026-11-09):
   This direction supersedes the earlier glyph corrections below. The phone's

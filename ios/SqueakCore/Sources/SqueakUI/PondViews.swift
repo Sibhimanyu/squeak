@@ -239,22 +239,13 @@ struct PondRow: View {
                     Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 4) {
-                    if item.needsYou > 0 { CountBadge(count: item.needsYou) }
-                    if item.working > 0 {
-                        HStack(spacing: 4) {
-                            StatusDot(color: Theme.working)
-                            Text("\(item.working)").font(.footnote).monospacedDigit().foregroundStyle(Theme.muted)
-                        }
-                    }
-                }
+                PondStatusMark(rollup: item.rollup)
             }
             .frame(minHeight: 52)
         }
         .tapHaptic(.navigate)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.name), \(item.shared ? "shared pond, " : "")\(PondList.threadCount(item.sessions.count))"
-            + (item.needsYou > 0 ? ", \(item.needsYou) waiting for you" : "") + (item.working > 0 ? ", \(item.working) working" : "")
+        .accessibilityLabel(item.rollup.label(for: item.name) + ", \(item.shared ? "shared pond, " : "")\(PondList.threadCount(item.sessions.count))"
             + (item.hidden ? ", hidden" : ""))
     }
 }
@@ -425,26 +416,27 @@ struct PondDashboard: View {
 /// One stream: its name, branch, and what its threads are doing.
 struct StreamRow: View {
     let stream: StreamItem
-    private var needsYou: Int { stream.sessions.filter(\.needsYou).count }
-    private var working: Int { stream.sessions.filter { $0.state == "working" && !$0.needsYou }.count }
+    private var rollup: StatusRollup { stream.rollup }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: stream.pinned ? "pin" : "arrow.triangle.branch").foregroundStyle(Theme.muted).frame(width: 24)
+            StreamGlyph(activity: rollup.activity).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(stream.name).font(.body).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(stream.name).font(.body).lineLimit(1)
+                    if stream.pinned { Image(systemName: "pin").font(.caption).foregroundStyle(Theme.muted) }
+                }
                 Text([stream.branch.flatMap { $0 == stream.name ? nil : $0 }, PondList.threadCount(stream.sessions.count)]
                     .compactMap { $0 }.joined(separator: " · "))
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if needsYou > 0 { CountBadge(count: needsYou) } else if working > 0 { StatusDot(color: Theme.working) }
+            if rollup.needsYou > 0 { CountBadge(count: rollup.needsYou) }
             if let at = stream.lastActivity { Text(Age.describe(at)).font(.footnote).foregroundStyle(Theme.subtle).monospacedDigit() }
         }
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(stream.pinned ? "Pinned stream " : "Stream ")\(stream.name), \(PondList.threadCount(stream.sessions.count))"
-            + (needsYou > 0 ? ", \(needsYou) waiting for you" : ""))
+        .accessibilityLabel("\(stream.pinned ? "Pinned stream " : "Stream ")\(rollup.label(for: stream.name)), \(PondList.threadCount(stream.sessions.count))")
     }
 }
 

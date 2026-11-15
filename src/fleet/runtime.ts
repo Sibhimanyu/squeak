@@ -53,6 +53,7 @@ import { ducklingsRunning } from "./ducklings.js";
 import type { FleetDucklings, FleetSession } from "./types.js";
 import type { FleetObserver } from "../addons.js";
 import { ArchivedSessions } from "./archived-sessions.js";
+import { pondStatusOf } from "./pond-status.js";
 
 export interface FleetRuntimeOptions {
   /** Observers add-ons supply (a host app's chats), read at every refresh; each is inert while its add-on is off. */
@@ -364,6 +365,8 @@ export function serializeState(
         pondIdOf?.(session) ?? null,
       ),
     ),
+    // One rollup per pond (working / needs_you / error / idle, with counts), for every surface to draw alike.
+    ...(pondIdOf ? { pondStatus: pondStatusOf(snapshot.active, pondIdOf) } : {}),
     others: others.map((session) =>
       serializeSession(session, canReply, null, projects?.infer(session) ?? null, pondIdOf?.(session) ?? null),
     ),

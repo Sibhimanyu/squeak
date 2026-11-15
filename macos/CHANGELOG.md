@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.27.2
+
+- You can see what is working at a glance: a folded or open pond shows the working glyph where its count sits when any thread inside is working, the needs-you count (wins over working) or an error mark; the count returns when it is quiet.
+- Streams use a new dot-grid glyph instead of the three waves: still and dim when idle, a soft brightness wave while a thread works, steady amber for needs you and red for an error. It holds one frame under Reduce Motion, and VoiceOver reads "greenroom, 1 working, 1 needs you".
+
 ## 2.27.1
 
 - A chat no longer says "very large" because its transcript file is big: the notice and the context popover now follow what is actually sent, and the popover says where the chat compacts ("Compacts automatically at 200k tokens"). Over that point the notice reads "Compacting soon to keep replies fast".
