@@ -26,6 +26,12 @@ import Testing
         #expect(!LaunchWindowPolicy.restoresFullScreen(saved: false, alreadyRestored: false, captureOrDemo: false))
         #expect(!LaunchWindowPolicy.restoresFullScreen(saved: true, alreadyRestored: false, captureOrDemo: true))
     }
+    @Test func fullScreenRestoreWaitsForRegularVisibleKeyWindow() {
+        #expect(LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: true, windowVisible: true, windowIsKey: true))
+        #expect(!LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: false, windowVisible: true, windowIsKey: true))
+        #expect(!LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: true, windowVisible: false, windowIsKey: true))
+        #expect(!LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: true, windowVisible: true, windowIsKey: false))
+    }
     @Test func quitDoesNotClearFullScreenFlag() {
         #expect(LaunchWindowPolicy.savedFullScreen(current: false, leavingBecauseAppIsQuitting: true, previous: true))
         #expect(!LaunchWindowPolicy.savedFullScreen(current: false, leavingBecauseAppIsQuitting: false, previous: true))

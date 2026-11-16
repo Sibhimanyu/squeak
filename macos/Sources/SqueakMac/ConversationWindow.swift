@@ -284,7 +284,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.titlebarSeparatorStyle = .none
-                w.styleMask.insert(.fullSizeContentView)
+                w.styleMask.insert([.fullSizeContentView, .closable, .miniaturizable, .resizable])
+                w.collectionBehavior.remove(.fullScreenNone)
+                w.collectionBehavior.insert(.fullScreenPrimary)
                 Reader.clearTitlebarSurface(w)
                 // A window that opens already in full screen starts the bar-less chrome at once.
                 if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
@@ -311,9 +313,32 @@ private struct ConversationWindowReader: NSViewRepresentable {
             guard LaunchWindowPolicy.restoresFullScreen(saved: saved, alreadyRestored: fullScreenRestored,
                                                         captureOrDemo: env["SQUEAK_MAC_CAPTURE"] != nil || env["SQUEAK_MAC_DEMO"] != nil) else { return }
             fullScreenRestored = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                if !w.styleMask.contains(.fullScreen) { w.toggleFullScreen(nil) }
+            // Only once the app is a regular app and the window is on screen and key: a toggle before that makes
+            // AppKit post willEnterFullScreen and then fail, which used to leave the lights hidden for good.
+            var tries = 0
+            func attempt() {
+                tries += 1
+                let ready = LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: NSApp.activationPolicy() == .regular,
+                                                                    windowVisible: w.isVisible, windowIsKey: w.isKeyWindow)
+                if w.styleMask.contains(.fullScreen) { return }
+                if ready {
+                    w.collectionBehavior.insert(.fullScreenPrimary)
+                    w.toggleFullScreen(nil)
+                    // If it did not take, leave the window windowed with its lights.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { syncChrome(w) }
+                } else if tries < 40 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { attempt() }
+                }
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { attempt() }
+        }
+
+        /// Chrome and the model follow what the window really is, so a transition that failed or was interrupted
+        /// can never leave the traffic lights hidden.
+        @MainActor static func syncChrome(_ w: NSWindow) {
+            let actual = w.styleMask.contains(.fullScreen)
+            setChrome(w, fullScreen: actual)
+            if AppModel.shared.conversationFullScreen != actual { AppModel.shared.conversationFullScreen = actual }
         }
 
         /// Windowed: the system buttons go to an absolute spot (`TitlebarAlignment.windowedButtonOrigin`): the close
@@ -404,7 +429,19 @@ private struct ConversationWindowReader: NSViewRepresentable {
                     }
                 })
             }
-            Task { @MainActor in AppModel.shared.conversationFullScreen = w.styleMask.contains(.fullScreen) }
+            // The transition can fail (AppKit has no public notification for it): look at the real state when it
+            // settles, when the window becomes key, and after a while following the start of a transition.
+            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didBecomeKeyNotification] {
+                tokens.append(nc.addObserver(forName: name, object: w, queue: .main) { _ in
+                    Task { @MainActor in Reader.syncChrome(w) }
+                })
+            }
+            tokens.append(nc.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: w, queue: .main) { _ in
+                for delay in [1.5, 5.0] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { Reader.syncChrome(w) } }
+                }
+            })
+            Task { @MainActor in Reader.syncChrome(w) }
         }
     }
 }

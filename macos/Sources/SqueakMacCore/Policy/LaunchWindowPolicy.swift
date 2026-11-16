@@ -36,5 +36,10 @@ public enum LaunchWindowPolicy {
         return current
     }
 
+    /// Full screen is entered only by a regular app whose window is on screen and key; earlier the transition fails.
+    public static func canRestoreFullScreen(appIsRegular: Bool, windowVisible: Bool, windowIsKey: Bool) -> Bool {
+        appIsRegular && windowVisible && windowIsKey
+    }
+
     public static let fullScreenKey = "conversationWindowFullScreen"
 }
