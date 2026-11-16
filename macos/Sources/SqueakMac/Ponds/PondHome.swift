@@ -470,7 +470,7 @@ struct PondStateMark: View {
 
     var body: some View {
         switch state {
-        case .working: WorkingGlyph(height: 12, slot: 24).accessibilityLabel("Working")
+        case .working: WorkingGlyph(height: 15, slot: 24, grid: .compact).accessibilityLabel("Working")
         case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16).accessibilityLabel("Needs you")
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14).accessibilityLabel("Failed")
         case .finished: EmptyView()

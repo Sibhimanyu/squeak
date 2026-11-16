@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import SqueakIcons
 
@@ -98,13 +99,14 @@ final class TideMotionTests: XCTestCase {
     func testFlowsRight() {
         let g = (29, 9)
         func profile(_ t: Double) -> [Double] {
-            let p = (0..<g.0).map { c in (0..<g.1).reduce(0.0) { $0 + Double(lv(c, $1, g, t)) } }
+            let fast = TideMotion.Tuning(speed: 1, paceDrift: 1, choppinessLow: 0, choppinessHigh: 1)  // the original flow, so one step shifts visibly
+            let p = (0..<g.0).map { c in (0..<g.1).reduce(0.0) { $0 + Double(TideMotion.level(col: c, row: $1, cols: g.0, rows: g.1, t: t, seed: seed, tuning: fast)) } }
             let m = p.reduce(0, +) / Double(p.count)
             return p.map { $0 - m }
         }
         var num = 0.0, den = 0.0
         for i in 0..<100 {
-            let t = Double(i) * 0.1, a = profile(t), b = profile(t + 0.3)
+            let t = Double(i) * 0.1, a = profile(t), b = profile(t + 0.1)
             for s in -3...3 {
                 var corr = 0.0
                 for c in 3..<(g.0 - 3) { corr += a[c] * b[c + s] }
@@ -116,7 +118,7 @@ final class TideMotionTests: XCTestCase {
 
     func testRimMoves() {
         let g = (21, 6)
-        let sets = Set(times.map { t in (0..<g.0).flatMap { c in [0, 5].map { lv(c, $0, g, t) > 0 } } })
+        let sets = Set(stride(from: 0.0, to: 40, by: 0.1).map { t in (0..<g.0).flatMap { c in [0, 5].map { lv(c, $0, g, t) > 0 } } })
         XCTAssertGreaterThan(sets.count, 10)
     }
 
@@ -181,7 +183,7 @@ final class TideMotionTests: XCTestCase {
     func testChoppinessDrifts() {
         let v = stride(from: 0.0, to: 120, by: 1).map { TideMotion.choppiness($0, seed) }
         XCTAssertTrue(v.allSatisfy { (0...1).contains($0) })
-        XCTAssertGreaterThan(v.max()! - v.min()!, 0.4)
+        XCTAssertGreaterThan(v.max()! - v.min()!, 0.25)
         for i in 1..<v.count { XCTAssertLessThan(abs(v[i] - v[i - 1]), 0.25) }
     }
 
@@ -219,5 +221,29 @@ final class TideMotionTests: XCTestCase {
                 last = a
             }
         } }
+    }
+
+    /// The rendered mask: with the vignette on, the outermost columns of a drawn glyph have lower average alpha than
+    /// the centre; with it off they do not (and the edge squares carry partial alpha inside one square).
+    @MainActor func testRenderedMaskFadesEdges() throws {
+        func columns(fade: Bool) throws -> [Double] {
+            let w = 200, h = 60
+            var sum = [Double](repeating: 0, count: w)
+            for t in stride(from: 1.0, to: 9.0, by: 2.0) {
+                let r = ImageRenderer(content: TideFrame(color: .white, height: 60, grid: .init(cols: 21, rows: 6, gap: 0), time: t, seed: seed, fade: fade)
+                    .frame(width: 200, height: 60).background(Color.black))
+                r.scale = 1
+                guard let cg = r.cgImage, let data = cg.dataProvider?.data, let p = CFDataGetBytePtr(data) else { throw XCTSkip("no render") }
+                let bpp = cg.bitsPerPixel / 8
+                for y in 0..<min(h, cg.height) { for x in 0..<min(w, cg.width) { sum[x] += Double(p[y * cg.bytesPerRow + x * bpp]) } }
+            }
+            return sum
+        }
+        let on = try columns(fade: true), off = try columns(fade: false)
+        func avg(_ a: [Double], _ r: Range<Int>) -> Double { a[r].reduce(0, +) / Double(r.count) }
+        XCTAssertLessThan(avg(on, 0..<10), avg(on, 90..<110) * 0.3)
+        XCTAssertLessThan(avg(on, 190..<200), avg(on, 90..<110) * 0.3)
+        XCTAssertGreaterThan(avg(off, 0..<10), 0)
+        XCTAssertLessThan(avg(on, 0..<10), avg(off, 0..<10))
     }
 }

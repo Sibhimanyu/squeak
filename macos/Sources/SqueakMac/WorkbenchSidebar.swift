@@ -658,8 +658,8 @@ private struct FoldRow: View {
             StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
                 .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
         case .working:
-            // 14 pt tall, right-aligned to the 24 pt slot and overflowing left into the row's free space; the padding keeps it clear of the name.
-            WorkingGlyph(height: 14, slot: 24, alignment: .trailing).padding(.leading, 18)
+            // 15 pt tall compact mark centred in a 24 pt slot: its visible pixels (about 23 pt) stay inside the slot, clear of the name.
+            WorkingGlyph(height: 15, slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
         case .error:
             StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):

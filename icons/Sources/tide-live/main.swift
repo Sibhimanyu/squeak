@@ -5,8 +5,8 @@ import SqueakIcons
 
 @MainActor final class Model: ObservableObject {
     @Published var tuning = TideMotion.Tuning()
-    @Published var sidebarHeight = 12.0
-    func reset() { tuning = TideMotion.Tuning(); sidebarHeight = 12 }
+    @Published var sidebarHeight = 15.0
+    func reset() { tuning = TideMotion.Tuning(); sidebarHeight = 15 }
     var source: String { "\(tuning.swiftSource)  // sidebar glyph height: \(String(format: "%.3g", sidebarHeight))" }
     func copy() {
         print(source); fflush(stdout)
@@ -29,23 +29,24 @@ struct Showcase: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(p.muted)
-            HStack(spacing: 14) {   // sidebar chat row, as the Mac: the mark slot (20 wide, glyph 11.5 right-aligned) then the title
-                TideGlyph(color: p.working, height: m.sidebarHeight, grid: .mark, tuning: m.tuning)
-                    .frame(width: 20, height: 16, alignment: .trailing)
-                Text("Hong Kong").font(.system(size: 14)).foregroundStyle(p.ink).lineLimit(1)
-                Spacer(minLength: 0)
-                Group { Text("+25k").foregroundStyle(p.add); Text("\u{2212}3.8k").foregroundStyle(p.remove) }
-                    .font(.system(size: 11, design: .monospaced))
-            }.padding(.horizontal, 10).frame(width: 260, height: 36)
-                .background(p.raised, in: RoundedRectangle(cornerRadius: 7))
-            HStack(spacing: 8) {   // pond header: tile, title, the rollup mark right after the title
-                Text("G").font(.system(size: 11, weight: .bold)).foregroundStyle(p.ink).frame(width: 20, height: 20)
-                    .background(p.raised, in: RoundedRectangle(cornerRadius: 5))
-                Text("greenroom").font(.system(size: 14, weight: .semibold)).foregroundStyle(p.ink)
-                TideGlyph(color: p.working, height: 11.5, grid: .mark, tuning: m.tuning)
-                    .frame(width: 20, height: 16, alignment: .leading)
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 10).frame(width: 260, height: 38)
+            VStack(spacing: 0) {   // the Mac sidebar: a pond row (depth 0, indent 10) with its chat row (depth 1, indent 22) under it
+                HStack(spacing: 8) {
+                    Text("G").font(.system(size: 11, weight: .bold)).foregroundStyle(p.ink).frame(width: 20, height: 20)
+                        .background(p.raised, in: RoundedRectangle(cornerRadius: 5))
+                    Text("greenroom").font(.system(size: 14, weight: .semibold)).foregroundStyle(p.ink)
+                    TideGlyph(color: p.working, height: 15, grid: .compact, tuning: m.tuning)
+                        .frame(width: 24, height: 12, alignment: .center).padding(.leading, 6)
+                    Spacer(minLength: 0)
+                }.padding(.leading, 10).frame(height: 38)
+                HStack(spacing: 14) {
+                    TideGlyph(color: p.working, height: m.sidebarHeight, grid: .compact, tuning: m.tuning)
+                        .frame(width: 20, height: 16, alignment: .center)
+                    Text("Hong Kong").font(.system(size: 14)).foregroundStyle(p.ink).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Group { Text("+25k").foregroundStyle(p.add); Text("\u{2212}3.8k").foregroundStyle(p.remove) }
+                        .font(.system(size: 11, design: .monospaced))
+                }.padding(.leading, 22).padding(.trailing, 10).frame(height: 36)
+            }.frame(width: 260).background(p.raised, in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 6) {   // pond card
                 Text("greenroom").font(.system(size: 13, weight: .medium)).foregroundStyle(p.ink)
                 TideGlyph(color: p.working, height: 28, tuning: m.tuning)

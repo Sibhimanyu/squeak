@@ -10,6 +10,8 @@ public struct TideGlyph: View {
         /// 7×3 with no gap: pixels are height/3, so at least 1 pt from 3 pt tall.
         public static let micro = Grid(cols: 7, rows: 3, gap: 0)
         public static let mini = Grid(cols: 11, rows: 4, gap: 0.5)
+        /// A small mark beside a title (a chat row): at 15 pt tall it is about 34 pt wide and, after the vignette, about 23 pt visible.
+        public static let compact = Grid(cols: 11, rows: 5, gap: 0.5)
         public static let mark = Grid(cols: 21, rows: 6, gap: 0.5)
         public static let large = Grid(cols: 29, rows: 9, gap: 0.5)
         /// Micro below 6 pt tall, mini up to 12 pt, mark up to 20 pt, large above. Each grid's pixel is at least 1 pt at
@@ -77,16 +79,30 @@ public struct TideFrame: View {
         let side = grid.side(height: size.height)
         guard side > 0 else { return }
         let ox = (size.width - grid.width(height: size.height)) / 2
-        for row in 0..<grid.rows {
-            for col in 0..<grid.cols {
-                let a: Double
-                if let time { a = TideMotion.smoothAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows, t: time, seed: seed, tuning: tuning) }
-                else { a = TideMotion.alpha(TideMotion.stillLevel(col: col, row: row, cols: grid.cols, rows: grid.rows, seed: seed)) }
-                guard a > 0.004 else { continue }
-                let rect = CGRect(x: ox + CGFloat(col) * (side + grid.gap), y: CGFloat(row) * (side + grid.gap),
-                                  width: side, height: side)
-                graphics.fill(Path(rect), with: .color(color.opacity(a * (fade ? TideMotion.vignette(col: col, row: row, cols: grid.cols, rows: grid.rows, tuning: tuning) : 1))))
+        // The pixels are drawn at full strength; the vignette is one smooth elliptical mask over the whole glyph, so an
+        // edge square shades across its own area (brighter inside, dimmer outside) instead of being in or out whole.
+        graphics.drawLayer { layer in
+            for row in 0..<grid.rows {
+                for col in 0..<grid.cols {
+                    let a: Double
+                    if let time { a = TideMotion.smoothAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows, t: time, seed: seed, tuning: tuning) }
+                    else { a = TideMotion.alpha(TideMotion.stillLevel(col: col, row: row, cols: grid.cols, rows: grid.rows, seed: seed)) }
+                    guard a > 0.004 else { continue }
+                    let rect = CGRect(x: ox + CGFloat(col) * (side + grid.gap), y: CGFloat(row) * (side + grid.gap), width: side, height: side)
+                    layer.fill(Path(rect), with: .color(color.opacity(a)))
+                }
             }
+            guard fade else { return }
+            let w = grid.width(height: size.height)
+            let stops = (0...24).map { k -> Gradient.Stop in
+                let r = Double(k) / 24
+                return Gradient.Stop(color: .black.opacity(TideMotion.vignetteCurve(r: r, tuning: tuning)), location: r)
+            }
+            layer.blendMode = .destinationIn
+            layer.translateBy(x: ox + w / 2, y: size.height / 2)
+            layer.scaleBy(x: w / 2, y: size.height / 1.1)  // unit space: u = x / half width, v = 0.55 * y / half height
+            layer.fill(Path(CGRect(x: -3, y: -3, width: 6, height: 6)),
+                       with: .radialGradient(Gradient(stops: stops), center: .zero, startRadius: 0, endRadius: 1))
         }
     }
 }

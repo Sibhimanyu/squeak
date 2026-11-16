@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.10
+
+- The working glyph moves calmly and smoothly, with soft fades instead of blinks, keeps moving while Squeak isn't the front app, and is a little larger in the sidebar.
+
 ## 2.27.9
 
 - Settings: the connection status and sign out now live in Account, and Devices is just the iPhones and browsers using your account (or a Sign in button). The wording no longer mentions the cloud or a relay.

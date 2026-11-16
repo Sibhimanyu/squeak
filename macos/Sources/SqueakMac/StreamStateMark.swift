@@ -15,7 +15,7 @@ struct StreamStateMark: View {
     var body: some View {
         ZStack {
             switch state {
-            case .working: WorkingGlyph(height: slotWidth >= 20 ? 11.5 : 9.5, slot: slotWidth, alignment: .trailing)
+            case .working: WorkingGlyph(height: slotWidth >= 20 ? 15 : 12, slot: slotWidth, alignment: .center, grid: .compact)
             case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
             case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)

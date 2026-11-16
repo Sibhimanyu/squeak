@@ -12,22 +12,22 @@ public enum TideMotion {
     /// Live-tunable parameters; the defaults are the shipped look.
     public struct Tuning: Sendable, Equatable {
         /// Overall flow speed multiplier.
-        public var speed: Double = 0.7
+        public var speed: Double = 0.5
         /// How far the pace wanders (1 = shipped 0.5x...1.3x; 0 = constant pace).
-        public var paceDrift: Double = 1
+        public var paceDrift: Double = 0.5
         /// The choppiness channel is remapped from 0...1 into this range.
-        public var choppinessLow: Double = 0
-        public var choppinessHigh: Double = 1
+        public var choppinessLow: Double = 0.15
+        public var choppinessHigh: Double = 0.8
         /// Multiplies every sparkle chance.
-        public var sparkle: Double = 1
-        /// 0 = no vignette, 1 = shipped, above 1 = narrower.
-        public var vignette: Double = 1
+        public var sparkle: Double = 2.2
+        /// 0 = no vignette, 1 = the original, above 1 = narrower.
+        public var vignette: Double = 1.5
         /// Crossfade time in seconds (0 = pixels snap between the four levels as before).
-        public var smoothness: Double = 0.3
+        public var smoothness: Double = 0.8
         /// Timeline rate: 15, 30 or 60.
         public var frameRate: Int = 30
         public init() {}
-        public init(speed: Double = 0.7, paceDrift: Double = 1, choppinessLow: Double = 0, choppinessHigh: Double = 1, sparkle: Double = 1, vignette: Double = 1, smoothness: Double = 0.3, frameRate: Int = 30) {
+        public init(speed: Double = 0.5, paceDrift: Double = 0.5, choppinessLow: Double = 0.15, choppinessHigh: Double = 0.8, sparkle: Double = 2.2, vignette: Double = 1.5, smoothness: Double = 0.8, frameRate: Int = 30) {
             self.smoothness = smoothness; self.frameRate = frameRate
             self.speed = speed; self.paceDrift = paceDrift; self.choppinessLow = choppinessLow; self.choppinessHigh = choppinessHigh
             self.sparkle = sparkle; self.vignette = vignette
@@ -61,7 +61,12 @@ public enum TideMotion {
     public static func vignette(col: Int, row: Int, cols: Int, rows: Int, tuning: Tuning = Tuning()) -> Double {
         let nx = (Double(col) + 0.5) / Double(cols) * 2 - 1
         let ny = (Double(row) + 0.5) / Double(rows) * 2 - 1
-        let r = (nx * nx + (0.55 * ny) * (0.55 * ny)).squareRoot()
+        return vignetteCurve(r: (nx * nx + (0.55 * ny) * (0.55 * ny)).squareRoot(), tuning: tuning)
+    }
+
+    /// The falloff at elliptical radius `r` (0 centre, 1 the glyph's left/right edge): the one curve behind both the
+    /// per-pixel `vignette` and the continuous mask `TideFrame` draws over the whole glyph.
+    public static func vignetteCurve(r: Double, tuning: Tuning = Tuning()) -> Double {
         let x = max(0, min(1, (r - 0.5) / 0.5))
         let f = 1 - x * x * (3 - 2 * x)
         return max(0, min(1, 1 - tuning.vignette * (1 - f)))

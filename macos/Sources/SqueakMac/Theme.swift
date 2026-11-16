@@ -92,9 +92,11 @@ struct WorkingGlyph: View {
     var slot: CGFloat = 24
     /// Where the glyph sits in the slot: `.trailing` overflows to the left only.
     var alignment: Alignment = .center
+    /// `.compact` for a mark beside a title (its visible pixels stay inside a 20-24 pt slot); `.mark` for wider sites.
+    var grid: TideGlyph.Grid = .mark
 
     var body: some View {
-        TideGlyph(color: color, height: height, grid: .mark)
+        TideGlyph(color: color, height: height, grid: grid)
             .frame(width: slot, height: 12, alignment: alignment)
             .allowsHitTesting(false)
     }
@@ -107,7 +109,7 @@ struct ChatMarkGlyph: View {
     var body: some View {
         switch mark.kind {
         case .working:
-            WorkingGlyph(height: 12, slot: 24).opacity(mark.quiet ? 0.7 : 1)
+            WorkingGlyph(height: 15, slot: 24, grid: .compact).opacity(mark.quiet ? 0.7 : 1)
         case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
         case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)
