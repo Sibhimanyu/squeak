@@ -144,6 +144,15 @@ final class PondsModel {
     /// The pond's logo-derived (or chosen) hue only when it has an icon or a chosen colour; nil means "today's tint".
     func accentHue(forPondId id: String) -> Double? { colourHue(forPondId: id) }
 
+    /// The same colour for a directory key (a project id, or a joined pond's own id), as the sidebar and the open chat
+    /// name a pond; a local pond has no pond id yet, so it is found by its project.
+    func colourHue(forKey key: String) -> Double? {
+        let entry = directory?.pond(id: key) ?? directory?.pond(pondId: key)
+        let project = projects.first { $0.id == (entry?.projectId ?? key) }
+        if let hue = PondColours.hue(named: project?.colour) { return hue }
+        return PondIcons.shared.vividHue(for: project) ?? PondIcons.shared.logoHues(for: project).first
+    }
+
     /// The directory row of a pond key (a project id, or a joined pond's own id).
     func entry(_ key: String) -> PondDirectory.Pond? { directory?.pond(id: key) }
 

@@ -43,7 +43,8 @@ enum PondColour {
 
     @MainActor private static func washHue(_ pondId: String?) -> Double? {
         guard let pondId else { return nil }
-        return PondsModel.shared.colourHue(forPondId: pondId) ?? PondTint.hue(for: pondId)
+        // Callers pass a directory key (a project id) or a pond id: the colour the person chose, else the logo's.
+        return PondsModel.shared.colourHue(forKey: pondId) ?? PondTint.hue(for: pondId)
     }
 
     /// The pond's accent at a role's opacity (guarded for text contrast); `.clear` with no pond. Lay it over the neutral
