@@ -71,6 +71,8 @@ import Testing
         #expect(PondColours.seed(named: "green") == .hue(140))
         #expect(PondColours.seed(named: "hue:200") == .hue(200))
         #expect(PondColours.seed(named: nil) == nil)
+        #expect(PondColours.legacyHueValue(for: "#8dc63f") == "hue:85")
+        #expect(PondColours.legacyHueValue(for: "green") == nil)
     }
 
     @Test func softTintKeepsTheLogoColourHue() {
@@ -81,3 +83,33 @@ import Testing
         }
     }
 }
+
+#if canImport(CoreGraphics) && canImport(ImageIO)
+import CoreGraphics
+import Foundation
+import ImageIO
+
+@Suite struct LogoColoursRealIconTests {
+    /// The real greenroom icon (white "G" on deep green, small lime dot), downsampled to 32x32 the way the Mac app does.
+    @Test func greenroomIconGivesDeepGreenAndLime() throws {
+        let url = try #require(Bundle.module.url(forResource: "greenroom", withExtension: "png", subdirectory: "icons"))
+        let src = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let img = try #require(CGImageSourceCreateImageAtIndex(src, 0, nil))
+        let n = 32
+        var bytes = [UInt8](repeating: 0, count: n * n * 4)
+        let ok: Bool = bytes.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .high
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: n, height: n))
+            return true
+        }
+        #expect(ok)
+        let colours = LogoColours.colours(rgba: bytes, width: n, height: n)
+        let hexes = colours.map { "\($0.rgb.hexString) share=\($0.share)" }
+        #expect(colours.count >= 2, "\(hexes)")
+        #expect(colours.contains { $0.rgb.g > 0.65 && $0.rgb.r > 0.3 && $0.rgb.b < 0.45 }, "lime missing: \(hexes)")
+        #expect(colours.contains { $0.rgb.g < 0.4 && $0.rgb.r < 0.25 && $0.rgb.g > $0.rgb.r }, "deep green missing: \(hexes)")
+    }
+}
+#endif

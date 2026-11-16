@@ -320,7 +320,15 @@ struct PondLookSection: View {
 
     private func setColour(_ name: String?) {
         guard !model.demoMode else { return }
-        run { try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(name)) }
+        run(failure: "Couldn't save the colour. Try again in a moment.") {
+            do { try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(name)) }
+            catch NativeHostError.http(let code, let m) {
+                guard code == 400 || code == 422, let legacy = PondColours.legacyHueValue(for: name) else { throw NativeHostError.http(code, m) }
+                // An older daemon only knows named colours and `hue:N`: save the nearest hue so picking still works.
+                AppLog.error("pond colour \(name ?? "") refused (\(code)): \(m ?? ""); saving \(legacy)")
+                try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(legacy))
+            }
+        }
     }
 
     private func choose() {
@@ -356,11 +364,14 @@ struct PondLookSection: View {
         }
     }
 
-    private func run(_ work: @escaping () async throws -> Void) {
+    /// `failure`, when given, replaces the host's own sentence (which can be a raw validation message); the detail is logged.
+    private func run(failure: String? = nil, _ work: @escaping () async throws -> Void) {
         problem = nil
         Task {
             do { try await work(); await model.refreshNativeProjects() }
-            catch let e as NativeHostError { problem = e.reason } catch { problem = "Squeak couldn't save that" }
+            catch let e as NativeHostError {
+                if let failure { AppLog.error("pond prefs: \(e.reason)"); problem = failure } else { problem = e.reason }
+            } catch { problem = failure ?? "Squeak couldn't save that" }
         }
     }
 

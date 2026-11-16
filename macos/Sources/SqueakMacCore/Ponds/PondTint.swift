@@ -23,6 +23,11 @@ public enum PondColours {
     public static func value(hue: Double) -> String { "hue:\(Int(PondTint.nudgeOutOfDuckBand(hue).rounded()) % 360)" }
     /// The stored value for a real colour taken from the logo: `#rrggbb`.
     public static func value(colour: PondTint.RGB) -> String { colour.hexString }
+    /// The nearest value an older daemon accepts for a `#rrggbb` colour: `hue:N`. Nil for anything else.
+    public static func legacyHueValue(for stored: String?) -> String? {
+        guard let stored, stored.hasPrefix("#"), let c = PondTint.RGB(hexString: stored) else { return nil }
+        return "hue:\(Int(PondTint.hsv(c).h.rounded()) % 360)"
+    }
     public static func isLogoValue(_ v: String?) -> Bool { v?.hasPrefix("hue:") == true || v?.hasPrefix("#") == true }
 
     /// What a stored colour means: a named colour or old `hue:` value is a hue; `#rrggbb` is the real colour itself.

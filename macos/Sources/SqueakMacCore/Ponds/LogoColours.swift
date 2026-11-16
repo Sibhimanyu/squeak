@@ -24,13 +24,8 @@ public enum LogoColours {
             let i = (y * width + x) * 4
             return (Double(rgba[i]) / 255, Double(rgba[i + 1]) / 255, Double(rgba[i + 2]) / 255, Double(rgba[i + 3]) / 255)
         }
-        func dist(_ a: (Double, Double, Double, Double), _ b: (Double, Double, Double, Double)) -> Double {
-            let dr = a.0 - b.0, dg = a.1 - b.1, db = a.2 - b.2
-            return (dr * dr + dg * dg + db * db).squareRoot()
-        }
-        // Pass 1 skips pixels beside a sharply different neighbour (an anti-aliased edge); if that leaves nothing
-        // (a tiny or all-edge icon) pass 2 counts them.
-        for skipEdges in [true, false] {
+        // Every opaque pixel counts (a small dot has no interior pixels at 32 px); blends are dropped afterwards.
+        do {
             var bins: [Int: (n: Double, r: Double, g: Double, b: Double)] = [:]
             var counted = 0.0
             for y in 0..<height {
@@ -40,15 +35,6 @@ public enum LogoColours {
                     let mx = max(p.0, p.1, p.2), mn = min(p.0, p.1, p.2)
                     if mx < 0.12 || mn > 0.90 { continue }
                     if mx == 0 || (mx - mn) / mx < 0.15 { continue }
-                    if skipEdges {
-                        var edge = false
-                        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                            let nx = x + dx, ny = y + dy
-                            guard nx >= 0, ny >= 0, nx < width, ny < height else { continue }
-                            if dist(p, px(nx, ny)) > 0.2 { edge = true; break }
-                        }
-                        if edge { continue }
-                    }
                     let k = Int(p.0 * 15.99) << 8 | Int(p.1 * 15.99) << 4 | Int(p.2 * 15.99)
                     var b = bins[k] ?? (0, 0, 0, 0)
                     b.n += 1; b.r += p.0; b.g += p.1; b.b += p.2
@@ -56,7 +42,7 @@ public enum LogoColours {
                     counted += 1
                 }
             }
-            guard counted > 0 else { continue }
+            guard counted > 0 else { return [] }
             // Greedy clusters over the bins, heaviest first, each joining the first cluster within `minDistance`.
             var clusters: [(n: Double, r: Double, g: Double, b: Double)] = []
             for b in bins.values.sorted(by: { $0.n > $1.n }) {
@@ -76,14 +62,36 @@ public enum LogoColours {
                 return Colour(rgb: rgb, share: k.n / counted, vividness: s * v)
             }
             let byShare = all.sorted { $0.share > $1.share }
-            let real = byShare.filter { $0.share >= 0.015 }
+            // A colour is real when it covers 1.5% of the counted pixels, or is vivid and clearly distinct at 0.4% (a
+            // small dot). Clusters are already at least `minDistance` apart. A smaller cluster lying on the line between
+            // a heavier colour and white/black/another heavier colour is an anti-aliased blend, not a colour.
+            func isBlend(_ c: Colour, heavier: [Colour]) -> Bool {
+                let ends = heavier.map(\.rgb) + [PondTint.RGB(r: 1, g: 1, b: 1), PondTint.RGB(r: 0, g: 0, b: 0)]
+                for i in 0..<ends.count { for j in (i + 1)..<ends.count where segmentDistance(c.rgb, ends[i], ends[j]) < 0.08 { return true } }
+                return false
+            }
+            var real: [Colour] = []
+            for c in byShare {
+                let big = c.share >= 0.015
+                let smallButVivid = c.share >= 0.004 && c.vividness >= 0.45
+                guard big || smallButVivid, !isBlend(c, heavier: real) else { continue }
+                real.append(c)
+            }
             let pool = real.isEmpty ? Array(byShare.prefix(1)) : real
             func score(_ c: Colour) -> Double { c.vividness * (1 + min(c.share, 0.2)) }
-            guard let accent = pool.max(by: { score($0) < score($1) }) else { continue }
+            guard let accent = pool.max(by: { score($0) < score($1) }) else { return [] }
             let rest = pool.filter { $0 != accent }
             return Array(([accent] + rest).prefix(maxColours))
         }
         return []
+    }
+
+    private static func segmentDistance(_ p: PondTint.RGB, _ a: PondTint.RGB, _ b: PondTint.RGB) -> Double {
+        let ab = (b.r - a.r, b.g - a.g, b.b - a.b), ap = (p.r - a.r, p.g - a.g, p.b - a.b)
+        let len2 = ab.0 * ab.0 + ab.1 * ab.1 + ab.2 * ab.2
+        let t = len2 == 0 ? 0 : min(max((ap.0 * ab.0 + ap.1 * ab.1 + ap.2 * ab.2) / len2, 0), 1)
+        let d = (ap.0 - t * ab.0, ap.1 - t * ab.1, ap.2 - t * ab.2)
+        return (d.0 * d.0 + d.1 * d.1 + d.2 * d.2).squareRoot()
     }
 }
 
