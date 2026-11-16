@@ -24,34 +24,28 @@ struct Palette {
     static let light = Palette(sidebar: hex(0xFCF7F1), raised: .white, ink: hex(0x292622), muted: hex(0x67625E), working: hex(0x1D4ED8), add: hex(0x16A249), remove: hex(0xDC2828))
 }
 
-/// As `WorkingGlyph` in the Mac app: the mark grid at `height`, in a 24 x 12 slot, overflowing to the left.
-struct Working: View {
-    let p: Palette; let m: Model
-    var body: some View {
-        TideGlyph(color: p.working, height: m.sidebarHeight, grid: .mark, tuning: m.tuning)
-            .frame(width: 24, height: 12, alignment: .trailing)
-    }
-}
-
 struct Showcase: View {
     let p: Palette; let title: String; @ObservedObject var m: Model
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(p.muted)
-            HStack(spacing: 8) {   // sidebar chat row
-                Text("Hong Kong").font(.system(size: 13)).foregroundStyle(p.ink)
+            HStack(spacing: 14) {   // sidebar chat row, as the Mac: the mark slot (20 wide, glyph 11.5 right-aligned) then the title
+                TideGlyph(color: p.working, height: m.sidebarHeight, grid: .mark, tuning: m.tuning)
+                    .frame(width: 20, height: 16, alignment: .trailing)
+                Text("Hong Kong").font(.system(size: 14)).foregroundStyle(p.ink).lineLimit(1)
                 Spacer(minLength: 0)
-                Text("+25k").foregroundStyle(p.add); Text("\u{2212}3.8k").foregroundStyle(p.remove)
-                Working(p: p, m: m)
-            }.font(.system(size: 11, design: .monospaced)).padding(.horizontal, 10).frame(width: 260, height: 30)
+                Group { Text("+25k").foregroundStyle(p.add); Text("\u{2212}3.8k").foregroundStyle(p.remove) }
+                    .font(.system(size: 11, design: .monospaced))
+            }.padding(.horizontal, 10).frame(width: 260, height: 36)
                 .background(p.raised, in: RoundedRectangle(cornerRadius: 7))
-            HStack(spacing: 8) {   // pond header
+            HStack(spacing: 8) {   // pond header: tile, title, the rollup mark right after the title
                 Text("G").font(.system(size: 11, weight: .bold)).foregroundStyle(p.ink).frame(width: 20, height: 20)
                     .background(p.raised, in: RoundedRectangle(cornerRadius: 5))
-                Text("greenroom").font(.system(size: 13, weight: .medium)).foregroundStyle(p.ink)
+                Text("greenroom").font(.system(size: 14, weight: .semibold)).foregroundStyle(p.ink)
+                TideGlyph(color: p.working, height: 11.5, grid: .mark, tuning: m.tuning)
+                    .frame(width: 20, height: 16, alignment: .leading)
                 Spacer(minLength: 0)
-                TideGlyph(color: p.working, height: 12, grid: .mark, tuning: m.tuning)
-            }.padding(.horizontal, 10).frame(width: 260, height: 30)
+            }.padding(.horizontal, 10).frame(width: 260, height: 38)
             VStack(alignment: .leading, spacing: 6) {   // pond card
                 Text("greenroom").font(.system(size: 13, weight: .medium)).foregroundStyle(p.ink)
                 TideGlyph(color: p.working, height: 28, tuning: m.tuning)
@@ -109,6 +103,7 @@ struct Root: View {
             Divider()
             Controls(m: m).background(.background)
         }.frame(minWidth: 720, minHeight: 520)
+            .environment(\.scenePhase, .active)  // an NSHostingView outside a Scene never reports .active
     }
 }
 
@@ -118,7 +113,8 @@ let model = Model()
 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 520), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
 window.title = "Tide glyph preview"
 window.contentView = NSHostingView(rootView: Root(m: model))
-window.center()
+window.collectionBehavior = [.moveToActiveSpace, .fullScreenNone]
+if let f = NSScreen.main?.visibleFrame { window.setFrameOrigin(NSPoint(x: f.midX - 360, y: f.midY - 260)) } else { window.center() }
 window.isReleasedWhenClosed = false
 window.orderFrontRegardless()
 final class Delegate: NSObject, NSApplicationDelegate { func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication) -> Bool { true } }

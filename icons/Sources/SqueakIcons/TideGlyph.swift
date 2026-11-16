@@ -31,6 +31,8 @@ public struct TideGlyph: View {
     /// One random seed per view, captured once: two glyphs side by side never match.
     @State private var instanceSeed = UInt64.random(in: .min ... .max)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Paused only in `.background`: macOS reports `.inactive` whenever the app is not frontmost, and a status glyph
+    /// must keep moving while the person works in another app.
     @Environment(\.scenePhase) private var scenePhase
 
     /// `fade` multiplies every pixel by a soft elliptical vignette (default on) so the glyph never reads as a box. To draw
@@ -45,7 +47,7 @@ public struct TideGlyph: View {
         let seed = fixedSeed ?? instanceSeed
         return Group {
             if !still && !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, tuning.frameRate)), paused: scenePhase != .active)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, tuning.frameRate)), paused: scenePhase == .background)) { context in
                     TideFrame(color: color, height: height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning)
                 }
             } else {
