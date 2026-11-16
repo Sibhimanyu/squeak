@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.4
+
+- A queued message is one short line in the chat (its first words, how many pictures, "Queued"). Click it to see the whole message and Steer, Edit or Remove it. Editing changes the words and keeps the pictures.
+
 ## 2.27.3
 
 - A message you steer into a working chat shows once: dimmed at the bottom until the agent takes it in, then in its place. It no longer also showed solid at the same time.

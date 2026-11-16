@@ -438,7 +438,7 @@ struct SessionDetail: View {
             hiddenSteers: model.native.key == session.key ? model.native.pending.hiddenSteerSteps(in: timeline.turns) : [],
             message: { m in rowView(.message(m, muted: false), footers: footers) },
             queuedActions: { t in
-                if let q = t.queuedId { NativeQueuedRowActions(session: session, queuedId: q, text: t.prompt) }
+                if let q = t.queuedId { NativeQueuedRow(session: session, queuedId: q, text: t.prompt, author: TimelineLabels.author(t.author, me: nil)) }
             }
         )
         .environment(\.attachedPictures, attached)

@@ -155,91 +155,147 @@ struct NativeQueueStack: View {
     }
 }
 
-/// Steer, Edit and Remove under a queued prompt's dimmed row in the transcript (the same host calls as the queue
-/// stack's cards). Edit holds the message on the host and opens it in place; Esc leaves it as it was.
-struct NativeQueuedRowActions: View {
+/// A message waiting in the queue, in the transcript: one dimmed line (author, its first words, how many pictures). A
+/// click opens it in a sheet with the whole message and what can be done with it: Steer, Edit, Remove.
+struct NativeQueuedRow: View {
     let session: HostSession
     let queuedId: String
     let text: String
+    let author: String?
+    @State private var open = false
+    @State private var hovering = false
+
+    var body: some View {
+        let summary = QueuedSummary(text)
+        Button { open = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "clock").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
+                if let author { Text(verbatim: author).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted).lineLimit(1) }
+                Text(verbatim: summary.line).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+                if summary.pictures > 0 {
+                    Label(summary.pictures == 1 ? "1 picture" : "\(summary.pictures) pictures", systemImage: "photo")
+                        .font(Typo.meta).foregroundStyle(Theme.muted).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
+                }
+                Spacer(minLength: 0)
+                Text("Queued").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(hovering ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Open this queued message to steer, edit or remove it")
+        .accessibilityLabel("Queued message: \(summary.line)")
+        .sheet(isPresented: $open) { NativeQueuedSheet(session: session, queuedId: queuedId, text: text, author: author, open: $open) }
+    }
+}
+
+/// A queued message in full, and its actions. Edit holds it on the host (so it is not sent while being changed) and
+/// changes the words only; its pictures stay attached. Closing the sheet mid-edit leaves it as it was.
+struct NativeQueuedSheet: View {
+    let session: HostSession
+    let queuedId: String
+    let text: String
+    let author: String?
+    @Binding var open: Bool
     @Environment(AppModel.self) private var model
     @State private var busy = false
     @State private var editing = false
+    @State private var held = false
     @State private var draft = ""
     @FocusState private var focused: Bool
 
+    private var parts: (words: String, paths: [String]) { ImageAttachments.split(text) }
+
     var body: some View {
-        Group {
-            if editing { editor } else { actions }
-        }
-        .onDisappear { if editing { editing = false; Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) } } }
-    }
-
-    private var actions: some View {
-        HStack(spacing: 8) {
-            if busy {
-                DotGridLoader(size: 14)
-            } else {
-                Button("Steer") { run { await model.nativeSteerQueued(session, queuedId) } }
-                    .buttonStyle(SecondaryButtonStyle()).help("Steer: send this into the turn now")
-                Button("Edit") { edit() }.buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
-                Button("Remove") { run { _ = await model.nativeDeleteQueued(session, queuedId) } }
-                    .buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var editor: some View {
-        let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1...6)
-                .focused($focused)
-                .onKeyPress(.escape) { cancel(); return .handled }
-                .onKeyPress(.return, phases: .down) { press in
-                    if press.modifiers.contains(.shift) { return .ignored }
-                    save(steer: press.modifiers.contains(.command))
-                    return .handled
-                }
-            HStack(spacing: 8) {
-                Button("Save") { save(steer: false) }.buttonStyle(SecondaryButtonStyle()).disabled(empty)
-                Button("Save and steer") { save(steer: true) }.buttonStyle(SecondaryButtonStyle()).disabled(empty)
-                Button("Cancel") { cancel() }.buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: 6) {
+                Text(author.map { "Queued from \($0)" } ?? "Queued message").font(Typo.heading).foregroundStyle(Theme.ink)
                 Spacer(minLength: 0)
             }
+            Text("It goes to the agent when the turn ends. Steer sends it into the running turn now.")
+                .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            if editing {
+                TextEditor(text: $draft)
+                    .font(Typo.body).foregroundStyle(Theme.ink).scrollContentBackground(.hidden)
+                    .focused($focused)
+                    .frame(minHeight: 90, maxHeight: 220)
+                    .padding(8)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
+            } else if !parts.words.isEmpty {
+                ScrollView {
+                    Text(verbatim: parts.words).font(Typo.body).foregroundStyle(Theme.ink).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 220)
+            }
+            if !parts.paths.isEmpty {
+                PictureFlow {
+                    ForEach(Array(parts.paths.enumerated()), id: \.offset) { _, path in
+                        StepImageView(path: path, caption: nil, card: false, maxHeight: PictureLayout.cardMaxHeight, maxWidth: 420, alwaysShow: true)
+                    }
+                }
+            }
+            HStack(spacing: Space.s) {
+                if busy { DotGridLoader(size: 12) }
+                if editing {
+                    Button("Remove") { remove() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                    Spacer(minLength: 0)
+                    Button("Cancel") { close() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+                    Button("Save and steer") { save(steer: true) }.buttonStyle(SecondaryButtonStyle()).disabled(busy || empty)
+                    Button("Save") { save(steer: false) }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy || empty)
+                } else {
+                    Button("Remove") { remove() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                    Button("Edit") { edit() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                    Spacer(minLength: 0)
+                    Button("Close") { close() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+                    Button("Steer now") { run { await model.nativeSteerQueued(session, queuedId) } }
+                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
+                }
+            }
         }
-        .padding(10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
-        .onAppear { focused = true }
+        .padding(Space.l).frame(width: 480)
+        .background(Theme.surfaceRaised)
+        .onDisappear { if held { held = false; Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) } } }
     }
+
+    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && parts.paths.isEmpty }
 
     private func run(_ work: @escaping () async -> Void) {
         guard !busy else { return }
         busy = true
-        Task { await work(); busy = false }
+        Task { await work(); busy = false; open = false }
+    }
+
+    private func close() {
+        if held { held = false; Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) } }
+        open = false
+    }
+
+    private func remove() {
+        held = false
+        run { _ = await model.nativeDeleteQueued(session, queuedId) }
     }
 
     private func edit() {
         guard !busy else { return }
         busy = true
         Task {
-            let held = await model.nativeHoldQueued(session, queuedId)
+            let ok = await model.nativeHoldQueued(session, queuedId)
             busy = false
-            if held { draft = text; editing = true }
+            if ok { held = true; draft = parts.words; editing = true; focused = true }
         }
     }
 
-    private func cancel() {
-        editing = false
-        Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) }
-    }
-
     private func save(steer: Bool) {
-        let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = ImageAttachments.compose(draft, refs: parts.paths)
         guard !t.isEmpty else { return }
-        editing = false
-        Task {
+        held = false
+        run {
             if await model.nativeReleaseQueued(session, queuedId, text: t), steer { await model.nativeSteerQueued(session, queuedId) }
         }
     }

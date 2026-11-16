@@ -70,8 +70,12 @@ private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
     var body: some View {
         let segments = TimelineSteps.segments(of: turn, details: details, hiding: hiddenSteers)
         VStack(alignment: .leading, spacing: 0) {
-            if let prompt = turn.promptMessage(me: me) { message(prompt) }
-            if turn.state == .queued, turn.queuedId != nil { queuedActions(turn).padding(.top, 6) }
+            // A message still waiting in the queue is one compact line (it opens to its whole text and actions).
+            if turn.waitsInQueue, turn.queuedId != nil {
+                queuedActions(turn)
+            } else if let prompt = turn.promptMessage(me: me) {
+                message(prompt)
+            }
             ForEach(segments) { segment in
                 switch segment {
                 case .work(_, let steps, let live):

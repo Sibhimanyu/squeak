@@ -113,6 +113,15 @@ final class TimelinePresentationTests: XCTestCase {
         XCTAssertEqual(pending.hiddenSteerSteps(in: t.turns), ["steer-3"], "only the one still waiting is hidden")
     }
 
+    func testAQueuedMessageIsOneLineWithItsPictureCount() {
+        let text = ImageAttachments.compose("why do I see these two together:\nsecond line", refs: ["/tmp/a b.png", "/tmp/c.png"])
+        XCTAssertEqual(QueuedSummary(text), QueuedSummary.init("why do I see these two together:\nsecond line\n\n" + ImageAttachments.line(for: "/tmp/a b.png") + "\n" + ImageAttachments.line(for: "/tmp/c.png")))
+        XCTAssertEqual(QueuedSummary(text).line, "why do I see these two together:")
+        XCTAssertEqual(QueuedSummary(text).pictures, 2)
+        XCTAssertEqual(QueuedSummary(ImageAttachments.compose("", refs: ["/tmp/c.png"])).line, "See the attached image.")
+        XCTAssertEqual(QueuedSummary("plain").pictures, 0)
+    }
+
     func testTheDockSeesTheWaitAsTheLastActivityStep() {
         var t = Log.timeline([Log.start(1, "t1", "go")])
         t.apply(Log.step(2, "t1", "wait-1", .waiting, "Waiting for Claude", .running, detail: ["since": .number(Log.t0.timeIntervalSince1970 * 1000)]))

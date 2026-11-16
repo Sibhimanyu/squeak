@@ -109,3 +109,16 @@ public extension TimelineSteps {
         return out
     }
 }
+
+/// A queued message's one line in the transcript: its first line of words, and how many pictures it carries.
+public struct QueuedSummary: Equatable, Sendable {
+    public var line: String
+    public var pictures: Int
+
+    public init(_ text: String) {
+        let parts = ImageAttachments.split(text)
+        let first = parts.words.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        pictures = parts.paths.count
+        line = first.isEmpty ? (pictures > 0 ? "Pictures" : "Empty message") : first
+    }
+}
