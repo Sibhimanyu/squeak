@@ -26,7 +26,7 @@ struct PaneLayoutSolverTests {
     }
     @Test func draggingTheInspectorWideStaysInsideTheWindow() {
         let cap = PaneWidths.dragged(start: 560, translation: 640, grewToward: 1, range: PaneWidths.inspectorRange, window: 1512, otherPane: 270)
-        #expect(cap == 1512 - 270 - PaneWidths.centreMin)
+        #expect(cap == min(PaneWidths.inspectorRange.upperBound, 1512 - 270 - PaneWidths.centreMin))
         let r = PaneLayoutSolver.solve(window: 1512, sidebar: side(true, 270), right: right(true, 1200))
         #expect(r.sidebar == 270 && r.right <= cap && r.centre >= PaneWidths.centreMin)
         #expect(abs(r.sidebar + r.centre + r.right - 1512) < 0.0001)
