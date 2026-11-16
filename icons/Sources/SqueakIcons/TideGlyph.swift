@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The standard "work in motion" glyph: a small wave stream of square pixels, wider than tall, flowing left to right
-/// with its ends dissolving. It always means working; the non-moving states are `StatusMark`. The caller passes the
+/// The standard "work in motion" glyph: a small block of square pixels, wider than tall, twinkling at random
+/// and fading out toward every edge. It always means working; the non-moving states are `StatusMark`. The caller passes the
 /// colour (SqueakIcons has no Theme). `still` or Reduce Motion holds one frame.
 public struct TideGlyph: View {
     /// The one cell pitch (dot plus gap, in points) of every tide glyph on a platform: the Mac's 3 pt is a 2.25 pt dot and a
@@ -119,15 +119,16 @@ public struct TideFrame: View {
         let side = grid.side(height: size.height)
         guard side > 0 else { return }
         let ox = (size.width - grid.width(height: size.height)) / 2
-        // The pixels are drawn at full strength; the vignette is one smooth elliptical mask over the whole glyph, so an
-        // edge square shades across its own area (brighter inside, dimmer outside) instead of being in or out whole.
+        // The radial fade is per cell, inside `TideMotion` (a partial alpha per cell, corners darkest); `fade` off turns it off.
+        var tuning = tuning
+        if !fade { tuning.vignette = 0 }
         graphics.drawLayer { layer in
             for row in 0..<grid.rows {
                 for col in 0..<grid.cols {
                     let a: Double
-                    if calm { a = TideMotion.alpha(TideMotion.calmLevel(col: col, row: row, cols: grid.cols, rows: grid.rows)) }
+                    if calm { a = TideMotion.calmAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
                     else if let time { a = TideMotion.smoothAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows, t: time, seed: seed, tuning: tuning) }
-                    else { a = TideMotion.alpha(TideMotion.stillLevel(col: col, row: row, cols: grid.cols, rows: grid.rows, seed: seed)) }
+                    else { a = TideMotion.alpha(TideMotion.level(col: col, row: row, cols: grid.cols, rows: grid.rows, t: TideMotion.stillTime, seed: seed, tuning: tuning)) }
                     guard a > 0.004 else { continue }
                     // Edges snap to whole device pixels so every dot is a crisp square.
                     func snap(_ v: CGFloat) -> CGFloat { (v * scale).rounded() / scale }
@@ -136,17 +137,6 @@ public struct TideFrame: View {
                     layer.fill(Path(rect), with: .color(color.opacity(a)))
                 }
             }
-            guard fade else { return }
-            let w = grid.width(height: size.height)
-            let stops = (0...24).map { k -> Gradient.Stop in
-                let r = Double(k) / 24
-                return Gradient.Stop(color: .black.opacity(TideMotion.vignetteCurve(r: r, tuning: tuning)), location: r)
-            }
-            layer.blendMode = .destinationIn
-            layer.translateBy(x: ox + w / 2, y: size.height / 2)
-            layer.scaleBy(x: w / 2, y: size.height / 1.1)  // unit space: u = x / half width, v = 0.55 * y / half height
-            layer.fill(Path(CGRect(x: -3, y: -3, width: 6, height: 6)),
-                       with: .radialGradient(Gradient(stops: stops), center: .zero, startRadius: 0, endRadius: 1))
         }
     }
 }
