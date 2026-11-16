@@ -7,6 +7,8 @@ public enum DockItem: Equatable, Hashable, Sendable {
     case terminal(UUID)
     /// A chat thread (its session key) docked in a side zone; in the centre it is a chat tab.
     case thread(String)
+    /// A chat's background helper opened as a tab in a side zone; it has no centre.
+    case duckling(DucklingRef)
 }
 
 /// A dragged tab on the pasteboard: a prefixed string, so a chat tab's plain-string drag is never read as one.
@@ -14,12 +16,16 @@ public enum DockItemPayload {
     public static let filePrefix = "squeak-dock-file:"
     public static let terminalPrefix = "squeak-dock-terminal:"
     public static let threadPrefix = "squeak-dock-thread:"
+    public static let ducklingPrefix = "squeak-dock-duckling:"
+    /// Separates the chat key from the task id (a control character, so neither can contain it).
+    static let ducklingSeparator: Character = "\u{1F}"
     public static func encode(_ item: DockItem) -> String {
         switch item {
         case .panel(let p): return DockPanelPayload.encode(p)
         case .file(let path): return filePrefix + path
         case .terminal(let id): return terminalPrefix + id.uuidString
         case .thread(let key): return threadPrefix + key
+        case .duckling(let ref): return ducklingPrefix + ref.session.stringValue + String(ducklingSeparator) + ref.taskId
         }
     }
     public static func decode(_ text: String) -> DockItem? {
@@ -30,6 +36,12 @@ public enum DockItemPayload {
         if text.hasPrefix(threadPrefix) {
             let key = String(text.dropFirst(threadPrefix.count))
             return key.isEmpty ? nil : .thread(key)
+        }
+        if text.hasPrefix(ducklingPrefix) {
+            let parts = text.dropFirst(ducklingPrefix.count).split(separator: ducklingSeparator, maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+            guard let key = SessionKey(stringValue: String(parts[0])) else { return nil }
+            return .duckling(DucklingRef(session: key, taskId: String(parts[1])))
         }
         guard text.hasPrefix(filePrefix) else { return nil }
         let path = String(text.dropFirst(filePrefix.count))

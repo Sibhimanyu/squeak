@@ -77,7 +77,7 @@ struct ConversationView: View {
 
     /// The window's narrowest content: sidebar min + centre min (+ right min while the right zone is shown).
     private var minContentWidth: CGFloat {
-        let right = dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads) && !dock.layout.right.collapsed
+        let right = dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
             && model.settingsSection == nil && model.selectedSession != nil
         return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.settingsSection != nil || !sidebarHidden, rightShown: right))
     }
@@ -103,7 +103,8 @@ struct ConversationView: View {
         let dockFiles = dock.files
         let dockTerminals = dock.activeTerminals
         let dockThreads = dock.threads
-        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads) && !layout.right.collapsed
+        let dockDucklings = dock.ducklings
+        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) && !layout.right.collapsed
         let showsInspectorWanted = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
         // One solver decides every width, so the panes can never add up to more than the window.
@@ -147,7 +148,7 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads) : .none
+                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
@@ -185,21 +186,13 @@ struct ConversationView: View {
                     if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
                 }
                 .overlay(alignment: .bottom) {
-                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads) { DockEdgeStrip(zone: .bottom) }
+                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) { DockEdgeStrip(zone: .bottom) }
                 }
             }
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
         .animation(Motion.standard, value: showingSettings)
-        // A duckling opens in the right zone: show it if it was folded away.
-        .onChange(of: model.openDuckling) { _, ref in
-            if ref != nil {
-                dock.update { l in
-                    if l.right.panels.isEmpty { l.show(.thread) } else { l.setCollapsed(false, for: .right) }
-                }
-            }
-        }
         .animation(Motion.standard, value: showsInspector && chatOpen)
         .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }

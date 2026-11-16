@@ -46,8 +46,9 @@ struct DucklingsBar: View {
     }
 
     private func chip(_ d: Duckling, now: Date) -> some View {
-        let open = model.openDuckling == DucklingRef(session: session.key, taskId: d.id)
-        return Button { model.openDuckling = open ? nil : DucklingRef(session: session.key, taskId: d.id) } label: {
+        let ref = DucklingRef(session: session.key, taskId: d.id)
+        let open = DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .right] == ref
+        return Button { DockStore.shared.openDuckling(ref) } label: {
             HStack(spacing: 5) {
                 DucklingStatusMark(duckling: d)
                 Text(verbatim: d.chipText(now: now)).lineLimit(1)
@@ -77,26 +78,22 @@ struct DucklingStatusMark: View {
     }
 }
 
-/// One duckling, read-only, in the right inspector in place of its tabs: a Back row, then its header, its steps (the
-/// chat's own rows, live while it runs), its report once it has one, and what it was asked, folded. The host's route
-/// answers; a host without it gets one sentence. Esc and Back close it; another chat closes it too (`AppModel.selected`).
+/// One duckling, read-only, as the body of its tab in a side zone: its header, its steps (the chat's own rows, live
+/// while it runs), its report once it has one, and what it was asked, folded. The host's route answers; a host without
+/// it gets one sentence. The tab's close (or middle click) ends it; another chat closes it too.
 struct DucklingPanel: View {
     let session: HostSession
     let chip: Duckling?
     let taskId: String
-    var width: CGFloat = Metrics.workbenchInspector
     @Environment(AppModel.self) private var model
     @State private var shown: DucklingPanelModel?
     @State private var briefOpen = false
 
     private var panel: DucklingPanelModel { shown ?? DucklingPanelModel.make(result: nil, chip: chip) }
-    private func close() { model.openDuckling = nil }
 
     var body: some View {
         let p = panel
         VStack(alignment: .leading, spacing: 0) {
-            backRow
-            Rectangle().fill(Theme.line).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.l) {
                     header(p)
@@ -108,10 +105,7 @@ struct DucklingPanel: View {
             // A running one follows its newest step; a finished one opens at the top. Scrolling up is left alone.
             .defaultScrollAnchor(p.isLive ? .bottom : .top)
         }
-        .frame(width: width).frame(maxHeight: .infinity)
-        .background(Theme.bg.ignoresSafeArea())
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
-        .background { Button("", action: close).keyboardShortcut(.escape, modifiers: []).opacity(0).accessibilityHidden(true) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Duckling: \(p.title)")
         .task(id: taskId) {
@@ -133,24 +127,6 @@ struct DucklingPanel: View {
             let next = DucklingPanelModel.make(result: read, chip: chip, previous: shown)
             if next != shown { shown = next }
         }
-    }
-
-    /// The inspector's top row: the same height as its tab row, so nothing moves when it swaps in.
-    private var backRow: some View {
-        HStack(spacing: Space.s) {
-            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the inspector's toggle (PaneToggleOverlay)
-            Button(action: close) {
-                HStack(spacing: 6) {
-                    Lucide(.arrowLeft, size: 14, color: Theme.muted)
-                    Text("Back").font(.system(size: 14)).foregroundStyle(Theme.ink)
-                }
-                .padding(.horizontal, 10).frame(height: 28)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).help("Back to the panel (Esc)").accessibilityLabel("Close the duckling")
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Space.m).frame(height: Metrics.header).background(WindowDragArea())
     }
 
     private func header(_ p: DucklingPanelModel) -> some View {

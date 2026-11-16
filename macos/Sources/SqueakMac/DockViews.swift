@@ -187,13 +187,14 @@ struct DockItemTab<Icon: View>: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help(title)
         .squeakContextMenu {
-            ForEach(DockZone.allCases.filter { $0 != zone }, id: \.self) { z in
+            ForEach(DockZone.allCases.filter { $0 != zone && DragScope.allows(item, on: .strip($0)) }, id: \.self) { z in
                 Button("Move to \(z.title)") {
                     switch item {
                     case .panel(let p): dock.update { $0.move(p, to: z) }
                     case .file(let path): dockMoveFile(path, to: z, model: model)
                     case .terminal(let id): dock.moveTerminal(id, to: z)
                     case .thread(let key): dock.moveThread(key, to: z)
+                    case .duckling(let ref): dock.moveDuckling(ref, to: z)
                     }
                 }
             }
@@ -231,6 +232,26 @@ struct DockThreadTab: View {
                     select: { DockStore.shared.selectThread(key); model.select(session.key) },
                     close: { DockStore.shared.moveThread(key, to: .centre) }) {
             Image(systemName: "bubble.left").font(.system(size: 13)).foregroundStyle(selected ? Theme.ink : Theme.muted)
+        }
+    }
+}
+
+/// A duckling's tab: its task name, a loader while it runs (a check or cross once it ends), a close.
+struct DockDucklingTab: View {
+    let session: HostSession
+    let ref: DucklingRef
+    let zone: DockZone
+    let selected: Bool
+    let height: CGFloat
+    let indicator: Namespace.ID
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let chip = model.ducklings(for: session)?.items.first { $0.id == ref.taskId }
+        DockItemTab(item: .duckling(ref), title: chip?.title ?? "Duckling", zone: zone, selected: selected, height: height, indicator: indicator,
+                    select: { DockStore.shared.selectDuckling(ref) },
+                    close: { DockStore.shared.closeDuckling(ref) }) {
+            if let chip { DucklingStatusMark(duckling: chip) } else { Lucide(.circleCheck, size: 11, color: Theme.subtle) }
         }
     }
 }
@@ -326,8 +347,13 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(state.panels.filter { $0 != .terminal }, id: \.self) { p in
-                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && shownTerminal == nil, height: height, indicator: indicator) {
+                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator) {
                             dock.selectPanel(p, in: zone)
+                        }
+                    }
+                    if let session {
+                        ForEach(dock.ducklings.ducklings(in: zone).filter { $0.session == session.key }, id: \.self) { ref in
+                            DockDucklingTab(session: session, ref: ref, zone: zone, selected: dock.ducklings.selected[zone] == ref && !state.collapsed, height: height, indicator: indicator)
                         }
                     }
                     ForEach(dock.threads.threads(in: zone), id: \.self) { key in
@@ -352,7 +378,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                 .padding(.horizontal, Space.s)
             }
             if trailingWidth == 0 || TabStripFit.showsAccessory(
-                strip: stripWidth, tabs: state.panels.filter { $0 != .terminal }.count + dock.threads.threads(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
+                strip: stripWidth, tabs: state.panels.filter { $0 != .terminal }.count + dock.threads.threads(in: zone).count + dock.ducklings.ducklings(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
                 leading: leadingWidth, accessory: trailingWidth) {
                 trailing()
             }
@@ -408,7 +434,10 @@ struct DockZoneBody: View {
         let file = DockStore.shared.files.selected[zone].flatMap { path in fileModel?.open.first { $0.path == path } }
         let shell = DockStore.shared.activeTerminals.shown(in: zone)
         Group {
-            if let shell {
+            if let ref = DockStore.shared.ducklings.selected[zone], let session, ref.session == session.key {
+                DucklingPanel(session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId)
+                    .id(ref.taskId)
+            } else if let shell {
                 TerminalPanelView(session: session, shell: shell)
             } else if let key = DockStore.shared.threads.selected[zone], let t = model.allSessions.first(where: { $0.key.stringValue == key }) {
                 if model.selected == t.key {
@@ -436,26 +465,15 @@ struct DockRightColumn: View {
     let width: CGFloat
     @Environment(AppModel.self) private var model
 
-    private var openDuckling: DucklingRef? { DucklingRef.open(model.openDuckling, whenSelected: session?.key) }
-
     var body: some View {
-        Group {
-            if let session, let ref = openDuckling {
-                DucklingPanel(
-                    session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId,
-                    width: width)
-                    .id(ref.taskId)
-            } else {
-                VStack(spacing: 0) {
-                    DockZoneStrip(zone: .right, height: Metrics.header, session: session) {
-                        Color.clear.frame(width: Space.m + PaneToggle.size)
-                    } trailing: {
-                        EmptyView()
-                    }
-                    .background(WindowDragArea())
-                    DockZoneBody(zone: .right, session: session)
-                }
+        VStack(spacing: 0) {
+            DockZoneStrip(zone: .right, height: Metrics.header, session: session) {
+                Color.clear.frame(width: Space.m + PaneToggle.size)
+            } trailing: {
+                EmptyView()
             }
+            .background(WindowDragArea())
+            DockZoneBody(zone: .right, session: session)
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)

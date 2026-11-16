@@ -92,6 +92,8 @@ public final class DockStore {
     public private(set) var files = DockFiles()
     /// Chat threads docked outside the centre (session state, never saved).
     public private(set) var threads = DockThreads()
+    /// Ducklings opened as tabs in a side zone (session state, never saved).
+    public private(set) var ducklings = DockDucklings()
     /// Shells placed in zones, per workspace folder (session state, never saved). `activeFolder` is the chat's folder.
     public private(set) var terminals: [String: DockTerminals] = [:]
     public private(set) var activeFolder: String?
@@ -151,7 +153,7 @@ public final class DockStore {
         workspaces.update(l)
         save()
         // A panel newly selected in a zone shows instead of that zone's file.
-        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z); threads.deselect(z); deselectTerminals(z) }
+        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z); threads.deselect(z); ducklings.deselect(z); deselectTerminals(z) }
     }
 
     // MARK: Shells
@@ -188,21 +190,21 @@ public final class DockStore {
         let z = zone ?? layout.terminalHome
         let home = layout.terminalHome
         mutateTerminals(folder) { $0.sync(live: live, home: home); $0.open(id, in: z) }
-        files.deselect(z)
+        files.deselect(z); ducklings.deselect(z)
         revealZone(z)
     }
 
     public func moveTerminal(_ id: UUID, to zone: DockZone, before: UUID? = nil) {
         guard let f = activeFolder else { return }
         mutateTerminals(f) { $0.move(id, to: zone, before: before) }
-        files.deselect(zone)
+        files.deselect(zone); ducklings.deselect(zone)
         revealZone(zone)
     }
 
     public func selectTerminal(_ id: UUID) {
         guard let f = activeFolder, let z = terminals[f]?.zone(of: id) else { return }
         mutateTerminals(f) { $0.select(id) }
-        files.deselect(z)
+        files.deselect(z); ducklings.deselect(z)
         revealZone(z)
     }
 
@@ -246,21 +248,21 @@ public final class DockStore {
     /// Puts an open file in a zone (the centre = back to the strip); a folded side zone opens for it.
     public func moveFile(_ path: String, to zone: DockZone, before: String? = nil) {
         files.move(path, to: zone, before: before)
-        deselectTerminals(zone); threads.deselect(zone)
+        deselectTerminals(zone); threads.deselect(zone); ducklings.deselect(zone)
         if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
     }
 
     /// A panel tab was pressed in a zone: it shows over that zone's file.
     public func selectPanel(_ panel: DockPanel, in zone: DockZone) {
         files.deselect(zone)
-        deselectTerminals(zone)
+        deselectTerminals(zone); ducklings.deselect(zone)
         update { $0.select(panel); $0.setCollapsed(false, for: zone) }
     }
 
     public func selectFile(_ path: String) {
         files.select(path)
         let z = files.zone(of: path)
-        deselectTerminals(z); threads.deselect(z)
+        deselectTerminals(z); threads.deselect(z); ducklings.deselect(z)
         if z != .centre { update { $0.setCollapsed(false, for: z) } }
     }
 
@@ -273,7 +275,7 @@ public final class DockStore {
     /// Docks a thread in a zone (the centre = back to the strip); a folded side zone opens for it.
     public func moveThread(_ key: String, to zone: DockZone, before: String? = nil) {
         threads.move(key, to: zone, before: before)
-        files.deselect(zone)
+        files.deselect(zone); ducklings.deselect(zone)
         deselectTerminals(zone)
         if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
     }
@@ -282,7 +284,7 @@ public final class DockStore {
         threads.select(key)
         let z = threads.zone(of: key)
         guard z != .centre else { return }
-        files.deselect(z)
+        files.deselect(z); ducklings.deselect(z)
         deselectTerminals(z)
         update { $0.setCollapsed(false, for: z) }
     }
@@ -292,6 +294,55 @@ public final class DockStore {
     public func pruneThreads(keeping live: Set<String>) {
         let p = threads.pruned(keeping: live)
         if p != threads { threads = p }
+    }
+
+    // MARK: Ducklings
+
+    /// What a side zone shows right now, so closing a duckling's tab can bring it back.
+    private func shownItem(in zone: DockZone) -> DockItem? {
+        if let c = ducklings.selected[zone] { return .duckling(c) }
+        if let t = activeTerminals.shown(in: zone) { return .terminal(t) }
+        if let k = threads.selected[zone] { return .thread(k) }
+        if let f = files.selected[zone] { return .file(f) }
+        return layout[zone].selected.map { .panel($0) }
+    }
+
+    private func deselectOthers(for ref: DucklingRef, in zone: DockZone) {
+        files.deselect(zone); threads.deselect(zone); deselectTerminals(zone)
+        update { $0.setCollapsed(false, for: zone) }
+    }
+
+    /// Opens a duckling as a tab in `zone` (default: the right) and shows it; already open = selected where it is.
+    public func openDuckling(_ ref: DucklingRef, in zone: DockZone = .right) {
+        let showing = ducklings.zone(of: ref).map { shownItem(in: $0) } ?? shownItem(in: zone)
+        let z = ducklings.open(ref, in: zone, showing: showing) ?? zone
+        deselectOthers(for: ref, in: z)
+    }
+
+    public func selectDuckling(_ ref: DucklingRef) { openDuckling(ref) }
+
+    /// Closes the tab; the zone goes back to what it showed before.
+    public func closeDuckling(_ ref: DucklingRef) {
+        guard let back = ducklings.close(ref) else { return }
+        switch back {
+        case .panel(let p): update { $0.select(p) }
+        case .file(let path): files.select(path)
+        case .thread(let k): threads.select(k)
+        case .terminal(let id): if let f = activeFolder { mutateTerminals(f) { $0.select(id) } }
+        case .duckling: break
+        }
+    }
+
+    public func moveDuckling(_ ref: DucklingRef, to zone: DockZone, before: DucklingRef? = nil) {
+        if zone == .centre { closeDuckling(ref); return }
+        ducklings.move(ref, to: zone, before: before)
+        deselectOthers(for: ref, in: zone)
+    }
+
+    /// A duckling belongs to its chat: only that chat's stay.
+    public func pruneDucklings(keeping sessions: Set<SessionKey>) {
+        let p = ducklings.pruned(keeping: sessions)
+        if p != ducklings { ducklings = p }
     }
 
     /// Changes the workspaces themselves (switch, save, reset, ...).
@@ -325,6 +376,10 @@ public final class DockStore {
             var b: UUID?
             if case .terminal(let other)? = before { b = other }
             moveTerminal(id, to: zone, before: b)
+        case .duckling(let ref):
+            var b: DucklingRef?
+            if case .duckling(let other)? = before { b = other }
+            moveDuckling(ref, to: zone, before: b)
         }
         return true
     }

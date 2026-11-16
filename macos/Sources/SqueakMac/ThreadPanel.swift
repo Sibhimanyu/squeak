@@ -46,7 +46,7 @@ struct ThreadPanel: View {
                 header(s, glance)
                 needsYou(s)
                 if glance.people.count > 0 { who(glance) }
-                if glance.hasRunning || !glance.helpers.isEmpty { running(glance) }
+                if glance.hasRunning || !glance.helpers.isEmpty { running(glance, s) }
                 if !glance.changed.isEmpty { changed(glance, s) }
                 controls(s, key: key, detail: detail, thread: thread)
             }
@@ -114,16 +114,23 @@ struct ThreadPanel: View {
         }
     }
 
-    private func running(_ g: ThreadGlance) -> some View {
+    private func running(_ g: ThreadGlance, _ s: HostSession) -> some View {
         section("Running") {
             VStack(alignment: .leading, spacing: Space.s) {
                 ForEach(g.helpers) { h in
+                    Button {
+                        if !h.isShell { DockStore.shared.openDuckling(DucklingRef(session: s.key, taskId: h.id)) }
+                    } label: {
                     HStack(spacing: Space.s) {
                         Lucide(h.isShell ? .terminal : .users, size: 13, color: Theme.muted)
                         Text(verbatim: h.title).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 0)
                         Text(verbatim: h.status).font(Typo.meta).foregroundStyle(h.running ? Theme.ink : Theme.muted)
                     }
+                    .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(h.isShell)
+                    .help(h.isShell ? "" : "Open this duckling as a tab")
                 }
                 if !g.queued.isEmpty {
                     Text(verbatim: g.queued.count == 1 ? "1 message queued" : "\(g.queued.count) messages queued").font(Typo.meta).foregroundStyle(Theme.muted)

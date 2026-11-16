@@ -3,7 +3,7 @@ import Foundation
 /// What is being dragged, as far as drop scoping cares. Each kind travels under its own pasteboard type
 /// (`identifier`), so a target can say "acceptable" synchronously, before the drop, without reading the payload.
 public enum DragKind: String, CaseIterable, Sendable {
-    case pond, thread, panel, terminal, file
+    case pond, thread, panel, terminal, file, duckling
     /// A file-tree row dragged inside the Files browser (move/copy), not a tab.
     case fileToken
 
@@ -15,6 +15,7 @@ public enum DragKind: String, CaseIterable, Sendable {
         case .panel: return .panel
         case .terminal: return .terminal
         case .file: return .file
+        case .duckling: return .duckling
         }
     }
 }
@@ -38,12 +39,14 @@ public enum DragTarget: Hashable, Sendable {
 }
 
 public enum DragScope {
-    /// The four tab kinds: threads, panels, terminals and files all move between the three strips.
-    public static let tabKinds: [DragKind] = [.thread, .panel, .terminal, .file]
+    /// The tab kinds: threads, panels, terminals and files move between the three strips; a duckling only between the right and bottom ones.
+    public static let tabKinds: [DragKind] = [.thread, .panel, .terminal, .file, .duckling]
 
     public static func allows(_ kind: DragKind, on target: DragTarget) -> Bool {
         switch target {
-        case .centreStrip, .rightStrip, .bottomStrip, .edgeStrip: return tabKinds.contains(kind)
+        case .centreStrip: return tabKinds.contains(kind) && kind != .duckling
+        case .rightStrip, .bottomStrip: return tabKinds.contains(kind)
+        case .edgeStrip(let zone): return tabKinds.contains(kind) && !(kind == .duckling && zone == .centre)
         case .pondList: return kind == .pond
         case .fileTree: return kind == .fileToken
         }
