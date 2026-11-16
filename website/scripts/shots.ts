@@ -15,12 +15,14 @@ const sizes = [
   { name: "m390", width: 390, height: 844, mobile: true },
   { name: "m360", width: 360, height: 740, mobile: true },
 ];
-const only = process.argv.slice(2);
+const args = process.argv.slice(2);
+const storyOnly = args.includes("story");
+const only = args.filter((a) => a !== "story");
 
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ headless: true, args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
 try {
-  for (const size of sizes.filter((s) => only.length === 0 || only.includes(s.name))) {
+  for (const size of sizes.filter((s) => !storyOnly && (only.length === 0 || only.includes(s.name)))) {
     const context = await browser.newContext({
       viewport: { width: size.width, height: size.height },
       deviceScaleFactor: 1,
@@ -76,6 +78,43 @@ try {
     await shot("next", marks.next);
     await shot("install", marks.install);
     await context.close();
+  }
+  // The Story page at the two looking sizes: hero, several scroll positions through the pinned or vertical timeline, the end.
+  if (storyOnly || only.length === 0) {
+    for (const size of sizes.filter((s) => s.name === "d1440" || s.name === "m390")) {
+      const context = await browser.newContext({
+        viewport: { width: size.width, height: size.height },
+        deviceScaleFactor: 1,
+        isMobile: size.mobile && size.width < 600,
+        hasTouch: size.mobile,
+      });
+      const page = await context.newPage();
+      await page.route("**/*pagesense.io/**", (route) => route.abort());
+      await page.goto(`${BASE_URL}story.html`, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready.then(() => true));
+      await page.waitForTimeout(2200);
+      const shot = async (name: string, y: number) => {
+        await page.evaluate((top) => window.scrollTo(0, top), y);
+        await page.waitForTimeout(1500);
+        await page.screenshot({ path: join(OUT, `story-${size.name}-${name}.png`) });
+      };
+      await shot("hero", 0);
+      const geo = (await page.evaluate(`(function () {
+        var t = window.ScrollTrigger.getById("story");
+        var el = document.querySelector("#story");
+        var top = el.getBoundingClientRect().top + window.scrollY;
+        return { pin: t ? { start: t.start, end: t.end } : null, top: top, height: el.offsetHeight, send: document.querySelector("#download").getBoundingClientRect().top + window.scrollY,
+          chapters: [].map.call(document.querySelectorAll("[data-chapter]"), function (c) { return c.getBoundingClientRect().top + window.scrollY; }) };
+      })()`)) as { pin: { start: number; end: number } | null; top: number; height: number; send: number; chapters: number[] };
+      if (geo.pin) {
+        const span = geo.pin.end - geo.pin.start;
+        for (const [i, p] of [0.02, 0.15, 0.3, 0.45, 0.55, 0.7, 0.85, 0.99].entries()) await shot(`pin-${i + 1}`, geo.pin.start + span * p);
+      } else {
+        for (const [i, y] of geo.chapters.entries()) await shot(`chapter-${i}`, Math.max(0, y - size.height * 0.2));
+      }
+      await shot("end", geo.send - 100);
+      await context.close();
+    }
   }
 } finally {
   await browser.close();

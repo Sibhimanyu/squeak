@@ -438,11 +438,195 @@ async function main(): Promise<void> {
   // Headless Chromium draws WebGL in software and can lose the context under load (webgl.js then falls
   // back to the flat Ink stage), so the backdrop must be seen drawing at least once, not at every size.
   check("hero", "the WebGL backdrop draws (is-live) at a wide size", glLive.some((g) => g.live), glLive.map((g) => `${g.area}: ${g.live}`).join("; "));
+  await storyChecks();
   const bad = checks.filter((c) => !c.ok);
   const result = { finishedAt: new Date().toISOString(), passed: checks.length - bad.length, total: checks.length, checks, evidence };
   await writeFile(join(OUT, "results.json"), `${JSON.stringify(result, null, 2)}\n`);
   console.log(`\n${checks.length - bad.length}/${checks.length} checks passed. Results: ${join(OUT, "results.json")}`);
   process.exit(bad.length ? 1 : 0);
+}
+
+// ---------- The Story page ----------
+async function storyChecks(): Promise<void> {
+  const html = await readFile(join(DIST, "story.html"), "utf8");
+  const indexHtml = await readFile(join(DIST, "index.html"), "utf8");
+  const markup = html.replace(/<script[\s\S]*?<\/script>/g, " ");
+  const text = markup.replace(/<svg[\s\S]*?<\/svg>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const chapterCount = (html.match(/data-chapter\s/g) ?? []).length;
+  check("story static", "built story.html has no missing tokens", !["{{", "}}", "undefined", "[object", "NaN "].some((s) => markup.includes(s)));
+  check("story static", "ten chapters in order, egg first and today last", chapterCount === 10 && html.indexOf("The egg") < html.indexOf("A pager with a duck") && html.indexOf("What it is now") > html.indexOf("A flock"), `${chapterCount} chapters`);
+  check("story static", "the retired chapter sits between Everywhere you are and Its own engine, marked Retired", html.indexOf("Everywhere you are") < html.indexOf("A detour we retired") && html.indexOf("A detour we retired") < html.indexOf("Its own engine") && /class="tag">Retired</.test(html));
+  check("story static", "upstream is credited by name with its link", html.includes('href="https://github.com/xudong963/conductor_mobile"') && /Apache-2\.0/.test(text) && /not ours/.test(text));
+  check("story static", "no internals of Conductor or the relay are described", !/keychain|endpoint|teardown|remote control|websocket|settings\.json|sqlite|token/i.test(text), "plain words only");
+  check("story static", "PageSense snippet is in the head as on the main page", html.includes('<script id="pagesenseCode">') && html.indexOf('id="pagesenseCode"') < html.indexOf("</head>"));
+  check("story static", "Coming items are marked Coming", (html.match(/class="badge">Coming</g) ?? []).length === 6);
+  check("story static", "Story link in the header and footer of both pages", [indexHtml, html].every((h) => /<li class="nav__story"><a href="(\.\/)?story\.html"/.test(h) && /<li><a href="\.\/story\.html">Story<\/a><\/li>/.test(h)));
+  check("story static", "the page ends with Download and a link back to the main page", html.includes(release.downloadUrl) && html.includes('href="./index.html">Back to the main page'));
+  check("story static", "paths are relative", !/(src|href)="\/[^/]/.test(html));
+
+  const browser = await chromium.launch({ headless: true });
+  const base = `${BASE_URL}story.html`;
+  try {
+    for (const vp of viewports) {
+      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.mobile && vp.width < 600, hasTouch: vp.mobile });
+      const page = await context.newPage();
+      const issues: string[] = [];
+      page.on("console", (m) => { if (["error", "warning"].includes(m.type())) issues.push(m.text()); });
+      page.on("pageerror", (e) => issues.push(e.message));
+      page.on("response", (r) => { if (r.status() >= 400) issues.push(`${r.status()} ${r.url()}`); });
+      await page.goto(base, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready.then(() => true));
+      await page.waitForTimeout(2200);
+      const area = `story ${vp.name} ${vp.width}x${vp.height}`;
+      const desk = vp.width >= 900 && vp.height >= 620;
+      const info = await ev<{ mode: string | null; chapters: number; overflow: number; pins: number; vline: string; hud: string }>(page, `(function () {
+        var s = document.querySelector("#story");
+        return { mode: s.getAttribute("data-mode"), chapters: document.querySelectorAll("[data-chapter]").length,
+          overflow: document.documentElement.scrollWidth - innerWidth, pins: document.querySelectorAll(".pin-spacer").length,
+          vline: getComputedStyle(document.querySelector(".vline")).display, hud: getComputedStyle(document.querySelector("[data-hud]")).display };
+      })()`);
+      check(area, "page loads with no console errors or failed requests", issues.length === 0, issues.join(" | ") || "clean");
+      check(area, "all ten chapters are present", info.chapters === 10, String(info.chapters));
+      check(area, desk ? "pinned horizontal timeline is on" : "vertical timeline is on (no pin)", desk ? info.mode === "d" && info.pins === 1 : info.mode === "m" && info.pins === 0 && info.vline !== "none" && info.hud === "flex", JSON.stringify(info));
+      check(area, "no horizontal overflow at the top", info.overflow <= 0, String(info.overflow));
+
+      const geo = await ev<{ start: number; end: number; send: number; docH: number }>(page, `(function () {
+        var t = window.ScrollTrigger.getById("story");
+        return { start: t ? t.start : 0, end: t ? t.end : 0, send: document.querySelector("#download").getBoundingClientRect().top + scrollY, docH: document.documentElement.scrollHeight };
+      })()`);
+      let maxOver = 0;
+      const probe = async (): Promise<void> => {
+        maxOver = Math.max(maxOver, await ev<number>(page, "document.documentElement.scrollWidth - innerWidth"));
+      };
+      if (desk) {
+        const span = geo.end - geo.start;
+        await scrollTo(page, geo.start + span * 0.5, 1600);
+        const mid = await ev<{ p: number; pos: string; top: number; active: string | null; count: string }>(page, `(function () {
+          var s = document.querySelector("#story"), pin = document.querySelector("[data-pin]");
+          return { p: Number(s.getAttribute("data-progress")), pos: getComputedStyle(s).position, top: Math.round(s.getBoundingClientRect().top), active: s.getAttribute("data-active"), count: document.querySelector("[data-hud-count]").textContent };
+        })()`);
+        check(area, "the pin holds mid-scroll (section fixed at the top, progress about half)", mid.pos === "fixed" && Math.abs(mid.top) <= 1 && mid.p > 0.3 && mid.p < 0.7, JSON.stringify(mid));
+        const dims = await ev<{ over: string[]; pathLen: number; drawn: number; duckInView: boolean; counterOk: boolean }>(page, `(function () {
+          var over = [];
+          [].forEach.call(document.querySelectorAll(".chapter.is-on .chapter__top"), function (e) {
+            var r = e.getBoundingClientRect();
+            if (r.bottom > innerHeight * 0.54 - 10 || r.top < 60) over.push(Math.round(r.top) + "-" + Math.round(r.bottom));
+          });
+          var d = document.querySelector("[data-p-draw]"), len = d.getTotalLength();
+          var lead = document.querySelector("[data-rider]").getBoundingClientRect();
+          return { over: over, pathLen: len, drawn: len - parseFloat(d.style.strokeDashoffset), duckInView: lead.left >= 0 && lead.right <= innerWidth && lead.top >= 0,
+            counterOk: Number(document.querySelector("[data-hud-count]").textContent.replace(/,/g, "")) > 100 };
+        })()`);
+        check(area, "chapter text clears the path and the counter; the path is drawn and the duck is on screen", dims.over.length === 0 && dims.drawn > 200 && dims.duckInView && dims.counterOk, JSON.stringify(dims));
+        await probe();
+        await scrollTo(page, geo.end + 40, 1600);
+        const endState = await ev<{ p: number; count: string; followers: number; releasedPos: string; sendTop: number }>(page, `(function () {
+          var s = document.querySelector("#story");
+          return { p: Number(s.getAttribute("data-progress")), count: document.querySelector("[data-hud-count]").textContent,
+            followers: [].filter.call(document.querySelectorAll("[data-follower]"), function (f) { return Number(getComputedStyle(f).opacity) > 0.9; }).length,
+            releasedPos: getComputedStyle(s).position, sendTop: Math.round(document.querySelector("#download").getBoundingClientRect().top) };
+        })()`);
+        check(area, "at the end the counter reads 1,922, the lone duck has become a flock, and the pin is released", endState.p >= 0.99 && endState.count === "1,922" && endState.followers >= 4 && endState.releasedPos !== "fixed" && endState.sendTop < vp.height, JSON.stringify(endState));
+        await scrollTo(page, geo.start + (geo.end - geo.start) * 0.2, 1400);
+        const early = await ev<string>(page, `document.querySelector("[data-hud-count]").textContent`);
+        check(area, "the counter counts up with scroll (smaller earlier than at the end)", Number(early.replace(/,/g, "")) < 1922 && early !== "0", early);
+      } else {
+        for (let i = 1; i <= 10; i++) {
+          await scrollTo(page, (geo.docH * i) / 11, 350);
+          await probe();
+        }
+        await scrollTo(page, geo.docH * 0.55, 1200);
+        const m = await ev<{ draw: string; on: number; count: string; p: number }>(page, `(function () {
+          return { draw: getComputedStyle(document.querySelector("[data-vline]")).transform, on: document.querySelectorAll(".chapter.is-on").length,
+            count: document.querySelector("[data-hud-count]").textContent, p: Number(document.querySelector("#story").getAttribute("data-progress")) };
+        })()`);
+        check(area, "the line draws and scenes reveal as you scroll", m.on >= 3 && m.p > 0.2 && m.draw !== "none" && m.draw !== "matrix(1, 0, 0, 0, 0, 0)" && m.count !== "0", JSON.stringify(m));
+      }
+      for (let i = 0; i <= 8; i++) {
+        await scrollTo(page, (geo.docH * i) / 8, 200);
+        await probe();
+      }
+      check(area, "no horizontal overflow while scrolling the whole page", maxOver <= 0, String(maxOver));
+
+      await scrollTo(page, 0, 300);
+      const targets = await ev<string[]>(page, `(function () {
+        var bad = [];
+        [].forEach.call(document.querySelectorAll(".nav__links a, .btn, .chapter__link a, .footer a, .shero__cue"), function (el) {
+          var r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return;
+          if (r.height < 43.5 || r.width < 43.5) bad.push((el.className || el.tagName) + " " + Math.round(r.width) + "x" + Math.round(r.height));
+        });
+        return bad;
+      })()`);
+      check(area, "buttons and links are at least 44px", targets.length === 0, targets.join(", ") || "all ok");
+      const small = await ev<string[]>(page, `(function () {
+        var bad = [];
+        [].forEach.call(document.querySelectorAll(".shero__lede, .chapter__body, .chapter__meta, .chapter__date, .chapter__link, .coming__list li, .section__lede"), function (el) {
+          var fs = parseFloat(getComputedStyle(el).fontSize);
+          if (fs < 15) bad.push(el.className + " " + fs);
+        });
+        return bad;
+      })()`);
+      check(area, "reading text is at least 15px", small.length === 0, small.join(", ") || "all ok");
+      const link = await ev<{ story: boolean; vis: boolean }>(page, `(function () {
+        var a = document.querySelector(".nav__story a"); var r = a.getBoundingClientRect();
+        return { story: a.getAttribute("href") === "./story.html", vis: r.width > 0 && r.right <= innerWidth };
+      })()`);
+      check(area, "the nav has a visible Story link", link.story && link.vis, JSON.stringify(link));
+      await page.screenshot({ path: join(OUT, `story-${vp.name}-top.png`) });
+      await context.close();
+    }
+
+    // The main page carries the Story link in its header too, even on a phone.
+    for (const vp of [viewports[0], viewports[3]]) {
+      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.mobile });
+      const page = await context.newPage();
+      await page.route("**/*pagesense.io/**", (route) => route.abort());
+      await page.goto(BASE_URL, { waitUntil: "load" });
+      const l = await ev<{ href: string | null; w: number; h: number; right: number }>(page, `(function () {
+        var a = document.querySelector(".nav__story a"); var r = a.getBoundingClientRect();
+        return { href: a.getAttribute("href"), w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right) };
+      })()`);
+      check(`index ${vp.name}`, "header has a visible Story link to ./story.html", l.href === "./story.html" && l.w >= 44 && l.h >= 44 && l.right <= vp.width, JSON.stringify(l));
+      await context.close();
+    }
+
+    // Reduced motion: a plain list, every chapter visible, nothing pinned.
+    for (const vp of [viewports[0], viewports[3]]) {
+      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, reducedMotion: "reduce", isMobile: vp.mobile });
+      const page = await context.newPage();
+      await page.route("**/*pagesense.io/**", (route) => route.abort());
+      await page.goto(base, { waitUntil: "load" });
+      await page.waitForTimeout(1800);
+      const m = await ev<{ mode: string | null; pins: number; vis: number; faded: number; overflow: number; classes: string }>(page, `(function () {
+        var cs = [].slice.call(document.querySelectorAll("[data-chapter]"));
+        return { mode: document.querySelector("#story").getAttribute("data-mode"), pins: document.querySelectorAll(".pin-spacer").length,
+          vis: cs.filter(function (c) { return c.getBoundingClientRect().height > 100; }).length,
+          faded: document.querySelectorAll("[data-s], .chapter__top, .scene").length && [].filter.call(document.querySelectorAll("[data-s], .chapter__top, .scene"), function (e) { return !e.classList.contains("ghost") && Number(getComputedStyle(e).opacity) < 1; }).length,
+          overflow: document.documentElement.scrollWidth - innerWidth, classes: document.documentElement.className };
+      })()`);
+      check(`story reduced motion ${vp.name}`, "all ten chapters are readable, unpinned and nothing is faded", m.mode === null && m.pins === 0 && m.vis === 10 && m.faded === 0 && m.overflow <= 0 && !/js-story/.test(m.classes), JSON.stringify(m));
+      await page.screenshot({ path: join(OUT, `story-reduced-${vp.name}.png`), fullPage: false });
+      await context.close();
+    }
+
+    // No JavaScript.
+    for (const vp of [viewports[0], viewports[3], viewports[4]]) {
+      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, javaScriptEnabled: false });
+      const page = await context.newPage();
+      await page.goto(base, { waitUntil: "load" });
+      const n = await ev<{ tops: number[]; overflow: number; hidden: number; titles: number }>(page, `(function () {
+        var cs = [].slice.call(document.querySelectorAll("[data-chapter]"));
+        return { tops: cs.map(function (c) { return Math.round(c.getBoundingClientRect().top); }), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          hidden: [].filter.call(document.querySelectorAll(".chapter__title, .chapter__body, .chapter__date, .shero__title"), function (e) { var s = getComputedStyle(e); return Number(s.opacity) < 1 || s.visibility === "hidden" || s.display === "none"; }).length,
+          titles: document.querySelectorAll(".chapter__title").length };
+      })()`);
+      check(`story no JS ${vp.name}`, "a complete, ordered, readable list with no overflow", n.titles === 10 && n.tops.every((v, i) => i === 0 || v > n.tops[i - 1]) && n.overflow <= 0 && n.hidden === 0, JSON.stringify(n));
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
 }
 
 await main();

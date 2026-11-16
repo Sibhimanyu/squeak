@@ -11,6 +11,7 @@ GSAP and ScrollTrigger vendored at a pinned version.
 | `index.template.html` | page | the markup; `{{dot.path}}` tokens are filled from content |
 | `src/content.ts` | page | all copy and links (default export) |
 | `styles.css`, `motion.js` | page | layout and scroll reveals |
+| `story.template.html`, `src/story.ts`, `story.css`, `story.js` | page | the Story page (`dist/story.html`): a scroll-driven timeline of how Squeak started and what it is now; copy in `src/story.ts` |
 | `scroll-score.json` | page | the scroll score the motion was built against |
 | `release.json` | tooling | the live Squeak release (from the appcast), imported by content |
 | `assets/` | tooling | optimised images, fonts, vendored GSAP, icons, social image |

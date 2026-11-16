@@ -15,7 +15,7 @@ const dist = join(site, "dist");
 const staging = join(site, "dist.building");
 
 const TOKEN = /\{\{\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\}\}/g;
-const COPIED_FILES = ["styles.css", "motion.js", "ducks.js", "webgl.js", "scroll-score.json"];
+const COPIED_FILES = ["styles.css", "motion.js", "ducks.js", "webgl.js", "scroll-score.json", "story.css", "story.js"];
 
 export function escapeHtml(value: string): string {
   return value
@@ -106,6 +106,9 @@ export async function build(): Promise<void> {
   for (const file of [...COPIED_FILES, "src/content.ts", "assets"]) {
     if (!existsSync(join(site, file))) throw new Error(`${file} is missing`);
   }
+  const storyTemplatePath = join(site, "story.template.html");
+  if (!existsSync(storyTemplatePath)) throw new Error("story.template.html is missing");
+  if (!existsSync(join(site, "src/story.ts"))) throw new Error("src/story.ts is missing");
   const template = await readFile(templatePath, "utf8");
   const contentModule = (await import(pathToFileURL(join(site, "src/content.ts")).href)) as { default?: unknown };
   if (contentModule.default === undefined) throw new Error("src/content.ts must export a default object");
@@ -113,9 +116,15 @@ export async function build(): Promise<void> {
   const release = JSON.parse(await readFile(join(site, "release.json"), "utf8")) as Release;
   const html = insertJsonLd(renderTemplate(template, content), softwareJsonLd(content.site, release));
 
+  // The Story page: its own template and copy, no JSON-LD (the build owns that for index only).
+  const storyModule = (await import(pathToFileURL(join(site, "src/story.ts")).href)) as { default?: unknown };
+  if (storyModule.default === undefined) throw new Error("src/story.ts must export a default object");
+  const storyHtml = renderTemplate(await readFile(storyTemplatePath, "utf8"), storyModule.default);
+
   await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
   await writeFile(join(staging, "index.html"), html);
+  await writeFile(join(staging, "story.html"), storyHtml);
   for (const file of COPIED_FILES) {
     await cp(join(site, file), join(staging, file));
   }
@@ -123,7 +132,7 @@ export async function build(): Promise<void> {
 
   await rm(dist, { recursive: true, force: true });
   await rename(staging, dist);
-  console.log(`built dist/ (${html.length} bytes of HTML)`);
+  console.log(`built dist/ (${html.length} + ${storyHtml.length} bytes of HTML)`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

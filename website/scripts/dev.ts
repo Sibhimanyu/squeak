@@ -97,7 +97,7 @@ function runBuild(): Promise<void> {
 }
 
 // Only the page's own sources; dist/ and node_modules/ are not watched.
-const WATCHED = /^(index\.template\.html|styles\.css|motion\.js|ducks\.js|webgl\.js|scroll-score\.json|release\.json|src[\\/]|assets[\\/])/;
+const WATCHED = /^(index\.template\.html|story\.template\.html|story\.css|story\.js|styles\.css|motion\.js|ducks\.js|webgl\.js|scroll-score\.json|release\.json|src[\\/]|assets[\\/])/;
 let timer: NodeJS.Timeout | undefined;
 watch(site, { recursive: true }, (_event, name) => {
   if (!name || !WATCHED.test(String(name))) return;

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="{{site.lang}}">
+<head>
+<meta charset="utf-8">
+<script id="pagesenseCode">!function(){var e="1.0",t=document,a=window,n="zps-page-screen",r=t.head||t.getElementsByTagName("head")[0],i=t.getElementById("pagesenseCode");if(!t.getElementById(n)){var o=t.createElement("style");o.type="text/css",o.id=n;var s="body { background: transparent !important; opacity: 0 !important; visibility: hidden !important; } html { opacity: 0 !important; visibility: hidden !important; }";o.styleSheet?o.styleSheet.cssText=s:o.appendChild(t.createTextNode(s)),r.firstChild?r.insertBefore(o,r.firstChild):r.appendChild(o),a._ps_conf={};var c={addScript:function(e){try{var n=t.createElement("script");if(n.type="text/javascript",n.async=!0,e.src?n.src=e.src:e.text&&(void 0!==n.text?n.text=e.text:n.appendChild(t.createTextNode(e.text))),i&&i.getAttribute){var o=i.getAttribute("nonce");o&&n.setAttribute("nonce",o)}n.onload=n.onreadystatechange=function(){this.readyState&&"loaded"!==this.readyState&&"complete"!==this.readyState||(n.onload=n.onreadystatechange=null,a._ps_conf&&a._ps_conf.pauseRenderForManualActivation?clearTimeout(d):c.revealPage())},n.onerror=function(){c.revealPage()},r.appendChild(n)}catch(e){throw c.revealPage(),e}},revealPage:function(){var e=t.getElementById(n);e&&e.parentNode&&e.parentNode.removeChild(e)}},d=setTimeout((function(){c.revealPage()}),1e4),p=c.revealPage;c.revealPage=function(){clearTimeout(d),p()};try{a._ps_conf&&a._ps_conf.pauseRenderForManualActivation&&(a.pagesense=a.pagesense||[],a.pagesense.push=function(e){e&&"activate"==e[0]&&c&&c.revealPage()}),a._ps_conf?a._ps_conf.version=e:a._ps_conf={version:e},c.addScript({src:"https://cdn-in.pagesense.io/js/sibhimanyugt0/38997b320d8347ba84581a5d611f4389.js"})}catch(e){c.revealPage()}}}();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{site.title}}</title>
+<meta name="description" content="{{site.description}}">
+<meta name="theme-color" content="{{site.themeColor}}">
+<link rel="canonical" href="{{site.canonical}}">
+<link rel="icon" href="./assets/favicon.png" type="image/png" sizes="64x64">
+<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" sizes="180x180">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Squeak">
+<meta property="og:title" content="{{site.ogTitle}}">
+<meta property="og:description" content="{{site.ogDescription}}">
+<meta property="og:url" content="{{site.canonical}}">
+<meta property="og:image" content="{{site.ogImage}}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{{site.ogImageAlt}}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{site.ogTitle}}">
+<meta name="twitter:description" content="{{site.ogDescription}}">
+<meta name="twitter:image" content="{{site.ogImage}}">
+<link rel="preload" href="./assets/fonts/figtree-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./story.css">
+<script>
+// PageSense hides the page until its script loads: SqueakShown(cb) runs cb once it is shown.
+window.SqueakShown=function(cb){var d=document,id="zps-page-screen",done=0,mo,go=function(){if(done)return;done=1;if(mo)mo.disconnect();cb()};if(!d.getElementById(id))return go();if(window.MutationObserver){mo=new MutationObserver(function(){if(!d.getElementById(id))go()});mo.observe(d.documentElement,{childList:true,subtree:true})}setTimeout(go,10500)};</script>
+<script src="./assets/vendor/gsap.min.js" defer></script>
+<script src="./assets/vendor/ScrollTrigger.min.js" defer></script>
+<script src="./assets/vendor/SplitText.min.js" defer></script>
+<script src="./assets/vendor/lenis.min.js" defer></script>
+<script src="./story.js" defer></script>
+</head>
+<body class="story-page">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-tri" viewBox="0 0 16 16"><path d="M8 1.9 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6.3v3.4M8 11.6v.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-q" viewBox="0 0 16 16"><path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c.9 0 1.7-.2 2.4-.5l3.1.9-.9-2.9A6.2 6.2 0 0 0 8 1.8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.4 6.3c.2-1.7 3.3-1.8 3.3.2 0 1.2-1.7 1.3-1.7 2.5M8 11v.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="i-load" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="3" cy="3" r="1.4"/><circle cx="8" cy="3" r="1.4" opacity=".55"/><circle cx="13" cy="3" r="1.4" opacity=".3"/><circle cx="3" cy="8" r="1.4" opacity=".55"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4" opacity=".55"/><circle cx="3" cy="13" r="1.4" opacity=".3"/><circle cx="8" cy="13" r="1.4" opacity=".55"/><circle cx="13" cy="13" r="1.4"/></g></symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="4" cy="3.5" r="1.7"/><circle cx="4" cy="12.5" r="1.7"/><circle cx="12" cy="5.5" r="1.7"/><path d="M4 5.2v5.6M12 7.2c0 3-8 1.6-8 3.6"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="m3 8.5 3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+<a class="skip" href="#story">{{nav.skip}}</a>
+
+<header class="shero" id="top">
+  <div class="shero__frame">
+    <div class="wrap shero__ui">
+      <nav class="nav" aria-label="{{nav.mainLabel}}">
+        <a class="nav__brand" href="./index.html" aria-label="{{nav.homeLabel}}"><img src="./assets/logo-paper.svg" width="100" height="30" alt="{{nav.logoAlt}}"></a>
+        <ul class="nav__links">
+          <li><a href="{{nav.threadsHref}}">{{nav.threads}}</a></li>
+          <li><a href="{{nav.needsHref}}">{{nav.needs}}</a></li>
+          <li><a href="{{nav.pondsHref}}">{{nav.ponds}}</a></li>
+          <li><a href="{{nav.awayHref}}">{{nav.away}}</a></li>
+          <li class="nav__story"><a href="{{nav.storyHref}}" aria-current="page">{{nav.story}}</a></li>
+          <li><a class="nav__cta" href="{{nav.downloadHref}}">{{nav.download}}<span class="nav__dot" aria-hidden="true"></span></a></li>
+        </ul>
+      </nav>
+      <div class="shero__text">
+        <p class="hero__kicker">{{hero.kicker}}</p>
+        <h1 class="shero__title"><span class="hero__line">{{hero.line1}}</span> <span class="hero__line"><span class="mark">{{hero.line2}}</span></span></h1>
+        <p class="shero__lede">{{hero.lede}}</p>
+      </div>
+      <div class="shero__foot">
+        <a class="shero__cue" href="#story"><span class="cue__arrow" aria-hidden="true"></span><span class="cue__d">{{hero.cue}}</span><span class="cue__m">{{hero.cueMobile}}</span></a>
+        <svg class="shero__line" viewBox="0 0 600 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 40 C 80 10, 140 60, 220 34 S 380 8, 440 36 S 560 52, 600 24" fill="none" stroke="#FFDA1A" stroke-width="6" stroke-linecap="round"/></svg>
+        <img class="shero__duck" src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="content">
+<section class="story" id="story" aria-labelledby="story-h">
+  <h2 class="sr-only" id="story-h">{{list.label}}</h2>
+  <div class="story__pin" data-pin>
+    <div class="hud" data-hud aria-hidden="true"><span class="hud__date" data-hud-date>{{c0.short}}</span><span class="hud__count"><b data-hud-count>0</b> {{hud.commits}}</span></div>
+    <div class="story__view" data-view>
+      <div class="story__track" data-track>
+        <svg class="story__path" data-path-svg aria-hidden="true" focusable="false"><path class="p-base" data-p-base d="M0 0"/><path class="p-draw" data-p-draw d="M0 0"/></svg>
+        <div class="vline" aria-hidden="true"><i class="vline__draw" data-vline></i></div>
+        <ol class="chapters" data-chapters>
+    <li class="chapter" id="chapter-0" data-chapter data-end="{{c0.end}}" data-short="{{c0.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c0.date}}</p>
+        <h3 class="chapter__title">{{c0.title}}</h3>
+        <p class="chapter__body">{{c0.body}}</p>
+        <p class="chapter__link"><a href="{{c0.linkHref}}" rel="noopener">{{c0.link}}</a></p>
+        <p class="chapter__meta">{{c0.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c0.sceneLabel}}"><div class="sc sc0">
+          <div class="egg" data-s style="--i:0"></div>
+          <div class="bub bub--in" data-s style="--i:1">{{c0.msgIn}}</div>
+          <div class="bub bub--out" data-s style="--i:2">{{c0.msgOut}}</div>
+          <span class="sc__cap" data-s style="--i:3">{{c0.egg}}</span></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-1" data-chapter data-end="{{c1.end}}" data-short="{{c1.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c1.date}}</p>
+        <h3 class="chapter__title">{{c1.title}}</h3>
+        <p class="chapter__body">{{c1.body}}</p>
+        <p class="chapter__meta">{{c1.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c1.sceneLabel}}"><div class="sc sc1">
+          <div class="tgc" data-s style="--i:0">
+            <img class="tgc__duck" src="./assets/duck-needs_you.webp" width="240" height="240" alt="">
+            <p class="tgc__app">{{c1.app}} <span class="tgc__needs"><svg class="mk" aria-hidden="true"><use href="#i-tri"/></svg>{{c1.needs}}</span></p>
+            <p class="tgc__chat">{{c1.chat}}</p>
+            <p class="tgc__said" data-s style="--i:2">{{c1.said}}</p>
+            <p class="tgc__chg" data-s style="--i:3"><svg class="ic" aria-hidden="true"><use href="#i-branch"/></svg>{{c1.changed}}</p>
+            <span class="tgc__btn" data-s style="--i:4">{{c1.reply}}</span>
+          </div></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-2" data-chapter data-end="{{c2.end}}" data-short="{{c2.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c2.date}}</p>
+        <h3 class="chapter__title">{{c2.title}}</h3>
+        <p class="chapter__body">{{c2.body}}</p>
+        <p class="chapter__meta">{{c2.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c2.sceneLabel}}"><div class="sc sc2">
+          <div class="sp" data-s style="--i:0"><p class="sp__head">{{c2.heading}}</p>
+          <ul class="sp__list">
+            <li class="row row--needs" data-s style="--i:1"><span class="td" style="--h:330" aria-hidden="true"></span><span class="row__text"><b>{{c2.r1}}</b><span>{{c2.r1s}}</span></span><span class="row__side"><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg><span class="row__age">{{c2.r1a}}</span></span></li>
+            <li class="row" data-s style="--i:2"><span class="td" style="--h:170" aria-hidden="true"></span><span class="row__text"><b>{{c2.r2}}</b><span>{{c2.r2s}}</span></span><span class="row__side"><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg><span class="row__age">{{c2.r2a}}</span></span></li>
+            <li class="row" data-s style="--i:3"><span class="td" style="--h:265" aria-hidden="true"></span><span class="row__text"><b>{{c2.r3}}</b><span>{{c2.r3s}}</span></span><span class="row__side"><svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg><span class="row__age">{{c2.r3a}}</span></span></li>
+            <li class="row" data-s style="--i:4"><span class="td" style="--h:140" aria-hidden="true"></span><span class="row__text"><b>{{c2.r4}}</b><span>{{c2.r4s}}</span></span><span class="row__side"><span class="udot" aria-hidden="true"></span><span class="row__age">{{c2.r4a}}</span></span></li>
+          </ul></div></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-3" data-chapter data-end="{{c3.end}}" data-short="{{c3.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c3.date}}</p>
+        <h3 class="chapter__title">{{c3.title}}</h3>
+        <p class="chapter__body">{{c3.body}}</p>
+        <p class="chapter__meta">{{c3.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c3.sceneLabel}}"><div class="sc sc3">
+          <div class="ph" data-s style="--i:0">
+            <span class="ph__notch" aria-hidden="true"></span>
+            <p class="ph__title"><svg class="mk" aria-hidden="true"><use href="#i-tri"/></svg>{{c3.title2}}</p>
+            <p class="ph__q" data-s style="--i:2">{{c3.q}}</p>
+            <span class="ph__opt" data-s style="--i:3">{{c3.a}}</span>
+            <span class="ph__opt" data-s style="--i:4">{{c3.b}}</span>
+          </div>
+          <div class="key" data-s style="--i:5"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 7V5a3 3 0 0 1 6 0v2M3.5 7h9v6.5h-9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><b>{{c3.signed}}</b><span>{{c3.expires}}</span></div></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-4" data-chapter data-end="{{c4.end}}" data-short="{{c4.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c4.date}}</p>
+        <h3 class="chapter__title">{{c4.title}}</h3>
+        <p class="chapter__body">{{c4.body}}</p>
+        <p class="chapter__meta">{{c4.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c4.sceneLabel}}"><div class="sc sc4">
+          <div class="mbar" data-s style="--i:0"><span class="mbar__apple" aria-hidden="true"></span><img src="./assets/duck-working.webp" width="240" height="240" alt=""><span class="mbar__t">{{c4.menu}}</span></div>
+          <div class="mpanel" data-s style="--i:1">
+            <p class="mpanel__head"><b>{{c4.menu}}</b><span><svg class="mk" aria-hidden="true"><use href="#i-tri"/></svg>{{c4.status}}</span></p>
+            <p class="mpanel__row" data-s style="--i:2"><span class="td td--s" style="--h:330" aria-hidden="true"></span>{{c4.s1}}<svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg></p>
+            <p class="mpanel__row" data-s style="--i:3"><span class="td td--s" style="--h:170" aria-hidden="true"></span>{{c4.s2}}<svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg></p>
+            <p class="mpanel__row" data-s style="--i:4"><span class="td td--s" style="--h:265" aria-hidden="true"></span>{{c4.s3}}<svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg></p>
+          </div>
+          <div class="oldwin" data-s style="--i:5"><span>{{c4.old}}</span><b>{{c4.oldTag}}</b></div></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-5" data-chapter data-end="{{c5.end}}" data-short="{{c5.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c5.date}}</p>
+        <h3 class="chapter__title">{{c5.title}}</h3>
+        <p class="chapter__body">{{c5.body}}</p>
+        <p class="chapter__meta">{{c5.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c5.sceneLabel}}"><div class="sc sc5">
+          <div class="call" data-s style="--i:0">
+            <p class="call__who"><span class="call__ring" aria-hidden="true"></span>{{c5.call}}</p>
+            <p class="call__q">{{c5.callQ}}</p>
+            <div class="call__keys" aria-hidden="true"><span>{{c5.key1}}</span><span class="is-press">{{c5.key2}}</span><span>{{c5.key3}}</span></div>
+          </div>
+          <div class="lid" data-s style="--i:2">
+            <svg class="lid__moon" viewBox="0 0 40 40" aria-hidden="true"><path d="M26 6a15 15 0 1 0 8 26A12 12 0 0 1 26 6z" fill="#FFC812"/></svg>
+            <span class="lid__mac" aria-hidden="true"></span>
+            <p class="lid__t">{{c5.awake}}</p>
+            <p class="lid__b"><span class="lid__bar" aria-hidden="true"><i></i></span>{{c5.battery}}</p>
+          </div></div></div>
+      </div>
+    </li>
+    <li class="chapter chapter--retired" id="chapter-6" data-chapter data-end="{{c6.end}}" data-short="{{c6.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c6.date}}<span class="tag">{{retiredTag}}</span></p>
+        <h3 class="chapter__title">{{c6.title}}</h3>
+        <p class="chapter__body">{{c6.body}}</p>
+        <p class="chapter__meta">{{c6.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c6.sceneLabel}}"><div class="sc sc6">
+          <div class="ghost" data-s style="--i:0">
+            <p class="ghost__t">{{c6.ghost}}</p>
+            <p class="ghost__s">{{c6.ghostSub}}</p>
+            <span class="ghost__line" data-s style="--i:2" aria-hidden="true"></span>
+          </div>
+          <span class="stamp" data-s style="--i:3">{{c6.stamp}}</span></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-7" data-chapter data-end="{{c7.end}}" data-short="{{c7.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c7.date}}</p>
+        <h3 class="chapter__title">{{c7.title}}</h3>
+        <p class="chapter__body">{{c7.body}}</p>
+        <p class="chapter__meta">{{c7.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c7.sceneLabel}}"><div class="sc sc7">
+          <div class="mw" data-s style="--i:0">
+            <div class="mw__bar"><i></i><i></i><i></i><span>{{c7.pond}} · {{c7.thread}}</span><kbd>{{c7.cmdk}}</kbd></div>
+            <div class="mw__body">
+              <div class="mw__approve" data-s style="--i:2"><p><svg class="mk mk--needs" aria-hidden="true"><use href="#i-tri"/></svg>{{c7.ask}}</p><span class="mw__btn mw__btn--go">{{c7.allow}}</span><span class="mw__btn">{{c7.deny}}</span></div>
+              <p class="mw__duck" data-s style="--i:3"><span class="td td--s" style="--h:170" aria-hidden="true"></span>{{c7.d1}}<svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg></p>
+              <p class="mw__duck" data-s style="--i:4"><span class="td td--s" style="--h:265" aria-hidden="true"></span>{{c7.d2}}<svg class="mk mk--working" aria-hidden="true"><use href="#i-load"/></svg></p>
+            </div>
+          </div></div></div>
+      </div>
+    </li>
+    <li class="chapter" id="chapter-8" data-chapter data-end="{{c8.end}}" data-short="{{c8.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c8.date}}</p>
+        <h3 class="chapter__title">{{c8.title}}</h3>
+        <p class="chapter__body">{{c8.body}}</p>
+        <p class="chapter__meta">{{c8.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c8.sceneLabel}}"><div class="sc sc8">
+          <div class="pp" data-s style="--i:0">
+            <p class="pp__title"><svg class="ic" aria-hidden="true"><use href="#i-branch"/></svg>{{c8.pondTitle}}</p>
+            <ul class="pp__members">
+              <li data-s style="--i:1"><span class="av" style="--h:45">Y</span>{{c8.m1}}</li>
+              <li data-s style="--i:2"><span class="av" style="--h:200">A</span>{{c8.m2}}<em>{{c8.joined}}</em></li>
+              <li data-s style="--i:3"><span class="av" style="--h:330">B</span>{{c8.m3}}<em>{{c8.joined}}</em></li>
+              <li data-s style="--i:4"><span class="av" style="--h:150">G</span>{{c8.m4}}<em>{{c8.joined}}</em></li>
+            </ul>
+            <p class="pp__invite" data-s style="--i:5">{{c8.invite}}</p>
+          </div></div></div>
+      </div>
+    </li>
+    <li class="chapter chapter--now" id="chapter-9" data-chapter data-end="{{c9.end}}" data-short="{{c9.short}}">
+      <div class="chapter__top">
+        <p class="chapter__date"><span class="chapter__dot" aria-hidden="true"></span>{{c9.date}}</p>
+        <h3 class="chapter__title">{{c9.title}}</h3>
+        <p class="chapter__body">{{c9.body}}</p>
+        <p class="chapter__meta">{{c9.meta}}</p>
+      </div>
+      <div class="chapter__bottom">
+        <div class="scene" role="img" aria-label="{{c9.sceneLabel}}"><div class="sc sc9">
+          <img class="flk flk--1" data-s style="--i:0" src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+          <img class="flk flk--2" data-s style="--i:1" src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+          <img class="flk flk--3" data-s style="--i:2" src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+          <img class="flk flk--4" data-s style="--i:3" src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+          <img class="flk flk--5" data-s style="--i:4" src="./assets/duck-brand.svg" width="1000" height="862" alt=""></div></div>
+        <div class="coming">
+          <p class="coming__k">{{c9.comingKicker}}</p>
+          <ul class="coming__list">
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i1}}</li>
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i2}}</li>
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i3}}</li>
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i4}}</li>
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i5}}</li>
+            <li><span class="badge">{{c9.comingBadge}}</span>{{c9.i6}}</li>
+          </ul>
+        </div>
+      </div>
+    </li>
+        </ol>
+      </div>
+      <div class="riders" data-riders aria-hidden="true">
+        <img class="rider rider--lead" data-rider src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+        <img class="rider rider--f" data-follower src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+        <img class="rider rider--f" data-follower src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+        <img class="rider rider--f" data-follower src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+        <img class="rider rider--f" data-follower src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+        <img class="rider rider--f" data-follower src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="send" id="download" aria-labelledby="send-h">
+  <div class="wrap send__row">
+    <div>
+      <p class="kicker">{{end.kicker}}</p>
+      <h2 id="send-h">{{end.heading}}</h2>
+      <p class="section__lede">{{end.lede}}</p>
+    </div>
+    <div>
+      <div class="actions">
+        <a class="btn btn--primary" href="{{end.ctaHref}}" download>{{end.cta}}</a>
+        <a class="btn btn--ghost" href="{{end.backHref}}">{{end.back}}</a>
+      </div>
+      <p class="install__meta">{{end.meta}}</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer__row">
+    <p>{{footer.by}} <a href="{{footer.authorHref}}">{{footer.author}}</a></p>
+    <ul>
+      <li><a href="{{footer.homeHref}}">{{footer.home}}</a></li>
+      <li><a href="{{footer.storyHref}}">{{footer.story}}</a></li>
+      <li><a href="{{footer.releasesHref}}">{{footer.releases}}</a></li>
+    </ul>
+    <p>{{footer.note}}</p>
+  </div>
+</footer>
+</body>
+</html>
