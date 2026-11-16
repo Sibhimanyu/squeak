@@ -434,13 +434,13 @@ private struct WorkbenchTabs: View {
         let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
             StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
-                     showsClose: !chats.isEmpty,
+                     showsClose: !chats.isEmpty, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),
                      onHover: { inside in
                          hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
                          if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
                      }, close: { closeTab(s) },
                      // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                     icon: { tabIcon(s).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "") },
+                     icon: { tabIcon(s).help(SessionText.agentName(s.agent) ?? "") },
                      title: {
                          HStack(spacing: 4) {
                              if model.isRenaming(s) {
@@ -486,14 +486,6 @@ private struct WorkbenchTabs: View {
             Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
-    }
-}
-
-
-private extension View {
-    /// A working chat's tab pulses its agent logo, no extra width.
-    @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
-        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in Motion.pulseStep } } else { self }
     }
 }
 

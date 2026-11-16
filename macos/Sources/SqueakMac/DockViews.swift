@@ -162,11 +162,14 @@ struct StripTab<Icon: View, Title: View>: View {
     let closeLabel: String
     var showsClose = true
     var dirty = false
+    /// Working or needing you shows in the trailing slot (the hover close takes its place while the pointer is on the tab).
+    var activity: TabActivity = .idle
     var onHover: (Bool) -> Void = { _ in }
     let close: () -> Void
     @ViewBuilder var icon: () -> Icon
     @ViewBuilder var title: () -> Title
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tabMaxWidth) private var maxWidth
     @Environment(AppModel.self) private var model
 
@@ -175,14 +178,7 @@ struct StripTab<Icon: View, Title: View>: View {
             icon().frame(width: ChatTabWidth.iconSlot).opacity(selected ? 1 : 0.8)
             title().frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading).padding(.leading, ChatTabWidth.iconGap)
             if dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).padding(.leading, 4).accessibilityLabel("Unsaved changes") }
-            if showsClose {
-                Button(action: close) {
-                    Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).padding(.leading, ChatTabWidth.closeGap)
-                .opacity(hovering ? 1 : 0).allowsHitTesting(hovering).animation(Motion.quick, value: hovering)
-                .help(closeLabel).accessibilityLabel(closeLabel)
-            }
+            slot
         }
         .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
         .frame(maxWidth: maxWidth, minHeight: height, maxHeight: height, alignment: .leading)
@@ -191,6 +187,33 @@ struct StripTab<Icon: View, Title: View>: View {
             if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
         }
         .contentShape(Rectangle())
+    }
+}
+
+extension StripTab {
+    /// The reserved trailing slot: the close button on hover, else the activity mark. Always 14pt wide.
+    @ViewBuilder fileprivate var slot: some View {
+        let content = TabSlotContent.of(activity, hovered: hovering)
+        if showsClose {
+            ZStack {
+                if showsClose {
+                    Button(action: close) {
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(content.close ? 1 : 0).allowsHitTesting(content.close)
+                    .help(closeLabel).accessibilityLabel(closeLabel)
+                }
+                Group {
+                    if reduceMotion { TideGlyph.calm(color: Theme.working, grid: .micro) } else { TideGlyph(color: Theme.working, grid: .micro) }
+                }.opacity(content.workingGlyph ? 1 : 0).accessibilityHidden(!content.workingGlyph).allowsHitTesting(false)
+                StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 12)
+                    .opacity(content.warning ? 1 : 0).accessibilityHidden(!content.warning).allowsHitTesting(false)
+            }
+            .frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot)
+            .padding(.leading, ChatTabWidth.closeGap)
+            .animation(Motion.quick, value: content)
+        }
     }
 }
 
@@ -204,6 +227,7 @@ struct DockItemTab<Icon: View>: View {
     let height: CGFloat
     let indicator: Namespace.ID
     var dirty = false
+    var activity: TabActivity = .idle
     let select: () -> Void
     let close: () -> Void
     @ViewBuilder var icon: () -> Icon
@@ -212,7 +236,7 @@ struct DockItemTab<Icon: View>: View {
     var body: some View {
         let dock = DockStore.shared
         Group {
-            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)", dirty: dirty,
+            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)", dirty: dirty, activity: activity,
                      onHover: { inside in
                          if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
                      }, close: close, icon: icon) {
@@ -274,6 +298,7 @@ struct DockThreadTab: View {
     var body: some View {
         let key = session.key.stringValue
         DockItemTab(item: .thread(key), title: model.workbenchTitle(session), zone: zone, selected: selected, height: height, indicator: indicator,
+                    activity: TabSlotContent.activity(of: model.mark(for: session)?.kind),
                     select: { DockStore.shared.selectThread(key); model.select(session.key) },
                     close: { DockStore.shared.moveThread(key, to: .centre) }) {
             Image(systemName: "bubble.left").font(.system(size: 13)).foregroundStyle(selected ? Theme.ink : Theme.muted)
@@ -294,6 +319,7 @@ struct DockDucklingTab: View {
     var body: some View {
         let chip = model.ducklings(for: session)?.items.first { $0.id == ref.taskId }
         DockItemTab(item: .duckling(ref), title: chip?.title ?? "Duckling", zone: zone, selected: selected, height: height, indicator: indicator,
+                    activity: chip?.status == .running ? .working : .idle,
                     select: { DockStore.shared.selectDuckling(ref) },
                     close: { DockStore.shared.closeDuckling(ref) }) {
             if let chip { DucklingStatusMark(duckling: chip) } else { Lucide(.circleCheck, size: 11, color: Theme.subtle) }
@@ -348,6 +374,7 @@ struct DockTerminalTab: View {
 
     var body: some View {
         DockItemTab(item: .terminal(tab.id), title: host.tabTitle(of: tab), zone: zone, selected: selected, height: height, indicator: indicator,
+                    activity: host.isBusy(tab.id) ? .working : .idle,
                     select: { DockStore.shared.selectTerminal(tab.id); host.focusPending = true },
                     close: { TerminalActions.close(tab.id, folder: folder) }) {
             Lucide(.terminal, size: 13, color: selected ? Theme.ink : Theme.muted)

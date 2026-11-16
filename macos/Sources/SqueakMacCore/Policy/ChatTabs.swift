@@ -110,3 +110,31 @@ public enum TabStripFit {
         return strip >= leading + plus + Double(max(0, tabs)) * tabMin + accessory
     }
 }
+
+/// What a tab is doing, for the mark in its trailing slot (DESIGN.md 8.10).
+public enum TabActivity: Equatable, Sendable {
+    case idle, working, needsYou
+}
+
+/// What the tab's reserved 14pt trailing slot shows. The slot never changes size; the close button and the activity
+/// mark share it, so hovering swaps them (the view crossfades) and the tab never shifts.
+public struct TabSlotContent: Equatable, Sendable {
+    public var close: Bool
+    public var workingGlyph: Bool
+    public var warning: Bool
+
+    /// Hovered: the close button only. Otherwise working shows the tide glyph, needs-you the warning triangle, idle nothing.
+    public static func of(_ activity: TabActivity, hovered: Bool) -> TabSlotContent {
+        if hovered { return TabSlotContent(close: true, workingGlyph: false, warning: false) }
+        return TabSlotContent(close: false, workingGlyph: activity == .working, warning: activity == .needsYou)
+    }
+
+    /// A chat's tab from its mark: working (also background work) and waiting; everything else is quiet.
+    public static func activity(of mark: ChatMarkKind?) -> TabActivity {
+        switch mark {
+        case .working?: .working
+        case .waiting?: .needsYou
+        default: .idle
+        }
+    }
+}

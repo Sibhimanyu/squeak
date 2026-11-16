@@ -19,6 +19,26 @@ final class TerminalHost {
     /// Workspaces the respawn guard left without a shell, with the dead shell's exit status.
     private(set) var stopped: [String: Int32?] = [:]
     @ObservationIgnored private var sessions: [UUID: TerminalSession] = [:]
+    /// Tabs whose shell has a foreground process other than itself (a command running), polled once a second.
+    private(set) var busy: Set<UUID> = []
+    @ObservationIgnored private var busyPoll: Task<Void, Never>?
+
+    func isBusy(_ tab: UUID) -> Bool { busy.contains(tab) }
+
+    private func pollBusy() {
+        guard busyPoll == nil else { return }
+        busyPoll = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, !self.sessions.isEmpty else { self?.busyPoll = nil; return }
+                let now = Set(self.sessions.compactMap { id, s in
+                    let p = s.pair()
+                    return TerminalShell.closeDecision(shellPid: p.shellPid, foregroundGroup: p.foregroundGroup) == .confirm ? id : nil
+                })
+                if now != self.busy { self.busy = now }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
     /// Set by an action that should leave the keyboard in the terminal (⌘J opening, a new or chosen tab).
     @ObservationIgnored var focusPending = false
 
@@ -64,6 +84,7 @@ final class TerminalHost {
         let session = TerminalSession(tab: tab.id, folder: folder, host: self)
         sessions[tab.id] = session
         session.begin()
+        pollBusy()
     }
 
     /// Tabs whose shell is running a command, which an app update would end.
