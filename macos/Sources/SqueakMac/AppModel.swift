@@ -519,8 +519,13 @@ final class AppModel {
         case .catalogChanged:
             _ = publishIfChanged(self, \.hostSessions, await broker.sessions())
             // Chats with no seq to compare (Conductor, terminal): the host's word about a turn we started.
-            for s in hostSessions where s.source != .squeak && optimistic[s.key] != nil {
-                noteOptimistic(s.key) { $0.observe(status: s.state) }
+            for s in hostSessions where optimistic[s.key] != nil {
+                if s.source == .squeak {
+                    // The open chat's stream also tells; every other Squeak chat has only the catalog.
+                    noteOptimistic(s.key) { $0.observe(catalog: s.state, turnEndedAt: s.lastTurnEndedAt) }
+                } else {
+                    noteOptimistic(s.key) { $0.observe(status: s.state) }
+                }
             }
             startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()

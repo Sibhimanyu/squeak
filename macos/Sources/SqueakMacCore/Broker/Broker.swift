@@ -112,7 +112,7 @@ public actor Broker {
         cache: EncryptedCache? = nil,
         draftStore: DraftStore? = nil,
         foregroundInterval: Duration = .seconds(2),
-        backgroundInterval: Duration = .seconds(10),
+        backgroundInterval: Duration = .seconds(5),
         transcriptLimit: Int = 200,
         nudgeDebounce: Duration = .milliseconds(200),
         nudgeMinGap: Duration = .seconds(1)
@@ -240,7 +240,13 @@ public actor Broker {
 
     public func setFocused(_ key: SessionKey?) { focused = key }
 
-    public var currentInterval: Duration { mode == .foreground ? foregroundInterval : backgroundInterval }
+    /// A chat working or waiting on the person keeps the poll at the foreground pace even with every window closed:
+    /// a finish or a question must reach the notification within seconds, not after a slow idle tick.
+    public var currentInterval: Duration {
+        if mode == .foreground { return foregroundInterval }
+        let busy = catalog.contains { $0.state == .working || $0.state == .blocked }
+        return busy ? foregroundInterval : backgroundInterval
+    }
 
     // MARK: Polling
 

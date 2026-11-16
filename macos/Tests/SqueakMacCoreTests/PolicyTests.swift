@@ -84,6 +84,35 @@ struct NotificationTests {
         #expect(n[0].key.provider == "conductor")
     }
 
+    @Test func squeakChatFinishNotifies() {
+        let prev = [makeSession("a", provider: "claude-squeak", state: .working)]
+        let cur = [makeSession("a", provider: "claude-squeak", state: .finished)]
+        #expect(NotificationPolicy.detect(previous: prev, current: cur).map(\.kind) == [.finished])
+    }
+
+    @Test func squeakFinishWaitsForHelpersAndRowStaysWorking() {
+        var running = makeSession("a", provider: "claude-squeak", state: .finished)
+        running.backgroundCount = 1
+        let prev = [makeSession("a", provider: "claude-squeak", state: .working)]
+        #expect(NotificationPolicy.detect(previous: prev, current: [running]).isEmpty)
+        #expect(SessionGrouping.kind(of: running, now: Date()) == .working)
+        var done = running
+        done.backgroundCount = 0
+        #expect(NotificationPolicy.detect(previous: [running], current: [done]).map(\.kind) == [.finished])
+    }
+
+    @Test func squeakCatalogEndsOptimisticWorkWithoutAStream() {
+        let sent = Date(timeIntervalSince1970: 1_800_000_000)
+        var w = OptimisticWork()
+        w.begin(at: sent.addingTimeInterval(0), baselineSeq: 5)
+        // An older idle before the turn started does not end it.
+        w.observe(catalog: .finished, turnEndedAt: sent.addingTimeInterval(-60))
+        #expect(w.resolve(host: .finished, now: sent.addingTimeInterval(1)) == .working)
+        // The host ended a turn after the send: the row flips without the chat ever being streamed.
+        w.observe(catalog: .finished, turnEndedAt: sent.addingTimeInterval(20))
+        #expect(w.resolve(host: .finished, now: sent.addingTimeInterval(21)) == .finished)
+    }
+
     @Test func errorNotifiesAndUnchangedStatesDoNot() {
         let prev = [makeSession("a", state: .working), makeSession("b", state: .blocked)]
         let cur = [makeSession("a", state: .error), makeSession("b", state: .blocked)]

@@ -129,7 +129,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         var state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
         // Helpers keeping a chat "working" is the fleet's and the push's rule. On the Mac the turn is over: the chat is
         // ready (no Working line, no Stop, a normal send) and its running ducklings draw the still mark and the bar.
-        let ask = state == .finished ? d?.asks : nil
+        // A turn that ended on a question while a helper still runs is working, not waiting: the question becomes the
+        // person's (triangle, notification) once nothing is running, because the next catalog read then carries it.
+        let helpersRunning = max(s.ducklings?.running ?? 0, s.backgroundCount ?? 0) > 0
+        let ask = state == .finished && !helpersRunning ? d?.asks : nil
         let caps = Capabilities(
             discover: .supported, readTranscript: .supported, send: .supported, activity: .supported, approve: .supported,
             openInHost: .unsupported("This chat is Squeak's own"),
@@ -163,6 +166,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.largeChat = s.isLarge ? true : nil
         h.largeCompacting = s.isLarge ? s.largeCompacting : nil
         h.autoCompactAt = s.autoCompactAt
+        h.lastTurnEndedAt = s.lastTurnEndedAt
         h.hostDucklingsOnly = s.ducklingsOnly
         h.retryable = s.retryable && state == .error ? true : nil
         return h

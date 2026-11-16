@@ -64,6 +64,16 @@ public struct OptimisticWork: Equatable, Sendable {
         }
     }
 
+    /// A Squeak chat the Mac is not streaming (another chat is open): the catalog is the only word it gets. `working`
+    /// is recorded; a turn the host ended after our send (`lastTurnEndedAt` later than `sentAt`) ends the optimism,
+    /// whether or not the Mac ever saw `working`. A non-working state alone is not enough: it may predate the send.
+    public mutating func observe(catalog host: SessionState, turnEndedAt: Date?) {
+        guard let sentAt else { return }
+        if host == .working { sawWorking = true; return }
+        if let turnEndedAt, turnEndedAt > sentAt, host != .blocked { self = OptimisticWork(); return }
+        observe(status: host)
+    }
+
     /// A chat with no seq to compare (Conductor, terminal): the agent's reply to the send has landed and the host is not
     /// working, so the turn was a short one the Mac never saw `working` for.
     public mutating func observeReply(host: SessionState) {

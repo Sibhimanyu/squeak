@@ -478,8 +478,8 @@ struct MarksReplay {
         h.setStatus("c1", "idle", turnEnded: true)
         await s.broker.refresh()
         let done = await s.broker.sessions()
-        // A Squeak chat finishing is on the sidebar, not a banner.
-        #expect(NotificationPolicy.detect(previous: blocked, current: done).isEmpty)
+        // A Squeak chat finishing is a banner too (the owner is usually in another chat); the app suppresses it for the open one.
+        #expect(NotificationPolicy.detect(previous: blocked, current: done).map(\.kind) == [.finished])
         #expect(done.first.flatMap { ChatMark.of($0, unread: true) } == ChatMark(.unread))
         #expect(done.first.flatMap { ChatMark.of($0, unread: false) } == nil)
     }

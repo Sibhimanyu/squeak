@@ -68,6 +68,8 @@ public enum NotificationPolicy {
             e.id = NotificationEvent.eventId(key: e.key, kind: e.kind, at: at)
             return e
         }
+        // A finished turn with helpers still running is working: it announces when the helpers are done, not before.
+        func effective(_ s: HostSession) -> SessionState { s.state == .finished && SessionGrouping.runsDucklings(s) ? .working : s.state }
         let before = Dictionary(previous.map { ($0.key, $0) }, uniquingKeysWith: { _, b in b })
         var out: [NotificationEvent] = []
         for s in current {
@@ -78,9 +80,9 @@ public enum NotificationPolicy {
                 out.append(stamped(blocked(s)))
                 continue
             }
-            guard old.state != s.state else { continue }
-            switch s.state {
-            case .finished where s.key.provider == "conductor":
+            guard effective(old) != effective(s) else { continue }
+            switch effective(s) {
+            case .finished where s.key.provider == "conductor" || s.source == .squeak:
                 out.append(stamped(event(s, .finished, "finished")))
             case .error:
                 out.append(stamped(event(s, .error, "failed")))
