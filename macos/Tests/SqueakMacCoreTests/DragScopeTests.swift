@@ -12,8 +12,8 @@ import Foundation
 
     @Test func everyTabKindIsAcceptedByEveryStripAndOnlyThere() {
         for k in DragScope.tabKinds {
-            // A duckling has no centre: right and bottom strips only.
-            for t in Self.strips { #expect(DragScope.allows(k, on: t) == (k != .duckling || t != .centreStrip), "\(k) on \(t)") }
+            // Every tab kind, ducklings included, lands on any of the three strips.
+            for t in Self.strips { #expect(DragScope.allows(k, on: t) == true, "\(k) on \(t)") }
             #expect(!DragScope.allows(k, on: .pondList))
             #expect(!DragScope.allows(k, on: .fileTree))
         }

@@ -4,7 +4,7 @@ import SqueakMarkup
 import SwiftUI
 
 /// The slim bar above the composer: "N ducklings working" and a chip per duckling (title, model, elapsed, a loader or a
-/// check or a cross). A click opens the duckling in the side panel. Shown only while one runs or a recent one finished.
+/// check or a cross). A click opens the duckling as a tab in the centre strip, after its thread. Shown only while one runs or a recent one finished.
 struct DucklingsBar: View {
     let session: HostSession
     let set: DucklingSet
@@ -47,7 +47,7 @@ struct DucklingsBar: View {
 
     private func chip(_ d: Duckling, now: Date) -> some View {
         let ref = DucklingRef(session: session.key, taskId: d.id)
-        let open = DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .right] == ref
+        let open = DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .centre] == ref
         return Button { DockStore.shared.openDuckling(ref) } label: {
             HStack(spacing: 5) {
                 DucklingStatusMark(duckling: d)
@@ -78,13 +78,15 @@ struct DucklingStatusMark: View {
     }
 }
 
-/// One duckling, read-only, as the body of its tab in a side zone: its header, its steps (the chat's own rows, live
+/// One duckling, read-only, as the body of its tab: its header, its steps (the chat's own rows, live
 /// while it runs), its report once it has one, and what it was asked, folded. The host's route answers; a host without
 /// it gets one sentence. The tab's close (or middle click) ends it; another chat closes it too.
 struct DucklingPanel: View {
     let session: HostSession
     let chip: Duckling?
     let taskId: String
+    /// In the centre strip: laid out at the transcript's reading width, not edge to edge like a side zone.
+    var centred = false
     @Environment(AppModel.self) private var model
     @State private var shown: DucklingPanelModel?
     @State private var briefOpen = false
@@ -100,7 +102,9 @@ struct DucklingPanel: View {
                     if let message = p.message { Text(verbatim: message).font(Typo.body).foregroundStyle(Theme.muted) }
                     ForEach(p.parts, id: \.self) { part in partView(part, p) }
                 }
-                .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(centred ? Metrics.readingInset : Space.m)
+                .frame(maxWidth: centred ? Metrics.readingColumn + 2 * Metrics.readingInset : .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: centred ? .center : .leading)
             }
             // A running one follows its newest step; a finished one opens at the top. Scrolling up is left alone.
             .defaultScrollAnchor(p.isLive ? .bottom : .top)

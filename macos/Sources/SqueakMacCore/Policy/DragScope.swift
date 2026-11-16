@@ -39,14 +39,14 @@ public enum DragTarget: Hashable, Sendable {
 }
 
 public enum DragScope {
-    /// The tab kinds: threads, panels, terminals and files move between the three strips; a duckling only between the right and bottom ones.
+    /// The tab kinds: threads, panels, terminals, files and ducklings move between the three strips.
     public static let tabKinds: [DragKind] = [.thread, .panel, .terminal, .file, .duckling]
 
     public static func allows(_ kind: DragKind, on target: DragTarget) -> Bool {
         switch target {
-        case .centreStrip: return tabKinds.contains(kind) && kind != .duckling
+        case .centreStrip: return tabKinds.contains(kind)
         case .rightStrip, .bottomStrip: return tabKinds.contains(kind)
-        case .edgeStrip(let zone): return tabKinds.contains(kind) && !(kind == .duckling && zone == .centre)
+        case .edgeStrip(let zone): return tabKinds.contains(kind)
         case .pondList: return kind == .pond
         case .fileTree: return kind == .fileToken
         }

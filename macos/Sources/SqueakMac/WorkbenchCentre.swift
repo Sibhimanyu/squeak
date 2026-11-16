@@ -55,6 +55,9 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
+            } else if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
+                DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
+                    .id(ref.taskId)
             } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
                 TerminalPanelView(session: chat, shell: shell)
             } else if let chat, let panel = DockStore.shared.layout.centre.selected {
@@ -74,7 +77,10 @@ struct WorkbenchCentre: View {
                 .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
         }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
-        .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre) }
+        .onChange(of: model.selected) { _, key in
+            for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre)
+            if let d = DockStore.shared.ducklings.selected[.centre], d.session != key { DockStore.shared.deselectDucklings(.centre) }
+        }
         .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
@@ -253,9 +259,10 @@ private struct WorkbenchTabs: View {
     private var chats: [HostSession] { model.streamThreads(workspace).filter { !dock.threads.isDocked($0.key.stringValue) } }
 
     private enum StripItem: Identifiable {
-        case chat(HostSession), file(OpenFile)
+        case chat(HostSession), file(OpenFile), duckling(DucklingRef)
         var id: String {
             switch self {
+            case .duckling(let r): "duckling-\(r.session.stringValue)-\(r.taskId)"
             case .chat(let s): "chat-\(s.key.stringValue)"
             case .file(let f): "file-\(f.id.uuidString)"
             }
@@ -264,6 +271,12 @@ private struct WorkbenchTabs: View {
 
     /// Threads and files in the order they were opened (the saved strip); before the stream has one, threads then files.
     private var stripItems: [StripItem] {
+        CentreStripOrder.order(baseItems, chatKey: { if case .chat(let s) = $0 { s.key.stringValue } else { nil } },
+                               ducklings: dock.ducklings.ducklings(in: .centre))
+            .map { e in switch e { case .item(let i): i; case .duckling(let r): .duckling(r) } }
+    }
+
+    private var baseItems: [StripItem] {
         let open = files?.open.filter { !$0.isListing } ?? []
         guard model.streamTabs.hasStrip(workspace.id) else { return chats.map(StripItem.chat) + open.map(StripItem.file) }
         let byKey = Dictionary(chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { a, _ in a })
@@ -287,6 +300,7 @@ private struct WorkbenchTabs: View {
     private var tabCap: CGFloat {
         var titles = chats.map { model.workbenchTitle($0) }
         titles += (files?.open ?? []).filter { dock.files.zone(of: $0.path) == .centre }.map(\.name)
+        titles += dock.ducklings.ducklings(in: .centre).map { r in model.allSessions.first { $0.key == r.session }.flatMap { model.ducklings(for: $0)?.items.first { $0.id == r.taskId }?.title } ?? "Duckling" }
         titles += dock.layout.centre.panels.filter { $0 != .terminal }.map(\.title)
         titles += dockTerminalTabs(in: .centre, session: chats.first)?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? []
         return TabTitleMeasure.cap(titles: titles, available: stripWidth - 120)
@@ -299,11 +313,16 @@ private struct WorkbenchTabs: View {
                     ForEach(stripItems) { item in
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
+                        case .duckling(let ref):
+                            if let parent = model.allSessions.first(where: { $0.key == ref.session }) {
+                                DockDucklingTab(session: parent, ref: ref, zone: .centre, selected: dock.ducklings.selected[.centre] == ref,
+                                                height: Metrics.tabStrip, indicator: tabIndicator).transition(.opacity)
+                            }
                         case .file(let f):
                             if let files, dock.files.zone(of: f.path) == .centre {
-                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil,
+                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
                                             height: Metrics.tabStrip, indicator: tabIndicator) {
-                                    dock.deselectTerminals(.centre)
+                                    dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                                     dock.update { $0.selectChats() }
                                     files.activePath = f.path
                                 }
@@ -313,7 +332,7 @@ private struct WorkbenchTabs: View {
                     ForEach(dock.layout.centre.panels.filter { $0 != .terminal }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
-                            dock.deselectTerminals(.centre)
+                            dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                             dock.update { $0.select(p) }
                         }
                     }
@@ -357,6 +376,7 @@ private struct WorkbenchTabs: View {
         .task(id: model.allSessions.count) {
             model.pruneStreamTabs()
             dock.pruneThreads(keeping: Set(model.allSessions.map { $0.key.stringValue }))
+            dock.pruneDucklings(keeping: Set(model.allSessions.map(\.key)))
         }
         // File tabs are saved with the strip: brought back once per run, if the file is still there.
         .task(id: files?.root) {
@@ -403,6 +423,7 @@ private struct WorkbenchTabs: View {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
         let wasOpen = s.key == model.selected
+        for r in dock.ducklings.ducklings(in: .centre) where r.session == s.key { dock.closeDuckling(r) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
         let next = model.closeStreamTab(s.key, in: workspace.id)
         if shown.count == 1 {
@@ -428,10 +449,10 @@ private struct WorkbenchTabs: View {
 
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil
+        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
+        let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
             StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
                      showsClose: !chats.isEmpty, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),

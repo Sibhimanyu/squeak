@@ -309,11 +309,15 @@ public final class DockStore {
 
     private func deselectOthers(for ref: DucklingRef, in zone: DockZone) {
         files.deselect(zone); threads.deselect(zone); deselectTerminals(zone)
-        update { $0.setCollapsed(false, for: zone) }
+        if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
     }
 
-    /// Opens a duckling as a tab in `zone` (default: the right) and shows it; already open = selected where it is.
-    public func openDuckling(_ ref: DucklingRef, in zone: DockZone = .right) {
+    /// The centre's duckling tab stops being the shown one (a chat, file, panel or shell tab was picked).
+    public func deselectDucklings(_ zone: DockZone) { ducklings.deselect(zone) }
+
+    /// Opens a duckling as a tab in `zone` (default: the centre, after its parent thread) and shows it; already open =
+    /// selected where it is.
+    public func openDuckling(_ ref: DucklingRef, in zone: DockZone = .centre) {
         let showing = ducklings.zone(of: ref).map { shownItem(in: $0) } ?? shownItem(in: zone)
         let z = ducklings.open(ref, in: zone, showing: showing) ?? zone
         deselectOthers(for: ref, in: z)
@@ -334,7 +338,6 @@ public final class DockStore {
     }
 
     public func moveDuckling(_ ref: DucklingRef, to zone: DockZone, before: DucklingRef? = nil) {
-        if zone == .centre { closeDuckling(ref); return }
         ducklings.move(ref, to: zone, before: before)
         deselectOthers(for: ref, in: zone)
     }
@@ -343,6 +346,11 @@ public final class DockStore {
     public func pruneDucklings(keeping sessions: Set<SessionKey>) {
         let p = ducklings.pruned(keeping: sessions)
         if p != ducklings { ducklings = p }
+    }
+
+    /// A side strip shows only the open chat's ducklings; the centre keeps its own after their parent's tab.
+    public func pruneSideDucklings(keeping selected: SessionKey?) {
+        for z in [DockZone.right, .bottom] { for r in ducklings.ducklings(in: z) where r.session != selected { closeDuckling(r) } }
     }
 
     /// Changes the workspaces themselves (switch, save, reset, ...).

@@ -177,7 +177,7 @@ The pond *dashboard* (centre page) manages a pond; the **Pond tab** (`PondPanel.
 `SqueakMacCore/Ponds`) is a live glance at the pond of the thread on screen: people with what they work on (from
 `PondDetail` members/presence/threads, else this Mac's chats), Now (working/waiting threads, click opens), Recent
 (last six pond ripples), and Invite / Open dashboard. The **Thread tab** (`ThreadPanel.swift`, `ThreadGlance`) covers
-the open thread: who (pond thread participants and presence), running (ducklings, shells, queue), changed files (open
+the open thread (a duckling opens as a tab in the centre strip after its thread; drag it to a side strip if you like): who (pond thread participants and presence), running (ducklings, shells, queue), changed files (open
 in Code) and controls (mode, model, private/share). The Pond panel never docks in the centre: a drop there calls
 `DockStore.openPondDashboard`, and `DockLayout.normalized()` moves an old centre Pond to the right. Old saved layouts
 gain Thread before Pond on decode. Built and unit-tested only; not seen on screen (no window was opened).

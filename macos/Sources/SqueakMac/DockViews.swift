@@ -320,8 +320,13 @@ struct DockDucklingTab: View {
         let chip = model.ducklings(for: session)?.items.first { $0.id == ref.taskId }
         DockItemTab(item: .duckling(ref), title: chip?.title ?? "Duckling", zone: zone, selected: selected, height: height, indicator: indicator,
                     activity: chip?.status == .running ? .working : .idle,
-                    select: { DockStore.shared.selectDuckling(ref) },
-                    close: { DockStore.shared.closeDuckling(ref) }) {
+                    select: { DockStore.shared.selectDuckling(ref); if zone == .centre { model.select(ref.session) } },
+                    close: {
+                        let wasShown = DockStore.shared.ducklings.selected[zone] == ref
+                        DockStore.shared.closeDuckling(ref)
+                        // Closing the open one in the centre returns to the thread it came from.
+                        if zone == .centre, wasShown { model.select(ref.session) }
+                    }) {
             if let chip { DucklingStatusMark(duckling: chip) } else { Lucide(.circleCheck, size: 11, color: Theme.subtle) }
         }
     }
@@ -456,13 +461,18 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                 .environment(\.tabMaxWidth, cap)
                 .padding(.horizontal, Space.s)
             }
+            // The scroller takes only the room the strip has (never its content's width): tabs shrink to their floor,
+            // then it scrolls, so a tab is never pushed past the zone's edge.
+            .frame(minWidth: 0, maxWidth: .infinity)
             if trailingWidth == 0 || TabStripFit.showsAccessory(
                 strip: stripWidth, tabs: state.panels.filter { $0 != .terminal }.count + dock.threads.threads(in: zone).count + dock.ducklings.ducklings(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
                 leading: leadingWidth, accessory: trailingWidth) {
                 trailing()
             }
         }
+        .frame(maxWidth: .infinity)
         .frame(height: height)
+        .clipped()
         .background(GeometryReader { g in Color.clear.onAppear { stripWidth = g.size.width }.onChange(of: g.size.width) { _, w in stripWidth = w } })
         .dockDrop(zone, wash: false)
         .animation(Motion.standard, value: state.selected)
@@ -556,6 +566,7 @@ struct DockRightColumn: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
+        .clipped()
         .background(Theme.bg.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
