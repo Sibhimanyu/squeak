@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
 
 import { logger } from "../utils/logger.js";
+
+/** A pond thread the person starts without naming a mode begins in Skip approvals, like `NEW_THREAD_PERMISSION_MODE` in native/server.ts. */
+const NEW_THREAD_MODE = "bypassPermissions";
 import { CatalystStore } from "../cloud/catalyst-store.js";
 import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
@@ -89,7 +92,7 @@ export async function startInProject(
       cwd: existing.path,
       agent: spec.agent,
       model: spec.model,
-      permissionMode: spec.permissionMode ?? "default",
+      permissionMode: spec.permissionMode ?? NEW_THREAD_MODE,
       ...(spec.effort ? { effort: spec.effort } : {}),
       workspaceId: existing.id,
       text: spec.text,
@@ -113,7 +116,7 @@ export async function startInProject(
     cwd: ws ? ws.path : project.rootPath,
     agent: spec.agent,
     model: spec.model,
-    permissionMode: spec.permissionMode ?? "default",
+    permissionMode: spec.permissionMode ?? NEW_THREAD_MODE,
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(ws ? { workspaceId: ws.id } : {}),
     text: spec.text,
@@ -261,7 +264,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
         cwd: ws.path,
         agent: spec.agent,
         model: spec.model,
-        permissionMode: spec.permissionMode ?? "default",
+        permissionMode: spec.permissionMode ?? NEW_THREAD_MODE,
         ...(spec.effort ? { effort: spec.effort } : {}),
         workspaceId: ws.id,
         text: spec.text,

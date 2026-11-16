@@ -264,7 +264,9 @@ final class AppModel {
     func streamThreads(_ workspace: SidebarWorkspace) -> [HostSession] {
         let all = pondPageTree.projects.flatMap(\.workspaces).first { $0.id == workspace.id }?.chats ?? workspace.chats
         guard streamTabs.hasStrip(workspace.id) else { return workspace.chats }
-        let byKey = Dictionary((all + workspace.chats).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
+        // The open chat stands in while the list does not carry it yet (a new thread).
+        let standIn = selectedSession.map { [$0] } ?? []
+        let byKey = Dictionary((all + workspace.chats + standIn).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
         return streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil }
     }
 
@@ -281,6 +283,15 @@ final class AppModel {
         guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key),
               !streamTabs.tabs(place.workspace.id).contains(.thread(key.stringValue)) else { return }
         registerTab(key)
+    }
+
+    /// The strip showing `workspace` has the open chat's tab even when the catalog does not list the chat yet (a new
+    /// thread), and a closed-tab memory never hides the chat that is open.
+    func ensureTab(for key: SessionKey, in workspace: SidebarWorkspace) {
+        WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id)
+        let closed = WorkbenchPrefs.shared.closed
+        let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+        if streamTabs.ensureOpen(.thread(key.stringValue), in: workspace.id, seed: seed) { saveStreamTabs() }
     }
 
     private func registerTab(_ key: SessionKey) {

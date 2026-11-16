@@ -367,7 +367,9 @@ private struct WorkbenchTabs: View {
         }
         .modifier(CentreFileDockSync(files: files))
         .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
-        .task(id: model.selected) { if let key = model.selected { model.ensureTab(for: key) } }
+        .task(id: "\(model.selected?.stringValue ?? "") \(model.allSessions.count) \(workspace.id)") {
+            if let key = model.selected, model.selectedSession != nil { model.ensureTab(for: key, in: workspace) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             let box = note.object as? CloseTabAction.Box
             if let files, files.review.isOpen { files.closeReview(); box?.handled = true }

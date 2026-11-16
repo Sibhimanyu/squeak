@@ -52,6 +52,16 @@ public struct StreamTabs: Codable, Equatable, Sendable {
         strips[workspace] = strip
     }
 
+    /// The tab of the thread shown in the centre always exists: added (and selected) when the strip lacks it, even if
+    /// the list does not know the thread yet; a strip that has it only has its selection moved there. Returns whether
+    /// anything changed.
+    @discardableResult
+    public mutating func ensureOpen(_ tab: StreamTab, in workspace: String, seed: [StreamTab] = []) -> Bool {
+        if let strip = strips[workspace], strip.tabs.contains(tab), strip.selected == tab { return false }
+        open(tab, in: workspace, seed: seed)
+        return true
+    }
+
     /// Selects a tab that is open; false when it is not.
     @discardableResult
     public mutating func select(_ tab: StreamTab, in workspace: String) -> Bool {

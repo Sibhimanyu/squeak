@@ -593,7 +593,7 @@ public struct NativeNewSession: Sendable, Equatable {
     public var workspaceId: String?
 
     public init(
-        agent: String, model: String, permissionMode: String = "default", effort: String? = nil, cwd: String? = nil,
+        agent: String, model: String, permissionMode: String = "bypassPermissions", effort: String? = nil, cwd: String? = nil,
         projectId: String? = nil, newWorkspace: Bool = false, branch: String? = nil, text: String? = nil, split: WorkSplit? = nil,
         main: Bool = false, workspaceId: String? = nil
     ) {

@@ -115,4 +115,24 @@ final class StreamTabsFileTests: XCTestCase {
         t.open(.file("x.md"), in: "w")
         XCTAssertEqual(t.tabs("w"), [.file("x.md"), .thread("a")])
     }
+
+    func testASavedStripWithoutTheNewThreadGetsItsTabAfterTheSelectedOne() {
+        var t = StreamTabs()
+        t.open(.thread("old"), in: "w")
+        XCTAssertTrue(t.ensureOpen(.thread("new"), in: "w"))
+        XCTAssertEqual(t.tabs("w"), [.thread("old"), .thread("new")])
+        XCTAssertEqual(t.selected("w"), .thread("new"))
+        // Even before the list resolves it, the strip carries it; once the list has it, it is drawn.
+        XCTAssertEqual(t.strip("w", hasThread: { _ in true }, isOpen: { _ in false }, openFiles: []), [.thread("old"), .thread("new")])
+        XCTAssertFalse(t.ensureOpen(.thread("new"), in: "w"))
+    }
+
+    func testEnsureOpenSelectsAnExistingTabWithoutMovingIt() {
+        var t = StreamTabs()
+        for id in ["a", "b", "c"] { t.open(.thread(id), in: "w") }
+        t.select(.thread("c"), in: "w")
+        XCTAssertTrue(t.ensureOpen(.thread("a"), in: "w"))
+        XCTAssertEqual(t.tabs("w"), [.thread("a"), .thread("b"), .thread("c")])
+        XCTAssertEqual(t.selected("w"), .thread("a"))
+    }
 }
