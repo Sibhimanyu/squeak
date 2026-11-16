@@ -374,7 +374,8 @@ public struct NativeNewChatForm: Equatable, Sendable {
     public var agent: NewChatAgent = .claude
     public private(set) var modelId: String?
     public private(set) var effort: String?
-    public var mode: ComposerMode = .ask
+    /// A new thread begins in Skip approvals (the person can pick another; nothing remembers the last pick).
+    public var mode: ComposerMode = .skipApprovals
     public var text = ""
     public private(set) var models: [DaemonChatModel] = []
     /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.

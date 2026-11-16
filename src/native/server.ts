@@ -21,6 +21,13 @@ import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * The mode a thread the person starts begins in when the caller names none: "Skip approvals" (`bypassPermissions` for
+ * Claude; Codex maps it to approvals never + full access, `codexPolicyFor`). Only `POST /native/sessions` uses it:
+ * routines and the backlog carry their own mode and are never in this one, and a chat an agent starts takes at most its parent's.
+ */
+export const NEW_THREAD_PERMISSION_MODE = "bypassPermissions";
+
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
 /** A request slower than this is logged with its route, so a stall is visible after the fact. */
@@ -1092,7 +1099,7 @@ export class NativeServer {
       cwd,
       agent,
       model,
-      permissionMode: str(b.permissionMode) ?? "default",
+      permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
       effort: str(b.effort),
       workspaceId,
       ...(str(b.text) ? { text: str(b.text)! } : {}),

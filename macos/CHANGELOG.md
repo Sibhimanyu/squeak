@@ -3,6 +3,8 @@
 ## 2.27.10
 
 - The working glyph moves calmly and smoothly, with soft fades instead of blinks, keeps moving while Squeak isn't the front app, and is a little larger in the sidebar.
+- New threads start in Skip approvals.
+- A stream on the dashboard shows its working threads and the newest few, with Show more for the rest.
 
 ## 2.27.9
 

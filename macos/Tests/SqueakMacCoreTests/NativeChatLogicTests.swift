@@ -109,7 +109,7 @@ final class NativeChatLogicTests: XCTestCase {
         var r = f.request
         XCTAssertEqual(r?.model, "opus"); XCTAssertEqual(r?.effort, "high")
         XCTAssertEqual(r?.newWorkspace, true); XCTAssertEqual(r?.projectId, "p1"); XCTAssertEqual(r?.text, "do it")
-        XCTAssertEqual(r?.permissionMode, "default")
+        XCTAssertEqual(r?.permissionMode, "bypassPermissions")
         f.place = .projectFolder
         r = f.request
         XCTAssertEqual(r?.cwd, "/r"); XCTAssertEqual(r?.newWorkspace, false)
@@ -125,5 +125,10 @@ final class NativeChatLogicTests: XCTestCase {
         XCTAssertEqual(NativeTitles.fallback(title: nil, firstMessage: nil), "New chat")
         XCTAssertEqual(NativeTitles.fallback(title: " ", firstMessage: "Fix it\nmore"), "Fix it")
         XCTAssertEqual(NativeTitles.fallback(title: "T", firstMessage: "x"), "T")
+    }
+
+    func testNewThreadFormStartsInSkipApprovals() {
+        XCTAssertEqual(NativeNewChatForm().mode, .skipApprovals)
+        XCTAssertEqual(NativeModes.permissionMode(NativeNewChatForm().mode), "bypassPermissions")
     }
 }

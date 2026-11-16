@@ -169,6 +169,17 @@ describe("NativeServer", () => {
     expect((await call(h, "GET", "/native/search?q=")).json.results).toEqual([]);
   });
 
+  it("starts a person's new thread in Skip approvals when no mode is named, and keeps a named one", async () => {
+    const h = await start();
+    const base = { cwd: "/tmp", agent: "claude", model: "opus-5-1m" };
+    const plain = await call(h, "POST", "/native/sessions", base);
+    expect(plain.json.session.permissionMode).toBe("bypassPermissions");
+    const codex = await call(h, "POST", "/native/sessions", { ...base, agent: "codex", model: "gpt-5" });
+    expect(codex.json.session.permissionMode).toBe("bypassPermissions");
+    const asked = await call(h, "POST", "/native/sessions", { ...base, permissionMode: "plan" });
+    expect(asked.json.session.permissionMode).toBe("plan");
+  });
+
   it("creates a session with a first message, lists it, and reads messages after a cursor", async () => {
     const h = await start();
     const made = await call(h, "POST", "/native/sessions", {
