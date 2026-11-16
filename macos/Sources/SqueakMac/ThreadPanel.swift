@@ -79,7 +79,7 @@ struct ThreadPanel: View {
         if s.state == .blocked || s.isLoopingNow {
             section("Needs you") {
                 if native(s), let card = model.native.card {
-                    NativeNeedsYouCard(session: s, card: card, focusComposer: {})
+                    NativeNeedsYouCard(session: s, card: card, focusComposer: {}, compact: true)
                 } else if let display = model.askCardDisplay(for: s.key) {
                     AskCard(
                         ask: display.ask, framed: true, canSend: model.isConnected && display.phase == .live,

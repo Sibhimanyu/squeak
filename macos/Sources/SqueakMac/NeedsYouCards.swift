@@ -91,28 +91,77 @@ struct ApprovalCardView: View {
     /// A link beside the note, e.g. Open in Conductor.
     var link: (title: String, action: () -> Void)?
 
+    /// The Thread panel's version: one line and small buttons, never the body.
+    var compact = false
+
     var body: some View {
-        NeedsYouFrame(title: model.heading, kind: model.tool) {
-            if let command = model.command {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("$").font(Typo.code).foregroundStyle(Theme.subtle)
-                    Text(verbatim: command).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
+        if compact { compactRow } else { fullCard }
+    }
+
+    private var compactRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: ApprovalPresentation.compactLine(tool: model.tool)).font(Typo.label).foregroundStyle(Theme.ink)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            if let actions {
+                HStack(spacing: 6) {
+                    Button("Allow", action: actions.allowOnce).buttonStyle(PrimaryButtonStyle())
+                    Button("Deny", action: actions.deny).buttonStyle(SecondaryButtonStyle())
                 }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
+            } else if let unavailableNote {
+                Text(verbatim: unavailableNote).font(Typo.meta).foregroundStyle(Theme.muted)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @State private var expanded = false
+
+    /// The command or change: the first lines with a fade, the rest behind "Show all N lines" (scrolls inside its own box).
+    private func codeBlock(_ text: String, prompt: String?) -> some View {
+        let clip = ApprovalPresentation.clip(text)
+        return VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if expanded && clip.clipped {
+                    ScrollView { codeText(text, prompt: prompt) }.frame(maxHeight: 220)
+                } else {
+                    codeText(clip.shown, prompt: prompt)
+                        .mask(clip.clipped ? AnyView(LinearGradient(stops: [.init(color: .black, location: 0.72), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)) : AnyView(Color.black))
+                }
+            }
+            .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
+            if clip.clipped {
+                Button { withAnimation(Motion.emphasis) { expanded.toggle() } } label: {
+                    Text(verbatim: ApprovalPresentation.disclosureTitle(total: clip.total, expanded: expanded)).font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func codeText(_ text: String, prompt: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let prompt { Text(verbatim: prompt).font(Typo.code).foregroundStyle(Theme.subtle) }
+            Text(verbatim: text).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private var fullCard: some View {
+        NeedsYouFrame(title: model.heading, kind: model.tool) {
+            if let reason = model.reason {
+                Text(verbatim: "\(agent): “\(reason)”").font(Typo.body).foregroundStyle(Theme.muted)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            }
+            if let command = model.command { codeBlock(command, prompt: "$") }
             if let target = model.target {
                 Text(verbatim: target).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2).truncationMode(.middle)
                     .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
             }
-            if let reason = model.reason {
-                Text(verbatim: "\(agent): “\(reason)”").font(Typo.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if let preview = model.preview { codeBlock(preview, prompt: nil) }
             if let actions {
                 HStack(spacing: 8) {
                     Button(action: actions.allowOnce) { label("Allow once", CardKeycaps.allowOnce) }

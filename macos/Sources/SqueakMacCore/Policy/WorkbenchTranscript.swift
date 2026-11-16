@@ -458,9 +458,11 @@ public struct ApprovalCardModel: Equatable, Sendable {
     public var target: String?
     public var reason: String?
     public var age: String?
+    /// A change the tool would make (an Edit's `-`/`+` lines, a Write's content), clipped like the command.
+    public var preview: String?
 
-    public init(tool: String? = nil, heading: String, command: String? = nil, target: String? = nil, reason: String? = nil, age: String? = nil) {
-        self.tool = tool; self.heading = heading; self.command = command; self.target = target; self.reason = reason; self.age = age
+    public init(tool: String? = nil, heading: String, command: String? = nil, target: String? = nil, reason: String? = nil, age: String? = nil, preview: String? = nil) {
+        self.tool = tool; self.heading = heading; self.command = command; self.target = target; self.reason = reason; self.age = age; self.preview = preview
     }
 }
 

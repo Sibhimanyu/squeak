@@ -8,6 +8,8 @@ struct NativeNeedsYouCard: View {
     let card: NativeCard
     /// Puts the cursor in the composer (an "Other" answer is typed there).
     var focusComposer: () -> Void
+    /// The Thread panel's one-line form of an approval.
+    var compact = false
     @Environment(AppModel.self) private var model
 
     private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
@@ -31,7 +33,7 @@ struct NativeNeedsYouCard: View {
                             allowSession: { model.nativeAllowForSession(session) },
                             allowEdits: NativeCards.isEditTool(m.tool ?? "") && !model.native.editsForChatUnsupported
                                 ? { model.nativeAllowEditsForChat(session) } : nil),
-                        unavailableNote: "Answering…", link: nil)
+                        unavailableNote: "Answering…", link: nil, compact: compact)
                     .cardKeys(.approval, composerHasText: composerHasText, busy: model.native.busy) { action in
                         switch action {
                         case .allowOnce: model.nativeAllow(session)
