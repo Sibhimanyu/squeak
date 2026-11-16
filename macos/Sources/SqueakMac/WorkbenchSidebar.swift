@@ -392,6 +392,7 @@ struct WorkbenchSidebar: View {
             let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(key: key) != nil ? 1 : 0)
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
+                unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
@@ -742,7 +743,7 @@ private struct FoldRow: View {
                 } else {
                     StreamStateMark(state: streamState, slotWidth: 20)
                 }
-                Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
+                Text(verbatim: title).font(.system(size: 14, weight: unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     .truncationMode(.tail)
                 // An open pond shows its chats, each with its own mark: the rollup would only repeat them.

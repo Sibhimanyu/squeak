@@ -90,19 +90,31 @@ public enum WorkspaceNavigation {
         return list[((i + delta) % list.count + list.count) % list.count]
     }
 
-    /// The chat to jump to for "next chat needing attention": the next one waiting on the person after `current` in
-    /// sidebar order (wrapping), else the next finished and unread one. Never `current` itself.
+    /// Every chat other than `current` that needs the person, in the order the pill walks them: waiting on a reply first,
+    /// then finished and unread, each newest first (ties by sidebar order). Empty once every reply has been seen.
+    public static func attentionTargets(
+        excluding current: SessionKey?, in tree: SidebarTree, pins: Set<String> = [], mark: (HostSession) -> ChatMark?
+    ) -> [(chat: HostSession, kind: ChatMarkKind)] {
+        let chats = flat(tree, pins: pins).flatMap(\.chats).filter { !sameChat($0.key, current) }
+        var out: [(chat: HostSession, kind: ChatMarkKind)] = []
+        for kind in [ChatMarkKind.waiting, .unread] {
+            var hits: [(offset: Int, chat: HostSession)] = []
+            for (i, c) in chats.enumerated() where mark(c)?.kind == kind { hits.append((i, c)) }
+            hits.sort { (x: (offset: Int, chat: HostSession), y: (offset: Int, chat: HostSession)) -> Bool in
+                let tx = x.chat.lastActivityAt ?? .distantPast, ty = y.chat.lastActivityAt ?? .distantPast
+                return tx == ty ? x.offset < y.offset : tx > ty
+            }
+            for h in hits { out.append((h.chat, kind)) }
+        }
+        return out
+    }
+
+    /// The chat to jump to for "next chat needing attention": the newest one waiting on the person, else the newest
+    /// finished and unread one. Never `current` itself.
     public static func nextAttention(
         after current: SessionKey?, in tree: SidebarTree, pins: Set<String> = [], mark: (HostSession) -> ChatMark?
     ) -> SessionKey? {
-        let chats = flat(tree, pins: pins).flatMap(\.chats)
-        guard !chats.isEmpty else { return nil }
-        let start = current.flatMap { c in chats.firstIndex { sameChat($0.key, c) } }.map { $0 + 1 } ?? 0
-        let rotated = Array(chats[start...] + chats[..<start]).filter { !sameChat($0.key, current) }
-        for kind in [ChatMarkKind.waiting, .unread] {
-            if let hit = rotated.first(where: { mark($0)?.kind == kind }) { return hit.key }
-        }
-        return nil
+        attentionTargets(excluding: current, in: tree, pins: pins, mark: mark).first?.chat.key
     }
 
     /// The chat on screen is never "the next one": compared by the host's own id, so a chat whose key was built from a

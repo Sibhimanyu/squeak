@@ -224,6 +224,9 @@ final class AppModel {
     private(set) var unread: UnreadTracker
     /// Which finished chats this Mac has opened (DESIGN.md §3.3: a chat is unread from a finished turn until opened).
     /// Local only; demo and capture runs neither read nor write the real record.
+    /// The open thread has been at its bottom long enough to count as seen (see `noteBottom`).
+    private(set) var viewingBottom = false { didSet { if viewingBottom != oldValue { inputsChanged() } } }
+    @ObservationIgnored private var dwellTask: Task<Void, Never>?
     private(set) var seenLog: ChatSeenLog { didSet { if seenLog != oldValue { inputsChanged() } } }
     /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
     private(set) var menuReplyPreviews: [SessionKey: String] = [:]
@@ -693,8 +696,37 @@ final class AppModel {
     }
 
     func isUnread(_ s: HostSession) -> Bool {
-        if s.key == selected, conversationOnScreen { return false }
+        if s.key == selected, viewingSelected { return false }
         return seenLog.isUnread(s)
+    }
+
+    /// The open thread is being looked at: its window is on screen and key, and it has sat at (or within a screen of)
+    /// the bottom for `ReadGate.dwell`. Only then is its reply read (`ReadGate`).
+    private var viewingSelected: Bool {
+        if captureMode { return true }
+        return viewingBottom && conversationOnScreen && (conversationWindow?.isKeyWindow ?? false)
+    }
+
+    /// The thread view says whether the newest end is in view. Arriving starts the dwell; leaving ends it at once.
+    func noteBottom(_ key: SessionKey, atBottom: Bool) {
+        guard key == selected else { return }
+        dwellTask?.cancel()
+        guard atBottom else { if viewingBottom { viewingBottom = false }; return }
+        guard !viewingBottom else { return }
+        dwellTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(ReadGate.dwell))
+            guard !Task.isCancelled, let self, self.selected == key else { return }
+            self.viewingBottom = true
+            self.markOpenChatSeen()
+        }
+    }
+
+    /// Sending in a thread reads it: the person has plainly seen what they are answering.
+    private func readOnSend(_ key: SessionKey) {
+        guard !captureMode, !demoMode, let s = session(key) else { return }
+        let before = seenLog
+        seenLog.markOpened(s)
+        if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
     }
 
     /// The person's "mark as read / unread" (R on a sidebar row): the chat's finished turn counts as opened, or not yet.
@@ -706,7 +738,7 @@ final class AppModel {
 
     /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
     private func markOpenChatSeen() {
-        guard !captureMode, !demoMode, let key = selected, conversationOnScreen, let s = session(key) else { return }
+        guard !captureMode, !demoMode, let key = selected, viewingSelected, let s = session(key) else { return }
         let before = seenLog
         seenLog.markOpened(s)
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
@@ -763,7 +795,8 @@ final class AppModel {
     }
 
     func recomputeVisibility() {
-        inputsChanged()  // what counts as "on screen" moves with the windows (marks read it)
+        inputsChanged()
+        markOpenChatSeen()  // a thread already dwelt on at the bottom reads when its window regains focus  // what counts as "on screen" moves with the windows (marks read it)
         let visible = captureMode || NSApp.windows.contains { w in
             w.isVisible && w.canBecomeKey && !w.isMiniaturized && w.occlusionState.contains(.visible)
         }
@@ -774,6 +807,7 @@ final class AppModel {
         Task { await broker.setMode(visible ? .foreground : .background) }
         if visible { markSelectedDisplayed() }
     }
+
 
     /// The source answered on the last poll, so a transcript read just now is current.
     private var transcriptIsLive: Bool {
@@ -1035,6 +1069,8 @@ final class AppModel {
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
+        dwellTask?.cancel()
+        viewingBottom = false
         markOpenChatSeen()
         selectedLoadedAt = nil
         transcriptReadKey = nil
@@ -1587,6 +1623,7 @@ final class AppModel {
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
+        readOnSend(key)
         let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil

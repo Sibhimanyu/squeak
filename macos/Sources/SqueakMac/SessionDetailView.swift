@@ -333,6 +333,7 @@ struct SessionDetail: View {
                     if atBottom { return }
                     if TranscriptPin.followsEnd(atBottom: false, lastIsUserMessage: user) { jumpToken += 1 } else { newBelow = TranscriptPin.marksNewBelow(atBottom: false, lastIsUserMessage: user) }
                 }
+                .onChange(of: session.key, initial: true) { _, k in model.noteBottom(k, atBottom: atBottom) }
                 .onChange(of: atBottom) { _, now in
                     guard now else { return }
                     newBelow = false
@@ -373,6 +374,7 @@ struct SessionDetail: View {
 
     private func followChanged(_ following: Bool) {
         atBottom = following
+        model.noteBottom(session.key, atBottom: following)
         if following { reachedBottom = true }
     }
 

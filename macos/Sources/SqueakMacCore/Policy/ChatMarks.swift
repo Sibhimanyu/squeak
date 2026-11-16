@@ -144,3 +144,18 @@ public struct ChatSeenLog: Codable, Sendable, Equatable {
         if seen.count > Self.capacity, let oldest = seen.min(by: { $0.value < $1.value })?.key { seen[oldest] = nil }
     }
 }
+
+/// When a chat's reply counts as seen, like a read receipt: the conversation window is on screen and key, and the
+/// thread has been at (or within a screen of) its bottom for `dwell`. Sending in the thread also reads it.
+public enum ReadGate {
+    public static let dwell: TimeInterval = 1.0
+
+    /// `bottomSince`: when the thread last arrived at the bottom (nil while scrolled away).
+    public static func isViewing(windowOnScreen: Bool, windowKey: Bool, bottomSince: Date?, now: Date) -> Bool {
+        guard windowOnScreen, windowKey, let bottomSince else { return false }
+        return now.timeIntervalSince(bottomSince) >= dwell
+    }
+
+    /// A stream is unread when any of its threads is; a pond when any of its streams is.
+    public static func anyUnread(_ chats: [HostSession], isUnread: (HostSession) -> Bool) -> Bool { chats.contains(where: isUnread) }
+}
