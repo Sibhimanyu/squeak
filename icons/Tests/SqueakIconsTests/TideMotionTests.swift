@@ -122,6 +122,21 @@ final class TideMotionTests: XCTestCase {
         XCTAssertGreaterThan(sets.count, 10)
     }
 
+    /// The calm mark is one fixed frame: deterministic, lit, and exactly the working glyph's size on every grid.
+    func testCalmFrameIsDeterministicAndSameSizeAsWorking() {
+        let named: [(String, TideGlyph.Grid)] = [("micro", .micro), ("mini", .mini), ("medium", .medium), ("compact", .compact), ("mark", .mark), ("stream", .stream), ("large", .large)]
+        for (name, grid) in named {
+            let a = (0..<grid.rows).map { r in (0..<grid.cols).map { c in TideMotion.calmLevel(col: c, row: r, cols: grid.cols, rows: grid.rows) } }
+            let b = (0..<grid.rows).map { r in (0..<grid.cols).map { c in TideMotion.calmLevel(col: c, row: r, cols: grid.cols, rows: grid.rows) } }
+            XCTAssertEqual(a, b, name)
+            XCTAssertGreaterThan(a.flatMap { $0 }.reduce(0, +), 0, name)
+            // The working glyph draws on this grid's `size`; the calm one is built from the same grid, so no jump.
+            for row in a { XCTAssertEqual(row, row.reversed(), name) }
+            XCTAssertEqual(grid.size.width, CGFloat(grid.cols) * TideGlyph.pitch - TideGlyph.gap, name)
+            XCTAssertEqual(grid.size.height, CGFloat(grid.rows) * TideGlyph.pitch - TideGlyph.gap, name)
+        }
+    }
+
     func testStillFrameIsBalanced() {
         for g in grids {
             var l = 0.0, r = 0.0

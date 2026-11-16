@@ -3,7 +3,7 @@ import SqueakMacCore
 import SwiftUI
 
 /// A stream's state as one mark (DESIGN.md §8.1): working is the tide glyph in `working`, waiting an amber dot (never
-/// a count), failed the circle-x in `negative`, unread a `done` dot, idle nothing. The slot keeps its size in every
+/// a count), failed the circle-x in `negative`, idle and unread a still frame of the tide glyph in `subtle`. The slot keeps its size in every
 /// state, so a row never moves. The state comes from the daemon's data (`StreamGlyphState`); this only draws it.
 struct StreamStateMark: View {
     let state: StreamGlyphState
@@ -18,8 +18,11 @@ struct StreamStateMark: View {
             case .working: WorkingGlyph(slot: slotWidth, alignment: .center, grid: slotWidth >= 20 ? .compact : .mark)
             case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
-            case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)
-            case .idle: Color.clear
+            case .unread, .idle:
+                // Calm water: one frozen frame on the working glyph's grid and frame, so idle to working only starts
+                // the motion and changes colour (unread is the title's weight, not a mark).
+                TideGlyph.calm(color: Theme.subtle, grid: slotWidth >= 20 ? .compact : .mark)
+                    .frame(width: slotWidth, height: 12, alignment: .center)
             }
         }
         .frame(width: slotWidth, height: 16)

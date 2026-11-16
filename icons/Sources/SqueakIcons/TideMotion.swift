@@ -90,6 +90,8 @@ public enum TideMotion {
 
     /// The time a still glyph samples.
     public static let stillTime = 3.7
+    /// The seed of the calm (idle) frame: fixed, so every idle mark is the same still water.
+    public static let calmSeed: UInt64 = 0
 
     // MARK: noise
 
@@ -288,5 +290,20 @@ public enum TideMotion {
     /// The still glyph's frame: the left half at `stillTime`, mirrored, so it is exactly symmetric left/right.
     public static func stillLevel(col: Int, row: Int, cols: Int, rows: Int, seed: UInt64 = 0) -> Int {
         level(col: min(col, cols - 1 - col), row: row, cols: cols, rows: rows, t: stillTime, seed: seed)
+    }
+
+    /// The calm (idle) frame: a low, even band of still water, symmetric and centred, on any grid. The band sits just
+    /// below the middle row, full in the middle and dimmer toward the ends, with a faint swell under it and a faint
+    /// crest above on grids of 5 rows or more. Pure: no time, no seed, so every idle mark is identical.
+    public static func calmLevel(col: Int, row: Int, cols: Int, rows: Int) -> Int {
+        guard cols > 1, rows > 0 else { return 0 }
+        let e = abs(Double(col) - Double(cols - 1) / 2) / (Double(cols - 1) / 2)  // 0 centre ... 1 end
+        let top = rows / 2
+        switch row - top {
+        case 0: return e < 0.6 ? 3 : 2
+        case 1: return e < 0.5 ? 2 : 1
+        case -1: return rows >= 5 && e < 0.3 ? 1 : 0
+        default: return 0
+        }
     }
 }
