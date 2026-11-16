@@ -58,10 +58,8 @@ const DEVICE_ROUTES: Array<[string, string, Record<string, string>]> = [
   ["PUT", "/doc?path=channels/a/state/x", { "x-squeak-relay": "k" }],
   ["DELETE", "/doc?path=channels/a/state/x", { "x-squeak-relay": "k" }],
   ["GET", "/list?prefix=channels/a/state", { "x-squeak-relay": "k" }],
-  ["POST", "/token", { "x-squeak-mac-key": "k" }],
   ["POST", "/pond-token", { "x-squeak-relay": "k" }],
   ["POST", "/pond-revoke", { "x-squeak-relay": "k" }],
-  ["POST", "/pond-stream", { "x-squeak-pond-token": "k" }],
   ["POST", "/account/link", { "x-squeak-mac-key": "k" }],
   ["POST", "/account/unlink", { "x-squeak-mac-key": "k" }],
   ["POST", "/account/macs/cliq-token", { "x-squeak-mac-key": "k" }],
@@ -144,5 +142,78 @@ describe("AppSail serves device traffic only", () => {
   it("answers /health without a key", async () => {
     const { base } = await boot();
     expect((await fetch(`${base}/health`)).status).toBe(200);
+  });
+});
+
+describe("live-update tokens on AppSail", () => {
+  async function bootWith(fetchImpl: any) {
+    const reached: string[] = [];
+    const server = createServer({
+      handle: async (req: any, res: any) => {
+        reached.push(`${req.method} ${req.url}`);
+        res.writeHead(204);
+        res.end();
+      },
+      log: () => {},
+      noCatalystUsers: true,
+      accountUrl: ACCOUNT,
+      fetchImpl,
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    servers.push(server);
+    return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, reached };
+  }
+
+  it("passes /token and /pond-stream to the function with the caller's own key, and nothing else", async () => {
+    const seen: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+    const fake = async (url: string, init: any) => {
+      seen.push({ url, headers: init.headers, body: init.body ? Buffer.from(init.body).toString() : "" });
+      return new Response('{"url":"wss://x","key":"k","wssId":"w"}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const { base, reached } = await bootWith(fake);
+    const r = await fetch(`${base}/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-squeak-mac-key": "mk", cookie: "zc=1", "x-zc-user": "u" },
+      body: '{"name":"sq1","channel":"c1"}',
+    });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ url: "wss://x", key: "k", wssId: "w" });
+    await fetch(`${base}/server/squeak_relay/pond-stream`, {
+      method: "POST",
+      headers: { "x-squeak-pond-token": "pt" },
+      body: "{}",
+    });
+    expect(seen.map((s) => s.url)).toEqual([`${ACCOUNT}/token`, `${ACCOUNT}/pond-stream`]);
+    expect(seen[0]!.headers).toEqual({ "content-type": "application/json", "x-squeak-mac-key": "mk" });
+    expect(seen[0]!.body).toBe('{"name":"sq1","channel":"c1"}');
+    expect(seen[1]!.headers["x-squeak-pond-token"]).toBe("pt");
+    expect(Object.keys(seen[1]!.headers).sort()).toEqual(["content-type", "x-squeak-pond-token"]);
+    // every other route is served here, never forwarded
+    await fetch(`${base}/doc?path=channels/c1/state/alive`, { headers: { "x-squeak-mac-key": "mk" } });
+    expect(seen).toHaveLength(2);
+    expect(reached).toEqual(["GET /doc?path=channels/c1/state/alive"]);
+  });
+
+  it("passes the function's refusal through, and answers 502 when the function cannot be reached", async () => {
+    const refusing = await bootWith(async () => new Response("", { status: 401 }));
+    expect((await fetch(`${refusing.base}/token`, { method: "POST", body: "{}" })).status).toBe(401);
+    const down = await bootWith(async () => {
+      throw new Error("offline");
+    });
+    expect((await fetch(`${down.base}/token`, { method: "POST", body: "{}" })).status).toBe(502);
+  });
+
+  it("refuses a body too large for a token request", async () => {
+    let called = false;
+    const { base } = await bootWith(async () => {
+      called = true;
+      return new Response("{}");
+    });
+    const r = await fetch(`${base}/token`, { method: "POST", body: "x".repeat(5000) });
+    expect(r.status).toBe(413);
+    expect(called).toBe(false);
   });
 });

@@ -4,12 +4,73 @@
 // headers, which AppSail's gateway sends too); tests pass `createRelay(fakes)` instead. No relay rule lives here.
 const http = require("node:http");
 
+/**
+ * Live-update tokens. A Custom Logic Data Streams channel issues token pairs only to its own access-control function
+ * (squeak_relay), so AppSail cannot mint them itself (verified live: 500). These two routes are passed through to the
+ * function with the caller's own credential header, unchanged; every other route stays here. Only a (re)connect pays it.
+ */
+const TOKEN_ROUTES = new Set(["/token", "/pond-stream"]);
+const FORWARD_HEADERS = [
+  "content-type",
+  "x-squeak-relay",
+  "x-squeak-mac-key",
+  "x-squeak-pond-token",
+  "x-squeak-join-attest",
+];
+const TOKEN_BODY_MAX = 4096;
+
+function routeOf(req) {
+  return (new URL(req.url || "/", "http://relay").pathname.replace(PREFIX, "") || "/").replace(/\/+$/, "") || "/";
+}
+
+async function forwardToken(req, res, accountUrl, fetchImpl) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > TOKEN_BODY_MAX) {
+      res.writeHead(413, { "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+    chunks.push(c);
+  }
+  const headers = {};
+  for (const h of FORWARD_HEADERS) if (typeof req.headers[h] === "string") headers[h] = req.headers[h];
+  const r = await fetchImpl(`${accountUrl}${routeOf(req)}`, {
+    method: req.method,
+    headers,
+    body: req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(chunks),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const body = Buffer.from(await r.arrayBuffer());
+  res.writeHead(r.status, {
+    "Content-Type": r.headers.get("content-type") || "application/json",
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
 /** A server whose every request goes to `handle(req, res)`; /health is answered here so the platform probe never needs a key. */
-function createServer({ handle, log = (s) => console.error(s), noCatalystUsers = false, accountUrl }) {
+function createServer({
+  handle,
+  log = (s) => console.error(s),
+  noCatalystUsers = false,
+  accountUrl,
+  fetchImpl = fetch,
+}) {
   return http.createServer((req, res) => {
     if (req.method === "GET" && (req.url === "/health" || req.url === "/_health")) {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end('{"status":"ok"}');
+      return;
+    }
+    if (accountUrl && TOKEN_ROUTES.has(routeOf(req))) {
+      forwardToken(req, res, accountUrl, fetchImpl).catch((e) => {
+        log(`relay: token pass-through failed ${(e && e.message) || e}`);
+        if (!res.headersSent) res.writeHead(502, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end('{"error":"token"}');
+      });
       return;
     }
     if (noCatalystUsers && needsCatalystUser(req)) {
@@ -49,8 +110,7 @@ const COOKIE_ONLY = new Set([
   "/account/handoff",
 ]);
 function needsCatalystUser(req) {
-  const route =
-    (new URL(req.url || "/", "http://relay").pathname.replace(PREFIX, "") || "/").replace(/\/+$/, "") || "/";
+  const route = routeOf(req);
   const h = req.headers;
   const token = h["x-squeak-account"] !== undefined;
   const key = h["x-squeak-relay"] !== undefined || h["x-squeak-mac-key"] !== undefined;
