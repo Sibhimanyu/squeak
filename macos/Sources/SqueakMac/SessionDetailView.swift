@@ -446,6 +446,7 @@ struct SessionDetail: View {
         let attached = PictureLayout.attachedPaths(inTexts: timeline.turns.map(\.prompt))
         NativeTurnsContent(
             feed: feed, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
+            renderKey: "\(needsYouMessageID ?? "-")|\(model.askCardDisplay(for: session.key) == nil)|\(sendBlock == nil && model.isReachable(session))",
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
             stream: live ? model.native.stream : nil,
             message: { m in rowView(.message(m, muted: false), footers: footers) },

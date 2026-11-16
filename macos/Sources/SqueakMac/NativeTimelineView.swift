@@ -33,6 +33,9 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
     /// Turns at or past this index arrived after the chat loaded: they fade in (only while the reader follows the end).
     var fadeFrom: Int?
     var followsEnd: Bool
+    /// What the message rows draw that is not in the turn (which message holds the answer buttons, whether they work):
+    /// the turn views skip their body on equal turns, so a change here must reach them through equality.
+    var renderKey = ""
     var filesLine: (TimelineTurn) -> String?
     /// The text being written: drawn as the running turn's last row, the place its finished message takes.
     var stream: StreamingTextBuffer?
@@ -42,7 +45,7 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
 
     var body: some View {
         ForEach(Array(feed.turns.enumerated()), id: \.element.id) { index, turn in
-            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn),
+            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn), renderKey: renderKey,
                            waitingSteers: feed.waitingSteers.isEmpty ? [] : feed.waitingSteers.filter { id in turn.steps.contains { $0.id == id } },
                            stream: turn.id == feed.streamingTurn ? stream : nil,
                            message: message, queuedActions: queuedActions)
@@ -59,7 +62,7 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
 /// being written updates on its own (`StreamingRow` reads the buffer), without evaluating this.
 private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
     nonisolated static func == (a: NativeTurnView<Message, Queued>, b: NativeTurnView<Message, Queued>) -> Bool {
-        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details && a.waitingSteers == b.waitingSteers
+        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.renderKey == b.renderKey && a.details == b.details && a.waitingSteers == b.waitingSteers
             && (a.stream == nil) == (b.stream == nil)
     }
 
@@ -67,6 +70,7 @@ private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
     let details: [String: ToolDetail]
     let me: String?
     let filesLine: String?
+    let renderKey: String
     let waitingSteers: Set<String>
     let stream: StreamingTextBuffer?
     @ViewBuilder let message: (ChatMessage) -> Message
