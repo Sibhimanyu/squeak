@@ -148,8 +148,8 @@ describe("auto-compaction in the host", () => {
     return { ...ctx, s };
   }
 
-  it("compacts an idle chat past 200k by default, with the image-dropping instruction", async () => {
-    const { runners } = await big(660_000);
+  it("compacts an idle chat past 90% of a 1M window by default, with the image-dropping instruction", async () => {
+    const { runners } = await big(950_000);
     expect(runners[0]!.sent.at(-1)).toMatch(/^\/compact .*screenshots/);
   });
 
@@ -159,24 +159,24 @@ describe("auto-compaction in the host", () => {
   });
 
   it("the very large chat carries a large flag for the Mac's notice", async () => {
-    const { host, s, store } = await big(660_000);
+    const { host, s, store } = await big(950_000);
     const row = host.list().find((x) => x.id === s.id)!;
     expect(row.large).toMatchObject({ reason: "context", compacting: true });
-    expect(row.autoCompactAt).toBe(200_000);
+    expect(row.autoCompactAt).toBe(900_000);
     void store;
   });
 
-  it("132k on a 1M window is not large, however big its transcript; 210k is", async () => {
-    const small = await big(132_000);
+  it("210k on a 1M window is not large, however big its transcript; 950k is", async () => {
+    const small = await big(210_000);
     const row = small.host.list().find((x) => x.id === small.s.id)!;
     expect(row.large).toBeUndefined();
-    const over = await big(210_000);
+    const over = await big(950_000);
     expect(over.host.list().find((x) => x.id === over.s.id)!.large).toMatchObject({ reason: "context" });
   });
 });
 
 describe("project setting", () => {
-  it("autoCompactTokens defaults to null (200k), accepts 0 (off) and a value, rejects junk", () => {
+  it("autoCompactTokens defaults to null (90% of the window), accepts 0 (off) and a value, rejects junk", () => {
     const store = new NativeStore(":memory:");
     const p = store.createProject({ name: "p", rootPath: "/w", defaultBranch: "main" });
     const cur = store.getProjectSettings(p.id);
@@ -187,6 +187,12 @@ describe("project setting", () => {
     expect(() => patchSettings(cur, { autoCompactTokens: 5 })).toThrow();
     store.saveProjectSettings(patchSettings(cur, { autoCompactTokens: 300_000 }));
     expect(store.getProjectSettings(p.id).autoCompactTokens).toBe(300_000);
+  });
+
+  it("a 200k model's host threshold is 180k and the CLI keeps its own default", async () => {
+    const ctx = setup();
+    const s = await ctx.host.create({ ...spec, model: "claude-opus-5", text: "go" });
+    expect(ctx.host.compactThreshold(ctx.store.getSession(s.id)!)).toBe(180_000);
   });
 
   it("off in the project means the host never compacts that chat, however large", async () => {

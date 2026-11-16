@@ -87,12 +87,14 @@ describe("size threshold", () => {
 });
 
 describe("auto-compaction threshold", () => {
-  it("defaults to 200k, honours a setting (min 100k) and 0 = off", () => {
-    expect(autoCompactThreshold(null)).toBe(200_000);
-    expect(autoCompactThreshold(undefined)).toBe(200_000);
-    expect(autoCompactThreshold(350_000)).toBe(350_000);
-    expect(autoCompactThreshold(50_000)).toBe(100_000);
-    expect(autoCompactThreshold(0)).toBeNull();
+  it("defaults to 90% of the model's window, honours a setting (100k to the window) and 0 = off", () => {
+    expect(autoCompactThreshold(null, "claude-opus-5[1m]")).toBe(900_000);
+    expect(autoCompactThreshold(undefined, "opus-5-1m")).toBe(900_000);
+    expect(autoCompactThreshold(null, "claude-opus-5")).toBe(180_000);
+    expect(autoCompactThreshold(350_000, "claude-opus-5[1m]")).toBe(350_000);
+    expect(autoCompactThreshold(50_000, "claude-opus-5[1m]")).toBe(100_000);
+    expect(autoCompactThreshold(900_000, "claude-opus-5")).toBe(200_000);
+    expect(autoCompactThreshold(0, "claude-opus-5[1m]")).toBeNull();
   });
 
   it("is due at or past the threshold, not when off, unknown, or just compacted", () => {
@@ -110,6 +112,10 @@ describe("auto-compaction threshold", () => {
     expect(cliCompactWindow(200_000, "claude-opus-5[1m]")).toBe(200_000);
     expect(cliCompactWindow(200_000, "claude-opus-5")).toBeNull();
     expect(cliCompactWindow(null, "claude-opus-5[1m]")).toBeNull();
+    expect(cliCompactWindow(900_000, "claude-opus-5[1m]")).toBe(900_000);
+    // a 200k model's default leaves the CLI's own default alone
+    expect(cliCompactWindow(180_000, "claude-opus-5")).toBeNull();
+    expect(cliCompactWindow(150_000, "claude-opus-5")).toBe(150_000);
   });
 });
 

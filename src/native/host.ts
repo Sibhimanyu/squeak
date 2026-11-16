@@ -354,12 +354,12 @@ export class SessionHost extends EventEmitter {
   private readonly lastFailure = new Map<string, string>();
   private readonly sizeCache = new Map<string, { at: number; bytes: number | null }>();
 
-  /** The context size at which this chat compacts itself (its project's setting; 200k by default; null = off). */
+  /** The context size at which this chat compacts itself (its project's setting; 90% of the model's window by default; null = off). */
   compactThreshold(s: SessionRow): number | null {
     if (s.agent !== "claude") return null;
     const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
     const project = ws ? this.store.getProject(ws.projectId) : this.store.getProjectByRoot(s.cwd);
-    return autoCompactThreshold(project ? this.store.getProjectSettings(project.id).autoCompactTokens : null);
+    return autoCompactThreshold(project ? this.store.getProjectSettings(project.id).autoCompactTokens : null, s.model);
   }
 
   private transcriptBytesOf(s: SessionRow): number | null {
