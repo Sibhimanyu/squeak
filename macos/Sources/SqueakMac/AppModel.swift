@@ -2096,17 +2096,39 @@ extension AppModel {
         do {
             let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: nil)
             guard native.key == s.key else { return true }
+            // The host's log is behind what this Mac held (reset or rebuilt): that is from a log that no longer exists.
+            if page.lastSeq < native.timeline.lastSeq { native.timeline = TurnTimeline() }
             native.timeline.load(page.events, hasEarlier: page.hasEarlier)
             native.timelineReady = true
             showTimeline(s.key)
             await closeTimelineGap(s)
+            fillEmptyView(s)
             scheduleDetails(s)
             return true
         } catch let e as AdapterError {
             if case .http(let code) = e, code == 404 || code == 400 { native.hostLacksTimeline = true; return false }
-            // Anything else (the host is down for a moment): the stream's first connection reads it again.
+            // Anything else (the host is down for a moment, a slow read): try again shortly, never leave the chat blank.
+            retryTimelineStart(s)
             return true
-        } catch { return true }
+        } catch { retryTimelineStart(s); return true }
+    }
+
+    /// A first read that failed is read again (a few times, spaced) until the chat has its baseline.
+    private func retryTimelineStart(_ s: HostSession, attempt: Int = 1) {
+        guard attempt <= 5 else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Double(attempt) * 1.5))
+            guard let self, native.key == s.key, !native.timelineReady else { return }
+            if await startNativeTimeline(s), !native.timelineReady { retryTimelineStart(s, attempt: attempt + 1) }
+        }
+    }
+
+    /// A newest page with nothing to draw (all its turns hidden kinds, or no turn at all) while older turns exist pages
+    /// older ones in by itself, a few times, so the chat never sits on a bare "Load earlier messages".
+    func fillEmptyView(_ s: HostSession, budget: Int = 4) {
+        guard budget > 0, native.key == s.key, native.timeline.hasEarlier, !native.olderLoading,
+              TimelinePresentation(native.timeline, now: Date()).messages.isEmpty else { return }
+        loadEarlierTurns(s.key) { [weak self] in self?.fillEmptyView(s, budget: budget - 1) }
     }
 
     /// Reads what the timeline is missing after `lastSeq` (a reconnect, a poll, a gap). Duplicates change nothing.
@@ -2176,8 +2198,10 @@ extension AppModel {
     }
 
     /// The next older page of turns, placed above without moving what is shown.
-    func loadEarlierTurns(_ key: SessionKey) {
-        guard let s = session(key), native.key == key, !native.olderLoading, let before = native.timeline.oldestSeq else { return }
+    func loadEarlierTurns(_ key: SessionKey, then: (@MainActor () -> Void)? = nil) {
+        guard let s = session(key), native.key == key, !native.olderLoading else { return }
+        // No turn held yet (the first page showed none): "before" the newest event reads the newest turns again.
+        let before = native.timeline.oldestSeq ?? (native.timeline.lastSeq + 1)
         native.olderLoading = true
         native.olderError = nil
         showTimeline(key)
@@ -2189,6 +2213,9 @@ extension AppModel {
                 guard native.key == key else { return }
                 native.timeline.prepend(page.events, hasEarlier: page.hasEarlier)
                 scheduleDetails(s)
+                native.olderLoading = false
+                showTimeline(key)
+                then?()
             } catch {
                 native.olderError = "Couldn't load earlier messages"
             }
