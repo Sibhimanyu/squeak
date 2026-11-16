@@ -7,6 +7,18 @@ public enum HeightGuard {
     public static func shouldWrite(old: CGFloat, new: CGFloat) -> Bool { abs(new - old) > threshold }
 }
 
+/// The transcript's bottom padding. The dock is a measured `.safeAreaInset`, so the scroll view already ends above it;
+/// the padding only has to clear what floats over the transcript's bottom edge right now: the dock fade, or the Next
+/// update pill (its height and gap above the dock) when one shows, plus a small gap. Nothing is a fixed worst case.
+public enum TranscriptBottomInset {
+    public static let pillHeight: CGFloat = 32
+    public static let pillGap: CGFloat = 8
+    public static func value(base: CGFloat, pillShown: Bool) -> CGFloat {
+        let floating = max(DockFade.height, pillShown ? pillHeight + pillGap : 0)
+        return max(base, floating + 8)
+    }
+}
+
 /// The least height of the transcript's scroll content, so a short chat sits on the composer.
 public enum TranscriptMinHeight {
     /// `viewport` is the ScrollView's own measured height. The dock is a `.safeAreaInset` on that ScrollView, and a

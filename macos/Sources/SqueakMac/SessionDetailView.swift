@@ -295,7 +295,7 @@ struct SessionDetail: View {
                     .modifier(TranscriptColumnWidth(container: viewportWidth, cap: Metrics.readingColumn + 2 * Metrics.readingInset))
                     .padding(.top, 44)
                     // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
-                    .padding(.bottom, DockFade.bottomPadding(base: Space.l))
+                    .padding(.bottom, TranscriptBottomInset.value(base: Space.l, pillShown: WorkbenchNav.attention(model) != nil))
                     // Short chats sit on the composer: the content is at least as tall as the scroll view, whose measured height already excludes the dock inset.
                     .frame(maxWidth: .infinity, minHeight: TranscriptMinHeight.value(viewport: viewportHeight), alignment: .bottom)
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
@@ -624,12 +624,6 @@ struct SessionDetail: View {
             if let tracker { tracker }
             if dock.showsRow {
                 liveRow
-            } else if WorkbenchNav.attention(model) != nil {
-                HStack {
-                    Spacer(minLength: 0)
-                    NextAttentionPill()
-                }
-                .frame(height: 40)
             }
             if let set = ducklings, DucklingWords.barText(set) != nil {
                 DucklingsBar(session: session, set: set, readyLine: dock.readyLine, onStop: session.turnOpen == true ? { stop() } : nil)
@@ -724,6 +718,13 @@ struct SessionDetail: View {
         .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
+        // The Next update / Next request pill floats over the transcript's bottom edge, right-aligned just above the
+        // dock, reserving no row of its own: the transcript's bottom padding already clears it (TranscriptBottomInset).
+        .overlay(alignment: .topTrailing) {
+            NextAttentionPill()
+                .padding(.trailing, Metrics.readingInset)
+                .offset(y: -(TranscriptBottomInset.pillHeight + TranscriptBottomInset.pillGap))
+        }
         .frame(maxWidth: .infinity)
         .squeakWindowCanvas()
     }
