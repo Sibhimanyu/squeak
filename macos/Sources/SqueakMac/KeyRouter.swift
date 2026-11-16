@@ -16,7 +16,7 @@ final class KeyFocus {
     private(set) var region: FocusRegion = .composer
     var centre: Centre = .chat { didSet { reclassify() } }
     /// Whether the terminal panel is on screen (inspector open, code view, lower part expanded).
-    private(set) var terminalOpen: Bool = UserDefaults.standard.bool(forKey: "terminalOpen") && UserDefaults.standard.bool(forKey: "inspectorOpen")
+    private(set) var terminalOpen: Bool = false
 
     /// The region the table answers for.
     var effective: FocusRegion { region.effective(terminalOpen: terminalOpen) }
@@ -145,8 +145,7 @@ final class KeyRouter {
             guard let id = host.tab(of: responder), let ws = host.workspace(of: id) else { return false }
             host.requestClose(workspace: ws, id)
             if host.registry.tabs(ws).isEmpty {
-                UserDefaults.standard.set(false, forKey: "terminalOpen")
-                KeyFocus.shared.setTerminalOpen(false)
+                DockStore.shared.update { $0.dismiss(.terminal) }
             }
             return true
         case .clearTerminal:

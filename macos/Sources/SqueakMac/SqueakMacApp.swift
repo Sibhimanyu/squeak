@@ -102,6 +102,7 @@ struct SqueakCommands: Commands {
             // (ActivationPolicyController.makeOrdinary); a second one here would answer the same chord twice.
             Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
                 .registryShortcut(.toggleTerminal)
+            Menu("Workspace") { DockWorkspaceMenuItems() }
         }
         // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
         // full screen; Close Window is added beside them because ⌘W closes the open tab first.
@@ -311,8 +312,7 @@ extension Scene {
 @MainActor enum NewTerminalAction {
     static func perform(_ model: AppModel) {
         guard let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder else { return }
-        UserDefaults.standard.set(true, forKey: "inspectorOpen")
-        UserDefaults.standard.set(true, forKey: "terminalOpen")
+        DockStore.shared.update { $0.show(.terminal) }
         TerminalHost.shared.add(workspace: folder, folder: folder)
     }
 }

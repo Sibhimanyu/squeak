@@ -166,33 +166,54 @@ struct NativeQueuedRow: View {
     let queuedId: String?
     let text: String
     let author: String?
+    @Environment(AppModel.self) private var model
     @State private var open = false
     @State private var hovering = false
+    @State private var steering = false
 
     var body: some View {
         let summary = QueuedSummary(text)
-        Button { if queuedId != nil { open = true } } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "clock").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
-                if let author { Text(verbatim: author).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted).lineLimit(1) }
-                Text(verbatim: summary.line).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
-                if summary.pictures > 0 {
-                    Label(summary.pictures == 1 ? "1 picture" : "\(summary.pictures) pictures", systemImage: "photo")
-                        .font(Typo.meta).foregroundStyle(Theme.muted).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
+        HStack(spacing: 8) {
+            // The line itself opens the whole message (Edit, Remove, Steer now).
+            Button { if queuedId != nil { open = true } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
+                    if let author { Text(verbatim: author).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted).lineLimit(1) }
+                    Text(verbatim: summary.line).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+                    if summary.pictures > 0 {
+                        Label(summary.pictures == 1 ? "1 picture" : "\(summary.pictures) pictures", systemImage: "photo")
+                            .font(Typo.meta).foregroundStyle(Theme.muted).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
+                    }
+                    Spacer(minLength: 0)
+                    Text(queuedId == nil ? "Sending…" : "Queued").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
                 }
-                Spacer(minLength: 0)
-                Text(queuedId == nil ? "Sending…" : "Queued").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(hovering ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.card))
+            .buttonStyle(.plain)
+            .help("Open this queued message to edit or remove it")
+            .accessibilityLabel("Queued message: \(summary.line)")
+            // Steer straight from the line: no sheet in the way.
+            if let queuedId {
+                Button {
+                    guard !steering else { return }
+                    steering = true
+                    Task { await model.nativeSteerQueued(session, queuedId); steering = false }
+                } label: {
+                    if steering { DotGridLoader(size: 12) } else { Text("Steer") }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .controlSize(.small)
+                .disabled(steering)
+                .help("Steer: send this into the running turn now")
+                .accessibilityLabel("Steer this message into the running turn")
+            }
+            Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                .onTapGesture { if queuedId != nil { open = true } }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(hovering ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .onHover { hovering = $0 }
-        .help("Open this queued message to steer, edit or remove it")
-        .accessibilityLabel("Queued message: \(summary.line)")
         .sheet(isPresented: $open) {
             if let queuedId { NativeQueuedSheet(session: session, queuedId: queuedId, text: text, author: author, open: $open) }
         }

@@ -22,8 +22,6 @@ extension Notification.Name {
 struct CommandPaletteHost: ViewModifier {
     @Environment(AppModel.self) private var model
     @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
-    @AppStorage("inspectorOpen") private var inspectorOpen = false
-    @AppStorage("terminalOpen") private var terminalOpen = false
     @AppStorage("paletteRecents") private var recentsJSON = ""
     @State private var paletteOpen = false
     @State private var shortcutsOpen = false
@@ -119,8 +117,8 @@ struct CommandPaletteHost: ViewModifier {
         case .searchChats:
             Task { @MainActor in paletteOpen = true }
         case .toggleSidebar: sidebarCollapsed.toggle()
-        case .toggleInspector: inspectorOpen.toggle()
-        case .toggleTerminal: if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
+        case .toggleInspector: DockStore.shared.update { $0.toggleRight() }
+        case .toggleTerminal: DockStore.shared.update { $0.toggle(.terminal) }
         case .openSettings: model.openSettings()
         case .openUsage: model.openUsage()
         case .showShortcuts: shortcutsOpen = true

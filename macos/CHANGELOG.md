@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.5
+
+- A queued message has its own Steer button on its line: one click sends it into the running turn. Clicking the line still opens the whole message to edit or remove it.
+
 ## 2.27.4
 
 - The chat no longer jumps, flickers or shows a message twice while it updates. Every message has exactly one row from the moment you press Send: a message you send while Claude works is its queued line at once (no card above the composer that later moves into the chat), a steer is a dimmed row at the end of the running turn that turns solid in the same place when the agent reads it, and the reply being written is the running turn's last row, the place the finished reply takes. A randomized test races the host's events, the queue and your presses in 600 orders and fails on any duplicate, reordered, vanished or reappearing row.

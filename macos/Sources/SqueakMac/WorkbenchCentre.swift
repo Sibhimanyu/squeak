@@ -15,7 +15,10 @@ struct WorkbenchCentre: View {
 
     @Environment(AppModel.self) private var model
     let sidebarHidden: Bool
-    @Binding var inspectorOpen: Bool
+    /// The right zone is on screen (its toggle sits in this header's place when it is not).
+    let inspectorOpen: Bool
+    /// The right zone's tab is Code, which carries the git cluster itself.
+    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     let showingCompose: Bool
 
@@ -41,7 +44,7 @@ struct WorkbenchCentre: View {
                 let place = model.sidebarTree.place(of: chat.key)
                 WorkbenchHeader(
                     session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.displayTitle,
-                    sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar)
+                    sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, gitInRightStrip: gitInRightStrip, toggleSidebar: toggleSidebar)
                 if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
                 HStack {
@@ -53,12 +56,14 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
+            } else if let chat, let panel = DockStore.shared.layout.centre.selected {
+                DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity).dockDrop(.centre)
             } else if let files, let chat, files.review.isOpen {
                 ReviewView(files: files, session: chat).heresayPrivate()
-            } else if let files, let file = files.activeFile {
+            } else if let files, let file = files.activeFile, DockStore.shared.files.zone(of: file.path) == .centre {
                 FileViewer(files: files, file: file).id(file.path)
             } else {
-                DetailView()
+                DetailView().dockDrop(.centre)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,7 +110,8 @@ private struct WorkbenchHeader: View {
     let project: String
     let workspace: String?
     let sidebarHidden: Bool
-    @Binding var inspectorOpen: Bool
+    let inspectorOpen: Bool
+    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -143,7 +149,7 @@ private struct WorkbenchHeader: View {
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
-            if !inspectorOpen, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
+            if !gitInRightStrip, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
             if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
@@ -236,6 +242,7 @@ private struct WorkbenchTabs: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showHistory = false
 
+    private var dock: DockStore { DockStore.shared }
     private var chats: [HostSession] { model.streamThreads(workspace) }
 
     private enum StripItem: Identifiable {
@@ -277,11 +284,26 @@ private struct WorkbenchTabs: View {
                     ForEach(stripItems) { item in
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
-                        case .file(let f): if let files { FileTab(files: files, file: f) }
+                        case .file(let f):
+                            if let files, dock.files.zone(of: f.path) == .centre {
+                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil,
+                                            height: Metrics.tabStrip, indicator: tabIndicator) {
+                                    dock.update { $0.selectChats() }
+                                    files.activePath = f.path
+                                }
+                            }
+                        }
+                    }
+                    ForEach(dock.layout.centre.panels, id: \.self) { p in
+                        DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
+                            files?.showChat()
+                            dock.update { $0.select(p) }
                         }
                     }
                     Button {
-                        if let native = model.nativeWorkspace(of: workspace) {
+                        if case .newTerminal = DockPlusAction.of(zone: .centre, layout: dock.layout) {
+                            NewTerminalAction.perform(model)
+                        } else if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
                         } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {
                             model.openNewThread(conductorWorkspaceId: conductorWorkspace)
@@ -296,6 +318,7 @@ private struct WorkbenchTabs: View {
                 }
                 .padding(.horizontal, Space.l)
             }
+            DockWorkspacePicker()
             Button { showHistory.toggle() } label: {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -306,6 +329,7 @@ private struct WorkbenchTabs: View {
             .accessibilityLabel("Chat history").help("Chat history")
         }
         .frame(height: Metrics.tabStrip)
+        .dockDrop(.centre, wash: false)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
         .task(id: model.allSessions.count) { model.pruneStreamTabs() }
         // File tabs are saved with the strip: brought back once per run, if the file is still there.
@@ -323,6 +347,7 @@ private struct WorkbenchTabs: View {
             for p in new where !old.contains(p) { model.fileTabOpened(p, in: workspace) }
             for p in old where !new.contains(p) { model.fileTabClosed(p, in: workspace) }
         }
+        .modifier(CentreFileDockSync(files: files))
         .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
         .task(id: model.selected) { if let key = model.selected { model.ensureTab(for: key) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
@@ -338,7 +363,7 @@ private struct WorkbenchTabs: View {
             if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed, and has its tab.
-        .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
+        .onChange(of: model.selected) { _, key in dock.update { $0.selectChats() }; if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
         .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .animation(Motion.standard, value: model.selected)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
@@ -375,10 +400,10 @@ private struct WorkbenchTabs: View {
 
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true
+        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); model.select(s.key) }) {
+        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); dock.update { $0.selectChats() }; model.select(s.key) }) {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
                 tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
@@ -430,5 +455,26 @@ private extension View {
     /// A working chat's tab pulses its agent logo, no extra width.
     @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
         if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in Motion.pulseStep } } else { self }
+    }
+}
+
+
+/// Keeps file placements honest: a file opened (say from the Files list) that sits in another zone is shown there, not
+/// in the centre, and placements of files that are no longer open (closed anywhere) are dropped.
+private struct CentreFileDockSync: ViewModifier {
+    let files: FilesModel?
+    @Environment(AppModel.self) private var model
+
+    private var openPaths: Set<String> { Set(model.filesModels.values.flatMap { $0.open.map(\.path) }) }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: files?.review.isOpen) { _, open in if open == true { DockStore.shared.update { $0.selectChats() } } }
+            .onChange(of: files?.activePath) { _, path in
+                let dock = DockStore.shared
+                if path != nil { dock.update { $0.selectChats() } }
+                if let path, dock.files.zone(of: path) != .centre { dock.selectFile(path); files?.showChat() }
+            }
+            .onChange(of: openPaths, initial: true) { _, open in DockStore.shared.pruneFiles(keeping: open) }
     }
 }

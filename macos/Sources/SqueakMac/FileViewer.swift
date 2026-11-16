@@ -119,34 +119,6 @@ struct FileViewer: View {
     }
 }
 
-/// A file tab in the strip: the name (mono), a dot while edited, and a close button.
-struct FileTab: View {
-    let files: FilesModel
-    let file: OpenFile
-
-    var body: some View {
-        let selected = files.activePath == file.path
-        HStack(spacing: 4) {
-            Button { files.activePath = file.path } label: {
-                HStack(spacing: 5) {
-                    Lucide(.fileText, size: 12, color: Theme.muted)
-                    Text(verbatim: file.name).font(Typo.code).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
-                    if file.dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).accessibilityLabel("Unsaved changes") }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            Button { files.close(file.path) } label: {
-                Lucide(.x, size: 11, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).help("Close \(file.name)").accessibilityLabel("Close \(file.name)")
-        }
-        .padding(.leading, 10).padding(.trailing, 4).frame(height: 28).frame(maxWidth: 220)
-        .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
 /// "Save changes to X?" when a tab with unsaved edits is closed. Attached once, to the centre column.
 struct FileCloseGuard: ViewModifier {
     let files: FilesModel?

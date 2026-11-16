@@ -14,11 +14,14 @@ struct TerminalPanel: View {
     @Binding var open: Bool
     /// Inside the inspector's lower part: no height of its own, no drag handle, no hide button (the part has them).
     var embedded = false
+    /// Embedded but still drawing the shell tabs and their "+" (a dock zone's strip carries only the panel's own tab).
+    var showsStrip = false
     private let host = TerminalHost.shared
     @Environment(\.colorScheme) private var scheme
     @State private var dragStart: Double?
     @State private var hovering = false
 
+    private var drawsStrip: Bool { !embedded || showsStrip }
     private var availability: TerminalWorkspace.Availability { TerminalWorkspace.availability(cwd: session.cwd) }
     private var workspace: String? { availability.folder }
     private var shown: Double { TerminalPanelSizing.clamp(height, column: column) }
@@ -27,7 +30,7 @@ struct TerminalPanel: View {
         VStack(spacing: 0) {
             if case .available(let folder) = availability, let code = host.stopped[folder],
                TerminalPlan.showsStopped(hasTabs: !host.registry.tabs(folder).isEmpty, guardStopped: true) {
-                if !embedded { strip(folder: folder) }
+                if drawsStrip { strip(folder: folder) }
                 VStack(spacing: Space.m) {
                     Text(verbatim: TerminalPlan.stoppedMessage(exitCode: code)).font(Typo.body).foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
@@ -36,7 +39,7 @@ struct TerminalPanel: View {
                 .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if case .available(let folder) = availability {
                 // Embedded, the inspector's row carries the shell tabs.
-                if !embedded { strip(folder: folder) }
+                if drawsStrip { strip(folder: folder) }
                 // Reading the selected tab here makes the panel redraw when a tab is added, replaced or ended, embedded or not.
                 TerminalSurface(workspace: folder, tab: host.registry.selected(folder)?.id, dark: scheme == .dark)
                     .id(folder)

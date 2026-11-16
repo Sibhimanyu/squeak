@@ -726,7 +726,8 @@ private struct FoldRow: View {
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     .truncationMode(.tail)
-                if depth == 0 { pondMark }
+                // An open pond shows its chats, each with its own mark: the rollup would only repeat them.
+                if depth == 0, folded || count != nil { pondMark }
                 if conductor { ConductorMarker(size: 12) }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)

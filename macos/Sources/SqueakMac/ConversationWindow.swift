@@ -14,17 +14,18 @@ struct ConversationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The person's own choices, kept across launches. The inspector starts closed (§8.10).
     @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
-    @AppStorage("inspectorOpen") private var inspectorOpen = false
-    @AppStorage("terminalOpen") private var terminalOpen = false
-    @AppStorage("inspectorCodeView") private var codeView = false
+    /// Where the Pond, Code and Terminal panels sit (DockLayout); the old inspector/terminal keys are read once, to migrate.
+    private var dock: DockStore { DockStore.shared }
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
     /// "not dragged yet": it takes its share of the window (30%).
     @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
-    @AppStorage("inspectorWidth") private var inspectorWidthSaved = 0.0
     @State private var windowWidth: Double = 1440
+    @State private var columnHeight: Double = 800
     /// Zen mode (⇧⌘.): both side panes away; what was open comes back with the same key.
     @State private var zenRestore: ZenState?
+    /// The layout before Zen folded the right and bottom zones.
+    @State private var zenLayout: DockLayout?
     /// Captures start with the sidebar hidden; a press of the toggle clears it.
     @State private var captureHidden: Bool
 
@@ -34,17 +35,19 @@ struct ConversationView: View {
 
     private var sidebarHidden: Bool { captureHidden || sidebarHiddenSaved }
 
-    private struct ZenState { var sidebarHidden: Bool; var inspectorOpen: Bool }
+    private struct ZenState { var sidebarHidden: Bool }
 
     private func toggleZen() {
         if let r = zenRestore {
             sidebarHiddenSaved = r.sidebarHidden
-            inspectorOpen = r.inspectorOpen
+            if let saved = zenLayout { dock.update { $0 = saved } }
             zenRestore = nil
+            zenLayout = nil
         } else {
-            zenRestore = ZenState(sidebarHidden: sidebarHiddenSaved, inspectorOpen: inspectorOpen)
+            zenRestore = ZenState(sidebarHidden: sidebarHiddenSaved)
+            zenLayout = dock.layout
             sidebarHiddenSaved = true
-            inspectorOpen = false
+            dock.update { $0 = $0.zen() }
         }
     }
 
@@ -55,34 +58,38 @@ struct ConversationView: View {
         sidebarHiddenSaved = !sidebarHidden
     }
 
-    private var inspectorTab: Binding<InspectorTab> {
-        Binding(get: { InspectorTab.restored(inspectorTabRaw) }, set: { inspectorTabRaw = $0.rawValue })
-    }
-
-    /// What the inspector takes before it is dragged: its share of the room beside the sidebar.
+    /// What the right zone takes before it is dragged: its share of the room beside the sidebar.
     private func inspectorFallback(sidebarOpen: Bool) -> Double {
         PaneWidths.inspectorDefault(
             window: windowWidth,
             sidebar: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
     }
 
+    private var inspectorWidthSaved: Binding<Double> {
+        Binding(get: { dock.layout.right.size ?? 0 }, set: { v in dock.update { $0.setSize(v > 0 ? v : nil, for: .right) } })
+    }
+
     private func sidebarWidth(open: Bool, inspectorOpen: Bool) -> Double {
         PaneWidths.effective(
             sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault, window: windowWidth,
             otherPane: inspectorOpen
-                ? PaneWidths.clamp(inspectorWidthSaved, PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: open)) : 0)
+                ? PaneWidths.clamp(inspectorWidthSaved.wrappedValue, PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: open)) : 0)
     }
 
     private func inspectorWidth(sidebarOpen: Bool) -> Double {
         PaneWidths.effective(
-            inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: sidebarOpen), window: windowWidth,
+            inspectorWidthSaved.wrappedValue, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: sidebarOpen), window: windowWidth,
             otherPane: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
     }
 
     var body: some View {
         @Bindable var model = model
         @Bindable var git = model.git
-        let showsInspector = inspectorOpen && model.settingsSection == nil && NewChatController.shared.page == nil
+        let layout = dock.layout
+        let ducklingOpen = DucklingRef.open(model.openDuckling, whenSelected: model.selectedSession?.key) != nil
+        let dockFiles = dock.files
+        let rightWanted = layout.isZoneVisible(.right, files: dockFiles) && !layout.right.collapsed
+        let showsInspector = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
         let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
         let inspectorW = inspectorWidth(sidebarOpen: !sidebarHidden)
@@ -116,37 +123,69 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                WorkbenchCentre(
-                    sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
-                    showingCompose: showingCompose
-                )
-                .squeakWindowCanvas()
-                if inspectorOpen, chatOpen {
-                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, codeView: $codeView, width: inspectorW)
+                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles) : .none
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        WorkbenchCentre(
+                            sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && chatOpen,
+                            gitInRightStrip: showsInspector && chatOpen && layout.right.selected == .code && !ducklingOpen,
+                            toggleSidebar: toggleSidebar, showingCompose: showingCompose
+                        )
+                        .squeakWindowCanvas()
+                        if placement == .underCentre { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight) }
+                    }
+                    if showsInspector, chatOpen {
+                        VStack(spacing: 0) {
+                            DockRightColumn(session: model.selectedSession, width: inspectorW)
+                            if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW) }
+                        }
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
-                                edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
+                                edge: .leading, width: inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
                         .transition(paneTransition(.trailing)).zIndex(1)
+                    }
+                }
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { columnHeight = g.size.height }.onChange(of: g.size.height) { _, h in columnHeight = h }
+                })
+                // Thin strips at the edges that have no zone, while a panel is being dragged.
+                .overlay(alignment: .trailing) {
+                    if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
+                }
+                .overlay(alignment: .bottom) {
+                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles) { DockEdgeStrip(zone: .bottom) }
                 }
             }
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
         .animation(Motion.standard, value: showingSettings)
-        // A duckling opens in the inspector: show it if it was closed.
-        .onChange(of: model.openDuckling) { _, ref in if ref != nil { inspectorOpen = true } }
-        .animation(Motion.standard, value: inspectorOpen && chatOpen)
+        // A duckling opens in the right zone: show it if it was folded away.
+        .onChange(of: model.openDuckling) { _, ref in
+            if ref != nil {
+                dock.update { l in
+                    if l.right.panels.isEmpty { l.show(.pond) } else { l.setCollapsed(false, for: .right) }
+                }
+            }
+        }
+        .animation(Motion.standard, value: showsInspector && chatOpen)
+        .onChange(of: layout.isShowing(.terminal), initial: true) { _, showing in
+            if showing { TerminalHost.shared.focusPending = true }
+            KeyFocus.shared.setTerminalOpen(showing)
+        }
+        .onAppear { DockDragMonitor.install() }
+        .onDisappear { KeyFocus.shared.setTerminalOpen(false) }
         .clipped()
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: inspectorOpen && chatOpen, showsRight: chatOpen, window: windowWidth, sidebarWidth: sidebarW,
-                    inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { inspectorOpen.toggle() }
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && chatOpen, showsRight: chatOpen, window: windowWidth, sidebarWidth: sidebarW,
+                    inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { dock.update { $0.toggleRight() } }
                 )
                 .animation(Motion.standard, value: sidebarHidden)
-                .animation(Motion.standard, value: inspectorOpen && chatOpen)
+                .animation(Motion.standard, value: showsInspector && chatOpen)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -168,20 +207,16 @@ struct ConversationView: View {
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in inspectorOpen.toggle() }
-        // ⌥⌘C flips the right panel between the Pond panel and the Code view (opening it when closed); a diff opened
-        // anywhere switches to Code without opening a closed panel.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in
-            if !inspectorOpen { inspectorOpen = true; codeView = true } else { codeView.toggle() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in codeView = true }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in dock.update { $0.toggleRight() } }
+        // ⌥⌘C shows the Code panel, or closes it when it is the one showing; a diff opened anywhere shows it too.
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in dock.update { $0.toggle(.code) } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in dock.update { $0.show(.code) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowFiles)) { _ in
-            inspectorOpen = true; codeView = true; inspectorTabRaw = InspectorTab.files.rawValue
+            inspectorTabRaw = InspectorTab.files.rawValue
+            dock.update { $0.show(.code) }
         }
-        // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in
-            if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
-        }
+        // ⌘J shows the terminal wherever it is docked, or closes it when it is the one showing.
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in dock.update { $0.toggle(.terminal) } }
         .background(ConversationWindowReader())
         .commandPalette()
         .background {
@@ -190,7 +225,7 @@ struct ConversationView: View {
                 Button("Toggle Sidebar") { toggleSidebar() }
                     .keyboardShortcut("\\", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
-                    Button("Inspector: \(t.title)") { inspectorOpen = true; codeView = true; inspectorTabRaw = t.rawValue }
+                    Button("Inspector: \(t.title)") { inspectorTabRaw = t.rawValue; dock.update { $0.show(.code) } }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
                 GitShortcuts()
