@@ -11,6 +11,7 @@ import {
   buildThreadContext,
   resolveOwnerName,
   stripSenderPrefix,
+  DUCKLING_LINES,
   threadContextFor,
   withSender,
 } from "./thread-context.js";
@@ -65,6 +66,21 @@ describe("buildThreadContext", () => {
     expect(codex).toContain("The Squeak guide appended below has the details.");
     expect(codex.endsWith(CODEX_SQUEAK_GUIDE)).toBe(true);
     expect(threadContextFor({ ...input, agent: "claude" })).not.toContain(CODEX_SQUEAK_GUIDE);
+  });
+});
+
+describe("duckling vocabulary", () => {
+  const input = { agent: "claude" as const, cwd: "/tmp/x" };
+  it("is in what Claude and Codex are told, and stays short", () => {
+    for (const agent of ["claude", "codex"] as const) {
+      const note = threadContextFor({ ...input, agent });
+      expect(note).toContain("your subagents are called ducklings");
+      expect(note).toContain("One duckling is still paddling");
+      expect(note).toContain("Keep the task, status and results exact");
+      expect(note).toContain("never call the person or yourself a duck");
+    }
+    expect(DUCKLING_LINES.join("\n").length).toBeLessThan(900);
+    expect(DUCKLING_LINES).toHaveLength(2);
   });
 });
 

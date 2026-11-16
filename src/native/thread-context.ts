@@ -24,6 +24,15 @@ export interface ThreadContextInput {
 /** The one paragraph of the ask format the note carries: question above lettered options. Reuses the constant. */
 const ASK_ESSENCE = `${ASK_FORMAT_TEXT.split("\n\n")[0]}\n${ASK_FORMAT_EXAMPLE_CHOICE}`;
 
+/**
+ * Squeak's word for a subagent (the Agent/Task tool), so the agent talks like the screens do ("2 ducklings running").
+ * Kept short: it is in every thread's prompt. Exported for the test and the skill.
+ */
+export const DUCKLING_LINES = [
+  "Start a duckling (your own helper, through the Agent tool) for short internal work; start another thread for work that is long, parallel or should be watched. Launch every duckling with `run_in_background: true` unless your very next step needs its result: a foreground duckling blocks you until it reports.",
+  'In Squeak your subagents are called ducklings: say "duckling" when you start, check on or report one, with a light touch and at most one playful verb per mention (e.g. "I\'ve sent a duckling to fix the bar spacing", "The duckling on the bar changes now has five tweaks", "One duckling is still paddling on full-screen spaces"). Keep the task, status and results exact and never pad; never call the person or yourself a duck.',
+];
+
 /** A compact `squeak` skill for Codex, which has no skills: Claude gets the real SKILL.md through the plugin. */
 export const CODEX_SQUEAK_GUIDE = [
   "Squeak guide (the full version is the `squeak` skill Claude chats get):",
@@ -60,7 +69,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
     input.agent === "claude"
       ? "The `squeak` skill has the details."
       : "The Squeak guide appended below has the details.",
-    "Start a duckling (your own helper, through the Agent tool) for short internal work; start another thread for work that is long, parallel or should be watched. Launch every duckling with `run_in_background: true` unless your very next step needs its result: a foreground duckling blocks you until it reports.",
+    ...DUCKLING_LINES,
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),
     ASK_ESSENCE,
