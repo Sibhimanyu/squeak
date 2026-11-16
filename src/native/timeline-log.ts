@@ -246,21 +246,25 @@ export class TimelineRecorder {
     this.store(sessionId, [{ type: "prompt.dequeued", queuedId, at: isoNow() }]);
   }
 
-  message(sessionId: string, row: MessageLike): void {
-    if (row.kind === "user/text") return;
-    this.feed(sessionId, this.projector(sessionId), row);
+  /** True when this row began a turn the agent ran by itself (a background helper reported in). */
+  message(sessionId: string, row: MessageLike): boolean {
+    if (row.kind === "user/text") return false;
+    return this.feed(sessionId, this.projector(sessionId), row);
   }
 
   /**
    * A row into the projector. The agent speaking with no turn open means Claude Code ran a turn by itself (a helper
    * reported in): it is a turn of its own, without a prompt, so its words are not lost.
    */
-  private feed(sessionId: string, p: TimelineProjector, row: MessageLike): void {
+  private feed(sessionId: string, p: TimelineProjector, row: MessageLike): boolean {
     const speaks = row.kind === "assistant" || row.kind.startsWith("item/");
+    let began = false;
     if (!p.openTurnId && speaks && !(row.payload as { parent_tool_use_id?: unknown } | null)?.parent_tool_use_id) {
       this.store(sessionId, p.begin({ promptSeq: row.seq, text: "", auto: true, at: row.createdAt }));
+      began = true;
     }
     this.store(sessionId, p.message(row));
+    return began;
   }
 
   delta(sessionId: string, payload: unknown): void {

@@ -1268,7 +1268,11 @@ export class SessionHost extends EventEmitter {
     author?: MessageAuthor;
   }): void {
     this.emit("event", { type: "message", ...m } satisfies HostEvent);
-    this.timeline.message(m.sessionId, m);
+    // The agent began a turn by itself (a background command or helper reported in): the chat is working, so every
+    // screen shows it working and offers Stop, until that turn ends like any other.
+    if (this.timeline.message(m.sessionId, m) && !BUSY.has(this.store.getSession(m.sessionId)?.status ?? "idle")) {
+      this.setStatus(m.sessionId, "working");
+    }
   }
 
   private setStatus(id: string, status: SessionStatus, endedTurn = false): void {

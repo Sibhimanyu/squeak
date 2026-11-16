@@ -340,6 +340,21 @@ describe("timeline event log", () => {
     expect(starts).toHaveLength(2);
     expect(starts[1]).toMatchObject({ auto: true, text: "" });
   });
+
+  it("marks the chat working while a turn the agent began by itself runs, and idle when it ends", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "start a long build in the background" });
+    runners[0]!.hooks.onMessage("agent", "assistant", text("left the build running", "w1"));
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    expect(store.getSession(s.id)!.status).toBe("idle");
+    // the build finishes: Claude Code runs a turn by itself, with no prompt from anyone
+    runners[0]!.hooks.onMessage("agent", "assistant", text("the build passed, relaunching", "w2"));
+    expect(store.getSession(s.id)!.status).toBe("working");
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    expect(store.getSession(s.id)!.status).toBe("idle");
+  });
 });
 
 describe("timeline projector", () => {
