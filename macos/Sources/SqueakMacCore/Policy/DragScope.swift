@@ -49,6 +49,17 @@ public enum DragScope {
         }
     }
 
+    /// The item-level answer on top of the kind: the Pond panel never docks in the centre (the dashboard is where a pond
+    /// is managed), so its drop there is routed to the dashboard instead (`opensPondDashboard`).
+    public static func allows(_ item: DockItem, on target: DragTarget) -> Bool {
+        if opensPondDashboard(item, on: target) { return false }
+        return allows(DragKind.of(item), on: target)
+    }
+
+    public static func opensPondDashboard(_ item: DockItem, on target: DragTarget) -> Bool {
+        item == .panel(.pond) && target == .centreStrip
+    }
+
     /// The kinds a target takes: what its `onDrop` lists, so nothing else ever highlights it.
     public static func accepted(by target: DragTarget) -> [DragKind] {
         DragKind.allCases.filter { allows($0, on: target) }

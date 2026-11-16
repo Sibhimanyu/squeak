@@ -43,4 +43,17 @@ import Foundation
         #expect(DragKind.of(.file("/x")) == .file)
         #expect(Set(DragKind.allCases.map(\.identifier)).count == DragKind.allCases.count)
     }
+
+    @Test func pondPanelNeverDocksInTheCentreButOpensTheDashboard() {
+        #expect(!DragScope.allows(DockItem.panel(.pond), on: .centreStrip))
+        #expect(DragScope.opensPondDashboard(.panel(.pond), on: .centreStrip))
+        for t in [DragTarget.rightStrip, .bottomStrip, .edgeStrip(.right)] {
+            #expect(DragScope.allows(DockItem.panel(.pond), on: t))
+            #expect(!DragScope.opensPondDashboard(.panel(.pond), on: t))
+        }
+        #expect(DragScope.allows(DockItem.panel(.thread), on: .centreStrip))
+        #expect(DragScope.allows(DockItem.panel(.code), on: .centreStrip))
+        // The pasteboard type is the same for every panel, so the strip still validates it; the drop routes it.
+        #expect(DragScope.allows(.panel, on: .centreStrip))
+    }
 }

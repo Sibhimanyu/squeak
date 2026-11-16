@@ -101,6 +101,8 @@ public final class DockStore {
     public var dragging: DockItem?
     /// The panel tab under the pointer (not observed): a drag that starts there is a panel drag.
     @ObservationIgnored public var hoveredTab: DockItem?
+    /// Set by the window: a Pond panel dropped on the centre opens the pond dashboard instead of docking.
+    @ObservationIgnored public var openPondDashboard: (() -> Void)?
     @ObservationIgnored private let defaults: UserDefaults
 
     public var layout: DockLayout { workspaces.active.current }
@@ -305,6 +307,7 @@ public final class DockStore {
     @discardableResult
     public func drop(_ item: DockItem, to zone: DockZone, before: DockItem? = nil) -> Bool {
         dragging = nil
+        if DragScope.opensPondDashboard(item, on: .strip(zone)) { openPondDashboard?(); return true }
         switch item {
         case .panel(let p):
             var b: DockPanel?

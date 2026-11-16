@@ -9,7 +9,7 @@ final class WindowMenuTests: XCTestCase {
 
     func testListsEveryPanelWithSidebarAndInspector() {
         let items = WindowMenu.items(layout: .standard, terminalShowing: false)
-        XCTAssertEqual(items.map(\.title), ["Sidebar", "Inspector", "Pond", "Code", "Terminal"])
+        XCTAssertEqual(items.map(\.title), ["Sidebar", "Inspector", "Thread", "Pond", "Code", "Terminal"])
         XCTAssertEqual(items.first { $0.id == .panel(.code) }?.shortcut, .toggleCode)
         XCTAssertEqual(items.first { $0.id == .sidebar }?.checked, true)
     }
@@ -81,5 +81,17 @@ final class WindowMenuTests: XCTestCase {
         w.update(l)
         w.resetActive()
         XCTAssertEqual(w.active.current, DockLayout.standard)
+    }
+
+    func testThreadItemChecksAndTogglesLikeAnyPanel() {
+        var items = WindowMenu.items(layout: .standard, terminalShowing: false)
+        XCTAssertEqual(items.first { $0.id == .panel(.thread) }?.checked, true)
+        XCTAssertEqual(items.first { $0.id == .panel(.pond) }?.checked, false)
+        let closed = layout(WindowMenu.perform(.panel(.thread), on: .standard, terminalShowing: false))
+        XCTAssertEqual(closed.hidden, [.thread])
+        items = WindowMenu.items(layout: closed, terminalShowing: false)
+        XCTAssertEqual(items.first { $0.id == .panel(.thread) }?.checked, false)
+        let back = layout(WindowMenu.perform(.panel(.thread), on: closed, terminalShowing: false))
+        XCTAssertEqual(back.right.selected, .thread)
     }
 }

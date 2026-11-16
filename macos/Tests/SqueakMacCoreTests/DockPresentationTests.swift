@@ -10,7 +10,7 @@ final class DockPresentationTests: XCTestCase {
         l.right.collapsed = false
         l.move(.terminal, to: .right)
         XCTAssertEqual(DockBottomPlacement.of(l), .none)
-        l.move(.pond, to: .bottom); l.move(.code, to: .bottom)
+        l.move(.thread, to: .bottom); l.move(.pond, to: .bottom); l.move(.code, to: .bottom)
         XCTAssertEqual(DockBottomPlacement.of(l), .underRight)
         l.close(.terminal)
         XCTAssertEqual(DockBottomPlacement.of(l), .underCentre)
@@ -70,14 +70,14 @@ final class DockPresentationTests: XCTestCase {
         XCTAssertTrue(l.right.collapsed)
         l.toggleRight()
         XCTAssertFalse(l.right.collapsed)
-        l.move(.pond, to: .centre); l.move(.code, to: .bottom)
+        l.move(.thread, to: .centre); l.move(.pond, to: .bottom); l.move(.code, to: .bottom)
         XCTAssertTrue(l.right.panels.isEmpty)
         l.toggleRight()
         XCTAssertEqual(l.right.panels, [.pond])
         var h = DockLayout.standard
-        h.close(.pond); h.close(.code)
+        h.close(.thread); h.close(.pond); h.close(.code)
         h.toggleRight()
-        XCTAssertEqual(h.right.panels, [.pond])
+        XCTAssertEqual(h.right.panels, [.thread])
     }
 
     func testDismissAndShowingAndZen() {
@@ -116,10 +116,19 @@ final class DockPresentationTests: XCTestCase {
     @MainActor func testStoreFreshDefaultsAndDrop() {
         let s = DockStore(defaults: UserDefaults(suiteName: "dock-test-\(UUID().uuidString)")!)
         XCTAssertEqual(s.layout.right.collapsed, true)
+        var dashboards = 0
+        s.openPondDashboard = { dashboards += 1 }
         s.dragging = .panel(.pond)
+        // The Pond panel never docks in the centre: the drop opens the pond dashboard and the layout stays as it was.
+        let before = s.layout
         XCTAssertTrue(s.drop(.panel(.pond), to: .centre))
         XCTAssertNil(s.dragging)
-        XCTAssertEqual(s.layout.centre.panels, [.pond])
-        XCTAssertEqual(s.layout.centre.selected, .pond)
+        XCTAssertEqual(dashboards, 1)
+        XCTAssertEqual(s.layout, before)
+        s.dragging = .panel(.thread)
+        XCTAssertTrue(s.drop(.panel(.thread), to: .centre))
+        XCTAssertEqual(dashboards, 1)
+        XCTAssertEqual(s.layout.centre.panels, [.thread])
+        XCTAssertEqual(s.layout.centre.selected, .thread)
     }
 }

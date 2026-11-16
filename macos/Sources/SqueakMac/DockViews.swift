@@ -380,7 +380,7 @@ struct DockPlusButton: View {
                 .buttonStyle(.plain).help("New terminal").accessibilityLabel("New terminal")
         case .showHidden(let hidden):
             Menu {
-                ForEach(hidden, id: \.self) { p in
+                ForEach(hidden.filter { !($0 == .pond && zone == .centre) }, id: \.self) { p in
                     Button { DockStore.shared.update { $0.move(p, to: zone) } } label: { Label(p.title, systemImage: p.symbol) }
                 }
             } label: { plus }

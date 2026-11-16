@@ -1070,16 +1070,26 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 
 ##### Right panel: the Pond panel and the Code view (owner 2026-11-10)
 
-Squeak is a place to see who is working and what needs you, not a code editor, so the right panel opens on the **Pond panel** and the code tools sit behind a **Code** button. The top bar's two words, **Pond** and **Code** (14pt, `selected` fill on the current one), switch between them; ⌥⌘C does the same from anywhere (it also opens a closed panel on Code). The choice is remembered by the window. Opening a diff tab, a tab shortcut (⌥⌘1–3) or "What changed" switches to Code by itself; closing the panel and reopening it keeps the last view.
+Squeak is a place to see who is working and what needs you, not a code editor, so the right panel opens on the **Thread tab** and the code tools sit behind a **Code** button. The top bar's words, **Thread**, **Pond** and **Code** (14pt, `selected` fill on the current one), switch between them; ⌥⌘C does the same from anywhere (it also opens a closed panel on Code). The choice is remembered by the window. Opening a diff tab, a tab shortcut (⌥⌘1–3) or "What changed" switches to Code by itself; closing the panel and reopening it keeps the last view.
 
-The Pond panel, top to bottom, is soft cards on `surface` with no borders and no mono chips; a section with nothing to show is left out, never an empty heading:
+**Pond tab, dashboard and Thread tab (owner 2026-11-16).** One rule: the pond **dashboard** (the centre page, Pond overview) is where a pond is *managed*; the **Pond tab** is ambient awareness of the pond while you work; the **Thread tab** covers the one thread open in the centre. The right zone's tabs run **Thread · Pond · Code**, and Thread is selected when a chat opens (a fresh or reset layout, and an older save that was still the untouched default; any other saved arrangement keeps its own selection, and an old save gains Thread in front of Pond). All of it is soft cards on `surface`, no borders, no mono chips; a section with nothing to show is left out, never an empty heading. `Thread` uses a speech-bubble symbol (the closest SF symbol to Lucide message-square) in the tab strip and the Window menu; it has no shortcut.
 
-- **Who's here.** The Flock in this pond: you (a coloured initial) and the open thread's agent (its own mark and model). Only people the Mac knows are shown; nobody is invented. When the project is in a pond (the host's pond routes answer) it lists the real Flock instead: online dot, "Typing" or "Viewing <thread>", role and Nest, then the open thread's agent.
-- **This thread.** Who started it, the nest it runs on ("This Mac"), agent and model, how long it has worked or when it finished, and its state mark.
-- **Needs you.** Every question or approval waiting in this pond, newest first. The open thread's own card answers inline with the same decision, question and approval cards as the chat; another thread's waiting shows as a row that opens it. An owner's join requests head the list, each with Approve and Deny.
-- **Other threads in this pond.** The pond's other threads, newest first, with their marks; a click opens one in the centre.
-- **Ripples.** Recent activity as short sentences with a relative time, newest first, at most 20: a thread started, finished, failed or needs you, a pull request opened or merged, files changed, and the pond's own Ripples (who started, joined, finished). Only what Squeak already knows, and nothing without a time.
-- **What changed.** One plain line ("Changed 4 files, +120 −30"); it opens the Code view on Changes.
+The **Pond tab** is a compact, live glance at the pond of the thread on screen (else the open pond), decided in `PondGlance` (SqueakMacCore, tested):
+
+- **People.** Members with avatars (online dot, a duck ring on you) and one line of what each is doing ("Working on X", "2 threads working", "1 thread needs them", "Online", "Last seen 3 h ago"), most active first: more working threads, then more waiting, then online, then you, then name.
+- **Now.** Threads working or waiting on someone in this pond, waiting first then working (newest first inside each), each with whose it is and the state mark (the working glyph, the waiting mark); a click opens the thread (in the centre if it is a chat on this Mac, else the pond's thread page).
+- **Recent.** The last six events as short sentences with a relative time ("X started …", "Y finished …"), from the pond's own ripples and this Mac's chats the pond does not list.
+- **Footer.** "Invite" and "Open dashboard".
+
+It carries nothing about the current thread (that is the Thread tab) and no link to Code. **The Pond tab never docks in the centre:** dragging it onto the centre strip opens the pond dashboard instead (`DragScope.opensPondDashboard`), the "+" menu of the centre does not offer it, and an older save with it in the centre moves it to the right zone.
+
+The **Thread tab** shows the thread open in the centre, live, decided in `ThreadGlance` (SqueakMacCore, tested); with no thread on screen a quiet "Open a thread…" line:
+
+- **Header and Needs you.** Title, state mark, "Working · Claude · Opus 5"; while the thread waits on you, its question, approval or plan card answers inline (moved here from the old Pond panel), with "Tell it to stop retrying" for a loop.
+- **Who.** Owner, people who took part, and who is watching now (typing says so), from the pond's thread and presence; a thread no pond holds is just you.
+- **Running.** Ducklings and background commands with their status, and the queued messages (at most three shown).
+- **Changed.** The files this thread changed (six, "+N more in Code"), each row opening that file's diff in the Code panel.
+- **Controls.** Approvals (the composer's mode chip), the model menu, the private switch for your own shared thread, and "Share with <pond>" for a Squeak chat the pond does not hold yet.
 
 The Code view is the inspector as before: the upper All files, Changes and Review tabs and the lower Setup, Run and Terminal part (⌘J).
 

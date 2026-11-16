@@ -1,11 +1,12 @@
 import Foundation
 
-/// A panel the person can dock: the Pond, Code and Terminal views. Chats and files are not panels; they are always in the centre.
+/// A panel the person can dock: the Thread, Pond, Code and Terminal views. Chats and files are not panels; they are always in the centre.
 public enum DockPanel: String, Codable, CaseIterable, Sendable {
-    case pond, code, terminal
+    case thread, pond, code, terminal
 
     public var title: String {
         switch self {
+        case .thread: return "Thread"
         case .pond: return "Pond"
         case .code: return "Code"
         case .terminal: return "Terminal"
@@ -14,6 +15,7 @@ public enum DockPanel: String, Codable, CaseIterable, Sendable {
 
     public var symbol: String {
         switch self {
+        case .thread: return "bubble.left"
         case .pond: return "person.2"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .terminal: return "terminal"
@@ -84,9 +86,9 @@ public struct DockLayout: Codable, Equatable, Sendable {
     public static let rightSizeRange: ClosedRange<Double> = PaneWidths.inspectorRange
     public static let bottomSizeRange: ClosedRange<Double> = TerminalPanelSizing.minHeight...1600
 
-    /// Today's layout: Pond and Code on the right, the Terminal collapsed at the bottom.
+    /// Today's layout: Thread, Pond and Code on the right (Thread selected), the Terminal collapsed at the bottom.
     public static let standard = DockLayout(
-        right: DockZoneState(panels: [.pond, .code], selected: .pond),
+        right: DockZoneState(panels: [.thread, .pond, .code], selected: .thread),
         bottom: DockZoneState(panels: [.terminal], selected: .terminal, collapsed: true))
 
     /// The first layout, built from the old `@AppStorage` values.
@@ -151,6 +153,8 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     /// Moves a panel to `zone`, before `before` (nil = at the end); within a zone this reorders. It becomes that zone's selection.
     public mutating func move(_ panel: DockPanel, to zone: DockZone, before: DockPanel? = nil) {
+        // The Pond tab is ambient awareness beside the work; managing a pond is the dashboard, which is a page, not a tab.
+        guard !(panel == .pond && zone == .centre) else { return }
         let old = self.zone(of: panel)
         let oldIndex = old.flatMap { self[$0].panels.firstIndex(of: panel) }
         detach(panel)
@@ -238,6 +242,11 @@ public struct DockLayout: Codable, Equatable, Sendable {
             for p in out[z].panels where seen.insert(p).inserted { kept.append(p) }
             out[z].panels = kept
         }
+        // The Pond panel never lives in the centre (an older save may have it there): it goes to the right zone.
+        if let i = out.centre.panels.firstIndex(of: .pond) {
+            out.centre.panels.remove(at: i)
+            out.right.panels.append(.pond)
+        }
         var hid: [DockPanel] = []
         for p in out.hidden where seen.insert(p).inserted { hid.append(p) }
         for p in DockPanel.allCases where seen.insert(p).inserted { hid.append(p) }
@@ -268,7 +277,19 @@ public struct DockLayout: Codable, Equatable, Sendable {
         hidden = raw.compactMap(DockPanel.init(rawValue:))
         sidebarCollapsed = (try? c.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed)) ?? false
         sidebarWidth = (try? c.decodeIfPresent(Double.self, forKey: .sidebarWidth)) ?? nil
+        gainThreadIfMissing()
         self = normalized()
+    }
+
+    /// A save from before the Thread tab: it joins the right zone in its default place (before Pond). A person who had
+    /// not changed the old default (Pond and Code on the right, Pond showing, nothing else moved) also gets Thread
+    /// showing, as a fresh install does; any other arrangement keeps its own selection.
+    private mutating func gainThreadIfMissing() {
+        guard zone(of: .thread) == nil, !hidden.contains(.thread) else { return }
+        guard !right.panels.isEmpty else { hidden.append(.thread); return }
+        let wasDefault = centre.panels.isEmpty && right.panels == [.pond, .code] && right.selected == .pond
+        right.panels.insert(.thread, at: right.panels.firstIndex(of: .pond) ?? 0)
+        if wasDefault { right.selected = .thread }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -322,10 +343,10 @@ public struct DockWorkspaces: Codable, Equatable, Sendable {
         DockWorkspace(id: "default", name: "Default", builtIn: true, saved: .standard),
         DockWorkspace(id: "terminal", name: "Terminal focus", builtIn: true, saved: DockLayout(
             centre: DockZoneState(panels: [.terminal], selected: .terminal),
-            right: DockZoneState(panels: [.pond, .code], selected: .pond))),
+            right: DockZoneState(panels: [.thread, .pond, .code], selected: .thread))),
         DockWorkspace(id: "review", name: "Review", builtIn: true, saved: DockLayout(
             centre: DockZoneState(panels: [.code], selected: .code),
-            right: DockZoneState(panels: [.pond], selected: .pond),
+            right: DockZoneState(panels: [.thread, .pond], selected: .thread),
             bottom: DockZoneState(panels: [.terminal], selected: .terminal, collapsed: true))),
     ]
 

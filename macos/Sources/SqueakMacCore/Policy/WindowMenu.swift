@@ -44,7 +44,7 @@ public enum WindowMenu {
         switch panel {
         case .code: return .toggleCode
         case .terminal: return .toggleTerminal
-        case .pond: return nil
+        case .pond, .thread: return nil
         }
     }
 

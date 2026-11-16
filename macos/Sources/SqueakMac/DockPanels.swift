@@ -4,7 +4,7 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The three dockable panels as views that fill whatever zone they are put in: the Pond, the Code tools (Files,
+// The dockable panels as views that fill whatever zone they are put in: the Thread, the Pond, the Code tools (Files,
 // Changes, Review) and the Terminal. None of them knows where it sits; the zone draws the tab and the frame.
 
 /// The panel a zone shows, for the chat `session`.
@@ -14,30 +14,10 @@ struct DockPanelContent: View {
 
     var body: some View {
         switch panel {
-        case .pond: PondPanelView(session: session)
+        case .thread: ThreadPanel(session: session)
+        case .pond: PondPanel(session: session)
         case .code: CodePanelView(session: session)
         case .terminal: TerminalPanelView(session: session)
-        }
-    }
-}
-
-struct PondPanelView: View {
-    let session: HostSession?
-    @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
-
-    var body: some View {
-        if let session {
-            PondPanel(session: session, showChanges: {
-                inspectorTabRaw = InspectorTab.changes.rawValue
-                DockStore.shared.update { $0.show(.code) }
-            })
-            .heresayPrivate().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            VStack {
-                Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }
