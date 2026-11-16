@@ -104,7 +104,7 @@ let pad: CGFloat = 6, gifGap: CGFloat = 8
             Text("+").font(.system(size: 16)).foregroundStyle(d.ink.opacity(0.5))
         }.padding(.leading, 10).padding(.trailing, 12).frame(width: 280, height: 38, alignment: .leading)
         let chat = HStack(spacing: 10) {
-            TideFrame(color: d.working, height: 13, grid: .mark, time: t, seed: 222).frame(width: 20, height: 16)
+            TideFrame(color: d.working, height: 11.5, grid: .mark, time: t, seed: 222).frame(width: 20, height: 16, alignment: .trailing)
             Text("Hong Kong").font(.system(size: 14)).foregroundStyle(d.ink).lineLimit(1)
             Spacer(minLength: 0)
             HStack(spacing: 5) {
