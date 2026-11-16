@@ -166,6 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         ActivationPolicyController.shared.start()
         let model = AppModel.shared
+        // Read before `model.start()`, whose update restore consumes the marker.
+        let updateMarker = UpdateRestoreMarker.decode(UserDefaults.standard.data(forKey: UpdateRestoreMarker.defaultsKey))?
+            .usable(currentVersion: AppModel.appVersion)
         model.start()
         MenuBarController.shared.start(model: model)
         FloatingDuckController.shared.start(model: model)
@@ -182,7 +185,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await CaptureRunner.run(prefix: prefix, model: model) }
         } else {
             OnboardingController.shared.showIfNeeded()
+            // Started by the person: open the main window too. At login (or while Welcome is up) stay in the menu bar.
+            let opens = LaunchWindowPolicy.opensWindow(
+                source: Self.launchSource(), captureOrDemo: model.captureMode || model.demoMode,
+                welcomeShowing: OnboardingController.shared.isShowing, updateRelaunchWindow: updateMarker?.window)
+            if opens { Task { await Self.openMainWindow(model) } }
         }
+    }
+
+    /// `SMAppService.mainApp` starts the app with an open-application event whose `keyAEPropData` is
+    /// `keyAELaunchedAsLogInItem`; Finder, the Dock, Spotlight, `open` and a direct run carry no such property.
+    static func launchSource() -> LaunchWindowPolicy.Source {
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let prop = event?.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+        return prop == OSType(keyAELaunchedAsLogInItem) ? .loginItem : .user
+    }
+
+    /// The window action is wired by the menu-bar label a moment after launch.
+    static func openMainWindow(_ model: AppModel) async {
+        for _ in 0..<30 where model.openConversationWindow == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        model.showConversationWindow()
+    }
+
+    /// Full screen is remembered: set on entering, cleared on leaving (unless the app is quitting).
+    static var terminating = false
+    static func noteFullScreen(_ on: Bool) {
+        let d = UserDefaults.standard
+        d.set(LaunchWindowPolicy.savedFullScreen(current: on, leavingBecauseAppIsQuitting: terminating,
+                previous: d.bool(forKey: LaunchWindowPolicy.fullScreenKey)), forKey: LaunchWindowPolicy.fullScreenKey)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
@@ -208,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             explicitQuit: intent.explicitQuit, systemQuit: isQuitEvent && QuitPolicy.isSystemQuitReason(reason),
             updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
         UpdateLog.standard.write("quit: decision=\(decision == .quit ? "quit" : "closeWindows") explicit=\(intent.explicitQuit) system=\(isQuitEvent && QuitPolicy.isSystemQuitReason(reason)) updating=\(intent.updating) installPending=\(intent.installPending) userQuit=\(intent.userQuit)")
+        if decision == .quit { Self.terminating = true }
         switch decision {
         case .quit:
             // A quit the person chose (not Sparkle's own) must stay a quit: an update staged to install on it

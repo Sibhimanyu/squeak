@@ -138,7 +138,9 @@ struct ConversationView: View {
                     if showsInspector, chatOpen {
                         VStack(spacing: 0) {
                             DockRightColumn(session: model.selectedSession, width: inspectorW)
-                            if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW) }
+                            if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW)
+                                    .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
+                            }
                         }
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
@@ -291,9 +293,26 @@ private struct ConversationWindowReader: NSViewRepresentable {
                     NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.bg : Tokens.Light.bg)
                 }
             }
-            Task { @MainActor in AppModel.shared.conversationWindow = w }
+            Task { @MainActor in
+                AppModel.shared.conversationWindow = w
+                if let w { Self.restoreFullScreenOnce(w) }
+            }
             observeFullScreen(w)
             observeTitlebar(w)
+        }
+
+        private static var fullScreenRestored = false
+        /// The first time the main window shows in a run, it goes back to full screen if it was in it when the app
+        /// last went down (on its saved display: AppKit puts a new window on the active one).
+        @MainActor static func restoreFullScreenOnce(_ w: NSWindow) {
+            let env = ProcessInfo.processInfo.environment
+            let saved = UserDefaults.standard.bool(forKey: LaunchWindowPolicy.fullScreenKey)
+            guard LaunchWindowPolicy.restoresFullScreen(saved: saved, alreadyRestored: fullScreenRestored,
+                                                        captureOrDemo: env["SQUEAK_MAC_CAPTURE"] != nil || env["SQUEAK_MAC_DEMO"] != nil) else { return }
+            fullScreenRestored = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                if !w.styleMask.contains(.fullScreen) { w.toggleFullScreen(nil) }
+            }
         }
 
         /// Windowed: the system buttons go to an absolute spot (`TitlebarAlignment.windowedButtonOrigin`): the close

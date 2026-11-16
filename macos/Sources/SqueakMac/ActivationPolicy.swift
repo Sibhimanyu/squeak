@@ -50,6 +50,7 @@ final class ActivationPolicyController {
             tokens.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 guard let w = note.object as? NSWindow else { return }
                 MainActor.assumeIsolated {
+                    if Self.isAppWindow(w), w.title == "Squeak" { AppDelegate.noteFullScreen(entering) }
                     if entering { self?.fullScreenWindows.insert(ObjectIdentifier(w)) } else { self?.fullScreenWindows.remove(ObjectIdentifier(w)) }
                 }
                 Task { @MainActor in self?.update(closing: nil) }

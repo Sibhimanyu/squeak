@@ -75,7 +75,7 @@ public enum ThreadArchive {
         archived(sessions).filter { $0.repoName?.lowercased() == project.lowercased() }
     }
 
-    /// The row at the foot of a pond's thread list: nil when nothing is archived there.
+    /// The pond home's Archived section title: nil when nothing is archived there.
     public static func entryTitle(count: Int) -> String? { count > 0 ? "Archived (\(count))" : nil }
 
     /// The sidebar's own entry, always there so people find it: muted, with the count only when something is archived.

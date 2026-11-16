@@ -9,8 +9,8 @@ import UIKit
 
 /// An agent's (or your own) message, set as a document: paragraphs, headings, lists, quotes,
 /// code with a Copy button, and tables as a grid. Agent text is untrusted, so nothing here
-/// opens a link or interprets HTML: a link is underlined words plus its host, and "Copy link"
-/// is the only thing it offers.
+/// interprets HTML. On the Mac an http(s) link (a code span that is one address too) opens in the
+/// browser; elsewhere a link is underlined words plus its host, and "Copy link" is what it offers.
 public struct MessageText: View {
     private let markdown: String
     private let style: MessageStyle

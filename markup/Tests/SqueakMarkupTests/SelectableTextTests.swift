@@ -48,10 +48,34 @@ struct SelectableTextTests {
         #expect(a.string == "See ~/a.log and nope.txt")
     }
 
-    @Test func linksAreNeverOpenableButKeepTheirDestinationForCopy() {
+    @Test func markdownLinkOpensItsWebAddressAndKeepsItForCopy() {
         let a = build("[docs](https://example.com/x)")
-        #expect(a.attribute(.link, at: 0, effectiveRange: nil) == nil)
+        #expect((a.attribute(.link, at: 0, effectiveRange: nil) as? URL)?.absoluteString == "https://example.com/x")
         #expect(a.attribute(SelectableText.destinationKey, at: 0, effectiveRange: nil) as? String == "https://example.com/x")
+        #expect(build("[x](file:///etc/passwd)").attribute(.link, at: 0, effectiveRange: nil) == nil)
+    }
+
+    @Test func aCodeSpanThatIsOneURLIsALink() {
+        let a = build("See `https://github.com/Sibhimanyu/greenroom/releases/tag/v1.5.0` now")
+        let url = "https://github.com/Sibhimanyu/greenroom/releases/tag/v1.5.0"
+        #expect((a.attribute(.link, at: 6, effectiveRange: nil) as? URL)?.absoluteString == url)
+        #expect(a.attribute(SelectableText.destinationKey, at: 6, effectiveRange: nil) as? String == url)
+        #expect(a.string == "See \(url) now")
+    }
+
+    @Test func aCodeSpanThatIsNotJustAURLStaysCode() {
+        for md in ["`npm run dev`", "`curl https://a.com/x`", "`ftp://a.com/x`", "`see https://a.com`", "`foo.bar`"] {
+            let a = build(md)
+            var linked = false
+            a.enumerateAttribute(.link, in: NSRange(location: 0, length: a.length)) { v, _, _ in if v != nil { linked = true } }
+            #expect(!linked, "\(md)")
+        }
+    }
+
+    @Test func aBareURLInTextIsALink() {
+        let a = build("Open https://example.com/x now")
+        #expect((a.attribute(.link, at: 6, effectiveRange: nil) as? URL)?.absoluteString == "https://example.com/x")
+        #expect(a.attribute(.link, at: 0, effectiveRange: nil) == nil)
     }
 
     @Test func listItemsHangTheirWrappedLines() {

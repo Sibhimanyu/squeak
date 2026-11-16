@@ -332,7 +332,7 @@ struct PondHomeView: View {
                                     if model.isRenaming(s) { InlineTitleEditor(session: s, font: Typo.body) }
                                     else { Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
                                     Spacer(minLength: 0)
-                                    if let at = s.archivedAt { Text(at, style: .relative).font(Typo.meta).foregroundStyle(Theme.subtle) }
+                                    if let at = s.archivedAt { Text(verbatim: PickerRows.age(at)).font(Typo.meta).foregroundStyle(Theme.subtle) }
                                 }
                                 .padding(.horizontal, 12).frame(height: 36).contentShape(Rectangle())
                             }

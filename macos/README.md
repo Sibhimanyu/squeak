@@ -172,15 +172,19 @@ on screen: written and built only, no window was opened.
 
 ### Dock icon and menus
 
-Squeak launches as a menu-bar accessory (`LSUIElement`). While the conversation
+Squeak launches as a menu-bar accessory (`LSUIElement`) and, when a person starts it (Finder, Dock, Spotlight, `open`, a
+direct run), also opens the conversation window (`LaunchWindowPolicy`); started at login (the open-application event's
+`keyAELaunchedAsLogInItem`), in capture/demo runs or with Welcome up, it stays in the menu bar; after an update it
+reopens the window only if it was open. A window that was in full screen when the app went down reopens in full screen.
+While the conversation
 window, Settings or Welcome is open, `ActivationPolicyController` switches the
 app to `.regular` (Dock icon, Cmd-Tab, its own menu bar: app menu with About,
 Check for Updates…, Settings…, Hide, Quit; Edit; Sessions; Window; Help) and
 activates it. When the last of those windows closes it goes back to `.accessory`.
 The popover and the quick composer are panels and never trigger it. A reopen
 with no window open (Spotlight, Finder, or the activation a clicked notification
-causes) shows the quick composer, never the conversation; the reopen is scheduled,
-not shown at once, so a clicked notification's own open wins over it. "Open Squeak" in the
+causes) opens the conversation window; the reopen is scheduled, not shown at once, so a
+clicked notification's own open (its chat's composer) wins over it. "Open Squeak" in the
 popover and menus opens the conversation. Nothing here quits the app.
 
 ### Menu-bar panel
