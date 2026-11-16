@@ -344,7 +344,7 @@ struct SessionRow: View {
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
                 .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
-            if session.isConductor { ConductorMarker() }
+            if model.snapshot?.showsConductorMark(for: session) == true { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
         }
@@ -363,7 +363,7 @@ struct SessionRow: View {
                 Text(inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session))
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
                 Spacer(minLength: 4)
-                if session.isConductor, let open = session.open { OpenTag(open: open) }
+                if model.snapshot?.showsConductorMark(for: session) == true, let open = session.open { OpenTag(open: open) }
             }
             .padding(.top, 2)
         }

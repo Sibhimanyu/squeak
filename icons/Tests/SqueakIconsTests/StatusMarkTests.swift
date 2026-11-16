@@ -2,9 +2,9 @@ import XCTest
 @testable import SqueakIcons
 
 final class StatusMarkTests: XCTestCase {
-    func testDotSizes() {
-        XCTAssertEqual(StatusMark.dotFraction(.waiting(count: nil)), 0.40)
-        XCTAssertEqual(StatusMark.dotFraction(.unread), 0.30)
+    func testNoDots() {
+        XCTAssertEqual(StatusMark.glyphFraction(.waiting(count: nil)), 0.85)
+        XCTAssertEqual(StatusMark.glyphFraction(.unread), 0)
     }
 }
 

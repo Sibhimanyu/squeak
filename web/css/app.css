@@ -223,7 +223,7 @@ button {
   gap: 8px;
 }
 .row .title {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 15px;
   line-height: 20px;
   flex: 1;
@@ -786,6 +786,9 @@ button {
 }
 .dot.d-done {
   background: var(--sq-done);
+}
+.row .title.unread {
+  font-weight: 700;
 }
 .dot.pulse {
   animation: sq-pulse 1.6s ease-in-out infinite;

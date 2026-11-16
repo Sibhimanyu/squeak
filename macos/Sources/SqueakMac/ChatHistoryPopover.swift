@@ -108,30 +108,32 @@ private struct ChatHistoryRowView: View {
     let row: ChatHistoryRow
     let selected: Bool
 
-    private var dot: Color? {
+    /// State as a glyph, never a dot: working the tide, waiting the triangle, failed the circle-x; finished is the
+    /// title's weight (see `titleWeight`).
+    @ViewBuilder private var dotMark: some View {
         switch row.state {
-        case .working: Theme.working
-        case .blocked: Theme.warning
-        case .error: Theme.negative
-        case .finished: Theme.done
-        default: nil
+        case .working: TideGlyph(color: Theme.working, height: 5)
+        case .blocked: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 14)
+        case .error: StatusMark(kind: .failed, color: Theme.negative, size: 14)
+        default: Color.clear
         }
     }
+    private var titleWeight: Font.Weight { row.state == .finished ? .semibold : .medium }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
-                Circle().fill(dot ?? .clear).frame(width: 7, height: 7)
-                Text(verbatim: row.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                dotMark.frame(width: 14, height: 14)
+                Text(verbatim: row.title).font(.system(size: 14, weight: titleWeight)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 8)
                 if let at = row.lastActivityAt {
                     Text(verbatim: ShortRelativeTime.format(at)).font(.system(size: 12)).foregroundStyle(Theme.muted)
                 }
             }
             Text(verbatim: [row.place, SessionText.agentName(row.agent)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1).padding(.leading, 15)
+                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1).padding(.leading, 22)
             if let snippet = row.snippet {
-                Text(highlighted(snippet)).font(.system(size: 12)).foregroundStyle(Theme.subtle).lineLimit(1).padding(.leading, 15)
+                Text(highlighted(snippet)).font(.system(size: 12)).foregroundStyle(Theme.subtle).lineLimit(1).padding(.leading, 22)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 6)

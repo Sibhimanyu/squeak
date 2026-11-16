@@ -67,7 +67,7 @@ struct AgentAvatar: View {
     let session: PhoneSnapshot.Session
     var size: CGFloat = 28
     /// Conductor's marker, at the top-right corner; the rows draw `ConductorMarker` after the title instead.
-    var conductorBadge = true
+    var conductorBadge = false
 
     static func asset(_ agent: String) -> String? {
         switch agent.lowercased() {
@@ -88,7 +88,7 @@ struct AgentAvatar: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if conductorBadge, session.isConductor {
+                if conductorBadge, session.isConductor {  // callers pass it only when the add-on is on
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: ThreadDuck.badgeSize(duck: size)))
                         .foregroundStyle(Theme.muted)
@@ -175,7 +175,7 @@ struct ConductorMarker: View {
 
 struct UnreadMark: View {
     var body: some View {
-        Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
+        Color.clear.frame(width: 8, height: 8).accessibilityHidden(true)  // unread is the title's weight, never a dot
     }
 }
 

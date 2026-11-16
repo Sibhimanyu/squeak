@@ -146,8 +146,8 @@ function chatRow(session, env) {
         onclick: () => env.actions.select(session.key),
       },
       sessionMark(st.tone, { label: st.text, approval: session.state === "awaiting_approval" }),
-      h("span", { class: loud ? "sb-title loud" : "sb-title" }, displayTitle(session)),
-      isUnread(session, env.seen) ? h("span", { class: "dot d-done", role: "img", "aria-label": "New reply" }) : null,
+      // Unread is the title's weight, never a dot (DESIGN.md §8.1).
+      h("span", { class: loud || isUnread(session, env.seen) ? "sb-title loud" : "sb-title" }, displayTitle(session)),
       h("span", { class: "sb-age" }, age(session.lastActivityAt)),
     ),
   );
