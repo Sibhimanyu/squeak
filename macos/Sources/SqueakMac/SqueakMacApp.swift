@@ -86,26 +86,17 @@ struct SqueakCommands: Commands {
             Button("Check for updates…") { model.updater.checkForUpdates(reveal: true) }
                 .disabled(!model.updater.canCheck && !model.updater.isBusy)
         }
-        CommandGroup(replacing: .sidebar) {
-            Button("Toggle Sidebar") {
-                NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil)
-            }
-            .keyboardShortcut("b", modifiers: .command)
-        }
-        // Keys and names come from the registry (`registryShortcut`), the list the hover hints and the sheet read.
-        CommandGroup(after: .sidebar) {
-            Button("Toggle Inspector") { NotificationCenter.default.post(name: .squeakToggleInspector, object: nil) }
-                .registryShortcut(.toggleInspector)
-            Button("Toggle Code View") { NotificationCenter.default.post(name: .squeakToggleCode, object: nil) }
-                .registryShortcut(.toggleCode)
-            // View › Enter Full Screen (⌃⌘F) is the system's own item for a window that is `.fullScreenPrimary`
-            // (ActivationPolicyController.makeOrdinary); a second one here would answer the same chord twice.
-            Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
-                .registryShortcut(.toggleTerminal)
-            Menu("Workspace") { DockWorkspaceMenuItems() }
-        }
+        // Sidebar, Inspector and every panel now live in Window (Photoshop-style); View keeps the system's own items.
+        CommandGroup(replacing: .sidebar) {}
         // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
         // full screen; Close Window is added beside them because ⌘W closes the open tab first.
+        // Window lists every panel with a checkmark when open (choose to open or close), then the Workspace submenu.
+        CommandGroup(before: .windowList) {
+            WindowPanelMenuItems()
+            Divider()
+            Menu("Workspace") { DockWorkspaceMenuItems() }
+            Divider()
+        }
         CommandGroup(after: .windowArrangement) {
             Button("Close Window") { (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil) }
                 .registryShortcut(.closeWindow)

@@ -353,6 +353,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         .animation(Motion.standard, value: shownFile)
         .animation(Motion.standard, value: shownTerminal)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .contextMenu { WindowPanelMenuItems(includeReset: true) }
     }
 }
 
@@ -529,10 +530,41 @@ struct DockWorkspaceMenuItems: View {
             }
         }
         Divider()
-        Button("Reset “\(active.name)”") { dock.edit { $0.resetActive() } }
-        Button("Save Workspace As…") { DockPrompts.saveAs() }
+        Button(WindowMenu.resetTitle(workspace: active.name)) { dock.edit { $0.resetActive() } }
+        Button(WindowMenu.newWorkspaceTitle) { DockPrompts.saveAs() }
         Button("Update “\(active.name)”") { dock.edit { $0.overwriteActive() } }.disabled(active.builtIn)
-        Button("Delete Workspace…") { DockPrompts.confirmDelete() }.disabled(active.builtIn)
+        Button(WindowMenu.deleteWorkspaceTitle) { DockPrompts.confirmDelete() }.disabled(active.builtIn)
+    }
+}
+
+/// Window menu's panel list (also a tab strip's right-click menu): a checkmark when open, a choice opens or closes it.
+struct WindowPanelMenuItems: View {
+    var includeReset = false
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let dock = DockStore.shared
+        ForEach(WindowMenu.items(layout: dock.layout, terminalShowing: dock.isTerminalShowing)) { item in
+            Button {
+                switch WindowMenu.perform(item.id, on: dock.layout, terminalShowing: dock.isTerminalShowing) {
+                case .layout(let l): dock.update { $0 = l }
+                case .toggleTerminal: TerminalActions.toggle(model)
+                }
+            } label: {
+                if item.checked { Label(item.title, systemImage: "checkmark") } else { Text(verbatim: item.title) }
+            }
+            .registryShortcutIfAny(item.shortcut)
+        }
+        if includeReset {
+            Divider()
+            Button(WindowMenu.resetTitle(workspace: dock.workspaces.active.name)) { dock.edit { $0.resetActive() } }
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder func registryShortcutIfAny(_ id: ShortcutID?) -> some View {
+        if let id { registryShortcut(id) } else { self }
     }
 }
 

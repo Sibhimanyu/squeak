@@ -69,9 +69,14 @@ public struct DockLayout: Codable, Equatable, Sendable {
     public var right: DockZoneState
     public var bottom: DockZoneState
     public var hidden: [DockPanel]
+    /// The sidebar is part of the arrangement, so each workspace remembers it: folded or not, and its dragged width (nil = default).
+    public var sidebarCollapsed: Bool
+    public var sidebarWidth: Double?
 
-    public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = []) {
+    public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = [],
+                sidebarCollapsed: Bool = false, sidebarWidth: Double? = nil) {
         self.centre = centre; self.right = right; self.bottom = bottom; self.hidden = hidden
+        self.sidebarCollapsed = sidebarCollapsed; self.sidebarWidth = sidebarWidth
     }
 
     public static let rightSizeRange: ClosedRange<Double> = PaneWidths.inspectorRange
@@ -200,6 +205,10 @@ public struct DockLayout: Codable, Equatable, Sendable {
         self[zone].size = Self.clampedSize(size, zone == .right ? Self.rightSizeRange : Self.bottomSizeRange)
     }
 
+    public mutating func setSidebarWidth(_ width: Double?) {
+        sidebarWidth = Self.clampedSize(width, PaneWidths.sidebarRange)
+    }
+
     public mutating func setCollapsed(_ collapsed: Bool, for zone: DockZone) {
         guard zone != .centre else { return }
         self[zone].collapsed = collapsed
@@ -230,10 +239,11 @@ public struct DockLayout: Codable, Equatable, Sendable {
         out.centre.collapsed = false
         out.right.size = Self.clampedSize(out.right.size, Self.rightSizeRange)
         out.bottom.size = Self.clampedSize(out.bottom.size, Self.bottomSizeRange)
+        out.sidebarWidth = Self.clampedSize(out.sidebarWidth, PaneWidths.sidebarRange)
         return out
     }
 
-    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden }
+    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden, sidebarCollapsed, sidebarWidth }
 
     /// Lenient, then repaired: a hand-edited, partial or newer layout never fails and never loses a panel.
     public init(from decoder: Decoder) throws {
@@ -243,7 +253,19 @@ public struct DockLayout: Codable, Equatable, Sendable {
         bottom = (try? c.decodeIfPresent(DockZoneState.self, forKey: .bottom)) ?? DockZoneState()
         let raw = (try? c.decodeIfPresent([String].self, forKey: .hidden)) ?? []
         hidden = raw.compactMap(DockPanel.init(rawValue:))
+        sidebarCollapsed = (try? c.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed)) ?? false
+        sidebarWidth = (try? c.decodeIfPresent(Double.self, forKey: .sidebarWidth)) ?? nil
         self = normalized()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(centre, forKey: .centre)
+        try c.encode(right, forKey: .right)
+        try c.encode(bottom, forKey: .bottom)
+        try c.encode(hidden, forKey: .hidden)
+        try c.encode(sidebarCollapsed, forKey: .sidebarCollapsed)
+        try c.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
     }
 }
 

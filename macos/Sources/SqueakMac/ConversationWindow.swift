@@ -13,13 +13,20 @@ struct ConversationView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The person's own choices, kept across launches. The inspector starts closed (§8.10).
-    @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
+    /// The sidebar's fold and width live in the dock layout, so each workspace remembers them (and Reset restores them).
+    private var sidebarHiddenSaved: Bool {
+        get { DockStore.shared.layout.sidebarCollapsed }
+        nonmutating set { DockStore.shared.update { $0.sidebarCollapsed = newValue } }
+    }
     /// Where the Pond, Code and Terminal panels sit (DockLayout); the old inspector/terminal keys are read once, to migrate.
     private var dock: DockStore { DockStore.shared }
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
     /// "not dragged yet": it takes its share of the window (30%).
-    @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
+    private var sidebarWidthSaved: Double { DockStore.shared.layout.sidebarWidth ?? PaneWidths.sidebarDefault }
+    private var sidebarWidthBinding: Binding<Double> {
+        Binding(get: { sidebarWidthSaved }, set: { v in DockStore.shared.update { $0.setSidebarWidth(v) } })
+    }
     @State private var windowWidth: Double = 1440
     @State private var columnHeight: Double = 800
     /// Zen mode (⇧⌘.): both side panes away; what was open comes back with the same key.
@@ -35,18 +42,17 @@ struct ConversationView: View {
 
     private var sidebarHidden: Bool { captureHidden || sidebarHiddenSaved }
 
-    private struct ZenState { var sidebarHidden: Bool }
+    private struct ZenState {}
 
     private func toggleZen() {
         if let r = zenRestore {
-            sidebarHiddenSaved = r.sidebarHidden
+            _ = r
             if let saved = zenLayout { dock.update { $0 = saved } }
             zenRestore = nil
             zenLayout = nil
         } else {
-            zenRestore = ZenState(sidebarHidden: sidebarHiddenSaved)
+            zenRestore = ZenState()
             zenLayout = dock.layout
-            sidebarHiddenSaved = true
             dock.update { $0 = $0.zen() }
         }
     }
@@ -111,7 +117,7 @@ struct ConversationView: View {
                         WorkbenchSidebar(width: sidebarW)
                             .overlay(alignment: .trailing) {
                                 PaneResizeHandle(
-                                    edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                    edge: .trailing, width: sidebarWidthBinding, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
                                     window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
                             }
                             .transition(Motion.morph(entering: false))
@@ -205,7 +211,6 @@ struct ConversationView: View {
             Color.clear.onAppear {
                 windowWidth = geo.size.width
                 // A saved width below the sidebar's minimum (an older build, a hand edit) is brought back on load.
-                sidebarWidthSaved = PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault)
             }.onChange(of: geo.size.width) { _, w in windowWidth = w }
         })
         .modifier(WindowStyling())

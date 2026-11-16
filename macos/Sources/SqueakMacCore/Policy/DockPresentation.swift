@@ -69,6 +69,7 @@ public extension DockLayout {
         var l = self
         l.setCollapsed(true, for: .right)
         l.setCollapsed(true, for: .bottom)
+        l.sidebarCollapsed = true
         return l
     }
 
@@ -83,6 +84,7 @@ public extension DockLayout {
 @MainActor @Observable
 public final class DockStore {
     public static let defaultsKey = "dockWorkspaces"
+    static let sidebarMigratedKey = "dockSidebarMigrated"
     public static let shared = DockStore()
 
     public private(set) var workspaces: DockWorkspaces
@@ -108,12 +110,29 @@ public final class DockStore {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.defaultsKey), let saved = try? JSONDecoder().decode(DockWorkspaces.self, from: data) {
             workspaces = saved
+            // The sidebar joined the layout later: carry the old global choice into every workspace once.
+            if !defaults.bool(forKey: Self.sidebarMigratedKey) {
+                defaults.set(true, forKey: Self.sidebarMigratedKey)
+                let collapsed = defaults.bool(forKey: "sidebarCollapsed")
+                let width = defaults.object(forKey: "sidebarWidth") != nil ? defaults.double(forKey: "sidebarWidth") : nil
+                for i in workspaces.workspaces.indices {
+                    for keyPath in [\DockWorkspace.current, \DockWorkspace.saved] {
+                        workspaces.workspaces[i][keyPath: keyPath].sidebarCollapsed = collapsed
+                        workspaces.workspaces[i][keyPath: keyPath].setSidebarWidth(width)
+                    }
+                }
+                save()
+            }
         } else {
             let layout = DockLayout.migrated(
                 codeView: defaults.bool(forKey: "inspectorCodeView"), terminalOpen: defaults.bool(forKey: "terminalOpen"),
                 inspectorOpen: defaults.bool(forKey: "inspectorOpen"), inspectorWidth: defaults.double(forKey: "inspectorWidth"),
                 terminalHeight: defaults.double(forKey: "terminalPanelHeight"))
-            workspaces = .initial(migratedFrom: layout)
+            var l = layout
+            l.sidebarCollapsed = defaults.bool(forKey: "sidebarCollapsed")
+            if defaults.object(forKey: "sidebarWidth") != nil { l.setSidebarWidth(defaults.double(forKey: "sidebarWidth")) }
+            defaults.set(true, forKey: Self.sidebarMigratedKey)
+            workspaces = .initial(migratedFrom: l)
         }
     }
 

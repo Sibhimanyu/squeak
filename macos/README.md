@@ -484,3 +484,11 @@ own on an older build gets the new version copied beside it, the `current` symli
 `launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
 (remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.
 The daemon starts without a `.env` (Telegram off), so the install needs no setup first; channels are set up in Settings.
+
+## Window menu and workspaces
+
+Window lists Sidebar, Inspector and every panel (Pond, Code, Terminal) with a checkmark when open and its shortcut
+beside it; choosing one opens it (to its home zone) or closes it (`WindowMenu`, pure, in SqueakMacCore). Window ›
+Workspace holds the saved workspaces, "Reset <Name>", "New Workspace…", Update and "Delete Workspace…". Right-clicking
+any tab strip shows the same panel list plus Reset. A workspace remembers the live layout (panels, order, selection,
+zone sizes and folds, and now the sidebar's fold and width) and writes it on every change; Reset puts it back as saved.
