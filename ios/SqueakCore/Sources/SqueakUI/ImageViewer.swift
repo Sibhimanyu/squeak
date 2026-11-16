@@ -1,4 +1,5 @@
 #if os(iOS)
+import SqueakIcons
 import SwiftUI
 import UIKit
 
@@ -71,7 +72,7 @@ struct ImageViewer: View {
             }
             .ignoresSafeArea()
         case .loading:
-            GlyphLoader(color: .white).frame(maxWidth: .infinity, maxHeight: .infinity)
+            TideGlyph(color: .white, height: 10).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Loading")
         case let .failed(reason, retry):
             Button(action: retry) {

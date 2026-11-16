@@ -1,4 +1,5 @@
 #if os(iOS)
+import SqueakIcons
 import SwiftUI
 
 /// A neutral content placeholder carrying the same faint glyph field as running rows.
@@ -14,7 +15,6 @@ struct SkeletonBar: View {
         RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
             .frame(maxWidth: .infinity)
             .frame(height: height)
-            .overlay { GlyphLoadingField() }
             .scaleEffect(x: fraction, y: 1, anchor: .leading)
     }
 }
@@ -47,7 +47,7 @@ struct LoadingLine: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            GlyphLoader().controlSize(.small)
+            TideGlyph(color: Theme.ink, height: 8)
             Text(word).font(.footnote).foregroundStyle(Theme.muted)
         }
         .accessibilityElement(children: .combine)

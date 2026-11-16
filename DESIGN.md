@@ -194,13 +194,13 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 
 | State                       | Mark (Lucide where it is an icon)         | Dark                                              | Light      | Motion                     | Telegram glyph | Duck mood         |
 | --------------------------- | ----------------------------------------- | ------------------------------------------------- | ---------- | -------------------------- | -------------- | ----------------- |
-| Working                     | the matrix glyph (`MatrixActivity`, §8.1) | `ink` (running line, sidebar row), `muted` (slot) | same       | flowing matrix, 15 fps     | 🟢             | `working`         |
-| Waiting on background tasks | the same glyph, quiet variant             | `muted`                                           | `muted`    | same frames, a 3 s cycle   | 🟢             | `working`         |
-| Waiting for your approval   | `triangle-alert`                          | `warning`                                         | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Plan ready for your review  | `triangle-alert`                          | `warning`                                         | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Waiting for your answer     | `message-circle-question-mark`            | `muted`                                           | `muted`    | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Failed                      | `circle-x`                                | `negative`                                        | `negative` | none                       | 🟣             | none              |
-| Finished, not opened        | an 8pt dot, the only dot left in a list   | `done`                                            | `done`     | none                       | ✅             | `celebrating` 45s |
+| Working                     | `TideGlyph` (SqueakIcons, §8.1) | `working` | `working` | a flowing water stream, 15 fps | 🟢             | `working`         |
+| Waiting on background tasks | the same glyph, quiet variant | `muted` | `muted` | same frames, a 3 s cycle   | 🟢             | `working`         |
+| Waiting for your approval   | amber dot (`StatusMark`) | `warning` | `warning` | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Plan ready for your review  | amber dot (`StatusMark`) | `warning` | `warning` | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Waiting for your answer     | amber dot (`StatusMark`) | `warning` | `warning` | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Failed                      | `circle-x` (`StatusMark`) | `negative`                                        | `negative` | none                       | 🟣             | none              |
+| Finished, not opened        | a yellow dot (`StatusMark`) | `done`                                            | `done`     | none                       | ✅             | `celebrating` 45s |
 | Finished and read, idle     | none (the age)                            | n/a                                               | n/a        | none                       | ⚪             | `idle` / `asleep` |
 | Offline                     | none on rows                              | `offline`                                         | `offline`  | none                       | n/a            | `offline`         |
 
@@ -522,8 +522,8 @@ duck, whose motion _is_ its mood.
 | `motion-standard` | 200ms     | ease-out             | Panels, sidebar, tab insert/remove, popovers, lists   |
 | `motion-emphasis` | 320ms     | ease-out             | Sheets and onboarding only                            |
 | `motion-none`     | 0         | none                 | Streaming text, timers, scroll-follow, per-frame data |
-| Loader (working)  | 9 × 110ms | stepped, no easing   | The dot-grid loader; frame 5 held under Reduce Motion |
-| Loader (quiet)    | 3s loop   | stepped, 70% opacity | A chat waiting on background tasks                    |
+| Tide (working)    | 15 fps    | continuous, no loop  | `TideGlyph`: flowing water, a seed per instance; held still under Reduce Motion |
+| Tide (quiet)      | 15 fps    | 70% opacity          | A chat waiting on background tasks                    |
 | Pulse (needs you) | 1.0s loop | ease-in-out          | Duck only, never a list                               |
 
 Rules:
@@ -545,7 +545,7 @@ Rules:
 - **Pane toggles (workbench, §8.10):** the sidebar and the inspector open and close at `motion-standard` (200ms ease-out):
   the pane slides on its own edge at a fixed width (the window clips it, so its content never reflows mid-slide) and
   its toggle travels with that edge. Under Reduce Motion the pane crossfades and the toggle jumps.
-- **Reduced motion:** the loader holds frame 5 and the pulses become still marks, the duck stops bobbing and
+- **Reduced motion:** the tide glyph holds one still frame and the pulses become still marks, the duck stops bobbing and
   switches sprite only, panels fade instead of scaling. All state must remain
   readable with zero motion.
 
@@ -560,16 +560,16 @@ reduced-motion and no-JavaScript version that shows the same content still.
 
 ### 8.1 Status mark
 
-The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its thread duck (§6.5, 16pt, the agent as its badge) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
+The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. **The one working glyph is `TideGlyph`** (SqueakIcons, shared by Mac and iPhone): a flowing-water pixel stream of square pixels, wider than tall, in `working` (`muted` or `ink` where a call site was grey: busy buttons, tool rows). Three grids chosen by height: mini 11×4 (up to 12pt tall, rows, buttons, slots), mark 21×6 (14pt tall, about 50pt wide: the running line) and large 29×9. A glyph is fitted to its slot's *width* (about 3.5× its height), so a slot never changes size when the state does. Each instance has its own seed and the flow never repeats; 15 fps; held still under Reduce Motion, while the window is inactive, and on the phone while the Mac is not answering (then `subtle`). Only working views build the timeline. **The only motion in lists is work in progress.** A chat waiting only on background tasks shows the same glyph at 70%. **Every other state is `StatusMark`, still, never a count:** an amber dot (waiting, any reason; the number lives in the tooltip and VoiceOver label), `circle-x` in `negative` (failed), a `done` yellow dot (unread), nothing (idle; a folded row's grey item count is a count, not a state). Each chat tab leads with its thread duck (§6.5, 16pt, the agent as its badge) before the title. Sidebar rows are dense (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
 
 | Mark                                                        | Meaning                     | Tooltip / VoiceOver (exact)                                |
 | ----------------------------------------------------------- | --------------------------- | ---------------------------------------------------------- |
-| the matrix glyph (a still frame under Reduce Motion)        | a turn is running           | "Working"                                                  |
+| `TideGlyph` (still under Reduce Motion)                      | a turn is running           | "Working"                                                  |
 | the same glyph, quiet variant                               | only background tasks run   | "Waiting for background tasks"                             |
-| amber `triangle-alert`                                      | an approval or a plan waits | "Waiting for your approval" / "Plan ready for your review" |
-| grey `message-circle-question-mark`                         | a question waits on you     | "Waiting for your answer"                                  |
-| red `circle-x`                                              | the turn failed             | "Failed"                                                   |
-| yellow dot, in the age's place, until opened                | finished, not opened since  | "Finished, not opened yet"                                 |
+| amber dot (`StatusMark`)                                    | an approval or a plan waits | "Waiting for your approval" / "Plan ready for your review" |
+| amber dot (`StatusMark`)                                    | a question waits on you     | "Waiting for your answer"                                  |
+| red `circle-x` (`StatusMark`)                               | the turn failed             | "Failed"                                                   |
+| yellow dot (`StatusMark`), in the age's place, until opened | finished, not opened since  | "Finished, not opened yet"                                 |
 | none (the age shows)                                        | finished and read, or idle  | VoiceOver reads "last active 12 minutes ago"               |
 | folded project or workspace shows the highest-priority mark | same words, plus the count  | "Waiting for your approval, 2 chats"                       |
 
@@ -592,25 +592,15 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - A row is a button: it opens the session's detail (app) or offers its actions (phone). Hover: `surface-raised`.
 - **Search** (the dock): chips **Waiting**, **Unread**, **Working**, **Failed**, **Claude**, **Codex** and up to five projects; the line is read as filters (the four state words, `claude`, `codex`, `today`, `yesterday`, `this week`, `project:` / `in:`) and free words; legacy synonyms are accepted but not offered. **Waiting** opens the decision cards page, titled "Waiting for you", whose cards carry no state header either (§8.10).
 - The chat header on the phone is title, then `pond · stream · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
-- **Motion means working**: the loader is the only thing in a list that moves.
+- **Motion means working**: `TideGlyph` is the only thing in a list that moves.
 
-- **Stream glyph (owner, 2026-11-15; replaces the three-line waves icon everywhere, Mac and iPhone).** A **3 rows x 6 columns grid of dots**
-  (`StreamDotGlyph`, one reusable `StreamGlyph(state:)` per platform) whose rows each sit on a gentle sine, so the dots trace
-  three wave lines (dot centre: row pitch 1/3 of the glyph, offset up to 26% of a pitch, one period over the 6 columns); dot
-  radius 36% of a column pitch; square footprint of the old icon (Mac 15pt in a 20pt column, 11-14pt in cards and chips; iPhone 22pt
-  in a 24pt column), so rows never shift. **Idle:** static, `muted` at 45% opacity. **Working:** a soft brightness wave
-  travels left to right through the dots in `working`, 30%-100% opacity, one pass per **1.6 s**, a row lagging the one above by
-  0.35 of a column (the wall clock's phase, so glyphs on screen flow in step), 20 ticks a second at most, only the working glyph owns a timeline.
-  **Needs you:** steady `warning`, 100%. **Error:** steady `negative`. **Unread** (Mac): steady `done`. **Reduce Motion** (or an
-  inactive window, or a Mac that stopped answering on the phone): the working glyph holds one frame of the wave, a lit pattern, never the dim idle one.
-  VoiceOver says the name and the rollup ("greenroom, 1 working, 1 needs you").
-  **One rollup decides every mark:** the daemon gives each pond and each stream `activity` (`working`, `needs_you`, `error`,
-  `idle`; needs you beats working beats error beats idle; a chat held by a running duckling counts as working) with `working` and
-  `needsYou` counts (phone view `ponds[]` and `streams[]`; `/state.pondStatus`); the surfaces draw it and decide nothing. A **pond row**
-  shows it in the count's slot (24pt Mac, 34x20pt iPhone): the needs-you count in `warning` wins, then the working matrix, then the
-  error mark; idle keeps the count. A **stream row, a pond page's stream card and the New thread "In:" chip** carry the stream glyph.
+- **Stream and pond marks (owner, 2026-11-16; replace the stream glyph, the dot-grid loader and the matrix glyph everywhere, Mac and iPhone).** A stream, a pond row and a pond
+  page card show the rollup as one mark in a fixed slot (20-24pt Mac, 24-34pt iPhone): working `TideGlyph` in `working`, needs you the amber dot, error `circle-x`
+  in `negative`, unread (Mac) the `done` dot, idle nothing. No count on any mark: a pond row's needs-you number is in its tooltip and VoiceOver label. **One rollup decides every mark:**
+  the daemon gives each pond and each stream `activity` (`working`, `needs_you`, `error`, `idle`; needs you beats working beats error beats idle; a chat held by a running
+  duckling counts as working) with `working` and `needsYou` counts (phone view `ponds[]` and `streams[]`; `/state.pondStatus`); the surfaces draw it and decide nothing.
 
-- **Project chat list and matrix activity** (owner-approved, 2026-11-09):
+- **Project chat list and working glyph** (owner-approved, 2026-11-09):
   This direction supersedes the earlier glyph corrections below. The phone's
   project page uses a flat list with a project icon, large name, actual thread/stream
   counts and project-scoped search. Each compact row retains its agent icon, title,
@@ -710,9 +700,8 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   A project with none keeps the neutral folder tile on its card and nothing on
   a row: the phone never invents a mark. The icons are the person's own, so a
   duck among them is theirs; the mascot rule is about the app's own artwork.
-- **Motion means working.** A chat that is working has the grey dot-grid loader
-  in its trailing slot: Reduce Motion holds frame 5, and
-  a Mac that has stopped answering gets a still one, because then "working"
+- **Motion means working.** A chat that is working has `TideGlyph` (mark grid) in its trailing slot: Reduce Motion holds it still, and
+  a Mac that has stopped answering gets a still one in `subtle`, because then "working"
   is only the last thing it said. Nothing else on Home moves.
 - **A chat can be renamed** from its header, or by pressing and holding its row
   (Rename). It is a signed command: the Mac sets the chat's title in Conductor's
@@ -1574,17 +1563,9 @@ Step by step, each step shippable on its own:
 6. **Telegram becomes one channel among several**, fed by the same state and
    the same card rules.
 
-### Owner correction: iOS glyph parity (2026-11-09)
+### Glyph parity and Tide (2026-11-16, supersedes the 2026-11-09 glyph, legibility and matrix corrections)
 
-The phone uses the Mac's faint moving monospaced glyph field behind running project/chat titles, with sharp foreground text. A compact glyph strip replaces indefinite spinners throughout the phone (sending, loading chats and steps, settings actions, image loading). Determinate progress bars retain their real progress. Only busy/running views instantiate the 12 fps timeline; Reduce Motion and a non-answering Mac hold a static frame. Navigation rows use age and unread title weight rather than waiting/failure glyphs or unread dots; decision and failure content remains inside the chat, with unchanged reply/approval behavior. Static skeleton surfaces carry a faint glyph texture while fetching their content.
-
-### iOS glyph legibility correction (2026-11-09)
-
-Foreground loaders are a crisp three-character `{ / }` strip, at least 30×18pt, with a traveling 40–100% opacity wave (55–85% for the quiet variant). They never reuse the low-alpha background field. Running row fields use 12pt medium glyphs at 20–40% opacity and only 0.2pt blur, keeping labels sharp above them. Reduce Motion and stale Mac state hold a legible static frame. Checked against a native iPhone 17 simulator render, rather than judging visibility only from compilation.
-
-### Matrix activity correction (2026-11-09)
-
-Owner clarification supersedes the literal character treatments: activity is an abstract pixel matrix with falling heads, fading wakes and a crossing current. No letters, digits, punctuation or text drawing. Both apps use SqueakIcons.MatrixActivity so their motion cannot diverge. The compact indicator is a bright 9×5 cell matrix at least 34×20pt; title backgrounds use a softer grid at 6pt pitch. Only running/loading views instantiate the 15 fps timeline; Reduce Motion or stale connection holds one fixed pattern. Foreground text remains crisp.
+Mac and iPhone share one working glyph, `SqueakIcons.TideGlyph` (§8.1): a flowing-water pixel stream, a per-instance seed that never repeats, 15 fps, held still under Reduce Motion, and it replaces every spinner, loader and matrix field (busy buttons, tool rows, Git, history, setup, queue, stream and pond marks, the phone's sending and loading states). No glyph field sits behind titles or skeletons. Every non-moving state is `StatusMark`: amber dot (waiting, no counts), `circle-x` (failed), yellow dot (unread), nothing (idle). Determinate progress bars keep their real progress. The title light on a working phone row stays (text only, still when the Mac is not answering).
 
 ### Owner correction: the workbench's proportions and arrangement (2026-11-09; colour rebuilt 2026-11-13)
 

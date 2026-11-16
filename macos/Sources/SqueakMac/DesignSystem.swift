@@ -341,7 +341,7 @@ struct LoadingSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: shape == .messages ? 22 : 16) {
             HStack(spacing: 6) {
-                DotGridLoader(size: 14)
+                TideGlyph(color: Theme.muted, height: 5)
                 Text(word).font(Typo.meta).foregroundStyle(Theme.muted)
             }
             ForEach(0..<3, id: \.self) { i in

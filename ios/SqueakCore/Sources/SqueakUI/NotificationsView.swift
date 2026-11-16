@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 
 /// Settings › Notifications: what Telegram and Cliq may push, one block per channel the Mac has set up.
@@ -118,7 +119,7 @@ private struct BotPictureSection: View {
                 HStack {
                     Text("Use Squeak logo")
                     Spacer()
-                    if sending { GlyphLoader() }
+                    if sending { TideGlyph(color: Theme.ink, height: 10) }
                 }
             }
             .frame(minHeight: 44)

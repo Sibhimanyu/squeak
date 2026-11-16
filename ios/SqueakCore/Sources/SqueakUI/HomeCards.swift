@@ -3,23 +3,6 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// §8.3: the pill for a count: red for what waits on you, yellow (`Theme.done`) for unreviewed finishes.
-/// Absent at zero, so the caller never draws "0".
-struct CountBadge: View {
-    let count: Int
-    var color: Color = Theme.needsYou
-    /// The number's colour: white on red, `Theme.primaryText` on unread yellow (white on the duck's yellow fails).
-    var onColor: Color = .white
-
-    var body: some View {
-        Text("\(count)")
-            .font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(onColor)
-            .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
-            .background(color, in: Capsule())
-            .accessibilityHidden(true)
-    }
-}
-
 /// Two dots: this pond is shared with someone. The words are for VoiceOver.
 struct SharedPondMark: View {
     let pond: PhoneSnapshot.Pond?
@@ -169,13 +152,14 @@ struct CornerMark: View {
     }
 }
 
-/// A compact glyph field, static under Reduce Motion or while the Mac is unavailable.
-struct WorkingGlyph: View {
+/// The tide glyph for a working chat, held still in a quiet colour while the Mac is not answering.
+struct LiveTide: View {
     @Environment(AppModel.self) private var model
     var quiet = false
 
     var body: some View {
-        if model.macIsLive { GlyphLoader(size: 14, quiet: quiet) } else { GlyphLoader(size: 14, quiet: quiet, color: Theme.subtle, still: true) }
+        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, height: 7, still: !model.macIsLive)
+            .opacity(quiet ? 0.7 : 1)
     }
 }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.27.6
+
+- One glyph for work in progress, everywhere: a small stream of pixels flowing like water, never repeating, so each working chat looks a little different. It moves only while something is actually working, and holds still under Reduce Motion.
+- Every other state is a still mark: an amber dot when a chat waits on you (no counts; the number is in the tooltip), a crossed circle when it failed, a yellow dot for unread. The wave-lines glyph and the 3×3 loader are gone.
+- An open pond no longer shows its status mark beside its name: its chats show their own.
+
 ## 2.27.5
 
 - A queued message has its own Steer button on its line: one click sends it into the running turn. Clicking the line still opens the whole message to edit or remove it.

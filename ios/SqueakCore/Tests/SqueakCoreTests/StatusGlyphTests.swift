@@ -36,36 +36,4 @@ final class StatusGlyphTests: XCTestCase {
         XCTAssertEqual(StatusRollup(activity: .idle).label(for: "greenroom"), "greenroom")
         XCTAssertEqual(StatusRollup(activity: .error).label(for: "greenroom"), "greenroom, failed")
     }
-
-    func testDotsTraceThreeWaveLines() {
-        for row in 0..<StreamDotGlyph.rows {
-            let ys = (0..<StreamDotGlyph.columns).map { StreamDotGlyph.centre(row: row, column: $0).y }
-            XCTAssertGreaterThan(Set(ys.map { ($0 * 1000).rounded() }).count, 1)
-            XCTAssertTrue(ys.allSatisfy { $0 > 0 && $0 < 1 })
-            XCTAssertLessThan(ys.max()! - ys.min()!, 1.0 / Double(StreamDotGlyph.rows))
-        }
-    }
-
-    func testOnlyWorkingMovesAndLoops() {
-        XCTAssertFalse(StreamDotGlyph.flows(.idle)); XCTAssertFalse(StreamDotGlyph.flows(.needsYou)); XCTAssertFalse(StreamDotGlyph.flows(.error))
-        XCTAssertEqual(StreamDotGlyph.level(.idle, row: 1, column: 2, time: 3, animated: true), StreamDotGlyph.idleLevel)
-        XCTAssertEqual(StreamDotGlyph.level(.needsYou, row: 0, column: 0, time: 3, animated: true), 1)
-        for row in 0..<3 { for col in 0..<6 { for i in 0..<32 {
-            let t = Double(i) * 0.05
-            let v = StreamDotGlyph.wave(row: row, column: col, time: t)
-            XCTAssertTrue(v >= StreamDotGlyph.troughLevel - 1e-9 && v <= 1 + 1e-9)
-            XCTAssertEqual(v, StreamDotGlyph.wave(row: row, column: col, time: t + StreamDotGlyph.flowSeconds), accuracy: 1e-9)
-        } } }
-    }
-
-    func testCrestTravelsRightAndReduceMotionHoldsAFrame() {
-        func brightest(_ t: Double) -> Int {
-            (0..<6).max { StreamDotGlyph.wave(row: 0, column: $0, time: t) < StreamDotGlyph.wave(row: 0, column: $1, time: t) }!
-        }
-        XCTAssertEqual(brightest(0.01), 0)
-        XCTAssertEqual(brightest(StreamDotGlyph.flowSeconds * 3 / 6), 3)
-        let a = StreamDotGlyph.level(.working, row: 0, column: 2, time: 0.3, animated: false)
-        let b = StreamDotGlyph.level(.working, row: 0, column: 2, time: 1.1, animated: false)
-        XCTAssertEqual(a, b)
-    }
 }

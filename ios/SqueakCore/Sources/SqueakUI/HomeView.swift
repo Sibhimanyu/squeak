@@ -245,7 +245,7 @@ struct AskCard: View {
                 Task { await send(answer) }
             } label: {
                 HStack(spacing: 6) {
-                    if sending == answer { GlyphLoader().controlSize(.small) }
+                    if sending == answer { TideGlyph(color: Theme.ink, height: 8) }
                     Text(answer.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.ink)
@@ -279,7 +279,7 @@ struct StartingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            GlyphLoader(size: 14).padding(.trailing, 0)
+            TideGlyph(color: Theme.ink, height: 7).padding(.trailing, 0)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Starting…").font(.headline)
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
@@ -386,7 +386,7 @@ struct SessionRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
                 DucklingCount(session: session)
-                if starting || session.state == "working" { ChatActivityGlyph(identity: session.key) }
+                if starting || session.state == "working" { ChatActivityGlyph() }
             }
         }
     }

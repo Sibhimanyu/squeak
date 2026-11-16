@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 
 /// Usage › Details: what the agents on the Mac have used, like Claude Code's `/stats`, over 7 days, 30 days
@@ -35,7 +36,7 @@ struct UsageDetailsView: View {
                             .font(.footnote).foregroundStyle(Theme.muted)
                     }
                     if loading {
-                        HStack(spacing: 6) { GlyphLoader().controlSize(.small); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
+                        HStack(spacing: 6) { TideGlyph(color: Theme.ink, height: 8); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
                     }
                     headline(stats)
                     tokens(stats.totals)

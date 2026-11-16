@@ -744,7 +744,7 @@ struct BackgroundStrip: View {
         switch task.status {
         case "running":
             HStack(spacing: 6) {
-                GlyphLoader(size: 12, quiet: true)
+                TideGlyph(color: Theme.ink, height: 6).opacity(0.7)
                 if let time { Text(time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted) }
             }
         case "done":
@@ -780,7 +780,7 @@ private struct StuckNotice: View {
                 Spacer(minLength: 0)
                 if canStop {
                     Button(action: stop) {
-                        if stopping { GlyphLoader().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                        if stopping { TideGlyph(color: Theme.ink, height: 8) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
                     }
                     .buttonStyle(.bordered).tint(Theme.ink)
                     .frame(minHeight: 44)
@@ -817,7 +817,7 @@ private struct EarlierRowView: View {
             sentinel
         case .loading:
             HStack(spacing: 8) {
-                GlyphLoader().controlSize(.small)
+                TideGlyph(color: Theme.ink, height: 8)
                 Text("Loading earlier messages…").font(.subheadline).foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
@@ -827,7 +827,7 @@ private struct EarlierRowView: View {
                 .frame(maxWidth: .infinity, minHeight: 28)
         case .catchingUp:
             HStack(spacing: 8) {
-                GlyphLoader().controlSize(.small)
+                TideGlyph(color: Theme.ink, height: 8)
                 Text("Catching up…").font(.subheadline).foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
@@ -1076,7 +1076,7 @@ private struct OpenWork: View {
                     }
                     HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
                 } else if loading {
-                    HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text("Loading the steps…").font(.footnote).foregroundStyle(Theme.muted) }
+                    HStack(spacing: 8) { TideGlyph(color: Theme.ink, height: 8); Text("Loading the steps…").font(.footnote).foregroundStyle(Theme.muted) }
                         .frame(minHeight: 36)
                 } else if let problem {
                     HStack(spacing: 8) {
@@ -1180,7 +1180,7 @@ struct WorkingRow: View {
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    WorkingGlyph()
+                    LiveTide()
                     Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
                     if !steps.isEmpty {
                         Spacer(minLength: 4)
@@ -1715,7 +1715,7 @@ struct QuestionCard: View {
                         }
                     } label: {
                         HStack(spacing: 8) {
-                            if sending { GlyphLoader(color: Theme.primaryText) }
+                            if sending { TideGlyph(color: Theme.primaryText, height: 10) }
                             Text(sending ? "Sending…" : "Send answer").font(.body.weight(.semibold))
                         }
                         .foregroundStyle(complete ? Theme.primaryText : Theme.muted)
@@ -1861,7 +1861,7 @@ struct OptionsView: View {
                 Button { Haptics.play(.tap); onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Group {
-                            if isSending { GlyphLoader() } else { Text(option.letter).font(.body.weight(.bold)) }
+                            if isSending { TideGlyph(color: Theme.ink, height: 10) } else { Text(option.letter).font(.body.weight(.bold)) }
                         }
                         .frame(width: 32, height: 32)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
@@ -2113,9 +2113,9 @@ struct Composer: View {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
         } else if let pending = model.inFlight[key] {
             // A menu action the Mac has not answered: the menu closed on the tap, so the chat says it is working.
-            HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
+            HStack(spacing: 8) { TideGlyph(color: Theme.ink, height: 8); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploading {
-            HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
+            HStack(spacing: 8) { TideGlyph(color: Theme.ink, height: 8); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploadProblem {
             HStack(spacing: 8) {
                 Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
@@ -2172,7 +2172,7 @@ struct SubagentSheet: View {
     @ViewBuilder private var chip: some View {
         let color: Color = status == "failed" ? Theme.negative : Theme.muted
         HStack(spacing: 6) {
-            if status == "running" { GlyphLoader(size: 12, quiet: true) }
+            if status == "running" { TideGlyph(color: Theme.ink, height: 6).opacity(0.7) }
             Text(Self.statusWord(status)).font(.caption.weight(.medium)).foregroundStyle(color)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -2217,7 +2217,7 @@ struct SubagentSheet: View {
             detail
         } else if let words = Self.explanation(for: watch, unavailable: unavailable) {
             HStack(spacing: 10) {
-                if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { GlyphLoader() }
+                if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { TideGlyph(color: Theme.ink, height: 10) }
                 Text(words).font(.subheadline).foregroundStyle(Theme.muted)
             }
         } else if let feed = watch.feed {

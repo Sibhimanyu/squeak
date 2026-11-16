@@ -363,7 +363,7 @@ struct JoinPondForm: View {
                 }
             case .waiting(let id):
                 HStack(spacing: Space.s) {
-                    WorkingGlyph(width: 20, height: 15)
+                    StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
                     Text("Waiting for the owner to approve").font(Typo.label).foregroundStyle(Theme.ink)
                 }
                 if let words = ponds.ponds.first(where: { $0.id == id })?.words, !words.isEmpty { MatchingWords(words: words, hint: InviteSheetText.wordsHintJoiner(owner: ponds.ponds.first(where: { $0.id == id })?.ownerName)) }

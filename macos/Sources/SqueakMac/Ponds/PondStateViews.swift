@@ -19,7 +19,7 @@ struct PondFreshnessStrip: View {
         let f = ponds.freshness(pond)
         if let line = f.line {
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                if f == .reading { WorkingGlyph(width: 20, height: 15) } else { Lucide(.triangleAlert, size: 13, color: f.isProblem ? Theme.warning : Theme.muted) }
+                if f == .reading { TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 20)) } else { Lucide(.triangleAlert, size: 13, color: f.isProblem ? Theme.warning : Theme.muted) }
                 Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 if let reason = f.writesDisabledReason {
                     Text(verbatim: reason).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
@@ -51,7 +51,7 @@ struct PondStateCardView: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 HStack(spacing: Space.s) {
                     switch card.tone {
-                    case .waiting: WorkingGlyph(width: 20, height: 15)
+                    case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
                     case .problem: Lucide(.triangleAlert, size: 14, color: Theme.negative)
                     case .calm: Lucide(.users, size: 14, color: Theme.muted)
                     }

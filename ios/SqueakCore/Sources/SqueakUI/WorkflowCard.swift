@@ -222,7 +222,7 @@ struct WorkflowCard: View {
                         }
                     } label: {
                         HStack(spacing: 8) {
-                            if installing { GlyphLoader() }
+                            if installing { TideGlyph(color: Theme.ink, height: 10) }
                             Text(installing ? "Asking your Mac…" : "Install \(tool.label) for me")
                         }
                         .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
@@ -246,7 +246,7 @@ struct WorkflowCard: View {
     private func primaryButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 8) {
-                if sending { GlyphLoader(color: Theme.primaryText) }
+                if sending { TideGlyph(color: Theme.primaryText, height: 10) }
                 Text(sending ? "Sending…" : title).font(.body.weight(.semibold))
             }
             .foregroundStyle(enabled ? Theme.primaryText : Theme.muted)

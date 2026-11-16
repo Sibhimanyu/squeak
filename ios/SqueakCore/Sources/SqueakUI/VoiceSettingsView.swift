@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 import UIKit
 
@@ -47,7 +48,7 @@ struct VoiceSettingsView: View {
                         HStack {
                             Label(ringing || testing ? "Calling…" : "Call me now", systemImage: "phone")
                             Spacer()
-                            if ringing || testing { GlyphLoader() }
+                            if ringing || testing { TideGlyph(color: Theme.ink, height: 10) }
                         }
                     }
                     .disabled(ringing || testing || (voice.callee == nil && voice.defaultCallee == nil))

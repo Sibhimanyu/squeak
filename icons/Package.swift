@@ -7,10 +7,12 @@ let package = Package(
     products: [
         .library(name: "SqueakIcons", targets: ["SqueakIcons"]),
         .executable(name: "lucide-sheet", targets: ["lucide-sheet"]),
+        .executable(name: "tide-preview", targets: ["tide-preview"]),
     ],
     targets: [
         .target(name: "SqueakIcons"),
         .executableTarget(name: "lucide-sheet", dependencies: ["SqueakIcons"]),
+        .executableTarget(name: "tide-preview", dependencies: ["SqueakIcons"]),
         .testTarget(name: "SqueakIconsTests", dependencies: ["SqueakIcons"]),
     ]
 )

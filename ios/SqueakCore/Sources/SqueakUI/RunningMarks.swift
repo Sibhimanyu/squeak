@@ -3,53 +3,13 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// An abstract pixel matrix behind running titles. Text stays sharp above the cell field.
-struct GlyphLoadingField: View {
-    var color: Color = Theme.muted
-    var still = false
-
-    var body: some View {
-        MatrixActivity(style: .field, color: color, still: still).blur(radius: 0.25)
-    }
-}
-
-/// The foreground matrix uses brighter, crisp pixels at phone scale, not the background's faint treatment.
-struct GlyphLoader: View {
-    var size: CGFloat = 14
-    var quiet = false
-    var color: Color = Theme.ink
-    var still = false
-
-    var body: some View {
-        MatrixActivity(style: .indicator, color: color, quiet: quiet, still: still)
-            .frame(width: max(34, size * 2.5), height: max(20, size * 1.4))
-            .accessibilityElement(children: .ignore)
-            .accessibilityHidden(false)
-            .accessibilityLabel("Loading")
-    }
-}
-
-extension View {
-    /// Only running rows create an animation timeline. The text above it stays crisp.
-    @ViewBuilder func runningGlyphs(_ active: Bool, still: Bool = false) -> some View {
-        background {
-            if active { GlyphLoadingField(still: still) }
-        }
-    }
-}
-
-/// A trailing activity mark. It never takes the agent's icon slot or paints behind the title.
+/// A trailing activity mark for a working row: the tide glyph (mark grid), still while the Mac is not answering. It
+/// never takes the agent's icon slot or paints behind the title.
 struct ChatActivityGlyph: View {
-    let identity: String
     @Environment(AppModel.self) private var model
-    @ScaledMetric(relativeTo: .subheadline) private var width = 104.0
-    @ScaledMetric(relativeTo: .subheadline) private var height = 26.0
 
     var body: some View {
-        MatrixActivity(style: .indicator, color: model.macIsLive ? Theme.activity : Theme.subtle,
-                       still: !model.macIsLive, identity: identity)
-            .frame(width: min(width, 120), height: min(height, 38))
-            .accessibilityHidden(true)
+        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, height: 14, still: !model.macIsLive)
     }
 }
 
@@ -61,13 +21,23 @@ private struct RunningTextLight: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
+    /// One pass of light every 4.2 to 6 seconds, offset per chat so two rows never pulse together; a held frame when still.
+    static func phase(identity: String, at time: TimeInterval, still: Bool) -> Double {
+        guard !still else { return 0.48 }
+        let key = identity.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+        let period = 4.2 + Double(key & 0xFFFF) / 65535 * 1.8
+        let offset = Double((key >> 16) & 0xFFFF) / 65535 * period
+        let value = (time + offset) / period
+        return value - floor(value)
+    }
+
     func body(content: Content) -> some View {
         if active {
             content.opacity(0.84).overlay {
                 TimelineView(.animation(minimumInterval: 1.0 / 15,
                                         paused: reduceMotion || still || scenePhase != .active)) { context in
-                    let phase = MatrixMotion(identity: identity).phase(at: context.date.timeIntervalSinceReferenceDate,
-                                                                      still: reduceMotion || still)
+                    let phase = Self.phase(identity: identity, at: context.date.timeIntervalSinceReferenceDate,
+                                           still: reduceMotion || still)
                     let leading = phase * 2 - 0.8
                     LinearGradient(stops: [
                         .init(color: .clear, location: 0),

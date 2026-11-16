@@ -649,12 +649,12 @@ private struct FoldRow: View {
         let r = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
         switch PondRowMark.of(r, count: count) {
         case .needsYou(let n):
-            Text("\(needs > 0 ? needs : n)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
-                .frame(minWidth: 24, alignment: .trailing).accessibilityHidden(true)
+            StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
+                .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
         case .working:
-            WorkingGlyph(width: 20, height: 12).frame(width: 24, alignment: .trailing)
+            TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 22)).frame(width: 24, alignment: .trailing)
         case .error:
-            Lucide(.circleX, size: 13, color: Theme.negative).frame(width: 24, alignment: .trailing)
+            StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):
             Text("\(n)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
         case nil:
@@ -684,7 +684,7 @@ private struct FoldRow: View {
         if let onAdd, depth == 0 || hovering {
             Button(action: onAdd) {
                 Group {
-                    if adding { GlyphLoadingField() } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
+                    if adding { TideGlyph(color: Theme.muted, height: TideGlyph.Grid.mini.height(fittingWidth: 20)) } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
                 }
                 .frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -721,7 +721,7 @@ private struct FoldRow: View {
                         }
                     }
                 } else {
-                    StreamGlyph(state: streamState).frame(width: 20)
+                    StreamStateMark(state: streamState, slotWidth: 20)
                 }
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
@@ -757,7 +757,7 @@ private struct FoldRow: View {
         if lifecycle == .setupFailed {
             LifecycleSlot(mark: .setupFailed)
         } else if lifecycle == .settingUp {
-            WorkingMark(quiet: true).frame(width: 28, height: 16, alignment: .trailing).help(WorkspaceLifecycle.words(.settingUp))
+            TideGlyph(color: Theme.muted, height: TideGlyph.Grid.mini.height(fittingWidth: 24)).opacity(0.7).frame(width: 28, height: 16, alignment: .trailing).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
                 Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)

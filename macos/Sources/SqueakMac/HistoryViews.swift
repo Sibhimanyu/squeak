@@ -190,7 +190,7 @@ struct HistoryEditor: View {
                 Button("Cancel") { model.history.cancelEdit() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
                 Button { model.submitEdit(handle.session, turn: handle.turn.turn) } label: {
                     HStack(spacing: 6) {
-                        if model.history.busy { DotGridLoader(size: 12) }
+                        if model.history.busy { TideGlyph(color: Theme.muted, height: 4.5) }
                         Text("Send")
                         Text("⌘↵").font(Typo.meta)
                     }
@@ -238,7 +238,7 @@ struct RestoreSheet: View {
                 Button("Cancel") { model.history.restoreAsk = nil }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
                 Button { model.restoreFiles(ask) } label: {
                     HStack(spacing: 6) {
-                        if model.history.busy { DotGridLoader(size: 12) }
+                        if model.history.busy { TideGlyph(color: Theme.muted, height: 4.5) }
                         Text("Restore files")
                     }
                 }

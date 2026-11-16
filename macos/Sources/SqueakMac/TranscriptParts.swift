@@ -249,7 +249,7 @@ struct ToolCallRow: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                 .layoutPriority(-1)
             Spacer(minLength: 8)
-            if running { DotGridLoader(size: 12) }
+            if running { TideGlyph(color: Theme.muted, height: 4.5) }
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).fixedSize()
             }
@@ -428,7 +428,7 @@ struct ProgressTracker: View {
                     if i > 0 { Rectangle().fill(done || now ? Theme.ink.opacity(0.5) : Theme.line).frame(height: 1).frame(maxWidth: 24) }
                     HStack(spacing: 4) {
                         if done { Lucide(.check, size: 11, color: Theme.muted) }
-                        else if now { DotGridLoader(size: 10) }
+                        else if now { TideGlyph(color: Theme.muted, height: 4.5) }
                         Text(verbatim: label).font(Typo.meta).lineLimit(1)
                             .foregroundStyle(now ? Theme.ink : done ? Theme.muted : Theme.subtle)
                     }
@@ -473,7 +473,7 @@ struct WorkbenchLiveRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            WorkingGlyph(width: 26, height: 15)
+            TideGlyph(color: Theme.working, height: 14)
             if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
             if let since { LiveClockText(since: since) }
             Spacer(minLength: 8)

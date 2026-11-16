@@ -138,7 +138,7 @@ struct PopupAwakeCard: View {
             if model.awakeLidReady {
                 PopupSwitch(label: "With the lid closed", isOn: Binding(get: { lidOn }, set: { setLid($0) }), enabled: !model.settingUpLid)
             } else if model.settingUpLid {
-                DotGridLoader(size: 14)
+                TideGlyph(color: Theme.muted, height: 5)
             } else {
                 Button("Set up…") { Task { await model.setUpLidClosed() } }
                     .buttonStyle(PopupButtonStyle(height: 26, hPad: 10, size: 12))

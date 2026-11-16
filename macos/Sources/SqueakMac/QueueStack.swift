@@ -88,7 +88,7 @@ struct QueueStack: View {
             switch item.state {
             case .queuing:
                 HStack(spacing: 6) {
-                    DotGridLoader(size: 14)
+                    TideGlyph(color: Theme.muted, height: 5)
                     Text("Queuing…").font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)
                 }
@@ -124,7 +124,7 @@ struct QueueStack: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if resting, let kind = store.busyKind {
-                DotGridLoader(size: 14)
+                TideGlyph(color: Theme.muted, height: 5)
                 Text(kind.word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
             } else {
                 Button("Steer now") { Task { await store.steer(item, sessionId: sessionId) } }

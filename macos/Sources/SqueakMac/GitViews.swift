@@ -75,7 +75,7 @@ struct GitCluster: View {
             // Secondary, never the duck: the composer's Send holds the one primary on screen (§8.10).
             Button { model.runGitAction(session, kind) } label: {
                 HStack(spacing: 6) {
-                    if busy { DotGridLoader(size: 12, quiet: true) }
+                    if busy { TideGlyph(color: Theme.muted, height: 4.5).opacity(0.7) }
                     Text(kind.title)
                 }
                 .font(Typo.label).foregroundStyle(Theme.ink)
@@ -130,7 +130,7 @@ struct ChecksMarkView: View {
             switch mark {
             case .passing: Lucide(.circleCheck, size: 14, color: Theme.subtle)
             case .failing: Lucide(.circleX, size: 14, color: Theme.negative)
-            case .running: DotGridLoader(size: 12)
+            case .running: TideGlyph(color: Theme.muted, height: 4.5)
             }
         }
         .frame(width: 16, height: 16)
@@ -178,7 +178,7 @@ struct MergeConfirmSheet: View {
                 Button("Cancel") { model.git.mergeConfirm = nil }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
                 Button { model.confirmMerge() } label: {
                     HStack(spacing: 6) {
-                        if model.git.merging { DotGridLoader(size: 12) }
+                        if model.git.merging { TideGlyph(color: Theme.muted, height: 4.5) }
                         Text("Merge")
                     }
                 }

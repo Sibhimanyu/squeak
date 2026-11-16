@@ -420,7 +420,7 @@ struct StreamRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StreamGlyph(activity: rollup.activity).frame(width: 24)
+            StreamStateMark(activity: rollup.activity, slotWidth: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(stream.name).font(.body).lineLimit(1)
@@ -431,7 +431,7 @@ struct StreamRow: View {
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if rollup.needsYou > 0 { CountBadge(count: rollup.needsYou) }
+            if rollup.needsYou > 0 { StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16) }
             if let at = stream.lastActivity { Text(Age.describe(at)).font(.footnote).foregroundStyle(Theme.subtle).monospacedDigit() }
         }
         .frame(minHeight: 44)

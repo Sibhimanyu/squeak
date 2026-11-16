@@ -33,7 +33,7 @@ struct LiveBar: View {
                     withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
                 } label: {
                     HStack(spacing: 8) {
-                        WorkingGlyph()
+                        LiveTide()
                         Text(stopping ? "Stopping…" : label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
                         Spacer(minLength: 4)
                         if !steps.isEmpty { Lucide(open ? .chevronDown : .chevronUp, size: 14, color: Theme.muted) }
@@ -48,7 +48,7 @@ struct LiveBar: View {
                 .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
                 if canStop {
                     Button(action: stop) {
-                        if stopping { GlyphLoader().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                        if stopping { TideGlyph(color: Theme.ink, height: 8) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
                     }
                     .buttonStyle(.bordered).tint(Theme.ink)
                     .frame(minHeight: 44)

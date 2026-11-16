@@ -64,7 +64,7 @@ struct CardPicture: View {
                 picture.accessibilityLabel(name)
             }
         case .loading:
-            placeholder { GlyphLoader() }
+            placeholder { TideGlyph(color: Theme.ink, height: 10) }
         case let .failed(reason):
             Button { attempt += 1 } label: {
                 placeholder {
@@ -257,7 +257,7 @@ private struct FilmScreen: View {
                     if film.canResume {
                         Button { Haptics.play(.tap); run(resume: true) } label: {
                             HStack(spacing: 8) {
-                                if busy { GlyphLoader(color: Theme.primaryText) } else { Lucide(.play, size: 16, color: Theme.primaryText) }
+                                if busy { TideGlyph(color: Theme.primaryText, height: 10) } else { Lucide(.play, size: 16, color: Theme.primaryText) }
                                 Text(film.director.state == "frozen" ? "Resume" : "Wake the director")
                             }
                         }
@@ -607,7 +607,7 @@ struct BriefCard: View {
                 } else {
                     Button { send("submit", submission()) } label: {
                         HStack(spacing: 8) {
-                            if sending { GlyphLoader(color: Theme.primaryText) }
+                            if sending { TideGlyph(color: Theme.primaryText, height: 10) }
                             Text(sending ? "Sending…" : "Start")
                         }
                     }
@@ -756,7 +756,7 @@ struct StyleframesCard: View {
             if !answered {
                 Button { send("approve", nil) } label: {
                     HStack(spacing: 8) {
-                        if sending { GlyphLoader(color: Theme.primaryText) }
+                        if sending { TideGlyph(color: Theme.primaryText, height: 10) }
                         Text(sending ? "Sending…" : "Approve the frames")
                     }
                 }

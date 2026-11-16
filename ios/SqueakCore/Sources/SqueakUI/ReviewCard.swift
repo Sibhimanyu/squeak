@@ -99,7 +99,7 @@ struct ReviewCard: View {
                     ProgressView(value: progress).tint(.white).frame(width: 160)
                     Text("Bringing it over · \(Int(progress * 100))%").font(.footnote.monospacedDigit())
                 } else {
-                    GlyphLoader(color: .white)
+                    TideGlyph(color: .white, height: 10)
                     Text("Bringing it over from your Mac…").font(.footnote)
                 }
                 Button {
@@ -303,7 +303,7 @@ struct ReviewCard: View {
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 8) {
-                if sending { GlyphLoader(color: Theme.primaryText) }
+                if sending { TideGlyph(color: Theme.primaryText, height: 10) }
                 Text(sending ? "Sending…" : title).font(.body.weight(.semibold))
             }
             .foregroundStyle(Theme.primaryText)

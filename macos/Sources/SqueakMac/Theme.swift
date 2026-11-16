@@ -82,34 +82,19 @@ extension NSColor {
     }
 }
 
-/// One mark drawn at its size (§8.1): the loader 12pt (grey; the quiet one at 70%), the glyphs 14pt, the unread dot 8pt.
+/// One mark drawn at its size (§8.1): the tide glyph (the quiet one at 70%), the status marks 14-18pt.
 struct ChatMarkGlyph: View {
     let mark: ChatMark
 
     var body: some View {
         switch mark.kind {
-        case .working: WorkingMark(quiet: mark.quiet)
-        case .waiting:
-            switch mark.waiting ?? .answer {
-            case .approval, .plan, .looping: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
-            case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
-            }
-        case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
-        case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
+        case .working:
+            TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 24)).opacity(mark.quiet ? 0.7 : 1)
+                .frame(width: 24, height: 12)
+        case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
+        case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
+        case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)
         }
-    }
-}
-
-/// The Working mark (§8.1): the matrix glyph (`MatrixActivity` indicator) in `muted`, 24x12 inside the 28x16 slot.
-/// A still frame under Reduce Motion (the glyph checks it itself) and while the window is inactive.
-struct WorkingMark: View {
-    var quiet = false
-    @Environment(\.scenePhase) private var scenePhase
-
-    var body: some View {
-        MatrixActivity(style: .indicator, color: Theme.muted, quiet: quiet, still: scenePhase != .active)
-            .frame(width: 24, height: 12)
-            .accessibilityHidden(true)
     }
 }
 

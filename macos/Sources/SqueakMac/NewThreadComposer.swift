@@ -338,7 +338,6 @@ struct NewThreadComposer: View {
                 Button("New stream") { state.choose(.new) }
             } label: {
                 HStack(spacing: 6) {
-                    StreamGlyph(state: .idle, size: 13)
                     Text("In:").foregroundStyle(Theme.muted)
                     Text(verbatim: label).foregroundStyle(Theme.ink).lineLimit(1)
                     Lucide(.chevronDown, size: 12, color: Theme.muted)

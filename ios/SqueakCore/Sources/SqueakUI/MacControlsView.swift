@@ -1,4 +1,5 @@
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 
 /// The words of the Mac controls page, kept apart so they can be tested on the Mac too.
@@ -284,7 +285,7 @@ private struct Tile: View {
     var body: some View {
         Button(action: { Haptics.play(.tap); action() }) {
             VStack(spacing: 6) {
-                if busy { GlyphLoader().frame(height: 24) } else { Image(systemName: symbol).font(.system(size: 20, weight: .semibold)) }
+                if busy { TideGlyph(color: Theme.ink, height: 8) } else { Image(systemName: symbol).font(.system(size: 20, weight: .semibold)) }
                 Text(title).font(.footnote.weight(.medium))
             }
             .foregroundStyle(on ? Theme.primaryText : Theme.ink)

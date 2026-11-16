@@ -232,18 +232,7 @@ struct LiveStepLineTests {
     }
 }
 
-@Suite struct DotGridLoaderFrameTests {
-    @Test func theCometTurnsOverNineFramesAndHoldsFrameFive() {
-        #expect(DotGridFrames.frameCount == 9 && DotGridFrames.heldFrame == 4)
-        // Frame 0: dot 0 is the head, the next three trail, the rest are unlit.
-        #expect(DotGridFrames.opacities(frame: 0) == [1, 0.2, 0.2, 0.2, 0.2, 0.2, 0.32, 0.5, 0.75])
-        #expect(DotGridFrames.opacities(frame: 4) == [0.2, 0.32, 0.5, 0.75, 1, 0.2, 0.2, 0.2, 0.2])
-        #expect(DotGridFrames.opacities(frame: 9) == DotGridFrames.opacities(frame: 0))
-        #expect(DotGridFrames.frame(at: 0.11 * 3 + 0.001, quiet: false) == 3)
-        #expect(DotGridFrames.frame(at: 3.0 / 9 * 2 + 0.001, quiet: true) == 2)
-        #expect(DotGridFrames.frame(at: 0.11 * 10 + 0.001, quiet: false) == 1)
-    }
-
+@Suite struct QuietWorkingMarkTests {
     @Test func aBackgroundWaitingChatShowsTheQuietLoader() {
         var s = HostSession(key: SessionKey(provider: "conductor", hostSessionId: "q"), state: .working, alive: true)
         #expect(ChatMark.of(s, unread: false)?.quiet == false)

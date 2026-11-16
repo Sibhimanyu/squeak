@@ -152,7 +152,7 @@ struct PondHomeView: View {
         ZStack {
             switch indicator {
             case .none: Color.clear
-            case .refreshing: WorkingGlyph(width: 20, height: 15).transition(.opacity).accessibilityLabel("Refreshing")
+            case .refreshing: TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 20)).transition(.opacity).accessibilityLabel("Refreshing")
             case .problem(let help):
                 Lucide(.triangleAlert, size: 13, color: Theme.warning).help(help).accessibilityLabel(help)
             case .retry(let help):
@@ -470,9 +470,9 @@ struct PondStateMark: View {
 
     var body: some View {
         switch state {
-        case .working: WorkingGlyph(width: 20, height: 15).accessibilityLabel("Working")
-        case .needsYou: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityLabel("Needs you")
-        case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityLabel("Failed")
+        case .working: TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 20)).accessibilityLabel("Working")
+        case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16).accessibilityLabel("Needs you")
+        case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14).accessibilityLabel("Failed")
         case .finished: EmptyView()
         }
     }

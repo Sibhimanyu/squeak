@@ -84,7 +84,7 @@ struct RunTab: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 HStack(spacing: Space.s) {
                     Text(run?.running == true ? "Running" : "Not running").font(Typo.heading).foregroundStyle(Theme.ink)
-                    if run?.running == true { DotGridLoader(size: 12) }
+                    if run?.running == true { TideGlyph(color: Theme.muted, height: 4.5) }
                     if run?.running == true, let port { Text(verbatim: ":\(port)").font(Typo.code).foregroundStyle(Theme.subtle) }
                     Spacer(minLength: 0)
                     if run?.running == true, WorkspaceLifecycle.localhostURL(port: port) != nil {

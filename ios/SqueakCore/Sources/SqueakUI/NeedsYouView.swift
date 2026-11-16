@@ -236,7 +236,7 @@ struct ReceiptLine: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 switch receipt.phase {
-                case .sending: GlyphLoader().controlSize(.small)
+                case .sending: TideGlyph(color: Theme.ink, height: 8)
                 case .sent: Lucide(.check, size: 14, color: Theme.muted).accessibilityHidden(true)
                 case .failed: EmptyView()
                 }
@@ -275,7 +275,7 @@ private struct InlineReply: View {
                 .accessibilityLabel("Reply to \(Presentation.displayTitle(session))")
             Button(action: send) {
                 Group {
-                    if sending { GlyphLoader() } else { Lucide(.arrowUp, size: 20, color: empty || locked ? Theme.muted : Theme.primaryText) }
+                    if sending { TideGlyph(color: Theme.ink, height: 10) } else { Lucide(.arrowUp, size: 20, color: empty || locked ? Theme.muted : Theme.primaryText) }
                 }
                 .frame(width: 48, height: 48)
                     .background(empty || locked ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))

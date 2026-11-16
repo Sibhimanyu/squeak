@@ -141,34 +141,3 @@ public struct ChatSeenLog: Codable, Sendable, Equatable {
         if seen.count > Self.capacity, let oldest = seen.min(by: { $0.value < $1.value })?.key { seen[oldest] = nil }
     }
 }
-
-/// DESIGN.md §8.1: the loader's frames, the 3x3 dot-grid comet. Nine frames; the dot at column-major index `i`
-/// is lit by how far the comet's head has moved past it. Pure, so a test pins the sequence the view draws.
-public enum DotGridFrames {
-    public static let frameCount = 9
-    /// 110 ms a frame (about a second a turn); the quiet loader takes 3 s a turn.
-    public static let frameSeconds = 0.110
-    public static let quietFrameSeconds = 3.0 / 9
-    public static let quietOpacity = 0.7
-    /// The frame Reduce Motion holds: the fifth (index 4), whose comet is visible.
-    public static let heldFrame = 4
-    /// Dot centres and radius on the 14-unit grid the mock was drawn on.
-    public static let centres: [Double] = [2.5, 7, 11.5]
-    public static let radius = 1.55
-    public static let unlit = 0.2
-
-    /// The opacity of each of the nine dots (column by column, top to bottom) in `frame`.
-    public static func opacities(frame: Int) -> [Double] {
-        let f = ((frame % frameCount) + frameCount) % frameCount
-        return (0..<9).map { i in
-            let d = (f - i + 9) % 9
-            return d <= 3 ? [1, 0.75, 0.5, 0.32][d] : unlit
-        }
-    }
-
-    /// The frame showing at `time` (seconds, any shared origin: every loader on screen turns in step).
-    public static func frame(at time: Double, quiet: Bool) -> Int {
-        let step = quiet ? quietFrameSeconds : frameSeconds
-        return Int((time / step).rounded(.down)) % frameCount
-    }
-}
