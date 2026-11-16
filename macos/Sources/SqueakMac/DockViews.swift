@@ -58,10 +58,10 @@ private struct DockDropModifier: ViewModifier {
         content
             // A tab opens a gap before itself while a tab hovers it; a strip or zone washes instead.
             .padding(.leading, before != nil && targeted ? 16 : 0)
-            .dropDestination(for: String.self) { values, _ in
-                guard let text = values.first, let item = DockItemPayload.decode(text) else { return false }
+            .scopedDrop(.strip(zone), isTargeted: { targeted = $0 }) { text in
+                guard let item = DockItemPayload.decode(text) else { return false }
                 return performDockDrop(item, to: zone, before: before, model: model)
-            } isTargeted: { targeted = $0 }
+            }
             .overlay {
                 if targeted {
                     if before != nil {
@@ -120,10 +120,10 @@ struct DockEdgeStrip: View {
             }
             .frame(width: zone == .right ? 20 : nil, height: zone == .bottom ? 20 : nil)
             .contentShape(Rectangle())
-            .dropDestination(for: String.self) { values, _ in
-                guard let text = values.first, let item = DockItemPayload.decode(text) else { return false }
+            .scopedDrop(.edgeStrip(zone), isTargeted: { targeted = $0 }) { text in
+                guard let item = DockItemPayload.decode(text) else { return false }
                 return performDockDrop(item, to: zone, before: nil, model: model)
-            } isTargeted: { targeted = $0 }
+            }
             .animation(Motion.quick, value: targeted)
             .accessibilityLabel("Drop here to dock on the \(zone.title.lowercased())")
     }
@@ -179,7 +179,7 @@ struct DockItemTab<Icon: View>: View {
         .accessibilityAddTraits(.isButton)
         .opacity(dock.dragging == item ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == item)
-        .draggable(DockItemPayload.encode(item)) { DockTabDragPreview(title: title) }
+        .onDrag { dragProvider(DockItemPayload.encode(item), kind: .of(item)) } preview: { DockTabDragPreview(title: title) }
         .dockDrop(zone, before: item, wash: false)
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -416,7 +416,6 @@ struct DockZoneBody: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
-        .dockDrop(zone)
     }
 }
 

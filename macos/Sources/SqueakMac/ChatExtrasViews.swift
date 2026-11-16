@@ -232,7 +232,7 @@ struct BackgroundStrip: View {
             }
             Spacer(minLength: Space.s)
             switch task.status {
-            case "running": TideGlyph(color: Theme.muted, height: 4.5)
+            case "running": TideGlyph(color: Theme.muted, grid: .mini)
             case "failed": Lucide(.circleX, size: 12, color: Theme.negative).accessibilityLabel("Failed")
             case "done": Lucide(.circleCheck, size: 12, color: Theme.subtle).accessibilityLabel("Done")
             default: Text("stopped").font(Typo.meta).foregroundStyle(Theme.muted)

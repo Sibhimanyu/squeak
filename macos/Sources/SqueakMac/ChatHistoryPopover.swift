@@ -112,7 +112,7 @@ private struct ChatHistoryRowView: View {
     /// title's weight (see `titleWeight`).
     @ViewBuilder private var dotMark: some View {
         switch row.state {
-        case .working: TideGlyph(color: Theme.working, height: 5)
+        case .working: TideGlyph(color: Theme.working, grid: .mini)
         case .blocked: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 14)
         case .error: StatusMark(kind: .failed, color: Theme.negative, size: 14)
         default: Color.clear

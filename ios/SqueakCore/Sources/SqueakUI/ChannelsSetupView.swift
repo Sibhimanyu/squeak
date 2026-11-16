@@ -22,7 +22,7 @@ struct ChannelsSetupView: View {
             if let setup {
                 if setup.restarting == true {
                     Section {
-                        HStack(spacing: 8) { TideGlyph(color: Theme.ink, height: 10); Text("Restarting the Squeak service…").foregroundStyle(Theme.muted) }
+                        HStack(spacing: 8) { TideGlyph(color: Theme.ink, grid: .medium); Text("Restarting the Squeak service…").foregroundStyle(Theme.muted) }
                     }
                 }
                 if let telegram = setup.telegram {
@@ -184,7 +184,7 @@ private struct TelegramSetupSections: View {
                 let linked = Set(chats.map(\.id))
                 let candidates = linking.candidates.filter { !linked.contains($0.id) }
                 if candidates.isEmpty {
-                    HStack(spacing: 8) { TideGlyph(color: Theme.ink, height: 10); Text(ChannelsSetupFormat.waiting).foregroundStyle(Theme.muted) }.frame(minHeight: 44)
+                    HStack(spacing: 8) { TideGlyph(color: Theme.ink, grid: .medium); Text(ChannelsSetupFormat.waiting).foregroundStyle(Theme.muted) }.frame(minHeight: 44)
                 }
                 ForEach(candidates) { c in
                     HStack {
@@ -218,7 +218,7 @@ private struct TelegramSetupSections: View {
                     pictureBusy = false
                 }
             } label: {
-                HStack { Text("Use Squeak logo"); Spacer(); if pictureBusy { TideGlyph(color: Theme.ink, height: 10) } }
+                HStack { Text("Use Squeak logo"); Spacer(); if pictureBusy { TideGlyph(color: Theme.ink, grid: .medium) } }
             }
             .disabled(pictureBusy)
             .frame(minHeight: 44)

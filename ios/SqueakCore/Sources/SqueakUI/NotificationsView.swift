@@ -119,7 +119,7 @@ private struct BotPictureSection: View {
                 HStack {
                     Text("Use Squeak logo")
                     Spacer()
-                    if sending { TideGlyph(color: Theme.ink, height: 10) }
+                    if sending { TideGlyph(color: Theme.ink, grid: .medium) }
                 }
             }
             .frame(minHeight: 44)

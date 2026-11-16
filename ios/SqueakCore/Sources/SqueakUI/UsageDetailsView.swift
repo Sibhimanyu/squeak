@@ -36,7 +36,7 @@ struct UsageDetailsView: View {
                             .font(.footnote).foregroundStyle(Theme.muted)
                     }
                     if loading {
-                        HStack(spacing: 6) { TideGlyph(color: Theme.ink, height: 8); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
+                        HStack(spacing: 6) { TideGlyph(color: Theme.ink, grid: .mini); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
                     }
                     headline(stats)
                     tokens(stats.totals)

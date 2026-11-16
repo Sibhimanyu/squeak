@@ -86,7 +86,7 @@ private struct FilesBrowser: View {
                 files.askDelete(sel, isDirectory: files.isDirectory(sel)); return .handled
             }
             .background(files.dropTarget == "" ? Theme.selected.opacity(0.5) : .clear)
-            .onDrop(of: [.fileURL, .plainText], isTargeted: Binding(
+            .onDrop(of: [.fileURL] + DragScope.types(for: .fileTree), isTargeted: Binding(
                 get: { files.dropTarget == "" }, set: { files.dropTarget = $0 ? "" : (files.dropTarget == "" ? nil : files.dropTarget) })
             ) { providers in FileDrop.handle(providers, files: files, into: "") }
         }
@@ -224,8 +224,8 @@ private struct TreeRow: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .squeakContextMenu { FileContextMenu(files: files, path: e.path, isDirectory: e.isDirectory) }
-            .onDrag { NSItemProvider(object: FileDrop.token(root: files.root, path: e.path) as NSString) }
-            .onDrop(of: [.fileURL, .plainText], isTargeted: Binding(
+            .onDrag { dragProvider(FileDrop.token(root: files.root, path: e.path), kind: .fileToken) }
+            .onDrop(of: [.fileURL] + DragScope.types(for: .fileTree), isTargeted: Binding(
                 get: { files.dropTarget == target }, set: { files.dropTarget = $0 ? target : (files.dropTarget == target ? nil : files.dropTarget) })
             ) { providers in FileDrop.handle(providers, files: files, into: target) }
             .accessibilityAddTraits(open || files.selection == e.path ? .isSelected : [])

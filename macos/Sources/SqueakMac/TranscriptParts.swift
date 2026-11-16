@@ -267,7 +267,7 @@ struct ToolCallRow: View {
             if running {
                 // A duckling at work is the bar's to show: its step keeps a small still mark, not the water glyph.
                 if preview.kind == .agent { Circle().fill(Theme.subtle).frame(width: 5, height: 5).accessibilityLabel("Duckling working") }
-                else { TideGlyph(color: Theme.muted, height: 4.5) }
+                else { TideGlyph(color: Theme.muted, grid: .mini) }
             }
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).fixedSize()
@@ -447,7 +447,7 @@ struct ProgressTracker: View {
                     if i > 0 { Rectangle().fill(done || now ? Theme.ink.opacity(0.5) : Theme.line).frame(height: 1).frame(maxWidth: 24) }
                     HStack(spacing: 4) {
                         if done { Lucide(.check, size: 11, color: Theme.muted) }
-                        else if now { TideGlyph(color: Theme.muted, height: 4.5) }
+                        else if now { TideGlyph(color: Theme.muted, grid: .mini) }
                         Text(verbatim: label).font(Typo.meta).lineLimit(1)
                             .foregroundStyle(now ? Theme.ink : done ? Theme.muted : Theme.subtle)
                     }
@@ -492,7 +492,7 @@ struct WorkbenchLiveRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            TideGlyph(color: Theme.working, height: 14)
+            TideGlyph(color: Theme.working, grid: .stream)
             if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
             if let since { LiveClockText(since: since) }
             Spacer(minLength: 8)

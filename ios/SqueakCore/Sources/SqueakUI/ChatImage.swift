@@ -75,7 +75,7 @@ struct ChatImage: View {
 
     private var placeholder: some View {
         HStack(spacing: 10) {
-            if isLoading { TideGlyph(color: Theme.ink, height: 6) } else { Lucide(.eye, size: 18, color: Theme.muted).accessibilityHidden(true) }
+            if isLoading { TideGlyph(color: Theme.ink, grid: .mini) } else { Lucide(.eye, size: 18, color: Theme.muted).accessibilityHidden(true) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(1)
                 if case let .failed(reason) = phase {

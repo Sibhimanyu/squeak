@@ -7,7 +7,7 @@ import SqueakIcons
     @Published var tuning = TideMotion.Tuning()
     @Published var sidebarHeight = 15.0
     func reset() { tuning = TideMotion.Tuning(); sidebarHeight = 15 }
-    var source: String { "\(tuning.swiftSource)  // sidebar glyph height: \(String(format: "%.3g", sidebarHeight))" }
+    var source: String { "\(tuning.swiftSource)" }
     func copy() {
         print(source); fflush(stdout)
         NSPasteboard.general.clearContents()
@@ -34,12 +34,12 @@ struct Showcase: View {
                     Text("G").font(.system(size: 11, weight: .bold)).foregroundStyle(p.ink).frame(width: 20, height: 20)
                         .background(p.raised, in: RoundedRectangle(cornerRadius: 5))
                     Text("greenroom").font(.system(size: 14, weight: .semibold)).foregroundStyle(p.ink)
-                    TideGlyph(color: p.working, height: 15, grid: .compact, tuning: m.tuning)
+                    TideGlyph(color: p.working, grid: .compact, tuning: m.tuning)
                         .frame(width: 24, height: 12, alignment: .center).padding(.leading, 6)
                     Spacer(minLength: 0)
                 }.padding(.leading, 10).frame(height: 38)
                 HStack(spacing: 14) {
-                    TideGlyph(color: p.working, height: m.sidebarHeight, grid: .compact, tuning: m.tuning)
+                    TideGlyph(color: p.working, grid: .compact, tuning: m.tuning)
                         .frame(width: 20, height: 16, alignment: .center)
                     Text("Hong Kong").font(.system(size: 14)).foregroundStyle(p.ink).lineLimit(1)
                     Spacer(minLength: 0)
@@ -49,10 +49,10 @@ struct Showcase: View {
             }.frame(width: 260).background(p.raised, in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 6) {   // pond card
                 Text("greenroom").font(.system(size: 13, weight: .medium)).foregroundStyle(p.ink)
-                TideGlyph(color: p.working, height: 28, tuning: m.tuning)
+                TideGlyph(color: p.working, grid: .large, tuning: m.tuning)
             }.padding(12).frame(width: 260, alignment: .leading).background(p.raised, in: RoundedRectangle(cornerRadius: 9))
             HStack(spacing: 10) {   // x4 zoom
-                TideGlyph(color: p.working, height: 12 * 4, grid: .mark, tuning: m.tuning)
+                TideGlyph(color: p.working, grid: .mark, tuning: m.tuning)
                 Text("\u{00D7}4").font(.caption).foregroundStyle(p.muted)
             }
         }
@@ -81,7 +81,6 @@ struct Controls: View {
             Slider1(label: "Sparkle rate", value: $m.tuning.sparkle, range: 0...3)
             Slider1(label: "Vignette strength", value: $m.tuning.vignette, range: 0...1.5)
             Slider1(label: "Smoothness (s)", value: $m.tuning.smoothness, range: 0...0.8)
-            Slider1(label: "Sidebar glyph height", value: $m.sidebarHeight, range: 6...24)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Frame rate").font(.caption)
                 Picker("", selection: $m.tuning.frameRate) { Text("15").tag(15); Text("30").tag(30); Text("60").tag(60) }

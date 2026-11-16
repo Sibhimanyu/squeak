@@ -72,7 +72,7 @@ struct ImageViewer: View {
             }
             .ignoresSafeArea()
         case .loading:
-            TideGlyph(color: .white, height: 10).frame(maxWidth: .infinity, maxHeight: .infinity)
+            TideGlyph(color: .white, grid: .medium).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Loading")
         case let .failed(reason, retry):
             Button(action: retry) {

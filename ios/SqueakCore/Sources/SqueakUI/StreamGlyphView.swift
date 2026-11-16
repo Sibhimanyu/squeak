@@ -16,7 +16,7 @@ struct StreamStateMark: View {
             switch activity {
             case .working:
                 TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle,
-                          height: TideGlyph.Grid.mini.height(fittingWidth: slotWidth), still: !model.macIsLive)
+                          grid: .fitting(width: slotWidth, rows: 4), still: !model.macIsLive)
             case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .error: StatusMark(kind: .failed, color: Theme.negative, size: 16)
             case .idle: Color.clear

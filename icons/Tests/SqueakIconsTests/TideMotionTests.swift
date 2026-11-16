@@ -267,4 +267,54 @@ final class TideOffShareTests: XCTestCase {
         XCTAssertGreaterThan(s, 0.30)
         XCTAssertLessThan(s, 0.40)
     }
+
+    /// The speed never goes haywire: over hours of simulated time with random stalls (pauses, sleep, background), clock
+    /// resets of the view (a fresh seed) and several instances reading one clock, the flow's rate stays within 0.5x-1.5x
+    /// of nominal in every frame and the clock never moves faster than real time.
+    func testFlowRateStaysBoundedOverHoursWithPausesAndRecreation() {
+        let tuning = TideMotion.Tuning()
+        let nominal = TideMotion.baseRate * tuning.speed
+        let clock = TideMotion.Clock()
+        var rng = SystemRandomNumberGenerator()
+        var wall = Date(timeIntervalSinceReferenceDate: 7e8)
+        var prevTime = clock.time(at: wall)
+        var seed: UInt64 = 0xC0FFEE
+        var prevFlow = TideMotion.flowTime(prevTime, seed, tuning)
+        var elapsed = 0.0
+        var frames = 0
+        while elapsed < 6 * 3600 {
+            var step = 1.0 / 30
+            let r = Double.random(in: 0..<1, using: &rng)
+            if r < 0.0005 { step = Double.random(in: 1...600, using: &rng) }  // pause, sleep or a long stall
+            else if r < 0.02 { step = Double.random(in: 0.05...0.5, using: &rng) }  // a busy frame
+            wall = wall.addingTimeInterval(step); elapsed += step
+            let t = clock.time(at: wall)
+            XCTAssertGreaterThanOrEqual(t, prevTime)
+            let dt = t - prevTime
+            XCTAssertLessThanOrEqual(dt, min(step, TideMotion.Clock.maxStep) + 1e-6)
+            // Several instances reading the same moment see the same time.
+            XCTAssertEqual(clock.time(at: wall), t)
+            if Double.random(in: 0..<1, using: &rng) < 0.01 { seed = UInt64.random(in: .min ... .max, using: &rng); prevFlow = TideMotion.flowTime(t, seed, tuning); prevTime = t; continue }
+            let flow = TideMotion.flowTime(t, seed, tuning)
+            if dt > 1e-6 {
+                let rate = (flow - prevFlow) / dt / nominal
+                XCTAssertGreaterThan(rate, 0.5, "frame \(frames)")
+                XCTAssertLessThan(rate, 1.5, "frame \(frames)")
+            }
+            prevFlow = flow; prevTime = t; frames += 1
+        }
+        XCTAssertGreaterThan(frames, 100_000)
+    }
+
+    /// The analytic rate over a long run, for several seeds and the widest drift the tuning panel allows.
+    func testPaceBoundsForEverySeed() {
+        for sd in UInt64(1)...20 {
+            let tuning = TideMotion.Tuning(speed: 0.5, paceDrift: 1)
+            for i in 0..<20_000 {
+                let t = Double(i) * 0.5 + 3e5
+                let rate = (TideMotion.flowTime(t + 0.01, sd, tuning) - TideMotion.flowTime(t, sd, tuning)) / 0.01 / (TideMotion.baseRate * tuning.speed)
+                XCTAssertTrue((0.5...1.5).contains(rate), "seed \(sd) t \(t) rate \(rate)")
+            }
+        }
+    }
 }

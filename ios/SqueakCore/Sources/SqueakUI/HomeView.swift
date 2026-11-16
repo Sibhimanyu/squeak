@@ -245,7 +245,7 @@ struct AskCard: View {
                 Task { await send(answer) }
             } label: {
                 HStack(spacing: 6) {
-                    if sending == answer { TideGlyph(color: Theme.ink, height: 8) }
+                    if sending == answer { TideGlyph(color: Theme.ink, grid: .mini) }
                     Text(answer.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.ink)
@@ -279,7 +279,7 @@ struct StartingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            TideGlyph(color: Theme.ink, height: 7).padding(.trailing, 0)
+            TideGlyph(color: Theme.ink, grid: .mini).padding(.trailing, 0)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Starting…").font(.headline)
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)

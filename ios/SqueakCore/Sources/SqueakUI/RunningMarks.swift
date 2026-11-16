@@ -9,7 +9,7 @@ struct ChatActivityGlyph: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, height: 14, still: !model.macIsLive)
+        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, grid: .mark, still: !model.macIsLive)
     }
 }
 

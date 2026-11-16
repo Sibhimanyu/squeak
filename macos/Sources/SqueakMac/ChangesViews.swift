@@ -460,7 +460,7 @@ struct CommentTray: View {
                 Button("Clear") { store.clearTray() }.buttonStyle(QuietButtonStyle()).disabled(store.sending)
                 Button { send() } label: {
                     HStack(spacing: 6) {
-                        if store.sending { TideGlyph(color: Theme.muted, height: 4.5) }
+                        if store.sending { TideGlyph(color: Theme.muted, grid: .mini) }
                         Text("Send to chat")
                     }
                 }

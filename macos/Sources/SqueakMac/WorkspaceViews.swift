@@ -14,7 +14,7 @@ struct LifecycleSlot: View {
     var body: some View {
         ZStack {
             switch mark {
-            case .settingUp: TideGlyph(color: Theme.muted, height: 4.5).opacity(0.7)
+            case .settingUp: TideGlyph(color: Theme.muted, grid: .mini).opacity(0.7)
             case .setupFailed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
             }
         }

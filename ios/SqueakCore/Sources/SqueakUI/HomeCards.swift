@@ -158,7 +158,7 @@ struct LiveTide: View {
     var quiet = false
 
     var body: some View {
-        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, height: 7, still: !model.macIsLive)
+        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, grid: .mini, still: !model.macIsLive)
             .opacity(quiet ? 0.7 : 1)
     }
 }

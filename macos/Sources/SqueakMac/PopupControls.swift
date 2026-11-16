@@ -138,7 +138,7 @@ struct PopupAwakeCard: View {
             if model.awakeLidReady {
                 PopupSwitch(label: "With the lid closed", isOn: Binding(get: { lidOn }, set: { setLid($0) }), enabled: !model.settingUpLid)
             } else if model.settingUpLid {
-                TideGlyph(color: Theme.muted, height: 5)
+                TideGlyph(color: Theme.muted, grid: .mini)
             } else {
                 Button("Set up…") { Task { await model.setUpLidClosed() } }
                     .buttonStyle(PopupButtonStyle(height: 26, hPad: 10, size: 12))

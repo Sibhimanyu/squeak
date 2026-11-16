@@ -39,10 +39,26 @@ public enum TideMotion {
         private func f(_ v: Double) -> String { String(format: "%.3g", v) }
     }
 
-    /// Seconds since a process-wide start: the clock every view reads, so `t` stays small (never the 8e8 of the
-    /// reference date, where the maths lost its precision).
-    public static let clockStart = Date()
-    public static func clock(_ date: Date) -> Double { date.timeIntervalSince(clockStart) }
+    /// The clock every view reads: seconds of *shown* motion, shared by all glyphs. It advances by the wall time between
+    /// reads but never by more than `maxStep` at once, and never backwards, so a stall (a paused or occluded view, sleep,
+    /// a busy main thread, a clock change) resumes where the water left off instead of jumping ahead and reading as a
+    /// sudden burst of speed. Combined with the bounded pace below, the flow's rate stays within 0.7x-1.1x of nominal.
+    public final class Clock: @unchecked Sendable {
+        public static let maxStep = 0.1
+        private let lock = NSLock()
+        private var last: Date?
+        private var t = 0.0
+        public init() {}
+        public func time(at date: Date) -> Double {
+            lock.lock(); defer { lock.unlock() }
+            guard let l = last else { last = date; return t }
+            let dt = date.timeIntervalSince(l)
+            if dt > 0 { t += min(dt, Clock.maxStep); last = date }
+            return t
+        }
+    }
+    public static let sharedClock = Clock()
+    public static func clock(_ date: Date) -> Double { sharedClock.time(at: date) }
 
     @inline(__always) static func wrap(_ x: Double) -> Double { x.truncatingRemainder(dividingBy: 2 * .pi) }
 

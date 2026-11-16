@@ -413,9 +413,9 @@ struct WorkbenchSidebar: View {
             .onDrag {
                 draggingPond = key
                 watchPondDrag()
-                return NSItemProvider(object: PondDragPayload.encode(key) as NSString)
+                return dragProvider(PondDragPayload.encode(key), kind: .pond)
             } preview: { pondDragPreview(name: name, pondId: pondRecord?.id) }
-            .onDrop(of: [.plainText], delegate: PondDropDelegate(
+            .onDrop(of: DragScope.types(for: .pondList), delegate: PondDropDelegate(
                 slot: { y in PondDragTarget.slot(rowIndex: index, y: y - 6, rowHeight: 28) },
                 over: { slot in if dropSlot != slot { withAnimation(Motion.standard) { dropSlot = slot } } },
                 left: { withAnimation(Motion.standard) { dropSlot = nil } },
@@ -522,7 +522,7 @@ struct WorkbenchSidebar: View {
         if names.count > 1 {
             Color.clear.frame(height: 10 + (gapSlot == names.count ? 22 : 0))
                 .overlay(alignment: .top) { if gapSlot == names.count { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6).padding(.top, 4) } }
-                .onDrop(of: [.plainText], delegate: PondDropDelegate(
+                .onDrop(of: DragScope.types(for: .pondList), delegate: PondDropDelegate(
                     slot: { _ in names.count },
                     over: { slot in if dropSlot != slot { withAnimation(Motion.standard) { dropSlot = slot } } },
                     left: { withAnimation(Motion.standard) { dropSlot = nil } },
@@ -672,7 +672,7 @@ private struct FoldRow: View {
                 .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
         case .working:
             // 15 pt tall compact mark centred in a 24 pt slot: its visible pixels (about 23 pt) stay inside the slot, clear of the name.
-            WorkingGlyph(height: 15, slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
+            WorkingGlyph(slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
         case .error:
             StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):
@@ -704,7 +704,7 @@ private struct FoldRow: View {
         if let onAdd, depth == 0 || hovering {
             Button(action: onAdd) {
                 Group {
-                    if adding { TideGlyph(color: Theme.muted, height: TideGlyph.Grid.mini.height(fittingWidth: 20)) } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
+                    if adding { TideGlyph(color: Theme.muted, grid: .mini) } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
                 }
                 .frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -794,7 +794,7 @@ private struct FoldRow: View {
         if lifecycle == .setupFailed {
             LifecycleSlot(mark: .setupFailed)
         } else if lifecycle == .settingUp {
-            WorkingGlyph(color: Theme.muted, height: 10, slot: 28, alignment: .trailing).opacity(0.7).frame(height: 16).help(WorkspaceLifecycle.words(.settingUp))
+            WorkingGlyph(color: Theme.muted, slot: 28, alignment: .trailing).opacity(0.7).frame(height: 16).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
                 Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)

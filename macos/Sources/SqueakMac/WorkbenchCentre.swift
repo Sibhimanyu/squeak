@@ -57,15 +57,15 @@ struct WorkbenchCentre: View {
             if showingCompose {
                 DesktopComposePage()
             } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
-                TerminalPanelView(session: chat, shell: shell).dockDrop(.centre)
+                TerminalPanelView(session: chat, shell: shell)
             } else if let chat, let panel = DockStore.shared.layout.centre.selected {
-                DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity).dockDrop(.centre)
+                DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let files, let chat, files.review.isOpen {
                 ReviewView(files: files, session: chat).heresayPrivate()
             } else if let files, let file = files.activeFile, DockStore.shared.files.zone(of: file.path) == .centre {
                 FileViewer(files: files, file: file).id(file.path)
             } else {
-                DetailView().dockDrop(.centre)
+                DetailView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -461,14 +461,15 @@ private struct WorkbenchTabs: View {
         .accessibilityAddTraits(.isButton)
         .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
-        .draggable(DockItemPayload.encode(.thread(s.key.stringValue))) { DockTabDragPreview(title: model.workbenchTitle(s)) }
+        .onDrag { dragProvider(DockItemPayload.encode(.thread(s.key.stringValue)), kind: .thread) } preview: { DockTabDragPreview(title: model.workbenchTitle(s)) }
         .padding(.leading, chatDropTarget == s.key ? 16 : 0)
         .overlay(alignment: .leading) {
             if chatDropTarget == s.key { Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8).allowsHitTesting(false).transition(.opacity) }
         }
         .animation(Motion.standard, value: chatDropTarget == s.key)
-        .dropDestination(for: String.self) { values, _ in
-            guard values.count == 1, let source = values.first else { return false }
+        .scopedDrop(.centreStrip, isTargeted: { on in
+            if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
+        }) { source in
             if case .thread(let moving)? = DockItemPayload.decode(source) {
                 // From a side zone the thread comes home first, then sits before this tab.
                 if dock.threads.isDocked(moving) { dock.moveThread(moving, to: .centre) }
@@ -477,9 +478,7 @@ private struct WorkbenchTabs: View {
             }
             // Any other dock tab dropped on a chat tab goes to the centre.
             if let item = DockItemPayload.decode(source) { return performDockDrop(item, to: .centre, before: nil, model: model) }
-            return model.moveChatTab(source, before: s.key, workspace: workspace)
-        } isTargeted: { on in
-            if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
+            return false
         }
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
