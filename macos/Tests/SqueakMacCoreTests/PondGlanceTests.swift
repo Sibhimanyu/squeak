@@ -95,7 +95,7 @@ import Foundation
         #expect(g.people.count == 1); #expect(g.people[0].name == "You"); #expect(g.agentLine == nil)
     }
 
-    @Test func runningHelpersQueueAndChangedFiles() {
+    @Test func runningHelpersQueueAndChangedLine() {
         let helpers = [Duckling(id: "1", title: "Lint", status: .done), Duckling(id: "2", kind: .shell, title: "dev server", status: .running)]
         let files = (1...8).map { DaemonChanges.File(path: "src/f\($0).swift", added: 2, removed: 1) }
         let g = ThreadGlance.build(agentName: "Codex", model: nil, state: .working, you: "S", thread: nil,
@@ -103,10 +103,8 @@ import Foundation
         #expect(g.helpers.first?.title == "dev server"); #expect(g.runningHelpers == 1)
         #expect(g.helpers.first?.isShell == true)
         #expect(g.queued == ["a", "b", "c"]); #expect(g.hasRunning)
-        #expect(g.changed.count == ThreadGlance.changedCap); #expect(g.changedMore == 2)
-        #expect(g.changedSummary == "Changed 8 files, +16 \u{2212}8")
-        #expect(g.changed[0].name == "f1.swift")
+        #expect(g.changedLine == "8 files changed")
         let idle = ThreadGlance.build(agentName: nil, model: nil, state: .idle, you: "S", thread: nil)
-        #expect(!idle.hasRunning); #expect(idle.changed.isEmpty); #expect(idle.changedSummary == nil)
+        #expect(!idle.hasRunning); #expect(idle.changedLine == nil)
     }
 }

@@ -1088,7 +1088,7 @@ The **Thread tab** shows the thread open in the centre, live, decided in `Thread
 - **Header and Needs you.** Title, state mark, "Working · Claude · Opus 5"; while the thread waits on you, its question, approval or plan card answers inline (moved here from the old Pond panel), with "Tell it to stop retrying" for a loop.
 - **Who.** Owner, people who took part, and who is watching now (typing says so), from the pond's thread and presence; a thread no pond holds is just you.
 - **Running.** Ducklings and background commands with their status, and the queued messages (at most three shown).
-- **Changed.** The files this thread changed (six, "+N more in Code"), each row opening that file's diff in the Code panel.
+- **No file list.** File-level change detail belongs to the Code tab only (owner, 2026-11-16: the numbers were the whole workspace diff, not this thread's). The header carries at most one quiet `subtle` line, "35 files changed", that switches to Code: no file names, no +/− counts.
 - **Controls.** Approvals (the composer's mode chip), the model menu, the private switch for your own shared thread, and "Share with <pond>" for a Squeak chat the pond does not hold yet.
 
 The Code view is the inspector as before: the upper All files, Changes and Review tabs and the lower Setup, Run and Terminal part (⌘J).

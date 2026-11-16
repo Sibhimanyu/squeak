@@ -1,7 +1,7 @@
 import Foundation
 
 // DESIGN.md "Pond tab, dashboard and Thread tab": the Thread tab covers the one thread open in the centre, live: who is
-// in it, what is running, what changed, and its controls. Pure view-model; the view draws it.
+// in it, what is running, and its controls. Pure view-model; the view draws it.
 
 public struct ThreadGlance: Equatable, Sendable {
     public struct Person: Equatable, Sendable, Identifiable {
@@ -25,15 +25,6 @@ public struct ThreadGlance: Equatable, Sendable {
         public var status: String
     }
 
-    public struct ChangedFile: Equatable, Sendable, Identifiable {
-        public var id: String { path }
-        public var path: String
-        public var name: String
-        public var status: String
-        public var added: Int
-        public var removed: Int
-    }
-
     public var people: [Person]
     /// "Claude · Opus 5", nil when the agent is unknown.
     public var agentLine: String?
@@ -41,11 +32,9 @@ public struct ThreadGlance: Equatable, Sendable {
     public var helpers: [Helper]
     public var runningHelpers: Int
     public var queued: [String]
-    public var changedSummary: String?
-    public var changed: [ChangedFile]
-    public var changedMore: Int
+    /// "35 files changed": one quiet line that opens Code, where the file detail lives. No file names, no +/- counts.
+    public var changedLine: String?
 
-    public static let changedCap = 6
     public static let queuedCap = 3
 
     public var hasRunning: Bool { runningHelpers > 0 || !queued.isEmpty }
@@ -85,14 +74,9 @@ public struct ThreadGlance: Equatable, Sendable {
                    isShell: d.kind == .shell, running: d.status == .running,
                    status: d.status == .running ? "Running" : d.status == .done ? "Done" : d.status == .failed ? "Failed" : "Stopped")
         }.sorted { $0.running != $1.running ? $0.running : false }
-        let sorted = files.sorted { $0.path.localizedCompare($1.path) == .orderedAscending }
-        let changed = sorted.prefix(changedCap).map { f in
-            ChangedFile(path: f.path, name: (f.path as NSString).lastPathComponent, status: f.status, added: f.added, removed: f.removed)
-        }
         return ThreadGlance(
             people: people, agentLine: agentLine.isEmpty ? nil : agentLine, statusWord: PondSentence.stateWord(state),
             helpers: rows, runningHelpers: rows.filter(\.running).count, queued: Array(queued.prefix(queuedCap)),
-            changedSummary: PondSentence.changed(files: files.count, added: files.reduce(0) { $0 + $1.added }, removed: files.reduce(0) { $0 + $1.removed }),
-            changed: Array(changed), changedMore: max(0, files.count - changedCap))
+            changedLine: files.isEmpty ? nil : "\(files.count) \(files.count == 1 ? "file" : "files") changed")
     }
 }

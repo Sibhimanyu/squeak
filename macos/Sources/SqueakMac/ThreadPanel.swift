@@ -3,7 +3,7 @@ import SqueakMacCore
 import SwiftUI
 
 // DESIGN.md "Pond tab, dashboard and Thread tab": the Thread tab covers the one thread open in the centre, live: who
-// is in it, what is running, what changed, and its controls. What it says is decided in `ThreadGlance`.
+// is in it, what is running, and its controls. What it says is decided in `ThreadGlance`.
 
 struct ThreadPanel: View {
     let session: HostSession?
@@ -47,7 +47,6 @@ struct ThreadPanel: View {
                 needsYou(s)
                 if glance.people.count > 0 { who(glance) }
                 if glance.hasRunning || !glance.helpers.isEmpty { running(glance, s) }
-                if !glance.changed.isEmpty { changed(glance, s) }
                 controls(s, key: key, detail: detail, thread: thread)
             }
             .padding(Space.m)
@@ -71,6 +70,12 @@ struct ThreadPanel: View {
                 MarkSlot(mark: model.mark(for: s))
             }
             Text(verbatim: [g.statusWord, g.agentLine].compactMap { $0 }.joined(separator: " \u{00B7} ")).font(Typo.meta).foregroundStyle(Theme.muted)
+            if let line = g.changedLine {
+                Button { NotificationCenter.default.post(name: .squeakShowCode, object: nil) } label: {
+                    Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.subtle)
+                }
+                .buttonStyle(.plain).help("Open Code")
+            }
         }
     }
 
@@ -138,27 +143,6 @@ struct ThreadPanel: View {
                         Text(verbatim: text).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                 }
-            }
-        }
-    }
-
-    private func changed(_ g: ThreadGlance, _ s: HostSession) -> some View {
-        let files = s.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
-        return section("Changed") {
-            VStack(alignment: .leading, spacing: 2) {
-                if let line = g.changedSummary { Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted).padding(.bottom, 2) }
-                ForEach(g.changed) { f in
-                    Button { files?.showReview(file: f.path) } label: {
-                        HStack(spacing: Space.s) {
-                            Text(verbatim: f.name).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
-                            Spacer(minLength: 0)
-                            Text(verbatim: "+\(f.added) \u{2212}\(f.removed)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                        }
-                        .padding(.horizontal, Space.s).frame(height: Metrics.chatRow).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).help(f.path)
-                }
-                if g.changedMore > 0 { Text(verbatim: "+\(g.changedMore) more in Code").font(Typo.meta).foregroundStyle(Theme.muted).padding(.horizontal, Space.s) }
             }
         }
     }
