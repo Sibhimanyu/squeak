@@ -3,7 +3,7 @@ import XCTest
 @testable import SqueakIcons
 
 final class TideMotionTests: XCTestCase {
-    let grids: [(Int, Int)] = [(11, 4), (21, 6), (29, 9)]
+    let grids: [(Int, Int)] = [(6, 3), (10, 4), (16, 5)]
     let times = (0..<150).map { Double($0) / 15 }
     let seed: UInt64 = 0xC0FFEE
 
@@ -127,7 +127,7 @@ final class TideMotionTests: XCTestCase {
             var l = 0.0, r = 0.0
             for row in 0..<g.1 { for col in 0..<g.0 {
                 let v = Double(TideMotion.stillLevel(col: col, row: row, cols: g.0, rows: g.1, seed: seed))
-                if col < g.0 / 2 { l += v } else if col > g.0 / 2 { r += v }
+                if col < g.0 / 2 { l += v } else if col >= (g.0 + 1) / 2 { r += v }
             } }
             XCTAssertGreaterThan(l + r, 0)
             XCTAssertEqual(l, r, "\(g)")
@@ -252,7 +252,7 @@ final class TideOffShareTests: XCTestCase {
     /// Share of in-band pixels drawn off (alpha under 0.15, the lowest level is 0.38), averaged over 10 s at 15 fps on the mark and large grids and several seeds.
     static func offShare(_ tuning: TideMotion.Tuning = TideMotion.Tuning()) -> Double {
         var off = 0.0, band = 0.0
-        for g in [(21, 6), (29, 9)] { for sd in UInt64(1)...4 { for i in 0..<150 {
+        for g in [(10, 4), (16, 5)] { for sd in UInt64(1)...4 { for i in 0..<150 {
             let t = Double(i) / 15
             for r in 0..<g.1 { for c in 0..<g.0 where TideMotion.inBand(col: c, row: r, cols: g.0, rows: g.1, t: t, seed: sd, tuning: tuning) {
                 band += 1

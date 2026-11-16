@@ -4,17 +4,18 @@ import SwiftUI
 /// with its ends dissolving. It always means working; the non-moving states are `StatusMark`. The caller passes the
 /// colour (SqueakIcons has no Theme). `still` or Reduce Motion holds one frame.
 public struct TideGlyph: View {
-    /// The one cell pitch (dot plus gap, in points) of every tide glyph on a platform: the Mac's 1.5 pt is a 1 pt dot and a
-    /// 0.5 pt gap; the phone's 2 pt is a 1.33 pt dot and a 0.67 pt gap. A glyph's size is `cols x pitch` by `rows x pitch`
+    /// The one cell pitch (dot plus gap, in points) of every tide glyph on a platform: the Mac's 3 pt is a 2.25 pt dot and a
+    /// 0.75 pt gap; the phone's 3.5 pt is a 2.625 pt dot and a 0.875 pt gap. Chunky on purpose (owner, 2026-11-16: fine
+    /// dots read as noise); drawn dot edges snap to whole device pixels so each is a crisp square. A glyph's size is `cols x pitch` by `rows x pitch`
     /// (less one trailing gap), so two glyphs on one screen always have pixels of the same size. A call site picks a
     /// grid (columns and rows) that fits its slot and never a scale. DESIGN.md §8.1, "Tide glyph pitch".
     #if os(macOS)
-    public static let pitch: CGFloat = 1.5
+    public static let pitch: CGFloat = 3
     #else
-    public static let pitch: CGFloat = 2
+    public static let pitch: CGFloat = 3.5
     #endif
-    /// The gap is a third of the pitch, the dot the other two thirds.
-    public static var gap: CGFloat { pitch / 3 }
+    /// The gap is a quarter of the pitch, the dot the other three quarters.
+    public static var gap: CGFloat { pitch / 4 }
 
     public struct Grid: Sendable, Equatable {
         public var cols: Int, rows: Int, gap: CGFloat
@@ -24,19 +25,19 @@ public struct TideGlyph: View {
         public static func standard(cols: Int, rows: Int) -> Grid { Grid(cols: cols, rows: rows, gap: TideGlyph.gap) }
         /// The widest grid of `rows` rows that fits `width` points (at least 3 columns).
         public static func fitting(width: CGFloat, rows: Int) -> Grid { .standard(cols: max(3, Int(((width + TideGlyph.gap) / TideGlyph.pitch).rounded(.down))), rows: rows) }
-        /// 7x3: a dot beside tight text.
-        public static var micro: Grid { .standard(cols: 7, rows: 3) }
-        /// 11x4: a button, a busy row, a stream slot (Mac 16.5 x 5.5, phone 22 x 7.3).
-        public static var mini: Grid { .standard(cols: 11, rows: 4) }
-        /// 11x5: a phone button (22 x 9.3).
-        public static var medium: Grid { .standard(cols: 11, rows: 5) }
-        /// 16x7: a Mac mark beside a title, 24 x 10.
-        public static var compact: Grid { .standard(cols: 16, rows: 7) }
-        /// 21x6: a row's working mark (Mac 31.5 x 8.5, phone 42 x 11.3).
-        public static var mark: Grid { .standard(cols: 21, rows: 6) }
-        /// 33x9: the Mac's working line (49.5 x 13).
-        public static var stream: Grid { .standard(cols: 33, rows: 9) }
-        public static var large: Grid { .standard(cols: 29, rows: 9) }
+        /// 4x2: a dot beside tight text (Mac 11.25 x 5.25).
+        public static var micro: Grid { .standard(cols: 4, rows: 2) }
+        /// 6x3: a button, a busy row, a stream slot (Mac 17.25 x 8.25, phone 20.1 x 9.6).
+        public static var mini: Grid { .standard(cols: 6, rows: 3) }
+        /// 7x3: a phone button (23.6 x 9.6).
+        public static var medium: Grid { .standard(cols: 7, rows: 3) }
+        /// 7x4: a Mac mark beside a title, 20.25 x 11.25.
+        public static var compact: Grid { .standard(cols: 7, rows: 4) }
+        /// 10x4: a row's working mark (Mac 29.25 x 11.25, phone 34.1 x 13.1).
+        public static var mark: Grid { .standard(cols: 10, rows: 4) }
+        /// 16x5: the Mac's working line (47.25 x 14.25).
+        public static var stream: Grid { .standard(cols: 16, rows: 5) }
+        public static var large: Grid { .standard(cols: 14, rows: 5) }
         /// Preview tools only: a named grid by height.
         public static func preset(forHeight h: CGFloat) -> Grid { h < 6 ? .micro : h <= 12 ? .mini : h <= 20 ? .mark : .large }
 
@@ -58,6 +59,7 @@ public struct TideGlyph: View {
     }
 
     private let color: Color, still: Bool, grid: Grid, fixedSeed: UInt64?, fade: Bool, tuning: TideMotion.Tuning
+    @Environment(\.displayScale) private var displayScale
     /// One random seed per view, captured once: two glyphs side by side never match.
     @State private var instanceSeed = UInt64.random(in: .min ... .max)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -78,10 +80,10 @@ public struct TideGlyph: View {
         return Group {
             if !still && !reduceMotion {
                 TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, tuning.frameRate)), paused: scenePhase == .background)) { context in
-                    TideFrame(color: color, height: grid.size.height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning)
+                    TideFrame(color: color, height: grid.size.height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning, scale: displayScale)
                 }
             } else {
-                TideFrame(color: color, height: grid.size.height, grid: grid, time: nil, seed: seed, fade: fade, tuning: tuning)
+                TideFrame(color: color, height: grid.size.height, grid: grid, time: nil, seed: seed, fade: fade, tuning: tuning, scale: displayScale)
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)
@@ -90,20 +92,20 @@ public struct TideGlyph: View {
 
 /// One frame of the glyph at an explicit time (nil = the still frame); the preview drives it directly.
 public struct TideFrame: View {
-    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64, fade: Bool, tuning: TideMotion.Tuning
+    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64, fade: Bool, tuning: TideMotion.Tuning, scale: CGFloat
 
-    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning()) {
-        self.tuning = tuning; self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed; self.fade = fade
+    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2) {
+        self.scale = scale; self.tuning = tuning; self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed; self.fade = fade
     }
 
     public var body: some View {
         Canvas { graphics, canvas in
-            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed, fade: fade, tuning: tuning)
+            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed, fade: fade, tuning: tuning, scale: scale)
         }
         .frame(width: grid.width(height: height), height: height)
     }
 
-    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning()) {
+    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2) {
         let side = grid.side(height: size.height)
         guard side > 0 else { return }
         let ox = (size.width - grid.width(height: size.height)) / 2
@@ -116,7 +118,10 @@ public struct TideFrame: View {
                     if let time { a = TideMotion.smoothAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows, t: time, seed: seed, tuning: tuning) }
                     else { a = TideMotion.alpha(TideMotion.stillLevel(col: col, row: row, cols: grid.cols, rows: grid.rows, seed: seed)) }
                     guard a > 0.004 else { continue }
-                    let rect = CGRect(x: ox + CGFloat(col) * (side + grid.gap), y: CGFloat(row) * (side + grid.gap), width: side, height: side)
+                    // Edges snap to whole device pixels so every dot is a crisp square.
+                    func snap(_ v: CGFloat) -> CGFloat { (v * scale).rounded() / scale }
+                    let x0 = snap(ox + CGFloat(col) * (side + grid.gap)), y0 = snap(CGFloat(row) * (side + grid.gap))
+                    let rect = CGRect(x: x0, y: y0, width: snap(ox + CGFloat(col) * (side + grid.gap) + side) - x0, height: snap(CGFloat(row) * (side + grid.gap) + side) - y0)
                     layer.fill(Path(rect), with: .color(color.opacity(a)))
                 }
             }

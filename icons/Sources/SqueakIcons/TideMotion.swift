@@ -155,13 +155,18 @@ public enum TideMotion {
     /// The surfaces at horizontal position `x` (0...1): the stream's top and bottom edge in y units where the outer
     /// rows sit near +-1; the band is about two thirds of the height and each surface moves about one row. The surface
     /// waves are advected slowly (the body's streaks run faster, so layers of water move at different speeds).
-    static func surfaces(x: Double, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> (top: Double, bottom: Double) {
+    /// `rows` sets the band's base half-thickness: a glyph with few rows needs a fatter band (0.62 at 6 rows or more) or its
+    /// outer rows would almost never light and the wave would read as one line.
+    static func bandBase(rows: Int) -> Double { max(0.62, min(0.78, 0.62 + 0.05 * Double(6 - rows))) }
+
+    static func surfaces(x: Double, t: Double, seed: UInt64, rows: Int = 6, tuning: Tuning = Tuning()) -> (top: Double, bottom: Double) {
         let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let ripple = 0.22 + 0.26 * chop, fx = 0.85 + 0.4 * chop  // choppy water ripples more and finer
         let thick = 1 + 0.15 * noise(tau * 0.2, 0.5, 0.5, seed &+ 12)
         let sway = 0.12 * noise(x * 1.1 - 0.10 * tau, tau * 0.1, 0.5, seed &+ 13)
-        let top = 0.62 * thick + ripple * noise(x * 3.2 * fx - 0.30 * tau, tau * 0.22, 1.5, seed &+ 14)
-        let bottom = 0.62 * thick + ripple * noise(x * 3.0 * fx - 0.27 * tau, tau * 0.2, 2.5, seed &+ 15)
+        let base = bandBase(rows: rows)
+        let top = base * thick + ripple * noise(x * 3.2 * fx - 0.30 * tau, tau * 0.22, 1.5, seed &+ 14)
+        let bottom = base * thick + ripple * noise(x * 3.0 * fx - 0.27 * tau, tau * 0.2, 2.5, seed &+ 15)
         return (-top + sway, bottom + sway)
     }
 
@@ -170,7 +175,10 @@ public enum TideMotion {
     static func streaks(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Double {
         let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let l1 = 4.8 - 2.2 * chop, l2 = 2.9 - 1.3 * chop  // calm: long smooth streaks; choppy: short ones
-        let c = (Double(col) + 0.5) / Double(cols) * 21, r = Double(row) / Double(rows) * 6  // units of the 21x6 grid
+        // Noise units per cell: the streak scale is in cells, not in glyph widths, so a coarse chunky grid keeps streaks 2-3
+        // cells long (a 21-unit-wide field squeezed into 6 columns made them sub-cell) and rows stay correlated.
+        let cu = max(0.9, min(1.6, 21 / Double(cols))), ru = min(1.4, 6 / Double(rows))
+        let c = (Double(col) + 0.5) * cu, r = Double(row) * ru
         let stagger = unit(seed &+ 40, row) * 23
         let u = c + stagger - 9.0 * tau + 0.9 * noise(c * 0.3, r * 0.7, tau * 0.4, seed &+ 41)
         let n = 0.6 * noise(u / l1, r / 0.95, tau * 0.6, seed &+ 42) + 0.4 * noise(u / l2 + 5.3, r / 0.8 + 3, tau * 0.9, seed &+ 43)
@@ -191,7 +199,7 @@ public enum TideMotion {
         let ends = e * e * (3 - 2 * e)
         let left = col < cols / 2
         let narrow = left ? 0.15 + 0.85 * ends : 0.45 + 0.55 * ends
-        let s = surfaces(x: x, t: t, seed: seed, tuning: tuning)
+        let s = surfaces(x: x, t: t, seed: seed, rows: rows, tuning: tuning)
         let mid = (s.top + s.bottom) / 2
         let topEdge = mid + (s.top - mid) * narrow, bottomEdge = mid + (s.bottom - mid) * narrow
         let dTop = y - topEdge, dBottom = bottomEdge - y
