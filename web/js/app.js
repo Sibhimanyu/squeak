@@ -52,15 +52,25 @@ import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
 import { getScreen, isScreen, loadScreen, navEntries, screenState } from "./router.js";
 import "./screens.js";
 import {
+  closeTab,
   createPondMemory,
   layoutMode,
   moveIndex,
+  openTab,
   paletteItems,
   sidebarModel,
   toggleInspector,
   inspectorShows,
 } from "./shell-logic.js";
-import { inspectorNodes, paletteNodes, shellNodes, sidebarNodes, tabbarNodes, topbarNodes } from "./shell-view.js";
+import {
+  inspectorNodes,
+  paletteNodes,
+  shellNodes,
+  sidebarNodes,
+  tabStripNodes,
+  tabbarNodes,
+  topbarNodes,
+} from "./shell-view.js";
 import { Outbox } from "./sends.js";
 import { Sync } from "./sync.js";
 import { identify, introduce, nudge, reportButton, setScreen } from "./heresay.js";
@@ -78,6 +88,7 @@ const ui = {
   sync: null,
   syncState: null,
   selected: null,
+  tabs: [], // open chats, the strip above the chat
   confirmChoice: null, // { key, letter }
   confirmForget: false,
   /** The owner's account on a Catalyst page: "loading" | "in" | "out" | "unknown", who, their Macs, and the request in flight. */
@@ -604,6 +615,7 @@ function select(key) {
   if (ui.selected) ui.read?.markSeen(ui.selected);
   if (key) ui.read?.markSeen(key);
   ui.selected = key;
+  if (key) ui.tabs = openTab(ui.tabs, key);
   if (key) ui.sheet = null;
   if (key) ui.cursor = key;
   if (ui.renaming && ui.renaming.key !== key) ui.renaming = null;
@@ -1642,6 +1654,21 @@ function pairedScreen() {
       ui.syncState?.error ? h("div", { class: "banner" }, ui.syncState.error) : null,
     ),
     homeScreenHint(),
+    session
+      ? tabStripNodes({
+          tabs: ui.tabs.map(findSession).filter(Boolean),
+          selected: ui.selected,
+          actions: {
+            select,
+            close: (key) => {
+              const result = closeTab(ui.tabs, key, ui.selected);
+              ui.tabs = result.tabs;
+              if (result.next !== ui.selected) select(result.next);
+              else render(true);
+            },
+          },
+        })
+      : null,
     ...(session || ui.pane ? [detail] : (dashboard ?? [list])),
   ];
   return shellNodes(

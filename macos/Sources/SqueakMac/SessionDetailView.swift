@@ -13,6 +13,14 @@ struct DetailView: View {
         Group {
             if model.navFilter == .usage {
                 UsageDetailView()
+            } else if let s = model.selectedSession, DockStore.shared.threads.isDocked(s.key.stringValue) {
+                let zone = DockStore.shared.threads.zone(of: s.key.stringValue)
+                VStack(spacing: Space.s) {
+                    Text("This thread is in the \(zone.title.lowercased()) panel.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Move it back here") { DockStore.shared.moveThread(s.key.stringValue, to: .centre) }
+                        .buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.ink)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
             } else if let key = model.selected {

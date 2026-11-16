@@ -107,15 +107,15 @@ public extension DockLayout {
     var terminalHome: DockZone { zone(of: .terminal) ?? .bottom }
 
     /// Like `isZoneVisible(_:files:)`, with shells: a side zone that holds only shells still shows.
-    func isZoneVisible(_ zone: DockZone, files: DockFiles, terminals: DockTerminals) -> Bool {
-        isZoneVisible(zone, files: files) || terminals.has(in: zone)
+    func isZoneVisible(_ zone: DockZone, files: DockFiles, terminals: DockTerminals, threads: DockThreads = DockThreads()) -> Bool {
+        isZoneVisible(zone, files: files) || terminals.has(in: zone) || threads.has(in: zone)
     }
 }
 
 public extension DockBottomPlacement {
-    static func of(_ layout: DockLayout, files: DockFiles, terminals: DockTerminals) -> DockBottomPlacement {
-        guard layout.isZoneVisible(.bottom, files: files, terminals: terminals) else { return .none }
-        let right = layout.isZoneVisible(.right, files: files, terminals: terminals) && !layout.right.collapsed
+    static func of(_ layout: DockLayout, files: DockFiles, terminals: DockTerminals, threads: DockThreads = DockThreads()) -> DockBottomPlacement {
+        guard layout.isZoneVisible(.bottom, files: files, terminals: terminals, threads: threads) else { return .none }
+        let right = layout.isZoneVisible(.right, files: files, terminals: terminals, threads: threads) && !layout.right.collapsed
         return right ? .underRight : .underCentre
     }
 }

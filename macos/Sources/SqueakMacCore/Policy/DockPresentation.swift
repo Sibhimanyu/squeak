@@ -88,6 +88,8 @@ public final class DockStore {
     public private(set) var workspaces: DockWorkspaces
     /// Open files placed outside the centre (session state, never saved).
     public private(set) var files = DockFiles()
+    /// Chat threads docked outside the centre (session state, never saved).
+    public private(set) var threads = DockThreads()
     /// Shells placed in zones, per workspace folder (session state, never saved). `activeFolder` is the chat's folder.
     public private(set) var terminals: [String: DockTerminals] = [:]
     public private(set) var activeFolder: String?
@@ -128,7 +130,7 @@ public final class DockStore {
         workspaces.update(l)
         save()
         // A panel newly selected in a zone shows instead of that zone's file.
-        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z); deselectTerminals(z) }
+        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z); threads.deselect(z); deselectTerminals(z) }
     }
 
     // MARK: Shells
@@ -223,7 +225,7 @@ public final class DockStore {
     /// Puts an open file in a zone (the centre = back to the strip); a folded side zone opens for it.
     public func moveFile(_ path: String, to zone: DockZone, before: String? = nil) {
         files.move(path, to: zone, before: before)
-        deselectTerminals(zone)
+        deselectTerminals(zone); threads.deselect(zone)
         if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
     }
 
@@ -237,7 +239,7 @@ public final class DockStore {
     public func selectFile(_ path: String) {
         files.select(path)
         let z = files.zone(of: path)
-        deselectTerminals(z)
+        deselectTerminals(z); threads.deselect(z)
         if z != .centre { update { $0.setCollapsed(false, for: z) } }
     }
 
@@ -245,6 +247,30 @@ public final class DockStore {
     public func pruneFiles(keeping open: Set<String>) {
         let p = files.pruned(keeping: open)
         if p != files { files = p }
+    }
+
+    /// Docks a thread in a zone (the centre = back to the strip); a folded side zone opens for it.
+    public func moveThread(_ key: String, to zone: DockZone, before: String? = nil) {
+        threads.move(key, to: zone, before: before)
+        files.deselect(zone)
+        deselectTerminals(zone)
+        if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
+    }
+
+    public func selectThread(_ key: String) {
+        threads.select(key)
+        let z = threads.zone(of: key)
+        guard z != .centre else { return }
+        files.deselect(z)
+        deselectTerminals(z)
+        update { $0.setCollapsed(false, for: z) }
+    }
+
+    public func closeThread(_ key: String) { threads.close(key) }
+
+    public func pruneThreads(keeping live: Set<String>) {
+        let p = threads.pruned(keeping: live)
+        if p != threads { threads = p }
     }
 
     /// Changes the workspaces themselves (switch, save, reset, ...).
@@ -269,6 +295,10 @@ public final class DockStore {
             var b: String?
             if case .file(let other)? = before { b = other }
             moveFile(path, to: zone, before: b)
+        case .thread(let key):
+            var b: String?
+            if case .thread(let other)? = before { b = other }
+            moveThread(key, to: zone, before: b)
         case .terminal(let id):
             var b: UUID?
             if case .terminal(let other)? = before { b = other }

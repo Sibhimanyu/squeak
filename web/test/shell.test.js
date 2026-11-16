@@ -73,10 +73,10 @@ describe("the preview's data", () => {
 });
 
 describe("layout modes", () => {
-  it("switches at 1100 and 761", () => {
+  it("switches at 1280 and 761", () => {
     expect(layoutMode(1440)).toBe("wide");
     expect(layoutMode(BREAKPOINTS.wide)).toBe("wide");
-    expect(layoutMode(1099)).toBe("mid");
+    expect(layoutMode(1279)).toBe("mid");
     expect(layoutMode(761)).toBe("mid");
     expect(layoutMode(760)).toBe("phone");
     expect(layoutMode(390)).toBe("phone");

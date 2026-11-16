@@ -89,7 +89,8 @@ struct ConversationView: View {
         let ducklingOpen = DucklingRef.open(model.openDuckling, whenSelected: model.selectedSession?.key) != nil
         let dockFiles = dock.files
         let dockTerminals = dock.activeTerminals
-        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals) && !layout.right.collapsed
+        let dockThreads = dock.threads
+        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads) && !layout.right.collapsed
         let showsInspector = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
         let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
@@ -124,7 +125,7 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals) : .none
+                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
@@ -158,7 +159,7 @@ struct ConversationView: View {
                     if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
                 }
                 .overlay(alignment: .bottom) {
-                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals) { DockEdgeStrip(zone: .bottom) }
+                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads) { DockEdgeStrip(zone: .bottom) }
                 }
             }
         }

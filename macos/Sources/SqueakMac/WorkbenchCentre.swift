@@ -246,7 +246,8 @@ private struct WorkbenchTabs: View {
     @State private var showHistory = false
 
     private var dock: DockStore { DockStore.shared }
-    private var chats: [HostSession] { model.streamThreads(workspace) }
+    /// The strip's threads: one docked in a side zone is not here (a thread is in one place).
+    private var chats: [HostSession] { model.streamThreads(workspace).filter { !dock.threads.isDocked($0.key.stringValue) } }
 
     private enum StripItem: Identifiable {
         case chat(HostSession), file(OpenFile)
@@ -277,6 +278,7 @@ private struct WorkbenchTabs: View {
 
     @State private var stripWidth: Double = 0
     @State private var hoveredTab: SessionKey?
+    @State private var chatDropTarget: SessionKey?
     @Namespace private var tabIndicator
     private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
 
@@ -341,7 +343,10 @@ private struct WorkbenchTabs: View {
         .frame(height: Metrics.tabStrip)
         .dockDrop(.centre, wash: false)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
-        .task(id: model.allSessions.count) { model.pruneStreamTabs() }
+        .task(id: model.allSessions.count) {
+            model.pruneStreamTabs()
+            dock.pruneThreads(keeping: Set(model.allSessions.map { $0.key.stringValue }))
+        }
         // File tabs are saved with the strip: brought back once per run, if the file is still there.
         .task(id: files?.root) {
             guard let files, !files.restoredTabs else { return }
@@ -413,7 +418,8 @@ private struct WorkbenchTabs: View {
         let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }) {
+        let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
+        return Group {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
                 tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
@@ -438,17 +444,37 @@ private struct WorkbenchTabs: View {
             }
             .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
             .frame(minWidth: ChatTabWidth.hugMinWidth, maxWidth: tabWidth, minHeight: Metrics.tabStrip, maxHeight: Metrics.tabStrip, alignment: .leading)
-            .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
+            .onHover { inside in
+                hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
+                if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
+            }
             .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .draggable(s.key.stringValue)
+        // Not a Button: a Button takes the mouse-down and the drag never starts.
+        .onTapGesture { if !model.isRenaming(s) { open() } }
+        .accessibilityAddTraits(.isButton)
+        .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
+        .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
+        .draggable(DockItemPayload.encode(.thread(s.key.stringValue))) { DockTabDragPreview(title: model.workbenchTitle(s)) }
+        .padding(.leading, chatDropTarget == s.key ? 16 : 0)
+        .overlay(alignment: .leading) {
+            if chatDropTarget == s.key { Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8).allowsHitTesting(false).transition(.opacity) }
+        }
+        .animation(Motion.standard, value: chatDropTarget == s.key)
         .dropDestination(for: String.self) { values, _ in
             guard values.count == 1, let source = values.first else { return false }
-            // A dock tab dropped on a chat tab goes to the centre; a nested String drop would not reach the strip's.
+            if case .thread(let moving)? = DockItemPayload.decode(source) {
+                // From a side zone the thread comes home first, then sits before this tab.
+                if dock.threads.isDocked(moving) { dock.moveThread(moving, to: .centre) }
+                dock.dragging = nil
+                return moving == s.key.stringValue || model.moveChatTab(moving, before: s.key, workspace: workspace)
+            }
+            // Any other dock tab dropped on a chat tab goes to the centre.
             if let item = DockItemPayload.decode(source) { return performDockDrop(item, to: .centre, before: nil, model: model) }
             return model.moveChatTab(source, before: s.key, workspace: workspace)
+        } isTargeted: { on in
+            if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
         }
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))

@@ -55,24 +55,40 @@ private struct DockDropModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // A tab opens a gap before itself while a tab hovers it; a strip or zone washes instead.
+            .padding(.leading, before != nil && targeted ? 16 : 0)
             .dropDestination(for: String.self) { values, _ in
                 guard let text = values.first, let item = DockItemPayload.decode(text) else { return false }
                 return performDockDrop(item, to: zone, before: before, model: model)
             } isTargeted: { targeted = $0 }
             .overlay {
                 if targeted {
-                    ZStack {
-                        if wash { Theme.selected.opacity(0.5) }
-                        RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 2).padding(wash ? 4 : 1)
+                    if before != nil {
+                        Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .allowsHitTesting(false).transition(.opacity)
+                    } else {
+                        ZStack {
+                            if wash { Theme.selected.opacity(0.5) }
+                            RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 2).padding(wash ? 4 : 1)
+                        }
+                        .allowsHitTesting(false).transition(.opacity)
                     }
-                    .allowsHitTesting(false).transition(.opacity)
                 }
             }
-            .animation(Motion.quick, value: targeted)
+            .animation(Motion.standard, value: targeted)
     }
 }
 
 @MainActor func performDockDrop(_ item: DockItem, to zone: DockZone, before: DockItem?, model: AppModel) -> Bool {
+    if case .thread(let key) = item {
+        var b: String?
+        if case .thread(let other)? = before { b = other }
+        DockStore.shared.dragging = nil
+        DockStore.shared.moveThread(key, to: zone, before: b)
+        if zone != .centre { model.select(SessionKey(stringValue: key)) }
+        return true
+    }
     if case .file(let path) = item {
         var b: String?
         if case .file(let other)? = before { b = other }
@@ -132,7 +148,7 @@ struct DockItemTab<Icon: View>: View {
 
     var body: some View {
         let dock = DockStore.shared
-        Button(action: select) {
+        Group {
             HStack(spacing: 7) {
                 icon().frame(width: 16).opacity(selected ? 1 : 0.8)
                 Text(verbatim: title).font(.system(size: 14, weight: .regular))
@@ -157,8 +173,12 @@ struct DockItemTab<Icon: View>: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .draggable(DockItemPayload.encode(item))
+        // Not a Button: a Button takes the mouse-down and the drag never starts.
+        .onTapGesture(perform: select)
+        .accessibilityAddTraits(.isButton)
+        .opacity(dock.dragging == item ? 0.35 : 1)
+        .animation(Motion.quick, value: dock.dragging == item)
+        .draggable(DockItemPayload.encode(item)) { DockTabDragPreview(title: title) }
         .dockDrop(zone, before: item, wash: false)
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -170,11 +190,44 @@ struct DockItemTab<Icon: View>: View {
                     case .panel(let p): dock.update { $0.move(p, to: z) }
                     case .file(let path): dockMoveFile(path, to: z, model: model)
                     case .terminal(let id): dock.moveTerminal(id, to: z)
+                    case .thread(let key): dock.moveThread(key, to: z)
                     }
                 }
             }
             Divider()
             Button("Close", action: close)
+        }
+    }
+}
+
+/// What follows the pointer while a tab is dragged: its title on a raised surface with a soft shadow.
+struct DockTabDragPreview: View {
+    let title: String
+    var body: some View {
+        Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1)
+            .padding(.horizontal, Space.m).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surfaceRaised))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+            .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
+            .padding(8)
+    }
+}
+
+/// A docked thread's tab in a side zone. Closing it puts the thread back in the centre strip.
+struct DockThreadTab: View {
+    let session: HostSession
+    let zone: DockZone
+    let selected: Bool
+    let height: CGFloat
+    let indicator: Namespace.ID
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let key = session.key.stringValue
+        DockItemTab(item: .thread(key), title: model.workbenchTitle(session), zone: zone, selected: selected, height: height, indicator: indicator,
+                    select: { DockStore.shared.selectThread(key); model.select(session.key) },
+                    close: { DockStore.shared.moveThread(key, to: .centre) }) {
+            Image(systemName: "bubble.left").font(.system(size: 13)).foregroundStyle(selected ? Theme.ink : Theme.muted)
         }
     }
 }
@@ -270,6 +323,11 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                             dock.selectPanel(p, in: zone)
                         }
                     }
+                    ForEach(dock.threads.threads(in: zone), id: \.self) { key in
+                        if let t = model.allSessions.first(where: { $0.key.stringValue == key }) {
+                            DockThreadTab(session: t, zone: zone, selected: dock.threads.selected[zone] == key && !state.collapsed, height: height, indicator: indicator)
+                        }
+                    }
                     if let fileModel {
                         ForEach(placed) { f in
                             DockFileTab(files: fileModel, file: f, zone: zone, selected: shownFile == f.path && !state.collapsed, height: height, indicator: indicator) {
@@ -339,6 +397,13 @@ struct DockZoneBody: View {
         Group {
             if let shell {
                 TerminalPanelView(session: session, shell: shell)
+            } else if let key = DockStore.shared.threads.selected[zone], let t = model.allSessions.first(where: { $0.key.stringValue == key }) {
+                if model.selected == t.key {
+                    SessionDetail(session: t).id(t.key)
+                } else {
+                    Button("Open “\(model.workbenchTitle(t))” here") { model.select(t.key) }.buttonStyle(.plain)
+                        .font(Typo.label).foregroundStyle(Theme.muted)
+                }
             } else if let fileModel, let file {
                 FileViewer(files: fileModel, file: file).id(file.path)
             } else if let p = DockStore.shared.layout[zone].selected {
