@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.3
+
+- A message you steer into a working chat shows once: dimmed at the bottom until the agent takes it in, then in its place. It no longer also showed solid at the same time.
+
 ## 2.27.2
 
 - Settings › Extensions no longer says "Not in this build" for Claude Code (external), Codex (external) and RasanAI: an add-on is unavailable only when the daemon says so, not when the app has no page for it.

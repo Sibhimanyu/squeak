@@ -1198,7 +1198,13 @@ export class SessionHost extends EventEmitter {
     this.emitPending(id, "remove", queueId, { consumed: false });
     const row = this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author);
     this.emitMessage(row);
-    this.timeline.steer(id, { seq: row.seq, text: item.text, author: item.author, at: row.createdAt });
+    this.timeline.steer(id, {
+      seq: row.seq,
+      text: item.text,
+      author: item.author,
+      clientNonce: item.clientNonce,
+      at: row.createdAt,
+    });
     this.noteSteered(id, item.text, item.author, row.seq, runner);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }

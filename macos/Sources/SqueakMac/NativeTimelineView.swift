@@ -33,13 +33,17 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
     var fadeFrom: Int?
     var followsEnd: Bool
     var filesLine: (TimelineTurn) -> String?
+    /// Steer steps whose card still waits at the bottom of the stream: drawn there, dimmed, not here.
+    var hiddenSteers: Set<String> = []
     @ViewBuilder let message: (ChatMessage) -> Message
     /// The actions under a prompt still waiting in the queue (Steer / Edit / Remove).
     @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
         ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn), message: message, queuedActions: queuedActions)
+            NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn),
+                           hiddenSteers: hiddenSteers.isEmpty ? [] : hiddenSteers.filter { id in turn.steps.contains { $0.id == id } },
+                           message: message, queuedActions: queuedActions)
                 .equatable()
                 .insertFade(followsEnd && index >= (fadeFrom ?? Int.max))
                 .padding(.top, index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
@@ -52,18 +56,19 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
 /// a refresh that changed only the newest turn leaves every earlier turn's body unevaluated.
 private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
     nonisolated static func == (a: NativeTurnView<Message, Queued>, b: NativeTurnView<Message, Queued>) -> Bool {
-        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details
+        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details && a.hiddenSteers == b.hiddenSteers
     }
 
     let turn: TimelineTurn
     let details: [String: ToolDetail]
     let me: String?
     let filesLine: String?
+    let hiddenSteers: Set<String>
     @ViewBuilder let message: (ChatMessage) -> Message
     @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
-        let segments = TimelineSteps.segments(of: turn, details: details)
+        let segments = TimelineSteps.segments(of: turn, details: details, hiding: hiddenSteers)
         VStack(alignment: .leading, spacing: 0) {
             if let prompt = turn.promptMessage(me: me) { message(prompt) }
             if turn.state == .queued, turn.queuedId != nil { queuedActions(turn).padding(.top, 6) }

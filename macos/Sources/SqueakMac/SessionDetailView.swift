@@ -435,6 +435,7 @@ struct SessionDetail: View {
         NativeTurnsContent(
             turns: timeline.turns, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
+            hiddenSteers: model.native.key == session.key ? model.native.pending.hiddenSteerSteps(in: timeline.turns) : [],
             message: { m in rowView(.message(m, muted: false), footers: footers) },
             queuedActions: { t in
                 if let q = t.queuedId { NativeQueuedRowActions(session: session, queuedId: q, text: t.prompt) }

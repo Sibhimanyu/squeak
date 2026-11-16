@@ -75,7 +75,8 @@ public enum TimelineSegment: Equatable, Identifiable, Sendable {
 public extension TimelineSteps {
     /// A running turn lists its work in the order it happened, with the agent's words and steers between; an ended
     /// turn folds all its work into one run above them (the `Worked for 1m 42s · 6 steps` line).
-    static func segments(of turn: TimelineTurn, details: [String: ToolDetail] = [:]) -> [TimelineSegment] {
+    /// `hiding`: steer steps not drawn yet (their card still waits at the bottom of the stream).
+    static func segments(of turn: TimelineTurn, details: [String: ToolDetail] = [:], hiding: Set<String> = []) -> [TimelineSegment] {
         func work(_ s: TimelineStep) -> ActivityStep? {
             switch s.kind {
             case .tool: ActivityStep(kind: "tool", text: s.label, at: s.at, toolId: s.id, detail: details[s.id])
@@ -89,7 +90,7 @@ public extension TimelineSteps {
             let all = turn.steps.compactMap(work)
             if let first = turn.steps.first(where: { work($0) != nil }) { out.append(.work(id: first.id, steps: all, live: false)) }
             for s in turn.steps {
-                if s.isMessage { out.append(.message(id: s.id)) } else if s.kind == .steer { out.append(.steer(id: s.id, text: s.detail["text"]?.string ?? s.label, author: s.author)) }
+                if s.isMessage { out.append(.message(id: s.id)) } else if s.kind == .steer, !hiding.contains(s.id) { out.append(.steer(id: s.id, text: s.detail["text"]?.string ?? s.label, author: s.author)) }
             }
             return out
         }
@@ -101,7 +102,7 @@ public extension TimelineSteps {
         }
         for s in turn.steps {
             if s.isMessage { flush(live: false); out.append(.message(id: s.id)) }
-            else if s.kind == .steer { flush(live: false); out.append(.steer(id: s.id, text: s.detail["text"]?.string ?? s.label, author: s.author)) }
+            else if s.kind == .steer { if !hiding.contains(s.id) { flush(live: false); out.append(.steer(id: s.id, text: s.detail["text"]?.string ?? s.label, author: s.author)) } }
             else if let a = work(s) { if runId == nil { runId = s.id }; run.append(a) }
         }
         flush(live: turn.state == .running)
