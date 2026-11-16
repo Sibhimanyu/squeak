@@ -29,7 +29,7 @@ final class NativeChatLogicTests: XCTestCase {
         let c = NativeCards.card(r, agent: "Claude")
         XCTAssertNil(c.approval?.command)
         XCTAssertEqual(c.approval?.target, "/a/b.ts")
-        XCTAssertEqual(c.approval?.heading, "Claude wants to use Edit")
+        XCTAssertEqual(c.approval?.heading, "Claude wants to edit a file")
     }
 
     func testPlanAndQuestionCards() {
