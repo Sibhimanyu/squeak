@@ -170,7 +170,7 @@ struct DockItemTab<Icon: View>: View {
                 if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
             }
             .overlay(alignment: .bottom) {
-                if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
+                if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
             }
             .contentShape(Rectangle())
         }

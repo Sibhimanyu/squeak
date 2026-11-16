@@ -69,6 +69,11 @@ struct WorkbenchCentre: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Pond tint (§3.5): a very faint wash from the top edge, fading out over the header and the tab strip.
+        .background(alignment: .top) {
+            LinearGradient(colors: [PondColour.wash(PondColour.openPond(chat), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
+        }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre) }
         .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
@@ -448,7 +453,7 @@ private struct WorkbenchTabs: View {
                 hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
                 if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
             }
-            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
+            .overlay(alignment: .bottom) { if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
             .contentShape(Rectangle())
         }
         // Not a Button: a Button takes the mouse-down and the drag never starts.

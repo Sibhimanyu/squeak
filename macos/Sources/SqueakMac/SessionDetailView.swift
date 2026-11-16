@@ -844,7 +844,8 @@ struct SessionDetail: View {
                 canCompact: isNative && model.native.key == session.key, working: working,
                 autoCompactAt: session.autoCompactAt),
             onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
-            picker: pickerSource
+            picker: pickerSource,
+            pondId: PondsModel.shared.key(of: session)
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)

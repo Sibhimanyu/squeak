@@ -255,6 +255,23 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 | Mac `muted` / `subtle` on `sidebar` / `selected`, light   | 6.41 / 4.73 and 5.75 / 4.24         | AA / AA and large (selected)         |
 | quiet loader (`muted` at 70%) on `surface` / `selected`   | about 3.8 / 3.1 (dark), 3.7 (light) | non-text ≥ 3:1                       |
 
+### 3.5 Pond tint
+
+The open pond's accent (the logo's vivid colour, `PondAccent`, 3:1 on the card) shows as a faint wash where the person
+is working. Maths in `SqueakMacCore/Ponds/PondWash.swift` (tested): the accent laid over the neutral ground at a role's
+opacity, lowered until `ink` and `muted` stay 4.5:1 on the result. Body text is never tinted; a surface with no pond keeps
+its neutral.
+
+| Role                                     | Light | Dark | Over                       |
+| ---------------------------------------- | ----- | ---- | -------------------------- |
+| Selected thread row (sidebar)            | 10%   | 12%  | `selected`                 |
+| Open pond's header row (sidebar)         | 8%    | 10%  | `selected`                 |
+| Workbench top (header and tab strip)     | 6%    | 8%   | window ground, fading out  |
+| Selected tab's 2 pt underline            | 100%  | 100% | the accent itself, not ink |
+| Composer focus ring (1.5 pt, on focus)   | 45%   | 55%  | `line`                     |
+
+
+
 ---
 
 ## 4. Typography

@@ -755,6 +755,7 @@ private struct FoldRow: View {
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
             .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
+            .background(homeSelected ? PondColour.wash(pondId, .pondHeader) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
@@ -845,7 +846,8 @@ struct WorkbenchChatRow: View {
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? PondColour.wash(PondsModel.shared.key(of: session), .selectedRow) : .clear, in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -883,7 +885,8 @@ struct SharedThreadRowView: View {
             }
             .padding(.leading, Space.s + 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? PondColour.wash(row.pondId, .selectedRow) : .clear, in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

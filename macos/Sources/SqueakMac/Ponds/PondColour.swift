@@ -33,6 +33,40 @@ enum PondColour {
         return dynamic { ns(PondAccent.rgb(hue: hue, dark: $0)) }
     }
 
+    // DESIGN.md §3.5, Pond tint: the open pond's accent as a faint wash, from `PondWash` (SqueakMacCore: opacity per role,
+    // blend, contrast guard). A surface with no pond gets nothing, so it keeps its neutral.
+
+    /// The pond a surface belongs to: the open pond page's, else the pond of the chat on screen.
+    @MainActor static func openPond(_ session: HostSession?) -> String? {
+        PondsModel.shared.homeProject ?? session.flatMap { PondsModel.shared.key(of: $0) }
+    }
+
+    @MainActor private static func washHue(_ pondId: String?) -> Double? {
+        guard let pondId else { return nil }
+        return PondsModel.shared.colourHue(forPondId: pondId) ?? PondTint.hue(for: pondId)
+    }
+
+    /// The pond's accent at a role's opacity (guarded for text contrast); `.clear` with no pond. Lay it over the neutral
+    /// fill, not instead of it.
+    @MainActor static func wash(_ pondId: String?, _ role: PondWash.Role) -> Color {
+        guard let hue = washHue(pondId) else { return .clear }
+        return dynamic { dark in
+            let a = PondWash.accent(hue: hue, dark: dark)
+            return NSColor(srgbRed: a.r, green: a.g, blue: a.b, alpha: PondWash.opacity(role, accent: a, dark: dark))
+        }
+    }
+
+    /// The selected tab's underline: the pond's accent, `ink` with no pond.
+    @MainActor static func tabIndicator(_ pondId: String?) -> Color {
+        guard washHue(pondId) != nil else { return Theme.ink }
+        return wash(pondId, .tabIndicator)
+    }
+
+    /// The composer's focus ring: the pond's accent at low opacity, `lineStrong` with no pond.
+    @MainActor static func focusRing(_ pondId: String?) -> Color {
+        washHue(pondId) == nil ? Theme.lineStrong : wash(pondId, .focusRing)
+    }
+
     /// A swatch of a named colour (the settings row).
     static func swatch(hue: Double) -> Color { dynamic { ns(PondTint.rgb(hue: hue, dark: $0)) } }
 
