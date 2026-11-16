@@ -283,12 +283,19 @@ private struct WorkbenchTabs: View {
     @State private var hoveredTab: SessionKey?
     @State private var chatDropTarget: SessionKey?
     @Namespace private var tabIndicator
-    private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
+    /// The widest any tab may be: infinity while every tab fits at its natural width (see `ChatTabWidth.cap`).
+    private var tabCap: CGFloat {
+        var titles = chats.map { model.workbenchTitle($0) }
+        titles += (files?.open ?? []).filter { dock.files.zone(of: $0.path) == .centre }.map(\.name)
+        titles += dock.layout.centre.panels.filter { $0 != .terminal }.map(\.title)
+        titles += dockTerminalTabs(in: .centre, session: chats.first)?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? []
+        return TabTitleMeasure.cap(titles: titles, available: stripWidth - 120)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     ForEach(stripItems) { item in
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
@@ -331,6 +338,7 @@ private struct WorkbenchTabs: View {
                     .buttonStyle(.plain).padding(.leading, 4)
                     .accessibilityLabel("New thread").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New thread")
                 }
+                .environment(\.tabMaxWidth, tabCap)
                 .padding(.horizontal, Space.l)
             }
             DockWorkspacePicker()
@@ -425,36 +433,25 @@ private struct WorkbenchTabs: View {
         let mark = selected || running ? nil : model.mark(for: s)
         let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
-            HStack(spacing: 7) {
-                // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
-                if model.isRenaming(s) {
-                    InlineTitleEditor(session: s, font: .system(size: 14)).frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
-                } else {
-                    Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
-                        .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
-                }
-                if s.showsConductorBadge { ConductorMarker().fixedSize() }
-                // The close slot is reserved (invisible until hover) so it never moves the layout; the tab hugs
-                // its content: title, a small gap, the ×.
-                if !chats.isEmpty {
-                    Button { closeTab(s) } label: {
-                        Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key).animation(Motion.quick, value: hoveredTab)
-                    .accessibilityLabel("Close \(model.workbenchTitle(s))")
-                }
-            }
-            .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
-            .frame(minWidth: ChatTabWidth.hugMinWidth, maxWidth: tabWidth, minHeight: Metrics.tabStrip, maxHeight: Metrics.tabStrip, alignment: .leading)
-            .onHover { inside in
-                hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
-                if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
-            }
-            .overlay(alignment: .bottom) { if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
-            .contentShape(Rectangle())
+            StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
+                     showsClose: !chats.isEmpty,
+                     onHover: { inside in
+                         hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
+                         if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
+                     }, close: { closeTab(s) },
+                     // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
+                     icon: { tabIcon(s).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "") },
+                     title: {
+                         HStack(spacing: 4) {
+                             if model.isRenaming(s) {
+                                 InlineTitleEditor(session: s, font: Typo.body)
+                             } else {
+                                 Text(verbatim: model.workbenchTitle(s)).font(Typo.body.weight(model.isUnread(s) ? .semibold : .regular))
+                                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
+                             }
+                             if s.showsConductorBadge { ConductorMarker().fixedSize() }
+                         }
+                     })
         }
         // Not a Button: a Button takes the mouse-down and the drag never starts.
         .onTapGesture { if !model.isRenaming(s) { open() } }

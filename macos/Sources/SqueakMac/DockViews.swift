@@ -131,8 +131,71 @@ struct DockEdgeStrip: View {
 
 // MARK: Tabs
 
-/// One dock tab, the chat tab's look: icon and title in the UI font, a close that shows on hover, a 2pt ink underline
-/// when selected. Panels and files both use it; it drags, takes drops before it, and has the Move to menu.
+// MARK: Shared tab chrome
+
+private struct TabMaxWidthKey: EnvironmentKey { static let defaultValue: CGFloat = .infinity }
+extension EnvironmentValues {
+    /// The widest a tab in this strip may be (`ChatTabWidth.cap`): infinity while every tab fits at its natural width.
+    var tabMaxWidth: CGFloat { get { self[TabMaxWidthKey.self] } set { self[TabMaxWidthKey.self] = newValue } }
+}
+
+/// Measures titles for `ChatTabWidth`, in the tab's own font.
+enum TabTitleMeasure {
+    static func width(_ title: String, semibold: Bool = false) -> Double {
+        let font = NSFont.systemFont(ofSize: 13, weight: semibold ? .semibold : .regular)
+        return Double((title as NSString).size(withAttributes: [.font: font]).width.rounded(.up))
+    }
+    /// The widest any tab of this strip may be, for these titles in `available` points.
+    static func cap(titles: [String], available: Double) -> CGFloat {
+        let c = ChatTabWidth.cap(naturals: titles.map { ChatTabWidth.natural(titleWidth: width($0)) }, available: available)
+        return c.isFinite ? CGFloat(c) : .infinity
+    }
+}
+
+/// The one tab look for every strip (centre chats, right, bottom): equal side padding, icon, title in the UI font, a
+/// close that shows only on hover (its small slot is always reserved), a 2pt accent underline when selected. It hugs its
+/// content and never pads out to a width. Callers add selection, drag and drop around it.
+struct StripTab<Icon: View, Title: View>: View {
+    let selected: Bool
+    let height: CGFloat
+    let indicator: Namespace.ID
+    let closeLabel: String
+    var showsClose = true
+    var dirty = false
+    var onHover: (Bool) -> Void = { _ in }
+    let close: () -> Void
+    @ViewBuilder var icon: () -> Icon
+    @ViewBuilder var title: () -> Title
+    @State private var hovering = false
+    @Environment(\.tabMaxWidth) private var maxWidth
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 0) {
+            icon().frame(width: ChatTabWidth.iconSlot).opacity(selected ? 1 : 0.8)
+            title().frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading).padding(.leading, ChatTabWidth.iconGap)
+            if dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).padding(.leading, 4).accessibilityLabel("Unsaved changes") }
+            if showsClose {
+                Button(action: close) {
+                    Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).padding(.leading, ChatTabWidth.closeGap)
+                .opacity(hovering ? 1 : 0).allowsHitTesting(hovering).animation(Motion.quick, value: hovering)
+                .help(closeLabel).accessibilityLabel(closeLabel)
+            }
+        }
+        .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
+        .frame(maxWidth: maxWidth, minHeight: height, maxHeight: height, alignment: .leading)
+        .onHover { inside in hovering = inside; onHover(inside) }
+        .overlay(alignment: .bottom) {
+            if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+/// One dock tab (panel, file, shell, thread, duckling) on the shared `StripTab`; it drags, takes drops before it, and
+/// has the Move to menu.
 struct DockItemTab<Icon: View>: View {
     let item: DockItem
     let title: String
@@ -144,36 +207,18 @@ struct DockItemTab<Icon: View>: View {
     let select: () -> Void
     let close: () -> Void
     @ViewBuilder var icon: () -> Icon
-    @State private var hovering = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let dock = DockStore.shared
         Group {
-            HStack(spacing: 7) {
-                icon().frame(width: 16).opacity(selected ? 1 : 0.8)
-                Text(verbatim: title).font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.middle)
-                    .frame(minWidth: TabStripFit.titleMin, maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
-                if dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).accessibilityLabel("Unsaved changes") }
-                Button(action: close) {
-                    Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .opacity(hovering || selected ? 1 : 0).allowsHitTesting(hovering || selected).animation(Motion.quick, value: hovering)
-                .help("Close \(title)").accessibilityLabel("Close \(title)")
+            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)", dirty: dirty,
+                     onHover: { inside in
+                         if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
+                     }, close: close, icon: icon) {
+                Text(verbatim: title).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted)
+                    .lineLimit(1).truncationMode(.tail)
             }
-            .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
-            .frame(minWidth: max(ChatTabWidth.hugMinWidth, TabStripFit.tabMin), minHeight: height, maxHeight: height, alignment: .leading)
-            .fixedSize(horizontal: true, vertical: false)
-            .onHover { inside in
-                hovering = inside
-                if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
-            }
-            .overlay(alignment: .bottom) {
-                if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
-            }
-            .contentShape(Rectangle())
         }
         // Not a Button: a Button takes the mouse-down and the drag never starts.
         .onTapGesture(perform: select)
@@ -342,10 +387,16 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         let shownFile = dock.files.selected[zone]
         let shownTerminal = dock.activeTerminals.shown(in: zone)
         let shells = dockTerminalTabs(in: zone, session: session)
+        let duckRefs = session.map { s in dock.ducklings.ducklings(in: zone).filter { $0.session == s.key } } ?? []
+        let titles: [String] = state.panels.filter { $0 != .terminal }.map(\.title)
+            + duckRefs.map { ref in session.flatMap { model.ducklings(for: $0)?.items.first { $0.id == ref.taskId }?.title } ?? "Duckling" }
+            + dock.threads.threads(in: zone).compactMap { k in model.allSessions.first { $0.key.stringValue == k }.map { model.workbenchTitle($0) } }
+            + placed.map(\.name) + (shells?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? [])
+        let cap = TabTitleMeasure.cap(titles: titles, available: stripWidth - leadingWidth - 36 - trailingWidth)
         HStack(spacing: 0) {
             leading()
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     ForEach(state.panels.filter { $0 != .terminal }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator) {
                             dock.selectPanel(p, in: zone)
@@ -375,6 +426,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                     }
                     DockPlusButton(zone: zone)
                 }
+                .environment(\.tabMaxWidth, cap)
                 .padding(.horizontal, Space.s)
             }
             if trailingWidth == 0 || TabStripFit.showsAccessory(

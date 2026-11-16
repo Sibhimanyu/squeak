@@ -75,7 +75,7 @@ struct PaneLayoutSolverTests {
 @Suite("Tab strip fit")
 struct TabStripFitTests {
     @Test func hintDropsFirst() {
-        #expect(!TabStripFit.showsAccessory(strip: 330, tabs: 2, leading: 44, accessory: 270))
+        #expect(!TabStripFit.showsAccessory(strip: 330, tabs: 3, leading: 44, accessory: 270))
         #expect(TabStripFit.showsAccessory(strip: 900, tabs: 2, leading: 44, accessory: 270))
         #expect(!TabStripFit.showsAccessory(strip: 0, tabs: 0, leading: 44, accessory: 270))
         #expect(TabStripFit.tabMin >= ChatTabWidth.closeSlot + TabStripFit.titleMin)
