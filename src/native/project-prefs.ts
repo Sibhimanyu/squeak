@@ -33,24 +33,27 @@ export const POND_COLOURS = {
 export type PondColourName = keyof typeof POND_COLOURS;
 export const POND_COLOUR_NAMES = Object.keys(POND_COLOURS) as PondColourName[];
 
-export type PondColour = PondColourName | `hue:${number}`;
+export type PondColour = PondColourName | `hue:${number}` | `#${string}`;
 
-/** A custom hue taken from the pond's logo: `hue:<0-359>`. */
+/** A custom hue taken from the pond's logo: `hue:<0-359>` (older Macs). */
 const HUE_COLOUR = /^hue:(\d{1,3})$/;
+/** A real colour taken from the pond's logo: `#rrggbb` (sRGB). */
+const HEX_COLOUR = /^#[0-9a-f]{6}$/;
 
 export function isPondColour(v: unknown): v is PondColour {
   if (typeof v !== "string") return false;
   if (Object.prototype.hasOwnProperty.call(POND_COLOURS, v)) return true;
+  if (HEX_COLOUR.test(v)) return true;
   const m = HUE_COLOUR.exec(v);
   return m !== null && Number(m[1]) < 360;
 }
 
-/** A palette name or `hue:<0-359>` (any case) or null to go back to the id-based colour. */
+/** A palette name `hue:<0-359>` or `#rrggbb` (any case) or null to go back to the id-based colour. */
 export function readColour(v: unknown): PondColour | null {
   if (v === null) return null;
   const name = typeof v === "string" ? v.trim().toLowerCase() : "";
   if (!isPondColour(name))
-    throw new PrefsError(`colour is one of ${POND_COLOUR_NAMES.join(", ")}, hue:<0-359>, or null`);
+    throw new PrefsError(`colour is one of ${POND_COLOUR_NAMES.join(", ")}, hue:<0-359>, #rrggbb, or null`);
   return name;
 }
 

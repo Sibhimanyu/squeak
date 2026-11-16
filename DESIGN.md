@@ -262,6 +262,14 @@ is working. Maths in `SqueakMacCore/Ponds/PondWash.swift` (tested): the accent l
 opacity, lowered until `ink` and `muted` stay 4.5:1 on the result. Body text is never tinted; a surface with no pond keeps
 its neutral.
 
+**The colour is the logo's own.** "From the logo" offers up to three real colours (`LogoColours`: opaque pixels grouped,
+white, black, grey and anti-aliased edges ignored; the most vivid first, then by prominence), shown exactly as they are and
+stored as `#rrggbb` (older `hue:` and named values still read). Everything derived starts from that colour: the accent
+(underline, mark, wash) keeps its hue and saturation and moves only its value, as little as the 3:1 contrast on the card
+needs (a lime darkens to a readable lime-green on light; a deep green lightens on dark; saturation gives way only when value
+alone cannot reach it); the soft tile fill keeps its hue and a fixed share of its saturation. A logo colour in the duck's
+band is kept as it is: it is the pond's own, and the pond tint is never a state.
+
 | Role                                     | Light | Dark | Over                       |
 | ---------------------------------------- | ----- | ---- | -------------------------- |
 | Selected thread row (sidebar)            | 10%   | 12%  | `selected`                 |

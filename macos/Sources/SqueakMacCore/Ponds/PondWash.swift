@@ -51,6 +51,8 @@ public enum PondWash {
     /// The accent for a pond hue in this appearance (the logo's vivid colour, kept 3:1 on the card).
     public static func accent(hue: Double, dark: Bool) -> PondTint.RGB { PondAccent.rgb(hue: hue, dark: dark) }
 
+    public static func accent(seed: PondSeed, dark: Bool) -> PondTint.RGB { PondAccent.rgb(seed: seed, dark: dark) }
+
     /// The opacity a role actually uses: the role's own, lowered in steps until ink and muted stay AA on the washed
     /// ground. A role without a ground (the line, the ring) is returned as it is.
     public static func opacity(_ role: Role, accent: PondTint.RGB, dark: Bool) -> Double {

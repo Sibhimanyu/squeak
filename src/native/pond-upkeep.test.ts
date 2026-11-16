@@ -67,6 +67,8 @@ describe("pond colour prefs", () => {
     expect(() => readColour("#fff")).toThrow(PrefsError);
     expect(() => readColour(3)).toThrow(PrefsError);
     expect(readColour("hue:140")).toBe("hue:140");
+    expect(readColour(" #8DC63F ")).toBe("#8dc63f");
+    expect(() => readColour("#8dc63")).toThrow(PrefsError);
     expect(readColour(" HUE:0 ")).toBe("hue:0");
     expect(() => readColour("hue:360")).toThrow(PrefsError);
     expect(() => readColour("hue:-5")).toThrow(PrefsError);

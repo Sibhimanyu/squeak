@@ -133,24 +133,25 @@ final class PondsModel {
     /// The native projects on this Mac, kept current by the sidebar, so a project finds its pond by id.
     @ObservationIgnored var projects: [NativeProject] = []
 
-    /// The hue of the colour chosen for a pond, when one was.
-    func colourHue(forPondId id: String) -> Double? {
+    /// The colour a pond's look starts from: the one the person chose (a name, an old hue, or a real `#rrggbb`), else the
+    /// logo's accent colour, as it is. Nil with no icon or choice: "today's tint".
+    func seed(forPondId id: String) -> PondSeed? {
         let project = directory?.pond(pondId: id).flatMap { d in projects.first { $0.id == d.projectId } }
-        if let hue = PondColours.hue(named: project?.colour) { return hue }
-        // No chosen colour: the logo's most vivid hue, when the pond has an icon.
-        return PondIcons.shared.vividHue(for: project) ?? PondIcons.shared.logoHues(for: project).first
+        return seed(of: project)
     }
 
-    /// The pond's logo-derived (or chosen) hue only when it has an icon or a chosen colour; nil means "today's tint".
-    func accentHue(forPondId id: String) -> Double? { colourHue(forPondId: id) }
+    func accentSeed(forPondId id: String) -> PondSeed? { seed(forPondId: id) }
 
-    /// The same colour for a directory key (a project id, or a joined pond's own id), as the sidebar and the open chat
-    /// name a pond; a local pond has no pond id yet, so it is found by its project.
-    func colourHue(forKey key: String) -> Double? {
+    /// The same for a directory key (a project id, or a joined pond's own id), as the sidebar and the open chat name a
+    /// pond; a local pond has no pond id yet, so it is found by its project.
+    func seed(forKey key: String) -> PondSeed? {
         let entry = directory?.pond(id: key) ?? directory?.pond(pondId: key)
-        let project = projects.first { $0.id == (entry?.projectId ?? key) }
-        if let hue = PondColours.hue(named: project?.colour) { return hue }
-        return PondIcons.shared.vividHue(for: project) ?? PondIcons.shared.logoHues(for: project).first
+        return seed(of: projects.first { $0.id == (entry?.projectId ?? key) })
+    }
+
+    private func seed(of project: NativeProject?) -> PondSeed? {
+        if let s = PondColours.seed(named: project?.colour) { return s }
+        return PondIcons.shared.logoColours(for: project).first.map(PondSeed.colour)
     }
 
     /// The directory row of a pond key (a project id, or a joined pond's own id).

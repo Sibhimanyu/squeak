@@ -1,8 +1,8 @@
 import Foundation
 
-// A pond's accent drawn next to its icon (the overview card's top bar, the selected pond's mark) comes from the logo's
-// most vivid colour, not from its most common one: a dark-green icon with a lime dot reads lime/green, never the dull
-// grey-green a pale tint of the average gives. Pure: the caller hands over the same 32 by 32 RGBA bytes as `LogoPalette`.
+// A pond's accent drawn next to its icon (the overview card's top bar, the selected pond's mark) starts from the
+// logo's real accent colour (`LogoColours`: the most vivid, not the most common), never a hue re-rendered at a fixed
+// saturation. Only its value (lightness) moves, and only as far as 3:1 contrast needs (DESIGN.md §3.5).
 
 public enum PondAccent {
     /// Contrast an accent must keep against the card it sits on (WCAG 2 non-text, 3:1; DESIGN.md §3.4).
@@ -11,56 +11,31 @@ public enum PondAccent {
     public static let lightSurface = PondTint.RGB(hex: 0xFAFAF9)
     public static let darkSurface = PondTint.RGB(hex: 0x211E1C)
 
-    /// The hue (degrees, never in the duck's band) of the logo's most vivid colour; nil for a greyscale or blank icon.
-    /// The winner is the hue bucket whose pixels are brightest and most saturated, provided it covers at least 1.5% of the
-    /// opaque pixels (an antialias pixel never wins); area only breaks near ties. A large dark field of another hue never
-    /// outranks a small bright dot. With nothing vivid present it falls back to the heaviest dull hue.
-    public static func vividHue(rgba: [UInt8], width: Int, height: Int) -> Double? {
-        guard width > 0, height > 0, rgba.count >= width * height * 4 else { return nil }
-        let buckets = LogoPalette.buckets
-        var count = [Double](repeating: 0, count: buckets)
-        var vivid = [Double](repeating: 0, count: buckets)
-        var weight = [Double](repeating: 0, count: buckets)
-        var sumSin = [Double](repeating: 0, count: buckets)
-        var sumCos = [Double](repeating: 0, count: buckets)
-        var opaque = 0.0
-        for i in 0..<(width * height) {
-            let a = Double(rgba[i * 4 + 3]) / 255
-            if a < 0.5 { continue }
-            opaque += 1
-            let r = Double(rgba[i * 4]) / 255, g = Double(rgba[i * 4 + 1]) / 255, b = Double(rgba[i * 4 + 2]) / 255
-            let mx = max(r, g, b), mn = min(r, g, b), d = mx - mn
-            if mx < 0.18 || mn > 0.92 { continue }
-            let sat = d / mx
-            if sat < 0.25 { continue }
-            var h: Double
-            if mx == r { h = ((g - b) / d).truncatingRemainder(dividingBy: 6) }
-            else if mx == g { h = (b - r) / d + 2 }
-            else { h = (r - g) / d + 4 }
-            h = (h * 60 + 360).truncatingRemainder(dividingBy: 360)
-            let k = Int(h / (360 / Double(buckets))) % buckets
-            let w = sat * mx * mx * mx
-            count[k] += 1
-            vivid[k] += sat * mx
-            weight[k] += w
-            sumSin[k] += w * sin(h * .pi / 180)
-            sumCos[k] += w * cos(h * .pi / 180)
+    /// The accent for a seed. A real logo colour keeps its hue and saturation: only its value moves, as little as the 3:1
+    /// contrast needs (lime darkens to a readable lime-green on light, a deep green lightens on dark). Only a colour that
+    /// cannot reach 3:1 by value alone (a saturated blue on the dark card) gives up saturation, in the smallest steps.
+    public static func rgb(seed: PondSeed, dark: Bool) -> PondTint.RGB {
+        switch seed {
+        case .hue(let h): return rgb(hue: h, dark: dark)
+        case .colour(let c):
+            let surface = dark ? darkSurface : lightSurface
+            if PondTint.contrast(c, surface) >= minContrast { return c }
+            let (h, s0, v0) = PondTint.hsv(c)
+            var best = c
+            var s = s0
+            while s >= 0 {
+                var v = v0
+                let step = dark ? 0.01 : -0.01
+                while v >= 0, v <= 1 {
+                    let t = PondTint.hsb(h, s, v)
+                    best = t
+                    if PondTint.contrast(t, surface) >= minContrast { return t }
+                    v += step
+                }
+                s -= 0.05
+            }
+            return best
         }
-        let present = weight.indices.filter { count[$0] > 0 }
-        guard !present.isEmpty else { return nil }
-        let minPixels = max(1.0, opaque * 0.015)
-        let candidates = present.filter { count[$0] >= minPixels && vivid[$0] / count[$0] >= 0.35 }
-        let best: Int
-        if candidates.isEmpty {
-            best = present.max(by: { weight[$0] < weight[$1] })!
-        } else {
-            func score(_ k: Int) -> Double { vivid[k] / count[k] * (1 + min(count[k] / max(opaque, 1), 0.2)) }
-            best = candidates.max(by: { score($0) < score($1) })!
-        }
-        guard weight[best] > 0 else { return nil }
-        var h = atan2(sumSin[best], sumCos[best]) * 180 / .pi
-        if h < 0 { h += 360 }
-        return PondTint.nudgeOutOfDuckBand(h)
     }
 
     /// The accent for a hue: vivid (saturation 0.85, so lime stays lime), its brightness moved only as far as the 3:1 contrast needs, so lime
