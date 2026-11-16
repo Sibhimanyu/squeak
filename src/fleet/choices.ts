@@ -245,6 +245,16 @@ const LIST_LINE = /^\s*(?:[-*+]|\d+[.)]|\(?[A-Za-z][).:])\s+/;
 const TRAILING_DECORATION = /[\s)\]*_~]|\p{Extended_Pictographic}|️/gu;
 
 /**
+ * The ONE definition of "this finished turn needs the person" read from text: it ends on a structured decision,
+ * lettered options (A) / B) / ...) under a question, as `parseChoices` reads them. Returns that question or null.
+ * A plain trailing question ("What should we work on next?", "Want me to open a PR?") is a normal finished turn,
+ * never needs-you. Approvals, plans and the ask tool are blocked states the host reports, not read from text.
+ */
+export function decisionQuestion(text: string | null): string | null {
+  return text ? (parseLettered(text)?.question ?? null) : null;
+}
+
+/**
  * Whether the agent's message ends by asking the person something ("Want me to open a PR?"): that question,
  * clipped, or null. Only the closing sentence counts, so a "?" in the middle of a summary, in a code block,
  * in inline code, a quote or a URL never makes a finished turn look like it is waiting. A message that ends on

@@ -22,7 +22,7 @@ import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { SqueakNativeObserver } from "./observers/squeak-native.js";
 import type { FleetObserver } from "../addons.js";
 import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
-import { closingQuestion } from "./choices.js";
+import { decisionQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ArchivedSessions } from "./archived-sessions.js";
@@ -638,7 +638,7 @@ export class FleetMonitor {
       if (!entry) {
         let asks: string | null = null;
         try {
-          asks = closingQuestion(read(session));
+          asks = decisionQuestion(read(session));
         } catch (error) {
           logger.debug("fleet last message read failed", {
             error: error instanceof Error ? error.message : String(error),

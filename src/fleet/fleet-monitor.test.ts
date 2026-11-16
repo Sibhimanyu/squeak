@@ -205,18 +205,18 @@ describe("FleetMonitor", () => {
 
     it("is an asked_question push in place of a quiet finish, carrying the question", async () => {
       const harness = makeMonitor([observed(FINISHED)]);
-      harness.monitor.setLastMessageSource(() => "Pushed the branch.\n\nWant me to open a PR?");
+      harness.monitor.setLastMessageSource(() => "Which way?\n\nA) Open a PR\nB) Push only");
 
       const snapshot = await harness.monitor.refresh();
 
       expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["asked_question"]);
-      expect(snapshot.active[0]?.asks).toBe("Want me to open a PR?");
+      expect(snapshot.active[0]?.asks).toBe("Which way?");
       expect(harness.pushes.flat().map((entry) => entry.kind)).toEqual(["asked_question"]);
     });
 
     it("pushes once for the episode, not on every refresh", async () => {
       const harness = makeMonitor([observed(FINISHED)]);
-      harness.monitor.setLastMessageSource(() => "Want me to open a PR?");
+      harness.monitor.setLastMessageSource(() => "Which way?\n\nA) Open a PR\nB) Push only");
 
       await harness.monitor.refresh();
       await harness.monitor.refresh();
@@ -227,13 +227,23 @@ describe("FleetMonitor", () => {
 
     it("reads the message once per change, not once per refresh", async () => {
       const harness = makeMonitor([observed(FINISHED)]);
-      const read = vi.fn(() => "Want me to open a PR?");
+      const read = vi.fn(() => "Which way?\n\nA) Open a PR\nB) Push only");
       harness.monitor.setLastMessageSource(read);
 
       await harness.monitor.refresh();
       await harness.monitor.refresh();
 
       expect(read).toHaveBeenCalledTimes(1);
+    });
+
+    it("a plain trailing question is a normal finish, not needs-you", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => "Hi! What should we work on next?");
+
+      const snapshot = await harness.monitor.refresh();
+
+      expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+      expect(snapshot.active[0]?.asks).toBeUndefined();
     });
 
     it("leaves a finish that ends on a statement as a quiet finish", async () => {
@@ -248,7 +258,7 @@ describe("FleetMonitor", () => {
 
     it("stops asking once a new turn starts", async () => {
       const harness = makeMonitor([observed(FINISHED)]);
-      harness.monitor.setLastMessageSource(() => "Want me to open a PR?");
+      harness.monitor.setLastMessageSource(() => "Which way?\n\nA) Open a PR\nB) Push only");
       await harness.monitor.refresh();
 
       harness.setClaude([observed({ ...FINISHED, state: "working", lastActivityAt: "2026-09-20T11:59:50.000Z" })]);
@@ -280,7 +290,7 @@ describe("FleetMonitor", () => {
           lastActivityAt: "2026-09-18T09:00:00.000Z",
         }),
       ]);
-      const read = vi.fn(() => "Want me to open a PR?");
+      const read = vi.fn(() => "Which way?\n\nA) Open a PR\nB) Push only");
       harness.monitor.setLastMessageSource(read);
 
       await harness.monitor.refresh();
