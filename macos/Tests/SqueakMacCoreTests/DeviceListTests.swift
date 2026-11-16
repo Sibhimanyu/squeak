@@ -46,8 +46,8 @@ import Testing
             #expect(!t.lowercased().contains("qr"))
             #expect(!t.lowercased().contains("code"))
         }
-        #expect(DeviceList.emptyLine(accountEmail: "me@x.org").contains("me@x.org"))
-        #expect(DeviceList.emptyLine(accountEmail: "").contains("Sign in to Squeak on this Mac"))
+        #expect(DeviceList.emptyLine(accountEmail: "me@x.org") == "Sign in to Squeak on your iPhone or the web with the same account.")
+        #expect(DeviceList.footnote() == "Remove a device to stop it seeing this Mac.")
         #expect(DeviceList.askFootnote(email: "me@x.org").contains("one click"))
     }
 

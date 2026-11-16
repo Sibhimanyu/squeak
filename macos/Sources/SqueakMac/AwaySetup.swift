@@ -25,7 +25,7 @@ struct PhoneChannelGate<Content: View>: View {
                     VStack(alignment: .leading, spacing: Space.s) {
                         if h.needsSignIn {
                             let known = app.account.email != nil && h.signInUrl != nil
-                            Text(known ? "Connect this Mac to Squeak's cloud" : "Sign in to Squeak").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text(known ? "Connect this Mac" : "Sign in to Squeak").font(Typo.label).foregroundStyle(Theme.ink)
                             Text(known ? "You're signed in. Connecting sets up the cloud your phone reaches this Mac through."
                                        : "Your phone reaches this Mac through your Squeak account. Signing in here sets it up.")
                                 .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
@@ -35,7 +35,7 @@ struct PhoneChannelGate<Content: View>: View {
                                     else { app.account.openSignIn(from: .setup) }
                                 }
                                     .buttonStyle(PrimaryButtonStyle()).disabled(app.account.busy)
-                                    .accessibilityLabel(known ? "Connect this Mac to Squeak's cloud" : "Sign in with a Squeak account")
+                                    .accessibilityLabel(known ? "Connect this Mac" : "Sign in with a Squeak account")
                                 if app.account.busy { ProgressView().controlSize(.small) }
                             }
                         } else {

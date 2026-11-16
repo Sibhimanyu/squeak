@@ -37,12 +37,13 @@ struct AccountSettings: View {
                     .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
                     if let keep = m.keepHistoryInCloud {
                         Toggle(isOn: Binding(get: { keep }, set: { v in Task { await m.setKeepHistoryInCloud(v) } })) {
-                            Text("Keep recent chats in Squeak's cloud (encrypted)").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text("Keep recent chats online (encrypted)").font(Typo.label).foregroundStyle(Theme.ink)
                         }
                         .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
                         Footnote("Lets your iPhone and browser open your last 30 days of chats while this Mac sleeps. Sealed with your key, so Squeak can't read them; turning it off deletes the copy.")
                     }
                     connectionStatus
+                    if let h = app.cloud.hosted, let l = h.legacySentence(accountKnown: true) { Footnote(l) }
                     Footnote(DeviceList.askFootnote(email: email))
                 } else if m.canSignIn {
                     Footnote("Sign in to see this Mac from your browser and iPhone without a QR code.")
@@ -53,7 +54,7 @@ struct AccountSettings: View {
                         Spacer()
                     }
                 } else {
-                    StatusLine(dot: nil, text: "Squeak's cloud isn't reachable right now.")
+                    StatusLine(dot: nil, text: "Squeak isn't reachable right now.")
                     Button("Retry") { Task { await m.refresh(); await app.cloud.refresh() } }.buttonStyle(SecondaryButtonStyle())
                 }
                 if let n = m.notice { Footnote(n) }
@@ -90,7 +91,7 @@ struct AccountSettings: View {
         }
     }
 
-    /// How this Mac reaches Squeak's cloud, as one quiet line under the identity row. Signing in sets it up; a press
+    /// How this Mac reaches your devices, as one quiet line under the identity row. Signing in sets it up; a press
     /// of Retry only shows when something can be done (an error, or the sign-in step that never reached the daemon).
     @ViewBuilder private var connectionStatus: some View {
         let cloud = app.cloud

@@ -20,7 +20,7 @@ public struct AccountFlow: Equatable, Sendable {
     public var line: String? {
         switch kind {
         case .signIn?: "Signing in…"
-        case .connect?: "Connecting to Squeak's cloud…"
+        case .connect?: "Connecting…"
         case .photo?: "Updating your photo…"
         case .signOut?: "Signing out…"
         case nil: nil

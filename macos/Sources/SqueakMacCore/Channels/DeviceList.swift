@@ -62,15 +62,12 @@ public enum DeviceList {
 
     /// The empty state: nothing about pairing, only what to do.
     public static func emptyLine(accountEmail: String?) -> String {
-        if let email = accountEmail, !email.isEmpty {
-            return "Open Squeak on your iPhone or on the web and sign in as \(email). This Mac shows up there by itself."
-        }
-        return "Sign in to Squeak on this Mac, then sign in with the same account on your iPhone or the web."
+        "Sign in to Squeak on your iPhone or the web with the same account."
     }
 
     /// Under the list.
     public static func footnote() -> String {
-        "A device on your account can read your sessions and send replies. Remove one to cut it off at once."
+        "Remove a device to stop it seeing this Mac."
     }
 
     /// The "Ask before adding my own devices" footnote: one click, never a code.

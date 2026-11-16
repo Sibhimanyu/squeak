@@ -57,7 +57,7 @@ private extension SettingsSection {
 
     var subtitle: String {
         switch self {
-        case .account: "Sign in to see this Mac from your browser and iPhone, and how it reaches Squeak's cloud."
+        case .account: "Sign in to see this Mac from your browser and iPhone, and whether it is connected."
         case .models: "The starting points for new threads, shared with your iPhone and the web."
         case .messages: "What a message does when the agent is already working."
         case .general: "Make Squeak feel right on this Mac."

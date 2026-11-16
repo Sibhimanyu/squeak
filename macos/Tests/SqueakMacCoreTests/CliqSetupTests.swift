@@ -60,7 +60,7 @@ struct CliqSetupTests {
         #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":true,"automatic":true}"#), outdated: false) == .ready)
         #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":false,"automatic":true}"#), outdated: false) == .gettingKey)
         #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":false}"#), outdated: false) == .needsHandlers)
-        let failed = try view(#"{"blocks":[],"relayReady":false,"automatic":true,"registerError":"Squeak's cloud could not set up Cliq."}"#)
-        #expect(CliqSetupModel.page(failed, outdated: false) == .failed("Squeak's cloud could not set up Cliq."))
+        let failed = try view(#"{"blocks":[],"relayReady":false,"automatic":true,"registerError":"Squeak could not set up Cliq."}"#)
+        #expect(CliqSetupModel.page(failed, outdated: false) == .failed("Squeak could not set up Cliq."))
     }
 }

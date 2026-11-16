@@ -130,7 +130,7 @@ final class ChannelsModel {
             cliqSetupNotice = nil
             cliqRelayKey = result.needsRelayDeploy ? result.relayKey : nil
             cliqSetupNotice = result.needsRelayDeploy
-                ? "Squeak's cloud has to be given this new key before the handlers work."
+                ? "Squeak has to be given this new key before the handlers work."
                 : "New handlers are ready. Paste all three into Cliq."
             cliqTapBaseline = .some(nil)
             try? await Task.sleep(for: .seconds(6)) // the daemon restarts to use the new secret

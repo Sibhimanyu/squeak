@@ -391,7 +391,7 @@ struct CliqHandlersSetup: View {
             case .gettingKey:
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Getting your Cliq key from Squeak's cloud…").font(.callout).foregroundStyle(.secondary)
+                    Text("Getting your Cliq key…").font(.callout).foregroundStyle(.secondary)
                 }
             case .failed(let reason):
                 Text(reason).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -547,7 +547,6 @@ struct IPhoneSettings: View {
     @Environment(AppModel.self) private var app
     @State private var confirmReset = false
     @State private var revoking: DeviceRow?
-    @State private var confirmUnlink = false
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
@@ -589,11 +588,6 @@ struct IPhoneSettings: View {
         } message: { d in
             Text(DeviceList.removeMessage(name: d.name))
         }
-        .confirmationDialog("Unlink your Squeak account?", isPresented: $confirmUnlink) {
-            Button("Unlink", role: .destructive) { Task { await m.unlinkAccount() } }
-        } message: {
-            Text("Browsers and iPhones signed in to \(m.remote?.account?.email ?? "this account") will no longer see this Mac. Devices already added keep working.")
-        }
         .confirmationDialog("Remove every device?", isPresented: $confirmReset) {
             Button("Remove all", role: .destructive) { Task { await m.resetPhones() } }
         } message: {
@@ -611,21 +605,20 @@ struct IPhoneSettings: View {
     @ViewBuilder private var enabledSections: some View {
         let devices = m.remote?.activeDevices ?? []
         let pending = m.remote?.pending ?? []
-        if let h = app.cloud.hosted, let line = h.statusSentence(accountKnown: app.account.email != nil) {
-            SettingsCard(title: "Squeak cloud", subtitle: "How your iPhone reaches this Mac.", symbol: "iphone.gen3") {
-                StatusLine(dot: h.isReady ? Theme.info : nil, text: line)
-                if let l = h.legacySentence(accountKnown: app.account.email != nil) { Footnote(l) }
-            }
-        }
         if !pending.isEmpty {
             SettingsCard(title: "Waiting for you", subtitle: "Devices of your own account that want to open this Mac.", symbol: "person.crop.circle.badge.questionmark") {
                 ForEach(pending) { PendingRow(request: $0) }
                 Footnote("One click lets it in. Reject if it isn't yours.")
             }
         }
-        SettingsCard(title: "Your devices", subtitle: "The iPhones and browsers signed in to your account.", symbol: "iphone.gen3") {
+        SettingsCard(title: "Devices", subtitle: "iPhones and browsers using your account.", symbol: "iphone.gen3") {
             let rows = DeviceList.rows(devices)
-            if rows.isEmpty {
+            if rows.isEmpty, app.account.email == nil {
+                HStack {
+                    Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
+                    Spacer()
+                }
+            } else if rows.isEmpty {
                 HStack(spacing: Space.m) {
                     Image(systemName: "iphone.gen3")
                         .font(.system(size: 19, weight: .medium)).foregroundStyle(Theme.muted)
@@ -636,12 +629,6 @@ struct IPhoneSettings: View {
                         Text(DeviceList.emptyLine(accountEmail: app.account.email))
                             .font(Typo.body).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if app.account.email == nil {
-                    HStack {
-                        Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
-                        Spacer()
                     }
                 }
             }
@@ -666,17 +653,7 @@ struct IPhoneSettings: View {
                 }
             }
 
-            if let account = m.remote?.account {
-                HStack(spacing: Space.m) {
-                    Text("Linked account:").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text(verbatim: account.email).font(Typo.body).foregroundStyle(Theme.muted).textSelection(.enabled)
-                    Spacer()
-                    Button("Unlink…") { confirmUnlink = true }.buttonStyle(DestructiveButtonStyle())
-                }
-                .accessibilityElement(children: .contain)
-            }
-
-            Footnote(DeviceList.footnote())
+            if app.account.email != nil { Footnote(DeviceList.footnote()) }
         }
         if let n = m.notice { SettingsCard(title: "Channel notice", subtitle: "The latest update from this connection.", symbol: "info.circle") { Footnote(n) } }
     }

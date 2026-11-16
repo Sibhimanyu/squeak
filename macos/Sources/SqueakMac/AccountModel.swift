@@ -102,7 +102,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         cancelPending()   // never two browser sheets at once
         let s = AccountSignIn.makeState()
         guard let url = AccountSignIn.photoURL(signInUrl: base, state: s) else {
-            notice = "Squeak's cloud gave an address Squeak can't use."; return
+            notice = "Squeak gave an address Squeak can't use."; return
         }
         notice = nil
         photoState = s
@@ -182,7 +182,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         guard !busy, !demo, let base = signInUrl else { return }
         let s = AccountSignIn.makeState()
         guard let url = AccountSignIn.cloudURL(signInUrl: base, state: s) else {
-            notice = "Squeak's cloud gave a sign-in address Squeak can't use."; return
+            notice = "Squeak gave a sign-in address Squeak can't use."; return
         }
         notice = nil
         anchorWindow = AppModel.shared.conversationWindow
@@ -212,7 +212,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         case .success(let token):
             do {
                 let r = try await client.cloudSignIn(token: token)
-                if !r.ok { notice = r.reason ?? "Couldn't connect to Squeak's cloud." }
+                if !r.ok { notice = r.reason ?? "Couldn't connect." }
             } catch { notice = "Couldn't reach the Squeak service to connect." }
         }
         await onChanged?()
@@ -234,7 +234,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         let s = AccountSignIn.makeState()
         let both = AccountFlow.wantsBothSteps(signInUrl: base, hosted: AppModel.shared.cloud.hosted)
         guard let url = AccountSignIn.startURL(signInUrl: base, state: s, both: both) else {
-            failSignIn("Squeak's cloud gave a sign-in address Squeak can't use."); return
+            failSignIn("Squeak gave a sign-in address Squeak can't use."); return
         }
         notice = nil
         if demo { state = AccountState(linked: true, email: "you@example.com", signInUrl: base); return }
@@ -305,7 +305,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
                 if let t = got.token { r = try await client.remoteAccountLink(ticket: got.ticket, token: t) }
                 else { r = try await client.remoteAccountLink(ticket: got.ticket) }
                 if r.ok { AppLog.info("account linked") }
-                else if handedToken, state?.linked != true, r.reason == nil { failSignIn("Couldn't connect to Squeak's cloud.") }
+                else if handedToken, state?.linked != true, r.reason == nil { failSignIn("Couldn't connect.") }
                 else { failSignIn(r.reason ?? "Couldn't link the account.") }
             } catch { failSignIn("Couldn't reach the Squeak service to finish signing in.") }
             await refresh()

@@ -54,9 +54,9 @@ import Testing
         let line = HostedCloud(phase: .needsSignIn).connectionLine(accountKnown: true)!
         #expect(line.tone == .quiet)
         #expect(line.retry)
-        #expect(line.actionTitle == "Finish connecting to Squeak's cloud")
+        #expect(line.actionTitle == "Finish connecting")
         let hold = HostedCloud(phase: .needsSignIn, moveDeferred: true).connectionLine(accountKnown: true)!
-        #expect(hold.text == "Connected. Moving this Mac to Squeak's cloud is on hold.")
+        #expect(hold.text == "Connected. Moving this Mac to your account is on hold.")
         #expect(!hold.retry)
     }
 

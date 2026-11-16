@@ -41,10 +41,10 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     /// `accountKnown`: the Mac app already knows the signed-in account, so "sign in" would contradict it.
     public func statusSentence(accountKnown: Bool = false) -> String? {
         switch phase {
-        case .needsSignIn: accountKnown ? "This Mac isn't connected to Squeak's cloud yet" : "Sign in to connect"
+        case .needsSignIn: accountKnown ? "This Mac isn't connected yet" : "Sign in to connect"
         case .connecting: "Connecting…"
-        case .ready: "Connected"
-        case .error: error ?? "Couldn't connect to Squeak's cloud."
+        case .ready: "Connected: your iPhone can reach this Mac"
+        case .error: error ?? "Couldn't connect."
         case nil: nil
         }
     }
@@ -54,9 +54,9 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         guard let legacy, moving != true else { return nil }
         let what: String
         switch legacy {
-        case .firebase: what = "your own Firebase"
-        case .shared: what = "Squeak's old shared server"
-        case .catalystOwn: what = "your own Catalyst relay"
+        case .firebase: what = "your own Firebase setup"
+        case .shared: what = "Squeak's old shared setup"
+        case .catalystOwn: what = "your own Catalyst setup"
         }
         return "This Mac still uses \(what). \(accountKnown ? "Connect" : "Sign in") to move it; paired devices follow."
     }
@@ -74,16 +74,16 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     /// out (the card shows Sign in) or when the daemon did not say. `retry` is set when a press can help.
     public func connectionLine(accountKnown: Bool) -> AccountConnection? {
         switch phase {
-        case .ready: return AccountConnection(text: "Connected through Squeak's cloud", tone: .ok, retry: false)
+        case .ready: return AccountConnection(text: "Connected: your iPhone can reach this Mac", tone: .ok, retry: false)
         case .connecting:
-            if moving == true { return AccountConnection(text: "Moving this Mac to Squeak's cloud…", tone: .working, retry: false) }
-            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to Squeak's cloud is on hold.", tone: .quiet, retry: false) }
+            if moving == true { return AccountConnection(text: "Moving this Mac to your account…", tone: .working, retry: false) }
+            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to your account is on hold.", tone: .quiet, retry: false) }
             return AccountConnection(text: "Connecting…", tone: .working, retry: false)
-        case .error: return AccountConnection(text: error ?? "Couldn't connect to Squeak's cloud.", tone: .error, retry: true)
+        case .error: return AccountConnection(text: error ?? "Couldn't connect.", tone: .error, retry: true)
         case .needsSignIn:
             guard accountKnown else { return nil }
-            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to Squeak's cloud is on hold.", tone: .quiet, retry: false) }
-            return AccountConnection(text: "One more step to connect this Mac to Squeak's cloud.", tone: .quiet, retry: true, actionTitle: "Finish connecting to Squeak's cloud")
+            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to your account is on hold.", tone: .quiet, retry: false) }
+            return AccountConnection(text: "One more step to connect this Mac.", tone: .quiet, retry: true, actionTitle: "Finish connecting")
         case nil: return nil
         }
     }
