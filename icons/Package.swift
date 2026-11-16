@@ -8,11 +8,13 @@ let package = Package(
         .library(name: "SqueakIcons", targets: ["SqueakIcons"]),
         .executable(name: "lucide-sheet", targets: ["lucide-sheet"]),
         .executable(name: "tide-preview", targets: ["tide-preview"]),
+        .executable(name: "tide-live", targets: ["tide-live"]),
     ],
     targets: [
         .target(name: "SqueakIcons"),
         .executableTarget(name: "lucide-sheet", dependencies: ["SqueakIcons"]),
         .executableTarget(name: "tide-preview", dependencies: ["SqueakIcons"]),
+        .executableTarget(name: "tide-live", dependencies: ["SqueakIcons"]),
         .testTarget(name: "SqueakIconsTests", dependencies: ["SqueakIcons"]),
     ]
 )

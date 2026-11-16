@@ -9,6 +9,43 @@ import Foundation
 /// periods, so the motion never visibly loops, and the seed (one per view) feeds every hash, so two glyphs never match. The two ends
 /// dissolve, so no box edge shows, and no pixel sits on a curve, so there are no lines of dots.
 public enum TideMotion {
+    /// Live-tunable parameters; the defaults are the shipped look.
+    public struct Tuning: Sendable, Equatable {
+        /// Overall flow speed multiplier.
+        public var speed: Double = 0.7
+        /// How far the pace wanders (1 = shipped 0.5x...1.3x; 0 = constant pace).
+        public var paceDrift: Double = 1
+        /// The choppiness channel is remapped from 0...1 into this range.
+        public var choppinessLow: Double = 0
+        public var choppinessHigh: Double = 1
+        /// Multiplies every sparkle chance.
+        public var sparkle: Double = 1
+        /// 0 = no vignette, 1 = shipped, above 1 = narrower.
+        public var vignette: Double = 1
+        /// Crossfade time in seconds (0 = pixels snap between the four levels as before).
+        public var smoothness: Double = 0.3
+        /// Timeline rate: 15, 30 or 60.
+        public var frameRate: Int = 30
+        public init() {}
+        public init(speed: Double = 0.7, paceDrift: Double = 1, choppinessLow: Double = 0, choppinessHigh: Double = 1, sparkle: Double = 1, vignette: Double = 1, smoothness: Double = 0.3, frameRate: Int = 30) {
+            self.smoothness = smoothness; self.frameRate = frameRate
+            self.speed = speed; self.paceDrift = paceDrift; self.choppinessLow = choppinessLow; self.choppinessHigh = choppinessHigh
+            self.sparkle = sparkle; self.vignette = vignette
+        }
+        /// The tuning as Swift source.
+        public var swiftSource: String {
+            "TideMotion.Tuning(speed: \(f(speed)), paceDrift: \(f(paceDrift)), choppinessLow: \(f(choppinessLow)), choppinessHigh: \(f(choppinessHigh)), sparkle: \(f(sparkle)), vignette: \(f(vignette)), smoothness: \(f(smoothness)), frameRate: \(frameRate))"
+        }
+        private func f(_ v: Double) -> String { String(format: "%.3g", v) }
+    }
+
+    /// Seconds since a process-wide start: the clock every view reads, so `t` stays small (never the 8e8 of the
+    /// reference date, where the maths lost its precision).
+    public static let clockStart = Date()
+    public static func clock(_ date: Date) -> Double { date.timeIntervalSince(clockStart) }
+
+    @inline(__always) static func wrap(_ x: Double) -> Double { x.truncatingRemainder(dividingBy: 2 * .pi) }
+
     /// Brightness levels 0...3: off, dim, mid, full.
     public static func alpha(_ level: Int) -> Double {
         switch level {
@@ -21,13 +58,13 @@ public enum TideMotion {
 
     /// A soft elliptical falloff, 0...1, by which every pixel's alpha is multiplied so no edge reads as a box: full in the
     /// middle, fading to nothing at the left and right ends (wider than the rows), a little at top and bottom.
-    public static func vignette(col: Int, row: Int, cols: Int, rows: Int) -> Double {
+    public static func vignette(col: Int, row: Int, cols: Int, rows: Int, tuning: Tuning = Tuning()) -> Double {
         let nx = (Double(col) + 0.5) / Double(cols) * 2 - 1
         let ny = (Double(row) + 0.5) / Double(rows) * 2 - 1
         let r = (nx * nx + (0.55 * ny) * (0.55 * ny)).squareRoot()
         let x = max(0, min(1, (r - 0.5) / 0.5))
         let f = 1 - x * x * (3 - 2 * x)
-        return f
+        return max(0, min(1, 1 - tuning.vignette * (1 - f)))
     }
 
     /// The time a still glyph samples.
@@ -68,9 +105,10 @@ public enum TideMotion {
     static let baseRate = 0.55
 
     /// The wandering pace, 0.5...1.3 (a sum of three sines with seeded periods of about 11-19, 7-11 and 23-31 s).
-    static func pace(_ t: Double, _ seed: UInt64) -> Double {
+    static func pace(_ t: Double, _ seed: UInt64, _ tuning: Tuning = Tuning()) -> Double {
         let w = paceWaves(seed)
-        return 0.9 + 0.4 * (0.5 * sin(w.0.w * t + w.0.p) + 0.3 * sin(w.1.w * t + w.1.p) + 0.2 * sin(w.2.w * t + w.2.p))
+        func sn(_ x: (w: Double, p: Double)) -> Double { sin(wrap(x.w * t) + x.p) }
+        return 0.9 + 0.4 * tuning.paceDrift * (0.5 * sn(w.0) + 0.3 * sn(w.1) + 0.2 * sn(w.2))
     }
     private static func paceWaves(_ seed: UInt64) -> ((w: Double, p: Double), (w: Double, p: Double), (w: Double, p: Double)) {
         func wave(_ k: UInt64, _ lo: Double, _ hi: Double) -> (w: Double, p: Double) {
@@ -81,22 +119,23 @@ public enum TideMotion {
 
     /// The stream's clock: the integral of `baseRate * pace`, so it never jumps and runs at half the old speed on average.
     /// It drives the flow, the surface waves and the sparkles; the morph below runs on it too.
-    static func flowTime(_ t: Double, _ seed: UInt64) -> Double {
+    static func flowTime(_ t: Double, _ seed: UInt64, _ tuning: Tuning = Tuning()) -> Double {
         let w = paceWaves(seed)
-        func part(_ x: (w: Double, p: Double), _ amp: Double) -> Double { -amp * (cos(x.w * t + x.p) - cos(x.p)) / x.w }
-        return baseRate * (0.9 * t + 0.4 * (part(w.0, 0.5) + part(w.1, 0.3) + part(w.2, 0.2)))
+        func part(_ x: (w: Double, p: Double), _ amp: Double) -> Double { -amp * (cos(wrap(x.w * t) + x.p) - cos(x.p)) / x.w }
+        return baseRate * tuning.speed * (0.9 * t + 0.4 * tuning.paceDrift * (part(w.0, 0.5) + part(w.1, 0.3) + part(w.2, 0.2)))
     }
 
     /// 0 (calm) ... 1 (choppy): a slow seeded channel over 15-30 s that changes the texture's character.
-    static func choppiness(_ t: Double, _ seed: UInt64) -> Double {
-        max(0, min(1, 0.5 + 1.4 * (0.7 * noise(t / 21, 0.5, 0.5, seed &+ 60) + 0.3 * noise(t / 13 + 7, 1.5, 0.5, seed &+ 61))))
+    static func choppiness(_ t: Double, _ seed: UInt64, _ tuning: Tuning = Tuning()) -> Double {
+        let raw = max(0, min(1, 0.5 + 1.4 * (0.7 * noise(t / 21, 0.5, 0.5, seed &+ 60) + 0.3 * noise(t / 13 + 7, 1.5, 0.5, seed &+ 61))))
+        return tuning.choppinessLow + (tuning.choppinessHigh - tuning.choppinessLow) * raw
     }
 
     /// The surfaces at horizontal position `x` (0...1): the stream's top and bottom edge in y units where the outer
     /// rows sit near +-1; the band is about two thirds of the height and each surface moves about one row. The surface
     /// waves are advected slowly (the body's streaks run faster, so layers of water move at different speeds).
-    static func surfaces(x: Double, t: Double, seed: UInt64) -> (top: Double, bottom: Double) {
-        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+    static func surfaces(x: Double, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> (top: Double, bottom: Double) {
+        let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let ripple = 0.22 + 0.26 * chop, fx = 0.85 + 0.4 * chop  // choppy water ripples more and finer
         let thick = 1 + 0.15 * noise(tau * 0.2, 0.5, 0.5, seed &+ 12)
         let sway = 0.12 * noise(x * 1.1 - 0.10 * tau, tau * 0.1, 0.5, seed &+ 13)
@@ -107,8 +146,8 @@ public enum TideMotion {
 
     /// The current's streaks at a pixel, 0...1: noise stretched about 3.5x along x and advected right much faster than
     /// the surface, row-staggered and domain-warped, so features are short broken horizontal streaks (2-6 px).
-    static func streaks(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64) -> Double {
-        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+    static func streaks(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Double {
+        let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let l1 = 4.8 - 2.2 * chop, l2 = 2.9 - 1.3 * chop  // calm: long smooth streaks; choppy: short ones
         let c = (Double(col) + 0.5) / Double(cols) * 21, r = Double(row) / Double(rows) * 6  // units of the 21x6 grid
         let stagger = unit(seed &+ 40, row) * 23
@@ -120,7 +159,7 @@ public enum TideMotion {
     }
 
     /// 0...1 brightness at a pixel before quantizing.
-    static func value(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64) -> Double {
+    static func value(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Double {
         let x = (Double(col) + 0.5) / Double(cols)
         let y = (Double(row) - Double(rows - 1) / 2) / (Double(rows) / 2)
         // Ends dissolve over the outer ~20% of the width. The left end is thinner (water entering); the right trails off.
@@ -130,12 +169,12 @@ public enum TideMotion {
         let ends = e * e * (3 - 2 * e)
         let left = col < cols / 2
         let narrow = left ? 0.15 + 0.85 * ends : 0.45 + 0.55 * ends
-        let s = surfaces(x: x, t: t, seed: seed)
+        let s = surfaces(x: x, t: t, seed: seed, tuning: tuning)
         let mid = (s.top + s.bottom) / 2
         let topEdge = mid + (s.top - mid) * narrow, bottomEdge = mid + (s.bottom - mid) * narrow
         let dTop = y - topEdge, dBottom = bottomEdge - y
         let a = col &+ row &* 977
-        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+        let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let slot = Int((tau / 0.22 + unit(seed &+ 50, a) * 40).rounded(.down))
         // Spray: now and then a crest lifts a pixel just above the surface and drops back.
         if dTop < -0.05, dTop > -0.42, ends > 0.3, unit(seed &+ 51, col, slot) < 0.025, unit(seed &+ 52, col, row, slot) < 0.7 {
@@ -148,7 +187,7 @@ public enum TideMotion {
         // The current: streaks with a short trail (head bright, tail dimmer to the left), a pure function of (seed, t).
         var light = 0.0, decay = 1.0
         for k in 0..<4 {
-            light = max(light, decay * streaks(col: col, row: row, cols: cols, rows: rows, t: t - 0.15 * Double(k), seed: seed))
+            light = max(light, decay * streaks(col: col, row: row, cols: cols, rows: rows, t: t - 0.15 * Double(k), seed: seed, tuning: tuning))
             decay *= 0.6
         }
         // Foam and crest highlights at the top, deeper water dimmer at the bottom.
@@ -158,15 +197,47 @@ public enum TideMotion {
         let da = 0.3 + 0.6 * unit(seed &+ 31, a), db = 0.7 + 0.9 * unit(seed &+ 32, a)
         let sa = Int((tau / da + unit(seed &+ 33, a) * 50).rounded(.down)), sb = Int((tau / db + unit(seed &+ 34, a) * 50).rounded(.down))
         let jitter = (unit(seed &+ 35, a, sa) - 0.5) * 0.3
-        let chance = (0.05 + 0.06 * foam) * (0.5 + 1.2 * chop)
-        let spark = (unit(seed &+ 36, a, sa) < chance || unit(seed &+ 37, a, sb) < 0.02 * (0.5 + 1.2 * chop)) ? 0.6 : 0
+        let chance = (0.05 + 0.06 * foam) * (0.5 + 1.2 * chop) * tuning.sparkle
+        let spark = (unit(seed &+ 36, a, sa) < chance || unit(seed &+ 37, a, sb) < 0.02 * (0.5 + 1.2 * chop) * tuning.sparkle) ? 0.6 : 0
         let v = max(0, min(1, (light * depth + 0.3 * foam * light + jitter + spark)))
         return ends * min(1, body * 1.2) * (0.08 + 0.92 * v)
     }
 
-    public static func level(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64 = 0) -> Int {
-        let v = value(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed)
+    public static func level(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64 = 0, tuning: Tuning = Tuning()) -> Int {
+        let v = value(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed, tuning: tuning)
         return v < 0.12 ? 0 : v < 0.30 ? 1 : v < 0.54 ? 2 : 3
+    }
+
+    /// Continuous alpha 0...1 for a brightness: a soft, piecewise-linear version of the four levels, half blended with the
+    /// quantized alpha so the pixel look stays but values between levels no longer jump.
+    static func softAlpha(_ v: Double) -> Double {
+        let pts: [(Double, Double)] = [(0.06, 0), (0.2, 0.38), (0.42, 0.68), (0.7, 1)]
+        let soft: Double
+        if v <= pts[0].0 { soft = 0 } else if v >= pts[3].0 { soft = 1 } else {
+            var k = 0
+            while v > pts[k + 1].0 { k += 1 }
+            let u = (v - pts[k].0) / (pts[k + 1].0 - pts[k].0)
+            soft = pts[k].1 + (pts[k + 1].1 - pts[k].1) * u * u * (3 - 2 * u)
+        }
+        let q = v < 0.12 ? 0 : v < 0.30 ? 1 : v < 0.54 ? 2 : 3
+        return 0.5 * soft + 0.5 * alpha(q)
+    }
+
+    /// A pixel's alpha with eased transitions: the soft alpha of the field at six instants stepping back over
+    /// `smoothness` s, each fading by e^(-age/tau) (a glint drops out slowly), and a two-tap average so a new glint
+    /// fades in over about a quarter of that. `smoothness` 0 is the single, quantized sample.
+    public static func smoothAlpha(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64 = 0, tuning: Tuning = Tuning()) -> Double {
+        let sm = tuning.smoothness
+        guard sm > 0.001 else { return alpha(level(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed, tuning: tuning)) }
+        let h = sm / 4, tau = sm * 2
+        var b = [Double](repeating: 0, count: 6)
+        for j in 0..<6 {
+            let a = softAlpha(value(col: col, row: row, cols: cols, rows: rows, t: t - Double(j) * h, seed: seed, tuning: tuning))
+            b[j] = a * exp(-Double(j) * h / tau)
+        }
+        var out = 0.0
+        for j in 0..<5 { out = max(out, 0.5 * (b[j] + b[j + 1])) }
+        return out
     }
 
     /// The still glyph's frame: the left half at `stillTime`, mirrored, so it is exactly symmetric left/right.

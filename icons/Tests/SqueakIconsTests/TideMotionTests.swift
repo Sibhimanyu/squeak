@@ -104,7 +104,7 @@ final class TideMotionTests: XCTestCase {
         }
         var num = 0.0, den = 0.0
         for i in 0..<100 {
-            let t = Double(i) * 0.1, a = profile(t), b = profile(t + 0.1)
+            let t = Double(i) * 0.1, a = profile(t), b = profile(t + 0.3)
             for s in -3...3 {
                 var corr = 0.0
                 for c in 3..<(g.0 - 3) { corr += a[c] * b[c + s] }
@@ -183,5 +183,41 @@ final class TideMotionTests: XCTestCase {
         XCTAssertTrue(v.allSatisfy { (0...1).contains($0) })
         XCTAssertGreaterThan(v.max()! - v.min()!, 0.4)
         for i in 1..<v.count { XCTAssertLessThan(abs(v[i] - v[i - 1]), 0.25) }
+    }
+
+    /// The maths must not depend on how large `t` is: flow speed and the per-second change rate at t ~ 10 and t ~ 8.2e8.
+    func testClockMagnitudeDoesNotChangeSpeed() {
+        func flow(_ t0: Double) -> Double { (TideMotion.flowTime(t0 + 20, seed) - TideMotion.flowTime(t0, seed)) / 20 }
+        func change(_ t0: Double) -> Double {
+            var diff = 0.0, n = 0.0
+            for i in 0..<300 {
+                let t = t0 + Double(i) * 0.1
+                for r in 0..<9 { for c in 0..<29 {
+                    let a = TideMotion.smoothAlpha(col: c, row: r, cols: 29, rows: 9, t: t, seed: seed)
+                    let b = TideMotion.smoothAlpha(col: c, row: r, cols: 29, rows: 9, t: t + 0.5, seed: seed)
+                    diff += abs(a - b); n += 1
+                } }
+            }
+            return diff / n
+        }
+        // Compare against windows whose pace phase is equal: use a long window so the average pace is comparable.
+        let small = flow(10), big = flow(8.2e8)
+        XCTAssertEqual(big / small, 1, accuracy: 0.15, "flow \(small) vs \(big)")
+        let cs = change(10), cb = change(8.2e8)
+        XCTAssertEqual(cb / cs, 1, accuracy: 0.15, "change \(cs) vs \(cb)")
+    }
+
+    func testSmoothAlphaIsContinuousAndInRange() {
+        var tune = TideMotion.Tuning()
+        tune.smoothness = 0.3
+        for c in 0..<21 { for r in 0..<6 {
+            var last = TideMotion.smoothAlpha(col: c, row: r, cols: 21, rows: 6, t: 0, seed: seed, tuning: tune)
+            for i in 1..<300 {
+                let a = TideMotion.smoothAlpha(col: c, row: r, cols: 21, rows: 6, t: Double(i) / 30, seed: seed, tuning: tune)
+                XCTAssertTrue((0...1).contains(a))
+                XCTAssertLessThan(abs(a - last), 0.6)
+                last = a
+            }
+        } }
     }
 }
