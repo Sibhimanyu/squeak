@@ -229,21 +229,32 @@ export function claudeTranscriptBytes(
 
 // ---- auto-compaction
 
-/** Context tokens at which a native Claude chat compacts itself, whatever the model's window (a 1M window is no reason to send 600k). */
-export const DEFAULT_AUTO_COMPACT_TOKENS = 200_000;
+/** By default a chat compacts at this share of its model's window (1M -> 900k, 200k -> 180k). */
+export const DEFAULT_AUTO_COMPACT_FRACTION = 0.9;
+/** The default threshold for a 1M model, for places that show one number without a model. */
+export const DEFAULT_AUTO_COMPACT_TOKENS = 900_000;
 /** The CLI accepts a window of 100k to 1M. */
 const MIN_COMPACT_WINDOW = 100_000;
 
-/** The project's setting to a threshold: null/absent = default, 0 = off, else clamped to at least 100k. */
-export function autoCompactThreshold(setting: number | null | undefined): number | null {
-  if (setting === 0) return null;
-  if (setting === null || setting === undefined) return DEFAULT_AUTO_COMPACT_TOKENS;
-  return Math.max(MIN_COMPACT_WINDOW, Math.round(setting));
+/** Where a chat on `model` compacts when the project sets nothing. */
+export function defaultCompactThreshold(model: string): number {
+  return Math.round(claudeContextLimit(model) * DEFAULT_AUTO_COMPACT_FRACTION);
 }
 
-/** What the CLI is told (`autoCompactWindow`): never above the model's own window, so a 200k model keeps its default. */
+/**
+ * The project's setting to a threshold: null/absent = near the model's limit, 0 = off, else at least 100k
+ * and never above the model's own window.
+ */
+export function autoCompactThreshold(setting: number | null | undefined, model: string): number | null {
+  if (setting === 0) return null;
+  if (setting === null || setting === undefined) return defaultCompactThreshold(model);
+  return Math.min(claudeContextLimit(model), Math.max(MIN_COMPACT_WINDOW, Math.round(setting)));
+}
+
+/** What the CLI is told (`autoCompactWindow`): nothing for the default of a 200k model (its own default), never above the window. */
 export function cliCompactWindow(threshold: number | null, model: string): number | null {
   if (threshold === null) return null;
+  if (claudeContextLimit(model) <= 200_000 && threshold === defaultCompactThreshold(model)) return null;
   return threshold < claudeContextLimit(model) ? threshold : null;
 }
 
