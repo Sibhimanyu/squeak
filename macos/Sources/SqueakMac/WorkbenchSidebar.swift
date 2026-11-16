@@ -650,13 +650,16 @@ private struct FoldRow: View {
     /// The count's slot, 24pt wide for the glyphs so a row never changes size: needs-you badge wins, then the working
     /// glyph, then the error mark; idle (or no rollup) is the count.
     @ViewBuilder private var pondMark: some View {
-        let r = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
+        let own = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
+        // An open pond shows its chats, and the working one moves: the pond itself does not repeat it.
+        let r = StatusRollup(state: own.state.asRollup(childrenVisible: !folded), working: own.working, needsYou: own.needsYou)
         switch PondRowMark.of(r, count: count) {
         case .needsYou(let n):
             StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
                 .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
         case .working:
-            TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 22)).frame(width: 24, alignment: .trailing)
+            // 14 pt tall, right-aligned to the 24 pt slot and overflowing left into the row's free space; the padding keeps it clear of the name.
+            WorkingGlyph(height: 14, slot: 24, alignment: .trailing).padding(.leading, 18)
         case .error:
             StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):
@@ -761,7 +764,7 @@ private struct FoldRow: View {
         if lifecycle == .setupFailed {
             LifecycleSlot(mark: .setupFailed)
         } else if lifecycle == .settingUp {
-            TideGlyph(color: Theme.muted, height: TideGlyph.Grid.mini.height(fittingWidth: 24)).opacity(0.7).frame(width: 28, height: 16, alignment: .trailing).help(WorkspaceLifecycle.words(.settingUp))
+            WorkingGlyph(color: Theme.muted, height: 10, slot: 28, alignment: .trailing).opacity(0.7).frame(height: 16).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
                 Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)

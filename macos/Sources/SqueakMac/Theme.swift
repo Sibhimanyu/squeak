@@ -82,6 +82,24 @@ extension NSColor {
     }
 }
 
+/// The working glyph on the mark grid, drawn larger than its layout slot: the slot keeps its width (a row never grows or
+/// jumps between states) and the glyph's vignette fades its overflow, so it never reads as a box. It takes no hits.
+struct WorkingGlyph: View {
+    var color: Color = Theme.working
+    /// The glyph's drawn height (the mark grid is 21 x 6, so its width is about 3.6x this).
+    var height: CGFloat = 11
+    /// The layout slot's width.
+    var slot: CGFloat = 24
+    /// Where the glyph sits in the slot: `.trailing` overflows to the left only.
+    var alignment: Alignment = .center
+
+    var body: some View {
+        TideGlyph(color: color, height: height, grid: .mark)
+            .frame(width: slot, height: 12, alignment: alignment)
+            .allowsHitTesting(false)
+    }
+}
+
 /// One mark drawn at its size (§8.1): the tide glyph (the quiet one at 70%), the status marks 14-18pt.
 struct ChatMarkGlyph: View {
     let mark: ChatMark
@@ -89,8 +107,7 @@ struct ChatMarkGlyph: View {
     var body: some View {
         switch mark.kind {
         case .working:
-            TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 24)).opacity(mark.quiet ? 0.7 : 1)
-                .frame(width: 24, height: 12)
+            WorkingGlyph(height: 12, slot: 24).opacity(mark.quiet ? 0.7 : 1)
         case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
         case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)

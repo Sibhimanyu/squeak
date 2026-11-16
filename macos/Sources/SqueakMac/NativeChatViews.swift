@@ -57,7 +57,7 @@ struct NativeQueueStack: View {
         HStack(spacing: 10) {
             Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: 20))
+            WorkingGlyph(height: 10, slot: 20)
             if let word = card.label { Text(word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

@@ -27,14 +27,17 @@ public struct TideGlyph: View {
         public func width(height: CGFloat) -> CGFloat { side(height: height) * CGFloat(cols) + gap * CGFloat(cols - 1) }
     }
 
-    private let color: Color, height: CGFloat, still: Bool, grid: Grid, fixedSeed: UInt64?
+    private let color: Color, height: CGFloat, still: Bool, grid: Grid, fixedSeed: UInt64?, fade: Bool
     /// One random seed per view, captured once: two glyphs side by side never match.
     @State private var instanceSeed = UInt64.random(in: .min ... .max)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    public init(color: Color, height: CGFloat, still: Bool = false, grid: Grid? = nil, seed: UInt64? = nil) {
-        self.color = color; self.height = height; self.still = still; self.fixedSeed = seed
+    /// `fade` multiplies every pixel by a soft elliptical vignette (default on) so the glyph never reads as a box. To draw
+    /// it larger than its layout slot, give it a taller `height` and a smaller frame (`.frame(width: slot, alignment:)`):
+    /// SwiftUI centres or aligns the overflow without clipping, and the glyph never takes hits.
+    public init(color: Color, height: CGFloat, still: Bool = false, grid: Grid? = nil, seed: UInt64? = nil, fade: Bool = true) {
+        self.color = color; self.height = height; self.still = still; self.fixedSeed = seed; self.fade = fade
         self.grid = grid ?? .preset(forHeight: height)
     }
 
@@ -43,10 +46,10 @@ public struct TideGlyph: View {
         return Group {
             if !still && !reduceMotion {
                 TimelineView(.animation(minimumInterval: 1.0 / 15, paused: scenePhase != .active)) { context in
-                    TideFrame(color: color, height: height, grid: grid, time: context.date.timeIntervalSinceReferenceDate, seed: seed)
+                    TideFrame(color: color, height: height, grid: grid, time: context.date.timeIntervalSinceReferenceDate, seed: seed, fade: fade)
                 }
             } else {
-                TideFrame(color: color, height: height, grid: grid, time: nil, seed: seed)
+                TideFrame(color: color, height: height, grid: grid, time: nil, seed: seed, fade: fade)
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)
@@ -55,20 +58,20 @@ public struct TideGlyph: View {
 
 /// One frame of the glyph at an explicit time (nil = the still frame); the preview drives it directly.
 public struct TideFrame: View {
-    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64
+    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64, fade: Bool
 
-    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0) {
-        self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed
+    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0, fade: Bool = true) {
+        self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed; self.fade = fade
     }
 
     public var body: some View {
         Canvas { graphics, canvas in
-            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed)
+            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed, fade: fade)
         }
         .frame(width: grid.width(height: height), height: height)
     }
 
-    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0) {
+    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0, fade: Bool = true) {
         let side = grid.side(height: size.height)
         guard side > 0 else { return }
         let ox = (size.width - grid.width(height: size.height)) / 2
@@ -79,7 +82,7 @@ public struct TideFrame: View {
                 guard level > 0 else { continue }
                 let rect = CGRect(x: ox + CGFloat(col) * (side + grid.gap), y: CGFloat(row) * (side + grid.gap),
                                   width: side, height: side)
-                graphics.fill(Path(rect), with: .color(color.opacity(TideMotion.alpha(level))))
+                graphics.fill(Path(rect), with: .color(color.opacity(TideMotion.alpha(level) * (fade ? TideMotion.vignette(col: col, row: row, cols: grid.cols, rows: grid.rows) : 1))))
             }
         }
     }

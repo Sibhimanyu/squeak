@@ -45,13 +45,13 @@ private struct PondWorkspaceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s) {
-                StreamStateMark(state: .of(rows: card.chats), slotWidth: 16, name: card.displayTitle)
+                StreamStateMark(state: StreamGlyphState.of(rows: card.chats).asRollup(childrenVisible: !card.chats.isEmpty), slotWidth: 16, name: card.displayTitle)
                 Text(verbatim: card.displayTitle).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(verbatim: "\(card.chats.count)")
                     .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                     .accessibilityLabel("\(card.chats.count) threads")
-                if let m = card.mark { ChatMarkGlyph(mark: m.mark).help(m.words) }
+                if let m = card.mark, let shown = m.mark.asRollup(childrenVisible: !card.chats.isEmpty) { ChatMarkGlyph(mark: shown).help(m.words) }
             }
             .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, card.branch == nil ? 12 : 6)
             if let branch = card.branch {

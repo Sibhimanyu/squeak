@@ -37,4 +37,16 @@ import Testing
         #expect(StreamGlyphState.waiting.label(for: "A") == "A, waiting on you")
     }
 
+    @Test func onlyTheWorkingLeafMoves() {
+        // A rollup over visible chats never animates; the chat itself does.
+        #expect(StreamGlyphState.working.asRollup(childrenVisible: true) == .idle)
+        #expect(StreamGlyphState.working.asRollup(childrenVisible: false) == .working)
+        // Waiting and failed still show on the rollup, as still marks.
+        #expect(StreamGlyphState.waiting.asRollup(childrenVisible: true) == .waiting)
+        #expect(StreamGlyphState.failed.asRollup(childrenVisible: true) == .failed)
+        #expect(ChatMark(.working).asRollup(childrenVisible: true) == nil)
+        #expect(ChatMark(.working, quiet: true).asRollup(childrenVisible: true) == nil)
+        #expect(ChatMark(.working).asRollup(childrenVisible: false) == ChatMark(.working))
+        #expect(ChatMark(.failed).asRollup(childrenVisible: true) == ChatMark(.failed))
+    }
 }

@@ -27,7 +27,7 @@ func label(_ s: String, _ p: Palette) -> some View { Text(s).font(.system(size: 
 
 let pad: CGFloat = 6, gifGap: CGFloat = 8
 @MainActor func gif(_ path: String, height: CGFloat, p: Palette) {
-    let frames = 150
+    let frames = 450  // 30 s, so the pace and character drift show
     let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.gif.identifier as CFString, frames, nil)!
     CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
     for i in 0..<frames {
@@ -89,6 +89,32 @@ let pad: CGFloat = 6, gifGap: CGFloat = 8
         }.padding(10).background(p.bg)
     }
     writePNG(image(VStack(spacing: 0) { real(.dark); real(.light) }, scale: 2), out + "/real-size.png")
+
+    // 1d. sidebar: the pond header row and a chat row at real 2x scale on the dark sidebar (#1C1915, DESIGN.md), with the
+    // glyph sizes the Mac call sites use (WorkingGlyph: pond mark 14 pt right-aligned in a 24 pt slot, chat mark 13 pt in 20 pt).
+    func sidebar(_ t: Double) -> some View {
+        let side = hex(0x1C1915)
+        let pond = HStack(spacing: 10) {
+            Text("G").font(.system(size: 15, weight: .bold)).foregroundStyle(d.ink).frame(width: 20, height: 20)
+                .padding(3).background(hex(0x2F5D3A), in: RoundedRectangle(cornerRadius: 7)).padding(-3)
+            Text("greenroom").font(.system(size: 14, weight: .semibold)).foregroundStyle(d.ink).lineLimit(1)
+            TideFrame(color: d.working, height: 14, grid: .mark, time: t, seed: 11).frame(width: 24, height: 12, alignment: .trailing).padding(.leading, 18)
+            Spacer(minLength: 0)
+            Text("\u{2304}").font(.system(size: 12)).foregroundStyle(d.ink.opacity(0.5))
+            Text("+").font(.system(size: 16)).foregroundStyle(d.ink.opacity(0.5))
+        }.padding(.leading, 10).padding(.trailing, 12).frame(width: 280, height: 38, alignment: .leading)
+        let chat = HStack(spacing: 10) {
+            TideFrame(color: d.working, height: 13, grid: .mark, time: t, seed: 222).frame(width: 20, height: 16)
+            Text("Hong Kong").font(.system(size: 14)).foregroundStyle(d.ink).lineLimit(1)
+            Spacer(minLength: 0)
+            HStack(spacing: 5) {
+                Text("+26k").foregroundStyle(hex(0x4CB782)); Text("\u{2212}3.8k").foregroundStyle(hex(0xF87171))
+            }.font(.system(size: 11, design: .monospaced))
+        }.padding(.leading, 22).padding(.trailing, 10).frame(width: 280, height: 36, alignment: .leading)
+        return VStack(spacing: 0) { pond; chat }.padding(.vertical, 8).background(side)
+    }
+    writePNG(image(sidebar(2.4), scale: 2), out + "/sidebar.png")
+    writePNG(image(VStack(spacing: 0) { ForEach(0..<3, id: \.self) { sidebar(2 + Double($0) * 4.3) } }, scale: 2), out + "/sidebar-3.png")
 
     // 2. marks: the glyph (still frame) and each StatusMark, dark and light, x4.
     func row(_ p: Palette) -> some View {

@@ -131,4 +131,57 @@ final class TideMotionTests: XCTestCase {
             XCTAssertEqual(l, r, "\(g)")
         }
     }
+
+    /// The vignette: every edge column is dimmer than the centre columns, the ends fade to near nothing, and it is symmetric.
+    func testVignetteFadesEdges() {
+        for g in grids {
+            for row in 0..<g.1 {
+                let centre = TideMotion.vignette(col: g.0 / 2, row: row, cols: g.0, rows: g.1)
+                for col in [0, g.0 - 1] {
+                    let edge = TideMotion.vignette(col: col, row: row, cols: g.0, rows: g.1)
+                    XCTAssertLessThan(edge, centre * 0.15, "\(g) col \(col) row \(row)")
+                }
+                XCTAssertEqual(TideMotion.vignette(col: 2, row: row, cols: g.0, rows: g.1),
+                               TideMotion.vignette(col: g.0 - 3, row: row, cols: g.0, rows: g.1), accuracy: 1e-9)
+            }
+            for c in 0..<g.0 { for r in 0..<g.1 {
+                let v = TideMotion.vignette(col: c, row: r, cols: g.0, rows: g.1)
+                XCTAssertTrue((0...1).contains(v))
+            } }
+        }
+    }
+
+    /// The pace wanders: always inside 0.5x...1.3x of the base, and the measured flow speed in two 3 s windows differs by
+    /// at least 30% for some seed. The clock never goes backwards or jumps.
+    func testPaceWandersAndClockIsContinuous() {
+        var found = false
+        for sd in UInt64(1)...8 {
+            var speeds: [Double] = []
+            for k in 0..<20 {
+                let t = Double(k) * 3
+                speeds.append((TideMotion.flowTime(t + 3, sd) - TideMotion.flowTime(t, sd)) / 3)
+            }
+            if speeds.max()! / speeds.min()! >= 1.3 { found = true }
+            for t in stride(from: 0.0, to: 90, by: 0.5) {
+                let p = TideMotion.pace(t, sd)
+                XCTAssertTrue((0.49...1.31).contains(p), "pace \(p)")
+            }
+            var last = TideMotion.flowTime(0, sd)
+            for i in 1..<1350 {
+                let now = TideMotion.flowTime(Double(i) / 15, sd)
+                XCTAssertGreaterThan(now, last)
+                XCTAssertLessThan(now - last, 0.55 * 1.3 / 15 + 1e-9)
+                last = now
+            }
+        }
+        XCTAssertTrue(found)
+    }
+
+    /// The texture's character drifts over tens of seconds, calm to choppy, and stays in range.
+    func testChoppinessDrifts() {
+        let v = stride(from: 0.0, to: 120, by: 1).map { TideMotion.choppiness($0, seed) }
+        XCTAssertTrue(v.allSatisfy { (0...1).contains($0) })
+        XCTAssertGreaterThan(v.max()! - v.min()!, 0.4)
+        for i in 1..<v.count { XCTAssertLessThan(abs(v[i] - v[i - 1]), 0.25) }
+    }
 }

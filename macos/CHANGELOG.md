@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.8
+
+- The working glyph in the sidebar is larger and fades softly at its edges, and moves slower, with a pace and pattern that drift like real water. A working chat shows its moving glyph once, on the chat itself, not again on its stream and pond.
+
 ## 2.27.7
 
 - Every shell is its own tab now: open as many as you like, drag each to the centre, right or bottom like a file, and close one without touching the others. Dragging a tab to another area works again (it had stopped working), and the ponds in the sidebar can be dragged into your own order.

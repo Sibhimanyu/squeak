@@ -36,6 +36,9 @@ public struct ChatMark: Equatable, Sendable {
         self.quiet = kind == .working && quiet
     }
 
+    /// This mark as a rollup over chats that are on screen: nil for working (the chats move, the rollup does not).
+    public func asRollup(childrenVisible: Bool) -> ChatMark? { kind == .working && childrenVisible ? nil : self }
+
     /// The tooltip and VoiceOver words (exact, §3.3).
     public var words: String {
         switch kind {

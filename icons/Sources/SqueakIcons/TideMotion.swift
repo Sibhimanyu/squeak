@@ -2,9 +2,11 @@ import Foundation
 
 /// The pure maths of `TideGlyph`: a pure function of (pixel, time, seed). The lit region is a horizontal stream whose
 /// top and bottom surfaces are smooth noise advected left to right; inside it, domain-warped 3-D noise drifts right and
-/// interferes into bright patches (light on water), and every pixel adds irregular hashed sparkles. Nothing is a
-/// sine of time, so the motion has no period and never visibly loops: the band's thickness and the flow's speed wander
-/// by noise (gusts and calm), and the seed (one per view) feeds every hash, so two glyphs never match. The two ends
+/// interferes into bright patches (light on water), and every pixel adds irregular hashed sparkles. The pace and
+/// the character both drift like real water: the flow's clock is the integral of a slowly wandering rate (0.5x to 1.3x
+/// of a slow base, over 10-30 s) and a second slow channel morphs the texture between calm (long smooth streaks, little
+/// foam) and choppy (short streaks, more sparkle and ripple). Rates are sums of sines with seeded, incommensurate
+/// periods, so the motion never visibly loops, and the seed (one per view) feeds every hash, so two glyphs never match. The two ends
 /// dissolve, so no box edge shows, and no pixel sits on a curve, so there are no lines of dots.
 public enum TideMotion {
     /// Brightness levels 0...3: off, dim, mid, full.
@@ -15,6 +17,17 @@ public enum TideMotion {
         case 2: return 0.68
         default: return 1
         }
+    }
+
+    /// A soft elliptical falloff, 0...1, by which every pixel's alpha is multiplied so no edge reads as a box: full in the
+    /// middle, fading to nothing at the left and right ends (wider than the rows), a little at top and bottom.
+    public static func vignette(col: Int, row: Int, cols: Int, rows: Int) -> Double {
+        let nx = (Double(col) + 0.5) / Double(cols) * 2 - 1
+        let ny = (Double(row) + 0.5) / Double(rows) * 2 - 1
+        let r = (nx * nx + (0.55 * ny) * (0.55 * ny)).squareRoot()
+        let x = max(0, min(1, (r - 0.5) / 0.5))
+        let f = 1 - x * x * (3 - 2 * x)
+        return f
     }
 
     /// The time a still glyph samples.
@@ -51,29 +64,56 @@ public enum TideMotion {
 
     // MARK: stream
 
-    /// The stream's clock for advection: time warped by slow noise, so the flow speeds up and slows by about 15%.
-    static func flowTime(_ t: Double, _ seed: UInt64) -> Double { t + 0.7 * noise(t * 0.15, 0.5, 0.5, seed &+ 11) }
+    /// Flow speed of the glyph at its calmest and busiest, relative to the first version: the mean rate is ~0.5x.
+    static let baseRate = 0.55
+
+    /// The wandering pace, 0.5...1.3 (a sum of three sines with seeded periods of about 11-19, 7-11 and 23-31 s).
+    static func pace(_ t: Double, _ seed: UInt64) -> Double {
+        let w = paceWaves(seed)
+        return 0.9 + 0.4 * (0.5 * sin(w.0.w * t + w.0.p) + 0.3 * sin(w.1.w * t + w.1.p) + 0.2 * sin(w.2.w * t + w.2.p))
+    }
+    private static func paceWaves(_ seed: UInt64) -> ((w: Double, p: Double), (w: Double, p: Double), (w: Double, p: Double)) {
+        func wave(_ k: UInt64, _ lo: Double, _ hi: Double) -> (w: Double, p: Double) {
+            (2 * .pi / (lo + (hi - lo) * unit(seed &+ k, 1)), 2 * .pi * unit(seed &+ k, 2))
+        }
+        return (wave(70, 11, 19), wave(71, 7, 11), wave(72, 23, 31))
+    }
+
+    /// The stream's clock: the integral of `baseRate * pace`, so it never jumps and runs at half the old speed on average.
+    /// It drives the flow, the surface waves and the sparkles; the morph below runs on it too.
+    static func flowTime(_ t: Double, _ seed: UInt64) -> Double {
+        let w = paceWaves(seed)
+        func part(_ x: (w: Double, p: Double), _ amp: Double) -> Double { -amp * (cos(x.w * t + x.p) - cos(x.p)) / x.w }
+        return baseRate * (0.9 * t + 0.4 * (part(w.0, 0.5) + part(w.1, 0.3) + part(w.2, 0.2)))
+    }
+
+    /// 0 (calm) ... 1 (choppy): a slow seeded channel over 15-30 s that changes the texture's character.
+    static func choppiness(_ t: Double, _ seed: UInt64) -> Double {
+        max(0, min(1, 0.5 + 1.4 * (0.7 * noise(t / 21, 0.5, 0.5, seed &+ 60) + 0.3 * noise(t / 13 + 7, 1.5, 0.5, seed &+ 61))))
+    }
 
     /// The surfaces at horizontal position `x` (0...1): the stream's top and bottom edge in y units where the outer
     /// rows sit near +-1; the band is about two thirds of the height and each surface moves about one row. The surface
     /// waves are advected slowly (the body's streaks run faster, so layers of water move at different speeds).
     static func surfaces(x: Double, t: Double, seed: UInt64) -> (top: Double, bottom: Double) {
-        let tau = flowTime(t, seed)
-        let thick = 1 + 0.15 * noise(t * 0.2, 0.5, 0.5, seed &+ 12)
-        let sway = 0.12 * noise(x * 1.1 - 0.10 * tau, t * 0.1, 0.5, seed &+ 13)
-        let top = 0.62 * thick + 0.34 * noise(x * 3.2 - 0.30 * tau, t * 0.22, 1.5, seed &+ 14)
-        let bottom = 0.62 * thick + 0.34 * noise(x * 3.0 - 0.27 * tau, t * 0.2, 2.5, seed &+ 15)
+        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+        let ripple = 0.22 + 0.26 * chop, fx = 0.85 + 0.4 * chop  // choppy water ripples more and finer
+        let thick = 1 + 0.15 * noise(tau * 0.2, 0.5, 0.5, seed &+ 12)
+        let sway = 0.12 * noise(x * 1.1 - 0.10 * tau, tau * 0.1, 0.5, seed &+ 13)
+        let top = 0.62 * thick + ripple * noise(x * 3.2 * fx - 0.30 * tau, tau * 0.22, 1.5, seed &+ 14)
+        let bottom = 0.62 * thick + ripple * noise(x * 3.0 * fx - 0.27 * tau, tau * 0.2, 2.5, seed &+ 15)
         return (-top + sway, bottom + sway)
     }
 
     /// The current's streaks at a pixel, 0...1: noise stretched about 3.5x along x and advected right much faster than
     /// the surface, row-staggered and domain-warped, so features are short broken horizontal streaks (2-6 px).
     static func streaks(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64) -> Double {
-        let tau = flowTime(t, seed)
+        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+        let l1 = 4.8 - 2.2 * chop, l2 = 2.9 - 1.3 * chop  // calm: long smooth streaks; choppy: short ones
         let c = (Double(col) + 0.5) / Double(cols) * 21, r = Double(row) / Double(rows) * 6  // units of the 21x6 grid
         let stagger = unit(seed &+ 40, row) * 23
-        let u = c + stagger - 9.0 * tau + 0.9 * noise(c * 0.3, r * 0.7, t * 0.4, seed &+ 41)
-        let n = 0.6 * noise(u / 3.6, r / 0.95, t * 0.6, seed &+ 42) + 0.4 * noise(u / 2.2 + 5.3, r / 0.8 + 3, t * 0.9, seed &+ 43)
+        let u = c + stagger - 9.0 * tau + 0.9 * noise(c * 0.3, r * 0.7, tau * 0.4, seed &+ 41)
+        let n = 0.6 * noise(u / l1, r / 0.95, tau * 0.6, seed &+ 42) + 0.4 * noise(u / l2 + 5.3, r / 0.8 + 3, tau * 0.9, seed &+ 43)
         let x = (n + 0.12) / 0.62
         let f = max(0, min(1, x))
         return f * f * (3 - 2 * f)
@@ -95,7 +135,8 @@ public enum TideMotion {
         let topEdge = mid + (s.top - mid) * narrow, bottomEdge = mid + (s.bottom - mid) * narrow
         let dTop = y - topEdge, dBottom = bottomEdge - y
         let a = col &+ row &* 977
-        let slot = Int((t / 0.22 + unit(seed &+ 50, a) * 40).rounded(.down))
+        let tau = flowTime(t, seed), chop = choppiness(t, seed)
+        let slot = Int((tau / 0.22 + unit(seed &+ 50, a) * 40).rounded(.down))
         // Spray: now and then a crest lifts a pixel just above the surface and drops back.
         if dTop < -0.05, dTop > -0.42, ends > 0.3, unit(seed &+ 51, col, slot) < 0.025, unit(seed &+ 52, col, row, slot) < 0.7 {
             return 0.85 * ends
@@ -107,18 +148,18 @@ public enum TideMotion {
         // The current: streaks with a short trail (head bright, tail dimmer to the left), a pure function of (seed, t).
         var light = 0.0, decay = 1.0
         for k in 0..<4 {
-            light = max(light, decay * streaks(col: col, row: row, cols: cols, rows: rows, t: t - 0.075 * Double(k), seed: seed))
+            light = max(light, decay * streaks(col: col, row: row, cols: cols, rows: rows, t: t - 0.15 * Double(k), seed: seed))
             decay *= 0.6
         }
         // Foam and crest highlights at the top, deeper water dimmer at the bottom.
-        let foam = max(0, min(1, 1 - dTop / 0.42))
+        let foam = max(0, min(1, 1 - dTop / 0.42)) * (0.5 + 0.65 * chop)
         let depth = 1.05 - 0.4 * max(0, min(1, (0.5 - dBottom) / 0.5))
         // Sparkles: two layers of hashed events with irregular durations; more of them in the foam.
         let da = 0.3 + 0.6 * unit(seed &+ 31, a), db = 0.7 + 0.9 * unit(seed &+ 32, a)
-        let sa = Int((t / da + unit(seed &+ 33, a) * 50).rounded(.down)), sb = Int((t / db + unit(seed &+ 34, a) * 50).rounded(.down))
+        let sa = Int((tau / da + unit(seed &+ 33, a) * 50).rounded(.down)), sb = Int((tau / db + unit(seed &+ 34, a) * 50).rounded(.down))
         let jitter = (unit(seed &+ 35, a, sa) - 0.5) * 0.3
-        let chance = 0.05 + 0.06 * foam
-        let spark = (unit(seed &+ 36, a, sa) < chance || unit(seed &+ 37, a, sb) < 0.03) ? 0.6 : 0
+        let chance = (0.05 + 0.06 * foam) * (0.5 + 1.2 * chop)
+        let spark = (unit(seed &+ 36, a, sa) < chance || unit(seed &+ 37, a, sb) < 0.02 * (0.5 + 1.2 * chop)) ? 0.6 : 0
         let v = max(0, min(1, (light * depth + 0.3 * foam * light + jitter + spark)))
         return ends * min(1, body * 1.2) * (0.08 + 0.92 * v)
     }

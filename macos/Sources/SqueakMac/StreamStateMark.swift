@@ -7,7 +7,7 @@ import SwiftUI
 /// state, so a row never moves. The state comes from the daemon's data (`StreamGlyphState`); this only draws it.
 struct StreamStateMark: View {
     let state: StreamGlyphState
-    /// The slot's width; the working glyph's height follows from it.
+    /// The slot's width; the working glyph is drawn larger than it and fades out at its edges.
     var slotWidth: CGFloat = 20
     /// The stream's name; when given the mark speaks "name, working", otherwise it is decoration.
     var name: String? = nil
@@ -15,7 +15,7 @@ struct StreamStateMark: View {
     var body: some View {
         ZStack {
             switch state {
-            case .working: TideGlyph(color: Theme.working, height: TideGlyph.Grid.mini.height(fittingWidth: slotWidth))
+            case .working: WorkingGlyph(height: slotWidth >= 20 ? 13 : 10, slot: slotWidth)
             case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
             case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)

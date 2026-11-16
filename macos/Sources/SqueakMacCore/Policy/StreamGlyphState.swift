@@ -36,6 +36,10 @@ public enum StreamGlyphState: Equatable, Sendable {
         return of(marks: marks, ducklingsRunning: rows.reduce(0) { $0 + $1.ducklingsRunning })
     }
 
+    /// Only the leaf that works moves: a rollup (a stream, a pond) whose chats are on screen shows no working glyph,
+    /// because each working chat already shows its own. Waiting, failed and unread still show (a still mark).
+    public func asRollup(childrenVisible: Bool) -> StreamGlyphState { self == .working && childrenVisible ? .idle : self }
+
     /// The word VoiceOver and tooltips add after the stream's name; nil when there is nothing to say.
     public var words: String? {
         switch self {
