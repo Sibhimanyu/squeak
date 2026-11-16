@@ -27,6 +27,8 @@ public enum TranscriptRead: Sendable, Equatable {
 public struct NotificationCapture: Sendable, Equatable {
     public var anchor: NotificationAnchor?
     public var messages: [ChatMessage]
+    /// The chat's newest assistant message, for the banner's one line.
+    public var lastAgentText: String? = nil
 }
 
 /// How far back a chat's history has been read, for the row at the top of the conversation.
@@ -541,11 +543,12 @@ public actor Broker {
         guard case .messages(let list, _) = await readTranscript(for: event.key, limit: limit) else {
             return NotificationCapture(anchor: NotificationAnchor(event: event), messages: [])
         }
+        let lastText = list.last(where: { $0.role == .assistant && !$0.text.isEmpty })?.text
         guard let anchor = NotificationContextPolicy.anchorNow(event: event, messages: list) else {
-            return NotificationCapture(anchor: nil, messages: [])
+            return NotificationCapture(anchor: nil, messages: [], lastAgentText: lastText)
         }
         let content = NotificationContextPolicy.resolve(messages: list, anchor: anchor)
-        return NotificationCapture(anchor: anchor, messages: content.cacheable)
+        return NotificationCapture(anchor: anchor, messages: content.cacheable, lastAgentText: lastText)
     }
 
     public func activity(for key: SessionKey) async throws -> [ActivityStep] {

@@ -293,3 +293,33 @@ struct NotificationTests {
         #expect(p.drain() == nil)
     }
 }
+
+
+@Suite("Notification text")
+struct NotificationTextTests {
+    func event(_ kind: NotificationKind, body: String = "x finished", detail: String? = nil) -> NotificationEvent {
+        NotificationEvent(key: SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "a"), kind: kind, title: "Squeak", body: body, detail: detail, label: "Fix login")
+    }
+
+    @Test func finishIsTheAgentsOwnLineWithThreadAndPond() {
+        let c = NotificationText.content(event(.finished), lastAgentText: "## Done\n\nI fixed the **login** bug and added a test.", pond: "greenroom")
+        #expect(c?.title == "Fix login · greenroom")
+        #expect(c?.body == "Done I fixed the login bug and added a test.")
+    }
+
+    @Test func longTextIsCutWithAnEllipsis() {
+        let long = String(repeating: "word ", count: 80)
+        let body = NotificationText.content(event(.finished), lastAgentText: long, pond: nil)?.body ?? ""
+        #expect(body.count <= NotificationText.lineLimit + 1 && body.hasSuffix("…"))
+    }
+
+    @Test func questionShowsTheQuestionAndApprovalSaysSo() {
+        #expect(NotificationText.content(event(.question, detail: "Which branch?"), lastAgentText: nil, pond: nil)?.body == "Which branch?")
+        #expect(NotificationText.content(event(.blocked, body: "Fix login is waiting for your approval"), lastAgentText: nil, pond: nil)?.body == "Wants to run a command")
+    }
+
+    @Test func nothingToShowFallsBack() {
+        #expect(NotificationText.content(event(.finished), lastAgentText: nil, pond: "p") == nil)
+        #expect(NotificationText.content(event(.finished), lastAgentText: "  \n ", pond: "p") == nil)
+    }
+}

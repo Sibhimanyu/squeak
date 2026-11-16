@@ -607,10 +607,15 @@ final class AppModel {
         let capture = Task { [weak self] in
             let c = await broker.capture(n)
             await self?.record(c, for: n.key)
-            return c.anchor
+            return c
         }
-        let anchor = await Self.race(within: .seconds(1)) { await capture.value }
-        Notifier.shared.post(n, showName: notificationsShowNames, anchor: anchor ?? NotificationAnchor(event: n))
+        let got = await Self.race(within: .seconds(1)) { await capture.value }
+        let anchor = got?.anchor
+        // The agent's own words, if the transcript read made it in time; the generic text otherwise.
+        let session = session(n.key)
+        let content = notificationsShowNames
+            ? NotificationText.content(n, lastAgentText: got?.lastAgentText, pond: session?.workspaceTitle ?? session?.repoName) : nil
+        Notifier.shared.post(n, showName: notificationsShowNames, anchor: anchor ?? NotificationAnchor(event: n), content: content)
     }
 
     private func record(_ capture: NotificationCapture, for key: SessionKey) async {
