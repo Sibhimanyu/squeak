@@ -91,16 +91,21 @@ public struct DucklingSet: Hashable, Codable, Sendable {
     public var running: Int
     /// Newest first.
     public var items: [Duckling]
+    /// The host says the chat's open turn waits on a foreground duckling and Claude itself does nothing; nil from an older host.
+    public var onlyDucklings: Bool?
 
-    public init(running: Int, items: [Duckling] = []) { self.running = running; self.items = items }
+    public init(running: Int, items: [Duckling] = [], onlyDucklings: Bool? = nil) {
+        self.running = running; self.items = items; self.onlyDucklings = onlyDucklings
+    }
 
-    enum CodingKeys: String, CodingKey { case running, items }
+    enum CodingKeys: String, CodingKey { case running, items, onlyDucklings }
     /// Lenient: a bad item is skipped, a missing count is the running items. (A wholly wrong field decodes to nil
     /// through `lenient`, which is how older hosts that omit it look.)
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         items = (c.lenient([Failable<Duckling>].self, .items) ?? []).compactMap(\.value).filter { !$0.id.isEmpty }
         running = max(0, c.lenient(Int.self, .running) ?? items.filter { $0.status == .running }.count)
+        onlyDucklings = c.lenient(Bool.self, .onlyDucklings)
     }
 
     public var isEmpty: Bool { running == 0 && items.isEmpty }
@@ -114,18 +119,25 @@ public enum DucklingWords {
     /// "1 duckling" / "3 ducklings".
     public static func count(_ n: Int) -> String { "\(n) \(n == 1 ? "duckling" : "ducklings")" }
 
-    /// The thread's status line while the chat is idle with helpers: "Ready · 2 ducklings running"; nil without any.
-    public static func readyLine(running: Int) -> String? { running > 0 ? "Ready · \(count(running)) running" : nil }
+    /// "1 duckling working" / "3 ducklings working": true of a duckling Claude waits on and of one that runs on after the turn.
+    public static func working(_ n: Int) -> String { "\(count(n)) working" }
 
-    /// The working row while the agent itself works and ducklings run: "Working… · 2 ducklings in the background".
-    public static func workingLine(_ base: String, running: Int) -> String {
-        running > 0 ? "\(base) · \(count(running)) in the background" : base
+    /// The thread's status line while the chat is idle with helpers: "Ready · 2 ducklings running"; nil without any.
+    /// While Claude's turn is still open on a foreground duckling it is not ready: "1 duckling working".
+    public static func readyLine(running: Int, turnOpen: Bool = false) -> String? {
+        guard running > 0 else { return nil }
+        return turnOpen ? working(running) : "Ready · \(count(running)) running"
     }
 
-    /// The bar above the composer: "2 in the background"; a line while only finished chips await their report; nil = no bar.
+    /// The working row while the agent itself works and ducklings run: "Working… · 2 ducklings working".
+    public static func workingLine(_ base: String, running: Int) -> String {
+        running > 0 ? "\(base) · \(working(running))" : base
+    }
+
+    /// The bar above the composer: "2 ducklings working"; a line while only finished chips await their report; nil = no bar.
     public static func barText(_ set: DucklingSet?, now: Date = Date()) -> String? {
         guard let set else { return nil }
-        if set.running > 0 { return "\(set.running) in the background" }
+        if set.running > 0 { return working(set.running) }
         let shown = set.barItems(now: now)
         if shown.isEmpty { return nil }
         return shown.contains { $0.status == .failed } ? "Background work finished, one failed" : "Background work finished"

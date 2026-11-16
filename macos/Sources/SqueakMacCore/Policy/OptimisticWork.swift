@@ -108,9 +108,11 @@ public struct OverlayCache: Sendable {
 
     public mutating func invalidate() { cached = nil }
 
-    public mutating func value(_ sessions: [HostSession], work: [SessionKey: OptimisticWork], now: Date) -> [HostSession] {
+    public mutating func value(
+        _ sessions: [HostSession], work: [SessionKey: OptimisticWork], now: Date, claude: ClaudeActivity.Open? = nil
+    ) -> [HostSession] {
         if let cached { return cached }
-        let out = OptimisticWork.overlay(sessions, work: work, now: now)
+        let out = ClaudeActivity.apply(OptimisticWork.overlay(sessions, work: work, now: now), open: claude)
         cached = out
         recomputes += 1
         return out

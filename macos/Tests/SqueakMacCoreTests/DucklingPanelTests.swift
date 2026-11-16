@@ -53,7 +53,7 @@ struct DucklingPanelTests {
     }
 
     @Test func workingLineNamesTheAgentAndItsDucklings() {
-        #expect(DucklingWords.workingLine("Working… · Opus 5.5", running: 2) == "Working… · Opus 5.5 · 2 ducklings in the background")
+        #expect(DucklingWords.workingLine("Working… · Opus 5.5", running: 2) == "Working… · Opus 5.5 · 2 ducklings working")
         #expect(DucklingWords.workingLine("Working…", running: 0) == "Working…")
     }
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.12
+
+- A chat no longer shows Working while only a duckling is working, whether Claude is waiting on it or has finished its part. The ducklings bar shows the work and has its own Stop.
+
 ## 2.27.11
 
 - When Claude hands work to ducklings and finishes its own part, the chat settles: no Working line or stop button, you can message normally, and only the ducklings bar stays until they're done.

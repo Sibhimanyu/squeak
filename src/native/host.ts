@@ -1,4 +1,4 @@
-import { helpersKeepWorking } from "../fleet/ducklings.js";
+import { DucklingOnlyTracker, helpersKeepWorking } from "../fleet/ducklings.js";
 import { DucklingTracker, DUCKLING_STEP_ROWS, type DucklingDetail, type Ducklings } from "./ducklings.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
@@ -272,6 +272,8 @@ export class SessionHost extends EventEmitter {
   /** Each chat's background helpers, kept from its stored rows; the turn does not wait on them. */
   private readonly ducklings = new Map<string, DucklingTracker>();
   private readonly ducklingsSent = new Map<string, string>();
+  /** Per chat: whether its open turn has only ducklings running, folded from the timeline's own events. */
+  private readonly onlyDucklings = new Map<string, DucklingOnlyTracker>();
   /** Foreground helpers (blocking Agent calls) running per chat: steers wait on them. */
   private readonly foregroundHelpers = new Map<string, number>();
   /** The label of each chat's oldest running foreground helper. */
@@ -303,9 +305,17 @@ export class SessionHost extends EventEmitter {
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
-    this.timeline = new TimelineRecorder(new TimelineLog(this.store.db), (sessionId, event) =>
-      this.emit("event", { type: "timeline", sessionId, event } satisfies HostEvent),
-    );
+    this.timeline = new TimelineRecorder(new TimelineLog(this.store.db), (sessionId, event) => {
+      this.emit("event", { type: "timeline", sessionId, event } satisfies HostEvent);
+      if (event.type === "reply.delta") return;
+      let tracker = this.onlyDucklings.get(sessionId);
+      if (!tracker) this.onlyDucklings.set(sessionId, (tracker = new DucklingOnlyTracker()));
+      tracker.apply(event);
+      // While helpers run, a step starting or ending can turn "only a duckling works" on or off: tell watchers.
+      if (event.type.startsWith("step.") && (this.ducklings.get(sessionId)?.list(Date.now()).running ?? 0) > 0) {
+        this.noteDucklings(sessionId);
+      }
+    });
     this.ownerNameOf = options.ownerName ?? (() => null);
     this.factory =
       options.runnerFactory ??
@@ -524,7 +534,14 @@ export class SessionHost extends EventEmitter {
     const tracker = this.ducklings.get(id);
     if (!tracker) return null;
     tracker.settle(this.runners.has(id), new Date().toISOString());
-    return tracker.list(Date.now());
+    const list = tracker.list(Date.now());
+    // Claude waits on a foreground duckling and does nothing itself: surfaces show the ducklings, not "Working".
+    const status = this.store.getSession(id)?.status;
+    if (list.running > 0 && status === "working") {
+      const agents = new Set(list.items.filter((d) => d.kind === "agent" && d.status === "running").map((d) => d.id));
+      if (this.onlyDucklings.get(id)?.isOnlyDucklings(agents)) return { ...list, onlyDucklings: true };
+    }
+    return list;
   }
 
   /** One helper's panel: its brief, its own steps from the stored rows, its report. Null when the chat has no such helper. */

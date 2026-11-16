@@ -1,0 +1,51 @@
+{
+ "autoCompactAt": 200000,
+ "id": "56a10a1a-476f-46f5-a8fa-f76ef89504a8",
+ "workspaceId": "87d08ded-db49-443e-a40c-d6b313d63903",
+ "cwd": "/Users/me/squeak/workspaces/greenroom/hong-kong",
+ "agent": "claude",
+ "agentSessionId": "agent-session-ound",
+ "title": "Greenroom x Recorditor",
+ "model": "opus-5-5-1m",
+ "effort": "medium",
+ "permissionMode": "bypassPermissions",
+ "status": "working",
+ "createdAt": "2026-11-13T05:28:49.018Z",
+ "updatedAt": "2026-11-16T08:35:59.703Z",
+ "lastTurnEndedAt": "2026-11-16T08:26:20.264Z",
+ "prunedThrough": 0,
+ "archivedAt": null,
+ "titleAuto": false,
+ "background": {
+  "count": 1
+ },
+ "ducklings": {
+  "running": 1,
+  "items": [
+   {
+    "id": "toolu_0124EKrK6HG87M5KHHeu3A17",
+    "kind": "agent",
+    "title": "Fix meeting UI polish items",
+    "model": "Sonnet",
+    "status": "running",
+    "startedAt": "2026-11-16T08:35:23.343Z"
+   },
+   {
+    "id": "toolu_01ULNBR26S5S4jtDsdCzaZMf",
+    "kind": "agent",
+    "title": "Audit meeting UI polish",
+    "model": "Opus",
+    "status": "done",
+    "startedAt": "2026-11-16T08:28:59.843Z",
+    "endedAt": "2026-11-16T08:34:48.633Z",
+    "reportedAt": "2026-11-16T08:34:56.577Z"
+   }
+  ]
+ },
+ "context": {
+  "used": 133722,
+  "limit": 1000000,
+  "percent": 13.4
+ },
+ "busy": true
+}

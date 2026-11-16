@@ -6,6 +6,70 @@ export const SHELL_SETTLED_MS = 60_000;
 /** A finished subagent keeps the chat working this long while its report has not been taken in (the follow-up turn starts within seconds). */
 export const REPORT_GRACE_MS = 2 * 60_000;
 
+/** The fields of a timeline event the rule reads (`src/native/timeline.ts`'s `TimelineEvent` satisfies it). */
+export interface TimelineEventLike {
+  type: string;
+  turnId?: string;
+  stepId?: string;
+  kind?: string;
+  status?: string;
+}
+
+/**
+ * Whether only ducklings are active in a chat's open turn, folded from the host's timeline events one at a time: the
+ * turn is open and every step still running is a duckling (an Agent/Task call whose duckling runs), so Claude waits on
+ * it and does nothing itself. A running thought, tool, wait or retry that is not a duckling means Claude is active, and
+ * so does nothing running at all. Steers, notes, errors and the progress tracker are not Claude's work. The same rule
+ * as the Mac's `ClaudeActivity.resolve` (macos/Sources/SqueakMacCore/Policy/ClaudeActivity.swift).
+ */
+export class DucklingOnlyTracker {
+  private turnId: string | null = null;
+  private open = false;
+  private readonly running = new Map<string, string>();
+
+  apply(e: TimelineEventLike): void {
+    switch (e.type) {
+      case "turn.started":
+        this.turnId = e.turnId ?? null;
+        this.open = true;
+        this.running.clear();
+        break;
+      case "turn.ended":
+        if (e.turnId === this.turnId) {
+          this.open = false;
+          this.running.clear();
+        }
+        break;
+      case "step.added":
+      case "step.updated":
+        if (!this.open || e.turnId !== this.turnId || !e.stepId) break;
+        if (e.status === "running" && isClaudeWork(e.kind)) this.running.set(e.stepId, e.kind ?? "other");
+        else this.running.delete(e.stepId);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** `agentIds`: the ids of the chat's running Agent/Task helpers (a helper's id is its tool-use id, the step's id). */
+  isOnlyDucklings(agentIds: ReadonlySet<string>): boolean {
+    if (!this.open || this.running.size === 0) return false;
+    for (const [id, kind] of this.running) if (kind !== "tool" || !agentIds.has(id)) return false;
+    return true;
+  }
+}
+
+function isClaudeWork(kind: string | undefined): boolean {
+  return kind !== "note" && kind !== "steer" && kind !== "error" && kind !== "progress";
+}
+
+/** The rule over a whole list of events (tests, and any reader that holds a page rather than a stream). */
+export function onlyDucklingsWork(events: readonly TimelineEventLike[], agentIds: ReadonlySet<string>): boolean {
+  const tracker = new DucklingOnlyTracker();
+  for (const e of events) tracker.apply(e);
+  return tracker.isOnlyDucklings(agentIds);
+}
+
 /**
  * Whether a Squeak chat's background helpers keep it working although its turn ended: a running subagent, a subagent
  * that finished but whose report the agent has not taken in yet (so the gap between the last worker and the follow-up
@@ -45,6 +109,9 @@ export function attachDucklings(
   if ((session.state === "finished" || session.state === "idle") && helpersKeepWorking(ducklings, nowMs)) {
     return { ...held, state: "working", stateSource: "host", backgroundOnly: true };
   }
+  // The host says Claude waits on a foreground duckling and does nothing itself: still working (no finish, no push),
+  // but not busy itself, like a chat whose turn ended with helpers running.
+  if (session.state === "working" && ducklings.onlyDucklings === true) return { ...held, backgroundOnly: true };
   return held;
 }
 

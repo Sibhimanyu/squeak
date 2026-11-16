@@ -96,7 +96,9 @@ final class NativeChatModel {
     @ObservationIgnored var cutStream: (() -> Void)?
     /// The open chat's feed: the host's ordered event log reduced (SqueakMacCore `TurnTimeline`). Everything the transcript
     /// shows for a Squeak chat is made from this and nothing else.
-    var timeline = TurnTimeline()
+    var timeline = TurnTimeline() { didSet { onTimelineChanged?() } }
+    /// Told after every change of `timeline`: what Claude itself is doing is read from it (`ClaudeActivity`).
+    @ObservationIgnored var onTimelineChanged: (() -> Void)?
     /// The first page of the log has been read.
     var timelineReady = false
     var olderLoading = false
@@ -132,6 +134,7 @@ final class NativeChatModel {
         if self.key != key, let key { restoreTimeline(for: key) }
         self.key = key; info = nil; card = nil; stream.clear(); retry = nil; pending.reset(); hostSendsPending = false; editingPendingId = nil; note = nil; queueNote = nil
         busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
+        onTimelineChanged?()
     }
 
     func show(requests: [NativeRequest], agent: String) {

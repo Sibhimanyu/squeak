@@ -82,7 +82,20 @@ final class AppModel {
 
     // MARK: Catalog and connection
     /// What the host's catalog last said, untouched: the optimistic overlay and the status observers read this.
-    private(set) var hostSessions: [HostSession] = [] { didSet { overlayCache.invalidate(); inputsChanged() } }
+    private(set) var hostSessions: [HostSession] = [] { didSet { overlayCache.invalidate(); refreshClaudeActivity(); inputsChanged() } }
+    /// What Claude itself is doing in the open Squeak chat, read from its timeline (`ClaudeActivity`, one definition).
+    /// Held as a small value so the lists below re-read only when it changes, not on every step of the turn.
+    private(set) var openClaudeActivity: ClaudeActivity.Open? { didSet { if openClaudeActivity != oldValue { overlayCache.invalidate(); inputsChanged() } } }
+
+    /// Reads the open chat's timeline through `ClaudeActivity.resolve`: while the host calls the chat working and only a
+    /// duckling it waits on works, every surface reads the chat as ready with ducklings at work.
+    func refreshClaudeActivity() {
+        var next: ClaudeActivity.Open?
+        if let key = native.key, let raw = hostSessions.first(where: { $0.key == key }), raw.state == .working {
+            next = ClaudeActivity.Open(key: key, activity: ClaudeActivity.resolve(turn: native.timeline.current ?? native.timeline.turns.last, session: raw))
+        }
+        if next != openClaudeActivity { openClaudeActivity = next }
+    }
     @ObservationIgnored private var overlayCache = OverlayCache()
     /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
     /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
@@ -95,7 +108,7 @@ final class AppModel {
         return listed
     }
     /// Every chat the host knows, archived ones included: only the archived views and `session(_:)` read this.
-    var allSessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
+    var allSessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date(), claude: openClaudeActivity) }
     /// Archived Squeak chats, newest archived first (the sidebar's Archived entry and the pond's archived section).
     var archivedSessions: [HostSession] { ThreadArchive.archived(allSessions) }
     @ObservationIgnored private var listedCache: (source: [HostSession], listed: [HostSession])?
@@ -439,6 +452,7 @@ final class AppModel {
         channels.onDeviceWaiting = { [weak self] p in Notifier.shared.postDeviceRequest(id: p.id, name: p.name, email: p.email ?? self?.channels.remote?.account?.email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
+        native.onTimelineChanged = { [weak self] in self?.refreshClaudeActivity() }
         // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
         updater.onNeedsAttention = { [weak self] in self?.showUpdateWhereThePersonIs() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
@@ -1559,7 +1573,7 @@ final class AppModel {
         let turn = answering ? await broker.currentTurnId(for: key) : nil
         // The chat reads working the instant Send is pressed, before any word from the host.
         let target = session(key)
-        let midTurn = target.map { effectiveState($0) == .working } ?? false
+        let midTurn = target.map { effectiveState($0) == .working || $0.turnOpen == true } ?? false
         if !midTurn { beginOptimistic(key, native: target?.source == .squeak, answeringBlocked: target?.state == .blocked) }
         // The watchdog and the timings start at the press, not once the POST has come back.
         let sentAtPress = ContinuousClock.now

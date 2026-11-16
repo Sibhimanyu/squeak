@@ -5709,6 +5709,8 @@ export class RemoteBridge {
       title: chatTitle(session),
       agent: session.agent,
       state: session.state,
+      // Working only through its ducklings (Claude waits on one, or its turn ended): the phone shows them, not "Working".
+      ...(session.backgroundOnly && session.state === "working" ? { backgroundOnly: true } : {}),
       lastActivityAt: session.lastActivityAt,
       // Whether the chat's tab is open in Conductor; absent when the Mac cannot tell. Older phones ignore it.
       ...(session.closed === undefined ? {} : { open: !session.closed }),

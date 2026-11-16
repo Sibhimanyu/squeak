@@ -34,6 +34,14 @@ final class DucklingsTests: XCTestCase {
         XCTAssertFalse(s.readyWithDucklings)
     }
 
+    func testAWorkingChatThatWorksOnlyThroughItsDucklingsIsNotShownWorking() throws {
+        let s = try session(#","backgroundOnly":true,"ducklings":{"running":1,"items":[{"id":"a","kind":"agent","title":"Audit","status":"running","startedAt":"2026-11-12T00:00:00Z"}]}"#, state: "working")
+        XCTAssertEqual(s.backgroundOnly, true)
+        XCTAssertTrue(s.readyWithDucklings)
+        // Without the flag (an older Mac) a working chat stays working.
+        XCTAssertFalse(try session(#","ducklings":{"running":1,"items":[]}"#, state: "working").readyWithDucklings)
+    }
+
     func testPhoneAdvertisesDucklings() {
         XCTAssertTrue(ChannelCrypto.capabilities.contains("ducklings"))
     }

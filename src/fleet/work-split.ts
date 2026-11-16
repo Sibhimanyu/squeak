@@ -66,7 +66,7 @@ export function splitBrief(split: WorkSplit | undefined): string | null {
   const lines: string[] = [];
   if (split.code || split.run) {
     lines.push(
-      "- You are the planner: plan, decide and review. Keep your own reading and editing small; ducklings do the bulk.",
+      "- You are the planner: plan, decide and review. Keep your own reading and editing small; ducklings do the bulk. Launch ducklings with run_in_background: true unless your very next step needs the result.",
     );
   }
   if (split.code) {

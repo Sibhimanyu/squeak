@@ -118,7 +118,7 @@ struct SessionDetail: View {
             backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true,
             hostStatus: info?.status, hostBackgroundCount: info?.backgroundCount, optimistic: model.optimistic[session.key]?.isStarted == true,
             hostOwnsState: isNative, hasStopRoute: session.conductorSessionId != nil || isNative,
-            activity: model.activity, model: chatModelName, ducklings: ducklings)
+            activity: model.activity, model: chatModelName, ducklings: ducklings, turnOpen: session.turnOpen == true)
     }
     /// The chat's background helpers: what the session carries, else the host's record while the chat is open.
     private var ducklings: DucklingSet? {
@@ -624,12 +624,12 @@ struct SessionDetail: View {
                 .frame(height: 40)
             }
             if let set = ducklings, DucklingWords.barText(set) != nil {
-                DucklingsBar(session: session, set: set, readyLine: dock.readyLine)
+                DucklingsBar(session: session, set: set, readyLine: dock.readyLine, onStop: session.turnOpen == true ? { stop() } : nil)
             }
-            if isNative, liveState == .working, let loop = session.looping {
+            if isNative, working, let loop = session.looping {
                 LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: session.key.hostSessionId) } }
             }
-            if ducklings == nil, let extras = model.chatExtras, liveState == .working {
+            if ducklings == nil, let extras = model.chatExtras, working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
@@ -751,7 +751,7 @@ struct SessionDetail: View {
     private var placeholder: String {
         ComposerPrompt.placeholder(
             agent: agent, workspace: model.sidebarTree.place(of: session.key)?.workspace.displayTitle, phase: composerPhase,
-            readOnlyReason: sendBlock, offline: model.isOffline(for: session))
+            readOnlyReason: sendBlock, offline: model.isOffline(for: session), waitingOnDuckling: session.turnOpen == true)
     }
 
     /// A reason the chat cannot be answered right now, in the hint line's place.
@@ -796,7 +796,9 @@ struct SessionDetail: View {
     }
 
     /// While the agent is mid-turn a message is either queued behind the turn or steered into it.
-    private var working: Bool { liveState == .working }
+    /// Claude's turn is also open while it waits on a foreground duckling (`session.turnOpen`): the chat reads as ready,
+    /// but a message is queued or steered into that turn.
+    private var working: Bool { liveState == .working || session.turnOpen == true }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// While a card waits the duck primary is on the card and Send is off (DESIGN.md §8.10).

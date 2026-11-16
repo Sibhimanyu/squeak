@@ -74,6 +74,11 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var autoCompactAt: Int?? = nil
     /// This Squeak chat's last turn failed in a way "Try again" can resend.
     public var retryable: Bool? = nil
+    /// The host says only a duckling works in this working chat (`ClaudeActivity`); nil from an older host.
+    public var hostDucklingsOnly: Bool? = nil
+    /// Set by `ClaudeActivity.apply`: the chat reads as ready (its state) but Claude's turn is still open, waiting on a
+    /// foreground duckling, so a message is queued or steered, never started as a new turn.
+    public var turnOpen: Bool? = nil
 
     public var id: SessionKey { key }
 

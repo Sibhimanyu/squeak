@@ -60,7 +60,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
     input.agent === "claude"
       ? "The `squeak` skill has the details."
       : "The Squeak guide appended below has the details.",
-    "Start a duckling (your own helper, through the Agent tool) for short internal work; start another thread for work that is long, parallel or should be watched.",
+    "Start a duckling (your own helper, through the Agent tool) for short internal work; start another thread for work that is long, parallel or should be watched. Launch every duckling with `run_in_background: true` unless your very next step needs its result: a foreground duckling blocks you until it reports.",
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),
     ASK_ESSENCE,

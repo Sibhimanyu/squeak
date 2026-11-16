@@ -816,6 +816,45 @@ describe("a chat whose helpers still run when its turn ends", () => {
     expect(statuses.filter((x, i) => x !== statuses[i - 1])).toEqual(["working", "idle", "working", "idle"]);
   });
 
+  it("a foreground duckling Claude waits on is 'only ducklings' while the chat is working, and ends with its result", async () => {
+    const { host, runners, events } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const h = runners[0]!.hooks;
+    h.onMessage("agent", "assistant", {
+      type: "assistant",
+      message: {
+        id: "m1",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_fg",
+            name: "Agent",
+            input: { description: "Audit it", prompt: "read only", run_in_background: false },
+          },
+        ],
+      },
+    });
+    await tick(20);
+    const row = host.list().find((x) => x.id === s.id)!;
+    expect(row.status).toBe("working");
+    expect(row.ducklings?.running).toBe(1);
+    expect(row.ducklings?.onlyDucklings).toBe(true);
+    // a status event told watchers when it became true
+    expect(
+      events.some(
+        (e) => e.type === "status" && (e as { ducklings?: { onlyDucklings?: boolean } }).ducklings?.onlyDucklings,
+      ),
+    ).toBe(true);
+
+    // Claude starts thinking on the side (a stream block): it is active again although the duckling still runs.
+    h.onDelta({
+      type: "stream_event",
+      event: { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
+    });
+    await tick(20);
+    expect(host.list().find((x) => x.id === s.id)?.ducklings?.onlyDucklings).toBeUndefined();
+  });
+
   it("a send while only helpers run is a normal send, not a steer or a queue", async () => {
     const { host, runners, store } = setup({ canSteer: true });
     const s = await host.create({ ...spec, text: "go" });

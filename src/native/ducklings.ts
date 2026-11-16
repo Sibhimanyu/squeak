@@ -30,6 +30,8 @@ export interface Duckling {
 export interface Ducklings {
   running: number;
   items: Duckling[];
+  /** Claude's turn is open and only a duckling it waits on works: surfaces show no Working row (`DucklingOnlyTracker`). */
+  onlyDucklings?: boolean;
 }
 
 export interface DucklingDetail extends Duckling {

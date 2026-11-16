@@ -1,0 +1,41 @@
+{
+ "autoCompactAt": 200000,
+ "id": "a536a7f4-457d-4b3b-ba04-4a2f3cf23b2f",
+ "workspaceId": "87d08ded-db49-443e-a40c-d6b313d63903",
+ "cwd": "/Users/me/squeak/workspaces/greenroom/hong-kong",
+ "agent": "claude",
+ "agentSessionId": "agent-session-wait",
+ "title": "Edit Feature Opens Separate Window",
+ "model": "opus-5-5-1m",
+ "effort": "medium",
+ "permissionMode": "bypassPermissions",
+ "status": "working",
+ "createdAt": "2026-11-16T06:47:47.947Z",
+ "updatedAt": "2026-11-16T08:35:33.332Z",
+ "lastTurnEndedAt": "2026-11-16T08:28:54.678Z",
+ "prunedThrough": 0,
+ "archivedAt": null,
+ "titleAuto": true,
+ "background": {
+  "count": 3
+ },
+ "ducklings": {
+  "running": 1,
+  "items": [
+   {
+    "id": "toolu_01UM7bWP1YcJv4JJ5mHCTsoz",
+    "kind": "agent",
+    "title": "Hide hover cards during splash",
+    "model": "Sonnet",
+    "status": "running",
+    "startedAt": "2026-11-16T08:24:18.023Z"
+   }
+  ]
+ },
+ "context": {
+  "used": 82995,
+  "limit": 1000000,
+  "percent": 8.3
+ },
+ "busy": true
+}

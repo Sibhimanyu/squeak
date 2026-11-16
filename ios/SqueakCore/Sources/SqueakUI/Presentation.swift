@@ -133,6 +133,8 @@ enum Presentation {
     /// "Ready · 2 ducklings running": the agent ended its turn and helpers still run, so a message starts a new turn.
     static func readyLine(_ session: PhoneSnapshot.Session) -> String {
         let n = session.ducklingsRunning
+        // Working only through its ducklings (Claude may be waiting on one): not "Ready", and not "Working" either.
+        if session.backgroundOnly == true, session.state == "working" { return "\(n) \(n == 1 ? "duckling" : "ducklings") working" }
         return "Ready \u{00B7} \(n) \(n == 1 ? "duckling" : "ducklings") running"
     }
 

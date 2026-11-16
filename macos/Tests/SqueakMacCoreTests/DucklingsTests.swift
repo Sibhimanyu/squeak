@@ -41,7 +41,7 @@ struct DucklingsTests {
         #expect(DucklingWords.barText(DucklingSet(running: 0, items: [done, reported]), now: at(30)) == nil)
         #expect(DucklingWords.barText(DucklingSet(running: 0, items: [done]), now: at(10)) == "Background work finished")
         #expect(DucklingWords.barText(DucklingSet(running: 0, items: [failed]), now: at(30)) == "Background work finished, one failed")
-        #expect(DucklingWords.barText(DucklingSet(running: 1, items: [done]), now: at(30)) == "1 in the background")
+        #expect(DucklingWords.barText(DucklingSet(running: 1, items: [done]), now: at(30)) == "1 duckling working")
     }
 
     @Test func decodesReportedAt() throws {
@@ -53,7 +53,7 @@ struct DucklingsTests {
     @Test func words() {
         #expect(DucklingWords.readyLine(running: 0) == nil)
         #expect(DucklingWords.readyLine(running: 1) == "Ready · 1 duckling running")
-        #expect(DucklingWords.barText(DucklingSet(running: 3)) == "3 in the background")
+        #expect(DucklingWords.barText(DucklingSet(running: 3)) == "3 ducklings working")
         #expect(DucklingWords.barText(nil) == nil && DucklingWords.barText(DucklingSet(running: 0)) == nil)
         #expect(DucklingWords.dashboardFigure(running: 0, threads: 0) == nil)
         #expect(DucklingWords.dashboardFigure(running: 3, threads: 1) == "3 ducklings running · 1 thread")

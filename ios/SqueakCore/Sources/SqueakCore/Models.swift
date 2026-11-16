@@ -138,6 +138,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// ducklings running"). Only for a phone whose presence caps name "ducklings", and only from a Mac new
         /// enough to send it; `background` stays for older phones.
         public var ducklings: Ducklings? = nil
+        /// The chat is working only through its ducklings: Claude waits on a foreground one, or its turn ended and they
+        /// run on (the Mac's `backgroundOnly`). The row shows them, not "Working". Absent from an older Mac.
+        public var backgroundOnly: Bool? = nil
 
         /// What the thread screen lists: `ducklings` when the Mac sent it, else a working chat's `background`.
         public var helpers: [BackgroundTask] { helpers(now: Date()) }
@@ -154,8 +157,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             return helpers.filter { $0.status == "running" }.count
         }
 
-        /// A chat the agent ended its turn on while helpers still run: ready, and a send is a new message.
-        public var readyWithDucklings: Bool { state != "working" && ducklingsRunning > 0 }
+        /// A chat the agent ended its turn on while helpers still run (ready), or one that works only through them
+        /// (`backgroundOnly`): no Working line, the ducklings are the work.
+        public var readyWithDucklings: Bool { (state != "working" || backgroundOnly == true) && ducklingsRunning > 0 }
 
         public struct Ducklings: Codable, Equatable, Sendable {
             public let running: Int

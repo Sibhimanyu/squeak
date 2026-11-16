@@ -3,13 +3,15 @@ import SqueakMacCore
 import SqueakMarkup
 import SwiftUI
 
-/// The slim bar above the composer: "N in the background" and a chip per duckling (title, model, elapsed, a loader or a
+/// The slim bar above the composer: "N ducklings working" and a chip per duckling (title, model, elapsed, a loader or a
 /// check or a cross). A click opens the duckling in the side panel. Shown only while one runs or a recent one finished.
 struct DucklingsBar: View {
     let session: HostSession
     let set: DucklingSet
     /// The status line of an idle chat with helpers: "Ready · 2 ducklings running".
     var readyLine: String?
+    /// A quiet Stop, only while Claude's turn waits on a foreground duckling (it cancels the turn, as the composer's Stop did).
+    var onStop: (() -> Void)?
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -24,6 +26,11 @@ struct DucklingsBar: View {
                         Text(verbatim: readyLine ?? text).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) { ForEach(chips) { chip($0, now: context.date).transition(.opacity) } }
+                        }
+                        if let onStop {
+                            Button("Stop", action: onStop)
+                                .buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+                                .help("Stop this turn").accessibilityLabel("Stop")
                         }
                     }
                     .padding(.horizontal, Space.m).frame(height: 34)

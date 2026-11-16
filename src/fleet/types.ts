@@ -187,6 +187,7 @@ export interface ObservedSession {
   /**
    * A Squeak chat whose own turn ended while helpers still run: `state` stays `working` (no finish push until the last
    * worker's follow-up turn ends), but it is not busy itself. Surfaces draw a still mark, no Working line, no Stop.
+   * Also set while the turn is open but only a foreground duckling works (Claude waits on it): `ducklings.onlyDucklings`.
    * Absent otherwise; old surfaces ignore it and read `working`.
    */
   backgroundOnly?: boolean;
@@ -319,4 +320,6 @@ export interface FleetDuckling {
 export interface FleetDucklings {
   running: number;
   items: FleetDuckling[];
+  /** The host says the chat's open turn waits on a foreground duckling and Claude itself does nothing (`DucklingOnlyTracker`). */
+  onlyDucklings?: boolean;
 }

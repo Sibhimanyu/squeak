@@ -264,7 +264,11 @@ struct ToolCallRow: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                 .layoutPriority(-1)
             Spacer(minLength: 8)
-            if running { TideGlyph(color: Theme.muted, height: 4.5) }
+            if running {
+                // A duckling at work is the bar's to show: its step keeps a small still mark, not the water glyph.
+                if preview.kind == .agent { Circle().fill(Theme.subtle).frame(width: 5, height: 5).accessibilityLabel("Duckling working") }
+                else { TideGlyph(color: Theme.muted, height: 4.5) }
+            }
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).fixedSize()
             }

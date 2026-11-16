@@ -260,6 +260,8 @@ function serializeSession(
     ...(session.conductorWaiting && session.state === "working" ? { conductorWaiting: true } : {}),
     // A Squeak chat's background helpers (the chat itself is ready, not working); absent when none.
     ...(session.ducklings && session.ducklings.items.length > 0 ? { ducklings: session.ducklings } : {}),
+    // Working only through its helpers (its turn ended, or Claude waits on a foreground duckling): no Working line, no Stop.
+    ...(session.backgroundOnly && session.state === "working" ? { backgroundOnly: true } : {}),
     alive: session.alive,
     // Archived in Squeak (archived-sessions.ts): when; absent for a thread in the lists.
     ...(session.archivedAt ? { archived: true, archivedAt: session.archivedAt } : {}),

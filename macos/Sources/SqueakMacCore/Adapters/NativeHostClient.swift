@@ -78,6 +78,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var ducklings: DucklingSet?
     /// The host says background helpers keep the chat working although its turn ended (its rule, `helpersKeepWorking`); false from an older host.
     public var helpersWorking: Bool = false
+    /// The host says only a duckling works in this working chat (Claude waits on it); nil from an older host.
+    public var ducklingsOnly: Bool? { ducklings?.onlyDucklings }
     /// The host says the chat is very large (slow, may fail); false from an older host.
     public var isLarge: Bool = false
     /// With `isLarge`: auto-compaction is on, so the chat compacts itself soon.

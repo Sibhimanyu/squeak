@@ -1,8 +1,17 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { classifyAttentions } from "./attention.js";
 import { withConductorHost } from "./host-fixtures.js";
-import { attachDucklings, ducklingsRunning, helpersKeepWorking, holdForBackgroundTasks } from "./ducklings.js";
+import {
+  attachDucklings,
+  ducklingsRunning,
+  helpersKeepWorking,
+  holdForBackgroundTasks,
+  onlyDucklingsWork,
+  type TimelineEventLike,
+} from "./ducklings.js";
 import { applyHookEvents, mergeObservations } from "./merge.js";
 import type { BackgroundTask } from "./background-work.js";
 import type { FleetDucklings, HookEvent, ObservedSession } from "./types.js";
@@ -204,5 +213,96 @@ describe("background-only marking", () => {
       items: [{ ...running.items[0]!, status: "done", endedAt: NOW, reportedAt: NOW }],
     };
     expect(attachDucklings(base!, done, Date.parse(NOW) + 10 * 60_000).backgroundOnly).toBeUndefined();
+  });
+});
+
+describe("only ducklings work in the open turn (a foreground duckling Claude waits on)", () => {
+  const fixtures = "../../macos/Tests/SqueakMacCoreTests/Fixtures/native";
+  const read = (name: string): { events: TimelineEventLike[] } =>
+    JSON.parse(readFileSync(new URL(`${fixtures}/${name}`, import.meta.url), "utf8")) as {
+      events: TimelineEventLike[];
+    };
+
+  it("the owner's foreground chat: only the duckling runs", () => {
+    const { events } = read("duckling-only-foreground-timeline.json");
+    expect(onlyDucklingsWork(events, new Set(["toolu_0124EKrK6HG87M5KHHeu3A17"]))).toBe(true);
+    // Without that duckling running (not listed), the same step is a tool Claude runs.
+    expect(onlyDucklingsWork(events, new Set())).toBe(false);
+  });
+
+  it("the owner's second chat runs a command: Claude is active", () => {
+    const { events } = read("duckling-only-bash-wait-timeline.json");
+    expect(onlyDucklingsWork(events, new Set(["toolu_01UM7bWP1YcJv4JJ5mHCTsoz"]))).toBe(false);
+  });
+
+  it("the duckling's result, then Claude thinking, turns it off; an ended turn is never 'only'", () => {
+    const { events } = read("duckling-only-foreground-timeline.json");
+    const id = "toolu_0124EKrK6HG87M5KHHeu3A17";
+    const agents = new Set([id]);
+    const done = { type: "step.updated", turnId: "t317648", stepId: id, kind: "tool", status: "done" };
+    const think = { type: "step.added", turnId: "t317648", stepId: "m:0", kind: "thinking", status: "running" };
+    expect(onlyDucklingsWork([...events, done], agents)).toBe(false);
+    expect(onlyDucklingsWork([...events, done, think], agents)).toBe(false);
+    expect(onlyDucklingsWork([...events, { type: "turn.ended", turnId: "t317648" }], agents)).toBe(false);
+  });
+
+  it("matches a reference rule over 300 random interleavings", () => {
+    for (let seed = 0; seed < 300; seed += 1) {
+      let x = seed * 7919 + 1;
+      const rnd = (n: number): number => {
+        x = (x * 1103515245 + 12345) % 2147483648;
+        return x % n;
+      };
+      const events: TimelineEventLike[] = [{ type: "turn.started", turnId: "t1" }];
+      const agents = new Set<string>();
+      const runningDucklings: string[] = [];
+      const open: { id: string; kind: string }[] = [];
+      let otherRunning = 0;
+      for (let i = 0; i < 6 + rnd(35); i += 1) {
+        const id = `s${i}`;
+        const op = rnd(6);
+        if (op === 0) {
+          events.push({ type: "step.added", turnId: "t1", stepId: id, kind: "tool", status: "running" });
+          agents.add(id);
+          runningDucklings.push(id);
+        } else if (op === 1 && runningDucklings.length > 0) {
+          const d = runningDucklings.splice(rnd(runningDucklings.length), 1)[0]!;
+          agents.delete(d);
+          events.push({ type: "step.updated", turnId: "t1", stepId: d, kind: "tool", status: "done" });
+        } else if (op === 2) {
+          const kind = ["thinking", "tool", "waiting"][rnd(3)]!;
+          events.push({ type: "step.added", turnId: "t1", stepId: id, kind, status: "running" });
+          open.push({ id, kind });
+          otherRunning += 1;
+        } else if (op === 3 && open.length > 0) {
+          const s = open.splice(rnd(open.length), 1)[0]!;
+          events.push({ type: "step.updated", turnId: "t1", stepId: s.id, kind: s.kind, status: "done" });
+          otherRunning -= 1;
+        } else if (op === 4) {
+          events.push({
+            type: "step.added",
+            turnId: "t1",
+            stepId: id,
+            kind: rnd(2) ? "note" : "steer",
+            status: "running",
+          });
+        }
+        expect(onlyDucklingsWork(events, agents), `seed ${seed}`).toBe(
+          otherRunning === 0 && runningDucklings.length > 0,
+        );
+      }
+      events.push({ type: "turn.ended", turnId: "t1" });
+      expect(onlyDucklingsWork(events, agents)).toBe(false);
+    }
+  });
+
+  it("marks a working chat backgroundOnly when the host says only a duckling works, with no push-worthy state change", () => {
+    const [base] = mergeObservations([{ ...native(), state: "working" }]);
+    const only: FleetDucklings = { ...running, onlyDucklings: true };
+    expect(attachDucklings(base!, only, Date.parse(NOW))).toMatchObject({ state: "working", backgroundOnly: true });
+    expect(attachDucklings(base!, running, Date.parse(NOW)).backgroundOnly).toBeUndefined();
+    // Never on a chat that is not working (blocked on you stays blocked).
+    const [blocked] = mergeObservations([{ ...native(), state: "awaiting_input" }]);
+    expect(attachDucklings(blocked!, only, Date.parse(NOW)).backgroundOnly).toBeUndefined();
   });
 });

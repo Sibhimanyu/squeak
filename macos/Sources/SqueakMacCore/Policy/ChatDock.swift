@@ -25,7 +25,7 @@ public enum ChatDock {
     public static func resolve(
         liveState: SessionState, messages: [ChatMessage], awaitingApproval: Bool, backgroundCount: Int, backgroundWaiting: Bool,
         hostStatus: String?, hostBackgroundCount: Int?, optimistic: Bool, hostOwnsState: Bool, hasStopRoute: Bool,
-        activity: [ActivityStep], model: String?, ducklings: DucklingSet? = nil, now: Date = Date()
+        activity: [ActivityStep], model: String?, ducklings: DucklingSet? = nil, turnOpen: Bool = false, now: Date = Date()
     ) -> Resolved {
         // A host that reports ducklings says its helpers never hold the thread: its turn is over, the chat is Ready,
         // a send starts a new turn at once. Only a source that cannot say keeps the old "waiting for background tasks".
@@ -37,7 +37,9 @@ public enum ChatDock {
             state: liveState, awaitingApproval: awaitingApproval, backgroundCount: backgroundCount,
             backgroundWaiting: backgroundWaiting, sending: false)
         let isWorking = hostOwnsState ? liveState == .working : ChatTimeline.isWorking(messages: messages, state: liveState, now: now)
-        let hostSays = ChatLiveness.showsWorkingLine(
+        // The host still calls the chat working while Claude waits on a foreground duckling: that is the duckling's work,
+        // drawn by the ducklings bar, never a Working row (`ClaudeActivity`).
+        let hostSays = turnOpen ? optimistic : ChatLiveness.showsWorkingLine(
             indicatorActive: false, isWorking: false, hostStatus: hostStatus, backgroundCount: hostBackgroundCount, optimistic: optimistic)
         let working = liveState == .working
         // The agent itself is busy while its ducklings run: say so, so the helpers are not read as what holds the chat.
@@ -48,6 +50,6 @@ public enum ChatDock {
             indicator: indicator, isWorking: isWorking, working: working, showsRow: indicator.isActive || isWorking || hostSays,
             line: line,
             canStop: working && hasStopRoute,
-            readyLine: working || indicator.isActive ? nil : DucklingWords.readyLine(running: ducklings?.running ?? 0))
+            readyLine: working || indicator.isActive ? nil : DucklingWords.readyLine(running: ducklings?.running ?? 0, turnOpen: turnOpen))
     }
 }

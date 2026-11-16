@@ -355,7 +355,7 @@ public enum ComposerPrompt {
     /// the Mac is offline, the session host is down.
     public static func placeholder(
         agent: String, workspace: String?, phase: ComposerPhase, readOnlyReason: String? = nil,
-        offline: Bool = false, hostDown: Bool = false
+        offline: Bool = false, hostDown: Bool = false, waitingOnDuckling: Bool = false
     ) -> String {
         if let readOnlyReason { return "Read-only: \(readOnlyReason)" }
         if hostDown { return "Squeak's session host isn't running" }
@@ -363,7 +363,10 @@ public enum ComposerPrompt {
         switch phase {
         case .idle:
             return "Tell \(agent) what to do next"
-        case .working: return "Steer \(agent) — it reads this at its next step"
+        case .working:
+            // Claude is blocked on a duckling: a message waits for it to report back.
+            if waitingOnDuckling { return "Message — \(agent) reads it when the duckling reports back" }
+            return "Steer \(agent) — it reads this at its next step"
         case .approval: return "Allow or deny above, or tell \(agent) what to do instead"
         case .plan: return "Adjust the plan, or approve it above"
         case .question: return "Answer above, or write your own answer"
