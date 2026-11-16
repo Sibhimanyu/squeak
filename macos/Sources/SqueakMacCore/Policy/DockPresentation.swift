@@ -55,7 +55,7 @@ public extension DockLayout {
         if right.panels.isEmpty {
             if let p = hidden.first(where: { $0.home == .right }) { show(p) } else { move(.pond, to: .right) }
         } else {
-            right.collapsed.toggle()
+            setCollapsed(!right.collapsed, for: .right)
         }
     }
 

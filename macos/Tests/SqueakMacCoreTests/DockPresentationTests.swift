@@ -35,6 +35,35 @@ final class DockPresentationTests: XCTestCase {
         XCTAssertNil(DockPanelPayload.decode("squeak-dock-panel:nope"))
     }
 
+    func testClosingInspectorFoldsBottomUnderIt() {
+        var l = DockLayout.standard
+        l.bottom.collapsed = false; l.bottom.size = 320
+        XCTAssertFalse(l.right.collapsed)
+        l.toggleRight()
+        XCTAssertTrue(l.right.collapsed)
+        XCTAssertTrue(l.bottom.collapsed)
+        XCTAssertEqual(l.bottom.size, 320)
+        l.toggleRight()
+        XCTAssertFalse(l.bottom.collapsed)
+        XCTAssertEqual(l.bottom.size, 320)
+    }
+
+    func testClosingInspectorLeavesAFoldedOrManuallyUnfoldedBottomAlone() {
+        var l = DockLayout.standard
+        l.toggleRight(); l.toggleRight()
+        XCTAssertTrue(l.bottom.collapsed)
+        // Folded by the inspector, then unfolded by hand: reopening must not fold or change it.
+        l.bottom.collapsed = false; l.toggleRight()
+        XCTAssertTrue(l.bottom.collapsed)
+        l.setCollapsed(false, for: .bottom)
+        l.toggleRight()
+        XCTAssertFalse(l.bottom.collapsed)
+        // A bottom the person folded stays folded across close and reopen.
+        var m = DockLayout.standard
+        m.toggleRight(); m.toggleRight()
+        XCTAssertTrue(m.bottom.collapsed)
+    }
+
     func testToggleRight() {
         var l = DockLayout.standard
         l.toggleRight()

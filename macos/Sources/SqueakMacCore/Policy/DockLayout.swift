@@ -72,6 +72,8 @@ public struct DockLayout: Codable, Equatable, Sendable {
     /// The sidebar is part of the arrangement, so each workspace remembers it: folded or not, and its dragged width (nil = default).
     public var sidebarCollapsed: Bool
     public var sidebarWidth: Double?
+    /// Closing the inspector folded the bottom zone (it sat under the inspector); opening it again unfolds it. Not saved.
+    public var bottomFoldedWithInspector = false
 
     public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = [],
                 sidebarCollapsed: Bool = false, sidebarWidth: Double? = nil) {
@@ -211,7 +213,18 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     public mutating func setCollapsed(_ collapsed: Bool, for zone: DockZone) {
         guard zone != .centre else { return }
+        let wasCollapsed = self[zone].collapsed
         self[zone].collapsed = collapsed
+        if zone == .right, collapsed != wasCollapsed {
+            if collapsed {
+                // The bottom zone sat under the inspector: it folds to its strip (its height is kept), full width.
+                if !bottom.collapsed, !bottom.panels.isEmpty { bottom.collapsed = true; bottomFoldedWithInspector = true }
+            } else if bottomFoldedWithInspector {
+                bottom.collapsed = false; bottomFoldedWithInspector = false
+            }
+        } else if zone == .bottom, !collapsed {
+            bottomFoldedWithInspector = false
+        }
     }
 
     // MARK: Repair
