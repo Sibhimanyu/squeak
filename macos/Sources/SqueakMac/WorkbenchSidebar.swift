@@ -678,8 +678,7 @@ private struct FoldRow: View {
         }
     }
 
-    private var row: some View {
-        Button(action: { focused = true; action() }) {
+    private var rowContent: some View {
             HStack(spacing: 10) {
                 if depth == 0 {
                     Group {
@@ -723,10 +722,27 @@ private struct FoldRow: View {
                 if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
             }
             .contentShape(Rectangle())
+    }
+
+    /// A pond row is not a Button: a Button (and a simultaneous double-tap gesture) takes the mouse-down, so the
+    /// row's `.draggable` never began a drag. One tap gesture reads the click count instead: the first click opens
+    /// the pond, a double-click folds or unfolds it like its chevron.
+    @ViewBuilder private var rowBody: some View {
+        if depth == 0 {
+            rowContent
+                .onTapGesture {
+                    focused = true
+                    if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { onDisclose?() } else { action() }
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { focused = true; action() }
+        } else {
+            Button(action: { focused = true; action() }) { rowContent }.buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        // A double-click on a pond folds or unfolds it like its chevron; the first click still opens it.
-        .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
+    }
+
+    private var row: some View {
+        rowBody
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
         .pointerHand()
         .accessibilityLabel(depth == 0 && rollup != nil && (rollup!.working > 0 || rollup!.needsYou > 0)
