@@ -243,7 +243,28 @@ final class TideMotionTests: XCTestCase {
         func avg(_ a: [Double], _ r: Range<Int>) -> Double { a[r].reduce(0, +) / Double(r.count) }
         XCTAssertLessThan(avg(on, 0..<10), avg(on, 90..<110) * 0.3)
         XCTAssertLessThan(avg(on, 190..<200), avg(on, 90..<110) * 0.3)
-        XCTAssertGreaterThan(avg(off, 0..<10), 0)
-        XCTAssertLessThan(avg(on, 0..<10), avg(off, 0..<10))
+        XCTAssertGreaterThan(avg(off, 15..<35), 0)
+        XCTAssertLessThan(avg(on, 15..<35), avg(off, 15..<35))
+    }
+}
+
+final class TideOffShareTests: XCTestCase {
+    /// Share of in-band pixels drawn off (alpha under 0.15, the lowest level is 0.38), averaged over 10 s at 15 fps on the mark and large grids and several seeds.
+    static func offShare(_ tuning: TideMotion.Tuning = TideMotion.Tuning()) -> Double {
+        var off = 0.0, band = 0.0
+        for g in [(21, 6), (29, 9)] { for sd in UInt64(1)...4 { for i in 0..<150 {
+            let t = Double(i) / 15
+            for r in 0..<g.1 { for c in 0..<g.0 where TideMotion.inBand(col: c, row: r, cols: g.0, rows: g.1, t: t, seed: sd, tuning: tuning) {
+                band += 1
+                if TideMotion.smoothAlpha(col: c, row: r, cols: g.0, rows: g.1, t: t, seed: sd, tuning: tuning) < 0.15 { off += 1 }  // what is drawn: dimmer than the lowest level
+            } }
+        } } }
+        return off / band
+    }
+    func testOffShareInRange() {
+        let s = Self.offShare()
+        print("OFFSHARE", s)
+        XCTAssertGreaterThan(s, 0.30)
+        XCTAssertLessThan(s, 0.40)
     }
 }

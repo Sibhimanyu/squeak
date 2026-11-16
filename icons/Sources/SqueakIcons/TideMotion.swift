@@ -164,7 +164,8 @@ public enum TideMotion {
     }
 
     /// 0...1 brightness at a pixel before quantizing.
-    static func value(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Double {
+    /// Where a pixel sits against the stream's surfaces: shared by `value` and the in-band measurement.
+    static func band(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning) -> (ends: Double, left: Bool, dTop: Double, dBottom: Double, body: Double) {
         let x = (Double(col) + 0.5) / Double(cols)
         let y = (Double(row) - Double(rows - 1) / 2) / (Double(rows) / 2)
         // Ends dissolve over the outer ~20% of the width. The left end is thinner (water entering); the right trails off.
@@ -178,6 +179,19 @@ public enum TideMotion {
         let mid = (s.top + s.bottom) / 2
         let topEdge = mid + (s.top - mid) * narrow, bottomEdge = mid + (s.bottom - mid) * narrow
         let dTop = y - topEdge, dBottom = bottomEdge - y
+        let body = max(0, min(1, min(dTop, dBottom) / 0.3 + 0.25))
+        return (ends, left, dTop, dBottom, body)
+    }
+
+    /// True when the pixel is inside the stream's body (lit or not, ends excluded, where it dissolves anyway): what the
+    /// off-share is measured over.
+    static func inBand(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Bool {
+        let g = band(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed, tuning: tuning)
+        return g.body > 0.5 && g.ends > 0.9
+    }
+
+    static func value(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64, tuning: Tuning = Tuning()) -> Double {
+        let (ends, left, dTop, dBottom, body0) = band(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed, tuning: tuning)
         let a = col &+ row &* 977
         let tau = flowTime(t, seed, tuning), chop = choppiness(t, seed, tuning)
         let slot = Int((tau / 0.22 + unit(seed &+ 50, a) * 40).rounded(.down))
@@ -185,8 +199,7 @@ public enum TideMotion {
         if dTop < -0.05, dTop > -0.42, ends > 0.3, unit(seed &+ 51, col, slot) < 0.025, unit(seed &+ 52, col, row, slot) < 0.7 {
             return 0.85 * ends
         }
-        let d = min(dTop, dBottom)
-        let body = max(0, min(1, d / 0.3 + 0.25))
+        let body = body0
         if ends > 0, body <= 0, !left, ends < 0.65, unit(seed &+ 53, a, slot) < 0.08 * (1 - ends) { return 0.5 }  // droplets
         guard body > 0, ends > 0 else { return 0 }
         // The current: streaks with a short trail (head bright, tail dimmer to the left), a pure function of (seed, t).
@@ -210,13 +223,16 @@ public enum TideMotion {
 
     public static func level(col: Int, row: Int, cols: Int, rows: Int, t: Double, seed: UInt64 = 0, tuning: Tuning = Tuning()) -> Int {
         let v = value(col: col, row: row, cols: cols, rows: rows, t: t, seed: seed, tuning: tuning)
-        return v < 0.12 ? 0 : v < 0.30 ? 1 : v < 0.54 ? 2 : 3
+        return v < offBelow ? 0 : v < 0.34 ? 1 : v < 0.56 ? 2 : 3
     }
+
+    /// Brightness below which a pixel is off. Raised from 0.12 so more of the band is dark (about a third of it).
+    static let offBelow = 0.32
 
     /// Continuous alpha 0...1 for a brightness: a soft, piecewise-linear version of the four levels, half blended with the
     /// quantized alpha so the pixel look stays but values between levels no longer jump.
     static func softAlpha(_ v: Double) -> Double {
-        let pts: [(Double, Double)] = [(0.06, 0), (0.2, 0.38), (0.42, 0.68), (0.7, 1)]
+        let pts: [(Double, Double)] = [(offBelow - 0.06, 0), (offBelow + 0.08, 0.38), (0.46, 0.68), (0.72, 1)]
         let soft: Double
         if v <= pts[0].0 { soft = 0 } else if v >= pts[3].0 { soft = 1 } else {
             var k = 0
@@ -224,7 +240,7 @@ public enum TideMotion {
             let u = (v - pts[k].0) / (pts[k + 1].0 - pts[k].0)
             soft = pts[k].1 + (pts[k + 1].1 - pts[k].1) * u * u * (3 - 2 * u)
         }
-        let q = v < 0.12 ? 0 : v < 0.30 ? 1 : v < 0.54 ? 2 : 3
+        let q = v < offBelow ? 0 : v < 0.34 ? 1 : v < 0.56 ? 2 : 3
         return 0.5 * soft + 0.5 * alpha(q)
     }
 
