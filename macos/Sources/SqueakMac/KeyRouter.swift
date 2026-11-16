@@ -137,13 +137,15 @@ final class KeyRouter {
         switch action {
         case .newThread: NewChatController.shared.show(); return true
         case .newTerminal:
-            if let id = host.tab(of: responder), let ws = host.workspace(of: id) { host.add(workspace: ws, folder: ws); return true }
+            if let id = host.tab(of: responder), let ws = host.workspace(of: id) {
+                NewTerminalAction.open(folder: ws, in: DockStore.shared.activeTerminals.zone(of: id)); return true
+            }
             guard let model else { return false }
             NewTerminalAction.perform(model)
             return true
         case .closeTerminalTab:
             guard let id = host.tab(of: responder), let ws = host.workspace(of: id) else { return false }
-            host.requestClose(workspace: ws, id)
+            TerminalActions.close(id, folder: ws)
             if host.registry.tabs(ws).isEmpty {
                 DockStore.shared.update { $0.dismiss(.terminal) }
             }

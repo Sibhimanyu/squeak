@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.7
+
+- Every shell is its own tab now: open as many as you like, drag each to the centre, right or bottom like a file, and close one without touching the others. Dragging a tab to another area works again (it had stopped working), and the ponds in the sidebar can be dragged into your own order.
+
 ## 2.27.6
 
 - One glyph for work in progress, everywhere: a small stream of pixels flowing like water, never repeating, so each working chat looks a little different. It moves only while something is actually working, and holds still under Reduce Motion.

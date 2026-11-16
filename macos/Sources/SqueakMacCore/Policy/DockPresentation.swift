@@ -30,7 +30,8 @@ public enum DockPlusAction: Equatable, Sendable {
     case showHidden([DockPanel])
     case none
 
-    public static func of(zone: DockZone, layout: DockLayout) -> DockPlusAction {
+    public static func of(zone: DockZone, layout: DockLayout, terminals: DockTerminals = DockTerminals()) -> DockPlusAction {
+        if terminals.shown(in: zone) != nil { return .newTerminal }
         if zone == .centre, layout.centre.selected == nil { return .newChat }
         if layout[zone].selected == .terminal { return .newTerminal }
         if zone == .centre { return .newChat }
@@ -87,6 +88,11 @@ public final class DockStore {
     public private(set) var workspaces: DockWorkspaces
     /// Open files placed outside the centre (session state, never saved).
     public private(set) var files = DockFiles()
+    /// Shells placed in zones, per workspace folder (session state, never saved). `activeFolder` is the chat's folder.
+    public private(set) var terminals: [String: DockTerminals] = [:]
+    public private(set) var activeFolder: String?
+    /// The current folder's shells.
+    public var activeTerminals: DockTerminals { activeFolder.flatMap { terminals[$0] } ?? DockTerminals() }
     /// A panel being dragged right now (not saved): zones that could take it show their drop strips.
     public var dragging: DockItem?
     /// The panel tab under the pointer (not observed): a drag that starts there is a panel drag.
@@ -122,24 +128,116 @@ public final class DockStore {
         workspaces.update(l)
         save()
         // A panel newly selected in a zone shows instead of that zone's file.
-        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z) }
+        for z in [DockZone.right, .bottom] where before[z].selected != layout[z].selected { files.deselect(z); deselectTerminals(z) }
+    }
+
+    // MARK: Shells
+
+    private func mutateTerminals(_ folder: String, _ change: (inout DockTerminals) -> Void) {
+        var t = terminals[folder] ?? DockTerminals()
+        change(&t)
+        if t.isEmpty { if terminals[folder] != nil { terminals[folder] = nil } } else if terminals[folder] != t { terminals[folder] = t }
+    }
+
+    /// Mirrors the registry's shells for a folder: gone ones dropped, new ones placed in the home zone.
+    public func syncTerminals(folder: String, live: [UUID]) {
+        activeFolder = folder
+        let home = layout.terminalHome
+        let layout = self.layout
+        mutateTerminals(folder) { t in
+            t.sync(live: live, home: home)
+            // A zone whose Terminal panel is its tab shows a shell: its first, until one is picked.
+            for z in DockZone.allCases where layout[z].selected == .terminal && t.shown(in: z) == nil {
+                if let first = t.terminals(in: z).first { t.select(first) }
+            }
+        }
+    }
+
+    /// A panel or file was selected in `zone` (or the chat in the centre): it shows instead of the zone's shell.
+    public func deselectTerminals(_ zone: DockZone) {
+        guard let f = activeFolder else { return }
+        mutateTerminals(f) { $0.deselect(zone) }
+    }
+
+    /// A new shell opens in `zone` (nil = the home zone) and is selected; a folded side zone unfolds.
+    public func openTerminal(_ id: UUID, folder: String, live: [UUID], in zone: DockZone? = nil) {
+        activeFolder = folder
+        let z = zone ?? layout.terminalHome
+        let home = layout.terminalHome
+        mutateTerminals(folder) { $0.sync(live: live, home: home); $0.open(id, in: z) }
+        files.deselect(z)
+        revealZone(z)
+    }
+
+    public func moveTerminal(_ id: UUID, to zone: DockZone, before: UUID? = nil) {
+        guard let f = activeFolder else { return }
+        mutateTerminals(f) { $0.move(id, to: zone, before: before) }
+        files.deselect(zone)
+        revealZone(zone)
+    }
+
+    public func selectTerminal(_ id: UUID) {
+        guard let f = activeFolder, let z = terminals[f]?.zone(of: id) else { return }
+        mutateTerminals(f) { $0.select(id) }
+        files.deselect(z)
+        revealZone(z)
+    }
+
+    /// The shell closed (its process is ended by the host).
+    public func closeTerminal(_ id: UUID) {
+        guard let f = activeFolder else { return }
+        mutateTerminals(f) { $0.close(id) }
+    }
+
+    private func revealZone(_ zone: DockZone) {
+        if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
+    }
+
+    /// Whether a shell is on screen: selected in the centre, or selected in an unfolded side zone.
+    public var isTerminalShowing: Bool {
+        let t = activeTerminals
+        return DockZone.allCases.contains { z in
+            t.shown(in: z) != nil && (z == .centre || !layout[z].collapsed) && (z != .centre || layout.centre.selected == nil)
+        }
+    }
+
+    /// ⌘J: folds or unfolds the zone that holds the selected or last shell; with no shell, `needsShell` is true and the
+    /// caller opens one in the home zone.
+    public func toggleTerminalZone() -> Bool {
+        guard let f = activeFolder, let z = terminals[f]?.toggleZone() else { return true }
+        if z == .centre {
+            if isTerminalShowing { update { $0.selectChats() }; deselectTerminals(.centre) } else {
+                if let last = terminals[f]?.last ?? terminals[f]?.terminals(in: .centre).first { selectTerminal(last) }
+            }
+            return false
+        }
+        if terminals[f]?.shown(in: z) != nil && !layout[z].collapsed {
+            update { $0.setCollapsed(true, for: z) }
+        } else {
+            if terminals[f]?.shown(in: z) == nil, let id = terminals[f]?.last ?? terminals[f]?.terminals(in: z).first { selectTerminal(id) }
+            update { $0.setCollapsed(false, for: z) }
+        }
+        return false
     }
 
     /// Puts an open file in a zone (the centre = back to the strip); a folded side zone opens for it.
     public func moveFile(_ path: String, to zone: DockZone, before: String? = nil) {
         files.move(path, to: zone, before: before)
+        deselectTerminals(zone)
         if zone == .centre { update { $0.selectChats() } } else { update { $0.setCollapsed(false, for: zone) } }
     }
 
     /// A panel tab was pressed in a zone: it shows over that zone's file.
     public func selectPanel(_ panel: DockPanel, in zone: DockZone) {
         files.deselect(zone)
+        deselectTerminals(zone)
         update { $0.select(panel); $0.setCollapsed(false, for: zone) }
     }
 
     public func selectFile(_ path: String) {
         files.select(path)
         let z = files.zone(of: path)
+        deselectTerminals(z)
         if z != .centre { update { $0.setCollapsed(false, for: z) } }
     }
 
@@ -171,6 +269,10 @@ public final class DockStore {
             var b: String?
             if case .file(let other)? = before { b = other }
             moveFile(path, to: zone, before: b)
+        case .terminal(let id):
+            var b: UUID?
+            if case .terminal(let other)? = before { b = other }
+            moveTerminal(id, to: zone, before: b)
         }
         return true
     }

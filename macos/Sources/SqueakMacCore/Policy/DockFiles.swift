@@ -4,19 +4,25 @@ import Foundation
 public enum DockItem: Equatable, Hashable, Sendable {
     case panel(DockPanel)
     case file(String)
+    case terminal(UUID)
 }
 
 /// A dragged tab on the pasteboard: a prefixed string, so a chat tab's plain-string drag is never read as one.
 public enum DockItemPayload {
     public static let filePrefix = "squeak-dock-file:"
+    public static let terminalPrefix = "squeak-dock-terminal:"
     public static func encode(_ item: DockItem) -> String {
         switch item {
         case .panel(let p): return DockPanelPayload.encode(p)
         case .file(let path): return filePrefix + path
+        case .terminal(let id): return terminalPrefix + id.uuidString
         }
     }
     public static func decode(_ text: String) -> DockItem? {
         if let p = DockPanelPayload.decode(text) { return .panel(p) }
+        if text.hasPrefix(terminalPrefix) {
+            return UUID(uuidString: String(text.dropFirst(terminalPrefix.count))).map { .terminal($0) }
+        }
         guard text.hasPrefix(filePrefix) else { return nil }
         let path = String(text.dropFirst(filePrefix.count))
         return path.isEmpty ? nil : .file(path)

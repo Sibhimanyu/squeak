@@ -308,11 +308,47 @@ extension Scene {
     }
 }
 
-/// File › New Terminal: shows the panel and adds a shell in the open chat's folder.
+/// File › New Terminal, "+" on a terminal's strip, ⌃⇧`: a new shell in the open chat's folder, as a new tab in `zone`
+/// (nil = the home zone: where the Terminal panel sits, else the bottom), selected.
 @MainActor enum NewTerminalAction {
-    static func perform(_ model: AppModel) {
+    static func perform(_ model: AppModel, in zone: DockZone? = nil) {
         guard let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder else { return }
-        DockStore.shared.update { $0.show(.terminal) }
-        TerminalHost.shared.add(workspace: folder, folder: folder)
+        open(folder: folder, in: zone)
+    }
+
+    static func open(folder: String, in zone: DockZone? = nil) {
+        let host = TerminalHost.shared
+        host.add(workspace: folder, folder: folder)
+        let live = host.registry.tabs(folder).map(\.id)
+        guard let id = host.registry.selected(folder)?.id else { return }
+        DockStore.shared.openTerminal(id, folder: folder, live: live, in: zone)
+    }
+}
+
+@MainActor enum TerminalActions {
+    /// A shell's tab closed: its process ends (the host asks first when something is running). A replacement the host
+    /// starts for the last shell opens in the zone the old one was in.
+    static func close(_ id: UUID, folder: String) {
+        let host = TerminalHost.shared
+        let dock = DockStore.shared
+        let zone = dock.activeTerminals.zone(of: id)
+        let before = Set(host.registry.tabs(folder).map(\.id))
+        host.requestClose(workspace: folder, id)
+        let live = host.registry.tabs(folder).map(\.id)
+        guard !live.contains(id) else { return }
+        dock.closeTerminal(id)
+        if let fresh = live.first(where: { !before.contains($0) }) {
+            dock.openTerminal(fresh, folder: folder, live: live, in: zone)
+        } else {
+            dock.syncTerminals(folder: folder, live: live)
+        }
+    }
+
+    /// ⌘J: folds or unfolds the zone that holds the terminal; with no shell it opens one in the home zone.
+    static func toggle(_ model: AppModel) {
+        if let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder {
+            DockStore.shared.syncTerminals(folder: folder, live: TerminalHost.shared.registry.tabs(folder).map(\.id))
+        }
+        if DockStore.shared.toggleTerminalZone() { NewTerminalAction.perform(model) }
     }
 }

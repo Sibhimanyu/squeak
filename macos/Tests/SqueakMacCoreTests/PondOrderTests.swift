@@ -45,3 +45,27 @@ import Testing
         #expect(PondOrder.moved(all: ["a", "b", "c"], shown: ["a", "c"], moving: "a", before: nil) == ["b", "c", "a"])
     }
 }
+
+@Suite struct PondDropTests {
+    private let all = ["a", "b", "c"]
+
+    @Test func moveBeforeSwitchesToManual() {
+        let s = PondOrder.dropped(state: PondOrderState(), all: all, shown: all, moving: "c", before: "a")
+        #expect(s == PondOrderState(mode: .manual, order: ["c", "a", "b"]))
+    }
+    @Test func moveToEnd() {
+        let s = PondOrder.dropped(state: PondOrderState(), all: all, shown: all, moving: "a", before: nil)
+        #expect(s?.order == ["b", "c", "a"])
+    }
+    @Test func noChangeAndUnknownKeySaveNothing() {
+        #expect(PondOrder.dropped(state: PondOrderState(), all: all, shown: all, moving: "b", before: "b") == nil)
+        #expect(PondOrder.dropped(state: PondOrderState(), all: all, shown: all, moving: "a", before: "b") == nil)
+        #expect(PondOrder.dropped(state: PondOrderState(), all: all, shown: all, moving: "zz", before: "a") == nil)
+    }
+    @Test func payloadIsStrict() {
+        #expect(PondDragPayload.decode(PondDragPayload.encode("k1")) == "k1")
+        #expect(PondDragPayload.decode("pond:") == nil)
+        #expect(PondDragPayload.decode("squeak-native:1") == nil)
+        #expect(PondDragPayload.decode("squeak-dock-panel:code") == nil)
+    }
+}

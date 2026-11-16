@@ -30,6 +30,12 @@ final class TerminalHost {
         return tab.number > 1 ? "\(name) \(tab.number)" : name
     }
 
+    /// A shell's tab title: what the shell set for itself, else "Terminal", "Terminal 2", ...
+    func tabTitle(of tab: TerminalTab) -> String {
+        if let t = titles[tab.id], !t.isEmpty { return t }
+        return tab.number > 1 ? "Terminal \(tab.number)" : "Terminal"
+    }
+
     /// The workspace's selected tab, starting its first shell on first use.
     func ensure(workspace: String, folder: String) {
         stopped[workspace] = nil

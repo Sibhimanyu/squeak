@@ -44,10 +44,11 @@ struct PondPanelView: View {
 
 struct TerminalPanelView: View {
     let session: HostSession?
+    var shell: UUID?
 
     var body: some View {
         if let session {
-            TerminalPanel(session: session, column: 0, height: .constant(TerminalPanelSizing.defaultHeight), open: .constant(true), embedded: true, showsStrip: true)
+            TerminalPanel(session: session, shell: shell)
         } else {
             Text("Open a chat to use its terminal.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -131,8 +132,8 @@ struct CodePanelView: View {
             }
             .disabled(changeCount == nil)
             Divider()
-            Button(DockStore.shared.layout.isShowing(.terminal) ? "Hide terminal (⌘J)" : "Show terminal (⌘J)") {
-                DockStore.shared.update { $0.toggle(.terminal) }
+            Button(DockStore.shared.isTerminalShowing ? "Hide terminal (⌘J)" : "Show terminal (⌘J)") {
+                TerminalActions.toggle(model)
             }
         } label: {
             Lucide(.ellipsisVertical, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())

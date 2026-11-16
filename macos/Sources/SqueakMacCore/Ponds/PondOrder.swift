@@ -49,3 +49,26 @@ public enum PondOrder {
         return rest
     }
 }
+
+/// A dragged pond row on the pasteboard: `pond:<directory id>`. Decoded strictly, so a chat tab's key or a dock tab
+/// (`squeak-dock-...`) is never taken for a pond, and a pond is never taken for either.
+public enum PondDragPayload {
+    public static let prefix = "pond:"
+    public static func encode(_ key: String) -> String { prefix + key }
+    public static func decode(_ text: String) -> String? {
+        guard text.hasPrefix(prefix) else { return nil }
+        let key = String(text.dropFirst(prefix.count))
+        return key.isEmpty ? nil : key
+    }
+}
+
+public extension PondOrder {
+    /// What a drop saves: the new order and the mode, which is always manual (the first drag switches to Your order).
+    /// nil when nothing changes (dropped on itself or where it already is, or the pond is unknown).
+    static func dropped(state: PondOrderState, all: [String], shown: [String], moving: String, before: String?) -> PondOrderState? {
+        guard all.contains(moving) else { return nil }
+        let next = moved(all: all, shown: shown, moving: moving, before: before)
+        guard next != all else { return nil }
+        return PondOrderState(mode: .manual, order: next)
+    }
+}

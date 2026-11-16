@@ -88,7 +88,8 @@ struct ConversationView: View {
         let layout = dock.layout
         let ducklingOpen = DucklingRef.open(model.openDuckling, whenSelected: model.selectedSession?.key) != nil
         let dockFiles = dock.files
-        let rightWanted = layout.isZoneVisible(.right, files: dockFiles) && !layout.right.collapsed
+        let dockTerminals = dock.activeTerminals
+        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals) && !layout.right.collapsed
         let showsInspector = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
         let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
@@ -123,7 +124,7 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles) : .none
+                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
@@ -155,7 +156,7 @@ struct ConversationView: View {
                     if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
                 }
                 .overlay(alignment: .bottom) {
-                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles) { DockEdgeStrip(zone: .bottom) }
+                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals) { DockEdgeStrip(zone: .bottom) }
                 }
             }
         }
@@ -171,7 +172,7 @@ struct ConversationView: View {
             }
         }
         .animation(Motion.standard, value: showsInspector && chatOpen)
-        .onChange(of: layout.isShowing(.terminal), initial: true) { _, showing in
+        .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
         }
@@ -216,7 +217,7 @@ struct ConversationView: View {
             dock.update { $0.show(.code) }
         }
         // ⌘J shows the terminal wherever it is docked, or closes it when it is the one showing.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in dock.update { $0.toggle(.terminal) } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in TerminalActions.toggle(model) }
         .background(ConversationWindowReader())
         .commandPalette()
         .background {

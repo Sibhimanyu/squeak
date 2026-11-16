@@ -144,7 +144,11 @@ struct WorkbenchSidebar: View {
     /// The directory's ponds in its order (newest first, or the person's own), hidden ones flagged. Nothing is sorted or
     /// matched here.
     private var pondEntries: [PondFilter.Entry] {
-        (PondsModel.shared.directory?.ponds ?? []).map { d in
+        // Your order shows at once from the saved state; the directory's own order follows when it is read again.
+        let ponds = PondsModel.shared.directory?.ponds ?? []
+        let keys = PondOrder.apply(keys: ponds.map(\.id), state: order.state)
+        let byId = Dictionary(ponds.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return keys.compactMap { byId[$0] }.map { d in
             PondFilter.Entry(id: d.id, name: d.name, hidden: d.hidden, labels: d.labels, shared: PondSharing.isSharedWithMe(PondsModel.shared.pond(key: d.id)))
         }
     }
@@ -159,9 +163,9 @@ struct WorkbenchSidebar: View {
     /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to Your order.
     private func dropPond(_ moving: String, before: String?, shown: [String]) {
         let all = pondEntries.map(\.id)
-        let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
-        withAnimation(Motion.standard) { saveOrder(mode: .manual, order: next) }
+        guard let next = PondOrder.dropped(state: order.state, all: all, shown: shown, moving: moving, before: before) else { return }
+        withAnimation(Motion.standard) { saveOrder(mode: .manual, order: next.order) }
     }
 
     /// Move a pond one place (the open pond, or the one right-clicked): saves the order and switches to Your order.
@@ -378,10 +382,10 @@ struct WorkbenchSidebar: View {
                 // The insertion line: where the dragged pond will land.
                 if dropBefore == key { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) }
             }
-            .draggable("pond:\(key)")
+            .draggable(PondDragPayload.encode(key))
             .dropDestination(for: String.self) { values, _ in
-                guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
-                dropPond(String(moving), before: key, shown: names)
+                guard let moving = values.lazy.compactMap(PondDragPayload.decode).first else { return false }
+                dropPond(moving, before: key, shown: names)
                 return true
             } isTargeted: { on in
                 withAnimation(Motion.quick) { if on { dropBefore = key } else if dropBefore == key { dropBefore = nil } }
@@ -486,8 +490,8 @@ struct WorkbenchSidebar: View {
             Color.clear.frame(height: 10)
                 .overlay(alignment: .top) { if dropBefore == "" { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) } }
                 .dropDestination(for: String.self) { values, _ in
-                    guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
-                    dropPond(String(moving), before: nil, shown: names)
+                    guard let moving = values.lazy.compactMap(PondDragPayload.decode).first else { return false }
+                    dropPond(moving, before: nil, shown: names)
                     return true
                 } isTargeted: { on in
                     withAnimation(Motion.quick) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }

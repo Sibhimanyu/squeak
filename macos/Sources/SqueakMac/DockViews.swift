@@ -9,23 +9,9 @@ import UniformTypeIdentifiers
 
 // MARK: Drag payload
 
-/// A panel or file tab being dragged. Carried as `public.data` holding `DockItemPayload`'s prefixed string: a custom
-/// exported type needs an Info.plist declaration the SwiftPM build cannot add, and the prefix check keeps a chat tab's
-/// plain-string drag from ever being read as a dock tab.
-struct DockItemDrag: Transferable {
-    var item: DockItem
-
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(contentType: .data) { drag in
-            Data(DockItemPayload.encode(drag.item).utf8)
-        } importing: { data in
-            guard let text = String(data: data, encoding: .utf8), let item = DockItemPayload.decode(text) else {
-                throw CocoaError(.coderInvalidValue)
-            }
-            return DockItemDrag(item: item)
-        }
-    }
-}
+// A dock tab is dragged as plain text, `DockItemPayload`'s prefixed string, exactly like a chat tab's key. An item
+// provider carrying only the abstract `public.data` type was never matched by a drop destination on macOS. The prefix
+// keeps a chat key from ever being read as a dock tab (`DockItemPayload.decode` answers nil for it).
 
 /// Moves a file tab to a zone and keeps the file model's "shown in the centre" in step: a file leaving the centre
 /// stops being the centre's file, one coming back is shown.
@@ -69,9 +55,9 @@ private struct DockDropModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .dropDestination(for: DockItemDrag.self) { items, _ in
-                guard let drag = items.first else { return false }
-                return performDockDrop(drag.item, to: zone, before: before, model: model)
+            .dropDestination(for: String.self) { values, _ in
+                guard let text = values.first, let item = DockItemPayload.decode(text) else { return false }
+                return performDockDrop(item, to: zone, before: before, model: model)
             } isTargeted: { targeted = $0 }
             .overlay {
                 if targeted {
@@ -117,9 +103,9 @@ struct DockEdgeStrip: View {
             }
             .frame(width: zone == .right ? 20 : nil, height: zone == .bottom ? 20 : nil)
             .contentShape(Rectangle())
-            .dropDestination(for: DockItemDrag.self) { items, _ in
-                guard let drag = items.first else { return false }
-                return performDockDrop(drag.item, to: zone, before: nil, model: model)
+            .dropDestination(for: String.self) { values, _ in
+                guard let text = values.first, let item = DockItemPayload.decode(text) else { return false }
+                return performDockDrop(item, to: zone, before: nil, model: model)
             } isTargeted: { targeted = $0 }
             .animation(Motion.quick, value: targeted)
             .accessibilityLabel("Drop here to dock on the \(zone.title.lowercased())")
@@ -172,7 +158,7 @@ struct DockItemTab<Icon: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .draggable(DockItemDrag(item: item))
+        .draggable(DockItemPayload.encode(item))
         .dockDrop(zone, before: item, wash: false)
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -183,6 +169,7 @@ struct DockItemTab<Icon: View>: View {
                     switch item {
                     case .panel(let p): dock.update { $0.move(p, to: z) }
                     case .file(let path): dockMoveFile(path, to: z, model: model)
+                    case .terminal(let id): dock.moveTerminal(id, to: z)
                     }
                 }
             }
@@ -227,6 +214,33 @@ struct DockFileTab: View {
     }
 }
 
+/// A shell's tab, in whichever zone it sits.
+struct DockTerminalTab: View {
+    let tab: TerminalTab
+    let folder: String
+    let zone: DockZone
+    let selected: Bool
+    let height: CGFloat
+    let indicator: Namespace.ID
+    var host: TerminalHost { TerminalHost.shared }
+
+    var body: some View {
+        DockItemTab(item: .terminal(tab.id), title: host.tabTitle(of: tab), zone: zone, selected: selected, height: height, indicator: indicator,
+                    select: { DockStore.shared.selectTerminal(tab.id); host.focusPending = true },
+                    close: { TerminalActions.close(tab.id, folder: folder) }) {
+            Lucide(.terminal, size: 13, color: selected ? Theme.ink : Theme.muted)
+        }
+    }
+}
+
+/// The terminal tabs a zone holds for the chat's folder, in order.
+@MainActor func dockTerminalTabs(in zone: DockZone, session: HostSession?) -> (folder: String, tabs: [TerminalTab])? {
+    guard let folder = TerminalWorkspace.availability(cwd: session?.cwd).folder else { return nil }
+    let all = TerminalHost.shared.registry.tabs(folder)
+    let tabs = DockStore.shared.activeTerminals.terminals(in: zone).compactMap { id in all.first { $0.id == id } }
+    return (folder, tabs)
+}
+
 /// A side zone's tab strip: its panels as tabs, then "+", with room for leading and trailing controls. The whole
 /// strip is a drop target that appends; each tab is one that inserts before it.
 struct DockZoneStrip<Leading: View, Trailing: View>: View {
@@ -245,12 +259,14 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         let fileModel = session?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         let placed = fileModel.map { fm in dock.files.files(in: zone).compactMap { p in fm.open.first { $0.path == p } } } ?? []
         let shownFile = dock.files.selected[zone]
+        let shownTerminal = dock.activeTerminals.shown(in: zone)
+        let shells = dockTerminalTabs(in: zone, session: session)
         HStack(spacing: 0) {
             leading()
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(state.panels, id: \.self) { p in
-                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil, height: height, indicator: indicator) {
+                    ForEach(state.panels.filter { $0 != .terminal }, id: \.self) { p in
+                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && shownTerminal == nil, height: height, indicator: indicator) {
                             dock.selectPanel(p, in: zone)
                         }
                     }
@@ -259,6 +275,11 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                             DockFileTab(files: fileModel, file: f, zone: zone, selected: shownFile == f.path && !state.collapsed, height: height, indicator: indicator) {
                                 dock.selectFile(f.path)
                             }
+                        }
+                    }
+                    if let shells {
+                        ForEach(shells.tabs) { t in
+                            DockTerminalTab(tab: t, folder: shells.folder, zone: zone, selected: shownTerminal == t.id && !state.collapsed, height: height, indicator: indicator)
                         }
                     }
                     DockPlusButton(zone: zone)
@@ -271,6 +292,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         .dockDrop(zone, wash: false)
         .animation(Motion.standard, value: state.selected)
         .animation(Motion.standard, value: shownFile)
+        .animation(Motion.standard, value: shownTerminal)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 }
@@ -281,9 +303,9 @@ struct DockPlusButton: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        switch DockPlusAction.of(zone: zone, layout: DockStore.shared.layout) {
+        switch DockPlusAction.of(zone: zone, layout: DockStore.shared.layout, terminals: DockStore.shared.activeTerminals) {
         case .newTerminal:
-            Button { NewTerminalAction.perform(model) } label: { plus }
+            Button { NewTerminalAction.perform(model, in: zone) } label: { plus }
                 .buttonStyle(.plain).help("New terminal").accessibilityLabel("New terminal")
         case .showHidden(let hidden):
             Menu {
@@ -313,8 +335,11 @@ struct DockZoneBody: View {
     var body: some View {
         let fileModel = session?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         let file = DockStore.shared.files.selected[zone].flatMap { path in fileModel?.open.first { $0.path == path } }
+        let shell = DockStore.shared.activeTerminals.shown(in: zone)
         Group {
-            if let fileModel, let file {
+            if let shell {
+                TerminalPanelView(session: session, shell: shell)
+            } else if let fileModel, let file {
                 FileViewer(files: fileModel, file: file).id(file.path)
             } else if let p = DockStore.shared.layout[zone].selected {
                 DockPanelContent(panel: p, session: session)
@@ -388,7 +413,7 @@ struct DockBottomZone: View {
                 .help(open ? "Fold this zone (⌘J for the terminal)" : "Unfold this zone")
                 .accessibilityLabel(open ? "Fold bottom zone" : "Unfold bottom zone")
             } trailing: {
-                if state.selected == .terminal, let hint = ShortcutFocus.terminalTitleHint(in: KeyFocus.shared.region, terminalOpen: open) {
+                if DockStore.shared.activeTerminals.shown(in: .bottom) != nil, let hint = ShortcutFocus.terminalTitleHint(in: KeyFocus.shared.region, terminalOpen: open) {
                     Text(verbatim: hint).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).padding(.trailing, Space.m)
                 }
             }

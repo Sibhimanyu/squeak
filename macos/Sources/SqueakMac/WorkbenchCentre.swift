@@ -56,6 +56,8 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
+            } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
+                TerminalPanelView(session: chat, shell: shell).dockDrop(.centre)
             } else if let chat, let panel = DockStore.shared.layout.centre.selected {
                 DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity).dockDrop(.centre)
             } else if let files, let chat, files.review.isOpen {
@@ -68,10 +70,11 @@ struct WorkbenchCentre: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
-        .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
+        .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre) }
         .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
+        .modifier(TerminalDockSync(cwd: chat?.cwd))
         .modifier(PathToast(files: files))
         .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
@@ -288,21 +291,28 @@ private struct WorkbenchTabs: View {
                             if let files, dock.files.zone(of: f.path) == .centre {
                                 DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil,
                                             height: Metrics.tabStrip, indicator: tabIndicator) {
+                                    dock.deselectTerminals(.centre)
                                     dock.update { $0.selectChats() }
                                     files.activePath = f.path
                                 }
                             }
                         }
                     }
-                    ForEach(dock.layout.centre.panels, id: \.self) { p in
+                    ForEach(dock.layout.centre.panels.filter { $0 != .terminal }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
+                            dock.deselectTerminals(.centre)
                             dock.update { $0.select(p) }
                         }
                     }
+                    if let shells = dockTerminalTabs(in: .centre, session: chats.first) {
+                        ForEach(shells.tabs) { t in
+                            DockTerminalTab(tab: t, folder: shells.folder, zone: .centre, selected: dock.activeTerminals.shown(in: .centre) == t.id, height: Metrics.tabStrip, indicator: tabIndicator)
+                        }
+                    }
                     Button {
-                        if case .newTerminal = DockPlusAction.of(zone: .centre, layout: dock.layout) {
-                            NewTerminalAction.perform(model)
+                        if case .newTerminal = DockPlusAction.of(zone: .centre, layout: dock.layout, terminals: dock.activeTerminals) {
+                            NewTerminalAction.perform(model, in: .centre)
                         } else if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
                         } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {
@@ -403,7 +413,7 @@ private struct WorkbenchTabs: View {
         let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); dock.update { $0.selectChats() }; model.select(s.key) }) {
+        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }) {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
                 tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
@@ -436,6 +446,8 @@ private struct WorkbenchTabs: View {
         .draggable(s.key.stringValue)
         .dropDestination(for: String.self) { values, _ in
             guard values.count == 1, let source = values.first else { return false }
+            // A dock tab dropped on a chat tab goes to the centre; a nested String drop would not reach the strip's.
+            if let item = DockItemPayload.decode(source) { return performDockDrop(item, to: .centre, before: nil, model: model) }
             return model.moveChatTab(source, before: s.key, workspace: workspace)
         }
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
@@ -476,5 +488,21 @@ private struct CentreFileDockSync: ViewModifier {
                 if let path, dock.files.zone(of: path) != .centre { dock.selectFile(path); files?.showChat() }
             }
             .onChange(of: openPaths, initial: true) { _, open in DockStore.shared.pruneFiles(keeping: open) }
+    }
+}
+
+
+/// Keeps the dock's placement of this folder's shells in step with the host's registry (new shells to the home zone,
+/// ended ones dropped).
+private struct TerminalDockSync: ViewModifier {
+    let cwd: String?
+    private let host = TerminalHost.shared
+
+    func body(content: Content) -> some View {
+        let folder = TerminalWorkspace.availability(cwd: cwd).folder
+        let ids = folder.map { host.registry.tabs($0).map(\.id) } ?? []
+        content.onChange(of: ids, initial: true) { _, live in
+            if let folder { DockStore.shared.syncTerminals(folder: folder, live: live) }
+        }
     }
 }
