@@ -7,6 +7,7 @@ import { logger } from "../utils/logger.js";
 import { terminateProcess, trackAgentProcess, untrackAgentProcess } from "./agent-procs.js";
 import { loadAgentSdk } from "./agent-sdk.js";
 import { ApiWaitTracker, STALL_DETAIL, stallMsFromEnv } from "./api-wait.js";
+import { ARTIFACT_TOOLS } from "./agent-settings.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
 import { READ_ONLY_TOOLS } from "./rules.js";
@@ -72,6 +73,14 @@ export class Pushable<T> implements AsyncIterable<T> {
   }
 }
 
+/** The agent's environment: Claude Code's entrypoint, and claude.ai connectors off unless the person allowed them. */
+export function claudeEnv(o: Pick<ClaudeRunnerOptions, "env" | "claudeAiConnectors">): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...(o.env ?? process.env), CLAUDE_CODE_ENTRYPOINT: "squeak" };
+  if (o.claudeAiConnectors) delete env.ENABLE_CLAUDEAI_MCP_SERVERS;
+  else env.ENABLE_CLAUDEAI_MCP_SERVERS = "false";
+  return env;
+}
+
 export async function defaultClaudeQuery(onFetch?: () => void): Promise<ClaudeQueryFn> {
   const sdk = await loadAgentSdk(onFetch ? { onFetch } : {});
   return (params) => sdk.query(params as never) as unknown as ClaudeQuery;
@@ -109,6 +118,8 @@ export interface ClaudeRunnerOptions {
   waitTickMs?: number;
   /** Tokens at which the CLI compacts this conversation by itself (`autoCompactWindow`); absent = the CLI's own. */
   autoCompactWindow?: number | null;
+  /** The person allows their claude.ai account's connectors in Squeak chats (default off: the CLI is told not to load them). */
+  claudeAiConnectors?: boolean;
 }
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -198,7 +209,9 @@ export class ClaudeRunner implements Runner {
       // Launched able to switch to "Skip approvals" and back later; canUseTool reads the live mode.
       allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
-      env: withSystemProxyEnv({ ...(this.options.env ?? process.env), CLAUDE_CODE_ENTRYPOINT: "squeak" }),
+      env: withSystemProxyEnv({ ...claudeEnv(this.options) }),
+      // Squeak shows pages through its own `show` tool; Claude Code's artifacts live on claude.ai.
+      disallowedTools: [...ARTIFACT_TOOLS],
       canUseTool: (toolName: string, toolInput: Record<string, unknown>, ctx: Record<string, unknown>) =>
         this.canUseTool(toolName, toolInput, ctx),
       // The message is pushed before the start snapshot finishes; no tool of any mode runs before it (a hook fires

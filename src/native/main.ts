@@ -3,6 +3,7 @@ import path from "node:path";
 import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
 
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
+import { AgentSettings } from "./agent-settings.js";
 import { ProjectPrefs } from "./project-prefs.js";
 import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
@@ -40,6 +41,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const host = new SessionHost({
     store,
     mcpFor: (id) => server?.mcpEndpoint(id) ?? null,
+    claudeAiConnectors: () => new AgentSettings(supportDir).get().claudeAiConnectors,
     ownerName: () => flotilla?.service?.identity.name ?? null,
   });
   const workspaces = new WorkspaceManager({ store });

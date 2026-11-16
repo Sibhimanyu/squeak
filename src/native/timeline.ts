@@ -454,6 +454,9 @@ export class TimelineProjector {
       case "squeak/image":
         step("step.added", `squeak-${m.seq}`, "tool", `Show image ${str(p.name) ?? ""}`.trim(), "done");
         return out;
+      case "squeak/show":
+        step("step.added", `squeak-${m.seq}`, "tool", `Show ${str(p.name) ?? "file"}`.trim(), "done");
+        return out;
       case "squeak/target-branch":
         if (str(p.branch)) step("step.added", `squeak-${m.seq}`, "tool", `Set target branch ${p.branch}`, "done");
         return out;

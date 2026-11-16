@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.27.9
+
+- Settings: the connection status and sign out now live in Account, and Devices is just the iPhones and browsers using your account (or a Sign in button). The wording no longer mentions the cloud or a relay.
+- Squeak chats no longer create claude.ai artifacts. An agent now shows you a page, diagram or document by writing it into the folder and opening it as a file tab in Squeak.
+- Your claude.ai connectors are off in Squeak chats by default. Turn them on in Settings, "Use my claude.ai connectors in Squeak chats".
+
 ## 2.27.8
 
 - The working glyph in the sidebar is larger and fades softly at its edges, and moves slower, with a pace and pattern that drift like real water. A working chat shows its moving glyph once, on the chat itself, not again on its stream and pond.

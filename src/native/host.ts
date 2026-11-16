@@ -198,6 +198,8 @@ export interface HostOptions {
   forkAgent?: AgentForker;
   /** Where a chat's agent reaches Squeak's tools; null = no tools (the server is not up). */
   mcpFor?: (sessionId: string) => McpEndpoint | null;
+  /** Read at each Claude start: may chats use the person's claude.ai connectors (default off). */
+  claudeAiConnectors?: () => boolean;
   /** The owner's pond member name, for the `[from <name> · owner]` line; the macOS full name otherwise. */
   ownerName?: () => string | null;
   /** How recent a chat must be to have its agent warmed when the host starts (default 30 min; 0 = never). */
@@ -221,6 +223,7 @@ export function defaultRunnerFactory(
   mcpFor?: (sessionId: string) => McpEndpoint | null,
   contextFor?: (session: SessionRow) => string | null,
   compactWindowFor?: (session: SessionRow) => number | null,
+  claudeAiConnectors?: () => boolean,
 ): RunnerFactory {
   const plugin = squeakPluginPath();
   return (session, hooks) =>
@@ -235,6 +238,7 @@ export function defaultRunnerFactory(
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
           autoCompactWindow: compactWindowFor?.(session) ?? null,
+          claudeAiConnectors: claudeAiConnectors?.() ?? false,
           log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
@@ -310,6 +314,7 @@ export class SessionHost extends EventEmitter {
         options.mcpFor,
         (s) => this.contextNote(s),
         (s) => cliCompactWindow(this.compactThreshold(s), s.model),
+        options.claudeAiConnectors,
       );
     this.summaryCall = options.summaryCall ?? defaultTitleCall();
     this.projectsDir = options.projectsDir;

@@ -270,6 +270,10 @@ public enum NativeTranscript {
                 guard let path = row.payload["path"]?.string else { break }
                 let name = row.payload["name"]?.string ?? basename(path)
                 step("tool", "Show image \(name)", row, toolId: "squeak-\(row.seq)", detail: .image(path: path, caption: row.payload["caption"]?.string, card: true))
+            case "squeak/show":
+                guard let path = row.payload["path"]?.string else { break }
+                let name = row.payload["name"]?.string ?? basename(path)
+                step("tool", "Show \(row.payload["title"]?.string ?? name)", row, toolId: "squeak-\(row.seq)", detail: .shown(path: path, at: row.createdAt ?? .distantPast))
             case "squeak/target-branch":
                 if let b = row.payload["branch"]?.string { step("tool", "Set target branch \(b)", row, toolId: "squeak-\(row.seq)") }
             case "squeak/progress":

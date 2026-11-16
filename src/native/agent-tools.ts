@@ -196,6 +196,13 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
+    name: "show",
+    description:
+      "Open a file from this chat's folder in the person's Squeak window as a file tab: a page, diagram, document or preview you wrote. HTML and Markdown show as pages. Write the file in the workspace first, then call show with its path. Never use claude.ai artifacts.",
+    inputSchema: obj({ path: { type: "string" }, title: { type: "string" } }, ["path"]),
+    readOnly: false,
+  },
+  {
     name: "set_merge_branch",
     description:
       "Pick a different branch for this stream to merge into; its changes and new pull requests are measured against it. Give the name as it is on origin, without 'origin/', and fetch it first. Nothing is rebased.",
@@ -302,7 +309,8 @@ export const LIMITS = {
 };
 
 export const SHOW_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".svg", ".pdf"]);
-export const MAX_SHOW_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_SHOW_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_SHOW_IMAGE_BYTES = 25 * 1024 * 1024;
 
 const textOf = (payload: unknown): string | null => {
   if (typeof payload !== "object" || payload === null) return null;
@@ -440,6 +448,24 @@ export class AgentTools {
           bytes: size,
         });
         return `Showing ${path.basename(real)} to the person.`;
+      }
+      case "show": {
+        const file = str("path");
+        if (!file) throw new ToolError("path is required.");
+        this.prune();
+        if (this.shown.filter((x) => x.from === s.id).length >= LIMITS.imagesPerHour) {
+          throw new ToolError("This chat showed enough files this hour.");
+        }
+        const { real, relative, size } = this.fileToShow(s, file);
+        this.shown.push({ from: s.id, at: this.now() });
+        this.deps.post(s.id, "squeak/show", {
+          path: path.join(s.cwd, relative),
+          relative,
+          name: path.basename(real),
+          title: str("title")?.trim().slice(0, 200) || null,
+          bytes: size,
+        });
+        return `Opened ${path.basename(real)} in the person's Squeak window.`;
       }
       case "set_merge_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
@@ -710,6 +736,25 @@ export class AgentTools {
     if (!stat.isFile()) throw new ToolError("That is not a file.");
     if (stat.size > MAX_SHOW_IMAGE_BYTES) throw new ToolError("That image is over 25 MB.");
     return { real, size: stat.size };
+  }
+
+  /** A file to open in the Mac app: only inside the chat's own folder, after symlinks are resolved. */
+  fileToShow(s: SessionRow, file: string): { real: string; relative: string; size: number } {
+    const expanded = file.startsWith("~/") ? path.join(os.homedir(), file.slice(2)) : file;
+    let real: string, base: string;
+    try {
+      base = fs.realpathSync(s.cwd);
+      real = fs.realpathSync(path.resolve(s.cwd, expanded));
+    } catch {
+      throw new ToolError("No such file.");
+    }
+    if (real === base || !real.startsWith(base + path.sep)) {
+      throw new ToolError("That file is outside this chat's folder. Write it in the folder first.");
+    }
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) throw new ToolError("That is not a file.");
+    if (stat.size > MAX_SHOW_FILE_BYTES) throw new ToolError("That file is over 10 MB.");
+    return { real, relative: path.relative(base, real), size: stat.size };
   }
 
   private async sendToChat(s: SessionRow, chatId: string | undefined, message: string | undefined): Promise<string> {

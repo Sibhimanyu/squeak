@@ -126,13 +126,16 @@ public enum ToolDetail: Hashable, Sendable {
     /// An image the step read, wrote or showed (Squeak's `show_image`: `card`, with its caption): a thumbnail under the
     /// row that opens the image tab. Never expands.
     case image(path: String, caption: String?, card: Bool)
+    /// A file Squeak's `show` tool opened for the person: its full path and when it was shown. The window opens it as a
+    /// file tab once, only while it is fresh (`ShownFile.shouldAutoOpen`).
+    case shown(path: String, at: Date)
     /// The full path of what a Read opened (the row's label keeps only the file name), so the target can be a link.
     case file(path: String)
 
     /// Whether the row opens to something (a thumbnail and a path are always showing).
     public var expands: Bool {
         switch self {
-        case .image, .file, .progress: false
+        case .image, .file, .progress, .shown: false
         default: true
         }
     }
@@ -140,7 +143,7 @@ public enum ToolDetail: Hashable, Sendable {
     /// The file the step is about, when it names one.
     public var path: String? {
         switch self {
-        case .diff(let path, _), .file(let path), .image(let path, _, _): path
+        case .diff(let path, _), .file(let path), .image(let path, _, _), .shown(let path, _): path
         default: nil
         }
     }
@@ -499,5 +502,14 @@ public struct QuestionCardModel: Equatable, Sendable {
         self.init(
             question: layout.question ?? "Choose one",
             options: layout.cards.map { Option(title: $0.title, detail: $0.detail, recommended: $0.isRecommended) }, age: age)
+    }
+}
+
+/// Squeak's `show` tool: a file the agent wrote for the person, opened in the window as a tab.
+public enum ShownFile {
+    /// A shown file opens by itself only while it is new (the person is looking at this turn), never when an old chat is
+    /// scrolled into view, and only once per shown row.
+    public static func shouldAutoOpen(shownAt: Date, now: Date, alreadyOpened: Bool, maxAge: TimeInterval = 20) -> Bool {
+        !alreadyOpened && now.timeIntervalSince(shownAt) >= -5 && now.timeIntervalSince(shownAt) <= maxAge
     }
 }

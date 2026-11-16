@@ -1077,6 +1077,21 @@ public struct NativeHostClient: Sendable {
         catch NativeHostError.http(404, _) { return false }
     }
 
+    /// `GET /native/agent-settings`: whether chats may use the claude.ai account's connectors; nil when the host is older.
+    public func claudeAiConnectors() async throws -> Bool? {
+        do {
+            let data = try await call("GET", "/native/agent-settings")
+            return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiConnectors"] as? Bool
+        } catch NativeHostError.http(404, _) { return nil }
+    }
+
+    /// `PUT /native/agent-settings`: false when the host is older than the route.
+    @discardableResult
+    public func setClaudeAiConnectors(_ on: Bool) async throws -> Bool {
+        do { _ = try await call("PUT", "/native/agent-settings", body: .object(["claudeAiConnectors": .bool(on)])); return true }
+        catch NativeHostError.http(404, _) { return false }
+    }
+
     /// The pond's own icon (PNG bytes), nil when it has none.
     public func projectIcon(key: String) async throws -> Data? {
         do { return try await call("GET", "/native/projects/\(Self.id(key))/icon") }

@@ -121,6 +121,29 @@ describe("ClaudeRunner", () => {
     expect(lines.some((l) => l.startsWith("send: spawn"))).toBe(true);
   });
 
+  it("turns claude.ai artifacts off and its connectors off unless the person allowed them", async () => {
+    for (const allowed of [false, true]) {
+      const f = fakeQuery();
+      const { h } = hooks();
+      const r = new ClaudeRunner({
+        cwd: "/w",
+        model: "m",
+        permissionMode: "default",
+        hooks: h,
+        queryFn: f.queryFn,
+        executable: "/bin/claude",
+        env: { PATH: "/bin", ENABLE_CLAUDEAI_MCP_SERVERS: allowed ? "false" : undefined },
+        claudeAiConnectors: allowed,
+      });
+      await r.send("hi");
+      await tick();
+      const o = f.calls[0] as { disallowedTools: string[]; env: Record<string, string | undefined> };
+      expect(o.disallowedTools).toEqual(["Artifact", "ArtifactComments", "ArtifactData", "ArtifactCheck"]);
+      expect(o.env.ENABLE_CLAUDEAI_MCP_SERVERS).toBe(allowed ? undefined : "false");
+      expect(o.env.CLAUDE_CODE_ENTRYPOINT).toBe("squeak");
+    }
+  });
+
   it("gives the chat Squeak's tools and plugin, and lets only Squeak's own tools run without asking", async () => {
     const f = fakeQuery();
     const asked: string[] = [];

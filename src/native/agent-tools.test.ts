@@ -290,6 +290,43 @@ describe("show_image", () => {
   });
 });
 
+describe("show", () => {
+  it("opens a workspace file in the window with a Mac-readable event", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    fs.mkdirSync(path.join(h.dir, "out"));
+    fs.writeFileSync(path.join(h.dir, "out", "page.html"), "<h1>hi</h1>");
+    const r = await callTool(h, a.id, "show", { path: "out/page.html", title: "Preview" });
+    expect(r.isError).toBeFalsy();
+    const ev = h.store.messagesAfter(a.id).find((m) => m.kind === "squeak/show");
+    const p = ev!.payload as { path: string; relative: string; name: string; title: string | null };
+    expect(p.relative).toBe(path.join("out", "page.html"));
+    expect(p.path).toBe(path.join(h.dir, "out", "page.html"));
+    expect(p.name).toBe("page.html");
+    expect(p.title).toBe("Preview");
+    expect(TOOLS.find((t) => t.name === "show")).toBeTruthy();
+  });
+
+  it("refuses paths outside the folder, a symlink escape, a folder and a path-less call", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tools-out-"));
+    fs.writeFileSync(path.join(outside, "secret.html"), "x");
+    fs.symlinkSync(path.join(outside, "secret.html"), path.join(h.dir, "link.html"));
+    fs.symlinkSync(outside, path.join(h.dir, "dirlink"));
+    fs.mkdirSync(path.join(h.dir, "sub"));
+    expect((await callTool(h, a.id, "show", { path: path.join(outside, "secret.html") })).content[0]!.text).toMatch(
+      /outside/,
+    );
+    expect((await callTool(h, a.id, "show", { path: "../x.html" })).isError).toBe(true);
+    expect((await callTool(h, a.id, "show", { path: "link.html" })).content[0]!.text).toMatch(/outside/);
+    expect((await callTool(h, a.id, "show", { path: "dirlink/secret.html" })).content[0]!.text).toMatch(/outside/);
+    expect((await callTool(h, a.id, "show", { path: "sub" })).content[0]!.text).toMatch(/not a file/);
+    expect((await callTool(h, a.id, "show", {})).isError).toBe(true);
+    expect(h.store.messagesAfter(a.id).some((m) => m.kind === "squeak/show")).toBe(false);
+  });
+});
+
 describe("stream_changes", () => {
   it("includes commits, uncommitted and untracked work against the target branch", async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tools-repo-"));

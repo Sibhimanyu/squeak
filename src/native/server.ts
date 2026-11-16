@@ -1,5 +1,6 @@
 import { buildDirectory, mapOrder, type DirSession, type PondDirectory } from "../flotilla/directory.js";
 import { toFleetState } from "../fleet/observers/squeak-native.js";
+import { AgentSettings } from "./agent-settings.js";
 import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -135,6 +136,7 @@ export class NativeServer {
   private readonly pickers: RepoPickers;
   readonly planner: Planner;
   private readonly prefs: ProjectPrefs | null;
+  private readonly agentSettings: AgentSettings | null;
   private readonly cleanup: DiskCleanup;
   private readonly history: VersionHistory;
 
@@ -143,6 +145,7 @@ export class NativeServer {
     this.history = options.history ?? new VersionHistory(options.store);
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
+    this.agentSettings = options.supportDir ? new AgentSettings(options.supportDir) : null;
     this.prefs = options.supportDir ? new ProjectPrefs(options.supportDir, options.iconEncoder) : null;
     this.git =
       options.git ??
@@ -742,6 +745,17 @@ export class NativeServer {
     }
     if (area === "directory" && !id && method === "GET") {
       return this.json(res, 200, await this.directory());
+    }
+    if (area === "agent-settings" && !id && (method === "GET" || method === "PUT")) {
+      const settings = this.agentSettings;
+      if (!settings) throw new HttpError(404, "not found");
+      if (method === "GET") return this.json(res, 200, settings.get());
+      try {
+        return this.json(res, 200, settings.set(await this.body(req)));
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(400, error instanceof Error ? error.message : "bad settings");
+      }
     }
     if (area === "pond-order" && !id && (method === "GET" || method === "PUT")) {
       const { prefs } = this;

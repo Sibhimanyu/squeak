@@ -655,13 +655,27 @@ private struct ModelsSettings: View {
 /// Settings › Agents › Messages: what Send does while the agent works.
 private struct MessagesSettings: View {
     @Environment(AppModel.self) private var model
+    @State private var connectors: Bool?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
                 SendDefaultPicker(model: model)
             }
+            if let on = connectors {
+                SettingsCard(title: "Agents", subtitle: "What Squeak chats can reach.", symbol: "puzzlepiece.extension") {
+                    Toggle(isOn: Binding(get: { on }, set: { v in
+                        connectors = v
+                        Task { if (try? await model.nativeHost.setClaudeAiConnectors(v)) != true { connectors = await (try? model.nativeHost.claudeAiConnectors()) ?? !v } }
+                    })) {
+                        Text("Use my claude.ai connectors in Squeak chats").font(Typo.label).foregroundStyle(Theme.ink)
+                    }
+                    .toggleStyle(.switch)
+                    SectionFootnote("Connectors from your claude.ai account (like Google Drive or Figma). Off keeps chats to Squeak's own tools and your project's.")
+                }
+            }
         }
+        .task { connectors = (try? await model.nativeHost.claudeAiConnectors()) ?? nil }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
     }
