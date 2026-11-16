@@ -19,7 +19,7 @@ import Testing
     @Test func naturalWidthHugsTheTitle() {
         #expect(ChatTabWidth.natural(titleWidth: 30) == ChatTabWidth.chrome + 30)
         #expect(ChatTabWidth.natural(titleWidth: 900) == ChatTabWidth.chrome + ChatTabWidth.maxTitle)
-        #expect(ChatTabWidth.chrome == 60)
+        #expect(ChatTabWidth.chrome == 54)
     }
 }
 

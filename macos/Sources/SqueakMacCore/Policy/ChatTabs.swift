@@ -60,8 +60,8 @@ public enum ModelPicking {
 /// it needs to be. Only when the strip genuinely runs out of room do titles truncate, and then the longest tabs give
 /// way first, down to a floor that still shows the icon and a few characters (`cap(naturals:available:)`).
 public enum ChatTabWidth {
-    public static let leadingPad: Double = 10
-    public static let trailingPad: Double = 10
+    public static let leadingPad: Double = 7
+    public static let trailingPad: Double = 7
     public static let iconSlot: Double = 16
     public static let iconGap: Double = 6
     public static let closeGap: Double = 4

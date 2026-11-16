@@ -620,7 +620,7 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 
 - **Stream and pond marks (owner, 2026-11-16; replace the stream glyph, the dot-grid loader and the matrix glyph everywhere, Mac and iPhone).** A stream, a pond row and a pond
   page card show the rollup as one mark in a fixed slot (20-24pt Mac, 24-34pt iPhone): working `TideGlyph` in `working`, needs you the `triangle-alert` glyph, error `circle-x`
-  in `negative`, unread nothing (title weight), idle nothing. No count on any mark: a pond row's needs-you number is in its tooltip and VoiceOver label. **One rollup decides every mark:**
+  in `negative`, unread and idle **a still frame of the tide glyph in `subtle`** (`TideGlyph.calm`: the same grid, slot and cell pitch as the working glyph, one fixed frame of calm water from a fixed seed, no timeline, zero CPU; so idle to working only starts the motion and changes colour; unread is the title's weight). No count on any mark: a pond row's needs-you number is in its tooltip and VoiceOver label. **One rollup decides every mark:**
   the daemon gives each pond and each stream `activity` (`working`, `needs_you`, `error`, `idle`; needs you beats working beats error beats idle; a chat held by a running
   duckling counts as working) with `working` and `needsYou` counts (phone view `ponds[]` and `streams[]`; `/state.pondStatus`); the surfaces draw it and decide nothing.
 
@@ -925,7 +925,7 @@ backgrounds the primary is ink-black instead, because yellow fails on white
 
 ### 8.10 Workbench
 
-- **Tab width and look (`ChatTabWidth`, `StripTab`; one component for the centre, right and bottom strips, owner 2026-11-16):** a tab hugs its content and is never padded to a width: 10pt side padding, 16pt icon, 6pt gap, title in `body` (13pt; `ink` selected, `muted` otherwise), 4pt gap, a 14pt × slot that is reserved but shows only while the pointer is on that tab (selected or not), 2pt accent underline when selected. Tabs sit edge to edge (the padding is the gap). A title is at most 200pt, tail-truncated, and truncates only when the strip genuinely runs out of room: then the longest tabs give way first to a shared cap (`ChatTabWidth.cap`, shorter tabs keep their own width) down to a 104pt floor (chrome plus 44pt of title), then the strip scrolls. A working chat shows no glyph in its tab: its duck pulses (opacity 1 to 0.45, 0.9s), adding no width; the full working indicator stays in the chat's working row.
+- **Tab width and look (`ChatTabWidth`, `StripTab`; one component for the centre, right and bottom strips, owner 2026-11-16):** a tab hugs its content and is never padded to a width: 7pt side padding, 16pt icon, 6pt gap, title in `body` (13pt; `ink` selected, `muted` otherwise), 4pt gap, a 14pt × slot that is reserved but shows only while the pointer is on that tab (selected or not), 2pt accent underline when selected. Tabs sit edge to edge (the padding is the gap). A title is at most 200pt, tail-truncated, and truncates only when the strip genuinely runs out of room: then the longest tabs give way first to a shared cap (`ChatTabWidth.cap`, shorter tabs keep their own width) down to a 98pt floor (chrome plus 44pt of title), then the strip scrolls. A working chat shows no glyph in its tab: its duck pulses (opacity 1 to 0.45, 0.9s), adding no width; the full working indicator stays in the chat's working row.
 
 The conversation window of Squeak for Mac. Mocks and renders: `.context/design/` (1440×900). Anything not covered by another section is defined here.
 
