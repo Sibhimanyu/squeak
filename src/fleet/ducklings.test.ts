@@ -193,3 +193,16 @@ describe("terminal chats hold for background tasks the same way", () => {
     expect(holdForBackgroundTasks(base!, [task("agent", NOW, "done")], at).state).toBe("finished");
   });
 });
+
+describe("background-only marking", () => {
+  it("flags a Squeak chat held working by its helpers, and no other state", () => {
+    const [base] = mergeObservations([native()]);
+    const held = attachDucklings(base!, running, Date.parse(NOW));
+    expect(held).toMatchObject({ state: "working", backgroundOnly: true });
+    const done: FleetDucklings = {
+      running: 0,
+      items: [{ ...running.items[0]!, status: "done", endedAt: NOW, reportedAt: NOW }],
+    };
+    expect(attachDucklings(base!, done, Date.parse(NOW) + 10 * 60_000).backgroundOnly).toBeUndefined();
+  });
+});

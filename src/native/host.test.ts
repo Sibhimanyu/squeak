@@ -741,3 +741,91 @@ describe("pending items (the queue stack and steers in flight)", () => {
     expect(runners[0]!.sent).toEqual(["go"]);
   });
 });
+
+describe("a chat whose helpers still run when its turn ends", () => {
+  const launch = (h: RunnerHooks) => {
+    h.onMessage("agent", "assistant", {
+      type: "assistant",
+      message: {
+        id: "m1",
+        content: [
+          { type: "tool_use", id: "toolu_1", name: "Agent", input: { description: "Editor page", prompt: "do it" } },
+        ],
+      },
+    });
+    h.onMessage("agent", "user", {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Async agent launched" }] },
+      tool_use_result: { status: "async_launched", isAsync: true },
+    });
+    h.onBackground!(1);
+  };
+
+  it("settles to idle with a running duckling, runs the report as an auto turn, and finishes once", async () => {
+    const { host, runners, store, events } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const h = runners[0]!.hooks;
+    launch(h);
+    h.onMessage("agent", "assistant", {
+      type: "assistant",
+      message: { id: "m2", content: [{ type: "text", text: "Handed off." }] },
+    });
+    h.onTurnEnd("idle");
+    await tick(20);
+    // the turn ended: idle, not working, and the duckling is the only thing still going
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    const row = host.list().find((x) => x.id === s.id)!;
+    expect(row.ducklings?.running).toBe(1);
+    expect(row.helpersWorking).toBe(true);
+    expect(row.busy).toBeUndefined();
+
+    // the worker reports in: Claude Code starts a turn by itself
+    h.onMessage("agent", "user", {
+      type: "user",
+      message: {
+        content:
+          "<task-notification><tool-use-id>toolu_1</tool-use-id><status>completed</status><result>done</result></task-notification>",
+      },
+    });
+    h.onBackground!(0);
+    h.onMessage("agent", "assistant", {
+      type: "assistant",
+      message: { id: "m3", content: [{ type: "text", text: "The editor page is in." }] },
+    });
+    expect(store.getSession(s.id)?.status).toBe("working");
+    h.onTurnEnd("idle");
+    await tick(20);
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    expect(host.list().find((x) => x.id === s.id)?.helpersWorking).toBeUndefined();
+
+    const log = host.timelinePage(s.id, { since: 0 }).events;
+    const kinds = log.map((e) => e.type).filter((t) => t === "turn.started" || t === "turn.ended");
+    expect(kinds).toEqual(["turn.started", "turn.ended", "turn.started", "turn.ended"]);
+    const starts = log.filter((e) => e.type === "turn.started") as unknown as {
+      auto?: boolean;
+      author?: unknown;
+      text: string;
+    }[];
+    expect(starts[0]).toMatchObject({ text: "go" });
+    expect(starts[1]).toMatchObject({ auto: true, text: "" });
+    expect(starts[1]).not.toHaveProperty("author");
+    // the report is never the person's message
+    expect(store.messagesAfter(s.id, 0).filter((m) => m.role === "user" && m.kind === "user/text")).toHaveLength(1);
+    // statuses: working at both turn starts, idle after each end, in that order
+    const statuses = events.filter((e) => e.type === "status").map((e) => (e as { status: string }).status);
+    expect(statuses.filter((x, i) => x !== statuses[i - 1])).toEqual(["working", "idle", "working", "idle"]);
+  });
+
+  it("a send while only helpers run is a normal send, not a steer or a queue", async () => {
+    const { host, runners, store } = setup({ canSteer: true });
+    const s = await host.create({ ...spec, text: "go" });
+    launch(runners[0]!.hooks);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    expect(await host.send(s.id, "meanwhile")).toEqual({ queued: false });
+    expect(runners[0]!.steered).toEqual([]);
+    expect(runners[0]!.sent).toEqual(["go", "meanwhile"]);
+    expect(store.queued(s.id)).toHaveLength(0);
+  });
+});

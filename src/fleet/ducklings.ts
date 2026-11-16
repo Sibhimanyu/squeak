@@ -43,7 +43,7 @@ export function attachDucklings(
   if (session.origin !== "squeak" || !ducklings || ducklings.items.length === 0) return session;
   const held = { ...session, ducklings };
   if ((session.state === "finished" || session.state === "idle") && helpersKeepWorking(ducklings, nowMs)) {
-    return { ...held, state: "working", stateSource: "host" };
+    return { ...held, state: "working", stateSource: "host", backgroundOnly: true };
   }
   return held;
 }

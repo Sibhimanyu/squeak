@@ -74,10 +74,22 @@ struct DucklingsTests {
         #expect(dock(nil, bg: 2).showsRow && dock(nil, bg: 2).readyLine == nil)
     }
 
-    @Test func hostSaysHelpersKeepAReadyChatWorking() throws {
-        let working = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"s1","status":"idle","helpersWorking":true,"lastTurnEndedAt":"2026-11-12T07:31:26.000Z"}"#.utf8))
-        #expect(NativeAdapter.started(working).state == .working)
+    @Test func helpersDoNotMakeAReadyChatWorkingOnTheMac() throws {
+        // The fleet holds the finish push while helpers run; on the Mac the turn is over, so there is no Working row,
+        // no Stop and no steer, and the ducklings draw the quiet mark and the bar.
+        let held = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"s1","status":"idle","helpersWorking":true,"lastTurnEndedAt":"2026-11-12T07:31:26.000Z"}"#.utf8))
+        let mapped = NativeAdapter.started(held)
+        #expect(mapped.state == .finished)
         let ready = NativeSession(id: "s2", status: "idle", lastTurnEndedAt: Date(), ducklings: DucklingSet(running: 1))
-        #expect(NativeAdapter.started(ready).state == .finished)  // the Mac does not guess from the chip count
+        let session = NativeAdapter.started(ready)
+        #expect(session.state == .finished)
+        #expect(ChatMark.of(session, unread: false) == ChatMark(.working, quiet: true))
+        #expect(SessionGrouping.kind(of: session, now: Date()) == .working)
+        let dock = ChatDock.resolve(
+            liveState: session.state, messages: [], awaitingApproval: false, backgroundCount: 0, backgroundWaiting: false,
+            hostStatus: "idle", hostBackgroundCount: nil, optimistic: false, hostOwnsState: true, hasStopRoute: true,
+            activity: [], model: nil, ducklings: DucklingSet(running: 1))
+        #expect(!dock.working && !dock.showsRow && !dock.canStop)
+        #expect(dock.readyLine != nil)
     }
 }

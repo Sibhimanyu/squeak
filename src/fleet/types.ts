@@ -184,6 +184,12 @@ export interface ObservedSession {
   conductorWaiting?: boolean;
   /** A Squeak chat's background helpers (async subagents, background shells), from the session host. Never holds its state. */
   ducklings?: FleetDucklings;
+  /**
+   * A Squeak chat whose own turn ended while helpers still run: `state` stays `working` (no finish push until the last
+   * worker's follow-up turn ends), but it is not busy itself. Surfaces draw a still mark, no Working line, no Stop.
+   * Absent otherwise; old surfaces ignore it and read `working`.
+   */
+  backgroundOnly?: boolean;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
   /** The same failing step repeated in the current turn (looping.ts), from the transcript tail. */

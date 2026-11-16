@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.27.11
+
+- When Claude hands work to ducklings and finishes its own part, the chat settles: no Working line or stop button, you can message normally, and only the ducklings bar stays until they're done.
+
 ## 2.27.10
 
 - The working glyph moves calmly and smoothly, with soft fades instead of blinks, keeps moving while Squeak isn't the front app, and is a little larger in the sidebar.

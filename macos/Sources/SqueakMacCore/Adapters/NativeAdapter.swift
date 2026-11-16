@@ -127,8 +127,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         let target = hostSessionId(s.id)
         let folder = s.cwd.split(separator: "/").last.map(String.init)
         var state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
-        // The host decides that helpers keep a ready chat working; this only draws it.
-        if s.helpersWorking, state == .finished || state == .idle { state = .working }
+        // Helpers keeping a chat "working" is the fleet's and the push's rule. On the Mac the turn is over: the chat is
+        // ready (no Working line, no Stop, a normal send) and its running ducklings draw the still mark and the bar.
         let ask = state == .finished ? d?.asks : nil
         let caps = Capabilities(
             discover: .supported, readTranscript: .supported, send: .supported, activity: .supported, approve: .supported,
