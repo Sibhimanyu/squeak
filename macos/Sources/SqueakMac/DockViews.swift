@@ -539,7 +539,8 @@ struct DockWorkspaceMenuItems: View {
 /// Window menu's panel list (also a tab strip's right-click menu): a checkmark when open, a choice opens or closes it.
 struct WindowPanelMenuItems: View {
     var includeReset = false
-    @Environment(AppModel.self) private var model
+    // Menus (Commands) have no environment, so the model is the shared one, never `@Environment`: reading it there crashed at launch.
+    private var model: AppModel { AppModel.shared }
 
     var body: some View {
         let dock = DockStore.shared
