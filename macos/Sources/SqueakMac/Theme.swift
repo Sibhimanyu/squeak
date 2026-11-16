@@ -105,11 +105,16 @@ struct WorkingGlyph: View {
 /// One mark drawn at its size (§8.1): the tide glyph (the quiet one at 70%), the status marks 14-18pt.
 struct ChatMarkGlyph: View {
     let mark: ChatMark
+    /// A row's subtitle: the working glyph takes exactly its own width and starts at the leading edge (no overflow).
+    var leading = false
 
     var body: some View {
         switch mark.kind {
         case .working:
-            WorkingGlyph(height: 15, slot: 24, grid: .compact).opacity(mark.quiet ? 0.7 : 1)
+            Group {
+                if leading { WorkingGlyph(height: 10, slot: TideGlyph.Grid.mark.width(height: 10), alignment: .leading) }
+                else { WorkingGlyph(height: 15, slot: 24, grid: .compact) }
+            }.opacity(mark.quiet ? 0.7 : 1)
         case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)
         case .unread: StatusMark(kind: .unread, color: Theme.done, size: 18)

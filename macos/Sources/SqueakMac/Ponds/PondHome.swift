@@ -467,10 +467,13 @@ struct PondSection<Content: View>: View {
 /// finished thread has none (its age says enough).
 struct PondStateMark: View {
     let state: PondThreadState
+    var leading = false
 
     var body: some View {
         switch state {
-        case .working: WorkingGlyph(height: 15, slot: 24, grid: .compact).accessibilityLabel("Working")
+        case .working:
+            (leading ? WorkingGlyph(height: 10, slot: TideGlyph.Grid.mark.width(height: 10), alignment: .leading) : WorkingGlyph(height: 15, slot: 24, grid: .compact))
+                .accessibilityLabel("Working")
         case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16).accessibilityLabel("Needs you")
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14).accessibilityLabel("Failed")
         case .finished: EmptyView()

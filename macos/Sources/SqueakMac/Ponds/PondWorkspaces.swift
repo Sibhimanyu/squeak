@@ -16,12 +16,19 @@ struct PondWorkspacesView: View {
         return " \u{00B7} \(n) \(n == 1 ? "thread" : "threads")"
     }
 
+    @State private var expandedStreams: Set<String> = []
+
+    private func expandedBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { expandedStreams.contains(id) },
+                set: { if $0 { expandedStreams.insert(id) } else { expandedStreams.remove(id) } })
+    }
+
     var body: some View {
         if !layout.workspaces.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
                 if showsHeading { Text("Streams").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader) }
                 LazyVStack(spacing: 14) {
-                    ForEach(layout.workspaces) { w in PondWorkspaceCardView(card: w, members: members, open: open) }
+                    ForEach(layout.workspaces) { w in PondWorkspaceCardView(card: w, members: members, open: open, expanded: expandedBinding(w.id)) }
                 }
             }
         }
@@ -41,11 +48,12 @@ private struct PondWorkspaceCardView: View {
     let members: [FlockMember]
     let open: (PondChatRow) -> Void
     @Environment(AppModel.self) private var model
+    @Binding var expanded: Bool
 
     var body: some View {
+        let shown = PondCardRows.visible(threads: card.chats, expanded: expanded)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s) {
-                StreamStateMark(state: StreamGlyphState.of(rows: card.chats).asRollup(childrenVisible: !card.chats.isEmpty), slotWidth: 16, name: card.displayTitle)
                 Text(verbatim: card.displayTitle).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(verbatim: "\(card.chats.count)")
@@ -62,7 +70,21 @@ private struct PondWorkspaceCardView: View {
             if !card.chats.isEmpty {
                 Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
             }
-            ForEach(card.chats) { r in PondChatRowView(row: r, members: members, open: open) }
+            ForEach(shown.rows) { r in PondChatRowView(row: r, members: members, open: open) }
+            if shown.hiddenCount > 0 || (expanded && card.chats.count > PondCardRows.minimum) {
+                Button {
+                    withAnimation(Motion.standard) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(verbatim: expanded ? "Show less" : "Show \(shown.hiddenCount) more").font(Typo.footnote)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold)).accessibilityHidden(true)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 16).padding(.vertical, 10).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             if let m = card.emptyMain {
                 HStack(spacing: Space.s) {
                     Text("The pond\u{2019}s own folder").font(Typo.footnote).foregroundStyle(Theme.muted)
@@ -123,7 +145,7 @@ private struct PondChatRowView: View {
                             .lineLimit(2).multilineTextAlignment(.leading)
                     }
                     HStack(spacing: 6) {
-                        if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
+                        if let m = row.mark { ChatMarkGlyph(mark: m, leading: true) } else { PondStateMark(state: row.state, leading: true) }
                         Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
                         if row.ducklingsRunning > 0 {
