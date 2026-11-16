@@ -18,7 +18,6 @@ struct WorkbenchCentre: View {
     /// The right zone is on screen (its toggle sits in this header's place when it is not).
     let inspectorOpen: Bool
     /// The right zone's tab is Code, which carries the git cluster itself.
-    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     let showingCompose: Bool
 
@@ -44,7 +43,7 @@ struct WorkbenchCentre: View {
                 let place = model.sidebarTree.place(of: chat.key)
                 WorkbenchHeader(
                     session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.displayTitle,
-                    sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, gitInRightStrip: gitInRightStrip, toggleSidebar: toggleSidebar)
+                    sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
                 if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
                 HStack {
@@ -119,7 +118,6 @@ private struct WorkbenchHeader: View {
     let workspace: String?
     let sidebarHidden: Bool
     let inspectorOpen: Bool
-    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -157,7 +155,7 @@ private struct WorkbenchHeader: View {
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
-            if !gitInRightStrip, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
+            if session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
             if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }

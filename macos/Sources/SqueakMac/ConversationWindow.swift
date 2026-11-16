@@ -75,32 +75,34 @@ struct ConversationView: View {
         Binding(get: { dock.layout.right.size ?? 0 }, set: { v in dock.update { $0.setSize(v > 0 ? v : nil, for: .right) } })
     }
 
-    private func sidebarWidth(open: Bool, inspectorOpen: Bool) -> Double {
-        PaneWidths.effective(
-            sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault, window: windowWidth,
-            otherPane: inspectorOpen
-                ? PaneWidths.clamp(inspectorWidthSaved.wrappedValue, PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: open)) : 0)
-    }
-
-    private func inspectorWidth(sidebarOpen: Bool) -> Double {
-        PaneWidths.effective(
-            inspectorWidthSaved.wrappedValue, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: sidebarOpen), window: windowWidth,
-            otherPane: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
+    /// The window's narrowest content: sidebar min + centre min (+ right min while the right zone is shown).
+    private var minContentWidth: CGFloat {
+        let right = dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads) && !dock.layout.right.collapsed
+            && model.settingsSection == nil && model.selectedSession != nil
+        return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.settingsSection != nil || !sidebarHidden, rightShown: right))
     }
 
     var body: some View {
         @Bindable var model = model
         @Bindable var git = model.git
         let layout = dock.layout
-        let ducklingOpen = DucklingRef.open(model.openDuckling, whenSelected: model.selectedSession?.key) != nil
         let dockFiles = dock.files
         let dockTerminals = dock.activeTerminals
         let dockThreads = dock.threads
         let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads) && !layout.right.collapsed
-        let showsInspector = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
+        let showsInspectorWanted = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
-        let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
-        let inspectorW = inspectorWidth(sidebarOpen: !sidebarHidden)
+        // One solver decides every width, so the panes can never add up to more than the window.
+        let solved = PaneLayoutSolver.solve(
+            window: windowWidth,
+            sidebar: .init(shown: !sidebarHidden, preferred: sidebarWidthSaved, range: PaneWidths.sidebarRange),
+            right: .init(
+                shown: showsInspectorWanted,
+                preferred: (dock.layout.right.size ?? 0) > 0 ? dock.layout.right.size! : PaneWidths.inspectorDefault(window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarWidthSaved),
+                range: PaneWidths.inspectorRange))
+        let showsInspector = showsInspectorWanted && solved.rightShown
+        let sidebarW = solved.sidebar
+        let inspectorW = solved.right
         let showingSettings = model.settingsSection != nil
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
@@ -117,7 +119,7 @@ struct ConversationView: View {
                         WorkbenchSidebar(width: sidebarW)
                             .overlay(alignment: .trailing) {
                                 PaneResizeHandle(
-                                    edge: .trailing, width: sidebarWidthBinding, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                    edge: .trailing, width: Binding(get: { sidebarW }, set: { sidebarWidthBinding.wrappedValue = $0 }), range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
                                     window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
                             }
                             .transition(Motion.morph(entering: false))
@@ -136,12 +138,15 @@ struct ConversationView: View {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
                             sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && chatOpen,
-                            gitInRightStrip: showsInspector && chatOpen && layout.right.selected == .code && !ducklingOpen,
+                            
                             toggleSidebar: toggleSidebar, showingCompose: showingCompose
                         )
                         .squeakWindowCanvas()
                         if placement == .underCentre { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight) }
                     }
+                    // Fixed to what the solver left, so nothing inside can push the row wider than the window.
+                    .frame(width: max(1, windowWidth - sidebarW - inspectorW))
+                    .clipped()
                     if showsInspector, chatOpen {
                         VStack(spacing: 0) {
                             DockRightColumn(session: model.selectedSession, width: inspectorW)
@@ -151,7 +156,7 @@ struct ConversationView: View {
                         }
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
-                                edge: .leading, width: inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
+                                edge: .leading, width: Binding(get: { inspectorW }, set: { inspectorWidthSaved.wrappedValue = $0 }), range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
                         .transition(paneTransition(.trailing)).zIndex(1)
@@ -247,7 +252,7 @@ struct ConversationView: View {
             }
             .opacity(0).accessibilityHidden(true)
         }
-        .frame(minWidth: 960, minHeight: 620)
+        .frame(minWidth: minContentWidth, minHeight: 620)
         .sheet(item: $model.permissionSheet) { kind in PermissionSheet(kind: kind) }
         .sheet(item: $git.mergeConfirm) { MergeConfirmSheet(confirm: $0) }
     }

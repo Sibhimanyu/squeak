@@ -154,17 +154,18 @@ struct DockItemTab<Icon: View>: View {
                 icon().frame(width: 16).opacity(selected ? 1 : 0.8)
                 Text(verbatim: title).font(.system(size: 14, weight: .regular))
                     .foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
+                    .frame(minWidth: TabStripFit.titleMin, maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
                 if dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).accessibilityLabel("Unsaved changes") }
                 Button(action: close) {
                     Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .opacity(hovering ? 1 : 0).allowsHitTesting(hovering).animation(Motion.quick, value: hovering)
+                .opacity(hovering || selected ? 1 : 0).allowsHitTesting(hovering || selected).animation(Motion.quick, value: hovering)
                 .help("Close \(title)").accessibilityLabel("Close \(title)")
             }
             .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
-            .frame(minWidth: ChatTabWidth.hugMinWidth, minHeight: height, maxHeight: height, alignment: .leading)
+            .frame(minWidth: max(ChatTabWidth.hugMinWidth, TabStripFit.tabMin), minHeight: height, maxHeight: height, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
             .onHover { inside in
                 hovering = inside
                 if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
@@ -176,6 +177,7 @@ struct DockItemTab<Icon: View>: View {
         }
         // Not a Button: a Button takes the mouse-down and the drag never starts.
         .onTapGesture(perform: select)
+        .overlay(MiddleClick(action: close))
         .accessibilityAddTraits(.isButton)
         .opacity(dock.dragging == item ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == item)
@@ -196,7 +198,7 @@ struct DockItemTab<Icon: View>: View {
                 }
             }
             Divider()
-            Button("Close", action: close)
+            Button("Close tab", action: close)
         }
     }
 }
@@ -301,10 +303,14 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
     let zone: DockZone
     let height: CGFloat
     let session: HostSession?
+    /// The trailing accessory's width: it is dropped when the tabs do not all fit beside it (0 = never dropped).
+    var trailingWidth: Double = 0
+    var leadingWidth: Double = 40
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var trailing: () -> Trailing
     @Environment(AppModel.self) private var model
     @Namespace private var indicator
+    @State private var stripWidth: Double = 0
 
     var body: some View {
         let dock = DockStore.shared
@@ -345,9 +351,14 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                 }
                 .padding(.horizontal, Space.s)
             }
-            trailing()
+            if trailingWidth == 0 || TabStripFit.showsAccessory(
+                strip: stripWidth, tabs: state.panels.filter { $0 != .terminal }.count + dock.threads.threads(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
+                leading: leadingWidth, accessory: trailingWidth) {
+                trailing()
+            }
         }
         .frame(height: height)
+        .background(GeometryReader { g in Color.clear.onAppear { stripWidth = g.size.width }.onChange(of: g.size.width) { _, w in stripWidth = w } })
         .dockDrop(zone, wash: false)
         .animation(Motion.standard, value: state.selected)
         .animation(Motion.standard, value: shownFile)
@@ -439,9 +450,7 @@ struct DockRightColumn: View {
                     DockZoneStrip(zone: .right, height: Metrics.header, session: session) {
                         Color.clear.frame(width: Space.m + PaneToggle.size)
                     } trailing: {
-                        if DockStore.shared.layout.right.selected == .code, let session, session.source == .squeak {
-                            GitCluster(session: session, showsBranch: false).padding(.trailing, Space.m)
-                        }
+                        EmptyView()
                     }
                     .background(WindowDragArea())
                     DockZoneBody(zone: .right, session: session)
@@ -470,7 +479,7 @@ struct DockBottomZone: View {
         let stored = state.size ?? TerminalPanelSizing.defaultHeight
         VStack(spacing: 0) {
             if open { dragHandle(stored: stored) } else { Rectangle().fill(Theme.line).frame(height: 1) }
-            DockZoneStrip(zone: .bottom, height: CGFloat(LowerPanelRules.headerHeight), session: session) {
+            DockZoneStrip(zone: .bottom, height: CGFloat(LowerPanelRules.headerHeight), session: session, trailingWidth: 270, leadingWidth: 44) {
                 Button { dock.update { $0.setCollapsed(open, for: .bottom) } } label: {
                     Lucide(.chevronDown, size: 14, color: Theme.muted).rotationEffect(.degrees(open ? 0 : 180))
                         .frame(width: 28, height: 28).contentShape(Rectangle())
@@ -607,5 +616,30 @@ struct DockWorkspacePicker: View {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         DockStore.shared.edit { $0.delete(id: active.id) }
+    }
+}
+
+/// A middle click on the view it overlays (a tab) runs `action`. The overlay never takes hits, so clicks, drags and the
+/// context menu reach the tab; a local monitor watches for the middle button inside its bounds.
+struct MiddleClick: NSViewRepresentable {
+    let action: () -> Void
+    func makeNSView(context: Context) -> NSView { Catcher(action: action) }
+    func updateNSView(_ view: NSView, context: Context) { (view as? Catcher)?.action = action }
+
+    final class Catcher: NSView {
+        var action: () -> Void
+        private var monitor: Any?
+        init(action: @escaping () -> Void) { self.action = action; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError() }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp) { [weak self] event in
+                guard let self, event.buttonNumber == 2, event.window === self.window else { return event }
+                if self.bounds.contains(self.convert(event.locationInWindow, from: nil)) { self.action(); return nil }
+                return event
+            }
+        }
     }
 }

@@ -78,3 +78,18 @@ public enum ChatTabWidth {
         return min(maxWidth, max(minWidth, (available / Double(count)).rounded(.down)))
     }
 }
+
+/// A dock strip's tabs never squash: each keeps room for its icon, a truncated title and its close, and the strip scrolls
+/// when they do not fit. A trailing accessory (a shortcut hint) is only worth the room when every tab still fits beside it.
+public enum TabStripFit {
+    /// The least a tab may be drawn at: leading pad, icon, a few characters of title, close slot, trailing pad.
+    public static let tabMin: Double = 12 + 16 + 7 + 44 + 7 + ChatTabWidth.closeSlot + 6
+    public static let titleMin: Double = 44
+
+    /// Whether a trailing accessory `accessory` points wide fits beside `tabs` tabs at their minimum, the strip's own
+    /// leading slot and the "+" button, in a strip `strip` points wide. Unknown width (0) says no.
+    public static func showsAccessory(strip: Double, tabs: Int, leading: Double, plus: Double = 36, accessory: Double) -> Bool {
+        guard strip.isFinite, strip > 0 else { return false }
+        return strip >= leading + plus + Double(max(0, tabs)) * (tabMin + 4) + accessory
+    }
+}
