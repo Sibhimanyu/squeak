@@ -83,6 +83,20 @@ struct ConversationView: View {
     }
 
     var body: some View {
+        // The width the solver is fed is measured on a layer that takes exactly what the window proposes and never
+        // grows with its content (a background on the content itself fed its own overflow back into the solver, so a
+        // dragged inspector made the "window" wider and the panes ran off both edges). The content sits in an overlay,
+        // which cannot change its container's size.
+        Color.clear
+            .frame(minWidth: minContentWidth, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: .top)
+            .background(GeometryReader { geo in
+                Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
+            })
+            .overlay(alignment: .topLeading) { windowContent }
+    }
+
+    @ViewBuilder private var windowContent: some View {
         @Bindable var model = model
         @Bindable var git = model.git
         let layout = dock.layout
@@ -144,8 +158,9 @@ struct ConversationView: View {
                         .squeakWindowCanvas()
                         if placement == .underCentre { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight) }
                     }
-                    // Fixed to what the solver left, so nothing inside can push the row wider than the window.
-                    .frame(width: max(1, windowWidth - sidebarW - inspectorW))
+                    // The centre takes every point the sidebar and right zone leave (never a width worked out from a
+                    // measured window, which could come up short and leave gaps); its minimum keeps overflow impossible.
+                    .frame(minWidth: PaneWidths.centreMin, maxWidth: .infinity)
                     .clipped()
                     if showsInspector, chatOpen {
                         VStack(spacing: 0) {
@@ -181,7 +196,7 @@ struct ConversationView: View {
         .onChange(of: model.openDuckling) { _, ref in
             if ref != nil {
                 dock.update { l in
-                    if l.right.panels.isEmpty { l.show(.pond) } else { l.setCollapsed(false, for: .right) }
+                    if l.right.panels.isEmpty { l.show(.thread) } else { l.setCollapsed(false, for: .right) }
                 }
             }
         }
@@ -190,7 +205,14 @@ struct ConversationView: View {
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
         }
-        .onAppear { DockDragMonitor.install() }
+        .onAppear {
+            DockDragMonitor.install()
+            // The Pond panel never docks in the centre: dropping it there opens the pond dashboard.
+            dock.openPondDashboard = { [model] in
+                let key = model.selectedSession.flatMap { PondsModel.shared.key(of: $0) } ?? PondsModel.shared.homeProject
+                if let key { PondsModel.shared.route = .home(project: key) }
+            }
+        }
         .onDisappear { KeyFocus.shared.setTerminalOpen(false) }
         .clipped()
         .overlay {
@@ -212,12 +234,6 @@ struct ConversationView: View {
         // Extend the whole clipping/overlay coordinate space into the title bar. Extending only
         // the children let the parent clip their headers off in a normal (non-fullscreen) window.
         .ignoresSafeArea(.container, edges: .top)
-        .background(GeometryReader { geo in
-            Color.clear.onAppear {
-                windowWidth = geo.size.width
-                // A saved width below the sidebar's minimum (an older build, a hand edit) is brought back on load.
-            }.onChange(of: geo.size.width) { _, w in windowWidth = w }
-        })
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
@@ -252,7 +268,6 @@ struct ConversationView: View {
             }
             .opacity(0).accessibilityHidden(true)
         }
-        .frame(minWidth: minContentWidth, minHeight: 620)
         .sheet(item: $model.permissionSheet) { kind in PermissionSheet(kind: kind) }
         .sheet(item: $git.mergeConfirm) { MergeConfirmSheet(confirm: $0) }
     }

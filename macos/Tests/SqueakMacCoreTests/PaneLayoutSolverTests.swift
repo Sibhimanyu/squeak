@@ -11,6 +11,26 @@ struct PaneLayoutSolverTests {
         #expect(r.sidebar + r.centre + r.right <= window + 0.001)
     }
 
+    @Test func panesSumExactlyToTheWindow() {
+        for sideShown in [true, false] { for rightShown in [true, false] {
+            let minW = PaneLayoutSolver.minimumWindowWidth(sidebarShown: sideShown, rightShown: rightShown)
+            for w in stride(from: minW, through: 2600, by: 37.5) {
+                let r = PaneLayoutSolver.solve(window: w, sidebar: side(sideShown, 270), right: right(rightShown, 900))
+                #expect(abs(r.sidebar + r.centre + r.right - w) < 0.0001)
+                if !sideShown { #expect(r.sidebar == 0 && !r.sidebarShown) }
+                if !rightShown { #expect(r.right == 0 && !r.rightShown) }
+            }
+        } }
+        let dash = PaneLayoutSolver.solve(window: 1512, sidebar: side(true, 270), right: right(false, 900))
+        #expect(dash.sidebar == 270 && dash.right == 0 && dash.centre == 1242)
+    }
+    @Test func draggingTheInspectorWideStaysInsideTheWindow() {
+        let cap = PaneWidths.dragged(start: 560, translation: 640, grewToward: 1, range: PaneWidths.inspectorRange, window: 1512, otherPane: 270)
+        #expect(cap == 1512 - 270 - PaneWidths.centreMin)
+        let r = PaneLayoutSolver.solve(window: 1512, sidebar: side(true, 270), right: right(true, 1200))
+        #expect(r.sidebar == 270 && r.right <= cap && r.centre >= PaneWidths.centreMin)
+        #expect(abs(r.sidebar + r.centre + r.right - 1512) < 0.0001)
+    }
     @Test func ownersCase() {
         let r = PaneLayoutSolver.solve(window: 1512, sidebar: side(true, 270), right: right(true, 900))
         check(r, 1512)
