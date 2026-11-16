@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closingQuestion, parseChoices } from "./choices.js";
+import { closingQuestion, decisionQuestion, parseChoices } from "./choices.js";
 
 /** The shape of a real decision message from a Conductor session, trimmed. */
 const DECISION = [
@@ -193,5 +193,17 @@ describe("a recommendation at the end of a long option", () => {
     );
     expect(parsed?.recommended).toBe("B");
     expect(parsed?.options[1]?.title).not.toMatch(/recommended/);
+  });
+});
+
+describe("decisionQuestion", () => {
+  it("a plain trailing question is not a decision", () => {
+    expect(decisionQuestion("Hi! What should we work on next?")).toBeNull();
+    expect(decisionQuestion("Done.\n\nWant me to open a PR?")).toBeNull();
+    expect(decisionQuestion("All set. Anything else?")).toBeNull();
+  });
+
+  it("lettered options under a question are a decision", () => {
+    expect(decisionQuestion("Which way?\n\nA) Merge first\nB) Release now\nC) Wait")).toBe("Which way?");
   });
 });
