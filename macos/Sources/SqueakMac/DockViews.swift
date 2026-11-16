@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 
 // MARK: Drag payload
 
-// A dock tab is dragged as plain text, `DockItemPayload`'s prefixed string, A chat tab now travels the same way, as a
+// A dock tab is dragged as plain text, `DockItemPayload`'s prefixed string. A chat tab now travels the same way, as a
 // thread item, so a thread can be docked in the right or bottom zone. An item provider carrying only the abstract
 // `public.data` type was never matched by a drop destination on macOS. A bare chat key from an older payload still
 // decodes to nil here; the chat strip reads it itself.
