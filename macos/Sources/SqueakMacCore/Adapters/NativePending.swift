@@ -166,28 +166,6 @@ public struct NativePendingStack: Sendable, Equatable {
 
     public static let rowPrefix = "native-"
 
-    /// The timeline's steer steps whose card is still up (dimmed at the bottom of the stream): not drawn in their turn
-    /// until the agent takes them in, so a steer is one row, never two. A host card names its step by seq; a card the
-    /// host has not listed yet (our own press, still on its way) by its words.
-    public func hiddenSteerSteps(in turns: [TimelineTurn]) -> Set<String> {
-        let waiting = inlineSteers
-        guard !waiting.isEmpty else { return [] }
-        let seqs = Set(host.compactMap { $0.state == .steering ? $0.seq : nil })
-        let unnamed = waiting.filter { card in card.isLocal || !host.contains { $0.id == card.id && $0.seq != nil } }.map(\.text)
-        var out: Set<String> = []
-        for turn in turns.suffix(4) {
-            for step in turn.steps where step.kind == .steer {
-                if case .string(let mid)? = step.detail["messageId"], mid.hasPrefix(Self.rowPrefix),
-                   let seq = Int(mid.dropFirst(Self.rowPrefix.count)), seqs.contains(seq) {
-                    out.insert(step.id)
-                } else if unnamed.contains(step.detail["text"]?.string ?? step.label) {
-                    out.insert(step.id)
-                }
-            }
-        }
-        return out
-    }
-
     /// The transcript without the steers still waiting to be taken in.
     public func visible(_ messages: [ChatMessage]) -> [ChatMessage] {
         guard host.contains(where: { $0.state == .steering && $0.seq != nil }) else { return messages }

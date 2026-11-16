@@ -9,6 +9,9 @@ import SwiftUI
 struct NativeQueueStack: View {
     let session: HostSession
     /// Queued messages the transcript already shows as dimmed rows (with their own Steer / Edit / Remove): not drawn twice here.
+    /// The transcript draws every queued message (the timeline view): the stack draws none, only how many wait, so a
+    /// message never shows in both places or moves from one to the other.
+    var transcriptHoldsQueue = false
     var inTranscript: Set<String> = []
     @Environment(AppModel.self) private var model
     @State private var busyId: String?
@@ -19,8 +22,8 @@ struct NativeQueueStack: View {
 
     var body: some View {
         let all = model.native.key == session.key ? model.native.pending.stackCards : []
-        let cards = all.filter { !($0.kind == .queued && inTranscript.contains($0.id)) }
-        let waiting = all.count - cards.count
+        let cards = transcriptHoldsQueue ? [] : all.filter { !($0.kind == .queued && inTranscript.contains($0.id)) }
+        let waiting = transcriptHoldsQueue ? max(inTranscript.count, all.filter { $0.kind == .queued }.count) : all.count - cards.count
         Group {
             if !cards.isEmpty || waiting > 1 {
                 VStack(alignment: .leading, spacing: 6) {
@@ -159,7 +162,8 @@ struct NativeQueueStack: View {
 /// click opens it in a sheet with the whole message and what can be done with it: Steer, Edit, Remove.
 struct NativeQueuedRow: View {
     let session: HostSession
-    let queuedId: String
+    /// Nil while the press is still on its way to the host: the line shows, and opens once the host has queued it.
+    let queuedId: String?
     let text: String
     let author: String?
     @State private var open = false
@@ -167,7 +171,7 @@ struct NativeQueuedRow: View {
 
     var body: some View {
         let summary = QueuedSummary(text)
-        Button { open = true } label: {
+        Button { if queuedId != nil { open = true } } label: {
             HStack(spacing: 8) {
                 Image(systemName: "clock").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
                 if let author { Text(verbatim: author).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted).lineLimit(1) }
@@ -177,7 +181,7 @@ struct NativeQueuedRow: View {
                         .font(Typo.meta).foregroundStyle(Theme.muted).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 0)
-                Text("Queued").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
+                Text(queuedId == nil ? "Sending…" : "Queued").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
@@ -189,7 +193,9 @@ struct NativeQueuedRow: View {
         .onHover { hovering = $0 }
         .help("Open this queued message to steer, edit or remove it")
         .accessibilityLabel("Queued message: \(summary.line)")
-        .sheet(isPresented: $open) { NativeQueuedSheet(session: session, queuedId: queuedId, text: text, author: author, open: $open) }
+        .sheet(isPresented: $open) {
+            if let queuedId { NativeQueuedSheet(session: session, queuedId: queuedId, text: text, author: author, open: $open) }
+        }
     }
 }
 

@@ -430,28 +430,25 @@ struct SessionDetail: View {
     /// The open Squeak chat: one block per turn of the host's timeline, then what is not a turn yet (steers waiting, the text being written).
     @ViewBuilder private func timelineTurns() -> some View {
         let timeline = model.timeline(for: session.key)
+        let live = model.native.key == session.key
+        let feed = ChatFeed(timeline, pending: live ? model.native.pending : NativePendingStack())
         let footers = footers
         let attached = PictureLayout.attachedPaths(inTexts: timeline.turns.map(\.prompt))
         NativeTurnsContent(
-            turns: timeline.turns, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
+            feed: feed, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
-            hiddenSteers: model.native.key == session.key ? model.native.pending.hiddenSteerSteps(in: timeline.turns) : [],
+            stream: live ? model.native.stream : nil,
             message: { m in rowView(.message(m, muted: false), footers: footers) },
             queuedActions: { t in
-                if let q = t.queuedId { NativeQueuedRow(session: session, queuedId: q, text: t.prompt, author: TimelineLabels.author(t.author, me: nil)) }
+                NativeQueuedRow(session: session, queuedId: t.queuedId, text: t.prompt, author: TimelineLabels.author(t.author, me: nil))
             }
         )
         .environment(\.attachedPictures, attached)
-        if model.native.key == session.key {
-            ForEach(model.native.pending.inlineSteers) { card in
-                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper ? (card.helper ?? "helper") : nil), cwd: nil,
-                          sendNow: card.canSendNow ? { await model.nativeSendSteerNow(session, card.id) } : nil)
-                    .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
-            }
-            StreamingRow(buffer: model.native.stream) { text in
-                rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
-            }
-            .id("native-streaming")
+        // Only a steer the host holds that is no step of any turn here (an older host) is drawn on its own.
+        ForEach(feed.looseSteers) { card in
+            SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper ? (card.helper ?? "helper") : nil), cwd: nil,
+                      sendNow: card.canSendNow ? { await model.nativeSendSteerNow(session, card.id) } : nil)
+                .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
         }
     }
 
@@ -674,7 +671,8 @@ struct SessionDetail: View {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
             } else if isNative {
-                NativeQueueStack(session: session, inTranscript: Set(model.timeline(for: session.key).turns.compactMap { $0.turnId == nil && $0.state == .queued ? $0.queuedId : nil }))
+                NativeQueueStack(session: session, transcriptHoldsQueue: usesTimelineView,
+                                 inTranscript: Set(model.timeline(for: session.key).turns.compactMap { $0.turnId == nil && $0.state == .queued ? $0.queuedId : nil }))
             }
             if let card = nativeCard, !ThreadArchive.composerReplaced(session) { pinnedCard(card) }
             if ThreadArchive.composerReplaced(session) {

@@ -208,10 +208,15 @@ export class TimelineRecorder {
       text: string;
       author?: MessageAuthor | undefined;
       clientNonce?: string | undefined;
+      waiting?: boolean | undefined;
       at: string;
     },
   ): void {
     this.store(sessionId, this.projector(sessionId).steer(input));
+  }
+
+  steerTaken(sessionId: string, seq: number, at: string): void {
+    this.store(sessionId, this.projector(sessionId).steerTaken(seq, at));
   }
 
   queued(

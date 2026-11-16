@@ -26,6 +26,8 @@ export type StepKind = "thinking" | "tool" | "note" | "waiting" | "retrying" | "
 export type StepStatus = "running" | "done" | "failed";
 export type TurnOutcome = "done" | "stopped" | "failed";
 
+type StepBody = Extract<TimelineBody, { kind: StepKind }>;
+
 export type TimelineBody =
   | {
       type: "turn.started";
@@ -203,34 +205,50 @@ export class TimelineProjector {
   }
 
   /** A message the agent took in mid-turn: a step of that turn, by its author. */
+  /**
+   * A message the agent took in mid-turn: a step of that turn, by its author. `waiting`: handed to the agent but not
+   * read yet, so the step is "running" (drawn dimmed in its place) until `steerTaken` marks it done.
+   */
   steer(input: {
     seq: number;
     text: string;
     author?: MessageAuthor | undefined;
     clientNonce?: string | undefined;
+    waiting?: boolean | undefined;
     at: string;
   }): TimelineBody[] {
     const t = this.turn;
     if (!t) return [];
     const author = authorOf(input.author);
-    return [
-      {
-        type: "step.added",
-        turnId: t.turnId,
-        stepId: `steer-${input.seq}`,
-        kind: "steer",
-        label: clip(input.text, 400),
-        detail: {
-          text: input.text,
-          messageId: `native-${input.seq}`,
-          ...(input.clientNonce ? { clientNonce: input.clientNonce } : {}),
-        },
-        status: "done",
-        ...(author ? { author } : {}),
-        at: input.at,
+    const body: StepBody = {
+      type: "step.added",
+      turnId: t.turnId,
+      stepId: `steer-${input.seq}`,
+      kind: "steer",
+      label: clip(input.text, 400),
+      detail: {
+        text: input.text,
+        messageId: `native-${input.seq}`,
+        ...(input.clientNonce ? { clientNonce: input.clientNonce } : {}),
       },
-    ];
+      status: input.waiting ? "running" : "done",
+      ...(author ? { author } : {}),
+      at: input.at,
+    };
+    if (input.waiting) this.waitingSteers.set(input.seq, body);
+    return [body];
   }
+
+  /** The agent read a waiting steer: its step is done, in place. */
+  steerTaken(seq: number, at: string): TimelineBody[] {
+    const body = this.waitingSteers.get(seq);
+    if (!body) return [];
+    this.waitingSteers.delete(seq);
+    if (!this.turn || this.turn.turnId !== body.turnId) return [];
+    return [{ ...body, type: "step.updated", status: "done", at }];
+  }
+
+  private readonly waitingSteers = new Map<number, StepBody>();
 
   note(failure: string): void {
     if (this.turn) this.turn.failure = failure;

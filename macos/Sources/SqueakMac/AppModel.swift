@@ -1569,9 +1569,12 @@ final class AppModel {
             native.firstEventLogged = false
             AppLog.timing("send pressed")
         }
-        // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
+        // A Squeak chat drawn from its timeline: every press is a row of the timeline at once (a prompt, a queued
+        // line, or a steer step at the end of the running turn), named in place by the nonce the host echoes.
+        let onTimeline = usesTimeline(key) && native.key == key
+        // An older host's chat: a message sent while it works is a card in the queue stack.
         var localCard: String?
-        if midTurn, target?.source == .squeak, native.key == key {
+        if midTurn, !onTimeline, target?.source == .squeak, native.key == key {
             localCard = UUID().uuidString
             native.pending.beginLocal(id: localCard!, text: trimmed, steer: mode == .steer, at: Date())
         }
@@ -1583,8 +1586,7 @@ final class AppModel {
         }
         // An idle Squeak chat's press is a row of the timeline at once, named by the nonce the host echoes on its turn.
         let clientId = UUID()
-        let onTimeline = !midTurn && usesTimeline(key) && native.key == key
-        if onTimeline { timelineSendPressed(key, nonce: clientId, text: trimmed) }
+        if onTimeline { timelineSendPressed(key, nonce: clientId, text: trimmed, midTurn: midTurn, steer: mode == .steer) }
         let result = await broker.send(trimmed, to: key, clientId: clientId, mode: mode, answersTurn: turn, echoes: localCard == nil && !onTimeline, keepsDraft: !clearsDraft)
         if let localCard {
             switch result {
@@ -2137,9 +2139,13 @@ extension AppModel {
     }
 
     /// A press of Send on an idle chat: its row exists before anything is sent.
-    func timelineSendPressed(_ key: SessionKey, nonce: UUID, text: String) {
+    func timelineSendPressed(_ key: SessionKey, nonce: UUID, text: String, midTurn: Bool = false, steer: Bool = false) {
         guard usesTimeline(key), native.key == key else { return }
-        native.timeline.send(nonce: nonce.uuidString, text: text, at: Date())
+        if midTurn, steer {
+            native.timeline.steer(nonce: nonce.uuidString, text: text, at: Date())
+        } else {
+            native.timeline.send(nonce: nonce.uuidString, text: text, at: Date(), behindTurn: midTurn)
+        }
         showTimeline(key)
     }
 

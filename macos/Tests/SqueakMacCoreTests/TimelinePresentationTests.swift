@@ -77,40 +77,40 @@ final class TimelinePresentationTests: XCTestCase {
     }
 
     /// The owner's report: a steer showed twice, solid in the turn and dimmed at the bottom, until the agent took it in.
-    func testASteerWaitingToBeTakenInIsOneRowNotTwo() {
+    /// Now it is one row from the press: a dimmed step at the end of the turn, filled in by the host's step in place,
+    /// solid once the agent has read it.
+    func testASteerIsOneRowFromThePressToBeingRead() {
         var t = Log.timeline([Log.start(1, "t1", "go"), Log.step(2, "t1", "tu1", .tool, "Run ls", .running)])
         let words = "i selected to share the cliq screen on another desktop"
         var pending = NativePendingStack()
-        // The press: our own dimmed card, before the host answers.
-        pending.beginLocal(id: "local-1", text: words, steer: true, at: Log.at(3))
-        // The host's steer step can arrive before the POST returns.
-        t.apply(TimelineEvent(seq: 3, at: Log.at(3), body: .step(TimelineStepEvent(
-            turnId: "t1", stepId: "steer-3", kind: .steer, label: words,
-            detail: ["text": .string(words), "messageId": .string("native-40")], status: .done, author: nil))))
-        func drawn() -> [String] {
-            let steps = TimelineSteps.segments(of: t.turns[0], hiding: pending.hiddenSteerSteps(in: t.turns)).map(\.id)
-            return steps + pending.inlineSteers.map { "card-\($0.text.prefix(4))" }
-        }
-        XCTAssertEqual(drawn(), ["work-tu1", "card-i se"], "while our card is up: the dimmed card only")
-        // The POST returns; the host lists its own steering card for that row.
-        pending.settleLocal(id: "local-1", accepted: true, queued: false)
+        t.steer(nonce: "n9", text: words, at: Log.at(3))
+        func drawn() -> [String] { ChatFeed(t, pending: pending).rowIds() }
+        XCTAssertEqual(drawn(), ["prompt:t1", "work-tu1", "steer-waiting:steer-local-n9"])
+        let detail: [String: NativeJSON] = ["text": .string(words), "messageId": .string("native-40"), "clientNonce": .string("n9")]
+        t.apply(Log.step(3, "t1", "steer-40", .steer, words, .running, detail: detail))
         pending.apply(.add(NativePendingItem(id: "h1", text: words, state: .steering, seq: 40)))
-        XCTAssertEqual(drawn(), ["work-tu1", "card-i se"], "the host's card: still one row")
-        // The agent takes it in: the card goes, the step shows solid in its place.
+        XCTAssertEqual(drawn(), ["prompt:t1", "work-tu1", "steer-waiting:steer-local-n9"], "the host's step is the same row")
+        t.apply(Log.step(4, "t1", "steer-40", .steer, words, .done, detail: detail))
         pending.apply(.remove(id: "h1", consumed: true, seq: 40))
-        XCTAssertEqual(drawn(), ["work-tu1", "steer-3"])
+        XCTAssertEqual(drawn(), ["prompt:t1", "work-tu1", "steer-local-n9"], "read: solid, in the same place")
     }
 
-    func testAnEarlierSteerWithTheSameWordsStaysDrawnOnceTakenIn() {
+    func testASteerThatDidNotGoLeavesNoRow() {
         var t = Log.timeline([Log.start(1, "t1", "go")])
-        for (seq, row) in [(2, 30), (3, 31)] {
-            t.apply(TimelineEvent(seq: seq, at: Log.at(seq), body: .step(TimelineStepEvent(
-                turnId: "t1", stepId: "steer-\(seq)", kind: .steer, label: "again",
-                detail: ["text": .string("again"), "messageId": .string("native-\(row)")], status: .done, author: nil))))
-        }
-        var pending = NativePendingStack()
-        pending.apply(.add(NativePendingItem(id: "h2", text: "again", state: .steering, seq: 31)))
-        XCTAssertEqual(pending.hiddenSteerSteps(in: t.turns), ["steer-3"], "only the one still waiting is hidden")
+        t.steer(nonce: "n1", text: "x", at: Log.at(2))
+        t.markNotSent(nonce: "n1", reason: "Host down")
+        XCTAssertEqual(ChatFeed(t).rowIds(), ["prompt:t1"])
+    }
+
+    func testAMessageSentWhileWorkingIsTheQueuedLineFromThePress() {
+        var t = Log.timeline([Log.start(1, "t1", "go")])
+        t.send(nonce: "n2", text: "next", at: Log.at(2), behindTurn: true)
+        XCTAssertEqual(ChatFeed(t).rowIds(), ["prompt:t1", "queued:send-n2"])
+        t.apply(Log.queued(2, "q2", "next", nonce: "n2"))
+        XCTAssertEqual(ChatFeed(t).rowIds(), ["prompt:t1", "queued:send-n2"])
+        t.apply(Log.end(3, "t1"))
+        t.apply(Log.start(4, "t4", "next", nonce: "n2", queued: "q2"))
+        XCTAssertEqual(ChatFeed(t).rowIds(), ["prompt:t1", "prompt:send-n2"], "it becomes the turn's prompt in the same row")
     }
 
     func testAQueuedMessageIsOneLineWithItsPictureCount() {

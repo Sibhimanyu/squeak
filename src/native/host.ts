@@ -707,6 +707,7 @@ export class SessionHost extends EventEmitter {
     if (rest.length) this.steering.set(id, rest);
     else this.steering.delete(id);
     for (const g of gone) {
+      if (g.seq !== undefined) this.timeline.steerTaken(id, g.seq, new Date().toISOString());
       this.emitPending(id, "remove", g.id, { consumed: true, ...(g.seq !== undefined ? { seq: g.seq } : {}) });
     }
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
@@ -743,6 +744,7 @@ export class SessionHost extends EventEmitter {
               text,
               author: options.author,
               clientNonce: options.clientNonce,
+              waiting: Boolean(runner.lastSteerUuid),
               at: row.createdAt,
             });
             this.noteSteered(id, text, options.author, row.seq, runner);
@@ -1203,6 +1205,7 @@ export class SessionHost extends EventEmitter {
       text: item.text,
       author: item.author,
       clientNonce: item.clientNonce,
+      waiting: Boolean(runner.lastSteerUuid),
       at: row.createdAt,
     });
     this.noteSteered(id, item.text, item.author, row.seq, runner);

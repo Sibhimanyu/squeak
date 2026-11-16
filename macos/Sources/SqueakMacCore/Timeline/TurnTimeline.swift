@@ -53,6 +53,8 @@ public struct TimelineTurn: Equatable, Identifiable, Sendable {
     public var queuedId: String?
     /// The host seq of the event that started it: where an earlier page ends.
     public var startSeq: Int?
+    /// A press made while another turn ran: it waits in the queue, so it is drawn as the queue's one-line row from the press.
+    public var behindTurn = false
 
     public var isRunning: Bool {
         switch state {
@@ -251,6 +253,8 @@ public struct TurnTimeline: Equatable, Sendable {
         switch e.body {
         case .turnStarted(let turnId, let promptId, let nonce, let text, let author, let queuedId, let auto):
             guard !turns.contains(where: { $0.turnId == turnId }) else { return }
+            // A steer press the host started as a turn of its own (the turn it aimed at had ended): it is that turn's prompt.
+            if let n = nonce, let (ti, si) = localSteer(nonce: n), turns[ti].steps[si].detail["messageId"] == nil { turns[ti].steps.remove(at: si) }
             if let i = pendingIndex(nonce: nonce, text: text, author: author, queuedId: queuedId, at: e.at ?? Date()) {
                 turns[i].turnId = turnId
                 turns[i].promptMessageId = promptId
@@ -274,6 +278,8 @@ public struct TurnTimeline: Equatable, Sendable {
             turns.insert(turn, at: at)
 
         case .promptQueued(let id, let text, let author, let nonce):
+            // A steer press the host could not hand the agent: it waits in the queue like any other message.
+            if let n = nonce, let (ti, si) = localSteer(nonce: n) { turns[ti].steps.remove(at: si) }
             if let n = nonce, let i = turns.firstIndex(where: { $0.clientNonce == n && $0.turnId == nil }) {
                 turns[i].state = .queued
                 turns[i].queuedId = id
@@ -301,9 +307,16 @@ public struct TurnTimeline: Equatable, Sendable {
             turns.removeAll { $0.queuedId == id && $0.turnId == nil && $0.state == .queued }
 
         case .step(let s):
-            // A steer our composer sent: the host took it into the turn, so the row we showed for the press is that step.
+            // A steer our composer sent: the host took it into the turn. The step we drew at the press becomes it, in
+            // place and under the same row id, so nothing moves; an older Mac's press row (a turn of its own) goes.
             if s.kind == .steer, case .string(let n)? = s.detail["clientNonce"] {
                 turns.removeAll { $0.clientNonce == n && $0.turnId == nil && ($0.state == .sending || $0.state == .queued) }
+                if let (ti, si) = localSteer(nonce: n) {
+                    var step = turns[ti].steps[si]
+                    step.label = s.label; step.detail = s.detail; step.status = s.status; step.author = s.author
+                    turns[ti].steps[si] = step
+                    return
+                }
             }
             guard let i = openIndex(s.turnId) else { return }
             upsert(TimelineStep(
@@ -374,15 +387,39 @@ public struct TurnTimeline: Equatable, Sendable {
     // MARK: Sending
 
     /// The press of Send on an idle chat: a row at once, named by the host's `turn.started` carrying this nonce.
-    public mutating func send(nonce: String, text: String, author: TimelineAuthor? = nil, at: Date? = nil) {
-        guard !turns.contains(where: { $0.clientNonce == nonce }) else { return }
+    /// `behindTurn`: pressed while a turn runs, so the host will queue it.
+    public mutating func send(nonce: String, text: String, author: TimelineAuthor? = nil, at: Date? = nil, behindTurn: Bool = false) {
+        guard !turns.contains(where: { $0.clientNonce == nonce }), localSteer(nonce: nonce) == nil else { return }
         turns.append(TimelineTurn(
             id: "send-\(nonce)", turnId: nil, promptMessageId: nil, prompt: text, author: author, clientNonce: nonce, auto: false, steps: [],
-            state: .sending, startedAt: at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil, startSeq: nil))
+            state: .sending, startedAt: at, endedAt: nil, error: nil, replyMessageId: nil, streaming: nil, queuedId: nil, startSeq: nil,
+            behindTurn: behindTurn))
+    }
+
+    /// The press of Steer while a turn runs: a waiting steer step at the end of that turn at once, where the host's own
+    /// step lands; the host's step (carrying this nonce) fills it in place. With no turn running it is a plain send.
+    public mutating func steer(nonce: String, text: String, author: TimelineAuthor? = nil, at: Date? = nil) {
+        guard !turns.contains(where: { $0.clientNonce == nonce }), localSteer(nonce: nonce) == nil else { return }
+        // The running turn, or our own press the host has not named yet (it becomes that turn in place).
+        guard let i = turns.lastIndex(where: { $0.state == .running }) ?? turns.lastIndex(where: { $0.turnId == nil && $0.state == .sending && !$0.behindTurn })
+        else { send(nonce: nonce, text: text, author: author, at: at); return }
+        turns[i].steps.append(TimelineStep(
+            id: "steer-local-\(nonce)", kind: .steer, label: text, detail: ["text": .string(text), "clientNonce": .string(nonce)],
+            status: .running, at: at, author: author, isMessage: false))
+    }
+
+    /// Where our own steer press sits: (turn, step).
+    private func localSteer(nonce: String) -> (Int, Int)? {
+        for ti in turns.indices.reversed() {
+            if let si = turns[ti].steps.firstIndex(where: { $0.kind == .steer && $0.detail["clientNonce"] == .string(nonce) }) { return (ti, si) }
+        }
+        return nil
     }
 
     /// The send did not go: the row stays, saying so, until the person discards or resends it.
     public mutating func markNotSent(nonce: String, reason: String) {
+        // A steer that did not go: its step goes (the words are back in the draft).
+        if let (ti, si) = localSteer(nonce: nonce), turns[ti].steps[si].detail["messageId"] == nil { turns[ti].steps.remove(at: si); return }
         guard let i = turns.firstIndex(where: { $0.clientNonce == nonce && $0.turnId == nil }) else { return }
         turns[i].state = .notSent(reason)
     }

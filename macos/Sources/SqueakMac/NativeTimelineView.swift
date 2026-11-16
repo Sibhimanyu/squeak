@@ -23,9 +23,10 @@ extension View {
     func insertFade(_ enabled: Bool) -> some View { modifier(InsertFade(enabled: enabled)) }
 }
 
-/// The turns of the open chat. `message` draws a chat message (the prompt or one of the agent's) as the rest of the chat does.
+/// The turns of the open chat, as `ChatFeed` lays them out. `message` draws a chat message (the prompt or one of the
+/// agent's) as the rest of the chat does. Every row keeps its id and its place: see `ChatFeed`.
 struct NativeTurnsContent<Message: View, Queued: View>: View {
-    let turns: [TimelineTurn]
+    let feed: ChatFeed
     let details: [String: ToolDetail]
     /// The viewer's own member id in a pond (their prompts carry no name); nil on the owner's own Mac.
     var me: String?
@@ -33,16 +34,17 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
     var fadeFrom: Int?
     var followsEnd: Bool
     var filesLine: (TimelineTurn) -> String?
-    /// Steer steps whose card still waits at the bottom of the stream: drawn there, dimmed, not here.
-    var hiddenSteers: Set<String> = []
+    /// The text being written: drawn as the running turn's last row, the place its finished message takes.
+    var stream: StreamingTextBuffer?
     @ViewBuilder let message: (ChatMessage) -> Message
-    /// The actions under a prompt still waiting in the queue (Steer / Edit / Remove).
+    /// A prompt waiting in the queue: its one line (it opens to the whole message and Steer / Edit / Remove).
     @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
-        ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+        ForEach(Array(feed.turns.enumerated()), id: \.element.id) { index, turn in
             NativeTurnView(turn: turn, details: details, me: me, filesLine: filesLine(turn),
-                           hiddenSteers: hiddenSteers.isEmpty ? [] : hiddenSteers.filter { id in turn.steps.contains { $0.id == id } },
+                           waitingSteers: feed.waitingSteers.isEmpty ? [] : feed.waitingSteers.filter { id in turn.steps.contains { $0.id == id } },
+                           stream: turn.id == feed.streamingTurn ? stream : nil,
                            message: message, queuedActions: queuedActions)
                 .equatable()
                 .insertFade(followsEnd && index >= (fadeFrom ?? Int.max))
@@ -52,29 +54,31 @@ struct NativeTurnsContent<Message: View, Queued: View>: View {
     }
 }
 
-/// Equatable on what it draws (the turn, the tool details, the viewer, the files line; never the message builder), so
-/// a refresh that changed only the newest turn leaves every earlier turn's body unevaluated.
+/// Equatable on what it draws (the turn, the tool details, the viewer, the files line, which steers wait; never the
+/// builders), so a refresh that changed only the newest turn leaves every earlier turn's body unevaluated. The text
+/// being written updates on its own (`StreamingRow` reads the buffer), without evaluating this.
 private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
     nonisolated static func == (a: NativeTurnView<Message, Queued>, b: NativeTurnView<Message, Queued>) -> Bool {
-        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details && a.hiddenSteers == b.hiddenSteers
+        a.turn == b.turn && a.me == b.me && a.filesLine == b.filesLine && a.details == b.details && a.waitingSteers == b.waitingSteers
+            && (a.stream == nil) == (b.stream == nil)
     }
 
     let turn: TimelineTurn
     let details: [String: ToolDetail]
     let me: String?
     let filesLine: String?
-    let hiddenSteers: Set<String>
+    let waitingSteers: Set<String>
+    let stream: StreamingTextBuffer?
     @ViewBuilder let message: (ChatMessage) -> Message
     @ViewBuilder let queuedActions: (TimelineTurn) -> Queued
 
     var body: some View {
-        let segments = TimelineSteps.segments(of: turn, details: details, hiding: hiddenSteers)
+        let segments = TimelineSteps.segments(of: turn, details: details)
         VStack(alignment: .leading, spacing: 0) {
-            // A message still waiting in the queue is one compact line (it opens to its whole text and actions).
-            if turn.waitsInQueue, turn.queuedId != nil {
-                queuedActions(turn)
-            } else if let prompt = turn.promptMessage(me: me) {
-                message(prompt)
+            switch ChatFeed.promptStyle(turn) {
+            case .queuedLine: queuedActions(turn)
+            case .bubble: if let prompt = turn.promptMessage(me: me) { message(prompt) }
+            case .none: EmptyView()
             }
             ForEach(segments) { segment in
                 switch segment {
@@ -84,14 +88,20 @@ private struct NativeTurnView<Message: View, Queued: View>: View, Equatable {
                     if let step = turn.steps.first(where: { $0.id == id }) {
                         message(turn.message(for: step)).padding(.top, ChatSpacing.messageToMessage)
                     }
-                case .steer(_, let text, let author):
+                case .steer(let id, let text, let author):
                     VStack(alignment: .leading, spacing: 2) {
                         if let name = TimelineLabels.author(author, me: me) {
                             Text(verbatim: name).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).accessibilityLabel("From \(name)")
                         }
-                        SteerCard(text: text, state: .taken, cwd: nil)
+                        // Dimmed until the agent reads it, then solid: the same row, in the same place.
+                        SteerCard(text: text, state: waitingSteers.contains(id) ? .waiting(helper: nil) : .taken, cwd: nil)
                     }
                     .padding(.top, ChatSpacing.messageToMessage)
+                }
+            }
+            if let stream {
+                StreamingRow(buffer: stream) { text in
+                    message(ChatMessage(id: "native-streaming", role: .assistant, text: text))
                 }
             }
             if case .ended(.failed) = turn.state, let why = turn.error, !why.isEmpty {

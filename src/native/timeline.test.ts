@@ -567,3 +567,36 @@ describe("timeline over HTTP", () => {
     expect(frames.some((f) => f.event === "timeline")).toBe(false);
   });
 });
+
+describe("a steer the agent has not read yet", () => {
+  it("is a running step until it is read, then the same step, done", () => {
+    const p = new TimelineProjector();
+    p.begin({ promptSeq: 1, text: "go", at: "2026-11-16T00:00:00Z" });
+    const [added] = p.steer({
+      seq: 7,
+      text: "also this",
+      clientNonce: "n7",
+      waiting: true,
+      at: "2026-11-16T00:00:01Z",
+    });
+    expect(added).toMatchObject({ type: "step.added", stepId: "steer-7", kind: "steer", status: "running" });
+    expect(added).toMatchObject({ detail: { clientNonce: "n7", messageId: "native-7", text: "also this" } });
+    const [taken] = p.steerTaken(7, "2026-11-16T00:00:05Z");
+    expect(taken).toMatchObject({
+      type: "step.updated",
+      stepId: "steer-7",
+      kind: "steer",
+      status: "done",
+      label: "also this",
+    });
+    expect(taken).toMatchObject({ detail: { clientNonce: "n7" } });
+    expect(p.steerTaken(7, "2026-11-16T00:00:06Z")).toEqual([]);
+  });
+
+  it("is done at once when the agent takes it in directly", () => {
+    const p = new TimelineProjector();
+    p.begin({ promptSeq: 1, text: "go", at: "2026-11-16T00:00:00Z" });
+    expect(p.steer({ seq: 3, text: "x", at: "2026-11-16T00:00:01Z" })[0]).toMatchObject({ status: "done" });
+    expect(p.steerTaken(3, "2026-11-16T00:00:02Z")).toEqual([]);
+  });
+});
