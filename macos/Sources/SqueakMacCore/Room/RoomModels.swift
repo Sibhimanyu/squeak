@@ -32,18 +32,20 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var level: RoomLevel
     public var text: String
     public var toSessionId: String?
+    /// Pictures and files a person attached; empty for a host that does not send them.
+    public var attachments: [RoomAttachment] = []
     /// Milliseconds since 1970.
     public var at: Int64
 
     public init(
         seq: Int, id: String, author: RoomAuthor, sessionId: String? = nil, kind: RoomPostKind = .message,
-        level: RoomLevel = .room, text: String, toSessionId: String? = nil, at: Int64
+        level: RoomLevel = .room, text: String, toSessionId: String? = nil, attachments: [RoomAttachment] = [], at: Int64
     ) {
         self.seq = seq; self.id = id; self.author = author; self.sessionId = sessionId; self.kind = kind
-        self.level = level; self.text = text; self.toSessionId = toSessionId; self.at = at
+        self.level = level; self.text = text; self.toSessionId = toSessionId; self.attachments = attachments; self.at = at
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, at }
+    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, attachments, at }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A post with no seq or id cannot be placed; the page drops it (see `Failable`).
@@ -55,6 +57,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         level = (try? c.decode(String.self, forKey: .level)).flatMap(RoomLevel.init(rawValue:)) ?? .room
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         toSessionId = try? c.decode(String.self, forKey: .toSessionId)
+        attachments = ((try? c.decode([Failable<RoomAttachment>].self, forKey: .attachments)) ?? []).compactMap(\.value)
         at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
     }
 }

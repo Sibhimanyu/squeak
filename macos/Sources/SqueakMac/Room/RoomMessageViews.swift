@@ -98,6 +98,7 @@ private struct RoomGroupView: View {
                             MessageBubble(message: m, text: t, tone: .normal, mine: true, first: false, retry: retry, makeJob: makeJob, open: opener(PondClick.target(message: m)))
                         }
                     }
+                    if !m.attachments.isEmpty { RoomAttachmentsView(attachments: m.attachments, pending: m.pending, alignment: .trailing) }
                 }
                 Text(verbatim: RoomRipples.clock(group.lastAt)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle).padding(.top, 2)
             }
@@ -114,6 +115,7 @@ private struct RoomGroupView: View {
                         ForEach(Array(m.parts.enumerated()), id: \.offset) { j, part in
                             partView(m, part, first: i == 0 && j == 0)
                         }
+                        if !m.attachments.isEmpty { RoomAttachmentsView(attachments: m.attachments, pending: m.pending) }
                     }
                 }
             }

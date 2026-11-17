@@ -501,6 +501,8 @@ Every person always sees one plain state; the host computes it and its sentence,
 
 ## Room
 
+**Attachments.** A person's room message may carry up to four pictures (PNG/JPEG by their bytes, 2 MB each; the Mac shrinks to the chat composer's 1.2 MB) and four files (5 MB each, 16 MB in all): `POST .../room { text?, attachments: [{ name, data(base64) }] }`, a picture alone is a message. Bytes live in `<support dir>/room-attachments/`, named in the lazily-created `room_attachments` table; posts carry `attachments: [{ id, kind, name, mime, size, url, width?, height? }]`, served by the token-gated `GET /native/projects/<id>/room/attachments/<attId>`. When a message becomes work for a duck (job Go / Allow / New duck) they are copied under the duck's folder at `.context/attachments/<id>/` and named like a chat's (`@⟦image-1.png⟧(path)`, `Attached file: path`); the job still finds its turn by the text without those lines. The job check hears only "(+N images)". An `@duck` send from the Mac saves them the same way through the chat path.
+
 Each pond has one room on this Mac (host side, `src/native/room.ts`; no cloud, no Flotilla publishing yet): a
 time-ordered stream of short posts saying what each agent is _working on_ (intent, never every edit or command).
 Agents post and read it through two MCP tools; the person posts like a group chat. Two levels: `room` (what a person

@@ -23,6 +23,8 @@ struct ComposerField: NSViewRepresentable {
     var onOptionReturn: (() -> Void)?
     /// Images pasted (⌘V with an image and no text) or dropped on the field. Nil: the field takes none.
     var onImages: (([ImageSource]) -> Void)?
+    /// Files dropped on the field (the room composer takes any file); nil: only pictures are taken, as before.
+    var onFiles: (([URL]) -> Void)?
     /// The caret's UTF-16 offset after every edit or move (the picker's trigger reads it).
     var onCaret: ((Int) -> Void)?
     /// Keys the picker wants first while it is open: true when it took the key.
@@ -62,7 +64,7 @@ struct ComposerField: NSViewRepresentable {
             steer()
             return true
         }
-        if onImages != nil { tv.registerForDraggedTypes([.fileURL, .png, .tiff]) }
+        if onImages != nil || onFiles != nil { tv.registerForDraggedTypes([.fileURL, .png, .tiff]) }
         scroll.documentView = tv
         handle?.textView = tv
         return scroll
@@ -74,6 +76,7 @@ struct ComposerField: NSViewRepresentable {
         if tv.string != text { tv.string = text }
         tv.placeholder = placeholder
         tv.onImages = onImages
+        tv.onFiles = onFiles
         tv.onFocus = onFocus
         tv.isEditable = isEnabled
         tv.alphaValue = isEnabled ? 1 : 0.5
@@ -158,7 +161,13 @@ final class PlaceholderTextView: NSTextView {
     /// True when it took the key; false lets ⌥↩ be an ordinary Return.
     var onOptionReturn: (() -> Bool)?
     var onImages: (([ImageSource]) -> Void)?
+    var onFiles: (([URL]) -> Void)?
     var onFocus: ((Bool) -> Void)?
+
+    private func droppedFiles(_ pb: NSPasteboard) -> [URL] {
+        guard onFiles != nil else { return [] }
+        return (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
@@ -186,11 +195,14 @@ final class PlaceholderTextView: NSTextView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        if !droppedFiles(sender.draggingPasteboard).isEmpty { return .copy }
         if onImages != nil, !ImagePasteboard.sources(sender.draggingPasteboard, rawNeedsNoText: false).isEmpty { return .copy }
         return super.draggingEntered(sender)
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let files = droppedFiles(sender.draggingPasteboard)
+        if let onFiles, !files.isEmpty { onFiles(files); return true }
         if let onImages {
             let found = ImagePasteboard.sources(sender.draggingPasteboard, rawNeedsNoText: false)
             if !found.isEmpty { onImages(found); return true }

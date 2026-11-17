@@ -188,6 +188,16 @@ export interface DuckRow {
   duty: "on" | "off";
 }
 
+export interface RoomAttachmentRow {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  mime: string;
+  size: number;
+  width?: number;
+  height?: number;
+}
+
 export interface RoomPostRow {
   seq: number;
   id: string;
@@ -223,6 +233,17 @@ export interface DiffCommentRow {
 }
 
 type Row = Record<string, unknown>;
+
+function attachmentRow(r: Row): RoomAttachmentRow {
+  return {
+    id: r.id as string,
+    kind: r.kind as "image" | "file",
+    name: r.name as string,
+    mime: r.mime as string,
+    size: r.size as number,
+    ...(typeof r.width === "number" && typeof r.height === "number" ? { width: r.width, height: r.height } : {}),
+  };
+}
 
 export interface SearchHit {
   sessionId: string;
@@ -1128,6 +1149,10 @@ export class NativeStore {
     return rows.map(roomPostRow);
   }
 
+  deleteRoomPost(id: string): void {
+    this.db.prepare("DELETE FROM room_posts WHERE id=?").run(id);
+  }
+
   roomPostById(id: string): RoomPostRow | null {
     const r = this.db.prepare("SELECT * FROM room_posts WHERE id=?").get(id) as Row | undefined;
     return r ? roomPostRow(r) : null;
@@ -1190,6 +1215,67 @@ export class NativeStore {
     );
     this.db.exec("CREATE INDEX IF NOT EXISTS room_jobs_project ON room_jobs(project_id, updated_at)");
     this.jobsReady = true;
+  }
+
+  private attachmentsReady = false;
+
+  private attachmentsTable(): void {
+    if (this.attachmentsReady) return;
+    // Created here, not as a migration (like room_jobs): the bytes live in files; this only names them.
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS room_attachments (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, post_id TEXT NOT NULL, ord INTEGER NOT NULL,
+         kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+         width INTEGER, height INTEGER)`,
+    );
+    this.db.exec("CREATE INDEX IF NOT EXISTS room_attachments_post ON room_attachments(post_id, ord)");
+    this.attachmentsReady = true;
+  }
+
+  addRoomAttachment(row: RoomAttachmentRow & { projectId: string; postId: string; ord: number }): void {
+    this.attachmentsTable();
+    this.db
+      .prepare(
+        "INSERT INTO room_attachments (id, project_id, post_id, ord, kind, name, mime, size, width, height) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      )
+      .run(
+        row.id,
+        row.projectId,
+        row.postId,
+        row.ord,
+        row.kind,
+        row.name,
+        row.mime,
+        row.size,
+        row.width ?? null,
+        row.height ?? null,
+      );
+  }
+
+  /** The attachments of these posts, by post id, in the order they were added. */
+  roomAttachmentsOf(postIds: string[]): Map<string, RoomAttachmentRow[]> {
+    this.attachmentsTable();
+    const out = new Map<string, RoomAttachmentRow[]>();
+    for (let i = 0; i < postIds.length; i += 500) {
+      const ids = postIds.slice(i, i + 500);
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM room_attachments WHERE post_id IN (${ids.map(() => "?").join(",")}) ORDER BY post_id, ord`,
+        )
+        .all(...ids) as Row[];
+      for (const r of rows) {
+        const list = out.get(r.post_id as string) ?? [];
+        list.push(attachmentRow(r));
+        out.set(r.post_id as string, list);
+      }
+    }
+    return out;
+  }
+
+  roomAttachment(id: string): (RoomAttachmentRow & { projectId: string; postId: string }) | null {
+    this.attachmentsTable();
+    const r = this.db.prepare("SELECT * FROM room_attachments WHERE id=?").get(id) as Row | undefined;
+    return r ? { ...attachmentRow(r), projectId: r.project_id as string, postId: r.post_id as string } : null;
   }
 
   saveRoomJob(row: { id: string; projectId: string; messageId: string; data: string; updatedAt: number }): void {

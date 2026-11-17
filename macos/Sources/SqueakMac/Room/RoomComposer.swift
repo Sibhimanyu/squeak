@@ -8,8 +8,10 @@ import SwiftUI
 struct RoomComposer: View {
     let room: PondRoomModel
     let pondName: String
-    let send: (RoomAddressee, String) -> Void
+    /// Where it goes, the words and the attachments; answers a sentence when it could not be prepared (nothing sent).
+    let send: (RoomAddressee, String, [OutgoingAttachment]) -> String?
     @Environment(AppModel.self) private var model
+    @State private var dictation = DictationController()
     @State private var draft = ""
     @State private var to: RoomAddressee = .everyone
     @State private var contentHeight: CGFloat = 0
@@ -17,6 +19,7 @@ struct RoomComposer: View {
     @State private var highlighted = 0
     @State private var chooser = false
     @State private var focused = false
+    @State private var focusToken = 0
 
     private var people: [String] {
         let me = NSFullUserName()
@@ -28,15 +31,24 @@ struct RoomComposer: View {
     private var candidates: [RoomMention.Candidate] {
         mention.map { RoomMention.candidates(query: $0.query, threads: room.feed.threads, people: people) } ?? []
     }
-    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var tray: RoomAttachmentTray { room.tray }
+    private var canSend: Bool { tray.draft.canSend(text: draft) && !dictation.isActive }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ComposerField(
-                text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
-                onSend: submit, onContentHeight: { contentHeight = $0 }, onPickerKey: pickerKey, onFocus: { focused = $0 }
-            )
-            .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
+            RoomAttachmentStrip(tray: tray).padding(.top, 8)
+            if dictation.state.showsMeter {
+                DictationBar(dictation: dictation).padding(.top, 8)
+            } else {
+                ComposerField(
+                    text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                    focusToken: focusToken,
+                    onSend: submit, onContentHeight: { contentHeight = $0 },
+                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
+                )
+                .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
+            }
+            DictationNotice(dictation: dictation)
             bar
         }
         .padding(.horizontal, 14).padding(.bottom, 10)
@@ -46,6 +58,16 @@ struct RoomComposer: View {
             if mention != nil, !candidates.isEmpty { picker(candidates).offset(y: -(contentHeight + 56)).padding(.leading, 12) }
         }
         .onChange(of: mention?.query) { highlighted = 0 }
+        .onAppear {
+            // Dictation is the chat composer's: the words land in the field for review, nothing is sent.
+            dictation.onText = { words in
+                draft = DictationState.append(words, to: draft)
+                focusToken += 1
+            }
+        }
+        .onChange(of: room.projectId) { _, _ in dictation.cancel() }
+        .onDisappear { dictation.cancel() }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in tray.pick() }
         .accessibilityElement(children: .contain)
     }
 
@@ -68,12 +90,26 @@ struct RoomComposer: View {
                 .padding(.horizontal, 8).frame(height: 22).background(Theme.selected, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             Spacer(minLength: 0)
+            RoomAttachButton(tray: tray)
+            micButton
             Button(action: submit) {
                 Lucide(.arrowUp, size: 14, color: canSend ? Theme.primaryText : Theme.ink)
                     .frame(width: 26, height: 26).background(canSend ? Theme.primaryFill : Theme.selectedStrong, in: Circle())
             }
             .buttonStyle(.plain).disabled(!canSend).accessibilityLabel("Send")
         }
+    }
+
+    /// The chat composer's mic: same controller, bars, notice and settings; words go to the field for review.
+    private var micButton: some View {
+        Button { dictation.toggle() } label: {
+            Lucide(.mic, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(dictation.isActive)
+        .keyboardShortcut("d", modifiers: [.command, .shift])
+        .shortcutHint("Dictate", .dictate)
+        .accessibilityLabel("Dictate a message")
     }
 
     private func picker(_ list: [RoomMention.Candidate], everyone: Bool = false) -> some View {
@@ -125,9 +161,11 @@ struct RoomComposer: View {
     }
 
     private func submit() {
+        guard canSend else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let items = tray.items
+        if let problem = send(to, text, items) { tray.fail(problem); return }
         draft = ""
-        send(to, text)
+        tray.clear()
     }
 }

@@ -51,6 +51,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const room = new Room({
     store,
     ownerName: () => flotilla?.service?.identity.name ?? null,
+    attachmentsDir: path.join(supportDir, "room-attachments"),
     ...(flag("roomSummary") ? { notebookSummary: "default" as const } : {}),
   });
   attachSqueakPosts(host, store, room);
@@ -64,7 +65,7 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     room,
     send: (id, text) => host.send(id, text),
-    newThread: (projectId, text, title) => server!.newJobThread(projectId, text, title),
+    newThread: (projectId, text, title, attach) => server!.newJobThread(projectId, text, title, attach),
     start: (spec) => server!.startDuckSession(spec),
     newBranch: (projectId, text) => server!.newStreamBranch(projectId, text),
     checkBranch: (projectId, branch) => server!.checkStreamBranch(projectId, branch),

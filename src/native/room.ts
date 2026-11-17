@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import path from "node:path";
 
 import { toFleetState } from "../fleet/observers/squeak-native.js";
@@ -27,6 +28,8 @@ import type { SessionRow } from "./types.js";
  * where the person talks too. Two levels: `room` (what a person sees) and `agents` (coordination). This Mac only.
  */
 
+import { AttachmentError, checkAttachments, RoomAttachments, type RoomAttachment } from "./room-attachments.js";
+
 export const ROOM_MAX_TEXT = 500;
 export const ROOM_AGENT_POSTS_PER_HOUR = 30;
 export const ROOM_THREAD_WINDOW_MS = 24 * 3_600_000;
@@ -46,6 +49,8 @@ export interface RoomPost {
   level: RoomLevel;
   text: string;
   toSessionId?: string;
+  /** Pictures and files the person attached (a person's message only). */
+  attachments?: RoomAttachment[];
   at: number;
 }
 
@@ -156,6 +161,8 @@ export interface NewRoomPost {
   level?: RoomLevel;
   text: string;
   toSessionId?: string;
+  /** A person's pictures and files, as the Mac sent them (checked here: PNG/JPEG by bytes, size and count limits). */
+  attachments?: unknown;
   /** Squeak's own start/end lines: a fixed id makes a replayed event a no-op. */
   id?: string;
   at?: number;
@@ -168,12 +175,15 @@ export interface RoomOptions {
   now?: () => number;
   /** A model call that writes a notebook line's outcome (Haiku); absent or failing = the plain line. */
   notebookSummary?: TitleModelCall | "default";
+  /** Where attachments' bytes are kept (the support dir's `room-attachments`); a temp folder when absent (tests). */
+  attachmentsDir?: string;
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
 export class Room extends EventEmitter {
   private readonly store: NativeStore;
   private readonly now: () => number;
+  readonly attachments: RoomAttachments;
   private readonly viewed = new Map<string, number>();
   private readonly streams = new Map<string, number>();
   private readonly sent = new Map<string, number[]>();
@@ -188,6 +198,10 @@ export class Room extends EventEmitter {
     this.setMaxListeners(0);
     this.store = options.store;
     this.now = options.now ?? Date.now;
+    this.attachments = new RoomAttachments(
+      options.store,
+      options.attachmentsDir ?? path.join(os.tmpdir(), `squeak-room-attachments-${process.pid}`),
+    );
     this.log = new TimelineLog(options.store.db);
     this.reader = new TurnReader(this.log, this.now);
     try {
@@ -238,6 +252,21 @@ export class Room extends EventEmitter {
       if (existing) return existing;
     }
     const name = input.author.name.replace(/[\r\n]+/g, " ").trim() || "Someone";
+    let checked: ReturnType<typeof checkAttachments>;
+    try {
+      checked = checkAttachments(input.attachments);
+    } catch (error) {
+      if (error instanceof AttachmentError) throw new RoomError(error.message);
+      throw error;
+    }
+    if (checked.length > 0 && (input.author.kind !== "person" || input.kind !== "message")) {
+      throw new RoomError("Only a person's message takes attachments.");
+    }
+    // A picture or file alone is a message: the text may be empty then.
+    const text =
+      checked.length > 0 && typeof input.text === "string" && !input.text.trim()
+        ? ""
+        : Room.cleanText(input.text, input.kind);
     const row = this.store.addRoomPost({
       ...(input.id ? { id: input.id } : {}),
       projectId: input.projectId,
@@ -247,17 +276,27 @@ export class Room extends EventEmitter {
       sessionId: input.sessionId ?? null,
       kind: input.kind,
       level,
-      text: Room.cleanText(input.text, input.kind),
+      text,
       toSessionId: input.toSessionId ?? null,
       at: input.at ?? this.now(),
     });
+    if (checked.length > 0) {
+      try {
+        this.attachments.save(input.projectId, row.id, checked);
+      } catch (error) {
+        this.store.deleteRoomPost(row.id);
+        if (error instanceof AttachmentError) throw new RoomError(error.message);
+        throw error;
+      }
+    }
     this.emit("post", row);
     return row;
   }
 
   /** The person's post. */
-  personPost(projectId: string, text: unknown, level: RoomLevel = "room"): RoomPostRow {
+  personPost(projectId: string, text: unknown, level: RoomLevel = "room", attachments?: unknown): RoomPostRow {
     return this.post({
+      ...(attachments !== undefined ? { attachments } : {}),
       projectId,
       author: { kind: "person", id: "owner", name: this.ownerName() },
       kind: "message",
@@ -290,6 +329,18 @@ export class Room extends EventEmitter {
     return row;
   }
 
+  /** The wire form of posts, with their attachments. */
+  toPosts(projectId: string, rows: RoomPostRow[]): RoomPost[] {
+    const atts = this.attachments.forPosts(
+      projectId,
+      rows.filter((r) => r.authorKind === "person").map((r) => r.id),
+    );
+    return rows.map((r) => {
+      const a = atts.get(r.id);
+      return a?.length ? { ...toRoomPost(r), attachments: a } : toRoomPost(r);
+    });
+  }
+
   /** Posts for the room's page: `since` forwards, `before` backwards, else the newest. Oldest first. */
   page(
     projectId: string,
@@ -303,7 +354,7 @@ export class Room extends EventEmitter {
         limit,
       })
       .filter((r) => !isSqueakLine(r));
-    const posts = rows.map(toRoomPost);
+    const posts = this.toPosts(projectId, rows);
     // The turns that started inside the posts' time window: the newest page covers the last 24 h.
     let from = this.now() - ROOM_THREAD_WINDOW_MS;
     let to = Infinity;
