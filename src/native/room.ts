@@ -4,7 +4,9 @@ import path from "node:path";
 import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
-import type { NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
+import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
+import { appendNotebook, notebookLine, summariseOutcome } from "./duck-notebook.js";
+import type { DuckRow, NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
 import {
   askOf,
@@ -47,7 +49,40 @@ export interface RoomPost {
   at: number;
 }
 
+/** Where a duck works: a stream (a git worktree on its own branch). Absent for Main or a plain-folder pond. */
+export interface DuckPlace {
+  kind: "stream";
+  workspaceId: string;
+  branch: string;
+}
+
+/** One duck of the pond with its current place (GET .../ducks). */
+export interface DuckView {
+  id: string;
+  projectId: string;
+  name: string;
+  role?: string;
+  colourSeed: string;
+  duty: "on" | "off";
+  /** The duck's current session; absent for a duck that has not worked yet. */
+  currentSessionId?: string;
+  place?: DuckPlace;
+  state: "working" | "waiting" | "idle" | "error";
+  lastActiveAt: number;
+  /** How many sessions it has had (the current one and its history). */
+  sessions: number;
+  notebook: string;
+  createdAt: number;
+}
+
 export interface RoomThread {
+  /** The duck's id (one thread per duck). */
+  duckId?: string;
+  /** Keeps the duck's colour stable: a migrated duck's first session id, else the duck id. */
+  colourSeed?: string;
+  /** Where the duck works now; absent for Main or when it has no session. */
+  place?: DuckPlace;
+  /** The duck's current session; empty for a duck that has not worked yet. */
   sessionId: string;
   title: string;
   /** The duck's name: the person's chosen one, else the chat title. */
@@ -126,6 +161,8 @@ export interface RoomOptions {
   /** The pond member name for the owner, when there is one (else the macOS full name, else "owner"). */
   ownerName?: () => string | null;
   now?: () => number;
+  /** A model call that writes a notebook line's outcome (Haiku); absent or failing = the plain line. */
+  notebookSummary?: TitleModelCall | "default";
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
@@ -148,6 +185,27 @@ export class Room extends EventEmitter {
     this.now = options.now ?? Date.now;
     this.log = new TimelineLog(options.store.db);
     this.reader = new TurnReader(this.log, this.now);
+    try {
+      this.migrateDucks();
+    } catch (error) {
+      logger.warn("duck migration failed", { error: String(error) });
+    }
+  }
+
+  /** Every session in a pond, and every one with an older duck row, becomes a duck once (idempotent). */
+  private migrateDucks(): void {
+    for (const p of this.store.listProjects()) this.sessionsOf(p.id);
+    for (const id of this.store.legacyDuckSessionIds()) {
+      const s = this.store.getSession(id);
+      const pond = s ? projectOfSession(this.store, s) : null;
+      if (s && pond) this.store.duckForSession(s.id, pond.id);
+    }
+  }
+
+  /** The duck a chat belongs to, made when it has none. */
+  duckOfSession(s: SessionRow): DuckRow | null {
+    const pond = projectOfSession(this.store, s);
+    return this.store.duckForSession(s.id, pond?.id ?? "");
   }
 
   ownerName(): string {
@@ -279,9 +337,11 @@ export class Room extends EventEmitter {
     const outcomeText = !running && t.reply ? firstSentence(t.reply) : "";
     const owner = t.authorName === undefined;
     const ducklings = this.ducklingsOf(s.id, t.turnId);
+    const duckId = this.store.duckBySession(s.id)?.id;
     return {
       id: `${s.id}:${t.turnId}`,
       sessionId: s.id,
+      ...(duckId ? { duckId } : {}),
       threadTitle: this.duckName(s),
       agent: s.agent,
       startedAt: t.startedAt,
@@ -343,6 +403,13 @@ export class Room extends EventEmitter {
       // A duckling (Agent/Task step) starting or ending changes the turn's ducklings.
       ((t === "step.added" || t === "step.updated") && isDucklingStep(event));
     if (!relevant || !turnId) return;
+    if (t === "turn.ended") {
+      try {
+        this.noteTurnEnded(sessionId, turnId);
+      } catch (error) {
+        logger.warn("duck notebook failed", { error: String(error) });
+      }
+    }
     this.scheduleTurn(sessionId, turnId);
   }
 
@@ -410,9 +477,13 @@ export class Room extends EventEmitter {
     const project = this.store.getProject(projectId);
     if (!project) return [];
     const streams = new Set(this.store.listWorkspaces(projectId).map((w) => w.id));
-    return this.store
+    const mine = this.store
       .listSessions()
       .filter((s) => !s.archivedAt && (s.workspaceId ? streams.has(s.workspaceId) : s.cwd === project.rootPath));
+    // A chat with no duck yet becomes one (its own, seeded by its id), so the room is all ducks.
+    const mapped = this.store.mappedSessionIds();
+    for (const s of mine) if (!mapped.has(s.id)) this.store.duckForSession(s.id, projectId);
+    return mine;
   }
 
   /** A chat's turns (not agent-run ones), oldest first. */
@@ -435,16 +506,103 @@ export class Room extends EventEmitter {
       .sort((a, b) => b.at - a.at || a.session.id.localeCompare(b.session.id));
   }
 
-  /** The pond's non-archived chats active in the last 24 h, newest activity first, with what each is working on. */
+  /** Where a chat runs: its stream, else nothing (Main, or a plain folder). */
+  placeOf(s: SessionRow | null): DuckPlace | undefined {
+    const ws = s?.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
+    return ws && ws.state !== "archived" ? { kind: "stream", workspaceId: ws.id, branch: ws.branch } : undefined;
+  }
+
+  /** The ducks of a pond with a current place, matching and listing: sessionless ones always, others while their chat is recent. */
+  duckCandidates(
+    projectId: string,
+    windowMs: number,
+    opts: { offDuty?: boolean } = {},
+  ): Array<{ duck: DuckRow; session: SessionRow | null; state: RoomThread["state"]; at: number }> {
+    if (!this.store.getProject(projectId)) return [];
+    this.sessionsOf(projectId); // makes ducks for chats that have none
+    const cutoff = this.now() - windowMs;
+    const out: Array<{ duck: DuckRow; session: SessionRow | null; state: RoomThread["state"]; at: number }> = [];
+    for (const duck of this.store.listDucks(projectId)) {
+      if (!opts.offDuty && duck.duty === "off") continue;
+      const session = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
+      if (session) {
+        if (session.archivedAt) continue;
+        const at = Date.parse(session.updatedAt);
+        if (!Number.isFinite(at) || at < cutoff) continue;
+        out.push({ duck, session, state: threadState(session.status, session.lastTurnEndedAt), at });
+      } else if (this.store.duckSessionIds(duck.id).length === 0) {
+        out.push({ duck, session: null, state: "idle", at: Date.parse(duck.createdAt) || 0 });
+      }
+    }
+    return out.sort((a, b) => b.at - a.at || a.duck.id.localeCompare(b.duck.id));
+  }
+
+  /** The pond's ducks active in the last 24 h (and those that have not worked yet), newest activity first. */
   threads(projectId: string): RoomThread[] {
     if (!this.store.getProject(projectId)) return [];
-    const cutoff = this.now() - ROOM_THREAD_WINDOW_MS;
     const marks = this.store.latestRoomMarks(projectId);
-    return this.sessionsOf(projectId)
-      .map((s) => ({ s, at: Date.parse(s.updatedAt) }))
-      .filter((x) => Number.isFinite(x.at) && x.at >= cutoff)
-      .sort((a, b) => b.at - a.at || a.s.id.localeCompare(b.s.id))
-      .map(({ s }): RoomThread => this.threadOf(s, marks));
+    return this.duckCandidates(projectId, ROOM_THREAD_WINDOW_MS, { offDuty: true }).map((c) =>
+      c.session ? this.threadOf(c.session, marks) : this.threadOfDuck(c.duck),
+    );
+  }
+
+  /** A duck that has not worked yet: a name and a role, no place. */
+  threadOfDuck(duck: DuckRow): RoomThread {
+    const at = Date.parse(duck.createdAt) || 0;
+    return {
+      duckId: duck.id,
+      colourSeed: duck.colourSeed,
+      sessionId: "",
+      title: duck.name ?? "Duck",
+      name: duck.name ?? "Duck",
+      ...(duck.role ? { role: duck.role } : {}),
+      duty: duck.duty,
+      lastActiveAt: at,
+      agent: "claude",
+      state: "idle",
+      lastState: "idle",
+      lastAt: at,
+    };
+  }
+
+  /** The duck's view for GET .../ducks. */
+  duckView(duck: DuckRow): DuckView {
+    const s = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
+    const created = Date.parse(duck.createdAt) || 0;
+    const at = s ? Date.parse(s.updatedAt) : created;
+    const place = this.placeOf(s);
+    return {
+      id: duck.id,
+      projectId: duck.projectId,
+      name: duck.name ?? (s ? agentName(s) : "Duck"),
+      ...(duck.role ? { role: duck.role } : {}),
+      colourSeed: duck.colourSeed,
+      duty: duck.duty,
+      ...(s ? { currentSessionId: s.id } : {}),
+      ...(place ? { place } : {}),
+      state: s ? threadState(s.status, s.lastTurnEndedAt) : "idle",
+      lastActiveAt: Number.isFinite(at) ? at : created,
+      sessions: this.store.duckSessionIds(duck.id).length,
+      notebook: duck.notebook,
+      createdAt: created,
+    };
+  }
+
+  /** Every duck of the pond worth listing (sessionless ones, and those whose chat was active in 30 days). */
+  listDucks(projectId: string): DuckView[] {
+    return this.duckCandidates(projectId, 30 * 24 * 3_600_000, { offDuty: true })
+      .map((c) => this.duckView(c.duck))
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt || a.id.localeCompare(b.id));
+  }
+
+  /** An identity with no session yet: a name (1..32) and an optional role. */
+  createDuck(projectId: string, input: { name?: unknown; role?: unknown }): DuckView {
+    if (!this.store.getProject(projectId)) throw new RoomError("No such pond.");
+    const patch = cleanDuckPatch({ name: input.name, ...(input.role !== undefined ? { role: input.role } : {}) });
+    if (!patch.name) throw new RoomError("name is required");
+    const duck = this.store.createDuck({ projectId, name: patch.name, role: patch.role ?? null });
+    this.emitDuck(duck.id);
+    return this.duckView(duck);
   }
 
   /** One chat as a room thread (a `thread` frame carries it alone). */
@@ -459,13 +617,16 @@ export class Room extends EventEmitter {
     const open = last && last.endedAt === undefined ? last : undefined;
     const progress = state === "working" && open ? this.progressOf(s.id, open.startSeq) : undefined;
     const ask = state === "waiting" ? askOf(last?.reply) : null;
-    const duck = this.store.duckOf(s.id);
+    const duck = this.duckOfSession(s);
+    const place = this.placeOf(s);
     return {
+      ...(duck ? { duckId: duck.id, colourSeed: duck.colourSeed } : {}),
+      ...(place ? { place } : {}),
       sessionId: s.id,
       title: s.title ?? "Untitled",
-      name: duck.name ?? agentName(s),
-      ...(duck.role ? { role: duck.role } : {}),
-      duty: duck.duty,
+      name: duck?.name ?? agentName(s),
+      ...(duck?.role ? { role: duck.role } : {}),
+      duty: duck?.duty ?? "on",
       lastActiveAt: Date.parse(s.updatedAt),
       agent: s.agent,
       state,
@@ -489,55 +650,113 @@ export class Room extends EventEmitter {
     return this.store.duckOf(s.id).name ?? agentName(s);
   }
 
-  /** Changes a duck's name and/or role (null clears) and tells `thread` listeners. */
+  /** Changes a chat's duck name and/or role (null clears) and tells `thread` listeners. */
   setDuck(sessionId: string, patch: { name?: unknown; role?: unknown }): { name: string; role?: string } {
     const s = this.store.getSession(sessionId);
     if (!s) throw new RoomError("No such chat.");
-    const clean: { name?: string | null; role?: string | null } = {};
-    if (patch.name !== undefined) {
-      if (patch.name === null) clean.name = null;
-      else if (typeof patch.name !== "string") throw new RoomError("name must be text or null");
-      else {
-        const n = patch.name.replace(/\s+/g, " ").trim();
-        if (n.length < 1 || [...n].length > DUCK_NAME_MAX)
-          throw new RoomError(`name is 1 to ${DUCK_NAME_MAX} characters`);
-        clean.name = n;
-      }
-    }
-    if (patch.role !== undefined) {
-      if (patch.role === null) clean.role = null;
-      else if (typeof patch.role !== "string") throw new RoomError("role must be text or null");
-      else {
-        const r = patch.role.replace(/\s+/g, " ").trim();
-        if ([...r].length > DUCK_ROLE_MAX) throw new RoomError(`role is at most ${DUCK_ROLE_MAX} characters`);
-        clean.role = r || null;
-      }
-    }
-    this.store.setDuck(sessionId, clean);
-    this.emitThread(s);
-    const t = this.store.duckOf(sessionId);
-    return { name: t.name ?? agentName(s), ...(t.role ? { role: t.role } : {}) };
+    const duck = this.duckOfSession(s);
+    if (!duck) throw new RoomError("No such chat.");
+    return this.setDuckById(duck.id, patch, s);
   }
 
-  /** Puts a duck on or off duty; tells `thread` listeners only on a change. */
+  /** Changes a duck's name and/or role (null clears) and tells `thread` listeners. */
+  setDuckById(
+    duckId: string,
+    patch: { name?: unknown; role?: unknown },
+    via?: SessionRow,
+  ): { name: string; role?: string } {
+    const duck = this.store.duckRow(duckId);
+    if (!duck) throw new RoomError("No such duck.");
+    this.store.updateDuck(duckId, cleanDuckPatch(patch));
+    this.emitDuck(duckId);
+    const t = this.store.duckRow(duckId)!;
+    const cur = via ?? (t.currentSessionId ? this.store.getSession(t.currentSessionId) : null);
+    return { name: t.name ?? (cur ? agentName(cur) : "Duck"), ...(t.role ? { role: t.role } : {}) };
+  }
+
+  /** Puts a chat's duck on or off duty; tells `thread` listeners only on a change. */
   setDuty(sessionId: string, on: boolean): "on" | "off" {
     const s = this.store.getSession(sessionId);
     if (!s) throw new RoomError("No such chat.");
-    const before = this.store.duckOf(sessionId).duty;
-    this.store.setDuty(sessionId, on);
-    if (before !== (on ? "on" : "off")) this.emitThread(s);
+    const duck = this.duckOfSession(s);
+    if (!duck) throw new RoomError("No such chat.");
+    return this.setDutyById(duck.id, on);
+  }
+
+  setDutyById(duckId: string, on: boolean): "on" | "off" {
+    const duck = this.store.duckRow(duckId);
+    if (!duck) throw new RoomError("No such duck.");
+    if (duck.duty !== (on ? "on" : "off")) {
+      this.store.updateDuck(duckId, { duty: on ? "on" : "off" });
+      this.emitDuck(duckId);
+    }
     return on ? "on" : "off";
   }
 
-  private emitThread(s: SessionRow): void {
-    const pond = projectOfSession(this.store, s);
-    if (!pond) return;
+  /** Tells `thread` listeners the duck changed (its place, name, role, duty). */
+  emitDuck(duckId: string): void {
     try {
-      this.emit("thread", { projectId: pond.id, thread: this.threadOf(s) });
+      const duck = this.store.duckRow(duckId);
+      if (!duck?.projectId) return;
+      const s = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
+      this.emit("thread", { projectId: duck.projectId, thread: s ? this.threadOf(s) : this.threadOfDuck(duck) });
     } catch (error) {
       logger.warn("room thread frame failed", { error: String(error) });
     }
   }
+
+  // ---- the notebook ----
+
+  private readonly notebookChain = new Map<string, Promise<void>>();
+  private readonly notebooked = new Set<string>();
+
+  /** Resolves when the notebook writes so far are done (tests). */
+  notebookIdle(): Promise<void> {
+    return Promise.all([...this.notebookChain.values()]).then(() => undefined);
+  }
+
+  /** A turn of a duck's chat ended: one compact line in its notebook (a model sentence when one answers in time). */
+  private noteTurnEnded(sessionId: string, turnId: string): void {
+    const key = `${sessionId}:${turnId}`;
+    if (this.notebooked.has(key)) return;
+    const s = this.store.getSession(sessionId);
+    const duck = s ? this.duckOfSession(s) : null;
+    if (!s || !duck) return;
+    this.notebooked.add(key);
+    const prev = this.notebookChain.get(duck.id) ?? Promise.resolve();
+    const run = prev
+      .then(() => this.writeNotebook(duck.id, s, turnId))
+      .catch((error) => logger.warn("duck notebook failed", { error: String(error) }))
+      .finally(() => {
+        if (this.notebookChain.get(duck.id) === run) this.notebookChain.delete(duck.id);
+      });
+    this.notebookChain.set(duck.id, run);
+  }
+
+  private async writeNotebook(duckId: string, s: SessionRow, turnId: string): Promise<void> {
+    const t = this.reader.turns(s.id).find((x) => x.turnId === turnId);
+    if (!t || t.endedAt === undefined) return;
+    const plain = t.reply ? firstSentence(t.reply) : "";
+    let outcome = plain;
+    const opt = this.options.notebookSummary;
+    if (opt && t.reply && t.reply.length > 200) {
+      const call = opt === "default" ? (this.summaryCall ??= defaultTitleCall()) : opt;
+      outcome = (await summariseOutcome(call, t.prompt, t.reply)) ?? plain;
+    }
+    const duck = this.store.duckRow(duckId);
+    if (!duck) return;
+    const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
+    const line = notebookLine({
+      at: t.endedAt,
+      job: t.prompt,
+      outcome,
+      ...(t.outcome ? { ended: t.outcome } : {}),
+      branch: ws?.branch ?? null,
+    });
+    this.store.updateDuck(duckId, { notebook: appendNotebook(duck.notebook, line) });
+  }
+
+  private summaryCall: TitleModelCall | null = null;
 
   /** A person (or a stream) looked at the room. */
   markViewed(projectId: string): void {
@@ -562,6 +781,34 @@ export class Room extends EventEmitter {
     const at = this.viewed.get(projectId);
     return at !== undefined && this.now() - at <= ROOM_VIEWED_MS;
   }
+}
+
+/** A name (1..32) and role (0..80) as the person typed them; null clears, a key left out is kept. */
+export function cleanDuckPatch(patch: { name?: unknown; role?: unknown }): {
+  name?: string | null;
+  role?: string | null;
+} {
+  const clean: { name?: string | null; role?: string | null } = {};
+  if (patch.name !== undefined) {
+    if (patch.name === null) clean.name = null;
+    else if (typeof patch.name !== "string") throw new RoomError("name must be text or null");
+    else {
+      const n = patch.name.replace(/\s+/g, " ").trim();
+      if (n.length < 1 || [...n].length > DUCK_NAME_MAX)
+        throw new RoomError(`name is 1 to ${DUCK_NAME_MAX} characters`);
+      clean.name = n;
+    }
+  }
+  if (patch.role !== undefined) {
+    if (patch.role === null) clean.role = null;
+    else if (typeof patch.role !== "string") throw new RoomError("role must be text or null");
+    else {
+      const r = patch.role.replace(/\s+/g, " ").trim();
+      if ([...r].length > DUCK_ROLE_MAX) throw new RoomError(`role is at most ${DUCK_ROLE_MAX} characters`);
+      clean.role = r || null;
+    }
+  }
+  return clean;
 }
 
 function isDucklingStep(event: object): boolean {

@@ -18,6 +18,8 @@ const KEEP_TURNS = 300;
 export interface RoomTurn {
   id: string;
   sessionId: string;
+  /** The duck that worked it (its older sessions' turns are still its own). */
+  duckId?: string;
   threadTitle: string;
   agent: string;
   startedAt: number;

@@ -172,6 +172,7 @@ describe("room turns", () => {
     expect(turns[0]).toEqual({
       id: `${r.s.id}:t1`,
       sessionId: r.s.id,
+      duckId: expect.any(String),
       threadTitle: "Wire retry",
       agent: "claude",
       startedAt: NOW - 30 * 60_000,

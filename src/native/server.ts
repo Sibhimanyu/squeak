@@ -16,7 +16,8 @@ import { HostError, logHostError, type HostEvent, type SessionHost } from "./hos
 import type { NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
 import { Room, RoomError, toRoomPost } from "./room.js";
-import { JobError, jobTitle, RoomJobs, type RoomJob } from "./room-jobs.js";
+import { slug } from "./workspace-sources.js";
+import { JobError, jobTitle, RoomJobs, type RoomJob, type StartSpec } from "./room-jobs.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -168,6 +169,9 @@ export class NativeServer {
         room: this.room,
         send: (id, text) => host.send(id, text),
         newThread: (projectId, text, title) => this.newJobThread(projectId, text, title),
+        start: (spec) => this.startDuckSession(spec),
+        newBranch: (projectId, text) => this.newStreamBranch(projectId, text),
+        checkBranch: (projectId, branch) => this.checkStreamBranch(projectId, branch),
       });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
@@ -497,6 +501,44 @@ export class NativeServer {
         if (store.duckOf(id).duty === "off") this.room.setDuty(id, true);
         return this.json(res, 200, await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}) }));
       }
+    }
+    if (area === "projects" && id && sub === "ducks" && parts.length === 4) {
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      if (method === "GET") return this.json(res, 200, { ducks: this.room.listDucks(id) });
+      if (method === "POST") {
+        const b = await this.body(req);
+        const unknown = Object.keys(b).filter((k) => k !== "name" && k !== "role");
+        if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+        try {
+          return this.json(res, 201, { duck: this.room.createDuck(id, b) });
+        } catch (error) {
+          if (error instanceof RoomError) throw new HttpError(400, error.message);
+          throw error;
+        }
+      }
+    }
+    if (area === "ducks" && id && parts.length === 3 && method === "PATCH") {
+      if (!store.duckRow(id)) throw new HttpError(404, "no such duck");
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "name" && k !== "role");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (b.name === undefined && b.role === undefined) throw new HttpError(400, "name or role is required");
+      try {
+        this.room.setDuckById(id, b);
+        return this.json(res, 200, { duck: this.room.duckView(store.duckRow(id)!) });
+      } catch (error) {
+        if (error instanceof RoomError) throw new HttpError(400, error.message);
+        throw error;
+      }
+    }
+    if (area === "ducks" && id && sub === "duty" && parts.length === 4 && method === "POST") {
+      if (!store.duckRow(id)) throw new HttpError(404, "no such duck");
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "on");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (typeof b.on !== "boolean") throw new HttpError(400, "on must be true or false");
+      const duty = this.room.setDutyById(id, b.on);
+      return this.json(res, 200, { duty, duck: this.room.duckView(store.duckRow(id)!) });
     }
     if (area === "sessions" && id && sub === "duck" && parts.length === 4 && method === "PATCH") {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -1214,6 +1256,91 @@ export class NativeServer {
       workspaceId,
       ...(str(b.text) ? { text: str(b.text)! } : {}),
       ...(agentPrefix ? { agentPrefix } : {}),
+    });
+  }
+
+  /** The model of the duck's newest chat, else of the pond's newest one that has a model. */
+  private modelFor(projectId: string, duckSession: SessionRow | null): { agent: SessionRow["agent"]; model: string } {
+    const { store } = this.options;
+    const own = duckSession && duckSession.model && duckSession.model !== "default" ? duckSession : null;
+    const sessions = store.listSessions().filter((s) => s.model && s.model !== "default");
+    const pick =
+      own ??
+      sessions.filter(
+        (s) => !s.archivedAt && this.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id),
+      )[0] ??
+      sessions[0];
+    if (!pick) throw new JobError("Squeak has no chat to take a model from yet; start a chat first.", 409);
+    return { agent: pick.agent, model: pick.model };
+  }
+
+  /** A free branch for a new stream, slugged from the job text; null in a pond with no streams. */
+  newStreamBranch(projectId: string, text: string): string | null {
+    const { store, workspaces } = this.options;
+    const project = store.getProject(projectId);
+    if (!project || project.kind !== "git") return null;
+    const prefix = workspaces.settingsFor(project).effective.branchPrefix;
+    const base = slug(jobTitle(text), 40);
+    for (let n = 1; n <= 30; n++) {
+      const candidate = `${prefix}${base}${n > 1 ? `-${n}` : ""}`;
+      try {
+        return workspaces.resolveNewBranch(project, candidate).branch;
+      } catch {
+        /* taken or not a branch git accepts: try the next */
+      }
+    }
+    return null;
+  }
+
+  /** A typed branch for a new stream, as git accepts it, or a JobError that says why not. */
+  checkStreamBranch(projectId: string, branch: string): string {
+    const project = this.options.store.getProject(projectId);
+    if (!project) throw new JobError("No such pond.", 404);
+    try {
+      return this.options.workspaces.resolveNewBranch(project, branch).branch;
+    } catch (error) {
+      throw new JobError(error instanceof Error ? error.message : "That branch name isn't usable.", 409);
+    }
+  }
+
+  /**
+   * A fresh session for a duck, in the place the job names: an existing stream, a new stream off the default branch
+   * (a worktree, setup scripts included), or the pond's own folder. The duck's identity rides in the session's note.
+   */
+  async startDuckSession(spec: StartSpec): Promise<SessionRow> {
+    const { store, host, workspaces } = this.options;
+    const project = store.getProject(spec.projectId);
+    if (!project) throw new JobError("No such pond.", 404);
+    let cwd = project.rootPath;
+    let workspaceId: string | null = null;
+    if (spec.place?.kind === "stream") {
+      const ws = store.getWorkspace(spec.place.workspaceId);
+      if (!ws || ws.projectId !== project.id || ws.state === "archived") {
+        throw new JobError("That stream isn't available in this pond any more.", 409);
+      }
+      cwd = ws.path;
+      workspaceId = ws.id;
+    } else if (spec.place?.kind === "new") {
+      try {
+        const ws = workspaces.createWorkspace(project.id, undefined, undefined, spec.place.branch, spec.title);
+        cwd = ws.path;
+        workspaceId = ws.id;
+      } catch (error) {
+        if (error instanceof WorkspaceError) throw new JobError(error.message, 409);
+        throw error;
+      }
+    }
+    const cur = spec.duck.currentSessionId ? store.getSession(spec.duck.currentSessionId) : null;
+    const { agent, model } = this.modelFor(project.id, cur);
+    return host.create({
+      cwd,
+      agent,
+      model,
+      permissionMode: NEW_THREAD_PERMISSION_MODE,
+      workspaceId,
+      title: spec.title,
+      text: spec.text,
+      duckId: spec.duck.id,
     });
   }
 
