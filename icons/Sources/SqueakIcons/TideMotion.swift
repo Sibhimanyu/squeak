@@ -143,7 +143,7 @@ public enum TideMotion {
     // MARK: the field
 
     /// Lattice cells per cell of the glyph for the two noise layers (1/scale): a feature is about 1-2 cells across.
-    private static let freqA = 1 / 1.7, freqB = 1 / 1.05
+    fileprivate static let freqA = 1 / 1.7, freqB = 1 / 1.05
 
     /// 0...1 raw brightness of a cell before the fade: two layers of smooth noise (about 1.7 and 1 cell across) over (x, y, time),
     /// both carried along a slow drift in a seeded direction that keeps turning, plus sparkle cells.
@@ -236,5 +236,73 @@ public enum TideMotion {
     public static func calmLevel(col: Int, row: Int, cols: Int, rows: Int) -> Int {
         let a = calmAlpha(col: col, row: row, cols: cols, rows: rows)
         return a <= 0 ? 0 : a < 0.45 ? 1 : 2
+    }
+}
+
+// MARK: one frame, everything per-glyph worked out once
+
+extension TideMotion {
+    /// A glyph's brightness field at one instant with everything that does not depend on the cell computed once: the flow
+    /// time (three cosines), the drift heading and swirls, and the hash prefix of each noise layer. `smoothAlpha` per cell
+    /// recomputed all of it for every cell (80 cells of a stream glyph, at 30 fps, per glyph on screen), which was half of the
+    /// Mac app's main-thread time in a live sample. The result is exactly `smoothAlpha`'s (a test pins it), cell for cell.
+    public struct Frame: Sendable {
+        let u: Double, along: Double, across: Double, c: Double, s: Double
+        let hA: UInt64, hB: UInt64, hLen: UInt64, hPos: UInt64, hSlot: UInt64
+        let sparkle: Double, vignette: Double, width: Double
+        let tuning: Tuning
+
+        public init(t: Double, seed: UInt64, tuning: Tuning = Tuning()) {
+            let u = TideMotion.flowTime(t, seed, tuning) / (TideMotion.baseRate * 0.5)
+            let theta = 2 * .pi * TideMotion.unit(seed &+ 80, 1)
+            let c = cos(theta), s = sin(theta)
+            let sw1 = 3.0 * sin(TideMotion.wrap(u * 2 * .pi / 53) + 6.28 * TideMotion.unit(seed &+ 80, 2))
+            let sw2 = 2.0 * sin(TideMotion.wrap(u * 2 * .pi / 37) + 6.28 * TideMotion.unit(seed &+ 80, 3))
+            self.u = u; self.c = c; self.s = s
+            self.along = 0.3 * u + sw2; self.across = sw1
+            self.hA = TideMotion.mix(seed &+ 81); self.hB = TideMotion.mix(seed &+ 82)
+            self.hLen = TideMotion.mix(seed &+ 90); self.hPos = TideMotion.mix(seed &+ 91); self.hSlot = TideMotion.mix(seed &+ 92)
+            self.sparkle = tuning.sparkle; self.vignette = tuning.vignette
+            self.width = tuning.smoothness / 8 * 1.3
+            self.tuning = tuning
+        }
+
+        /// `unit(seed, a, b, c)` with the seed's first mix already done (`h0 = mix(seed)`).
+        @inline(__always) private static func unit(_ h0: UInt64, _ a: Int, _ b: Int = 0, _ c: Int = 0) -> Double {
+            var h = TideMotion.mix(h0 ^ UInt64(bitPattern: Int64(a)))
+            h = TideMotion.mix(h ^ UInt64(bitPattern: Int64(b)) &* 0xD6E8_FEB8_6659_FD93)
+            h = TideMotion.mix(h ^ UInt64(bitPattern: Int64(c)) &* 0xA076_1D64_78BD_642F)
+            return Double(h >> 11) / Double(1 << 53)
+        }
+        @inline(__always) private static func noise(_ x: Double, _ y: Double, _ z: Double, _ h0: UInt64) -> Double {
+            let fx = x.rounded(.down), fy = y.rounded(.down), fz = z.rounded(.down)
+            let ix = Int(fx), iy = Int(fy), iz = Int(fz)
+            @inline(__always) func sm(_ t: Double) -> Double { t * t * (3 - 2 * t) }
+            let tx = sm(x - fx), ty = sm(y - fy), tz = sm(z - fz)
+            @inline(__always) func v(_ dx: Int, _ dy: Int, _ dz: Int) -> Double { unit(h0, ix + dx, iy + dy, iz + dz) * 2 - 1 }
+            @inline(__always) func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
+            let x00 = lerp(v(0, 0, 0), v(1, 0, 0), tx), x10 = lerp(v(0, 1, 0), v(1, 1, 0), tx)
+            let x01 = lerp(v(0, 0, 1), v(1, 0, 1), tx), x11 = lerp(v(0, 1, 1), v(1, 1, 1), tx)
+            return lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
+        }
+
+        /// The cell's drawn alpha; equal to `TideMotion.smoothAlpha` for the same time, seed and tuning.
+        public func alpha(col: Int, row: Int, cols: Int, rows: Int) -> Double {
+            let g = TideMotion.vignette(col: col, row: row, cols: cols, rows: rows, tuning: tuning)
+            let gain = 1 - 0.8 * (1 - g) * min(1, vignette)
+            guard gain > 0 else { return TideMotion.softAlpha(0, width: width) }
+            let x = Double(col) + along * c - across * s, y = Double(row) + along * s + across * c
+            let n = 0.6 * Frame.noise(x * TideMotion.freqA, y * TideMotion.freqA, u * 0.38, hA)
+                + 0.4 * Frame.noise(x * TideMotion.freqB + 9.1, y * TideMotion.freqB + 4.7, u * 0.62 + 3, hB)
+            let f = max(0, min(1, 0.5 + 1.45 * n))
+            // Sparkle.
+            let a = col &+ row &* 977
+            let len = 1.0 + 1.4 * Frame.unit(hLen, a)
+            let pos = u / len + Frame.unit(hPos, a) * 60
+            let slot = Int(pos.rounded(.down)), frac = pos - Double(slot)
+            var sp = 0.0
+            if Frame.unit(hSlot, a, slot) < 0.035 * sparkle { let b = sin(.pi * frac); sp = 0.6 * b * b }
+            return TideMotion.softAlpha((f + sp) * gain, width: width)
+        }
     }
 }

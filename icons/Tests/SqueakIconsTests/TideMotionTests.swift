@@ -393,3 +393,43 @@ final class TideClockTests: XCTestCase {
         }
     }
 }
+
+final class TideFrameEquivalenceTests: XCTestCase {
+    /// The per-frame fast path draws exactly what the per-cell `smoothAlpha` does, so the look is unchanged.
+    func testFrameMatchesSmoothAlpha() {
+        var tuning = TideMotion.Tuning(); tuning.speed = 0.7; tuning.sparkle = 2
+        for seed: UInt64 in [0, 1, 99, 0xDEAD_BEEF_CAFE] {
+            for t in [0.0, 0.37, 3.7, 41.2, 600.5] {
+                for g in [(4, 2), (6, 3), (10, 4), (16, 5)] {
+                    for tn in [TideMotion.Tuning(), tuning] {
+                        let f = TideMotion.Frame(t: t, seed: seed, tuning: tn)
+                        for r in 0..<g.1 { for c in 0..<g.0 {
+                            XCTAssertEqual(f.alpha(col: c, row: r, cols: g.0, rows: g.1), TideMotion.smoothAlpha(col: c, row: r, cols: g.0, rows: g.1, t: t, seed: seed, tuning: tn), accuracy: 1e-12)
+                        } }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Cost of one stream glyph frame (80 cells), for tracking regressions.
+    func testFramePerformance() {
+        measure {
+            for i in 0..<300 {
+                let f = TideMotion.Frame(t: Double(i) / 30, seed: 7)
+                for r in 0..<5 { for c in 0..<16 { _ = f.alpha(col: c, row: r, cols: 16, rows: 5) } }
+            }
+        }
+    }
+}
+
+extension TideFrameEquivalenceTests {
+    /// The same 300 frames through the old per-cell path, to show the gap.
+    func testPerCellBaselinePerformance() {
+        measure {
+            for i in 0..<300 {
+                for r in 0..<5 { for c in 0..<16 { _ = TideMotion.smoothAlpha(col: c, row: r, cols: 16, rows: 5, t: Double(i) / 30, seed: 7) } }
+            }
+        }
+    }
+}

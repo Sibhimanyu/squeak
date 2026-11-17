@@ -122,19 +122,25 @@ public struct TideFrame: View {
         // The radial fade is per cell, inside `TideMotion` (a partial alpha per cell, corners darkest); `fade` off turns it off.
         var tuning = tuning
         if !fade { tuning.vignette = 0 }
+        // Everything per-glyph once (flow time, drift, hash prefixes) and the colour resolved once: per cell, only the
+        // noise and one `Color(resolved)` remain. Resolving `color.opacity(a)` per cell went through the appearance
+        // closure of `Theme.adaptive` 80 times a frame per glyph.
+        let frame = (!calm && time != nil) ? TideMotion.Frame(t: time!, seed: seed, tuning: tuning) : nil
+        let base = color.resolve(in: graphics.environment)
         graphics.drawLayer { layer in
             for row in 0..<grid.rows {
                 for col in 0..<grid.cols {
                     let a: Double
                     if calm { a = TideMotion.calmAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
-                    else if let time { a = TideMotion.smoothAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows, t: time, seed: seed, tuning: tuning) }
+                    else if let frame { a = frame.alpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
                     else { a = TideMotion.alpha(TideMotion.level(col: col, row: row, cols: grid.cols, rows: grid.rows, t: TideMotion.stillTime, seed: seed, tuning: tuning)) }
                     guard a > 0.004 else { continue }
                     // Edges snap to whole device pixels so every dot is a crisp square.
                     func snap(_ v: CGFloat) -> CGFloat { (v * scale).rounded() / scale }
                     let x0 = snap(ox + CGFloat(col) * (side + grid.gap)), y0 = snap(CGFloat(row) * (side + grid.gap))
                     let rect = CGRect(x: x0, y: y0, width: snap(ox + CGFloat(col) * (side + grid.gap) + side) - x0, height: snap(CGFloat(row) * (side + grid.gap) + side) - y0)
-                    layer.fill(Path(rect), with: .color(color.opacity(a)))
+                    var cell = base; cell.opacity = Float(Double(base.opacity) * a)
+                    layer.fill(Path(rect), with: .color(Color(cell)))
                 }
             }
         }
