@@ -3,13 +3,13 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// A trailing activity mark for a working row: the tide glyph (mark grid), still while the Mac is not answering. It
+/// A trailing activity mark for a working row: the tide glyph (mark grid), drawn only while the Mac is answering. It
 /// never takes the agent's icon slot or paints behind the title.
 struct ChatActivityGlyph: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, grid: .mark, still: !model.macIsLive)
+        if model.macIsLive { TideGlyph(color: Theme.working, grid: .mark) }
     }
 }
 

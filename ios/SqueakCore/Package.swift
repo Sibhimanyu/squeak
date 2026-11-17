@@ -17,13 +17,13 @@ let package = Package(
         .package(path: "../../markup"),
     ],
     targets: [
-        .target(name: "SqueakCore"),
+        .target(name: "SqueakCore", dependencies: [.product(name: "SqueakIcons", package: "icons")]),
         .target(name: "SqueakUI", dependencies: ["SqueakCore", .product(name: "SqueakIcons", package: "icons"), .product(name: "SqueakMarkup", package: "markup")], resources: [.process("Resources")]),
         // Writes the fixtures the Mac's tests verify against (src/remote/fixtures).
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
         // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).
         .executableTarget(name: "squeak-e2e", dependencies: ["SqueakCore"]),
         .testTarget(name: "SqueakUITests", dependencies: ["SqueakUI", "SqueakCore", .product(name: "SqueakMarkup", package: "markup")]),
-        .testTarget(name: "SqueakCoreTests", dependencies: ["SqueakCore"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "SqueakCoreTests", dependencies: ["SqueakCore", .product(name: "SqueakIcons", package: "icons")], resources: [.copy("Fixtures")]),
     ]
 )

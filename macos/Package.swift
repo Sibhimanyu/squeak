@@ -34,7 +34,7 @@ let package = Package(
         .package(path: "../markup"),
     ],
     targets: [
-        .target(name: "SqueakMacCore"),
+        .target(name: "SqueakMacCore", dependencies: [.product(name: "SqueakIcons", package: "icons")]),
         addonsRegistrar,
         .executableTarget(
             name: "SqueakMac",
@@ -48,7 +48,7 @@ let package = Package(
                 .product(name: "SqueakMarkup", package: "markup"),
             ]),
         .testTarget(
-            name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"],
+            name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore", .product(name: "SqueakIcons", package: "icons")],
             resources: [.copy("Fixtures/native"), .copy("Fixtures/ponds"), .copy("Fixtures/icons")]),
     ] + addonTargets,
     swiftLanguageModes: [.v6]

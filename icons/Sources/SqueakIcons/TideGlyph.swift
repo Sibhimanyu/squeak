@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The standard "work in motion" glyph: a small block of square pixels, wider than tall, twinkling at random
 /// and fading out toward every edge. It always means working; the non-moving states are `StatusMark`. The caller passes the
-/// colour (SqueakIcons has no Theme). `still` or Reduce Motion holds one frame.
+/// colour (SqueakIcons has no Theme). It is only ever drawn moving, on something that works (`GlyphPresentation`): under Reduce
+/// Motion it is a distinct non-pixel icon (`loader-circle`), never a frozen frame, and a caller with nothing working draws nothing.
 public struct TideGlyph: View {
     /// The one cell pitch (dot plus gap, in points) of every tide glyph on a platform: the Mac's 3 pt is a 2.25 pt dot and a
     /// 0.75 pt gap; the phone's 3.5 pt is a 2.625 pt dot and a 0.875 pt gap. Chunky on purpose (owner, 2026-11-16: fine
@@ -58,8 +59,7 @@ public struct TideGlyph: View {
         public var size: CGSize { CGSize(width: CGFloat(cols) * (side + gap) - gap, height: CGFloat(rows) * (side + gap) - gap) }
     }
 
-    private let color: Color, still: Bool, grid: Grid, fixedSeed: UInt64?, fade: Bool, tuning: TideMotion.Tuning
-    private var calm = false
+    private let color: Color, grid: Grid, fixedSeed: UInt64?, fade: Bool, tuning: TideMotion.Tuning
     @Environment(\.displayScale) private var displayScale
     /// One random seed per view, captured once: two glyphs side by side never match.
     @State private var instanceSeed = UInt64.random(in: .min ... .max)
@@ -71,29 +71,21 @@ public struct TideGlyph: View {
     /// `fade` multiplies every pixel by a soft elliptical vignette (default on) so the glyph never reads as a box. To draw
     /// it past its layout slot, give it a bigger grid and a smaller frame (`.frame(width: slot, alignment:)`): SwiftUI
     /// centres or aligns the overflow without clipping, and the glyph never takes hits. Its size is the grid's, at the one pitch.
-    public init(color: Color, grid: Grid, still: Bool = false, seed: UInt64? = nil, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning()) {
-        self.tuning = tuning; self.color = color; self.still = still; self.fixedSeed = seed; self.fade = fade
+    public init(color: Color, grid: Grid, seed: UInt64? = nil, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning()) {
+        self.tuning = tuning; self.color = color; self.fixedSeed = seed; self.fade = fade
         self.grid = grid
-    }
-
-    /// The calm mark for a stream that is not working: one frozen frame of the same glyph on the same grid, so idle to
-    /// working only starts the motion and changes colour. A fixed pure frame (`TideMotion.calmLevel`),
-    /// no TimelineView, so it is identical everywhere and costs nothing. DESIGN.md §8.1, "Idle stream mark".
-    public static func calm(color: Color, grid: Grid) -> TideGlyph {
-        var glyph = TideGlyph(color: color, grid: grid, still: true, seed: TideMotion.calmSeed)
-        glyph.calm = true
-        return glyph
     }
 
     public var body: some View {
         let seed = fixedSeed ?? instanceSeed
         return Group {
-            if !still && !reduceMotion {
+            if GlyphPresentation.of(working: true, reduceMotion: reduceMotion) == .animatedGlyph {
                 TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, tuning.frameRate)), paused: scenePhase == .background)) { context in
                     TideFrame(color: color, height: grid.size.height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning, scale: displayScale)
                 }
             } else {
-                TideFrame(color: color, height: grid.size.height, grid: grid, time: nil, seed: seed, fade: fade, tuning: tuning, scale: displayScale, calm: calm)
+                Lucide(.loaderCircle, size: min(grid.size.height + 2, 14), color: color)
+                    .frame(width: grid.size.width, height: grid.size.height)
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)
@@ -102,20 +94,20 @@ public struct TideGlyph: View {
 
 /// One frame of the glyph at an explicit time (nil = the still frame); the preview drives it directly.
 public struct TideFrame: View {
-    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64, fade: Bool, tuning: TideMotion.Tuning, scale: CGFloat, calm: Bool
+    let color: Color, height: CGFloat, grid: TideGlyph.Grid, time: Double?, seed: UInt64, fade: Bool, tuning: TideMotion.Tuning, scale: CGFloat
 
-    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2, calm: Bool = false) {
-        self.calm = calm; self.scale = scale; self.tuning = tuning; self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed; self.fade = fade
+    public init(color: Color, height: CGFloat, grid: TideGlyph.Grid? = nil, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2) {
+        self.scale = scale; self.tuning = tuning; self.color = color; self.height = height; self.grid = grid ?? .preset(forHeight: height); self.time = time; self.seed = seed; self.fade = fade
     }
 
     public var body: some View {
         Canvas { graphics, canvas in
-            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed, fade: fade, tuning: tuning, scale: scale, calm: calm)
+            Self.draw(&graphics, size: canvas, color: color, grid: grid, time: time, seed: seed, fade: fade, tuning: tuning, scale: scale)
         }
         .frame(width: grid.width(height: height), height: height)
     }
 
-    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2, calm: Bool = false) {
+    public static func draw(_ graphics: inout GraphicsContext, size: CGSize, color: Color, grid: TideGlyph.Grid, time: Double?, seed: UInt64 = 0, fade: Bool = true, tuning: TideMotion.Tuning = TideMotion.Tuning(), scale: CGFloat = 2) {
         let side = grid.side(height: size.height)
         guard side > 0 else { return }
         let ox = (size.width - grid.width(height: size.height)) / 2
@@ -125,14 +117,13 @@ public struct TideFrame: View {
         // Everything per-glyph once (flow time, drift, hash prefixes) and the colour resolved once: per cell, only the
         // noise and one `Color(resolved)` remain. Resolving `color.opacity(a)` per cell went through the appearance
         // closure of `Theme.adaptive` 80 times a frame per glyph.
-        let frame = (!calm && time != nil) ? TideMotion.Frame(t: time!, seed: seed, tuning: tuning) : nil
+        let frame = (time != nil) ? TideMotion.Frame(t: time!, seed: seed, tuning: tuning) : nil
         let base = color.resolve(in: graphics.environment)
         graphics.drawLayer { layer in
             for row in 0..<grid.rows {
                 for col in 0..<grid.cols {
                     let a: Double
-                    if calm { a = TideMotion.calmAlpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
-                    else if let frame { a = frame.alpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
+                    if let frame { a = frame.alpha(col: col, row: row, cols: grid.cols, rows: grid.rows) }
                     else { a = TideMotion.alpha(TideMotion.level(col: col, row: row, cols: grid.cols, rows: grid.rows, t: TideMotion.stillTime, seed: seed, tuning: tuning)) }
                     guard a > 0.004 else { continue }
                     // Edges snap to whole device pixels so every dot is a crisp square.

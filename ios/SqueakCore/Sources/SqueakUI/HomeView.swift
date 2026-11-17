@@ -343,7 +343,7 @@ struct SessionRow: View {
             if !recent, !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
-                .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
+                .runningTextLight((starting || session.state == "working") && model.macIsLive, identity: session.key)
             if model.snapshot?.showsConductorMark(for: session) == true { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
@@ -382,7 +382,7 @@ struct SessionRow: View {
                 if let secondLine {
                     Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
+                        .runningTextLight((starting || session.state == "working") && model.macIsLive, identity: session.key)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
                 DucklingCount(session: session)
