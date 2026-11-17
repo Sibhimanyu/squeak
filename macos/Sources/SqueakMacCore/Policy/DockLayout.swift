@@ -76,6 +76,8 @@ public struct DockLayout: Codable, Equatable, Sendable {
     public var sidebarWidth: Double?
     /// Closing the inspector folded the bottom zone (it sat under the inspector); opening it again unfolds it. Not saved.
     public var bottomFoldedWithInspector = false
+    /// The right zone's open tabs beside each pond (by directory key); see `InspectorTabs.swift`.
+    public var inspectorTabs: [String: InspectorTabsRecord] = [:]
 
     public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = [],
                 sidebarCollapsed: Bool = false, sidebarWidth: Double? = nil) {
@@ -265,7 +267,7 @@ public struct DockLayout: Codable, Equatable, Sendable {
         return out
     }
 
-    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden, sidebarCollapsed, sidebarWidth }
+    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden, sidebarCollapsed, sidebarWidth, inspectorTabs }
 
     /// Lenient, then repaired: a hand-edited, partial or newer layout never fails and never loses a panel.
     public init(from decoder: Decoder) throws {
@@ -277,6 +279,7 @@ public struct DockLayout: Codable, Equatable, Sendable {
         hidden = raw.compactMap(DockPanel.init(rawValue:))
         sidebarCollapsed = (try? c.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed)) ?? false
         sidebarWidth = (try? c.decodeIfPresent(Double.self, forKey: .sidebarWidth)) ?? nil
+        inspectorTabs = (try? c.decodeIfPresent([String: InspectorTabsRecord].self, forKey: .inspectorTabs)) ?? [:]
         gainThreadIfMissing()
         self = normalized()
     }
@@ -300,6 +303,7 @@ public struct DockLayout: Codable, Equatable, Sendable {
         try c.encode(hidden, forKey: .hidden)
         try c.encode(sidebarCollapsed, forKey: .sidebarCollapsed)
         try c.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
+        if !inspectorTabs.isEmpty { try c.encode(inspectorTabs, forKey: .inspectorTabs) }
     }
 }
 

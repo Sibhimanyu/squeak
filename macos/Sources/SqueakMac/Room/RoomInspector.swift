@@ -220,22 +220,13 @@ struct RoomInspector: View {
     }
 }
 
-/// The right zone while the room shows: a header-height strip (room for the pane toggle), then the room inspector.
+/// The right zone while a pond page shows: the always-there tab strip (Pond pinned first), then the selected tab.
 struct RoomRightColumn: View {
     let projectId: String
     let key: String
     let width: CGFloat
 
-    var body: some View {
-        let room = PondRoomStore.shared.model(for: projectId)
-        VStack(spacing: 0) {
-            Color.clear.frame(height: Metrics.header).background(WindowDragArea())
-            RoomInspector(key: key, room: room)
-        }
-        .frame(width: width).frame(maxHeight: .infinity).clipped()
-        .background(Theme.bg.ignoresSafeArea())
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
-    }
+    var body: some View { PondInspectorZone(projectId: projectId, key: key, width: width) }
 }
 
 struct DuckEdit: Identifiable {

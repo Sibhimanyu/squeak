@@ -9,12 +9,16 @@ import SwiftUI
 /// (one set per workspace folder, kept alive while the app runs): moving a tab between zones or hiding the zone only
 /// moves or detaches the view, never the process. `shell` nil shows the folder's selected shell, starting one on first use.
 struct TerminalPanel: View {
-    let session: HostSession
+    let cwd: String?
     var shell: UUID?
     private let host = TerminalHost.shared
     @Environment(\.colorScheme) private var scheme
 
-    private var availability: TerminalWorkspace.Availability { TerminalWorkspace.availability(cwd: session.cwd) }
+    init(session: HostSession, shell: UUID? = nil) { self.cwd = session.cwd; self.shell = shell }
+    /// A shell in a folder with no chat (the pond inspector's terminal tab).
+    init(cwd: String?, shell: UUID? = nil) { self.cwd = cwd; self.shell = shell }
+
+    private var availability: TerminalWorkspace.Availability { TerminalWorkspace.availability(cwd: cwd) }
     private var workspace: String? { availability.folder }
 
     var body: some View {

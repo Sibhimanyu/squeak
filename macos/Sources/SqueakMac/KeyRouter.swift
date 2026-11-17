@@ -122,7 +122,11 @@ final class KeyRouter {
         let focus = KeyFocus.shared
         focus.reclassify(window: window)
         if focus.region == .terminal, !focus.terminalOpen { focus.releaseTerminal(); focus.reclassify(window: window) }
-        let action = ShortcutFocus.action(chord, in: focus.region, terminalOpen: focus.terminalOpen)
+        var action = ShortcutFocus.action(chord, in: focus.region, terminalOpen: focus.terminalOpen)
+        // ⌘T with the keys in a right-zone shell opens another shell there; everywhere else it stays a chat tab.
+        if chord == .newTab, focus.region == .terminal, let id = TerminalHost.shared.tab(of: window.firstResponder) {
+            action = InspectorKeys.newTab(focusedZone: DockStore.shared.activeTerminals.zone(of: id))
+        }
         switch (chord, action) {
         case (.newTab, _), (.newTerminalTab, _), (.close, .closeTerminalTab), (.palette, .clearTerminal), (.leaveTerminal, _), (.focusComposer, _):
             return perform(action, window: window)

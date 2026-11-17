@@ -234,23 +234,34 @@ struct DockItemTab<Icon: View>: View {
     let indicator: Namespace.ID
     var dirty = false
     var activity: TabActivity = .idle
+    /// The right zone's first tab: no close button, and it cannot be dragged out or moved.
+    var pinned = false
     let select: () -> Void
     let close: () -> Void
     @ViewBuilder var icon: () -> Icon
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if pinned { tab.onTapGesture(perform: select).accessibilityAddTraits(.isButton).accessibilityLabel(title).accessibilityAddTraits(selected ? .isSelected : []).help(title) }
+        else { draggable }
+    }
+
+    private var tab: some View {
         let dock = DockStore.shared
-        Group {
-            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)",
+        return StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)", showsClose: !pinned,
                      titleWidth: TabTitleMeasure.width(title), dirty: dirty, activity: activity,
                      onHover: { inside in
+                         guard !pinned else { return }
                          if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
                      }, close: close, icon: icon) {
                 Text(verbatim: title).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted)
                     .lineLimit(1).truncationMode(.tail)
             }
-        }
+    }
+
+    private var draggable: some View {
+        let dock = DockStore.shared
+        return Group { tab }
         // Not a Button: a Button takes the mouse-down and the drag never starts.
         .onTapGesture(perform: select)
         .overlay(MiddleClick(action: close))
@@ -349,11 +360,12 @@ struct DockPanelTab: View {
     let selected: Bool
     let height: CGFloat
     let indicator: Namespace.ID
+    var pinned = false
     let select: () -> Void
 
     var body: some View {
         DockItemTab(item: .panel(panel), title: panel.title, zone: zone, selected: selected, height: height, indicator: indicator,
-                    select: select, close: { DockStore.shared.update { $0.close(panel) } }) {
+                    pinned: pinned, select: select, close: { DockStore.shared.update { $0.close(panel) } }) {
             Image(systemName: panel.symbol).font(.system(size: 13)).foregroundStyle(selected ? Theme.ink : Theme.muted)
         }
     }
@@ -440,7 +452,8 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }, id: \.self) { p in
-                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator) {
+                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator,
+                                     pinned: zone == .right && p == state.panels.first(where: { $0 != .terminal && !InspectorStash.hides($0) })) {
                             dock.selectPanel(p, in: zone)
                         }
                     }
@@ -499,6 +512,12 @@ struct DockPlusButton: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if zone == .right {
+            InspectorPlusMenu(label: plus) { item in InspectorActions.stream(item, model: model) }
+        } else { legacy }
+    }
+
+    @ViewBuilder private var legacy: some View {
         switch DockPlusAction.of(zone: zone, layout: DockStore.shared.layout, terminals: DockStore.shared.activeTerminals) {
         case .newTerminal:
             Button { NewTerminalAction.perform(model, in: zone) } label: { plus }
@@ -515,7 +534,7 @@ struct DockPlusButton: View {
         }
     }
 
-    private var plus: some View {
+    var plus: some View {
         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
     }
 }

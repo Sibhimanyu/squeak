@@ -25,10 +25,14 @@ struct DockPanelContent: View {
 struct TerminalPanelView: View {
     let session: HostSession?
     var shell: UUID?
+    /// A folder to run in when there is no chat (beside a pond page).
+    var cwd: String?
 
     var body: some View {
         if let session {
             TerminalPanel(session: session, shell: shell)
+        } else if let cwd {
+            TerminalPanel(cwd: cwd, shell: shell)
         } else {
             Text("Open a chat to use its terminal.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -39,6 +43,8 @@ struct TerminalPanelView: View {
 /// Files, Changes and Review under their own small tab row (the sub-tab is remembered in `inspectorTab`).
 struct CodePanelView: View {
     let session: HostSession?
+    /// A tab that is its own strip tab (beside a pond page): the sub-tab row is not the person's to change.
+    var fixedTab: InspectorTab?
     @Environment(AppModel.self) private var model
     @AppStorage("inspectorTab") private var tabRaw = InspectorTab.changes.rawValue
     @AppStorage("changesAsTree") private var asTree = false
@@ -46,11 +52,11 @@ struct CodePanelView: View {
     @State private var query = ""
 
     private var native: Bool { session?.source == .squeak }
-    private var tab: InspectorTab { InspectorTab.restored(tabRaw) }
+    private var tab: InspectorTab { fixedTab ?? InspectorTab.restored(tabRaw) }
 
     var body: some View {
         VStack(spacing: 0) {
-            tabRow
+            if fixedTab == nil { tabRow }
             if searching && tab == .changes { searchField }
             Rectangle().fill(Theme.line).frame(height: 1)
             upper.frame(maxHeight: .infinity)
