@@ -215,11 +215,10 @@ final class MacRegistryTests: XCTestCase {
 
     // MARK: the signed-out screen
 
-    func testSignedOutOffersSignInAndOnlyOneSmallLinkToTheCode() {
-        XCTAssertEqual(SignInScreen.entries, [.signIn, .macNotOnAccount])
+    func testSignedOutOffersSignInAndNothingElse() {
         let words = [SignInScreen.title, SignInScreen.detail, SignInScreen.signInLabel, SignInScreen.providers].joined(separator: " ").lowercased()
         for banned in ["scan", "qr", "code", "pair", "approve", "link one"] { XCTAssertFalse(words.contains(banned), banned) }
-        XCTAssertEqual(SignInScreen.fallbackLabel, "Mac not on an account yet?")
+        XCTAssertEqual(SignInScreen.pairingLinkGone, "Pairing codes are gone. Sign in with the same account as your Mac.")
     }
 
     func testOpeningAMacNeverShowsACode() {
