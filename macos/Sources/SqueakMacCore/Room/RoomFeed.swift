@@ -8,6 +8,8 @@ public struct RoomRow: Sendable, Equatable, Identifiable {
     /// Sent from here, not yet answered by the host.
     public var pending: Bool
     public var failed: Bool
+    /// Typed on this Mac: stays on the right when the host's copy replaces the pending row, whatever name it carries.
+    public var mine = false
 }
 
 /// What a step of the feed asks the caller to do next.
@@ -26,6 +28,10 @@ public struct RoomFeed: Sendable, Equatable {
     /// More history before the oldest row (false until a page says so by being full).
     public var hasMoreBefore = false
     public private(set) var threads: [RoomThread] = []
+    /// Room v2 turns, oldest first by start (id breaks a tie); an update replaces in place, so a row never moves.
+    public private(set) var turns: [RoomTurn] = []
+    /// A host that serves turns says so once (even an empty list); until then the ripples fall back to posts.
+    public private(set) var servesTurns = false
     private var seen: Set<Int> = []
     private var localCounter = 0
 
@@ -41,6 +47,7 @@ public struct RoomFeed: Sendable, Equatable {
         let first = !loaded
         loaded = true
         threads = page.threads
+        if let t = page.turns { servesTurns = true; for turn in t { upsert(turn: turn) } }
         for p in page.posts.sorted(by: { $0.seq < $1.seq }) { appendReal(p) }
         latestSeq = max(latestSeq, page.latestSeq)
         if first, let pageSize { hasMoreBefore = page.posts.count >= pageSize }
@@ -65,11 +72,20 @@ public struct RoomFeed: Sendable, Equatable {
 
     /// An older page, newest-last. Only rows older than the oldest held are taken, in front.
     public mutating func prepend(page: RoomPage, pageSize: Int) {
+        if let t = page.turns { for turn in t { upsert(turn: turn) } }
         let floor = oldestSeq ?? Int.max
         let older = page.posts.filter { $0.seq < floor && !seen.contains($0.seq) }.sorted { $0.seq < $1.seq }
         for p in older { seen.insert(p.seq) }
         rows.insert(contentsOf: older.map { RoomRow(id: $0.id, post: $0, pending: false, failed: false) }, at: 0)
         hasMoreBefore = page.posts.count >= pageSize
+    }
+
+    /// A turn from the stream or a page: new ones take their place by start time, known ones change in place.
+    public mutating func upsert(turn: RoomTurn) {
+        servesTurns = true
+        if let i = turns.firstIndex(where: { $0.id == turn.id }) { turns[i] = turn; return }
+        let at = turns.lastIndex { ($0.startedAt, $0.id) <= (turn.startedAt, turn.id) }.map { $0 + 1 } ?? 0
+        turns.insert(turn, at: at)
     }
 
     public mutating func setThreads(_ t: [RoomThread]) { threads = t }
@@ -98,7 +114,7 @@ public struct RoomFeed: Sendable, Equatable {
         localCounter += 1
         let id = "local-\(localCounter)"
         let post = RoomPost(seq: 0, id: id, author: author, kind: .message, level: level, text: text, at: at)
-        rows.append(RoomRow(id: id, post: post, pending: true, failed: false))
+        rows.append(RoomRow(id: id, post: post, pending: true, failed: false, mine: true))
         return id
     }
 

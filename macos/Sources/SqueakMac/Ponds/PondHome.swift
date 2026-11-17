@@ -13,12 +13,33 @@ struct PondRouteView: View {
     let sidebarHidden: Bool
     @Environment(AppModel.self) private var model
 
+    /// The room is a pond's landing view; its Dashboard is the other half of the switch, remembered per pond. A pond with no
+    /// native project (or still waiting to join) has no room, so it keeps the dashboard.
+    private func roomProject(_ key: String) -> String? {
+        guard RoomViewPref.shared.mode(for: key) == .room else { return nil }
+        if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
+        return PondsModel.shared.native(key: key)?.id
+    }
+
+    private var sidebarClearance: CGFloat {
+        sidebarHidden ? PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
+    }
+
     var body: some View {
+        if case .home(let project) = route, let projectId = roomProject(project) {
+            PondRoomView(projectId: projectId, key: project, leadingInset: sidebarClearance).id(project).screen("Pond room")
+        } else {
+            standard
+        }
+    }
+
+    private var standard: some View {
         VStack(spacing: 0) {
             HStack {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size) }
+                if sidebarHidden { Color.clear.frame(width: sidebarClearance) }
                 Spacer(minLength: 0)
+                if case .home(let project) = route, PondsModel.shared.native(key: project) != nil { RoomModeSwitch(key: project).padding(.trailing, Space.xl) }
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
@@ -361,7 +382,12 @@ struct PondHomeView: View {
         .help(candidates.isEmpty ? (localSessions.isEmpty ? "No chats on this Mac to share yet" : "Every thread on this Mac is already in the pond") : "Show one of this Mac\u{2019}s threads to the flock")
     }
 
-    private func startThread() {
+    private func startThread() { Self.startThread(key: key, model: model) }
+
+    /// Also the room's "New thread".
+    static func startThread(key: String, model: AppModel) {
+        let ponds = PondsModel.shared
+        let pond = ponds.pond(key: key), native = ponds.native(key: key)
         // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
         // A pond in a plain folder starts its thread in the folder through the same route (it has no streams).
         if let pond, !pond.local || native?.isPlainFolder == true {

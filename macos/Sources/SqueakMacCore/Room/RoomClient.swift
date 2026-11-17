@@ -3,6 +3,8 @@ import Foundation
 public enum RoomStreamEvent: Sendable, Equatable {
     case hello(latestSeq: Int)
     case post(RoomPost)
+    /// A turn started or changed (room v2): upsert by id.
+    case turn(RoomTurn)
     /// The stream (re)connected after a drop: read `since` what is held.
     case reconnected
 }
@@ -69,6 +71,10 @@ public struct RoomClient: Sendable {
                             case "post":
                                 if let data = frame.data.data(using: .utf8), let p = try? JSONDecoder().decode(RoomPost.self, from: data) {
                                     continuation.yield(.post(p))
+                                }
+                            case "turn":
+                                if let data = frame.data.data(using: .utf8), let t = try? JSONDecoder().decode(RoomTurn.self, from: data) {
+                                    continuation.yield(.turn(t))
                                 }
                             default: break
                             }

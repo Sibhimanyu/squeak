@@ -26,6 +26,7 @@ final class PondRoomModel {
     private(set) var phase: Phase = .loading
     private(set) var loadingOlder = false
     var filter = RoomFilter()
+    var rippleFilter: RoomRippleFilter = .all
     static let pageSize = 50
 
     @ObservationIgnored private var running = false
@@ -48,6 +49,7 @@ final class PondRoomModel {
                 let effect = f.receive(p)
                 feed = f
                 await react(effect, client)
+            case .turn(let t): feed.upsert(turn: t)
             case .reconnected: await catchUp(client)
             }
         }
@@ -89,6 +91,7 @@ final class PondRoomModel {
         feed = f
     }
 
+    /// A message to the whole room (or to a person, whose name leads it).
     func send(_ text: String, host: NativeHostClient) async {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
@@ -129,26 +132,42 @@ final class PondRoomStore {
 
 // MARK: - View
 
+/// The pond's landing view (the mock-ups: header, Now, Ripples, composer, inspector). `embedded` is the pinned tab inside
+/// a chat's workbench: no header of its own (the chat's header is there) and no inspector.
 struct PondRoomView: View {
     let projectId: String
+    /// The pond's directory key (nil from the pinned tab, which has no pond page to switch to).
+    var key: String?
+    var embedded = false
+    /// Room for the sidebar toggle when the sidebar is closed.
+    var leadingInset: CGFloat = 0
+
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var atBottom = true
     @State private var unseen = 0
-    @State private var draft = ""
-    @State private var contentHeight: CGFloat = 0
+    @State private var ledger = RoomFadeLedger()
 
     private var room: PondRoomModel { PondRoomStore.shared.model(for: projectId) }
+    private var ponds: PondsModel { .shared }
 
     var body: some View {
         let room = room
-        VStack(spacing: 0) {
-            WorkingNowStrip(threads: RoomPresentation.workingNow(room.feed.threads), recent: RoomPresentation.recent(room.feed.threads), open: openThread)
-            content(room)
-            composer(room).padding(.horizontal, Space.l).padding(.bottom, Space.l).padding(.top, Space.s)
-                .frame(maxWidth: Metrics.readingColumn)
+        GeometryReader { geo in
+            let showInspector = !embedded && key != nil && geo.size.width >= 1040
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    if !embedded, let key { RoomHeader(key: key, summary: RoomSummary.line(feed: room.feed), leadingInset: leadingInset) }
+                    content(room)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if showInspector, let key {
+                    Rectangle().fill(Theme.line).frame(width: 1)
+                    RoomInspector(key: key, today: RoomSummary.today(turns: room.feed.turns))
+                        .frame(width: 300).frame(maxHeight: .infinity)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
         .task(id: projectId) { await room.run(host: model.nativeHost) }
     }
@@ -161,40 +180,62 @@ struct PondRoomView: View {
         case .loading, .failed:
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
-            let groups = RoomGrouping.groups(room.feed.rows, filter: room.filter)
-            if groups.isEmpty && room.feed.threads.isEmpty {
-                Text("When threads in this pond start working, what they're on shows up here.")
-                    .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                    .padding(Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if groups.isEmpty {
-                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                feedView(room, groups)
+            let unread = unreadThreads(room)
+            let cards = RoomNow.cards(threads: room.feed.threads, unread: unread, filesFor: { model.changesStore(for: $0).changes?.files.count })
+            let ripples = RoomRipples.build(feed: room.feed, filter: room.rippleFilter)
+            VStack(spacing: 0) {
+                column { RoomNowSection(cards: cards, key: key, open: openThread, answer: answer) }
+                column { ripplesHeader(room) }
+                ripplesFeed(room, ripples)
+                column { RoomComposer(room: room, send: sendTo) }.padding(.bottom, Space.l).padding(.top, Space.s)
             }
         }
     }
 
-    private func feedView(_ room: PondRoomModel, _ groups: [RoomGroup]) -> some View {
-        ScrollViewReader { proxy in
+    /// The centred reading column (760 at most, 32 from either edge).
+    private func column<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+        c().padding(.horizontal, Metrics.readingInset).frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
+    }
+
+    private func ripplesHeader(_ room: PondRoomModel) -> some View {
+        HStack {
+            Text("Ripples").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+            Spacer()
+            RoomSegmented(
+                items: RoomRippleFilter.allCases, selection: Binding(get: { room.rippleFilter }, set: { room.rippleFilter = $0 }),
+                title: \.title, height: 26)
+        }
+        .padding(.top, Space.m).padding(.bottom, Space.s)
+    }
+
+    private func ripplesFeed(_ room: PondRoomModel, _ ripples: [RoomRipple]) -> some View {
+        let count = ripples.reduce(0) { $0 + RoomRippleView.weight($1) }
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Space.l) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if room.feed.hasMoreBefore {
                         Color.clear.frame(height: 1).onAppear { Task { await room.loadOlder(host: model.nativeHost) } }
                     }
-                    ForEach(groups) { group in
-                        RoomGroupView(group: group, threads: room.feed.threads, retry: { id in Task { await room.retry(id, host: model.nativeHost) } })
+                    if ripples.isEmpty {
+                        Text(room.rippleFilter == .all ? "When threads in this pond start working, what they're on shows up here." : "Nothing here yet.")
+                            .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
+                    }
+                    ForEach(ripples) { ripple in
+                        RoomRippleView(ripple: ripple, threads: room.feed.threads, ledger: ledger, open: openThread,
+                            retry: { id in Task { await room.retry(id, host: model.nativeHost) } })
                     }
                     Color.clear.frame(height: 1).id("room-bottom")
                         .onAppear { atBottom = true; unseen = 0 }
                         .onDisappear { atBottom = false }
                 }
-                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
-                .frame(maxWidth: Metrics.readingColumn).frame(maxWidth: .infinity)
+                .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.s)
+                .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
-            .onChange(of: room.feed.rows.last?.id) { old, new in
-                guard old != nil, new != nil else { return }
-                if atBottom { proxy.scrollTo("room-bottom", anchor: .bottom) } else { unseen += 1 }
+            .onAppear { ledger.freeze(ripples.map(\.id)) }
+            .onChange(of: count) { old, new in
+                guard new > old else { return }
+                if atBottom { proxy.scrollTo("room-bottom", anchor: .bottom) } else { unseen += new - old }
             }
             .overlay(alignment: .bottom) {
                 if !atBottom && unseen > 0 {
@@ -203,7 +244,7 @@ struct PondRoomView: View {
                         proxy.scrollTo("room-bottom", anchor: .bottom)
                     } label: {
                         Text("New activity").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
-                            .padding(.horizontal, 12).frame(height: Metrics.pill)
+                            .padding(.horizontal, 12).frame(height: Metrics.pill + 4)
                             .background(Theme.surfaceRaised, in: Capsule()).overlay(Capsule().strokeBorder(Theme.lineStrong))
                     }
                     .buttonStyle(.plain).padding(.bottom, Space.s).transition(.opacity)
@@ -211,198 +252,61 @@ struct PondRoomView: View {
                 }
             }
             .animation(reduceMotion ? nil : Motion.quick, value: unseen > 0)
-            .overlay(alignment: .topTrailing) { agentTalkToggle(room).padding(Space.s) }
         }
     }
 
-    private func agentTalkToggle(_ room: PondRoomModel) -> some View {
-        Button {
-            var f = room.filter
-            f.showAgentTalk.toggle()
-            room.filter = f
-        } label: {
-            Text(room.filter.showAgentTalk ? "Hide agent talk" : "Show agent talk").font(.system(size: 12))
-                .foregroundStyle(Theme.muted).padding(.horizontal, 8).frame(height: Metrics.pill)
-                .background(Theme.bg.opacity(0.9), in: Capsule())
+    // MARK: Actions
+
+    private func unreadThreads(_ room: PondRoomModel) -> Set<String> {
+        var out = Set<String>()
+        for t in room.feed.threads where t.state == .idle || t.state == .error {
+            if let s = session(t.sessionId), model.mark(for: s)?.kind == .unread { out.insert(t.sessionId) }
         }
-        .buttonStyle(.plain).accessibilityLabel(room.filter.showAgentTalk ? "Hide agent talk" : "Show agent talk")
+        return out
     }
 
-    private func composer(_ room: PondRoomModel) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ComposerField(
-                text: $draft, sendKey: .returnSends, placeholder: "Message the pond",
-                onSend: send, onContentHeight: { contentHeight = $0 }
-            )
-            .frame(height: min(max(contentHeight, 36), 140))
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
-    }
-
-    private func send() {
-        let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        draft = ""
-        atBottom = true
-        Task { await room.send(text, host: model.nativeHost) }
+    private func session(_ id: String) -> HostSession? {
+        model.allSessions.first { $0.key.hostSessionId == id && $0.source == .squeak }
     }
 
     private func openThread(_ sessionId: String) {
-        guard let s = model.allSessions.first(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
+        guard let s = session(sessionId) else { return }
         RoomSelection.shared.close()
+        PondsModel.shared.route = nil
         model.select(s.key)
     }
-}
 
-// MARK: - Working now
-
-private struct WorkingNowStrip: View {
-    let threads: [RoomThread]
-    let recent: [RoomThread]
-    let open: (String) -> Void
-
-    var body: some View {
-        if !threads.isEmpty || !recent.isEmpty {
-            VStack(spacing: 0) {
-                if !threads.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Space.s) {
-                            ForEach(threads) { t in chip(t) }
-                        }
-                        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
-                    }
-                }
-                if !recent.isEmpty { recentList }
-                Rectangle().fill(Theme.line).frame(height: 1)
-            }
-        }
+    /// An answer to a needs-you card goes through the chat's own send path, marked as an answer (a letter is just the letter).
+    private func answer(_ sessionId: String, _ text: String) {
+        guard let s = session(sessionId) else { return }
+        Task { _ = await model.send(text, to: s.key, answering: true) }
     }
 
-    /// Quiet list of threads that are not working: title, and how their last turn ended. Tap opens the thread.
-    private var recentList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Recent").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                .padding(.bottom, 2)
-            ForEach(recent.prefix(6)) { t in
-                Button { open(t.sessionId) } label: {
-                    HStack(spacing: Space.s) {
-                        Text(verbatim: t.title).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
-                        Spacer(minLength: Space.s)
-                        Text(verbatim: RoomPresentation.recentLine(t, now: Date())).font(.system(size: 12))
-                            .foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open \(t.title)")
-            }
-        }
-        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
-        .frame(maxWidth: Metrics.readingColumn, alignment: .leading).frame(maxWidth: .infinity)
-    }
-
-    private func chip(_ t: RoomThread) -> some View {
-        Button { open(t.sessionId) } label: {
-            HStack(spacing: 8) {
-                ChatMarkGlyph(mark: ChatMark(t.state == .waiting ? .waiting : .working, waiting: .answer))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: t.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(verbatim: RoomPresentation.chipLine(t)).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: 260, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.line))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(t.title), \(RoomPresentation.chipLine(t))")
-        .help("Open \(t.title)")
-    }
-}
-
-// MARK: - Feed rows
-
-private struct RoomGroupView: View {
-    let group: RoomGroup
-    let threads: [RoomThread]
-    let retry: (String) -> Void
-
-    var body: some View {
-        let author = group.author
-        let right = RoomPresentation.alignsRight(author)
-        let agentLevel = group.rows[0].post.level == .agents
-        HStack(alignment: .top, spacing: 10) {
-            if right { Spacer(minLength: 60) } else { RoomAvatar(author: author, agent: threads.first { $0.sessionId == group.rows[0].post.sessionId }?.agent) }
-            VStack(alignment: right ? .trailing : .leading, spacing: 4) {
-                if !right {
-                    Text(verbatim: RoomPresentation.authorName(author)).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                }
-                ForEach(group.rows) { row in RoomPostView(row: row, threads: threads, right: right, retry: retry) }
-            }
-            .padding(.leading, agentLevel ? Space.l : 0)
-            if !right { Spacer(minLength: 60) }
-        }
-        .opacity(agentLevel ? 0.7 : 1)
-    }
-}
-
-private struct RoomPostView: View {
-    let row: RoomRow
-    let threads: [RoomThread]
-    let right: Bool
-    let retry: (String) -> Void
-
-    var body: some View {
-        let post = row.post
-        let label = RoomPresentation.kindLabel(post)
-        let to = RoomPresentation.recipient(post, threads: threads)
-        VStack(alignment: right ? .trailing : .leading, spacing: 2) {
-            if label != nil || to != nil {
-                HStack(spacing: 6) {
-                    if let label { Text(verbatim: label.text).foregroundStyle(label.attention ? Theme.warning : Theme.muted) }
-                    if let to { Text(verbatim: to).foregroundStyle(Theme.muted) }
-                }
-                .font(.system(size: 11))
-            }
-            Text(verbatim: post.text).font(.system(size: 14)).foregroundStyle(Theme.ink).textSelection(.enabled)
-                .multilineTextAlignment(right ? .trailing : .leading)
-                .padding(.horizontal, right ? 12 : 0).padding(.vertical, right ? 8 : 0)
-                .background(right ? AnyShapeStyle(Theme.selected) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-                .opacity(row.pending ? 0.6 : 1)
-            if row.failed {
-                Button("Not sent. Retry") { retry(row.id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.negative)
-            } else if !row.pending, post.at > 0 {
-                Text(verbatim: RoomPresentation.relativeTime(at: post.at, now: Date())).font(.system(size: 11)).foregroundStyle(Theme.subtle)
-            }
+    private func sendTo(_ to: RoomAddressee, _ text: String) {
+        atBottom = true
+        switch to {
+        case .thread(let id, _):
+            guard let s = session(id) else { return }
+            Task { _ = await model.send(text, to: s.key) }
+        case .everyone, .person:
+            Task { await room.send(RoomMention.roomText(text, to: to), host: model.nativeHost) }
         }
     }
 }
 
-private struct RoomAvatar: View {
-    let author: RoomAuthor
-    let agent: String?
-    private let size: CGFloat = 24
+/// Remembers which rows were there at the first draw, so only rows that arrive later fade in (once).
+@MainActor final class RoomFadeLedger {
+    private var known: Set<String> = []
+    private var frozen = false
+    func freeze(_ ids: [String]) { guard !frozen else { return }; frozen = true; known.formUnion(ids) }
+    /// True once for a row that was not in the first draw.
+    func shouldFade(_ id: String) -> Bool { frozen && known.insert(id).inserted }
+}
 
-    var body: some View {
-        Group {
-            switch author.kind {
-            case .squeak: DuckMark(width: size)
-            case .agent:
-                if let mark = AgentMark(agent: agent ?? author.name.lowercased(), size: size - 4) { mark } else { initials }
-            case .person: initials
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-
-    private var initials: some View {
-        Text(verbatim: RoomPresentation.initials(RoomPresentation.authorName(author))).font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Theme.ink).frame(width: size, height: size)
-            .background(Theme.selectedStrong, in: Circle())
+extension View {
+    /// Reports the view's height (a background reader: `onGeometryChange` needs macOS 15).
+    func onGeometryChangeCompat(_ report: @escaping (CGFloat) -> Void) -> some View {
+        background(GeometryReader { g in Color.clear.onAppear { report(g.size.height) }.onChange(of: g.size.height) { _, h in report(h) } })
     }
 }
 
