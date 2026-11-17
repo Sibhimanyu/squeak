@@ -123,12 +123,11 @@ source = {
   "apps": [{
     "name": "Squeak", "bundleIdentifier": bundle, "developerName": "Squeak",
     "subtitle": "Answer your agents from anywhere", "localizedDescription":
-      "See every coding agent running on your Mac, read what it said, and answer its questions. Pairs with Squeak for Mac; replies are end-to-end encrypted and signed by this phone's Secure Enclave.",
+      "See every coding agent running on your Mac, read what it said, and answer its questions. Sign in with the same account as your Mac; replies are end-to-end encrypted and signed by this phone's Secure Enclave.",
     "iconURL": f"{site}/icon.png", "tintColor": "#FCD02C", "category": "developer",
     "version": version, "versionDate": now, "versionDescription": notes,
     "downloadURL": url, "size": int(size),
     "versions": [v] + old, "appPermissions": {"entitlements": [], "privacy": {
-      "NSCameraUsageDescription": "Squeak uses the camera once, to scan the pairing code on your Mac.",
       "NSFaceIDUsageDescription": "Squeak asks for Face ID before it sends anything to your agents."}},
   }],
   "news": [],
