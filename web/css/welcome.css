@@ -565,20 +565,6 @@ button.wl-opt:hover {
   grid-row: span 2;
 }
 
-/* scan control inside the card (pairing.js builds it with owner classes) */
-.wl .scan {
-  margin: 0;
-}
-.wl .scan > .btn {
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--sq-line-strong);
-  background: var(--sq-surface-raised);
-  color: var(--sq-ink);
-  border-radius: var(--sq-radius-control);
-  font-weight: 600;
-}
-
 /* tablet: one preview column */
 @media (max-width: 1099px) {
   .wl {

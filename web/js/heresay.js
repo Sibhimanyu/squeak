@@ -19,7 +19,7 @@ let lastScreen = null;
 let lastWho = "";
 let introduced = false;
 
-/** Names the screen the person is on ("Your Macs", "Pair", "Sessions", "Thread", "Settings", "Guest pond", "Join"). */
+/** Names the screen the person is on ("Your Macs", "Sign in", "Sessions", "Thread", "Settings", "Guest pond", "Join"). */
 export function setScreen(name) {
   if (!name || name === lastScreen) return;
   lastScreen = name;

@@ -1,4 +1,4 @@
-// The one layout every screen before pairing shares: the owner's sign-in and Macs, the QR pairing, the app sign-in
+// The one layout every screen before pairing shares: the owner's sign-in and Macs, the app sign-in
 // callback and the pond guest join. Wide, two halves (a brand panel with a muted, static preview of the dashboard board;
 // the action card); on a phone the panel is a compact header over a full-width card. Drawing only: no data of its own.
 // `build` is the element builder (tests pass a fake, which skips the decorations that need a real document).
@@ -9,7 +9,7 @@ import { avatarNode } from "./avatar-view.js";
 import { h } from "./dom.js";
 import { bellIcon, chatsIcon, chevronRight, circleXIcon, laptopIcon, shieldIcon } from "./icons.js";
 
-export const TAGLINE = "A pager for your coding agents";
+export const TAGLINE = "Your coding agents, from anywhere.";
 
 export const POINTS = [
   { icon: bellIcon, text: "Needs you at a glance" },
@@ -234,7 +234,7 @@ export function macCard({ mac, line, pick, current = false, build = h }) {
 
 /* ---------- the calm card (direction A): the sign-in pages' layout ---------- */
 
-export const CALM_FOOT = "A pager for your coding agents";
+export const CALM_FOOT = "Your coding agents, from anywhere.";
 
 /** Ink page, the duck, one centered card, one footer line. `build` as welcomeLayout's. */
 export function calmLayout({ children, build = h }) {

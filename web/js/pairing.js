@@ -14,9 +14,6 @@ import { parsePairingLink, PairingError } from "./pairing-link.js";
 import { CatalystDb } from "./catalyst-db.js";
 import { RtdbClient } from "./rtdb.js";
 
-// Scanning the Mac's QR code only produces text for beginPairing, like the paste box.
-export { scanControl, scanSupported } from "./qr-scanner.js";
-
 /** "Web · Chrome", from the user agent: only a label on the Mac's device list. */
 export function deviceNameFor(userAgent = "") {
   const browser = /Edg\//.test(userAgent)

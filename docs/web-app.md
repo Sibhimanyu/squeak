@@ -5,8 +5,9 @@ channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `s
 results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
 
 Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's QR and "Copy web link" use `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12, and browsers paired there pair once more): the no-install phone option with the iPhone app's features, minus Face ID
-and the same-Wi-Fi direct route. You sign in with your Squeak account and open a Mac (no code, no QR). An old Mac not yet on an account still pairs by QR (camera
-button) or pasted link, and a Firebase-hosted copy needs the same Firebase project (`SQUEAK_REMOTE_PROJECT`) as the iPhone app.
+and the same-Wi-Fi direct route. The owner's web path is sign-in only: you sign in with your Squeak account and open a Mac. There is no QR, pairing code or paste box on
+any screen (an old `#pair=` link shows the sign-in with "Pairing codes are gone. Sign in with the same account as your Mac."). Signed in with the
+same account as your Mac, this browser joins it by itself.
 
 ## Commands
 
@@ -85,10 +86,10 @@ the start asks the page's own relay (`<origin>/server/squeak_relay`, same origin
 - 200: "Your Macs" from `GET /account/macs`: name and online / asleep / offline with "last seen" (`seenAt`, when the Mac's own
   key last called the relay: online within 3 min, asleep within 12 h, offline beyond; no claim when the relay does not say).
   Exactly one Mac and none open: it opens by itself.
-- 401: one sign-in screen (`/__catalyst/auth/login`: Zoho, Google or email), and a small "Mac not on an account yet?" link to
-  the old QR screen, for a Mac too old to sign in (`pairing-view.js`, `pairing.js`, `#pair=` links stay for it).
-- anything else (Firebase hosting, network): today's QR pairing screen only. `welcomeScreen` gets a way back to the account
-  start only when there is one.
+- 401: one sign-in screen (`/__catalyst/auth/login`: Zoho, Google or email). Nothing else is offered: no QR, no pasted code.
+- anything else (`fetchMe` says `unknown`: a network or blocked cross-origin failure, a non-200, no account API): "Can't reach Squeak
+  right now" with Try again (asks `/me` again) and Sign in (`unreachableScreen`, `account-view.js`). Never a pairing screen; only a
+  clean 401 `signin` means signed out.
 
 `catalyst-session.js` holds what the guest page and this app share: the login path, `sdkSignOut`, `signInRedirect`,
 `accountRelayBase`. `account.js` is the account's calls and flow, `account-view.js` its screens and Settings section.
