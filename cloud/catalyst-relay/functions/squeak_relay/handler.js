@@ -956,6 +956,7 @@ function createRelay(deps) {
     }
     const sent = [];
     const failed = [];
+    let detail = "";
     for (const email of list) {
       const m = mailing.buildInviteMail({
         inviterName: body.inviterName,
@@ -966,13 +967,15 @@ function createRelay(deps) {
       try {
         await deps.mail.send({ to: email, subject: m.subject, text: m.text, html: m.html });
         sent.push(email);
-      } catch {
+      } catch (error) {
         log("invite email not sent");
+        // Only the operator (relay key) sees the provider's own words, to diagnose a sender that is not set up; a Mac never does.
+        if (!mac && !detail) detail = String((error && (error.message || error.code)) || error).slice(0, 300);
         failed.push(email);
       }
     }
     // Nothing went out: say so as a failure (quota or a sender that is not set up are the usual causes), no SDK words.
-    if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed });
+    if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed, ...(detail ? { detail } : {}) });
     return out(200, { sent, failed });
   }
 
