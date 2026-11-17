@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.29.1
+
+- New threads really start in Skip approvals now: picking a preset no longer switches them back to Ask.
+- Only one "Next update" button above the composer (two could stack up).
+
 ## 2.29.0
 
 - Every stream's tab strip starts with a small pinned tab: the pond room. It shows what each thread in the pond is working on right now, as short lines rather than every edit and command, plus "needs you" and "finished" notes. Turn on "Show agent talk" to see threads coordinating with each other, and type in it to talk to the room like a group chat.
