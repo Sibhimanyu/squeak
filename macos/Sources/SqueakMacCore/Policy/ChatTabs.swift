@@ -67,7 +67,7 @@ public enum ChatTabWidth {
     public static let closeGap: Double = 4
     public static let closeSlot: Double = 14
     /// A title never shows more than this, however much room there is.
-    public static let maxTitle: Double = 200
+    public static let maxTitle: Double = 220
     public static let minTitle: Double = 44
 
     /// Everything in a tab that is not its title.
@@ -78,6 +78,14 @@ public enum ChatTabWidth {
     /// A tab's natural width for a title that measures `titleWidth` points.
     public static func natural(titleWidth: Double) -> Double {
         chrome + min(max(titleWidth, 0), maxTitle)
+    }
+
+    /// The width a tab is drawn at: it hugs its content (`natural`, plus `extra` for anything after the title such as a
+    /// badge or dirty dot), never under `minWidth` and never over `cap` (infinity while the strip has room). A cap below
+    /// the floor loses to the floor, so a crowded strip scrolls instead of squashing tabs.
+    public static func width(titleWidth: Double, extra: Double = 0, cap: Double = .infinity) -> Double {
+        let hug = max(natural(titleWidth: titleWidth) + max(extra, 0), minWidth)
+        return max(min(hug, cap), minWidth)
     }
 
     /// The widest any one tab may be so that all of `naturals` fit in `available` points: infinity while they already

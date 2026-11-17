@@ -320,7 +320,7 @@ private struct WorkbenchTabs: View {
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
+                HStack(spacing: 4) {
                     if let project = roomProject {
                         PondRoomTab(selected: roomOpen, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
@@ -477,7 +477,9 @@ private struct WorkbenchTabs: View {
         let open = { RoomSelection.shared.close(); files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
             StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
-                     showsClose: !chats.isEmpty, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),
+                     showsClose: !chats.isEmpty,
+                     titleWidth: model.isRenaming(s) ? 160 : TabTitleMeasure.width(model.workbenchTitle(s), semibold: model.isUnread(s)),
+                     titleExtra: s.showsConductorBadge ? 18 : 0, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),
                      onHover: { inside in
                          hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
                          if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }

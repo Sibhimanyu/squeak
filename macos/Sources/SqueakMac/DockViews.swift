@@ -161,6 +161,10 @@ struct StripTab<Icon: View, Title: View>: View {
     let indicator: Namespace.ID
     let closeLabel: String
     var showsClose = true
+    /// The title's measured natural width (`TabTitleMeasure.width`): the tab is drawn exactly as wide as it needs.
+    var titleWidth: Double = 0
+    /// Room for anything beside the title (a badge).
+    var titleExtra: Double = 0
     var dirty = false
     /// Working or needing you shows in the trailing slot (the hover close takes its place while the pointer is on the tab).
     var activity: TabActivity = .idle
@@ -176,12 +180,14 @@ struct StripTab<Icon: View, Title: View>: View {
     var body: some View {
         HStack(spacing: 0) {
             icon().frame(width: ChatTabWidth.iconSlot).opacity(selected ? 1 : 0.8)
-            title().frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading).padding(.leading, ChatTabWidth.iconGap)
+            title().frame(maxWidth: .infinity, alignment: .leading).padding(.leading, ChatTabWidth.iconGap)
             if dirty { Circle().fill(Theme.muted).frame(width: 6, height: 6).padding(.leading, 4).accessibilityLabel("Unsaved changes") }
             slot
         }
         .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
-        .frame(maxWidth: maxWidth, minHeight: height, maxHeight: height, alignment: .leading)
+        // A fixed width from the measured title, so the tab hugs its content and the trailing slot never moves on hover.
+        .frame(width: CGFloat(ChatTabWidth.width(titleWidth: titleWidth, extra: titleExtra + (dirty ? 10 : 0), cap: Double(maxWidth))),
+               height: height, alignment: .leading)
         .onHover { inside in hovering = inside; onHover(inside) }
         .overlay(alignment: .bottom) {
             if selected { Rectangle().fill(PondColour.tabIndicator(PondColour.openPond(model.selectedSession))).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
@@ -236,7 +242,8 @@ struct DockItemTab<Icon: View>: View {
     var body: some View {
         let dock = DockStore.shared
         Group {
-            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)", dirty: dirty, activity: activity,
+            StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(title)",
+                     titleWidth: TabTitleMeasure.width(title), dirty: dirty, activity: activity,
                      onHover: { inside in
                          if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
                      }, close: close, icon: icon) {

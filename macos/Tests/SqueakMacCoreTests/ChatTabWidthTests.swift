@@ -34,4 +34,16 @@ import Testing
         #expect(ChatTabs.selectionAfterClosing("c", selected: "c", shown: ["a", "b", "c"]) == "b")
         #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
     }
+
+    @Test func tabHugsItsTitle() {
+        // A short title gets a short tab (the floor), a long one stops at the title maximum, never padded to a cap.
+        #expect(ChatTabWidth.width(titleWidth: 10) == ChatTabWidth.minWidth)
+        #expect(ChatTabWidth.width(titleWidth: 100) == ChatTabWidth.chrome + 100)
+        #expect(ChatTabWidth.width(titleWidth: 100, extra: 18) == ChatTabWidth.chrome + 118)
+        #expect(ChatTabWidth.width(titleWidth: 900) == ChatTabWidth.chrome + ChatTabWidth.maxTitle)
+        // A cap shortens a long tab but leaves a short one alone, and never goes under the floor.
+        #expect(ChatTabWidth.width(titleWidth: 400, cap: 150) == 150)
+        #expect(ChatTabWidth.width(titleWidth: 60, cap: 300) == ChatTabWidth.chrome + 60)
+        #expect(ChatTabWidth.width(titleWidth: 400, cap: 10) == ChatTabWidth.minWidth)
+    }
 }
