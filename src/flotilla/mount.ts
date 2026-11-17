@@ -274,6 +274,21 @@ export class FlotillaRoutes {
       );
       return true;
     }
+    if (b === "invites" && c === "email" && parts.length === 4 && method === "POST") {
+      // Invite by email: { emails: string[], role? }. Answers { sent, failed: [{ email, reason }] }.
+      const emailBody = await ctx.body();
+      if (Object.keys(emailBody).some((k) => k !== "emails" && k !== "role")) {
+        throw new FlotillaError("the body is exactly { emails, role? }");
+      }
+      const { emails } = emailBody;
+      if (!Array.isArray(emails) || emails.some((e) => typeof e !== "string")) {
+        throw new FlotillaError("emails is a list of email addresses");
+      }
+      const emailRole = str(emailBody.role) ?? "member";
+      if (emailRole !== "member" && emailRole !== "viewer") throw new FlotillaError("role is member or viewer");
+      ctx.json(200, await service.inviteByEmail(pondId, emails as string[], emailRole as Role));
+      return true;
+    }
     if (b === "invites" && c && parts.length === 4 && method === "DELETE") {
       ctx.json(200, await service.revokeInvite(pondId, c));
       return true;

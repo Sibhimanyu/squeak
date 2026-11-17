@@ -4,6 +4,7 @@
 #
 #   RELAY_KEY                  default: the relay key already in ~/Library/Application Support/squeak/cloud.json
 #                              (catalyst block), so the current Mac keeps working
+#   SQUEAK_MAIL_FROM  optional; the verified Catalyst Mail sender for pond invite emails (unset = no invite email)
 #   SQUEAK_ZOHO_CLIENT_ID/SECRET  optional; left as the REPLACED_AT_DEPLOY placeholder (= unset) when absent
 #   SQUEAK_CLIQ_KEY            default: SQUEAK_CLIQ_KEY in <support dir>/.env; becomes the function's CLIQ_KEY (never printed).
 #                              Without it CLIQ_KEY stays UNSET and Cliq's handlers get a 401.
@@ -55,6 +56,7 @@ e.RELAY_KEY = key;
 e.SQUEAK_RELAY_HOSTED = "1";
 if (process.env.SQUEAK_ZOHO_CLIENT_ID) e.SQUEAK_ZOHO_CLIENT_ID = process.env.SQUEAK_ZOHO_CLIENT_ID;
 if (process.env.SQUEAK_ZOHO_CLIENT_SECRET) e.SQUEAK_ZOHO_CLIENT_SECRET = process.env.SQUEAK_ZOHO_CLIENT_SECRET;
+if (process.env.SQUEAK_MAIL_FROM) e.SQUEAK_MAIL_FROM = process.env.SQUEAK_MAIL_FROM;
 fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 '
 

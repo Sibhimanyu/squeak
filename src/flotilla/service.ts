@@ -43,6 +43,7 @@ import {
 import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import { joinWords } from "./join-words.js";
 import { normalizeShortCode } from "./short-code.js";
+import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
 import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { LockDoc, TaskView } from "./tasks.js";
 import {
@@ -161,6 +162,11 @@ interface LocalInvite {
   state?: InviteState;
   /** The relay join token's member id (Catalyst), so a revoke can end the token too. */
   tokenId?: string;
+  /**
+   * An invite by email: the (lower-cased) address its join token is bound to at the relay. A join request that proves this
+   * invite and whose relay-verified account email equals it is let in without the owner's second approval.
+   */
+  email?: string;
   decidedAt?: number;
   createdAt?: number;
   /** Who it became: the name on the request that used it (accepted or declined). */
@@ -301,6 +307,8 @@ export interface FlotillaOptions {
   budgetMs?: number;
   /** Base of an invite's link form, `https://<host>/join`; the code goes in the fragment. */
   inviteLinkBase?: string;
+  /** Base of an emailed invite's link (the web app on Slate; the relay accepts only this one): default `EMAIL_INVITE_LINK_BASE`. */
+  emailInviteLinkBase?: string;
   /**
    * Where this Mac's store is. An invite carries only what is safe to hand out (`inviteLocation`): a Firebase
    * database address, or a Catalyst relay's URL, never its relay key.
@@ -499,6 +507,10 @@ export interface VerifiedCommand {
 const TINTS = ["#E8A33D", "#4C8DF6", "#3FB68B", "#E5604D", "#8E6CEF", "#D9588F", "#3AA7C9", "#7DA33B"];
 const INVITE_PREFIX = "squeak-pond:";
 const INVITE_TTL_MS = 24 * 60 * 60_000;
+/** An emailed link opens the web app's join page on Slate (the relay's mail route accepts only this origin and path). */
+export const EMAIL_INVITE_LINK_BASE = "https://squeak.onslate.in/join";
+/** An invite by email lives a week: the person may read it tomorrow. Its join token is bound to their address. */
+const EMAIL_INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
 /** A short code lives 10 minutes (the relay's `SHORT_TTL_MS`); the invite behind it (and its join token) lets the owner answer for an hour. */
 const SHORT_INVITE_LIFE_MS = 60 * 60_000;
 /** A finished invite is kept this long past its expiry, so the owner can see what became of it. */
@@ -1463,11 +1475,17 @@ export class FlotillaService extends EventEmitter {
     email: string | undefined,
     options: { short: true },
   ): Promise<ShortInvite>;
+  invite(
+    pondId: string,
+    role: Role | undefined,
+    email: string | undefined,
+    options: { keyless: true; life?: number; linkBase?: string },
+  ): Promise<LongInvite>;
   async invite(
     pondId: string,
     role: Role = "member",
     email?: string,
-    options: { short?: boolean } = {},
+    options: { short?: boolean; keyless?: boolean; life?: number; linkBase?: string } = {},
   ): Promise<LongInvite | ShortInvite> {
     const pond = this.activePond(pondId);
     this.allow(pond, "invite", {}, "Only an owner can invite.");
@@ -1479,7 +1497,8 @@ export class FlotillaService extends EventEmitter {
     if (short && !this.options.relay?.shortCreate) {
       throw new FlotillaError("Short codes need Squeak's cloud. Sign in to Squeak, or share a link instead.", 503);
     }
-    const life = short ? SHORT_INVITE_LIFE_MS : INVITE_TTL_MS;
+    const keyless = options.keyless === true;
+    const life = short ? SHORT_INVITE_LIFE_MS : (options.life ?? INVITE_TTL_MS);
     let joinToken: string | undefined;
     let tokenId: string | undefined;
     if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
@@ -1499,13 +1518,16 @@ export class FlotillaService extends EventEmitter {
     const body = {
       v: 1,
       p: pond.id,
-      ...(short ? {} : { k: pond.keys[String(pond.current)], kv: pond.current }),
+      // A keyless (emailed) invite carries no pond key: it reaches the member sealed to their key once they are let in.
+      ...(short ? {} : keyless ? { k: "", kv: 0 } : { k: pond.keys[String(pond.current)], kv: pond.current }),
       o: pond.ownerKey,
       n: pond.name,
       s: secret,
       e: expiresAt,
       r: role,
       ...(this.identity.name ? { on: this.identity.name } : {}),
+      // An emailed invite names the address it is for, so the page can say which account to sign in with.
+      ...(keyless && email ? { em: normalizeEmail(email) } : {}),
       l: location,
       ...(joinToken ? { jt: joinToken } : {}),
     };
@@ -1541,7 +1563,7 @@ export class FlotillaService extends EventEmitter {
     }
     const code = INVITE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
     // The link form keeps the secret in the fragment, which a browser never sends to any server.
-    const base = this.options.inviteLinkBase?.replace(/[#?].*$/, "").replace(/\/+$/, "");
+    const base = (options.linkBase ?? this.options.inviteLinkBase)?.replace(/[#?].*$/, "").replace(/\/+$/, "");
     const link = base ? `${base}#${code.slice(INVITE_PREFIX.length)}` : undefined;
     pond.invites.push({
       id,
@@ -1554,9 +1576,126 @@ export class FlotillaService extends EventEmitter {
       code,
       ...(link ? { link } : {}),
       ...(tokenId ? { tokenId } : {}),
+      ...(keyless && email ? { email: normalizeEmail(email) } : {}),
     });
     this.save();
     return { code, expiresAt, id, ...(link ? { link } : {}) };
+  }
+
+  /**
+   * Invite by email (docs/ponds.md, "Invite by email"): one email-bound invite per address, the link sent by the relay
+   * through Catalyst Mail. Nobody types a code. When the person opens the link and signs in with that address, this Mac
+   * lets them in at once (`autoApproveEmailJoins`); any other account is refused by the relay. Addresses that could not
+   * be sent are listed with a reason and their invite is withdrawn quietly.
+   */
+  async inviteByEmail(
+    pondId: string,
+    addresses: string[],
+    role: Role = "member",
+  ): Promise<{ sent: string[]; failed: Array<{ email: string; reason: string }> }> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
+    if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
+    const emails = [...new Set(addresses.map((a) => (typeof a === "string" ? normalizeEmail(a) : "")))];
+    if (emails.length === 0) throw new FlotillaError("Type at least one email address.");
+    if (emails.length > MAX_EMAILS_PER_SEND) {
+      throw new FlotillaError(`Invite at most ${MAX_EMAILS_PER_SEND} people at a time.`);
+    }
+    const bad = emails.filter((e) => !isEmail(e));
+    if (bad.length) throw new FlotillaError(`That doesn't look like an email address: ${bad[0]}`);
+    if (pond.local) await this.publish(pondId);
+    const relay = this.options.relay;
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst" || !relay?.inviteEmail) {
+      throw new FlotillaError("Invites by email need Squeak's cloud. Sign in to Squeak, then try again.", 503);
+    }
+    const failed: Array<{ email: string; reason: string }> = [];
+    const links: Record<string, string> = {};
+    const made = new Map<string, LongInvite>();
+    const linkBase = this.options.emailInviteLinkBase ?? EMAIL_INVITE_LINK_BASE;
+    for (const email of emails) {
+      try {
+        const invite = await this.invite(pondId, role, email, { keyless: true, life: EMAIL_INVITE_TTL_MS, linkBase });
+        if (!invite.link) throw new Error("no link");
+        made.set(email, invite);
+        links[email] = invite.link;
+      } catch {
+        failed.push({ email, reason: "Squeak couldn't make this invite. Try again." });
+      }
+    }
+    let sent: string[] = [];
+    if (made.size > 0) {
+      const inviterName = (this.options.account?.name() || this.identity.name || "Someone").trim() || "Someone";
+      try {
+        const result = await relay.inviteEmail(pondId, {
+          emails: [...made.keys()],
+          inviteUrls: links,
+          pondName: pond.name,
+          inviterName,
+        });
+        const ok = new Set(result.sent.map(normalizeEmail));
+        sent = [...made.keys()].filter((e) => ok.has(e));
+        for (const email of made.keys()) {
+          if (!ok.has(email)) failed.push({ email, reason: "Squeak couldn't send this email. Try again later." });
+        }
+      } catch (error) {
+        const reason =
+          error instanceof RelayRefused && error.status === 429
+            ? "Too many invitations just now. Try again in a while."
+            : error instanceof RelayRefused && error.status === 503
+              ? "Squeak couldn't send email right now. Try again later."
+              : "Squeak's cloud can't be reached, so nothing was sent. Try again.";
+        for (const email of made.keys()) failed.push({ email, reason });
+      }
+      // An invite whose email never went out must not stay live.
+      for (const [email, invite] of made) {
+        if (!sent.includes(email)) await this.dropInviteQuietly(pond, invite.id);
+      }
+    }
+    return { sent, failed };
+  }
+
+  /** Ends an unused invite without a Ripple (its email was never sent): the relay token first, then the record. */
+  private async dropInviteQuietly(pond: LocalPond, inviteId: string): Promise<void> {
+    const invite = pond.invites.find((i) => i.id === inviteId);
+    if (!invite || this.inviteState(invite) !== "pending") return;
+    if (invite.tokenId && this.options.relay) {
+      await this.options.relay.revoke(pond.id, invite.tokenId).catch((error) =>
+        logger.warn("could not revoke the token of an invite that was not emailed", {
+          pond: pond.id,
+          error: String(error),
+        }),
+      );
+    }
+    invite.state = "revoked";
+    invite.decidedAt = this.now();
+    delete invite.code;
+    delete invite.link;
+    this.save();
+  }
+
+  /**
+   * Lets in a join request that came on an email-bound invite from the very account that address names. Three things
+   * must hold: the request proves that invite's secret (so it came on its link), the invite is still pending, and the
+   * relay-verified email on the request (`joinids`, written from the signed-in account, never from the request) equals
+   * the invite's address. A signed-out, different or unverifiable request stays pending for the owner. The approval is
+   * the ordinary one (member from the account's name, the "joined" Ripple).
+   */
+  private async autoApproveEmailJoins(pond: LocalPond): Promise<void> {
+    if (!pond.invites.some((i) => i.email && this.inviteState(i) === "pending")) return;
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    for (const request of await this.pendingJoins(pond)) {
+      if (request.stale || !request.verifiedEmail) continue;
+      const invite = this.inviteFor(pond, request.requestId, request.publicKey, request.proof);
+      if (!invite?.email || this.inviteState(invite) !== "pending") continue;
+      if (normalizeEmail(request.verifiedEmail) !== normalizeEmail(invite.email)) continue;
+      try {
+        await this.decideJoin(pond.id, request.requestId, { approve: true });
+        this.emit("member-joined", pond.id, request.verifiedName || request.name);
+        this.emit("changed", pond.id);
+      } catch (error) {
+        logger.warn("could not let in an invited person", { pond: pond.id, error: String(error) });
+      }
+    }
   }
 
   /** The relay's answer to a short code, in the sentences a person reads. */
@@ -1600,6 +1739,8 @@ export class FlotillaService extends EventEmitter {
     const { p, o, n, s, e } = body;
     const k = shortCode ? "" : body.k;
     const kv = shortCode ? 0 : body.kv;
+    // An emailed invite is keyless too (`k: ""`): the pond key arrives sealed to this Mac's key once it is let in.
+    const keyless = k === "";
     if (
       body.v !== 1 ||
       typeof p !== "string" ||
@@ -1659,7 +1800,7 @@ export class FlotillaService extends EventEmitter {
       ownerKey: o,
       location,
       ...(joinToken ? { joinToken } : {}),
-      keys: shortCode ? {} : { [String(kv)]: k },
+      keys: keyless ? {} : { [String(kv)]: k },
       current: kv,
       words: joinWords(o, me.publicKey, p),
       requestId,
@@ -2539,6 +2680,7 @@ export class FlotillaService extends EventEmitter {
     }
     await this.republishThreads(pond);
     if (pond.role === "owner") {
+      await this.autoApproveEmailJoins(pond).catch(() => undefined);
       await this.renewTokens(pond).catch(() => undefined);
       await this.reapLeavers(pond).catch(() => undefined);
       await this.refreshMemberNames(pond).catch(() => undefined);

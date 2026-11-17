@@ -118,6 +118,12 @@ public struct PondsClient: Sendable {
         return try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 60))
     }
 
+    /// Invite by email: one email-bound invite per address, the links sent by Squeak's cloud. Answers who got one.
+    public func inviteByEmail(pond: String, emails: [String], role: PondRole) async throws -> PondEmailInviteResult {
+        let body: [String: NativeJSON] = ["emails": .array(emails.map { .string($0) }), "role": .string(role.rawValue)]
+        return try decode(PondEmailInviteResult.self, try await host.call("POST", "\(Self.p(pond))/invites/email", body: .object(body), timeout: 90))
+    }
+
     public func join(code: String) async throws -> PondJoinResult {
         try decode(
             PondJoinResult.self,

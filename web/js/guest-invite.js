@@ -90,7 +90,8 @@ function inviteFrom(body, now, origin, short) {
     ok: true,
     invite: {
       pondId: p,
-      key: short ? null : k,
+      // An emailed invite is keyless (`k: ""`) like a short one: the pond key arrives once the owner's Mac lets this browser in.
+      key: short || !k ? null : k,
       keyVersion: kv,
       ownerKey: o,
       name: typeof n === "string" ? n.slice(0, 200) : "A pond",
@@ -100,6 +101,9 @@ function inviteFrom(body, now, origin, short) {
       ownerName: typeof body.on === "string" && body.on ? body.on.slice(0, 100) : null,
       relayUrl: sameOrigin ?? relayUrl,
       joinToken: body.jt,
+      // An emailed invite names the address it is for: the page says which account to sign in with.
+      email:
+        typeof body.em === "string" && body.em.length <= 254 && body.em.includes("@") ? body.em.toLowerCase() : null,
     },
   };
 }

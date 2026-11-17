@@ -60,6 +60,7 @@
 const crypto = require("node:crypto");
 const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
 const scoped = require("./scoped");
+const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 
 const VERSION = require("./package.json").version;
@@ -128,11 +129,13 @@ const ZOHO_ACCOUNTS = /^accounts\.zoho\.(com|in|eu|com\.au|jp|com\.cn|sa|ca)$/;
 const ZOHO_APP_PATH = "/app/index.html";
 /** The only places a sign-in handoff may return to (exact origin, no wildcard): the web app's Slate home. */
 const HANDOFF_ORIGINS = ["https://squeak.onslate.in"];
+/** Home, or the invite page (an emailed link opens /join#<code>; the code stays in the fragment, which the handoff never sees). */
+const HANDOFF_PATHS = ["/", "/index.html", "/join"];
 const handoffReturn = (value) => {
   try {
     const u = new URL(String(value));
     if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash) return null;
-    if (!HANDOFF_ORIGINS.includes(u.origin) || (u.pathname !== "/" && u.pathname !== "/index.html")) return null;
+    if (!HANDOFF_ORIGINS.includes(u.origin) || !HANDOFF_PATHS.includes(u.pathname)) return null;
     return `${u.origin}${u.pathname}`;
   } catch {
     return null;
@@ -153,6 +156,15 @@ const SHORT_LOCK_MS = 10 * 60 * 1000;
 const SHORT_BODY_MAX = 4096;
 /** What a short code's details may hold: the invite's fields except the pond key (`k`, `kv`), which never goes to the relay. */
 const SHORT_DETAIL_KEYS = ["v", "p", "o", "n", "s", "e", "r", "on", "l", "jt"];
+/** Invite email (docs/cloud-layer.md): limits and the fixed sentences a failure may carry. */
+const INVITE_MAIL_PK = "invite-mail";
+const INVITE_MAIL_MAX = 10;
+const INVITE_MAIL_PER_MAC_DAY = 20;
+const INVITE_MAIL_PER_POND_HOUR = 10;
+const INVITE_MAIL_BODY_MAX = 32 * 1024;
+const DAY_MS = 24 * HOUR_MS;
+const MAIL_NOT_SET = "Squeak's email isn't set up yet.";
+const MAIL_FAILED = "Squeak couldn't send the email right now. Try again later.";
 const normEmail = (e) => String(e).trim().toLowerCase();
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
@@ -308,7 +320,8 @@ function createRelay(deps) {
       }
     }
     if (!user && (pinned || deps.signin === "required")) return { status: 401, body: { error: "signin" } };
-    if (pinned && normEmail(user.email) !== normEmail(pinned)) return { status: 403, body: { error: "email" } };
+    if (pinned && normEmail(user.email) !== normEmail(pinned))
+      return { status: 403, body: { error: "email", masked: mailing.maskEmail(pinned) } };
     return { user };
   }
 
@@ -873,14 +886,76 @@ function createRelay(deps) {
     return d;
   }
   /** Counts one more use in a window kept under (pk, id); false once `limit` uses are spent. */
-  async function spend(pk, id, windowMs, limit) {
+  async function spend(pk, id, windowMs, limit, n = 1) {
     const now = clock();
     const rate = parseOr(await deps.store.get(pk, id));
     const fresh = !rate || typeof rate.since !== "number" || rate.since + windowMs <= now;
     const used = fresh ? 0 : Number(rate.n) || 0;
-    if (used >= limit) return false;
-    await deps.store.put(pk, id, JSON.stringify({ since: fresh ? now : rate.since, n: used + 1 }));
+    if (used + n > limit) return false;
+    await deps.store.put(pk, id, JSON.stringify({ since: fresh ? now : rate.since, n: used + n }));
     return true;
+  }
+
+  /**
+   * POST /ponds/<pondId>/invites/email (a Mac's own key, or the operator's): sends each address its invitation through the
+   * injected mail sender (Catalyst Mail). The join token behind each link is already bound to its address (/pond-token);
+   * this route only delivers. Strict body { emails, inviteUrls: { <email>: <link> }, pondName, inviterName }.
+   * 20 emails per Mac per day, 10 per pond per hour. A mail failure is a fixed 503 {error:"mail", reason}, never the SDK's words.
+   */
+  async function handleInviteEmail(req, res, method, mac, pondId) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
+    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
+    const body = await readJson(req, INVITE_MAIL_BODY_MAX);
+    const keys = Object.keys(body || {});
+    const emails = body && body.emails;
+    const urls = body && body.inviteUrls;
+    const oneLine = (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 200;
+    if (
+      keys.some((k) => !["emails", "inviteUrls", "pondName", "inviterName"].includes(k)) ||
+      !Array.isArray(emails) ||
+      emails.length < 1 ||
+      emails.length > INVITE_MAIL_MAX ||
+      !emails.every((e) => mailing.validEmail(e)) ||
+      !urls ||
+      typeof urls !== "object" ||
+      Array.isArray(urls) ||
+      !oneLine(body.pondName) ||
+      !oneLine(body.inviterName)
+    )
+      return out(400, { error: "body" });
+    const list = [...new Set(emails.map(mailing.normEmail))];
+    if (!list.every((e) => mailing.linkOk(urls[e]))) return out(400, { error: "links" });
+    if (!deps.mail || !deps.mail.send) return out(503, { error: "mail", reason: MAIL_NOT_SET });
+    const who = mac ? mac.macId : "operator";
+    // The pond's hour first, then the Mac's day; a refusal by the second gives the first back.
+    if (!(await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, list.length)))
+      return out(429, { error: "busy" });
+    if (!(await spend(INVITE_MAIL_PK, `d-${who}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, list.length))) {
+      await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, -list.length);
+      return out(429, { error: "busy" });
+    }
+    const sent = [];
+    const failed = [];
+    for (const email of list) {
+      const m = mailing.buildInviteMail({
+        inviterName: body.inviterName,
+        pondName: body.pondName,
+        email,
+        url: urls[email],
+      });
+      try {
+        await deps.mail.send({ to: email, subject: m.subject, text: m.text, html: m.html });
+        sent.push(email);
+      } catch {
+        log("invite email not sent");
+        failed.push(email);
+      }
+    }
+    // Nothing went out: say so as a failure (quota or a sender that is not set up are the usual causes), no SDK words.
+    if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed });
+    return out(200, { sent, failed });
   }
 
   /** POST /ponds/short: an owner's Mac (or the operator) makes a short code for the join details it hands over. */
@@ -1137,6 +1212,10 @@ function createRelay(deps) {
       }
 
       if (route === "/ponds/short") return await handleShortCreate(req, res, method, mac);
+      {
+        const m = /^\/ponds\/([^/]+)\/invites\/email$/.exec(route);
+        if (m) return await handleInviteEmail(req, res, method, mac, m[1]);
+      }
 
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});

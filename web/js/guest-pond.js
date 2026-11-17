@@ -36,6 +36,7 @@ import {
   readThread,
   readThreadEvent,
 } from "./guest-docs.js";
+import { wrongEmailLine } from "./guest-model.js";
 import { RelayError, RelayStore } from "./guest-relay.js";
 import { joinWords } from "./join-words.js";
 
@@ -43,9 +44,11 @@ export const RECORD = "guest";
 
 /** What went wrong, in words a person can use. */
 export class GuestError extends Error {
-  constructor(message, status = 400) {
+  constructor(message, status = 400, code = null) {
     super(message);
     this.status = status;
+    /** The relay's word for a refused join ("email", "signin"), when it sent one. */
+    this.code = code;
   }
 }
 
@@ -67,7 +70,8 @@ export function plainRelayError(error) {
 export const TERMINAL = ["declined", "expired", "revoked", "removed"];
 
 /** What a refused join request says (docs/web-app.md, "Web guests"). */
-export function joinRefusal(code) {
+export function joinRefusal(code, masked = null) {
+  if (code === "email" && masked) return wrongEmailLine(masked);
   if (code === "email") return "This invite is for a different email. Sign in with the email it was sent to.";
   if (code === "signin") return "You need to sign in to join. Sign in and try again.";
   return "The pond refused this request. Ask for a new invite.";
@@ -166,7 +170,9 @@ export class GuestPond {
       // Nothing reached the owner: no "waiting" may be left behind for a request that was never sent.
       await vault.write(RECORD, reuse ? prior : null);
       if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
-        throw new GuestError(joinRefusal(error.code), error.status);
+        throw Object.assign(new GuestError(joinRefusal(error.code, error.masked), error.status, error.code), {
+          masked: error.masked ?? null,
+        });
       }
       throw error;
     }

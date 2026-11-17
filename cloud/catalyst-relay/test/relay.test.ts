@@ -688,7 +688,7 @@ describe("signed-in guests (Catalyst Hosted login)", () => {
     expect(await r(null)).toEqual({ status: 401, json: { error: "signin" } });
     expect(await r({ userId: "u9", email: "other@example.com", name: "" })).toEqual({
       status: 403,
-      json: { error: "email" },
+      json: { error: "email", masked: "p***@e***.com" },
     });
     expect((await r(ME)).status).toBe(204);
     // An unpinned token on the same relay is untouched by the pin.
@@ -1744,6 +1744,160 @@ describe('short invite codes (docs/ponds.md, "Short codes")', () => {
     for (const k of ["shortcodes", "short-rate", "short-tries"]) {
       expect((await call(f.deps, "GET", `/list?prefix=${k}`)).status).toBe(400);
       expect((await call(f.deps, "GET", `/doc?path=${k}/x`)).status).toBe(400);
+    }
+  });
+});
+
+describe("invite by email (docs/ponds.md, 'Invite by email')", () => {
+  const POND = "P".repeat(30);
+  const CODE = "e".repeat(60);
+  const url = (n = "") => `https://squeak.onslate.in/join#${CODE}${n}`;
+  const route = `/ponds/${POND}/invites/email`;
+  const body = (extra: Record<string, unknown> = {}) => ({
+    emails: ["Pat@Example.com"],
+    inviteUrls: { "pat@example.com": url() },
+    pondName: "Site",
+    inviterName: "Sibhi",
+    ...extra,
+  });
+  function setup(fail: (to: string) => boolean = () => false) {
+    const f = fakes();
+    const sent: Array<{ to: string; subject: string; text: string; html: string }> = [];
+    Object.assign(f.deps, {
+      mail: {
+        send: async (m: { to: string; subject: string; text: string; html: string }) => {
+          if (fail(m.to)) throw new Error("SDK secret detail");
+          sent.push(m);
+        },
+      },
+    });
+    return { f, sent };
+  }
+
+  it("sends each address its own email with the subject and the words the owner chose", async () => {
+    const { f, sent } = setup();
+    const r = await call(f.deps, "POST", route, { body: body() });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ sent: ["pat@example.com"], failed: [] });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.subject).toBe("Sibhi invited you to Site on Squeak");
+    expect(sent[0]!.text).toContain("Sibhi wants you in Site, a shared space");
+    expect(sent[0]!.text).toContain(url());
+    expect(sent[0]!.text).toContain("sign in with pat@example.com");
+    expect(sent[0]!.html).toContain("Join Site");
+    expect(sent[0]!.html).not.toMatch(/<img|pixel|track/i);
+  });
+
+  it("escapes names in the html and keeps newlines out of the subject", async () => {
+    const { f, sent } = setup();
+    await call(f.deps, "POST", route, { body: body({ inviterName: "<b>Eve</b>\r\nBcc: x@y.z", pondName: "A&B" }) });
+    expect(sent[0]!.subject).not.toMatch(/[\r\n]/);
+    expect(sent[0]!.html).not.toContain("<b>Eve");
+    expect(sent[0]!.html).toContain("A&amp;B");
+  });
+
+  it("is strict: unknown keys, bad or too many addresses, links off the web app, missing links", async () => {
+    const { f, sent } = setup();
+    const bad = async (b: unknown, status = 400) =>
+      expect((await call(f.deps, "POST", route, { body: b })).status).toBe(status);
+    await bad(body({ extra: 1 }));
+    await bad(body({ emails: [] }));
+    await bad(body({ emails: ["not an email"] }));
+    await bad(body({ emails: ["a@b"] }));
+    await bad(body({ emails: [`${"a".repeat(250)}@example.com`] }));
+    await bad(body({ emails: Array.from({ length: 11 }, (_, i) => `u${i}@example.com`) }));
+    await bad(body({ inviteUrls: { "pat@example.com": "https://evil.example/join#" + CODE } }));
+    await bad(body({ inviteUrls: { "pat@example.com": "https://squeak.onslate.in/join" } }));
+    await bad(body({ inviteUrls: {} }));
+    await bad(body({ pondName: "" }));
+    expect((await call(f.deps, "POST", `/ponds/short/invites/email`, { body: body() })).status).toBe(400);
+    expect((await call(f.deps, "GET", route)).status).toBe(405);
+    expect((await call(f.deps, "POST", route, { key: null, body: body() })).status).toBe(401);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("is capped at 10 emails per pond per hour and 20 per day per Mac", async () => {
+    const { f, sent } = setup();
+    const many = (n: number, tag: string) => ({
+      emails: Array.from({ length: n }, (_, i) => `${tag}${i}@example.com`),
+      inviteUrls: Object.fromEntries(Array.from({ length: n }, (_, i) => [`${tag}${i}@example.com`, url()])),
+      pondName: "Site",
+      inviterName: "Sibhi",
+    });
+    expect((await call(f.deps, "POST", route, { body: many(10, "a") })).status).toBe(200);
+    expect((await call(f.deps, "POST", route, { body: many(1, "b") })).json).toEqual({ error: "busy" });
+    const other = `/ponds/${"Q".repeat(30)}/invites/email`;
+    expect((await call(f.deps, "POST", other, { body: many(10, "c") })).status).toBe(200);
+    expect((await call(f.deps, "POST", `/ponds/${"R".repeat(30)}/invites/email`, { body: many(1, "d") })).status).toBe(
+      429,
+    );
+    expect(sent).toHaveLength(20);
+  });
+
+  it("a mail failure is a fixed sentence, never the SDK's words; one failure among several is listed", async () => {
+    const down = setup(() => true);
+    const r = await call(down.f.deps, "POST", route, { body: body() });
+    expect(r.status).toBe(503);
+    expect(r.json.error).toBe("mail");
+    expect(r.text).not.toContain("SDK secret");
+    const some = setup((to) => to === "bad@example.com");
+    const two = await call(some.f.deps, "POST", route, {
+      body: body({
+        emails: ["ok@example.com", "bad@example.com"],
+        inviteUrls: { "ok@example.com": url(), "bad@example.com": url() },
+      }),
+    });
+    expect(two.json).toEqual({ sent: ["ok@example.com"], failed: ["bad@example.com"] });
+  });
+
+  it("with no sender configured: 503 mail", async () => {
+    const f = fakes();
+    const r = await call(f.deps, "POST", route, { body: body() });
+    expect(r.status).toBe(503);
+    expect(r.json).toMatchObject({ error: "mail" });
+  });
+
+  it("a join refused for the wrong email carries the masked address, never the real one", async () => {
+    const f = fakes();
+    Object.assign(f.deps, { currentUser: async () => ({ userId: "u9", email: "other@example.com", name: "" }) });
+    await call(f.deps, "POST", "/pond-token", {
+      body: { pondId: POND, memberId: "j1", scope: "join", ttlSec: 600, email: "pat.lee@example.com" },
+    });
+    const tok = (
+      await call(f.deps, "POST", "/pond-token", {
+        body: { pondId: POND, memberId: "j2", scope: "join", ttlSec: 600, email: "pat.lee@example.com" },
+      })
+    ).json.token;
+    const req: any = new EventEmitter();
+    req.method = "PUT";
+    req.url = `/server/squeak_relay/doc?path=channels/${POND}/joins/r1`;
+    req.headers = { "x-squeak-pond-token": tok };
+    let status = 0;
+    let text = "";
+    const res: any = { writeHead: (s: number) => (status = s), end: (t?: string) => (text = t ?? "") };
+    const done = createRelay(f.deps)(req, res);
+    setImmediate(() => {
+      req.emit("data", Buffer.from(JSON.stringify({ doc: doc() })));
+      req.emit("end");
+    });
+    await done;
+    expect(status).toBe(403);
+    expect(JSON.parse(text)).toEqual({ error: "email", masked: "p***@e***.com" });
+  });
+
+  it("the sign-in handoff may return to /join, and nowhere else new", async () => {
+    const f = fakes();
+    (f.deps as any).currentUser = async () => ({ userId: "u1", email: "pat@example.com", name: "Pat" });
+    const at = (r: string) => `/account/handoff?return=${encodeURIComponent(r)}`;
+    const ok = await call(f.deps, "GET", at("https://squeak.onslate.in/join"), { key: null });
+    expect(ok.status).toBe(302);
+    expect((ok.headers.Location as string).startsWith("https://squeak.onslate.in/join#squeak-token=")).toBe(true);
+    for (const bad of [
+      "https://squeak.onslate.in/join/",
+      "https://squeak.onslate.in/join#x",
+      "https://squeak.onslate.in/join?a=1",
+    ]) {
+      expect((await call(f.deps, "GET", at(bad), { key: null })).status, bad).toBe(400);
     }
   });
 });

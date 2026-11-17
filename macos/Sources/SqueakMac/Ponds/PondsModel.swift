@@ -342,6 +342,14 @@ final class PondsModel {
         catch { note = "That didn't go through"; return nil }
     }
 
+    /// Invite by email: the host makes one email-bound invite per address and Squeak's cloud sends the links.
+    func inviteByEmail(pond: String, emails: [String], role: PondRole) async -> PondEmailInviteResult? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.inviteByEmail(pond: pond, emails: emails, role: role) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
     /// Joining needs a Squeak account (the person's name is the account's), so a signed-out Mac says so first.
     func join(code: String, account: AccountModel) async -> PondJoinResult? {
         guard let client else { return nil }

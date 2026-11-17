@@ -8,6 +8,7 @@ import {
   endCopy,
   foldEvents,
   joiningLine,
+  maskEmail,
   parkedInviteUsable,
   pendingSends,
   workingRow,
@@ -35,6 +36,7 @@ import {
   accountTokenFor,
   sdkSignOut,
   signInRedirect,
+  takeHandoffToken,
 } from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
@@ -105,6 +107,7 @@ export function startGuest({
   /** Who is asking, before any join screen: joining needs a Squeak account, so the first step is signing in. */
   async function entry() {
     ui.threadUi = null;
+    ui.wrongEmail = null;
     const me = await fetchMe({
       baseUrl: ui.invite.relayUrl,
       fetch,
@@ -194,11 +197,21 @@ export function startGuest({
     mount(
       signInScreen({
         pondName: ui.invite.name,
+        ownerName: ui.invite.ownerName ?? null,
+        forEmail: ui.invite.email ? maskEmail(ui.invite.email) : null,
         error: ui.error,
         onSignIn: () => signIn(win),
         onCancel: cancel,
       }),
     );
+  }
+
+  /** The masked address an emailed invite is for when this account is another one, else null. */
+  function wrongAccount() {
+    const want = ui.invite?.email;
+    const have = ui.user?.email;
+    if (!want || !have) return null;
+    return want.trim().toLowerCase() === have.trim().toLowerCase() ? null : maskEmail(want);
   }
 
   function showSignedIn() {
@@ -207,7 +220,10 @@ export function startGuest({
       signedInScreen({
         line: joiningLine(ui.user),
         pondName: ui.invite.name,
+        ownerName: ui.invite.ownerName ?? null,
         role: ui.invite.role,
+        // Signed in under another address than an emailed invite names (known before asking, or told by the relay).
+        wrongEmail: ui.wrongEmail ?? wrongAccount(),
         error: ui.error,
         busy: ui.busy,
         onJoin: join,
@@ -254,6 +270,13 @@ export function startGuest({
         ui.error = joinRefusal("signin");
         await park();
         return showSignIn();
+      }
+      const masked = error instanceof GuestError && error.code === "email" ? (error.masked ?? null) : null;
+      if (masked || (error instanceof GuestError && error.code === "email" && ui.invite.email)) {
+        // The relay refused this account for an emailed invite: say whose it is (masked) and offer to switch.
+        ui.wrongEmail = masked ?? maskEmail(ui.invite.email);
+        ui.error = null;
+        return back();
       }
       ui.error =
         error instanceof GuestError ? error.message : "I couldn't reach the pond. Check your connection and try again.";
@@ -432,10 +455,25 @@ export function startGuest({
     const sig = JSON.stringify([ui.view, ui.note]);
     if (ui.screen === "pond" && sig === ui.sig) return;
     ui.screen = "pond";
-    const screen = pondScreen({ view: ui.view, now: Date.now(), onOpen: openThread, onLeave: leave });
+    const screen = pondScreen({
+      view: ui.view,
+      now: Date.now(),
+      onOpen: openThread,
+      onLeave: leave,
+      macPrompt: ui.macCardDismissed ? null : { onDismiss: dismissMacCard },
+    });
     mount(screen);
     if (ui.note) root.prepend(banner());
     ui.sig = sig;
+  }
+
+  /** The Mac-app card is shown until dismissed once in this browser (kept in the vault, never in web storage). */
+  const MAC_CARD = "mac-card-dismissed";
+  function dismissMacCard() {
+    ui.macCardDismissed = true;
+    void vault.write(MAC_CARD, true).catch(() => undefined);
+    ui.sig = "";
+    paintPond();
   }
 
   function paintThread() {
@@ -579,6 +617,10 @@ export function startGuest({
 
   return (async () => {
     mount(page(h("p", { class: "g-lead" }, "One moment…")));
+    // Back from the sign-in handoff on this origin: keep the account token (it leaves the address bar); the invite itself
+    // was parked in IndexedDB before leaving, so there is no fragment left to read.
+    takeHandoffToken(win);
+    ui.macCardDismissed = !!(await vault.read(MAC_CARD).catch(() => null));
     const code = codeFrom(win.location?.hash);
     const short = code ? normalizeShortCode(code) : null;
     const parsed = code && !short ? readInvite(code, Date.now(), win.location.origin) : null;

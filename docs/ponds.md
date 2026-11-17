@@ -105,6 +105,7 @@ up to 64 KB on request through `tcmds` `diff`).
 | `GET /ponds/<id>`                                  |                                     | `{ pond, members, threads, ripples, presence, holds, joins, me }`                                                                                                                                                             |
 | `DELETE /ponds/<id>/members/<memberId>`            |                                     | owner only; rotates the key                                                                                                                                                                                                   |
 | `POST /ponds/<id>/invites`                         | `{ role, short? }`                  | `{ code, expiresAt, link? }`, or with `short: true` `{ short, expiresAt, id, inviteExpiresAt }` (`link` only when an invite link base is configured)                                                                          |
+| `POST /ponds/<id>/invites/email`                   | `{ emails, role? }`                 | `{ sent: [email], failed: [{ email, reason }] }` (owner; 1 to 10 addresses, role member or viewer; publishes a local pond first; an email-bound invite per address, the relay sends the links; see "Invite by email")         |
 | `POST /ponds/join`                                 | `{ code }`                          | `{ pondId, status: "pending" }` (`code` is the code or the link; needs a signed-in Squeak account, else 401 "Sign in to Squeak to join a pond. Your name comes from your account."; an old client's `displayName` is ignored) |
 | `DELETE /ponds/<id>/invites/<inviteId>`            |                                     | `{ id, state: "revoked" }` (owner; an unused invite only; ends its relay join token first)                                                                                                                                    |
 | `POST /ponds/<id>/joins/<requestId>`               | `{ approve, role }`                 | `{ ok }`                                                                                                                                                                                                                      |
@@ -281,6 +282,42 @@ role, 404 for nothing there, 409 with `heldBy` when someone else holds it):
 `GET /ponds/<id>` also carries `tasks: TaskView[]` (newest change first; `claimedBy { id, name, until }`, `threadKey`) and
 `locks: LockDoc[]`, both optional for older readers. A local pond has none (no cloud). Not here: nothing enforces a lock on file
 writes yet, and tasks do not start threads by themselves.
+
+## Invite by email (2026-11-17)
+
+The owner's way to bring people in: no code, no QR. Type one or more addresses in the invite sheet (Mac) and each person
+gets an email; opening the link and signing in to Squeak **with that address** puts them in the pond at once, with no second
+approval on the owner's Mac.
+
+- **One invite per address.** `FlotillaService.inviteByEmail(pondId, emails, role)` makes an email-bound invite for each
+  (`invite(..., email, { keyless: true })`): a relay join token pinned to the lower-cased address (`pins/<pondId>`,
+  `/pond-token` with `email`), a week's life, and a link `https://squeak.onslate.in/join#<code>`. The code is **keyless**
+  (`k: ""`, `kv: 0`, like a short code's details) and names the address (`em`), so an email never carries the pond key: it
+  reaches the member sealed to their own key when the owner's Mac lets them in (`sendKeyTo`). `FlotillaService.join` and the
+  web's `readInvite` both read `k: ""` as keyless.
+- **Delivery.** The Mac calls the relay's `POST /ponds/<pondId>/invites/email` (its own key) with `{ emails, inviteUrls,
+pondName, inviterName }`; the relay sends one email per address through Catalyst Mail (docs/cloud-layer.md, "Invite
+  email") and answers `{ sent, failed }`. An address whose email did not go out has its invite withdrawn quietly (token
+  revoked, no Ripple) and comes back in `failed` with a fixed sentence (limit, mail down, cloud unreachable). Limits: 20 emails
+  per Mac per day, 10 per pond per hour.
+- **Who is let in.** The relay enforces the pin: a join request written under that token by a signed-in account whose
+  verified email (case-insensitive, trimmed) differs is `403 { error: "email", masked }`; a signed-out one is `401 signin`.
+  On an owner's refresh, `autoApproveEmailJoins` approves a join request only when all three hold: it proves that invite's
+  secret, the invite is still pending, and the relay-written `joinids` email equals the invite's address. It then runs the
+  ordinary `decideJoin` (member named from the account, the "joined" Ripple, the `member-joined` event), so the owner is told
+  in the Mac's usual Ripple path. A mismatched or missing verified email never auto-approves. An ordinary invite is
+  never auto-approved.
+- **The page** (web/join, the Slate origin): pond name, who invited you (initials), "Squeak lets a team watch, steer and talk
+  to coding agents together.", **Sign in to join** (Zoho, Google or email; a new person makes the account right there).
+  Sign-in goes through `/account/handoff` and returns to exactly `https://squeak.onslate.in/join` (the relay allows that path
+  and `/`); the invite was parked in IndexedDB before leaving, so the fragment survives the round trip. Signed in with another
+  address the page says "This invite is for p***@e***.com. Sign in with that address." with one button, "Sign out and switch
+  account" (it knows the masked address from the link, or from the relay's refusal). After joining, a dismissible card offers
+  Squeak for Mac (https://sibhimanyu.github.io/squeak/). There is no "Open in Squeak" button: the Mac app registers no
+  pond-opening URL scheme.
+- **Mac.** The invite sheet is the email form (tokens, Member/Viewer, Send invites, a row per address). "Copy invite link" is a
+  small secondary action (an ordinary link that still waits for approval). The parsing and limits live in
+  `SqueakMacCore/Ponds/EmailInviteList.swift`.
 
 ## Names (2026-11-13)
 
