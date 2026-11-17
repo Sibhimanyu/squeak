@@ -9,6 +9,23 @@ public enum DragKind: String, CaseIterable, Sendable {
 
     public var identifier: String { "com.squeak.drag.\(rawValue)" }
 
+    /// The kind a payload string names, from its prefix alone. The plain-text half of every drag carries it, so a drop
+    /// still works when the custom pasteboard type is not matched at the destination.
+    public static func sniff(_ text: String) -> DragKind? {
+        let prefixes: [(String, DragKind)] = [
+            (PondDragPayload.prefix, .pond), (DockItemPayload.threadPrefix, .thread), (DockPanelPayload.prefix, .panel),
+            (DockItemPayload.terminalPrefix, .terminal), (DockItemPayload.filePrefix, .file),
+            (DockItemPayload.ducklingPrefix, .duckling), ("squeak-file:", .fileToken),
+        ]
+        return prefixes.first { text.hasPrefix($0.0) }?.1
+    }
+
+    /// The kind to accept `text` as on `target`, or nil (not ours, or not allowed there).
+    public static func accepted(_ text: String, on target: DragTarget) -> DragKind? {
+        guard let kind = sniff(text), DragScope.allows(kind, on: target) else { return nil }
+        return kind
+    }
+
     public static func of(_ item: DockItem) -> DragKind {
         switch item {
         case .thread: return .thread

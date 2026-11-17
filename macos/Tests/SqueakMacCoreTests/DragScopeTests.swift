@@ -58,3 +58,37 @@ import Foundation
         #expect(DragScope.allows(.panel, on: .centreStrip))
     }
 }
+
+@Suite struct DragPayloadFallbackTests {
+    static let items: [DockItem] = [.thread("claude:abc"), .panel(.pond), .terminal(UUID()), .file("/tmp/a.txt")]
+
+    @Test func everyTabKindRoundTripsAndIsSniffedFromPlainText() {
+        for item in Self.items {
+            let text = DockItemPayload.encode(item)
+            #expect(DockItemPayload.decode(text) == item)
+            // The plain-text half alone (custom type missing) still names the kind and lands on every strip.
+            #expect(DragKind.sniff(text) == DragKind.of(item))
+            for t in [DragTarget.centreStrip, .rightStrip, .bottomStrip] {
+                #expect(DragKind.accepted(text, on: t) == DragKind.of(item))
+            }
+            #expect(DragKind.accepted(text, on: .pondList) == nil)
+        }
+    }
+
+    @Test func pondAndFileTokenFallBackToPlainText() {
+        let pond = PondDragPayload.encode("dir-1")
+        #expect(PondDragPayload.decode(pond) == "dir-1")
+        #expect(DragKind.accepted(pond, on: .pondList) == .pond)
+        #expect(DragKind.accepted(pond, on: .centreStrip) == nil)
+        #expect(DragKind.accepted("squeak-file:/r\n/r/a", on: .fileTree) == .fileToken)
+    }
+
+    @Test func ordinaryTextIsNeverAccepted() {
+        #expect(DragKind.sniff("hello") == nil)
+        for t in [DragTarget.centreStrip, .pondList, .fileTree] { #expect(DragKind.accepted("hello", on: t) == nil) }
+    }
+
+    @Test func everyKindHasADistinctIdentifier() {
+        #expect(Set(DragKind.allCases.map(\.identifier)).count == DragKind.allCases.count)
+    }
+}

@@ -87,6 +87,7 @@ cat > "$PLIST" <<PL
   <key>NSMicrophoneUsageDescription</key><string>Squeak listens only while you dictate a message, to turn your voice into text on this Mac. Nothing is recorded or sent.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Squeak turns your dictated words into text for the message you are writing. It happens on this Mac when it can.</string>
   <key>CFBundleIconFile</key><string>Squeak</string>
+$(cat "$HERE/scripts/drag-types.plist.frag")
 </dict>
 </plist>
 PL

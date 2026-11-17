@@ -8,28 +8,38 @@ extension DragKind {
 }
 
 extension DragScope {
-    static func types(for target: DragTarget) -> [UTType] { accepted(by: target).map(\.utType) }
+    /// The custom types of the kinds a target takes, then plain text: the payload is always also plain text with a
+    /// known prefix, so a target still takes it when the custom type is not matched (undeclared, or lost in transit).
+    static func types(for target: DragTarget) -> [UTType] { accepted(by: target).map(\.utType) + [.utf8PlainText, .plainText] }
 }
 
-/// A drag payload: the plain string (for the receiving side to decode) plus a marker type that names its kind,
-/// kept inside this app.
+/// A drag payload: the prefixed plain string (read by any destination) plus a data representation under the kind's
+/// own type, declared in the app's Info.plist (`UTExportedTypeDeclarations`).
 func dragProvider(_ text: String, kind: DragKind) -> NSItemProvider {
     let p = NSItemProvider(object: text as NSString)
-    p.registerDataRepresentation(forTypeIdentifier: kind.identifier, visibility: .ownProcess) { done in
+    p.registerDataRepresentation(forTypeIdentifier: kind.identifier, visibility: .all) { done in
         done(Data(text.utf8), nil)
         return nil
     }
     return p
 }
 
-/// Reads the string out of a drop, whatever its kind.
-@MainActor func loadDragString(_ info: DropInfo, kinds: [DragKind], _ then: @escaping @MainActor (String) -> Void) -> Bool {
-    for kind in kinds {
+/// Reads the string out of a drop: the kind's own type first, else the plain-text half. Only a payload whose prefix
+/// names a kind the target takes is passed on, so ordinary text dragged in is ignored.
+@MainActor func loadDragString(_ info: DropInfo, target: DragTarget, _ then: @escaping @MainActor (String) -> Void) -> Bool {
+    func deliver(_ text: String) {
+        guard DragKind.accepted(text, on: target) != nil else { return }
+        Task { @MainActor in then(text) }
+    }
+    for kind in DragScope.accepted(by: target) {
         guard let p = info.itemProviders(for: [kind.utType]).first else { continue }
         p.loadDataRepresentation(forTypeIdentifier: kind.identifier) { data, _ in
-            guard let data, let text = String(data: data, encoding: .utf8) else { return }
-            Task { @MainActor in then(text) }
+            if let data, let text = String(data: data, encoding: .utf8) { deliver(text) }
         }
+        return true
+    }
+    for p in info.itemProviders(for: [.utf8PlainText, .plainText]) where p.canLoadObject(ofClass: String.self) {
+        _ = p.loadObject(ofClass: String.self) { text, _ in if let text { deliver(text) } }
         return true
     }
     return false
@@ -49,7 +59,7 @@ struct ScopedDropDelegate: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         targeted(false)
         return MainActor.assumeIsolated {
-            loadDragString(info, kinds: DragScope.accepted(by: target)) { text in _ = perform(text) }
+            loadDragString(info, target: target) { text in _ = perform(text) }
         }
     }
 }

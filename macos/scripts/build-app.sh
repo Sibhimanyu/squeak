@@ -84,6 +84,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleIdentifier</key><string>com.squeak.mac</string>
   <key>CFBundleName</key><string>Squeak</string>
+$(cat "$HERE/scripts/drag-types.plist.frag")
   <key>CFBundleDisplayName</key><string>Squeak</string>
   <key>CFBundleExecutable</key><string>SqueakMac</string>
   <key>CFBundlePackageType</key><string>APPL</string>
