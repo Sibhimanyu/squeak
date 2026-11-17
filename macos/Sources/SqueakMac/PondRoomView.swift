@@ -50,6 +50,7 @@ final class PondRoomModel {
                 feed = f
                 await react(effect, client)
             case .turn(let t): feed.upsert(turn: t)
+            case .job(let j): feed.upsert(job: j)
             case .reconnected: await catchUp(client)
             }
         }
@@ -107,6 +108,34 @@ final class PondRoomModel {
         await deliver(pendingId: id, text: row.post.text, level: row.post.level, host: host)
     }
 
+    /// "Make this a job" on a person's message; a refusal shows inline under it.
+    func makeJob(messageId: String, host: NativeHostClient) async {
+        let key = "msg:" + messageId
+        feed.clearJobLocal(key)
+        do { feed.upsert(job: try await RoomClient(host: host).makeJob(project: projectId, messageId: messageId)) }
+        catch { feed.failJob(key, message: RoomJobs.refusal(error)) }
+    }
+
+    /// Go, New thread, Just a note, Allow, No: shown at once, reconciled by the job the host answers with.
+    func act(_ job: RoomJobLine, _ action: RoomJobAction, host: NativeHostClient) async {
+        guard let id = job.jobId else { return }
+        var title: String?
+        if case .go(let sid?) = action { title = ([job.target].compactMap { $0 } + job.candidates).first { $0.sessionId == sid }?.title }
+        feed.beginJob(id, action: action, title: title)
+        await perform(id, action, host: host)
+    }
+
+    func act(claim: RoomJobs.ClaimCard, allow: Bool, host: NativeHostClient) async {
+        let action: RoomJobAction = allow ? .allow : .deny
+        feed.beginJob(claim.jobId, action: action)
+        await perform(claim.jobId, action, host: host)
+    }
+
+    private func perform(_ id: String, _ action: RoomJobAction, host: NativeHostClient) async {
+        do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action)) }
+        catch { feed.failJob(id, message: RoomJobs.refusal(error)) }
+    }
+
     private func deliver(pendingId: String, text: String, level: RoomLevel, host: NativeHostClient) async {
         do {
             let post = try await RoomClient(host: host).send(project: projectId, text: text, level: level)
@@ -153,21 +182,12 @@ struct PondRoomView: View {
 
     var body: some View {
         let room = room
-        GeometryReader { geo in
-            let showInspector = !embedded && key != nil && geo.size.width >= 1040
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    if !embedded, let key { RoomHeader(key: key, summary: RoomSummary.line(feed: room.feed), leadingInset: leadingInset) }
-                    content(room)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if showInspector, let key {
-                    Rectangle().fill(Theme.line).frame(width: 1)
-                    RoomInspector(key: key, today: RoomSummary.today(turns: room.feed.turns))
-                        .frame(width: 300).frame(maxHeight: .infinity)
-                }
-            }
+        // The room inspector (Flock, Invite, Today, Pond controls) lives in the app's right zone (ConversationWindow).
+        VStack(spacing: 0) {
+            if !embedded, let key { RoomHeader(key: key, summary: RoomSummary.line(feed: room.feed), leadingInset: leadingInset) }
+            content(room)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
         .task(id: projectId) { await room.run(host: model.nativeHost) }
     }
@@ -182,9 +202,13 @@ struct PondRoomView: View {
         case .ready:
             let unread = unreadThreads(room)
             let cards = RoomNow.cards(threads: room.feed.threads, unread: unread, filesFor: { model.changesStore(for: $0).changes?.files.count })
-            let ripples = RoomRipples.build(feed: room.feed, filter: room.rippleFilter)
+            let ripples = RoomRipples.build(feed: room.feed, filter: room.rippleFilter, owner: NSFullUserName())
             VStack(spacing: 0) {
-                column { RoomNowSection(cards: cards, key: key, open: openThread, answer: answer) }
+                column {
+                    RoomNowSection(
+                        cards: cards, claims: room.feed.claims, key: key, open: openThread, answer: answer,
+                        decide: { claim, allow in Task { await room.act(claim: claim, allow: allow, host: model.nativeHost) } })
+                }
                 column { ripplesHeader(room) }
                 ripplesFeed(room, ripples)
                 column { RoomComposer(room: room, send: sendTo) }.padding(.bottom, Space.l).padding(.top, Space.s)
@@ -212,7 +236,7 @@ struct PondRoomView: View {
         let count = ripples.reduce(0) { $0 + RoomRippleView.weight($1) }
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     if room.feed.hasMoreBefore {
                         Color.clear.frame(height: 1).onAppear { Task { await room.loadOlder(host: model.nativeHost) } }
                     }
@@ -221,8 +245,18 @@ struct PondRoomView: View {
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
                     }
                     ForEach(ripples) { ripple in
-                        RoomRippleView(ripple: ripple, threads: room.feed.threads, ledger: ledger, open: openThread,
-                            retry: { id in Task { await room.retry(id, host: model.nativeHost) } })
+                        // A thread's turns are a section whose header (duck, title, count) stays pinned while any of its
+                        // turns is on screen, so a row never loses its thread when the group starts above the fold.
+                        Section {
+                            RoomRippleView(
+                                ripple: ripple, threads: room.feed.threads, ledger: ledger, open: openThread,
+                                retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
+                                makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
+                                canMakeJob: { RoomJobs.canMakeJob($0, jobs: room.feed.jobs) },
+                                act: { line, a in Task { await room.act(line, a, host: model.nativeHost) } })
+                        } header: {
+                            if case .threadTurns(let g) = ripple { RoomGroupHeader(group: g, open: openThread) }
+                        }
                     }
                     Color.clear.frame(height: 1).id("room-bottom")
                         .onAppear { atBottom = true; unseen = 0 }
@@ -233,6 +267,9 @@ struct PondRoomView: View {
             }
             .defaultScrollAnchor(.bottom)
             .onAppear { ledger.freeze(ripples.map(\.id)) }
+            .onChange(of: RoomJump.shared.token) { _, _ in
+                if let id = RoomJump.shared.target { withAnimation(reduceMotion ? nil : Motion.standard) { proxy.scrollTo(id, anchor: .center) } }
+            }
             .onChange(of: count) { old, new in
                 guard new > old else { return }
                 if atBottom { proxy.scrollTo("room-bottom", anchor: .bottom) } else { unseen += new - old }

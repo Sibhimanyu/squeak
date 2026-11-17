@@ -163,3 +163,21 @@ struct RoomInspector: View {
         .accessibilityLabel(value.map { "\(title), \($0)" } ?? title).accessibilityHint("Opens pond settings")
     }
 }
+
+/// The right zone while the room shows: a header-height strip (room for the pane toggle), then the room inspector.
+struct RoomRightColumn: View {
+    let projectId: String
+    let key: String
+    let width: CGFloat
+
+    var body: some View {
+        let room = PondRoomStore.shared.model(for: projectId)
+        VStack(spacing: 0) {
+            Color.clear.frame(height: Metrics.header).background(WindowDragArea())
+            RoomInspector(key: key, today: RoomSummary.today(turns: room.feed.turns))
+        }
+        .frame(width: width).frame(maxHeight: .infinity).clipped()
+        .background(Theme.bg.ignoresSafeArea())
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
+    }
+}

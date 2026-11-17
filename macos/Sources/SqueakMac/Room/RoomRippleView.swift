@@ -1,3 +1,4 @@
+import AppKit
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -11,6 +12,9 @@ struct RoomRippleView: View {
     let ledger: RoomFadeLedger
     let open: (String) -> Void
     let retry: (String) -> Void
+    var makeJob: (String) -> Void = { _ in }
+    var canMakeJob: (RoomRow) -> Bool = { _ in false }
+    var act: (RoomJobLine, RoomJobAction) -> Void = { _, _ in }
     @State private var visible = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -35,8 +39,9 @@ struct RoomRippleView: View {
     @ViewBuilder private var content: some View {
         switch ripple {
         case .day(_, let label): DaySeparator(label: label)
-        case .threadTurns(let g): GroupView(group: g, open: open)
-        case .bubble(let row, let mine): BubbleView(row: row, mine: mine, retry: retry)
+        case .threadTurns(let g): ForEach(g.rows) { TurnRowView(row: $0) }
+        case .bubble(let row, let mine): BubbleView(row: row, mine: mine, retry: retry, canMakeJob: canMakeJob(row), makeJob: { makeJob(row.post.id) })
+        case .jobLine(let line): RoomJobLineView(line: line, open: open, act: act)
         case .handoff(let h): HandoffView(handoff: h, threads: threads)
         case .event(let row, let title, let agent): EventView(row: row, title: title, agent: agent)
         }
@@ -60,33 +65,33 @@ private struct DaySeparator: View {
     }
 }
 
-private struct GroupView: View {
+/// A thread's header: duck, title, turn count. Pinned by the feed, so it is always on screen with its turns.
+struct RoomGroupHeader: View {
     let group: RoomThreadGroup
     let open: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: 56, height: 1)
-                ThreadDuckView(id: group.sessionId, agent: group.agent, size: 24)
-                Color.clear.frame(width: RoomRippleView.gutter - 56 - 24, height: 1)
-                Button { open(group.sessionId) } label: {
-                    HStack(spacing: 8) {
-                        Text(verbatim: group.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                        Text(verbatim: group.countLabel).font(.system(size: 12)).foregroundStyle(Theme.subtle)
-                    }
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 56, height: 1)
+            ThreadDuckView(id: group.sessionId, agent: group.agent, size: 24)
+            Color.clear.frame(width: RoomRippleView.gutter - 56 - 24, height: 1)
+            Button { open(group.sessionId) } label: {
+                HStack(spacing: 8) {
+                    Text(verbatim: group.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: group.countLabel).font(.system(size: 12)).foregroundStyle(Theme.subtle)
                 }
-                .buttonStyle(.plain).help("Open \(group.title)")
-                Spacer(minLength: 0)
             }
-            .padding(.top, Space.l).padding(.bottom, 2)
-            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-            ForEach(group.rows) { TurnRowView(row: $0) }
+            .buttonStyle(.plain).help("Open \(group.title)")
+            Spacer(minLength: 0)
         }
+        .padding(.top, Space.m).padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.bg)
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
     }
 }
 
-private struct TurnRowView: View {
+struct TurnRowView: View {
     let row: RoomTurnRow
 
     var body: some View {
@@ -100,6 +105,7 @@ private struct TurnRowView: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 7)
+        .id(row.turn.id)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
@@ -154,6 +160,9 @@ private struct BubbleView: View {
     let row: RoomRow
     let mine: Bool
     let retry: (String) -> Void
+    var canMakeJob = false
+    var makeJob: () -> Void = {}
+    @State private var hover = false
     private var author: RoomAuthor { row.post.author }
 
     var body: some View {
@@ -165,17 +174,20 @@ private struct BubbleView: View {
                     Text("You").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                     bubble.frame(alignment: .trailing)
                     failure
+                    jobAffordance
                 }
             } else {
                 avatar.padding(.trailing, 4)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: RoomPresentation.authorName(author)).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
                     bubble
+                    jobAffordance
                 }
                 Spacer(minLength: 120)
             }
         }
         .padding(.vertical, 9)
+        .onHover { hover = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mine ? "You" : RoomPresentation.authorName(author)): \(row.post.text)")
     }
@@ -186,6 +198,18 @@ private struct BubbleView: View {
             .background(mine ? AnyShapeStyle(Theme.selected) : AnyShapeStyle(Theme.surface), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line))
             .opacity(row.pending ? 0.6 : 1)
+            .contextMenu {
+                if canMakeJob { Button("Make this a job", action: makeJob) }
+                Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(row.post.text, forType: .string) }
+            }
+    }
+
+    /// "Make this a job" on hover (also in the context menu); reserves its height so the row never jumps.
+    @ViewBuilder private var jobAffordance: some View {
+        if canMakeJob {
+            Button("Make this a job", action: makeJob).buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                .opacity(hover ? 1 : 0).allowsHitTesting(hover)
+        }
     }
 
     @ViewBuilder private var failure: some View {
