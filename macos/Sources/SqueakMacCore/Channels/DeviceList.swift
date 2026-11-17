@@ -60,10 +60,13 @@ public enum DeviceList {
             }
     }
 
-    /// The empty state: nothing about pairing, only what to do.
-    public static func emptyLine(accountEmail: String?) -> String {
-        "Sign in to Squeak on your iPhone or the web with the same account."
+    /// What to do to add a device: sign in with the same account. `address` is the web app's, without the scheme.
+    public static func signInLine(email: String, address: String) -> String {
+        "Sign in to Squeak with \(email) on your iPhone or in a browser at \(address). It shows up here by itself."
     }
+
+    /// Signed out: there is no account to sign in with yet.
+    public static let signedOutLine = "Sign in to Squeak here first. Then sign in with the same account on your iPhone or in a browser."
 
     /// Under the list.
     public static func footnote() -> String {

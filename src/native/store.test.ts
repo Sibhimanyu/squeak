@@ -77,7 +77,7 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE timeline_events;");
     old.db.exec("ALTER TABLE queue DROP COLUMN client_nonce;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 11}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 12}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -114,7 +114,7 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE timeline_events;");
     old.db.exec("ALTER TABLE queue DROP COLUMN client_nonce;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 7}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 8}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([

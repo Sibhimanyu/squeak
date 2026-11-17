@@ -150,26 +150,15 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertEqual(SetupFlow(facts(hooks: installed, signedIn: true, phone: true)).openStages, [])
     }
 
-    func testWebPairLinkKeepsPayloadExactly() {
-        let payload = "eyJhIjoiYiIsImMiOiJkIn0%3D-_abc"
-        XCTAssertEqual(WebPairLink.payload(fromPairingURL: "squeak://pair?d=\(payload)"), payload)
-        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)"), "https://squeak-60083782173.development.catalystserverless.in/app/index.html#pair=\(payload)")
-        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)", signInUrl: "https://relay.example.in/app/index.html#x"), "https://relay.example.in/app/index.html#pair=\(payload)")
-        XCTAssertEqual(WebPairLink.base(signInUrl: "http://insecure.example"), WebPairLink.fallbackBase)
-        XCTAssertEqual(WebPairLink.payload(fromPairingURL: "squeak://pair?x=1&d=abc&y=2"), "abc")
-        // The daemon's webUrl (the web app's own home) wins; an old daemon (nil) or a non-https one keeps today's derivation.
-        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)", signInUrl: "https://relay.example.in/app/index.html", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
-        XCTAssertEqual(PairTarget.web.qrText(pairingURL: "squeak://pair?d=\(payload)", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
-        XCTAssertEqual(PairTarget.web.copyText(pairingURL: "squeak://pair?d=\(payload)", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
-        XCTAssertEqual(WebPairLink.address(signInUrl: nil, webUrl: "https://squeak.onslate.in/"), "squeak.onslate.in/")
-        XCTAssertEqual(WebPairLink.base(signInUrl: "https://relay.example.in/app/index.html", webUrl: "http://insecure.example"), "https://relay.example.in/app/index.html")
-        XCTAssertEqual(WebPairLink.base(signInUrl: nil, webUrl: nil), WebPairLink.fallbackBase)
+    func testWebAppAddressPrefersTheDaemonsWebUrl() {
+        XCTAssertEqual(WebAppLink.base(signInUrl: "http://insecure.example"), WebAppLink.fallbackBase)
+        XCTAssertEqual(WebAppLink.address(signInUrl: nil, webUrl: "https://squeak.onslate.in/"), "squeak.onslate.in/")
+        XCTAssertEqual(WebAppLink.base(signInUrl: "https://relay.example.in/app/index.html", webUrl: "http://insecure.example"), "https://relay.example.in/app/index.html")
+        XCTAssertEqual(WebAppLink.base(signInUrl: nil, webUrl: nil), WebAppLink.fallbackBase)
         let hosted = try? JSONDecoder().decode(HostedCloud.self, from: Data(#"{"state":"ready","signInUrl":"https://r.in/app/index.html","webUrl":"https://squeak.onslate.in/","future":1}"#.utf8))
         XCTAssertEqual(hosted?.webUrl, "https://squeak.onslate.in/")
         let old = try? JSONDecoder().decode(HostedCloud.self, from: Data(#"{"state":"ready"}"#.utf8))
         XCTAssertNil(old?.webUrl)
-        XCTAssertNil(WebPairLink.url(fromPairingURL: "https://example.com/?d=abc"))
-        XCTAssertNil(WebPairLink.url(fromPairingURL: "squeak://pair?d="))
     }
 
     func testTelegramStepFollowsWhatIsTrue() {
@@ -232,26 +221,6 @@ final class PermissionFlowTests: XCTestCase {
     }
 }
 
-final class PairTargetTests: XCTestCase {
-    private let link = "squeak://pair?d=eyJ2IjoxfQ"
-
-    func testTheAppCodeIsTheDaemonsLinkAndTheWebCodeOpensTheWebApp() {
-        XCTAssertEqual(PairTarget.app.qrText(pairingURL: link), link)
-        XCTAssertEqual(PairTarget.web.qrText(pairingURL: link), "https://squeak-60083782173.development.catalystserverless.in/app/index.html#pair=eyJ2IjoxfQ")
-    }
-
-    func testCopyIsExactlyWhatTheCodeCarries() {
-        for target in PairTarget.allCases {
-            XCTAssertEqual(target.copyText(pairingURL: link), target.qrText(pairingURL: link))
-        }
-    }
-
-    func testSomethingThatIsNotAPairingLinkMakesNoCode() {
-        XCTAssertNil(PairTarget.app.qrText(pairingURL: "https://example.com/?d=abc"))
-        XCTAssertNil(PairTarget.web.qrText(pairingURL: "https://example.com/?d=abc"))
-        XCTAssertNil(PairTarget.web.qrText(pairingURL: "squeak://pair?d="))
-    }
-}
 
 final class SetupCardProgressTests: XCTestCase {
     func testFractionAndSubtitle() {

@@ -38,7 +38,7 @@ import Testing
 
     @Test func noCopyTalksOfPairingOrCodes() {
         let texts = [
-            DeviceList.emptyLine(accountEmail: "me@x.org"), DeviceList.emptyLine(accountEmail: nil),
+            DeviceList.signInLine(email: "me@x.org", address: "squeak.onslate.in"), DeviceList.signedOutLine,
             DeviceList.footnote(), DeviceList.askFootnote(email: "me@x.org"), DeviceList.removeMessage(name: "Phone"),
         ]
         for t in texts {
@@ -46,7 +46,7 @@ import Testing
             #expect(!t.lowercased().contains("qr"))
             #expect(!t.lowercased().contains("code"))
         }
-        #expect(DeviceList.emptyLine(accountEmail: "me@x.org") == "Sign in to Squeak on your iPhone or the web with the same account.")
+        #expect(DeviceList.signInLine(email: "me@x.org", address: "squeak.onslate.in") == "Sign in to Squeak with me@x.org on your iPhone or in a browser at squeak.onslate.in. It shows up here by itself.")
         #expect(DeviceList.footnote() == "Remove a device to stop it seeing this Mac.")
         #expect(DeviceList.askFootnote(email: "me@x.org").contains("one click"))
     }

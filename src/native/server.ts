@@ -12,7 +12,8 @@ import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
-import type { NativeStore } from "./store.js";
+import type { NativeStore, RoomPostRow } from "./store.js";
+import { Room, RoomError, toRoomPost } from "./room.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -68,6 +69,8 @@ export interface NativeServerOptions {
   cleanup?: DiskCleanup;
   /** Tests inject one with a fake git; default runs the real one. */
   history?: VersionHistory;
+  /** The pond rooms; one is made when absent (the same instance must reach `tools` for agents to share it). */
+  room?: Room;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -146,10 +149,12 @@ export class NativeServer {
   private readonly agentSettings: AgentSettings | null;
   private readonly cleanup: DiskCleanup;
   private readonly history: VersionHistory;
+  readonly room: Room;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
+    this.room = options.room ?? new Room({ store: options.store });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
     this.agentSettings = options.supportDir ? new AgentSettings(options.supportDir) : null;
@@ -192,6 +197,7 @@ export class NativeServer {
         send: (id, text) => host.send(id, text),
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
+        room: this.room,
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
@@ -869,6 +875,48 @@ export class NativeServer {
         throw error;
       }
     }
+    if (area === "projects" && id && sub === "room" && (parts.length === 4 || parts.length === 5)) {
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      if (parts.length === 5) {
+        if (parts[4] !== "stream" || method !== "GET") throw new HttpError(404, "not found");
+        return this.roomStream(req, res, id);
+      }
+      if (method === "GET") {
+        const num = (k: string): number | undefined => {
+          const raw = url.searchParams.get(k);
+          if (raw === null) return undefined;
+          const n = Number(raw);
+          if (!/^\d+$/.test(raw) || !Number.isSafeInteger(n)) throw new HttpError(400, `${k} must be a whole number`);
+          return n;
+        };
+        const since = num("since");
+        const before = num("before");
+        const limit = num("limit");
+        this.room.markViewed(id);
+        return this.json(res, 200, {
+          ...this.room.page(id, {
+            ...(since !== undefined ? { since } : {}),
+            ...(before !== undefined ? { before } : {}),
+            ...(limit !== undefined ? { limit: Math.min(200, Math.max(1, limit)) } : {}),
+          }),
+        });
+      }
+      if (method === "POST") {
+        const b = await this.body(req);
+        const unknown = Object.keys(b).filter((k) => k !== "text" && k !== "level");
+        if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+        if (b.level !== undefined && b.level !== "room" && b.level !== "agents") {
+          throw new HttpError(400, "level must be room or agents");
+        }
+        try {
+          const post = this.room.personPost(id, b.text, b.level === "agents" ? "agents" : "room");
+          return this.json(res, 201, { post: toRoomPost(post) });
+        } catch (error) {
+          if (error instanceof RoomError) throw new HttpError(400, error.message);
+          throw error;
+        }
+      }
+    }
     if (area === "projects" && id && sub === "threads" && parts.length === 4 && method === "GET") {
       // Every non-archived chat of one project, newest first (the phone's pond page; the fleet snapshot only holds the
       // newest 100 native chats). Rows carry only what a thread row and its stream need.
@@ -1104,6 +1152,34 @@ export class NativeServer {
       workspaceId,
       ...(str(b.text) ? { text: str(b.text)! } : {}),
       ...(agentPrefix ? { agentPrefix } : {}),
+    });
+  }
+
+  /** `event: hello` with the newest seq, then `event: post` for each new post; a comment heartbeat every 25 s. */
+  private roomStream(req: http.IncomingMessage, res: http.ServerResponse, projectId: string): void {
+    const { room } = this;
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-store",
+      connection: "keep-alive",
+    });
+    const onPost = (row: RoomPostRow): void => {
+      if (row.projectId !== projectId) return;
+      res.write(`id: ${row.seq}\nevent: post\ndata: ${JSON.stringify(toRoomPost(row))}\n\n`);
+    };
+    // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
+    room.on("post", onPost);
+    room.streamOpened(projectId);
+    res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: this.options.store.latestRoomSeq(projectId) })}\n\n`);
+    const beat = setInterval(() => {
+      room.markViewed(projectId);
+      res.write(": ping\n\n");
+    }, this.options.heartbeatMs ?? 25_000);
+    beat.unref();
+    req.on("close", () => {
+      clearInterval(beat);
+      room.off("post", onPost);
+      room.streamClosed(projectId);
     });
   }
 

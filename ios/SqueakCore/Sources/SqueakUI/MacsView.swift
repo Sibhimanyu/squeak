@@ -3,30 +3,18 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// The screen of a phone with no Mac open: sign in, or (signed in) your Macs. The fallback for a Mac that is not on an
-/// account yet is one small link at the bottom of the sign-in screen and nowhere else.
+/// The screen of a phone with no Mac open: sign in, or (signed in) your Macs.
 struct UnpairedView: View {
     @Environment(AppModel.self) private var model
-    @State private var fallback = false
 
     var body: some View {
-        Group {
-            if fallback || model.pairingFailure != nil {
-                PairView(onBack: { fallback = false })
-            } else if model.account.session == nil {
-                SignInView(onFallback: { fallback = true })
-            } else {
-                MacsHomeView()
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: fallback)
+        if model.account.session == nil { SignInView() } else { MacsHomeView() }
     }
 }
 
 /// First run, and after signing out: one job.
 struct SignInView: View {
     @Environment(AppModel.self) private var model
-    var onFallback: () -> Void
 
     var body: some View {
         let account = model.account
@@ -48,10 +36,6 @@ struct SignInView: View {
                     Text(message).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                     ReportProblemButton(problem: message, place: "Sign in", title: "Report")
                 }
-                Button { Haptics.play(.tap); onFallback() } label: {
-                    Text(SignInScreen.fallbackLabel).font(.footnote).foregroundStyle(Theme.muted).frame(minHeight: 44)
-                }
-                .accessibilityIdentifier("mac-not-on-account")
             }
             .padding(24)
             .frame(maxWidth: 480)

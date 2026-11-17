@@ -16,6 +16,8 @@ import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/inde
 import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
+import { attachSqueakPosts, Room } from "./room.js";
+import { RoomSummariser } from "./room-summary.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
@@ -44,6 +46,9 @@ export async function runHost(supportDir: string): Promise<void> {
     claudeAiConnectors: () => new AgentSettings(supportDir).get().claudeAiConnectors,
     ownerName: () => flotilla?.service?.identity.name ?? null,
   });
+  const room = new Room({ store, ownerName: () => flotilla?.service?.identity.name ?? null });
+  attachSqueakPosts(host, store, room);
+  new RoomSummariser({ host, store, room }).start();
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
@@ -77,6 +82,7 @@ export async function runHost(supportDir: string): Promise<void> {
         send: (id, text) => host.send(id, text),
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
+        room,
         pond: {
           prefs: new ProjectPrefs(supportDir),
           // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
@@ -100,6 +106,7 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     workspaces,
     ...(flotilla && shared ? { flotilla, ...shared } : {}),
+    room,
     supportDir,
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,

@@ -58,7 +58,7 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         case .shared: what = "Squeak's old shared setup"
         case .catalystOwn: what = "your own Catalyst setup"
         }
-        return "This Mac still uses \(what). \(accountKnown ? "Connect" : "Sign in") to move it; paired devices follow."
+        return "This Mac still uses \(what). \(accountKnown ? "Connect" : "Sign in") to move it; your devices follow."
     }
 
     /// The button the page shows, or nil when none is needed: connect when the account is known, sign in when not.

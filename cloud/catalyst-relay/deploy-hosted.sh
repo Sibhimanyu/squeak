@@ -56,7 +56,9 @@ e.RELAY_KEY = key;
 e.SQUEAK_RELAY_HOSTED = "1";
 if (process.env.SQUEAK_ZOHO_CLIENT_ID) e.SQUEAK_ZOHO_CLIENT_ID = process.env.SQUEAK_ZOHO_CLIENT_ID;
 if (process.env.SQUEAK_ZOHO_CLIENT_SECRET) e.SQUEAK_ZOHO_CLIENT_SECRET = process.env.SQUEAK_ZOHO_CLIENT_SECRET;
-if (process.env.SQUEAK_MAIL_FROM) e.SQUEAK_MAIL_FROM = process.env.SQUEAK_MAIL_FROM;
+const mailFrom = process.env.SQUEAK_MAIL_FROM || (()=>{try{const l=require("fs").readFileSync(require("path").join(process.env.HOME,"Library/Application Support/squeak/.env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_MAIL_FROM\s*=/.test(x));return l&&l.slice(l.indexOf("=")+1).trim();}catch{return undefined}})();
+if (mailFrom) e.SQUEAK_MAIL_FROM = mailFrom;
+else console.error("Note: no SQUEAK_MAIL_FROM in env or .env; pond invite emails stay off.");
 fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 '
 

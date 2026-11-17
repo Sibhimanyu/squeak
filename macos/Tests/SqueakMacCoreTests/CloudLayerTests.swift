@@ -52,7 +52,7 @@ struct CloudLayerTests {
         #expect(h.statusSentence(accountKnown: false) == "Sign in to connect")
         #expect(h.actionTitle(accountKnown: true) == "Connect…")
         #expect(h.actionTitle(accountKnown: false) == "Sign in…")
-        #expect(h.legacySentence(accountKnown: true) == "This Mac still uses your own Catalyst setup. Connect to move it; paired devices follow.")
+        #expect(h.legacySentence(accountKnown: true) == "This Mac still uses your own Catalyst setup. Connect to move it; your devices follow.")
         #expect(h.signInUrl == "https://x.test/app/index.html")
     }
 
@@ -78,9 +78,9 @@ struct CloudLayerTests {
     }
 
     @Test func legacySentencePerKindAndMoving() {
-        #expect(HostedCloud(legacy: .firebase).legacySentence() == "This Mac still uses your own Firebase setup. Sign in to move it; paired devices follow.")
-        #expect(HostedCloud(legacy: .shared).legacySentence() == "This Mac still uses Squeak's old shared setup. Sign in to move it; paired devices follow.")
-        #expect(HostedCloud(legacy: .catalystOwn).legacySentence() == "This Mac still uses your own Catalyst setup. Sign in to move it; paired devices follow.")
+        #expect(HostedCloud(legacy: .firebase).legacySentence() == "This Mac still uses your own Firebase setup. Sign in to move it; your devices follow.")
+        #expect(HostedCloud(legacy: .shared).legacySentence() == "This Mac still uses Squeak's old shared setup. Sign in to move it; your devices follow.")
+        #expect(HostedCloud(legacy: .catalystOwn).legacySentence() == "This Mac still uses your own Catalyst setup. Sign in to move it; your devices follow.")
         #expect(HostedCloud(legacy: .firebase, moving: true).legacySentence() == nil)
         #expect(HostedCloud(phase: .ready).legacySentence() == nil)
     }

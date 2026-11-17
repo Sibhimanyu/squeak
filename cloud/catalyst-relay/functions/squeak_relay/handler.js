@@ -966,8 +966,9 @@ function createRelay(deps) {
       try {
         await deps.mail.send({ to: email, subject: m.subject, text: m.text, html: m.html });
         sent.push(email);
-      } catch {
-        log("invite email not sent");
+      } catch (error) {
+        // The provider's own words go to the function's log only (the operator reads them there), never into a response.
+        log("invite email not sent", String((error && (error.message || error.code)) || error).slice(0, 300));
         failed.push(email);
       }
     }
