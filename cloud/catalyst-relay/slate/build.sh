@@ -13,4 +13,9 @@ rm -rf "$OUT"; mkdir -p "$OUT/.catalyst"
 rm -f "$OUT/client-package.json"
 cp "$HERE/slate-config.toml" "$OUT/.catalyst/slate-config.toml"
 printf '/* /index.html 200\n' > "$OUT/_redirects"
+# Slate's static hosting ignores _redirects (and slate-config [[redirects]]): an unknown path is a 404. The emailed invite
+# link is /join#<code>, so /join gets a real copy of the entry page; <base href="/"> keeps its relative js/ and css/ paths.
+mkdir -p "$OUT/join"
+sed 's#<head>#<head>\n    <base href="/" />#' "$OUT/index.html" > "$OUT/join/index.html"
+grep -q '<base href="/"' "$OUT/join/index.html" || { echo "join/index.html: no <base>"; exit 1; }
 echo "staged $OUT"
