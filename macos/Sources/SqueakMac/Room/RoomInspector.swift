@@ -105,11 +105,9 @@ struct RoomInspector: View {
     }
 
     private func openDuck(_ sessionId: String) {
-        guard let s = model.allSessions.first(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
-        PondsModel.shared.route = nil
-        model.select(s.key)
-        if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
-            Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
+        guard let s = model.pondDuckSession(sessionId), model.openFromPond(.duck(s.key.hostSessionId), pond: key, page: .room) else { return }
+        if room.feed.threads.first(where: { $0.sessionId == s.key.hostSessionId })?.onDuty == false {
+            Task { await room.setDuty(sessionId: s.key.hostSessionId, on: true, host: model.nativeHost) }
         }
     }
 
