@@ -15,6 +15,7 @@ import {
   readLabels,
   type ProjectPrefs,
 } from "./project-prefs.js";
+import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
 import type { AgentKind, SessionRow } from "./types.js";
@@ -78,6 +79,8 @@ export interface AgentToolDeps {
     prefs: ProjectPrefs;
     ripple?: (projectId: string, projectName: string, text: string, by?: string) => Promise<void> | void;
   };
+  /** The pond's room (`post_to_room`, `read_room`, and `send_to_chat` mirrored into it). Absent: those tools say so. */
+  room?: Room;
   now?: () => number;
   /** git, injectable for tests. */
   git?: (cwd: string, args: string[]) => Promise<string>;
@@ -228,6 +231,31 @@ export const TOOLS: ToolDef[] = [
       "Send a message to another Squeak chat, as a new turn there (queued if it is busy). The person sees it, marked as from you. Use it to ask another agent something or hand over work; then read_chat later for its answer. Limited to a few messages per chat per hour.",
     inputSchema: obj({ chatId: { type: "string" }, message: { type: "string" } }, ["chatId", "message"]),
     readOnly: false,
+  },
+  {
+    name: "post_to_room",
+    description:
+      'Post one short line to this pond\'s room, the shared stream the person and the other chats read. kind: working (you are starting a distinct piece of work: say what, e.g. "Wiring retry into the uploader"), done (that work is finished), needs (you are blocked on the person), handoff (you are passing work on; name the chat in toChatId), message (anything else). level: room (default, what the person sees) or agents (coordination the person need not see). At most 500 characters; 30 posts per chat per hour.',
+    inputSchema: obj(
+      {
+        text: { type: "string" },
+        kind: { type: "string", enum: ["working", "done", "needs", "handoff", "message"] },
+        level: { type: "string", enum: ["room", "agents"] },
+        toChatId: { type: "string" },
+      },
+      ["text", "kind"],
+    ),
+    readOnly: false,
+  },
+  {
+    name: "read_room",
+    description:
+      "The newest posts in this pond's room (what each chat is working on, what the person said) and who is working on what now. Read it before touching an area another chat may be in. last: 1 to 50 posts (20 by default); level: room, agents or all (default).",
+    inputSchema: obj({
+      last: { type: "integer", minimum: 1, maximum: 50 },
+      level: { type: "string", enum: ["room", "agents", "all"] },
+    }),
+    readOnly: true,
   },
   {
     name: "start_chat",
@@ -492,6 +520,10 @@ export class AgentTools {
         return this.sendToChat(s, str("chatId"), str("message"));
       case "start_chat":
         return this.startChat(s, args);
+      case "post_to_room":
+        return this.postToRoom(s, args);
+      case "read_room":
+        return this.readRoom(s, args);
       case "script_output":
         return this.terminalOutput(s, str("script"), args.lines);
       case "pond_appearance":
@@ -576,13 +608,73 @@ export class AgentTools {
 
   /** The pond (project) this chat belongs to: its workspace's project, else the project whose folder it runs in. */
   private pondOf(s: SessionRow): { id: string; name: string } | null {
-    const { store } = this.deps;
-    const viaWorkspace = this.projectOf(s);
-    const project =
-      (viaWorkspace ? store.getProject(viaWorkspace) : null) ??
-      store.listProjects().find((p) => path.resolve(p.rootPath) === path.resolve(s.cwd)) ??
-      null;
-    return project ? { id: project.id, name: project.name } : null;
+    return projectOfSession(this.deps.store, s);
+  }
+
+  private roomOf(): Room {
+    if (!this.deps.room) throw new ToolError("The room isn't available here.");
+    return this.deps.room;
+  }
+
+  private postToRoom(s: SessionRow, args: Record<string, unknown>): string {
+    const room = this.roomOf();
+    const mine = this.pondOf(s);
+    if (!mine) throw new ToolError("This chat isn't in a pond, so it has no room to post to.");
+    const kind = args.kind;
+    if (kind !== "working" && kind !== "done" && kind !== "needs" && kind !== "handoff" && kind !== "message") {
+      throw new ToolError("kind must be working, done, needs, handoff or message.");
+    }
+    const level = args.level === undefined ? "room" : args.level;
+    if (level !== "room" && level !== "agents") throw new ToolError("level must be room or agents.");
+    let toSessionId: string | undefined;
+    if (args.toChatId !== undefined) {
+      if (typeof args.toChatId !== "string") throw new ToolError("toChatId must be a chat id.");
+      const target = this.deps.store.getSession(args.toChatId);
+      const there = target ? this.pondOf(target) : null;
+      if (!target || there?.id !== mine.id) throw new ToolError("toChatId must be a chat in this pond.");
+      toSessionId = target.id;
+    }
+    try {
+      room.agentPost(s, { kind, level, text: args.text as string, ...(toSessionId ? { toSessionId } : {}) });
+    } catch (error) {
+      if (error instanceof RoomError) throw new ToolError(error.message);
+      throw error;
+    }
+    return level === "agents" ? "Posted to the agents level of the room." : "Posted to the room.";
+  }
+
+  private readRoom(s: SessionRow, args: Record<string, unknown>): string {
+    const room = this.roomOf();
+    const mine = this.pondOf(s);
+    if (!mine) throw new ToolError("This chat isn't in a pond, so it has no room.");
+    const last =
+      typeof args.last === "number" && Number.isInteger(args.last) ? Math.min(50, Math.max(1, args.last)) : 20;
+    const level = args.level === "room" || args.level === "agents" ? args.level : "all";
+    const rows: ReturnType<Room["page"]>["posts"] = [];
+    let before: number | undefined;
+    for (let page = 0; page < 20 && rows.length < last; page++) {
+      const got = room.page(mine.id, { ...(before !== undefined ? { before } : {}), limit: 200 }).posts;
+      if (got.length === 0) break;
+      for (let i = got.length - 1; i >= 0 && rows.length < last; i--) {
+        if (level === "all" || got[i]!.level === level) rows.push(got[i]!);
+      }
+      before = got[0]!.seq;
+    }
+    const hhmm = (at: number): string => {
+      const d = new Date(at);
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+    const lines = rows.reverse().map((p) => `[${hhmm(p.at)}] ${p.author.name} (${p.kind}): ${p.text}`);
+    const working = room
+      .threads(mine.id)
+      .filter((t) => t.workingOn)
+      .map((t) => `- ${t.title}${t.sessionId === s.id ? " (you)" : ""}: ${t.workingOn}`);
+    return [
+      lines.length ? lines.join("\n") : "The room is quiet.",
+      working.length ? `\nWorking now:\n${working.join("\n")}` : "",
+    ]
+      .join("\n")
+      .trim();
   }
 
   private async pondTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
@@ -773,6 +865,7 @@ export class AgentTools {
     this.sent.push({ from: s.id, to: chatId, at: this.now() });
     const header = `[Message from the Squeak chat "${s.title ?? "Untitled"}" (${s.id}). Reply in this chat; it can read your answer with read_chat.]`;
     const { queued } = await this.deps.send(chatId, `${header}\n\n${message}`);
+    this.mirrorToRoom(s, chatId, message);
     this.deps.post(s.id, "squeak/agent-message", {
       text: `Sent to "${target.title ?? "Untitled"}"`,
       to: chatId,
@@ -780,6 +873,25 @@ export class AgentTools {
       queued,
     });
     return queued ? "Queued: that chat is busy and will get it next." : "Sent; that chat is working on it.";
+  }
+
+  /** A sent message also lands in the room's agents level, from the sender; never fails the send. */
+  private mirrorToRoom(s: SessionRow, toChatId: string, message: string): void {
+    try {
+      const pond = this.pondOf(s);
+      if (!this.deps.room || !pond) return;
+      this.deps.room.post({
+        projectId: pond.id,
+        author: { kind: "agent", id: s.id, name: agentName(s) },
+        sessionId: s.id,
+        kind: "message",
+        level: "agents",
+        text: message.trim().slice(0, ROOM_MAX_TEXT),
+        toSessionId: toChatId,
+      });
+    } catch (error) {
+      logger.warn("room mirror failed", { error: String(error) });
+    }
   }
 
   /**
@@ -859,7 +971,7 @@ export async function handleMcpMessage(
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: MCP_SERVER_NAME, version: "1" },
         instructions:
-          "Squeak runs this chat. Use these tools to see the stream's diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac.",
+          "Squeak runs this chat. Use these tools to see the stream's diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac. This pond has a room: post a short `working` line (post_to_room) when you start a distinct piece of work and `done` when it is finished, read_room before touching an area another chat may be in, and use level `agents` for coordination the person doesn't need to see.",
       });
     case "ping":
       return ok({});

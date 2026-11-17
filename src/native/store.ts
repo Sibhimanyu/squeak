@@ -156,7 +156,38 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE queue ADD COLUMN client_nonce TEXT;
   `,
+  // Pond rooms: a time-ordered stream of short posts per project (what each agent is working on).
+  `
+  CREATE TABLE IF NOT EXISTS room_posts (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, project_id TEXT NOT NULL,
+    author_kind TEXT NOT NULL, author_id TEXT, author_name TEXT NOT NULL, session_id TEXT,
+    kind TEXT NOT NULL, level TEXT NOT NULL, text TEXT NOT NULL, to_session_id TEXT, at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS room_posts_project ON room_posts(project_id, seq);
+  `,
 ];
+
+/** Posts a pond's room keeps; the oldest go when a new one lands past this. */
+export const ROOM_KEEP_POSTS = 2000;
+
+export type RoomAuthorKind = "person" | "agent" | "squeak";
+export type RoomPostKind = "working" | "done" | "needs" | "message" | "handoff";
+export type RoomLevel = "room" | "agents";
+
+export interface RoomPostRow {
+  seq: number;
+  id: string;
+  projectId: string;
+  authorKind: RoomAuthorKind;
+  authorId: string | null;
+  authorName: string;
+  sessionId: string | null;
+  kind: RoomPostKind;
+  level: RoomLevel;
+  text: string;
+  toSessionId: string | null;
+  at: number;
+}
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
   typeof r.author_id === "string" && typeof r.author_name === "string"
@@ -1037,4 +1068,90 @@ export class NativeStore {
     this.db.prepare("DELETE FROM queue WHERE id=?").run(first.id);
     return first;
   }
+
+  addRoomPost(input: Omit<RoomPostRow, "seq" | "id"> & { id?: string }): RoomPostRow {
+    const id = input.id ?? randomUUID();
+    const info = this.db
+      .prepare(
+        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.authorKind,
+        input.authorId,
+        input.authorName,
+        input.sessionId,
+        input.kind,
+        input.level,
+        input.text,
+        input.toSessionId,
+        input.at,
+      );
+    const seq = Number(info.lastInsertRowid);
+    this.db
+      .prepare(
+        `DELETE FROM room_posts WHERE project_id=? AND seq <= COALESCE(
+           (SELECT seq FROM room_posts WHERE project_id=? ORDER BY seq DESC LIMIT 1 OFFSET ?), 0)`,
+      )
+      .run(input.projectId, input.projectId, ROOM_KEEP_POSTS);
+    return { ...input, id, seq };
+  }
+
+  /** `since`: the first `limit` posts after it; `before`: the newest `limit` before it; neither: the newest. Oldest first. */
+  roomPosts(projectId: string, opts: { since?: number; before?: number; limit: number }): RoomPostRow[] {
+    const rows =
+      opts.since !== undefined
+        ? (this.db
+            .prepare("SELECT * FROM room_posts WHERE project_id=? AND seq>? ORDER BY seq ASC LIMIT ?")
+            .all(projectId, opts.since, opts.limit) as Row[])
+        : (
+            this.db
+              .prepare("SELECT * FROM room_posts WHERE project_id=? AND seq<? ORDER BY seq DESC LIMIT ?")
+              .all(projectId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.limit) as Row[]
+          ).reverse();
+    return rows.map(roomPostRow);
+  }
+
+  latestRoomSeq(projectId: string): number {
+    const r = this.db.prepare("SELECT MAX(seq) AS m FROM room_posts WHERE project_id=?").get(projectId) as Row;
+    return (r.m as number | null) ?? 0;
+  }
+
+  /** Per session, its newest `working` and newest `done` post (by anyone about it). */
+  latestRoomMarks(projectId: string): Map<string, { working?: RoomPostRow; done?: RoomPostRow }> {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM room_posts WHERE seq IN (
+           SELECT MAX(seq) FROM room_posts WHERE project_id=? AND session_id IS NOT NULL AND kind IN ('working','done')
+           GROUP BY session_id, kind)`,
+      )
+      .all(projectId) as Row[];
+    const out = new Map<string, { working?: RoomPostRow; done?: RoomPostRow }>();
+    for (const r of rows.map(roomPostRow)) {
+      const m = out.get(r.sessionId!) ?? {};
+      if (r.kind === "working") m.working = r;
+      else m.done = r;
+      out.set(r.sessionId!, m);
+    }
+    return out;
+  }
+}
+
+function roomPostRow(r: Row): RoomPostRow {
+  return {
+    seq: r.seq as number,
+    id: r.id as string,
+    projectId: r.project_id as string,
+    authorKind: r.author_kind as RoomAuthorKind,
+    authorId: (r.author_id as string | null) ?? null,
+    authorName: r.author_name as string,
+    sessionId: (r.session_id as string | null) ?? null,
+    kind: r.kind as RoomPostKind,
+    level: r.level as RoomLevel,
+    text: r.text as string,
+    toSessionId: (r.to_session_id as string | null) ?? null,
+    at: r.at as number,
+  };
 }

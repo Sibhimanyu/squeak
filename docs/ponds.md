@@ -498,3 +498,38 @@ Every person always sees one plain state; the host computes it and its sentence,
 
 - **Offline.** When the relay cannot be reached (network down, 429, 5xx) `list()` and `view()` answer from the last good read, flagged `offline: true` with `asOf` (unix ms) on the view and on each pond summary. The snapshot is `flotilla/snapshot.json` (0600, beside the keys): names, counts, thread titles and the Ripples feed only; no thread events or message bodies, no session ids, presence, holds or pending joins. A 401/403/404 from the relay is a refusal, never served from the cache, and a pond that is removed or forgotten leaves the cache. Writes are refused with one fixed sentence while the relay is unreachable; nothing is queued.
 - **Rotate the key.** `POST /native/ponds/<id>/rotate-key` with exactly `{ "pondId": "<id>" }` (owner only; `rotateKey`): a new pond key sealed to every current member, their old relay tokens ended and issued again, Ripple "The pond key was changed". A member is an account with one or more device keys ("Members are accounts"), so a lost device is `POST /native/ponds/<id>/devices/remove` with exactly `{ memberId, deviceKeyId }` (`removeDevice`; for a member's only device the ids are equal and it is `removeMember`): that device is removed and the pond key rotates.
+
+## Room
+
+Each pond has one room on this Mac (host side, `src/native/room.ts`; no cloud, no Flotilla publishing yet): a
+time-ordered stream of short posts saying what each agent is _working on_ (intent, never every edit or command).
+Agents post and read it through two MCP tools; the person posts like a group chat. Two levels: `room` (what a person
+sees by default) and `agents` (agent-to-agent coordination; a person can open it). Stored in `native.db`
+`room_posts` (newest 2000 per pond are kept).
+
+```
+RoomPost   = { seq, id, author: { kind: "person"|"agent"|"squeak", id?, name }, sessionId?,
+               kind: "working"|"done"|"needs"|"message"|"handoff", level: "room"|"agents",
+               text, toSessionId?, at /* ms epoch */ }
+RoomThread = { sessionId, title, agent, state: "working"|"waiting"|"idle"|"error",
+               workingOn?, workingOnAt? }   // non-archived chats active in 24 h, newest first;
+                                            // workingOn = newest `working` post, gone once a later `done` exists
+```
+
+Routes (token-gated, no CORS, strict JSON bodies, an unknown key is a 400):
+
+- `GET /native/projects/<id>/room?since=<seq>&before=<seq>&limit=<n>` -> `{ posts, latestSeq, threads }`, posts oldest to
+  newest. `since` gives the first `limit` posts after it, `before` the newest `limit` before it, neither the newest.
+  Limit defaults to 100, at most 200.
+- `POST /native/projects/<id>/room` `{ text, level? }` -> 201 `{ post }`; author is the person (pond member name, else
+  the macOS full name, else "owner"), kind `message`.
+- `GET /native/projects/<id>/room/stream` -> SSE: `event: hello` `{latestSeq}`, then `event: post` (a `RoomPost`, `id:` =
+  seq), a `: ping` comment every 25 s. Any GET or an open stream marks the room viewed.
+
+Text is trimmed, at most 500 characters, never empty; everything but `message` is one line. Agents use
+`post_to_room { text, kind, level?, toChatId? }` (30 a chat an hour; `toChatId` must be in the same pond) and
+`read_room { last?, level? }` (compact `[hh:mm] name (kind): text` lines plus "Working now"); every `send_to_chat` is
+mirrored as an `agents` message. Squeak itself posts `needs` ("<title> needs you", once per waiting episode) and, when a
+turn ends with a `working` line still open, `done`. While a chat works and its room was viewed in the last 10 minutes,
+a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-written `working` line posted for it
+(`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it).

@@ -25,6 +25,7 @@ the daemon. A missing file is fine. An invalid file, an unknown name or a non-bo
 | `caffeinate`     | `SQUEAK_CAFFEINATE`     | on      | off only for `off` (`working` is read separately) |
 | `askFormat`      | `SQUEAK_ASK_FORMAT`     | on      | off for `off`, `0`, `false`, `no`                 |
 | `autoTitle`      | `SQUEAK_AUTO_TITLE`     | on      | off only for `off` (heuristic title, no model)    |
+| `roomSummary`    | `SQUEAK_ROOM_SUMMARY`   | on      | off only for `off` (no model-written room lines)  |
 
 Values are trimmed and case-insensitive. Other switches (`SQUEAK_FLOTILLA`, `SQUEAK_ADDONS`,
 `SQUEAK_CLOUD_URL`) still read their own variables; move them here one at a time, with a test that the old values give
