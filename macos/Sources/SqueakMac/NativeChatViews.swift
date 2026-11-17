@@ -57,7 +57,7 @@ struct NativeQueueStack: View {
         HStack(spacing: 10) {
             Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            WorkingGlyph(height: 10, slot: 20)
+            WorkingGlyph(slot: 20)
             if let word = card.label { Text(word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -73,7 +73,7 @@ struct NativeQueueStack: View {
             Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if busyId == card.id {
-                TideGlyph(color: Theme.muted, height: 5)
+                TideGlyph(color: Theme.muted, grid: .mini)
             } else {
                 Button("Steer") { run(card) { await model.nativeSteerQueued(session, card.id) } }
                     .buttonStyle(SecondaryButtonStyle())
@@ -199,7 +199,7 @@ struct NativeQueuedRow: View {
                     steering = true
                     Task { await model.nativeSteerQueued(session, queuedId); steering = false }
                 } label: {
-                    if steering { TideGlyph(color: Theme.muted, height: 4.5) } else { Text("Steer") }
+                    if steering { TideGlyph(color: Theme.muted, grid: .mini) } else { Text("Steer") }
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .controlSize(.small)
@@ -268,7 +268,7 @@ struct NativeQueuedSheet: View {
                 }
             }
             HStack(spacing: Space.s) {
-                if busy { TideGlyph(color: Theme.muted, height: 4.5) }
+                if busy { TideGlyph(color: Theme.muted, grid: .mini) }
                 if editing {
                     Button("Remove") { remove() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
                     Spacer(minLength: 0)

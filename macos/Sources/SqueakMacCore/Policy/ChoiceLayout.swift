@@ -54,9 +54,15 @@ public struct ChoiceLayout: Equatable, Sendable {
         }
         let afterLines = Array(lines[(last.index + 1)...])
 
-        let cards = zip(parsed.options, hits).map { opt, hit -> ChoiceCard in
+        let mark = #"\((?:recommended|suggested)\)"#
+        let cards = zip(parsed.options, hits).enumerated().map { n, pair -> ChoiceCard in
+            let (opt, hit) = pair
             let (title, detail) = splitTitle(hit.rest)
-            return ChoiceCard(letter: opt.letter, title: title.isEmpty ? opt.label : title, detail: detail, isRecommended: parsed.recommended == opt.letter || hit.rest.range(of: #"\((?:recommended|suggested)\)"#, options: [.regularExpression, .caseInsensitive]) != nil)
+            // An option may wrap onto indented lines; its "(recommended)" can sit on any of them.
+            let end = n + 1 < hits.count ? hits[n + 1].index : min(lines.count, hit.index + 3)
+            let wrapped = lines[(hit.index + 1)..<max(hit.index + 1, end)].prefix(2).joined(separator: " ")
+            let marked = (hit.rest + " " + (wrapped.hasPrefix(" ") || wrapped.hasPrefix("\t") ? wrapped : "")).range(of: mark, options: [.regularExpression, .caseInsensitive]) != nil
+            return ChoiceCard(letter: opt.letter, title: title.isEmpty ? opt.label : title, detail: detail, isRecommended: parsed.recommended == opt.letter || marked)
         }
         return ChoiceLayout(
             before: beforeLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),

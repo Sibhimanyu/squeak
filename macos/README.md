@@ -170,17 +170,33 @@ Palette is `Tokens.Terminal` (contrast pinned by a test). SwiftTerm is pinned `e
 statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. Not yet seen
 on screen: written and built only, no window was opened.
 
+### Right zone: Thread, Pond, Code
+
+The right zone's tabs are **Thread · Pond · Code** (`DockPanel`, `DockLayout.standard`; Thread selected by default).
+The pond *dashboard* (centre page) manages a pond; the **Pond tab** (`PondPanel.swift`, view-model `PondGlance` in
+`SqueakMacCore/Ponds`) is a live glance at the pond of the thread on screen: people with what they work on (from
+`PondDetail` members/presence/threads, else this Mac's chats), Now (working/waiting threads, click opens), Recent
+(last six pond ripples), and Invite / Open dashboard. The **Thread tab** (`ThreadPanel.swift`, `ThreadGlance`) covers
+the open thread (a duckling opens as a tab in the centre strip after its thread; drag it to a side strip if you like): who (pond thread participants and presence), running (ducklings, shells, queue), changed files (open
+in Code) and controls (mode, model, private/share). The Pond panel never docks in the centre: a drop there calls
+`DockStore.openPondDashboard`, and `DockLayout.normalized()` moves an old centre Pond to the right. Old saved layouts
+gain Thread before Pond on decode. Built and unit-tested only; not seen on screen (no window was opened).
+
 ### Dock icon and menus
 
-Squeak launches as a menu-bar accessory (`LSUIElement`). While the conversation
+Squeak launches as a menu-bar accessory (`LSUIElement`) and, when a person starts it (Finder, Dock, Spotlight, `open`, a
+direct run), also opens the conversation window (`LaunchWindowPolicy`); started at login (the open-application event's
+`keyAELaunchedAsLogInItem`), in capture/demo runs or with Welcome up, it stays in the menu bar; after an update it
+reopens the window only if it was open. A window that was in full screen when the app went down reopens in full screen.
+While the conversation
 window, Settings or Welcome is open, `ActivationPolicyController` switches the
 app to `.regular` (Dock icon, Cmd-Tab, its own menu bar: app menu with About,
 Check for Updates…, Settings…, Hide, Quit; Edit; Sessions; Window; Help) and
 activates it. When the last of those windows closes it goes back to `.accessory`.
 The popover and the quick composer are panels and never trigger it. A reopen
 with no window open (Spotlight, Finder, or the activation a clicked notification
-causes) shows the quick composer, never the conversation; the reopen is scheduled,
-not shown at once, so a clicked notification's own open wins over it. "Open Squeak" in the
+causes) opens the conversation window; the reopen is scheduled, not shown at once, so a
+clicked notification's own open (its chat's composer) wins over it. "Open Squeak" in the
 popover and menus opens the conversation. Nothing here quits the app.
 
 ### Menu-bar panel
@@ -480,3 +496,11 @@ own on an older build gets the new version copied beside it, the `current` symli
 `launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
 (remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.
 The daemon starts without a `.env` (Telegram off), so the install needs no setup first; channels are set up in Settings.
+
+## Window menu and workspaces
+
+Window lists Sidebar, Inspector and every panel (Pond, Code, Terminal) with a checkmark when open and its shortcut
+beside it; choosing one opens it (to its home zone) or closes it (`WindowMenu`, pure, in SqueakMacCore). Window ›
+Workspace holds the saved workspaces, "Reset <Name>", "New Workspace…", Update and "Delete Workspace…". Right-clicking
+any tab strip shows the same panel list plus Reset. A workspace remembers the live layout (panels, order, selection,
+zone sizes and folds, and now the sidebar's fold and width) and writes it on every change; Reset puts it back as saved.

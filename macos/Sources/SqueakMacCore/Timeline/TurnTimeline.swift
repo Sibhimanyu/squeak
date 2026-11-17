@@ -181,7 +181,11 @@ public struct TurnTimeline: Equatable, Sendable {
 
     /// A page of the log (the first read, or a refetch): the first event of a first page sets where the log starts.
     public mutating func load(_ events: [TimelineEvent], hasEarlier more: Bool? = nil) {
-        if !hasBaseline {
+        // A baseline that holds no turn (a stale or empty one) cannot be the place a first page continues from: a page
+        // that starts past it would be held behind a gap for good, and the chat would show nothing but "Load earlier".
+        let staleBaseline = hasBaseline && turns.isEmpty && (events.first.map { $0.seq > lastSeq + 1 } ?? false)
+        if !hasBaseline || staleBaseline {
+            if staleBaseline { held = [:] }
             lastSeq = max(0, (events.first?.seq ?? 1) - 1)
             hasBaseline = true
             if let more { hasEarlier = more }

@@ -146,8 +146,8 @@ function chatRow(session, env) {
         onclick: () => env.actions.select(session.key),
       },
       sessionMark(st.tone, { label: st.text, approval: session.state === "awaiting_approval" }),
-      h("span", { class: loud ? "sb-title loud" : "sb-title" }, displayTitle(session)),
-      isUnread(session, env.seen) ? h("span", { class: "dot d-done", role: "img", "aria-label": "New reply" }) : null,
+      // Unread is the title's weight, never a dot (DESIGN.md §8.1).
+      h("span", { class: loud || isUnread(session, env.seen) ? "sb-title loud" : "sb-title" }, displayTitle(session)),
       h("span", { class: "sb-age" }, age(session.lastActivityAt)),
     ),
   );
@@ -269,6 +269,48 @@ export function sidebarNodes(env) {
         ),
       ),
     ),
+  );
+}
+
+/* ---------- chat tab strip (tablet and desktop) ---------- */
+
+/** The open chats as tabs above the chat. `env`: { tabs: [session], selected, actions: { select, close } }; null with fewer than two. */
+export function tabStripNodes(env) {
+  if (env.tabs.length < 2) return null;
+  return h(
+    "div",
+    { class: "chat-tabs", role: "tablist", "aria-label": "Open chats" },
+    env.tabs.map((s) => {
+      const st = status(s);
+      const on = env.selected === s.key;
+      return h(
+        "div",
+        { class: on ? "chat-tab on" : "chat-tab", role: "presentation" },
+        h(
+          "button",
+          {
+            class: "chat-tab-main",
+            type: "button",
+            role: "tab",
+            "aria-selected": on ? "true" : "false",
+            title: `${displayTitle(s)} · ${st.text}`,
+            onclick: () => env.actions.select(s.key),
+          },
+          sessionMark(st.tone, { label: st.text, approval: s.state === "awaiting_approval" }),
+          h("span", { class: "chat-tab-title" }, displayTitle(s)),
+        ),
+        h(
+          "button",
+          {
+            class: "chat-tab-close",
+            type: "button",
+            "aria-label": `Close ${displayTitle(s)}`,
+            onclick: () => env.actions.close(s.key),
+          },
+          closeIcon(),
+        ),
+      );
+    }),
   );
 }
 

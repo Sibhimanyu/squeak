@@ -11,6 +11,7 @@ import { SessionHost } from "./host.js";
 import { attachSqueakPosts, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
 import { RoomSummariser, SUMMARY_QUIET_MS } from "./room-summary.js";
 import { NativeServer } from "./server.js";
+import { TimelineLog } from "./timeline-log.js";
 import { MIGRATIONS, NativeStore, ROOM_KEEP_POSTS } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
 import { WorkspaceManager } from "./workspaces.js";
@@ -138,7 +139,7 @@ describe("Room", () => {
 });
 
 describe("Squeak's own posts", () => {
-  it("posts 'needs you' once per waiting episode, and 'finished' only for a working line with no done", () => {
+  function rig() {
     const store = new NativeStore(":memory:");
     const p = pond(store);
     const room = new Room({ store });
@@ -147,29 +148,138 @@ describe("Squeak's own posts", () => {
     const s = p.chat("Wire retry");
     const ev = (e: unknown) => host.emit("event", e);
     const posts = () => store.roomPosts(p.project.id, { limit: 50 });
-    ev({ type: "status", sessionId: s.id, status: "awaiting_approval" });
-    ev({ type: "request", sessionId: s.id, request: {} });
-    ev({ type: "status", sessionId: s.id, status: "awaiting_approval" });
-    expect(posts().map((x) => [x.authorKind, x.kind, x.text])).toEqual([["squeak", "needs", "Wire retry needs you"]]);
-    ev({ type: "status", sessionId: s.id, status: "working" });
-    ev({ type: "status", sessionId: s.id, status: "awaiting_answer" });
-    expect(posts()).toHaveLength(2);
+    const tl = (event: any) => ev({ type: "timeline", sessionId: s.id, event });
+    return { store, p, room, s, ev, posts, tl };
+  }
+  const started = (turnId: string, text = "add retry\nto the uploader") => ({
+    type: "turn.started",
+    seq: 1,
+    turnId,
+    promptMessageId: "m",
+    text,
+    at: "",
+  });
+  const ended = (turnId: string, outcome = "done") => ({ type: "turn.ended", seq: 2, turnId, outcome, at: "" });
 
-    const ended = {
-      type: "timeline",
-      sessionId: s.id,
-      event: { type: "turn.ended", seq: 1, turnId: "t", outcome: "done", at: "" },
-    };
-    ev(ended);
-    expect(posts()).toHaveLength(2); // no working line: nothing
-    room.agentPost(s, { kind: "working", text: "wiring" });
-    ev(ended);
-    expect(posts().at(-1)).toMatchObject({ kind: "done", text: "Wire retry finished", authorKind: "squeak" });
-    ev(ended);
-    expect(posts()).toHaveLength(4); // the done post closed it
-    room.agentPost(s, { kind: "working", text: "again" });
-    ev({ ...ended, event: { ...ended.event, outcome: "failed" } });
-    expect(posts()).toHaveLength(5);
+  it("posts 'needs you' once per waiting episode", () => {
+    const r = rig();
+    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_approval" });
+    r.ev({ type: "request", sessionId: r.s.id, request: {} });
+    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_approval" });
+    expect(r.posts().map((x) => [x.authorKind, x.kind, x.text])).toEqual([["squeak", "needs", "Wire retry needs you"]]);
+    r.ev({ type: "status", sessionId: r.s.id, status: "working" });
+    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_answer" });
+    expect(r.posts()).toHaveLength(2);
+  });
+
+  it("posts one Started and one end line per turn, by how it ended, deduped on replay", () => {
+    const r = rig();
+    r.tl(started("t1"));
+    r.tl(started("t1"));
+    r.tl(ended("t1"));
+    r.tl(ended("t1"));
+    r.tl(started("t2", "x".repeat(300)));
+    r.tl(ended("t2", "stopped"));
+    r.tl(started("t3"));
+    r.tl(ended("t3", "failed"));
+    r.tl({ ...started("t4"), auto: true });
+    const rows = r.posts();
+    expect(rows.map((x) => [x.kind, x.authorKind, x.authorName, x.text.slice(0, 30)])).toEqual([
+      ["working", "squeak", "Wire retry", "Started: add retry"],
+      ["done", "squeak", "Wire retry", "Finished"],
+      ["working", "squeak", "Wire retry", "Started: " + "x".repeat(21)],
+      ["done", "squeak", "Wire retry", "Stopped"],
+      ["working", "squeak", "Wire retry", "Started: add retry"],
+      ["done", "squeak", "Wire retry", "Hit an error"],
+    ]);
+    expect(rows[2]!.text.length).toBeLessThanOrEqual("Started: ".length + 120);
+    expect(rows.every((x) => x.sessionId === r.s.id)).toBe(true);
+  });
+
+  it("skips Finished when the agent posted its own done in that turn", () => {
+    const r = rig();
+    r.tl(started("t1"));
+    r.room.agentPost(r.s, { kind: "done", text: "retry wired" });
+    r.tl(ended("t1"));
+    expect(r.posts().map((x) => x.kind)).toEqual(["working", "done"]);
+    r.tl(started("t2"));
+    r.tl(ended("t2"));
+    expect(r.posts().map((x) => x.text)).toEqual([
+      "Started: add retry",
+      "retry wired",
+      "Started: add retry",
+      "Finished",
+    ]);
+  });
+});
+
+describe("room backfill and thread state", () => {
+  it("fills an empty room once from the last 24 h of timelines, in time order, merged with live posts", () => {
+    const store = new NativeStore(":memory:");
+    const p = pond(store);
+    const now = Date.parse("2026-11-17T12:00:00Z");
+    const room = new Room({ store, now: () => now });
+    const s = p.chat("Old chat");
+    const log = new TimelineLog(store.db);
+    const iso = (h: number) => new Date(now - h * 3_600_000).toISOString();
+    log.append(s.id, { type: "turn.started", turnId: "a", promptMessageId: "m", text: "first job", at: iso(30) });
+    log.append(s.id, { type: "turn.ended", turnId: "a", outcome: "done", at: iso(29) });
+    log.append(s.id, { type: "turn.started", turnId: "b", promptMessageId: "m", text: "second job", at: iso(3) });
+    log.append(s.id, { type: "turn.ended", turnId: "b", outcome: "done", at: iso(2.5) });
+    log.append(s.id, { type: "turn.started", turnId: "c", promptMessageId: "m", text: "third job", at: iso(1) });
+    log.append(s.id, { type: "turn.ended", turnId: "c", outcome: "failed", at: iso(0.2) });
+    // A live post that happened between b and c.
+    room.post({
+      projectId: p.project.id,
+      author: { kind: "person", name: "me" },
+      kind: "message",
+      text: "hi",
+      at: now - 2 * 3_600_000,
+    } as any);
+    const first = room.page(p.project.id, {});
+    expect(first.posts.map((x) => x.text)).toEqual([
+      "Started: second job",
+      "Finished",
+      "hi",
+      "Started: third job",
+      "Hit an error",
+    ]);
+    expect(first.posts.map((x) => x.at)).toEqual([...first.posts.map((x) => x.at)].sort((a, b) => a - b));
+    expect(first.posts.map((x) => x.seq)).toEqual([...first.posts.map((x) => x.seq)].sort((a, b) => a - b));
+    const second = room.page(p.project.id, {});
+    expect(second.posts.map((x) => x.id)).toEqual(first.posts.map((x) => x.id));
+  });
+
+  it("never duplicates a live post and does not run twice", () => {
+    const store = new NativeStore(":memory:");
+    const p = pond(store);
+    const room = new Room({ store });
+    const host = new EventEmitter();
+    attachSqueakPosts(host as any, store, room);
+    const s = p.chat("Live");
+    const log = new TimelineLog(store.db);
+    const at = new Date().toISOString();
+    const body = { type: "turn.started", turnId: "a", promptMessageId: "m", text: "go", at } as const;
+    const ev = log.append(s.id, body);
+    host.emit("event", { type: "timeline", sessionId: s.id, event: ev });
+    expect(room.page(p.project.id, {}).posts).toHaveLength(1);
+    store.markRoomBackfilled("other", 0);
+    expect(room.page(p.project.id, {}).posts).toHaveLength(1);
+  });
+
+  it("threads carry lastState and lastAt", () => {
+    const store = new NativeStore(":memory:");
+    const p = pond(store);
+    const room = new Room({ store });
+    const a = p.chat("A");
+    const b = p.chat("B");
+    const log = new TimelineLog(store.db);
+    const at = new Date().toISOString();
+    log.append(a.id, { type: "turn.started", turnId: "t", promptMessageId: "m", text: "x", at });
+    log.append(a.id, { type: "turn.ended", turnId: "t", outcome: "stopped", at });
+    const t = room.threads(p.project.id);
+    expect(t.find((x) => x.sessionId === a.id)).toMatchObject({ lastState: "stopped", lastAt: Date.parse(at) });
+    expect(t.find((x) => x.sessionId === b.id)?.lastState).toBe("idle");
   });
 });
 

@@ -245,7 +245,7 @@ struct AskCard: View {
                 Task { await send(answer) }
             } label: {
                 HStack(spacing: 6) {
-                    if sending == answer { TideGlyph(color: Theme.ink, height: 8) }
+                    if sending == answer { TideGlyph(color: Theme.ink, grid: .mini) }
                     Text(answer.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.ink)
@@ -279,7 +279,7 @@ struct StartingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            TideGlyph(color: Theme.ink, height: 7).padding(.trailing, 0)
+            TideGlyph(color: Theme.ink, grid: .mini).padding(.trailing, 0)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Starting…").font(.headline)
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
@@ -344,7 +344,7 @@ struct SessionRow: View {
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
                 .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
-            if session.isConductor { ConductorMarker() }
+            if model.snapshot?.showsConductorMark(for: session) == true { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
         }
@@ -363,7 +363,7 @@ struct SessionRow: View {
                 Text(inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session))
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
                 Spacer(minLength: 4)
-                if session.isConductor, let open = session.open { OpenTag(open: open) }
+                if model.snapshot?.showsConductorMark(for: session) == true, let open = session.open { OpenTag(open: open) }
             }
             .padding(.top, 2)
         }

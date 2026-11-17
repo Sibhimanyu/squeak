@@ -22,21 +22,16 @@ final class PondIcons {
         return custom.value(id: p.id, stamp: stamp(p))
     }
 
-    /// The logo's palette (dominant first), from the cached image; empty while it loads or when it is greyscale.
-    func logoHues(for p: NativeProject?) -> [Double] {
+    /// The logo's real colours (accent first, then by prominence), from the cached image; empty while it loads or when
+    /// it is greyscale.
+    func logoColours(for p: NativeProject?) -> [PondTint.RGB] {
         guard let img = image(for: p) else { return [] }
-        return Self.hues(of: img)
+        return Self.colours(of: img)
     }
 
-    /// The hue of the logo's most vivid colour (`PondAccent`), when the pond has an icon with colour in it.
-    func vividHue(for p: NativeProject?) -> Double? {
-        guard let img = image(for: p), let (bytes, n) = Self.rgba(of: img) else { return nil }
-        return PondAccent.vividHue(rgba: bytes, width: n, height: n)
-    }
-
-    static func hues(of image: NSImage) -> [Double] {
+    static func colours(of image: NSImage) -> [PondTint.RGB] {
         guard let (bytes, n) = rgba(of: image) else { return [] }
-        return LogoPalette.hues(rgba: bytes, width: n, height: n)
+        return LogoColours.colours(rgba: bytes, width: n, height: n).map(\.rgb)
     }
 
     private static func rgba(of image: NSImage) -> ([UInt8], Int)? {
@@ -262,7 +257,7 @@ struct PondLookSection: View {
     @State private var dropping = false
 
     private let grid = [GridItem(.adaptive(minimum: 28, maximum: 32), spacing: 8)]
-    private var logoHues: [Double] { PondIcons.shared.logoHues(for: current) }
+    private var logoColours: [PondTint.RGB] { PondIcons.shared.logoColours(for: current) }
 
     private var current: NativeProject { model.native.projects.first { $0.id == project.id } ?? project }
 
@@ -285,18 +280,19 @@ struct PondLookSection: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Colour").font(Typo.label).foregroundStyle(Theme.ink)
-                if !logoHues.isEmpty {
+                if !logoColours.isEmpty {
                     Text("From the logo").font(Typo.meta).foregroundStyle(Theme.muted)
                     LazyVGrid(columns: grid, alignment: .leading, spacing: 8) {
-                        ForEach(Array(logoHues.enumerated()), id: \.offset) { i, hue in
-                            swatch(name: PondColours.value(hue: hue), fill: PondColour.swatch(hue: hue), label: "Logo colour \(i + 1)",
-                                   on: current.colour == PondColours.value(hue: hue) || (current.colour == nil && i == 0))
+                        ForEach(Array(logoColours.enumerated()), id: \.offset) { i, c in
+                            swatch(name: PondColours.value(colour: c), fill: Color(nsColor: NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1)),
+                                   label: "Logo colour \(i + 1)",
+                                   on: current.colour == PondColours.value(colour: c) || (current.colour == nil && i == 0))
                         }
                     }
                     Text("Other colours").font(Typo.meta).foregroundStyle(Theme.muted)
                 }
                 LazyVGrid(columns: grid, alignment: .leading, spacing: 8) {
-                    swatch(name: nil, fill: PondColour.tint(nil), label: "Default", on: current.colour == nil && logoHues.isEmpty)
+                    swatch(name: nil, fill: PondColour.tint(nil), label: "Default", on: current.colour == nil && logoColours.isEmpty)
                     ForEach(PondColours.all, id: \.name) { c in swatch(name: c.name, fill: PondColour.swatch(hue: c.hue), label: c.name.capitalized) }
                 }
             }
@@ -324,7 +320,15 @@ struct PondLookSection: View {
 
     private func setColour(_ name: String?) {
         guard !model.demoMode else { return }
-        run { try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(name)) }
+        run(failure: "Couldn't save the colour. Try again in a moment.") {
+            do { try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(name)) }
+            catch NativeHostError.http(let code, let m) {
+                guard code == 400 || code == 422, let legacy = PondColours.legacyHueValue(for: name) else { throw NativeHostError.http(code, m) }
+                // An older daemon only knows named colours and `hue:N`: save the nearest hue so picking still works.
+                AppLog.error("pond colour \(name ?? "") refused (\(code)): \(m ?? ""); saving \(legacy)")
+                try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(legacy))
+            }
+        }
     }
 
     private func choose() {
@@ -340,8 +344,8 @@ struct PondLookSection: View {
         guard let data = try? Data(contentsOf: url), let img = NSImage(data: data), let png = Self.small(img) else {
             problem = "That isn't a PNG or JPEG image."; return
         }
-        // The logo's dominant hue becomes the pond's colour unless the person chose a named one.
-        let auto = PondIcons.hues(of: img).first.map(PondColours.value(hue:))
+        // The logo's accent colour becomes the pond's colour unless the person chose a named one.
+        let auto = PondIcons.colours(of: img).first.map(PondColours.value(colour:))
         let colour = current.colour
         run {
             try await model.nativeHost.setProjectIcon(key: project.id, image: png, mime: "image/png")
@@ -360,11 +364,14 @@ struct PondLookSection: View {
         }
     }
 
-    private func run(_ work: @escaping () async throws -> Void) {
+    /// `failure`, when given, replaces the host's own sentence (which can be a raw validation message); the detail is logged.
+    private func run(failure: String? = nil, _ work: @escaping () async throws -> Void) {
         problem = nil
         Task {
             do { try await work(); await model.refreshNativeProjects() }
-            catch let e as NativeHostError { problem = e.reason } catch { problem = "Squeak couldn't save that" }
+            catch let e as NativeHostError {
+                if let failure { AppLog.error("pond prefs: \(e.reason)"); problem = failure } else { problem = e.reason }
+            } catch { problem = failure ?? "Squeak couldn't save that" }
         }
     }
 

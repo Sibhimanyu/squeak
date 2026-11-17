@@ -143,7 +143,7 @@ struct PondRoomView: View {
     var body: some View {
         let room = room
         VStack(spacing: 0) {
-            WorkingNowStrip(threads: RoomPresentation.workingNow(room.feed.threads), open: openThread)
+            WorkingNowStrip(threads: RoomPresentation.workingNow(room.feed.threads), recent: RoomPresentation.recent(room.feed.threads), open: openThread)
             content(room)
             composer(room).padding(.horizontal, Space.l).padding(.bottom, Space.l).padding(.top, Space.s)
                 .frame(maxWidth: Metrics.readingColumn)
@@ -162,10 +162,12 @@ struct PondRoomView: View {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             let groups = RoomGrouping.groups(room.feed.rows, filter: room.filter)
-            if groups.isEmpty {
+            if groups.isEmpty && room.feed.threads.isEmpty {
                 Text("When threads in this pond start working, what they're on shows up here.")
                     .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                     .padding(Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if groups.isEmpty {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 feedView(room, groups)
             }
@@ -258,20 +260,47 @@ struct PondRoomView: View {
 
 private struct WorkingNowStrip: View {
     let threads: [RoomThread]
+    let recent: [RoomThread]
     let open: (String) -> Void
 
     var body: some View {
-        if !threads.isEmpty {
+        if !threads.isEmpty || !recent.isEmpty {
             VStack(spacing: 0) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Space.s) {
-                        ForEach(threads) { t in chip(t) }
+                if !threads.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Space.s) {
+                            ForEach(threads) { t in chip(t) }
+                        }
+                        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
                     }
-                    .padding(.horizontal, Space.l).padding(.vertical, Space.s)
                 }
+                if !recent.isEmpty { recentList }
                 Rectangle().fill(Theme.line).frame(height: 1)
             }
         }
+    }
+
+    /// Quiet list of threads that are not working: title, and how their last turn ended. Tap opens the thread.
+    private var recentList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Recent").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                .padding(.bottom, 2)
+            ForEach(recent.prefix(6)) { t in
+                Button { open(t.sessionId) } label: {
+                    HStack(spacing: Space.s) {
+                        Text(verbatim: t.title).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: Space.s)
+                        Text(verbatim: RoomPresentation.recentLine(t, now: Date())).font(.system(size: 12))
+                            .foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open \(t.title)")
+            }
+        }
+        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+        .frame(maxWidth: Metrics.readingColumn, alignment: .leading).frame(maxWidth: .infinity)
     }
 
     private func chip(_ t: RoomThread) -> some View {

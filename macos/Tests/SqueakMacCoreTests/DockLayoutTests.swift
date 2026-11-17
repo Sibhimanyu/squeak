@@ -25,12 +25,45 @@ final class DockLayoutTests: XCTestCase {
 
     func testStandard() {
         let l = DockLayout.standard
-        XCTAssertEqual(l.right.panels, [.pond, .code]); XCTAssertEqual(l.right.selected, .pond)
+        XCTAssertEqual(l.right.panels, [.thread, .pond, .code]); XCTAssertEqual(l.right.selected, .thread)
         XCTAssertEqual(l.bottom.panels, [.terminal]); XCTAssertTrue(l.bottom.collapsed)
         XCTAssertTrue(l.centre.panels.isEmpty)
         assertInvariant(l)
         XCTAssertEqual(DockPanel.terminal.title, "Terminal")
         XCTAssertEqual(DockPanel.pond.symbol, "person.2")
+    }
+
+    func testThreadTabJoinsOldSavesBeforePond() throws {
+        // An old save (no thread anywhere) that was the untouched default also gets Thread showing.
+        let old = #"{"centre":{"panels":[]},"right":{"panels":["pond","code"],"selected":"pond"},"bottom":{"panels":["terminal"]},"hidden":[]}"#
+        let a = try JSONDecoder().decode(DockLayout.self, from: Data(old.utf8))
+        XCTAssertEqual(a.right.panels, [.thread, .pond, .code]); XCTAssertEqual(a.right.selected, .thread)
+        // A customised arrangement keeps its own selection and order; Thread still arrives before Pond.
+        let custom = #"{"centre":{"panels":[]},"right":{"panels":["code","pond"],"selected":"code"},"bottom":{"panels":["terminal"]},"hidden":[]}"#
+        let b = try JSONDecoder().decode(DockLayout.self, from: Data(custom.utf8))
+        XCTAssertEqual(b.right.panels, [.code, .thread, .pond]); XCTAssertEqual(b.right.selected, .code)
+        // Pond was the selection and Code moved away: not the default, so it stays on Pond.
+        let moved = #"{"centre":{"panels":[]},"right":{"panels":["pond"],"selected":"pond"},"bottom":{"panels":["terminal","code"]},"hidden":[]}"#
+        let c = try JSONDecoder().decode(DockLayout.self, from: Data(moved.utf8))
+        XCTAssertEqual(c.right.panels, [.thread, .pond]); XCTAssertEqual(c.right.selected, .pond)
+        // A save with no right panels at all does not bring the inspector back: Thread waits in hidden.
+        let none = #"{"centre":{"panels":[]},"right":{"panels":[]},"bottom":{"panels":["terminal"]},"hidden":["pond","code"]}"#
+        let d = try JSONDecoder().decode(DockLayout.self, from: Data(none.utf8))
+        XCTAssertTrue(d.right.panels.isEmpty); XCTAssertTrue(d.hidden.contains(.thread))
+        // A save that already knows Thread (even closed) is left alone.
+        let closed = #"{"centre":{"panels":[]},"right":{"panels":["pond","code"],"selected":"pond"},"bottom":{"panels":[]},"hidden":["thread","terminal"]}"#
+        let e = try JSONDecoder().decode(DockLayout.self, from: Data(closed.utf8))
+        XCTAssertEqual(e.right.panels, [.pond, .code]); XCTAssertEqual(e.hidden, [.thread, .terminal])
+        for l in [a, b, c, d, e] { assertInvariant(l); XCTAssertEqual(l, l.normalized()) }
+    }
+
+    func testPondNeverDocksInTheCentre() {
+        var l = DockLayout.standard
+        l.move(.pond, to: .centre)
+        XCTAssertEqual(l, DockLayout.standard)
+        XCTAssertEqual(DockPanel.thread.title, "Thread")
+        XCTAssertEqual(DockPanel.allCases.prefix(3), [.thread, .pond, .code])
+        for w in DockWorkspaces.builtIns { XCTAssertEqual(w.saved.right.panels.first, .thread, w.name) }
     }
 
     func testZoneOfAndVisibility() {
@@ -43,11 +76,12 @@ final class DockLayoutTests: XCTestCase {
 
     func testMoveAcrossZonesSelectsAndFixesOldSelection() {
         var l = DockLayout.standard
-        l.move(.pond, to: .centre)
-        XCTAssertEqual(l.centre.panels, [.pond]); XCTAssertEqual(l.centre.selected, .pond)
-        XCTAssertEqual(l.right.panels, [.code]); XCTAssertEqual(l.right.selected, .code)
+        l.move(.thread, to: .centre)
+        XCTAssertEqual(l.centre.panels, [.thread]); XCTAssertEqual(l.centre.selected, .thread)
+        XCTAssertEqual(l.right.panels, [.pond, .code]); XCTAssertEqual(l.right.selected, .pond)
         l.move(.code, to: .bottom, before: .terminal)
-        XCTAssertEqual(l.bottom.panels, [.code, .terminal]); XCTAssertEqual(l.bottom.selected, .code)
+        l.move(.pond, to: .bottom)
+        XCTAssertEqual(l.bottom.panels, [.code, .terminal, .pond]); XCTAssertEqual(l.bottom.selected, .pond)
         XCTAssertFalse(l.bottom.collapsed)
         XCTAssertTrue(l.right.panels.isEmpty); XCTAssertNil(l.right.selected)
         assertInvariant(l)
@@ -65,18 +99,18 @@ final class DockLayoutTests: XCTestCase {
     func testReorderWithinZone() {
         var l = DockLayout.standard
         l.move(.code, to: .right, before: .pond)
-        XCTAssertEqual(l.right.panels, [.code, .pond]); XCTAssertEqual(l.right.selected, .code)
+        XCTAssertEqual(l.right.panels, [.thread, .code, .pond]); XCTAssertEqual(l.right.selected, .code)
         l.move(.code, to: .right)
-        XCTAssertEqual(l.right.panels, [.pond, .code])
+        XCTAssertEqual(l.right.panels, [.thread, .pond, .code])
         l.move(.code, to: .right, before: .code)
-        XCTAssertEqual(l.right.panels, [.pond, .code])
+        XCTAssertEqual(l.right.panels, [.thread, .pond, .code])
         assertInvariant(l)
     }
 
     func testSelectAndSelectChats() {
         var l = DockLayout.standard
         l.select(.code); XCTAssertEqual(l.right.selected, .code)
-        l.move(.pond, to: .centre); XCTAssertEqual(l.centre.selected, .pond)
+        l.move(.thread, to: .centre); XCTAssertEqual(l.centre.selected, .thread)
         l.selectChats(); XCTAssertNil(l.centre.selected)
         l.close(.code); l.select(.code)
         XCTAssertNil(l.zone(of: .code))
@@ -85,9 +119,9 @@ final class DockLayoutTests: XCTestCase {
     func testCloseAndShow() {
         var l = DockLayout.standard
         l.close(.code)
-        XCTAssertEqual(l.hidden, [.code]); XCTAssertEqual(l.right.panels, [.pond])
+        XCTAssertEqual(l.hidden, [.code]); XCTAssertEqual(l.right.panels, [.thread, .pond])
         l.show(.code)
-        XCTAssertEqual(l.right.panels, [.pond, .code]); XCTAssertEqual(l.right.selected, .code)
+        XCTAssertEqual(l.right.panels, [.thread, .pond, .code]); XCTAssertEqual(l.right.selected, .code)
         XCTAssertTrue(l.hidden.isEmpty)
         l.select(.pond); l.setCollapsed(true, for: .right)
         l.show(.code)
@@ -129,7 +163,7 @@ final class DockLayoutTests: XCTestCase {
         XCTAssertEqual(a.right.selected, .code); XCTAssertTrue(a.bottom.collapsed)
         XCTAssertTrue(a.right.collapsed); XCTAssertNil(a.right.size); XCTAssertNil(a.bottom.size)
         let b = DockLayout.migrated(codeView: false, terminalOpen: true, inspectorOpen: true, inspectorWidth: 400, terminalHeight: 300)
-        XCTAssertEqual(b.right.selected, .pond); XCTAssertFalse(b.bottom.collapsed)
+        XCTAssertEqual(b.right.selected, .thread); XCTAssertFalse(b.bottom.collapsed)
         XCTAssertFalse(b.right.collapsed); XCTAssertEqual(b.right.size, 400); XCTAssertEqual(b.bottom.size, 300)
         let c = DockLayout.migrated(codeView: false, terminalOpen: true, inspectorOpen: true, inspectorWidth: 5000, terminalHeight: 1)
         XCTAssertEqual(c.right.size, 560); XCTAssertEqual(c.bottom.size, 120)
@@ -143,8 +177,9 @@ final class DockLayoutTests: XCTestCase {
          "bottom":{"panels":["code"],"collapsed":true},"hidden":["pond","mystery"]}
         """
         let l = try JSONDecoder().decode(DockLayout.self, from: Data(json.utf8))
-        XCTAssertEqual(l.centre.panels, [.pond]); XCTAssertNil(l.centre.selected)
-        XCTAssertEqual(l.right.panels, [.code]); XCTAssertEqual(l.right.selected, .code)
+        // The Pond panel never lives in the centre: an older save with it there gets it back on the right.
+        XCTAssertTrue(l.centre.panels.isEmpty); XCTAssertNil(l.centre.selected)
+        XCTAssertEqual(l.right.panels, [.thread, .code, .pond]); XCTAssertEqual(l.right.selected, .thread)
         XCTAssertEqual(l.right.size, 560)
         XCTAssertTrue(l.bottom.panels.isEmpty)
         XCTAssertEqual(l.hidden, [.terminal])

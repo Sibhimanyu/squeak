@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.30.0
+
+- A reply is read the way WhatsApp reads it: once the thread is open, on screen and scrolled to the bottom for a second, or when you send. Ponds show bold only when something is unread, and the Next pill walks Needs you, then unread, newest first.
+- The sidebar no longer has an Archived entry.
+- Tabs show the new tide glyph: a twinkling cloud while working, a warning when a thread needs you, and the close button on hover. Tabs sit closer together and share one look in every strip.
+- Ducklings open as tabs in the centre strip after their thread, and in the right and bottom strips; agents now call their subagents ducklings.
+- Each pond takes its own colour, from its logo or the one you chose, as a faint wash on its selected row, header and tab underline.
+- The right side has Thread, Pond and Code tabs, and the Thread tab shows one quiet "N files changed" line that opens Code.
+- A plain closing question is a normal finish; only lettered options make a thread need you. Answer buttons now show whenever the composer is folded.
+- Approval cards lead with the decision and clip long commands to six lines with Show all.
+- Notifications use the agent's own line as the body and "thread, pond" as the title. New threads start on Skip approvals everywhere.
+- Drag and drop is steadier: tabs dock into zones, ponds reorder with a live gap, and drops from outside the app land.
+- Squeak is lighter on the CPU: the tide glyph is about four times cheaper to draw and an idle chat's transcript is no longer re-read every two seconds.
+- Auto-compact now starts at 90% of the model's window.
+
+## 2.29.2
+
+- Coming back to Squeak from another Space no longer flips a finished chat to Idle and back.
+
+## 2.29.1
+
+- New threads really start in Skip approvals now: picking a preset no longer switches them back to Ask.
+- Only one "Next update" button above the composer (two could stack up).
+
 ## 2.29.0
 
 - Every stream's tab strip starts with a small pinned tab: the pond room. It shows what each thread in the pond is working on right now, as short lines rather than every edit and command, plus "needs you" and "finished" notes. Turn on "Show agent talk" to see threads coordinating with each other, and type in it to talk to the room like a group chat.

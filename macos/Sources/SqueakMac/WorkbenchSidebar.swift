@@ -24,7 +24,9 @@ struct WorkbenchSidebar: View {
     /// The pond whose Labels popover is open (its project id).
     @State private var labelsFor: String?
     /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
-    @State private var dropBefore: String?
+    /// The pond being dragged, and the slot (0...count) where a gap is open for it. Both clear on drop and on cancel.
+    @State private var draggingPond: String?
+    @State private var dropSlot: Int?
     private var order: PondOrderStore { PondOrderStore.shared }
     private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
     /// Folded projects, kept across launches. Legacy workspace entries are ignored.
@@ -33,8 +35,6 @@ struct WorkbenchSidebar: View {
     /// Demo and capture runs keep their own folds (never the real ones), and start with one project folded so a
     /// capture shows a folded row's mark.
     @State private var demoFolded: Set<String> = ["atlas"]
-    /// Ponds whose Archived entry is open (collapsed by default).
-    @State private var archivedOpen: Set<String> = []
 
     private var folded: Set<String> {
         model.demoMode ? demoFolded : Set(foldedRaw.split(separator: "\n").map(String.init))
@@ -160,10 +160,36 @@ struct WorkbenchSidebar: View {
         order.set(mode: mode, order: next, host: model.demoMode ? nil : model.nativeHost) { await PondsModel.shared.refreshDirectory() }
     }
 
+    private func endPondDrag() {
+        withAnimation(Motion.standard) { draggingPond = nil; dropSlot = nil }
+    }
+
+    /// A drag has no cancel callback, so the dim and the gap are released when the button comes up outside a drop.
+    private func watchPondDrag() {
+        Task { @MainActor in
+            while draggingPond != nil, NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(nanoseconds: 80_000_000) }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if draggingPond != nil { endPondDrag() }
+        }
+    }
+
+    /// The pond row's drag preview: its tile and name on a raised surface.
+    private func pondDragPreview(name: String, pondId: String?) -> some View {
+        HStack(spacing: Space.s) {
+            PondTile(name: name, pondId: pondId, size: 20)
+            Text(verbatim: name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+        }
+        .padding(.horizontal, Space.m).frame(height: 34)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.surfaceRaised))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 4)
+        .padding(8)
+    }
+
     /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to Your order.
     private func dropPond(_ moving: String, before: String?, shown: [String]) {
         let all = pondEntries.map(\.id)
-        dropBefore = nil
+        endPondDrag()
         guard let next = PondOrder.dropped(state: order.state, all: all, shown: shown, moving: moving, before: before) else { return }
         withAnimation(Motion.standard) { saveOrder(mode: .manual, order: next.order) }
     }
@@ -352,7 +378,8 @@ struct WorkbenchSidebar: View {
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
         let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope)
         let names = filtered.ids
-        ForEach(names, id: \.self) { key in
+        let gapSlot = draggingPond.flatMap { m in dropSlot.flatMap { PondDragTarget.gap(slot: $0, moving: m, shown: names) } }
+        ForEach(Array(names.enumerated()), id: \.element) { index, key in
             let entry = PondsModel.shared.entry(key)
             let name = entry?.name ?? ""
             let native = PondsModel.shared.native(key: key)
@@ -365,6 +392,7 @@ struct WorkbenchSidebar: View {
             let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(key: key) != nil ? 1 : 0)
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
+                unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
@@ -377,19 +405,26 @@ struct WorkbenchSidebar: View {
                 folded: projectFolded,
                 pondId: pondRecord?.id, projectId: entry?.projectId
             ) { openHome(key) }
-            .padding(.top, 6)
+            .padding(.top, 6 + (gapSlot == index ? 22 : 0))
             .overlay(alignment: .top) {
-                // The insertion line: where the dragged pond will land.
-                if dropBefore == key { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) }
+                // The gap that opens where the pond will land, with its insertion line.
+                if gapSlot == index { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6).padding(.top, 10).transition(.opacity) }
             }
-            .draggable(PondDragPayload.encode(key))
-            .dropDestination(for: String.self) { values, _ in
-                guard let moving = values.lazy.compactMap(PondDragPayload.decode).first else { return false }
-                dropPond(moving, before: key, shown: names)
-                return true
-            } isTargeted: { on in
-                withAnimation(Motion.quick) { if on { dropBefore = key } else if dropBefore == key { dropBefore = nil } }
-            }
+            .opacity(draggingPond == key ? 0.35 : 1)
+            .onDrag {
+                draggingPond = key
+                watchPondDrag()
+                return dragProvider(PondDragPayload.encode(key), kind: .pond)
+            } preview: { pondDragPreview(name: name, pondId: pondRecord?.id) }
+            .onDrop(of: DragScope.types(for: .pondList), delegate: PondDropDelegate(
+                slot: { y in PondDragTarget.slot(rowIndex: index, y: y - 6, rowHeight: 28) },
+                over: { slot in if dropSlot != slot { withAnimation(Motion.standard) { dropSlot = slot } } },
+                left: { withAnimation(Motion.standard) { dropSlot = nil } },
+                perform: { slot in
+                    guard let moving = draggingPond else { return false }
+                    dropPond(moving, before: PondDragTarget.before(slot: slot, shown: names), shown: names)
+                    return true
+                }))
             .popover(isPresented: Binding(get: { labelsFor == key }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
                 PondLabelsPopover(name: name, current: entry?.labels ?? [], known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(key, labels: $0) }
             }
@@ -482,20 +517,21 @@ struct WorkbenchSidebar: View {
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
                 sharedThreads(of: key)
-                archivedEntry(key)
             }
         }
         // Dropping below the last pond puts it last.
         if names.count > 1 {
-            Color.clear.frame(height: 10)
-                .overlay(alignment: .top) { if dropBefore == "" { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) } }
-                .dropDestination(for: String.self) { values, _ in
-                    guard let moving = values.lazy.compactMap(PondDragPayload.decode).first else { return false }
-                    dropPond(moving, before: nil, shown: names)
-                    return true
-                } isTargeted: { on in
-                    withAnimation(Motion.quick) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
-                }
+            Color.clear.frame(height: 10 + (gapSlot == names.count ? 22 : 0))
+                .overlay(alignment: .top) { if gapSlot == names.count { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6).padding(.top, 4) } }
+                .onDrop(of: DragScope.types(for: .pondList), delegate: PondDropDelegate(
+                    slot: { _ in names.count },
+                    over: { slot in if dropSlot != slot { withAnimation(Motion.standard) { dropSlot = slot } } },
+                    left: { withAnimation(Motion.standard) { dropSlot = nil } },
+                    perform: { slot in
+                        guard let moving = draggingPond else { return false }
+                        dropPond(moving, before: nil, shown: names)
+                        return true
+                    }))
         }
         if filtered.hiddenCount > 0 || (showHiddenPonds && pondEntries.contains { $0.hidden }) {
             Button { showHiddenPonds.toggle() } label: {
@@ -517,28 +553,6 @@ struct WorkbenchSidebar: View {
             let openId: String? = { if case .thread(_, let id, let thread)? = PondsModel.shared.route, id == detail.pond.id { return thread } else { return nil } }()
             ForEach(SharedThreadRows.rows(detail, keeping: openId, hidden: PondsModel.shared.hides.hiddenIds)) { row in
                 SharedThreadRowView(row: row, project: pond, selected: openId == row.threadId).transition(Motion.fold)
-            }
-        }
-    }
-
-    /// "Archived (n)" at the foot of a pond's list: folded by default, newest archived first when open. Shown only
-    /// when the pond has archived threads; the pond's home has the same list as a section.
-    @ViewBuilder private func archivedEntry(_ pond: String) -> some View {
-        let archived = model.archivedThreads(in: pond)
-        if let title = ThreadArchive.entryTitle(count: archived.count) {
-            let open = archivedOpen.contains(pond)
-            Button { withAnimation(Motion.standard) { if open { archivedOpen.remove(pond) } else { archivedOpen.insert(pond) } } } label: {
-                HStack(spacing: 8) {
-                    Lucide(open ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
-                    Text(verbatim: title).font(Typo.body).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 0)
-                }
-                .padding(.leading, 22).padding(.trailing, 10).frame(height: Metrics.chatRow).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).pointerHand()
-            .accessibilityLabel(open ? "\(title), open. Hide" : "\(title), folded. Show")
-            if open {
-                ForEach(archived) { WorkbenchChatRow(session: $0, indent: 1).transition(Motion.fold) }
             }
         }
     }
@@ -659,7 +673,7 @@ private struct FoldRow: View {
                 .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
         case .working:
             // 15 pt tall compact mark centred in a 24 pt slot: its visible pixels (about 23 pt) stay inside the slot, clear of the name.
-            WorkingGlyph(height: 15, slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
+            WorkingGlyph(slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
         case .error:
             StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):
@@ -691,7 +705,7 @@ private struct FoldRow: View {
         if let onAdd, depth == 0 || hovering {
             Button(action: onAdd) {
                 Group {
-                    if adding { TideGlyph(color: Theme.muted, height: TideGlyph.Grid.mini.height(fittingWidth: 20)) } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
+                    if adding { TideGlyph(color: Theme.muted, grid: .mini) } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
                 }
                 .frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -703,8 +717,7 @@ private struct FoldRow: View {
         }
     }
 
-    private var row: some View {
-        Button(action: { focused = true; action() }) {
+    private var rowContent: some View {
             HStack(spacing: 10) {
                 if depth == 0 {
                     Group {
@@ -730,7 +743,7 @@ private struct FoldRow: View {
                 } else {
                     StreamStateMark(state: streamState, slotWidth: 20)
                 }
-                Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
+                Text(verbatim: title).font(.system(size: 14, weight: unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     .truncationMode(.tail)
                 // An open pond shows its chats, each with its own mark: the rollup would only repeat them.
@@ -743,15 +756,33 @@ private struct FoldRow: View {
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
             .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
+            .background(homeSelected ? PondColour.wash(pondId, .pondHeader) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
             }
             .contentShape(Rectangle())
+    }
+
+    /// A pond row is not a Button: a Button (and a simultaneous double-tap gesture) takes the mouse-down, so the
+    /// row's `.draggable` never began a drag. One tap gesture reads the click count instead: the first click opens
+    /// the pond, a double-click folds or unfolds it like its chevron.
+    @ViewBuilder private var rowBody: some View {
+        if depth == 0 {
+            rowContent
+                .onTapGesture {
+                    focused = true
+                    if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { onDisclose?() } else { action() }
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { focused = true; action() }
+        } else {
+            Button(action: { focused = true; action() }) { rowContent }.buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        // A double-click on a pond folds or unfolds it like its chevron; the first click still opens it.
-        .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
+    }
+
+    private var row: some View {
+        rowBody
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
         .pointerHand()
         .accessibilityLabel(depth == 0 && rollup != nil && (rollup!.working > 0 || rollup!.needsYou > 0)
@@ -764,7 +795,7 @@ private struct FoldRow: View {
         if lifecycle == .setupFailed {
             LifecycleSlot(mark: .setupFailed)
         } else if lifecycle == .settingUp {
-            WorkingGlyph(color: Theme.muted, height: 10, slot: 28, alignment: .trailing).opacity(0.7).frame(height: 16).help(WorkspaceLifecycle.words(.settingUp))
+            WorkingGlyph(color: Theme.muted, slot: 28, alignment: .trailing).opacity(0.7).frame(height: 16).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
                 Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)
@@ -816,7 +847,8 @@ struct WorkbenchChatRow: View {
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? PondColour.wash(PondsModel.shared.key(of: session), .selectedRow) : .clear, in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -854,7 +886,8 @@ struct SharedThreadRowView: View {
             }
             .padding(.leading, Space.s + 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? PondColour.wash(row.pondId, .selectedRow) : .clear, in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1012,4 +1045,17 @@ private struct HoverIcon: View {
             .animation(Motion.quick, value: over || rowHovering)
             .onHover { over = $0 }
     }
+}
+
+/// Tracks where a dragged pond hovers (before or after the row, by the pointer's half) and performs the drop.
+private struct PondDropDelegate: DropDelegate {
+    let slot: (Double) -> Int
+    let over: (Int) -> Void
+    let left: () -> Void
+    let perform: (Int) -> Bool
+
+    func dropEntered(info: DropInfo) { over(slot(info.location.y)) }
+    func dropUpdated(info: DropInfo) -> DropProposal? { over(slot(info.location.y)); return DropProposal(operation: .move) }
+    func dropExited(info: DropInfo) { left() }
+    func performDrop(info: DropInfo) -> Bool { perform(slot(info.location.y)) }
 }

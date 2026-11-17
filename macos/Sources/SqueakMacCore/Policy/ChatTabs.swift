@@ -55,26 +55,94 @@ public enum ModelPicking {
     }
 }
 
-/// Chat tab widths (DESIGN.md 8.10): a tab never passes `maxWidth` (title text at most `maxTitle`); with many tabs they
-/// shrink evenly down to `minWidth`, and only then does the strip scroll.
+/// Tab widths for every strip (centre chats, right, bottom; DESIGN.md 8.10). A tab hugs its content: equal 10pt side
+/// padding, icon, 6pt gap, title, 4pt gap, a 14pt close slot (reserved, shown on hover only). No tab is ever wider than
+/// it needs to be. Only when the strip genuinely runs out of room do titles truncate, and then the longest tabs give
+/// way first, down to a floor that still shows the icon and a few characters (`cap(naturals:available:)`).
 public enum ChatTabWidth {
-    public static let maxWidth: Double = 260
-    public static let minWidth: Double = 120
-    public static let maxTitle: Double = 200
-    /// A tab hugs its content (leading pad, mark, title, gap, ×, trailing pad); this keeps a short title's hit target.
-    public static let hugMinWidth: Double = 72
-    public static let leadingPad: Double = 12
-    public static let trailingPad: Double = 6
-    public static let closeSlot: Double = 18
+    public static let leadingPad: Double = 7
+    public static let trailingPad: Double = 7
+    public static let iconSlot: Double = 16
+    public static let iconGap: Double = 6
+    public static let closeGap: Double = 4
+    public static let closeSlot: Double = 14
+    /// A title never shows more than this, however much room there is.
+    public static let maxTitle: Double = 220
+    public static let minTitle: Double = 44
 
-    /// The width a tab takes for its natural content, held between the minimum and the shared cap.
-    public static func hugged(content: Double, cap: Double) -> Double {
-        min(max(cap, hugMinWidth), max(hugMinWidth, content + leadingPad + trailingPad))
+    /// Everything in a tab that is not its title.
+    public static let chrome: Double = leadingPad + iconSlot + iconGap + closeGap + closeSlot + trailingPad
+    /// The narrowest a tab is drawn: its chrome and a few characters.
+    public static let minWidth: Double = chrome + minTitle
+
+    /// A tab's natural width for a title that measures `titleWidth` points.
+    public static func natural(titleWidth: Double) -> Double {
+        chrome + min(max(titleWidth, 0), maxTitle)
     }
 
-    /// Each chat tab width given `count` tabs sharing `available` points.
-    public static func width(count: Int, available: Double) -> Double {
-        guard count > 0, available > 0 else { return maxWidth }
-        return min(maxWidth, max(minWidth, (available / Double(count)).rounded(.down)))
+    /// The width a tab is drawn at: it hugs its content (`natural`, plus `extra` for anything after the title such as a
+    /// badge or dirty dot), never under `minWidth` and never over `cap` (infinity while the strip has room). A cap below
+    /// the floor loses to the floor, so a crowded strip scrolls instead of squashing tabs.
+    public static func width(titleWidth: Double, extra: Double = 0, cap: Double = .infinity) -> Double {
+        let hug = max(natural(titleWidth: titleWidth) + max(extra, 0), minWidth)
+        return max(min(hug, cap), minWidth)
+    }
+
+    /// The widest any one tab may be so that all of `naturals` fit in `available` points: infinity while they already
+    /// fit (nothing truncates); otherwise the longest tabs are cut back to a shared cap (shorter ones keep their own
+    /// width, so no room is left empty), never below `minWidth`.
+    public static func cap(naturals: [Double], available: Double) -> Double {
+        guard !naturals.isEmpty, available.isFinite, available > 0 else { return .infinity }
+        let total = naturals.reduce(0, +)
+        if total <= available { return .infinity }
+        var low = minWidth, high = naturals.max() ?? minWidth
+        guard naturals.reduce(0, { $0 + min($1, low) }) < available else { return low }
+        for _ in 0..<40 {
+            let mid = (low + high) / 2
+            if naturals.reduce(0, { $0 + min($1, mid) }) <= available { low = mid } else { high = mid }
+        }
+        return low.rounded(.down)
+    }
+}
+
+/// A dock strip's tabs never squash below `ChatTabWidth.minWidth`, and the strip scrolls when they still do not fit. A
+/// trailing accessory (a shortcut hint) is only worth the room when every tab still fits beside it.
+public enum TabStripFit {
+    public static let tabMin: Double = ChatTabWidth.minWidth
+    public static let titleMin: Double = ChatTabWidth.minTitle
+
+    /// Whether a trailing accessory `accessory` points wide fits beside `tabs` tabs at their minimum, the strip's own
+    /// leading slot and the "+" button, in a strip `strip` points wide. Unknown width (0) says no.
+    public static func showsAccessory(strip: Double, tabs: Int, leading: Double, plus: Double = 36, accessory: Double) -> Bool {
+        guard strip.isFinite, strip > 0 else { return false }
+        return strip >= leading + plus + Double(max(0, tabs)) * tabMin + accessory
+    }
+}
+
+/// What a tab is doing, for the mark in its trailing slot (DESIGN.md 8.10).
+public enum TabActivity: Equatable, Sendable {
+    case idle, working, needsYou
+}
+
+/// What the tab's reserved 14pt trailing slot shows. The slot never changes size; the close button and the activity
+/// mark share it, so hovering swaps them (the view crossfades) and the tab never shifts.
+public struct TabSlotContent: Equatable, Sendable {
+    public var close: Bool
+    public var workingGlyph: Bool
+    public var warning: Bool
+
+    /// Hovered: the close button only. Otherwise working shows the tide glyph, needs-you the warning triangle, idle nothing.
+    public static func of(_ activity: TabActivity, hovered: Bool) -> TabSlotContent {
+        if hovered { return TabSlotContent(close: true, workingGlyph: false, warning: false) }
+        return TabSlotContent(close: false, workingGlyph: activity == .working, warning: activity == .needsYou)
+    }
+
+    /// A chat's tab from its mark: working (also background work) and waiting; everything else is quiet.
+    public static func activity(of mark: ChatMarkKind?) -> TabActivity {
+        switch mark {
+        case .working?: .working
+        case .waiting?: .needsYou
+        default: .idle
+        }
     }
 }

@@ -184,7 +184,7 @@ struct NativeNewChatView: View {
     @State private var agent = NewChatAgent.claude
     @State private var modelId: String?
     @State private var effort: String?
-    @State private var mode = "default"
+    @State private var mode = "bypassPermissions"
     @State private var text = ""
     @State private var sending = false
     @State private var problem: String?

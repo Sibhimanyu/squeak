@@ -18,7 +18,6 @@ struct WorkbenchCentre: View {
     /// The right zone is on screen (its toggle sits in this header's place when it is not).
     let inspectorOpen: Bool
     /// The right zone's tab is Code, which carries the git cluster itself.
-    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     let showingCompose: Bool
 
@@ -49,7 +48,7 @@ struct WorkbenchCentre: View {
             if let chat {
                 WorkbenchHeader(
                     session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.displayTitle,
-                    sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, gitInRightStrip: gitInRightStrip, toggleSidebar: toggleSidebar)
+                    sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
                 if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
                 HStack {
@@ -63,21 +62,32 @@ struct WorkbenchCentre: View {
                 DesktopComposePage()
             } else if let chat, let project = roomProject(for: place), RoomSelection.shared.isOpen(project) {
                 PondRoomView(projectId: project).heresayPrivate()
+            } else if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
+                DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
+                    .id(ref.taskId)
             } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
-                TerminalPanelView(session: chat, shell: shell).dockDrop(.centre)
+                TerminalPanelView(session: chat, shell: shell)
             } else if let chat, let panel = DockStore.shared.layout.centre.selected {
-                DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity).dockDrop(.centre)
+                DockPanelContent(panel: panel, session: chat).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let files, let chat, files.review.isOpen {
                 ReviewView(files: files, session: chat).heresayPrivate()
             } else if let files, let file = files.activeFile, DockStore.shared.files.zone(of: file.path) == .centre {
                 FileViewer(files: files, file: file).id(file.path)
             } else {
-                DetailView().dockDrop(.centre)
+                DetailView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Pond tint (§3.5): a very faint wash from the top edge, fading out over the header and the tab strip.
+        .background(alignment: .top) {
+            LinearGradient(colors: [PondColour.wash(PondColour.openPond(chat), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
+        }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
-        .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre) }
+        .onChange(of: model.selected) { _, key in
+            for f in model.filesModels.values { f.showChat() }; DockStore.shared.deselectTerminals(.centre)
+            if let d = DockStore.shared.ducklings.selected[.centre], d.session != key { DockStore.shared.deselectDucklings(.centre) }
+        }
         .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
@@ -121,7 +131,6 @@ private struct WorkbenchHeader: View {
     let workspace: String?
     let sidebarHidden: Bool
     let inspectorOpen: Bool
-    let gitInRightStrip: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -159,7 +168,7 @@ private struct WorkbenchHeader: View {
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
-            if !gitInRightStrip, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
+            if session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
             if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
@@ -253,12 +262,14 @@ private struct WorkbenchTabs: View {
     @State private var showHistory = false
 
     private var dock: DockStore { DockStore.shared }
-    private var chats: [HostSession] { model.streamThreads(workspace) }
+    /// The strip's threads: one docked in a side zone is not here (a thread is in one place).
+    private var chats: [HostSession] { model.streamThreads(workspace).filter { !dock.threads.isDocked($0.key.stringValue) } }
 
     private enum StripItem: Identifiable {
-        case chat(HostSession), file(OpenFile)
+        case chat(HostSession), file(OpenFile), duckling(DucklingRef)
         var id: String {
             switch self {
+            case .duckling(let r): "duckling-\(r.session.stringValue)-\(r.taskId)"
             case .chat(let s): "chat-\(s.key.stringValue)"
             case .file(let f): "file-\(f.id.uuidString)"
             }
@@ -267,6 +278,12 @@ private struct WorkbenchTabs: View {
 
     /// Threads and files in the order they were opened (the saved strip); before the stream has one, threads then files.
     private var stripItems: [StripItem] {
+        CentreStripOrder.order(baseItems, chatKey: { if case .chat(let s) = $0 { s.key.stringValue } else { nil } },
+                               ducklings: dock.ducklings.ducklings(in: .centre))
+            .map { e in switch e { case .item(let i): i; case .duckling(let r): .duckling(r) } }
+    }
+
+    private var baseItems: [StripItem] {
         let open = files?.open.filter { !$0.isListing } ?? []
         guard model.streamTabs.hasStrip(workspace.id) else { return chats.map(StripItem.chat) + open.map(StripItem.file) }
         let byKey = Dictionary(chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { a, _ in a })
@@ -288,8 +305,17 @@ private struct WorkbenchTabs: View {
 
     @State private var stripWidth: Double = 0
     @State private var hoveredTab: SessionKey?
+    @State private var chatDropTarget: SessionKey?
     @Namespace private var tabIndicator
-    private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
+    /// The widest any tab may be: infinity while every tab fits at its natural width (see `ChatTabWidth.cap`).
+    private var tabCap: CGFloat {
+        var titles = chats.map { model.workbenchTitle($0) }
+        titles += (files?.open ?? []).filter { dock.files.zone(of: $0.path) == .centre }.map(\.name)
+        titles += dock.ducklings.ducklings(in: .centre).map { r in model.allSessions.first { $0.key == r.session }.flatMap { model.ducklings(for: $0)?.items.first { $0.id == r.taskId }?.title } ?? "Duckling" }
+        titles += dock.layout.centre.panels.filter { $0 != .terminal }.map(\.title)
+        titles += dockTerminalTabs(in: .centre, session: chats.first)?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? []
+        return TabTitleMeasure.cap(titles: titles, available: stripWidth - 120)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -298,6 +324,7 @@ private struct WorkbenchTabs: View {
                     if let project = roomProject {
                         PondRoomTab(selected: roomOpen, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
+                            dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                             dock.update { $0.selectChats() }
                             RoomSelection.shared.open(project)
                         }
@@ -305,11 +332,16 @@ private struct WorkbenchTabs: View {
                     ForEach(stripItems) { item in
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
+                        case .duckling(let ref):
+                            if let parent = model.allSessions.first(where: { $0.key == ref.session }) {
+                                DockDucklingTab(session: parent, ref: ref, zone: .centre, selected: dock.ducklings.selected[.centre] == ref && !roomOpen,
+                                                height: Metrics.tabStrip, indicator: tabIndicator).transition(.opacity)
+                            }
                         case .file(let f):
                             if let files, dock.files.zone(of: f.path) == .centre {
-                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil && !roomOpen,
+                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil && !roomOpen,
                                             height: Metrics.tabStrip, indicator: tabIndicator) {
-                                    dock.deselectTerminals(.centre)
+                                    dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                                     RoomSelection.shared.close()
                                     dock.update { $0.selectChats() }
                                     files.activePath = f.path
@@ -321,7 +353,7 @@ private struct WorkbenchTabs: View {
                         DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p && !roomOpen, height: Metrics.tabStrip, indicator: tabIndicator) {
                             RoomSelection.shared.close()
                             files?.showChat()
-                            dock.deselectTerminals(.centre)
+                            dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                             dock.update { $0.select(p) }
                         }
                     }
@@ -346,6 +378,7 @@ private struct WorkbenchTabs: View {
                     .buttonStyle(.plain).padding(.leading, 4)
                     .accessibilityLabel("New thread").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New thread")
                 }
+                .environment(\.tabMaxWidth, tabCap)
                 .padding(.horizontal, Space.l)
             }
             DockWorkspacePicker()
@@ -361,7 +394,11 @@ private struct WorkbenchTabs: View {
         .frame(height: Metrics.tabStrip)
         .dockDrop(.centre, wash: false)
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
-        .task(id: model.allSessions.count) { model.pruneStreamTabs() }
+        .task(id: model.allSessions.count) {
+            model.pruneStreamTabs()
+            dock.pruneThreads(keeping: Set(model.allSessions.map { $0.key.stringValue }))
+            dock.pruneDucklings(keeping: Set(model.allSessions.map(\.key)))
+        }
         // File tabs are saved with the strip: brought back once per run, if the file is still there.
         .task(id: files?.root) {
             guard let files, !files.restoredTabs else { return }
@@ -379,7 +416,9 @@ private struct WorkbenchTabs: View {
         }
         .modifier(CentreFileDockSync(files: files))
         .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
-        .task(id: model.selected) { if let key = model.selected { model.ensureTab(for: key) } }
+        .task(id: "\(model.selected?.stringValue ?? "") \(model.allSessions.count) \(workspace.id)") {
+            if let key = model.selected, model.selectedSession != nil { model.ensureTab(for: key, in: workspace) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             let box = note.object as? CloseTabAction.Box
             if roomOpen { RoomSelection.shared.close(); box?.handled = true }
@@ -406,6 +445,7 @@ private struct WorkbenchTabs: View {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
         let wasOpen = s.key == model.selected
+        for r in dock.ducklings.ducklings(in: .centre) where r.session == s.key { dock.closeDuckling(r) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
         let next = model.closeStreamTab(s.key, in: workspace.id)
         if shown.count == 1 {
@@ -431,45 +471,56 @@ private struct WorkbenchTabs: View {
 
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && !roomOpen
+        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil && !roomOpen
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return RowOrButton(editing: model.isRenaming(s), action: { RoomSelection.shared.close(); files?.showChat(); dock.deselectTerminals(.centre); dock.update { $0.selectChats() }; model.select(s.key) }) {
-            HStack(spacing: 7) {
-                // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
-                if model.isRenaming(s) {
-                    InlineTitleEditor(session: s, font: .system(size: 14)).frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
-                } else {
-                    Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
-                        .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
-                }
-                if s.showsConductorBadge { ConductorMarker().fixedSize() }
-                // The close slot is reserved (invisible until hover) so it never moves the layout; the tab hugs
-                // its content: title, a small gap, the ×.
-                if !chats.isEmpty {
-                    Button { closeTab(s) } label: {
-                        Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key).animation(Motion.quick, value: hoveredTab)
-                    .accessibilityLabel("Close \(model.workbenchTitle(s))")
-                }
-            }
-            .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
-            .frame(minWidth: ChatTabWidth.hugMinWidth, maxWidth: tabWidth, minHeight: Metrics.tabStrip, maxHeight: Metrics.tabStrip, alignment: .leading)
-            .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
-            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
-            .contentShape(Rectangle())
+        let open = { RoomSelection.shared.close(); files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
+        return Group {
+            StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
+                     showsClose: !chats.isEmpty,
+                     titleWidth: model.isRenaming(s) ? 160 : TabTitleMeasure.width(model.workbenchTitle(s), semibold: model.isUnread(s)),
+                     titleExtra: s.showsConductorBadge ? 18 : 0, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),
+                     onHover: { inside in
+                         hoveredTab = inside ? s.key : (hoveredTab == s.key ? nil : hoveredTab)
+                         if inside { dock.hoveredTab = .thread(s.key.stringValue) } else if dock.hoveredTab == .thread(s.key.stringValue) { dock.hoveredTab = nil }
+                     }, close: { closeTab(s) },
+                     // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
+                     icon: { tabIcon(s).help(SessionText.agentName(s.agent) ?? "") },
+                     title: {
+                         HStack(spacing: 4) {
+                             if model.isRenaming(s) {
+                                 InlineTitleEditor(session: s, font: Typo.body)
+                             } else {
+                                 Text(verbatim: model.workbenchTitle(s)).font(Typo.body.weight(model.isUnread(s) ? .semibold : .regular))
+                                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
+                             }
+                             if s.showsConductorBadge { ConductorMarker().fixedSize() }
+                         }
+                     })
         }
-        .buttonStyle(.plain)
-        .draggable(s.key.stringValue)
-        .dropDestination(for: String.self) { values, _ in
-            guard values.count == 1, let source = values.first else { return false }
-            // A dock tab dropped on a chat tab goes to the centre; a nested String drop would not reach the strip's.
+        // Not a Button: a Button takes the mouse-down and the drag never starts.
+        .onTapGesture { if !model.isRenaming(s) { open() } }
+        .accessibilityAddTraits(.isButton)
+        .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
+        .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
+        .onDrag { dragProvider(DockItemPayload.encode(.thread(s.key.stringValue)), kind: .thread) } preview: { DockTabDragPreview(title: model.workbenchTitle(s)) }
+        .padding(.leading, chatDropTarget == s.key ? 16 : 0)
+        .overlay(alignment: .leading) {
+            if chatDropTarget == s.key { Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8).allowsHitTesting(false).transition(.opacity) }
+        }
+        .animation(Motion.standard, value: chatDropTarget == s.key)
+        .scopedDrop(.centreStrip, isTargeted: { on in
+            if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
+        }) { source in
+            if case .thread(let moving)? = DockItemPayload.decode(source) {
+                // From a side zone the thread comes home first, then sits before this tab.
+                if dock.threads.isDocked(moving) { dock.moveThread(moving, to: .centre) }
+                dock.dragging = nil
+                return moving == s.key.stringValue || model.moveChatTab(moving, before: s.key, workspace: workspace)
+            }
+            // Any other dock tab dropped on a chat tab goes to the centre.
             if let item = DockItemPayload.decode(source) { return performDockDrop(item, to: .centre, before: nil, model: model) }
-            return model.moveChatTab(source, before: s.key, workspace: workspace)
+            return false
         }
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
@@ -480,14 +531,6 @@ private struct WorkbenchTabs: View {
             Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
-    }
-}
-
-
-private extension View {
-    /// A working chat's tab pulses its agent logo, no extra width.
-    @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
-        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in Motion.pulseStep } } else { self }
     }
 }
 

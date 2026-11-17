@@ -5,7 +5,7 @@
 import { age, displayTitle, newestFirst, projectName, projects, status, needsYouCount } from "./presentation.js";
 
 /** Widths where the layout changes; the same numbers are the media queries in css/shell.css. */
-export const BREAKPOINTS = Object.freeze({ wide: 1100, mid: 761 });
+export const BREAKPOINTS = Object.freeze({ wide: 1280, mid: 761 });
 
 /** `wide` (sidebar, main, inspector), `mid` (sidebar, main; the inspector is a drawer) or `phone` (one column, tab bar, sheet). */
 export function layoutMode(width) {
@@ -204,4 +204,21 @@ export function filterPalette(items, query, limit = PALETTE_LIMIT) {
 export function moveIndex(index, step, length) {
   if (length <= 0) return -1;
   return ((((index < 0 ? (step > 0 ? -1 : 0) : index) + step) % length) + length) % length;
+}
+
+/** The chat tab strip: opening a chat adds its tab (at most `max`, the oldest unselected one drops). Returns a new list. */
+export function openTab(tabs, key, max = 8) {
+  if (!key || tabs.includes(key)) return tabs;
+  const next = [...tabs, key];
+  while (next.length > max) next.shift();
+  return next;
+}
+
+/** Closing a tab: the list without it, and which chat to show next when it was the open one (its neighbour, else none). */
+export function closeTab(tabs, key, selected) {
+  const at = tabs.indexOf(key);
+  if (at < 0) return { tabs, next: selected };
+  const rest = tabs.filter((k) => k !== key);
+  if (selected !== key) return { tabs: rest, next: selected };
+  return { tabs: rest, next: rest[Math.min(at, rest.length - 1)] ?? null };
 }

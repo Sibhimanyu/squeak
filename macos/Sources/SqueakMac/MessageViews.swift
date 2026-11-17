@@ -211,7 +211,7 @@ struct EarlierRow: View {
             case .none:
                 Color.clear.frame(height: 1)
             case .loading:
-                TideGlyph(color: Theme.muted, height: 5)
+                TideGlyph(color: Theme.muted, grid: .mini)
                 Text("Loading earlier messages…").font(Typo.meta).foregroundStyle(Theme.muted)
             case .failed:
                 let error = paging.error ?? ""

@@ -2,12 +2,24 @@ import Testing
 @testable import SqueakMacCore
 
 @Suite struct ChatTabWidthTests {
-    @Test func fewTabsCapAtMax() { #expect(ChatTabWidth.width(count: 2, available: 1000) == 260) }
-    @Test func manyTabsShrinkEvenly() { #expect(ChatTabWidth.width(count: 5, available: 800) == 160) }
-    @Test func neverBelowMin() { #expect(ChatTabWidth.width(count: 30, available: 800) == 120) }
-    @Test func noTabsOrSpace() {
-        #expect(ChatTabWidth.width(count: 0, available: 800) == 260)
-        #expect(ChatTabWidth.width(count: 3, available: 0) == 260)
+    @Test func fitsMeansNoCap() {
+        #expect(ChatTabWidth.cap(naturals: [120, 150, 90], available: 400) == .infinity)
+        #expect(ChatTabWidth.cap(naturals: [], available: 400) == .infinity)
+        #expect(ChatTabWidth.cap(naturals: [120], available: 0) == .infinity)
+    }
+    @Test func shortTabsKeepTheirWidthAndLongOnesGiveWay() {
+        let naturals = [90.0, 260, 260]
+        let cap = ChatTabWidth.cap(naturals: naturals, available: 500)
+        #expect(cap >= 204 && cap <= 205)   // 90 + 2 x ~205 = 500: no room left empty
+        #expect(naturals.reduce(0) { $0 + min($1, cap) } <= 500)
+    }
+    @Test func neverBelowTheFloor() {
+        #expect(ChatTabWidth.cap(naturals: Array(repeating: 260, count: 30), available: 800) == ChatTabWidth.minWidth)
+    }
+    @Test func naturalWidthHugsTheTitle() {
+        #expect(ChatTabWidth.natural(titleWidth: 30) == ChatTabWidth.chrome + 30)
+        #expect(ChatTabWidth.natural(titleWidth: 900) == ChatTabWidth.chrome + ChatTabWidth.maxTitle)
+        #expect(ChatTabWidth.chrome == 54)
     }
 }
 
@@ -22,7 +34,16 @@ import Testing
         #expect(ChatTabs.selectionAfterClosing("c", selected: "c", shown: ["a", "b", "c"]) == "b")
         #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
     }
-    @Test func shortTitleKeepsMinimum() { #expect(ChatTabWidth.hugged(content: 20, cap: 260) == 72) }
-    @Test func contentHugsBetweenBounds() { #expect(ChatTabWidth.hugged(content: 100, cap: 260) == 118) }
-    @Test func longTitleStopsAtCap() { #expect(ChatTabWidth.hugged(content: 500, cap: 260) == 260) }
+
+    @Test func tabHugsItsTitle() {
+        // A short title gets a short tab (the floor), a long one stops at the title maximum, never padded to a cap.
+        #expect(ChatTabWidth.width(titleWidth: 10) == ChatTabWidth.minWidth)
+        #expect(ChatTabWidth.width(titleWidth: 100) == ChatTabWidth.chrome + 100)
+        #expect(ChatTabWidth.width(titleWidth: 100, extra: 18) == ChatTabWidth.chrome + 118)
+        #expect(ChatTabWidth.width(titleWidth: 900) == ChatTabWidth.chrome + ChatTabWidth.maxTitle)
+        // A cap shortens a long tab but leaves a short one alone, and never goes under the floor.
+        #expect(ChatTabWidth.width(titleWidth: 400, cap: 150) == 150)
+        #expect(ChatTabWidth.width(titleWidth: 60, cap: 300) == ChatTabWidth.chrome + 60)
+        #expect(ChatTabWidth.width(titleWidth: 400, cap: 10) == ChatTabWidth.minWidth)
+    }
 }

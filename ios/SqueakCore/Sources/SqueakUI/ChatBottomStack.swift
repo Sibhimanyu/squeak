@@ -48,7 +48,7 @@ struct LiveBar: View {
                 .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
                 if canStop {
                     Button(action: stop) {
-                        if stopping { TideGlyph(color: Theme.ink, height: 8) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                        if stopping { TideGlyph(color: Theme.ink, grid: .mini) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
                     }
                     .buttonStyle(.bordered).tint(Theme.ink)
                     .frame(minHeight: 44)

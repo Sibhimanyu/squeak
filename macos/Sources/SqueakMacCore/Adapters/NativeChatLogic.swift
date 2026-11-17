@@ -145,13 +145,16 @@ public enum NativeCards {
             c.approval = ApprovalCardModel(tool: "File change", heading: clean(p["title"]?.string) ?? "Change files", target: clean(p["grantRoot"]?.string), reason: reason, age: age)
         default:
             let name = tool ?? "a tool"
-            let heading = clean(p["title"]?.string) ?? "\(agent) wants to use \(name)"
+            let heading = clean(p["title"]?.string) ?? ApprovalPresentation.title(agent: agent, tool: name.hasPrefix("mcp__") ? "MCP" : name)
             let command = name == "Bash" ? clean(input["command"]?.string) : nil
             let target = command == nil
                 ? (clean(p["blockedPath"]?.string) ?? clean(input["file_path"]?.string) ?? clean(input["notebook_path"]?.string)
                     ?? clean(input["url"]?.string) ?? clean(input["pattern"]?.string))
                 : nil
-            c.approval = ApprovalCardModel(tool: name.hasPrefix("mcp__") ? "MCP" : name, heading: heading, command: command, target: target, reason: reason, age: age)
+            let preview: String? = name == "Edit" || name == "MultiEdit"
+                ? ApprovalPresentation.diff(old: input["old_string"]?.string, new: input["new_string"]?.string)
+                : (name == "Write" ? clean(input["content"]?.string) : nil)
+            c.approval = ApprovalCardModel(tool: name.hasPrefix("mcp__") ? "MCP" : name, heading: heading, command: command, target: target, reason: reason, age: age, preview: preview)
         }
         return c
     }

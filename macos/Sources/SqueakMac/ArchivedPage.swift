@@ -64,7 +64,7 @@ private struct ArchivedRow: View {
             ThreadDuckView(id: entry.id, agent: entry.agent, size: ThreadDuck.Size.sidebarRow)
             Text(verbatim: entry.title).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
             Spacer(minLength: 8)
-            Text(entry.archivedAt, style: .relative).font(Typo.meta).foregroundStyle(Theme.subtle)
+            Text(verbatim: PickerRows.age(entry.archivedAt)).font(Typo.meta).foregroundStyle(Theme.subtle)
             Button("Open") { open() }.buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
             Button("Unarchive") { unarchive() }.buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
         }

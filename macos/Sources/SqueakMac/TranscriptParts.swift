@@ -78,7 +78,7 @@ struct TurnBlockView: View {
                 Group {
                     switch entry.item {
                     case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
-                    case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
+                    case .tool(let id, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, toolId: id, expand: expand)
                     }
                 }
                 .padding(.top, entry.gap)
@@ -196,6 +196,9 @@ struct ToolCallRow: View {
     let preview: ToolCallPreview
     let running: Bool
     let detail: ToolDetail?
+    /// The call's id: an Agent row opens its duckling as a tab when the chat has one by this id.
+    var toolId: String?
+    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.agentModelContext) private var agentContext
     @Environment(\.pathLinker) private var linker
@@ -208,15 +211,22 @@ struct ToolCallRow: View {
     private var expandable: Bool { detail?.expands == true }
     /// The file a Read/Write/Edit row is about, in full (the label keeps only the name).
     private var targetPath: String? { preview.targetIsPath || preview.kind == .edit ? detail?.path : nil }
+    /// The duckling this Agent row started, when the chat's set has one with the call's id.
+    private var ducklingRef: DucklingRef? {
+        guard preview.kind == .agent, let toolId, let session = model.selectedSession,
+              model.ducklings(for: session)?.items.contains(where: { $0.id == toolId }) == true else { return nil }
+        return DucklingRef(session: session.key, taskId: toolId)
+    }
     private var agentModel: String? { preview.agentModel(chatModelName: agentContext.chatModelName, in: agentContext.choices) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                if let ref = ducklingRef { DockStore.shared.openDuckling(ref); return }
                 guard expandable else { return }
                 withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
-                .buttonStyle(.plain).pointerHand(expandable)
+                .buttonStyle(.plain).pointerHand(expandable || ducklingRef != nil)
                 .onHover { hovering = $0 }
                 .onChange(of: expand) { _, ask in
                     guard expandable else { return }
@@ -267,7 +277,7 @@ struct ToolCallRow: View {
             if running {
                 // A duckling at work is the bar's to show: its step keeps a small still mark, not the water glyph.
                 if preview.kind == .agent { Circle().fill(Theme.subtle).frame(width: 5, height: 5).accessibilityLabel("Duckling working") }
-                else { TideGlyph(color: Theme.muted, height: 4.5) }
+                else { TideGlyph(color: Theme.muted, grid: .mini) }
             }
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).fixedSize()
@@ -447,7 +457,7 @@ struct ProgressTracker: View {
                     if i > 0 { Rectangle().fill(done || now ? Theme.ink.opacity(0.5) : Theme.line).frame(height: 1).frame(maxWidth: 24) }
                     HStack(spacing: 4) {
                         if done { Lucide(.check, size: 11, color: Theme.muted) }
-                        else if now { TideGlyph(color: Theme.muted, height: 4.5) }
+                        else if now { TideGlyph(color: Theme.muted, grid: .mini) }
                         Text(verbatim: label).font(Typo.meta).lineLimit(1)
                             .foregroundStyle(now ? Theme.ink : done ? Theme.muted : Theme.subtle)
                     }
@@ -492,13 +502,10 @@ struct WorkbenchLiveRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            TideGlyph(color: Theme.working, height: 14)
+            TideGlyph(color: Theme.working, grid: .stream)
             if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
             if let since { LiveClockText(since: since) }
-            Spacer(minLength: 8)
-            NextAttentionPill()
         }
-        .frame(height: 40)
         .background {
             if let onStop {
                 Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)

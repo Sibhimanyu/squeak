@@ -152,7 +152,7 @@ struct PondHomeView: View {
         ZStack {
             switch indicator {
             case .none: Color.clear
-            case .refreshing: WorkingGlyph(height: 10, slot: 20).transition(.opacity).accessibilityLabel("Refreshing")
+            case .refreshing: WorkingGlyph(slot: 20).transition(.opacity).accessibilityLabel("Refreshing")
             case .problem(let help):
                 Lucide(.triangleAlert, size: 13, color: Theme.warning).help(help).accessibilityLabel(help)
             case .retry(let help):
@@ -332,7 +332,7 @@ struct PondHomeView: View {
                                     if model.isRenaming(s) { InlineTitleEditor(session: s, font: Typo.body) }
                                     else { Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
                                     Spacer(minLength: 0)
-                                    if let at = s.archivedAt { Text(at, style: .relative).font(Typo.meta).foregroundStyle(Theme.subtle) }
+                                    if let at = s.archivedAt { Text(verbatim: PickerRows.age(at)).font(Typo.meta).foregroundStyle(Theme.subtle) }
                                 }
                                 .padding(.horizontal, 12).frame(height: 36).contentShape(Rectangle())
                             }
@@ -472,7 +472,7 @@ struct PondStateMark: View {
     var body: some View {
         switch state {
         case .working:
-            (leading ? WorkingGlyph(height: 10, slot: TideGlyph.Grid.mark.width(height: 10), alignment: .leading) : WorkingGlyph(height: 15, slot: 24, grid: .compact))
+            (leading ? WorkingGlyph(slot: TideGlyph.Grid.mark.size.width, alignment: .leading, grid: .mark) : WorkingGlyph(slot: 24, grid: .compact))
                 .accessibilityLabel("Working")
         case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16).accessibilityLabel("Needs you")
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14).accessibilityLabel("Failed")

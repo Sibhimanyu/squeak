@@ -4,7 +4,7 @@ import SqueakIcons
 import SwiftUI
 
 /// A stream's state as one mark (DESIGN.md §8.1): working is the tide glyph in `working` (still while the Mac is not
-/// answering), needs you an amber dot (never a count), error the circle-x in `negative`, idle nothing. The slot keeps
+/// answering), needs you an amber dot (never a count), error the circle-x in `negative`, idle a still frame of the glyph in `subtle`. The slot keeps
 /// its size in every state, so a row never moves. The state is the Mac's rollup (`StatusRollup`); this only draws it.
 struct StreamStateMark: View {
     let activity: StatusRollup.Activity
@@ -16,10 +16,10 @@ struct StreamStateMark: View {
             switch activity {
             case .working:
                 TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle,
-                          height: TideGlyph.Grid.mini.height(fittingWidth: slotWidth), still: !model.macIsLive)
+                          grid: .fitting(width: slotWidth, rows: 4), still: !model.macIsLive)
             case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .error: StatusMark(kind: .failed, color: Theme.negative, size: 16)
-            case .idle: Color.clear
+            case .idle: TideGlyph.calm(color: Theme.subtle, grid: .fitting(width: slotWidth, rows: 4))
             }
         }
         .frame(width: slotWidth, height: 20)

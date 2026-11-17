@@ -13,13 +13,20 @@ struct ConversationView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The person's own choices, kept across launches. The inspector starts closed (§8.10).
-    @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
+    /// The sidebar's fold and width live in the dock layout, so each workspace remembers them (and Reset restores them).
+    private var sidebarHiddenSaved: Bool {
+        get { DockStore.shared.layout.sidebarCollapsed }
+        nonmutating set { DockStore.shared.update { $0.sidebarCollapsed = newValue } }
+    }
     /// Where the Pond, Code and Terminal panels sit (DockLayout); the old inspector/terminal keys are read once, to migrate.
     private var dock: DockStore { DockStore.shared }
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
     /// "not dragged yet": it takes its share of the window (30%).
-    @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
+    private var sidebarWidthSaved: Double { DockStore.shared.layout.sidebarWidth ?? PaneWidths.sidebarDefault }
+    private var sidebarWidthBinding: Binding<Double> {
+        Binding(get: { sidebarWidthSaved }, set: { v in DockStore.shared.update { $0.setSidebarWidth(v) } })
+    }
     @State private var windowWidth: Double = 1440
     @State private var columnHeight: Double = 800
     /// Zen mode (⇧⌘.): both side panes away; what was open comes back with the same key.
@@ -35,18 +42,17 @@ struct ConversationView: View {
 
     private var sidebarHidden: Bool { captureHidden || sidebarHiddenSaved }
 
-    private struct ZenState { var sidebarHidden: Bool }
+    private struct ZenState {}
 
     private func toggleZen() {
         if let r = zenRestore {
-            sidebarHiddenSaved = r.sidebarHidden
+            _ = r
             if let saved = zenLayout { dock.update { $0 = saved } }
             zenRestore = nil
             zenLayout = nil
         } else {
-            zenRestore = ZenState(sidebarHidden: sidebarHiddenSaved)
+            zenRestore = ZenState()
             zenLayout = dock.layout
-            sidebarHiddenSaved = true
             dock.update { $0 = $0.zen() }
         }
     }
@@ -69,31 +75,49 @@ struct ConversationView: View {
         Binding(get: { dock.layout.right.size ?? 0 }, set: { v in dock.update { $0.setSize(v > 0 ? v : nil, for: .right) } })
     }
 
-    private func sidebarWidth(open: Bool, inspectorOpen: Bool) -> Double {
-        PaneWidths.effective(
-            sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault, window: windowWidth,
-            otherPane: inspectorOpen
-                ? PaneWidths.clamp(inspectorWidthSaved.wrappedValue, PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: open)) : 0)
-    }
-
-    private func inspectorWidth(sidebarOpen: Bool) -> Double {
-        PaneWidths.effective(
-            inspectorWidthSaved.wrappedValue, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: sidebarOpen), window: windowWidth,
-            otherPane: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
+    /// The window's narrowest content: sidebar min + centre min (+ right min while the right zone is shown).
+    private var minContentWidth: CGFloat {
+        let right = dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
+            && model.settingsSection == nil && model.selectedSession != nil
+        return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.settingsSection != nil || !sidebarHidden, rightShown: right))
     }
 
     var body: some View {
+        // The width the solver is fed is measured on a layer that takes exactly what the window proposes and never
+        // grows with its content (a background on the content itself fed its own overflow back into the solver, so a
+        // dragged inspector made the "window" wider and the panes ran off both edges). The content sits in an overlay,
+        // which cannot change its container's size.
+        Color.clear
+            .frame(minWidth: minContentWidth, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: .top)
+            .background(GeometryReader { geo in
+                Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
+            })
+            .overlay(alignment: .topLeading) { windowContent }
+    }
+
+    @ViewBuilder private var windowContent: some View {
         @Bindable var model = model
         @Bindable var git = model.git
         let layout = dock.layout
-        let ducklingOpen = DucklingRef.open(model.openDuckling, whenSelected: model.selectedSession?.key) != nil
         let dockFiles = dock.files
         let dockTerminals = dock.activeTerminals
-        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals) && !layout.right.collapsed
-        let showsInspector = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
+        let dockThreads = dock.threads
+        let dockDucklings = dock.ducklings
+        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) && !layout.right.collapsed
+        let showsInspectorWanted = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
-        let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
-        let inspectorW = inspectorWidth(sidebarOpen: !sidebarHidden)
+        // One solver decides every width, so the panes can never add up to more than the window.
+        let solved = PaneLayoutSolver.solve(
+            window: windowWidth,
+            sidebar: .init(shown: !sidebarHidden, preferred: sidebarWidthSaved, range: PaneWidths.sidebarRange),
+            right: .init(
+                shown: showsInspectorWanted,
+                preferred: (dock.layout.right.size ?? 0) > 0 ? dock.layout.right.size! : PaneWidths.inspectorDefault(window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarWidthSaved),
+                range: PaneWidths.inspectorRange))
+        let showsInspector = showsInspectorWanted && solved.rightShown
+        let sidebarW = solved.sidebar
+        let inspectorW = solved.right
         let showingSettings = model.settingsSection != nil
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
@@ -110,7 +134,7 @@ struct ConversationView: View {
                         WorkbenchSidebar(width: sidebarW)
                             .overlay(alignment: .trailing) {
                                 PaneResizeHandle(
-                                    edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                    edge: .trailing, width: Binding(get: { sidebarW }, set: { sidebarWidthBinding.wrappedValue = $0 }), range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
                                     window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
                             }
                             .transition(Motion.morph(entering: false))
@@ -124,25 +148,31 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals) : .none
+                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
                             sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && chatOpen,
-                            gitInRightStrip: showsInspector && chatOpen && layout.right.selected == .code && !ducklingOpen,
+                            
                             toggleSidebar: toggleSidebar, showingCompose: showingCompose
                         )
                         .squeakWindowCanvas()
                         if placement == .underCentre { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight) }
                     }
+                    // The centre takes every point the sidebar and right zone leave (never a width worked out from a
+                    // measured window, which could come up short and leave gaps); its minimum keeps overflow impossible.
+                    .frame(minWidth: PaneWidths.centreMin, maxWidth: .infinity)
+                    .clipped()
                     if showsInspector, chatOpen {
                         VStack(spacing: 0) {
                             DockRightColumn(session: model.selectedSession, width: inspectorW)
-                            if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW) }
+                            if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW)
+                                    .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
+                            }
                         }
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
-                                edge: .leading, width: inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
+                                edge: .leading, width: Binding(get: { inspectorW }, set: { inspectorWidthSaved.wrappedValue = $0 }), range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
                         .transition(paneTransition(.trailing)).zIndex(1)
@@ -156,27 +186,26 @@ struct ConversationView: View {
                     if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
                 }
                 .overlay(alignment: .bottom) {
-                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals) { DockEdgeStrip(zone: .bottom) }
+                    if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) { DockEdgeStrip(zone: .bottom) }
                 }
             }
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
         .animation(Motion.standard, value: showingSettings)
-        // A duckling opens in the right zone: show it if it was folded away.
-        .onChange(of: model.openDuckling) { _, ref in
-            if ref != nil {
-                dock.update { l in
-                    if l.right.panels.isEmpty { l.show(.pond) } else { l.setCollapsed(false, for: .right) }
-                }
-            }
-        }
         .animation(Motion.standard, value: showsInspector && chatOpen)
         .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
         }
-        .onAppear { DockDragMonitor.install() }
+        .onAppear {
+            DockDragMonitor.install()
+            // The Pond panel never docks in the centre: dropping it there opens the pond dashboard.
+            dock.openPondDashboard = { [model] in
+                let key = model.selectedSession.flatMap { PondsModel.shared.key(of: $0) } ?? PondsModel.shared.homeProject
+                if let key { PondsModel.shared.route = .home(project: key) }
+            }
+        }
         .onDisappear { KeyFocus.shared.setTerminalOpen(false) }
         .clipped()
         .overlay {
@@ -198,13 +227,6 @@ struct ConversationView: View {
         // Extend the whole clipping/overlay coordinate space into the title bar. Extending only
         // the children let the parent clip their headers off in a normal (non-fullscreen) window.
         .ignoresSafeArea(.container, edges: .top)
-        .background(GeometryReader { geo in
-            Color.clear.onAppear {
-                windowWidth = geo.size.width
-                // A saved width below the sidebar's minimum (an older build, a hand edit) is brought back on load.
-                sidebarWidthSaved = PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault)
-            }.onChange(of: geo.size.width) { _, w in windowWidth = w }
-        })
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
@@ -239,7 +261,6 @@ struct ConversationView: View {
             }
             .opacity(0).accessibilityHidden(true)
         }
-        .frame(minWidth: 960, minHeight: 620)
         .sheet(item: $model.permissionSheet) { kind in PermissionSheet(kind: kind) }
         .sheet(item: $git.mergeConfirm) { MergeConfirmSheet(confirm: $0) }
     }
@@ -281,7 +302,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.titlebarSeparatorStyle = .none
-                w.styleMask.insert(.fullSizeContentView)
+                w.styleMask.insert([.fullSizeContentView, .closable, .miniaturizable, .resizable])
+                w.collectionBehavior.remove(.fullScreenNone)
+                w.collectionBehavior.insert(.fullScreenPrimary)
                 Reader.clearTitlebarSurface(w)
                 // A window that opens already in full screen starts the bar-less chrome at once.
                 if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
@@ -291,9 +314,49 @@ private struct ConversationWindowReader: NSViewRepresentable {
                     NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.bg : Tokens.Light.bg)
                 }
             }
-            Task { @MainActor in AppModel.shared.conversationWindow = w }
+            Task { @MainActor in
+                AppModel.shared.conversationWindow = w
+                if let w { Self.restoreFullScreenOnce(w) }
+            }
             observeFullScreen(w)
             observeTitlebar(w)
+        }
+
+        private static var fullScreenRestored = false
+        /// The first time the main window shows in a run, it goes back to full screen if it was in it when the app
+        /// last went down (on its saved display: AppKit puts a new window on the active one).
+        @MainActor static func restoreFullScreenOnce(_ w: NSWindow) {
+            let env = ProcessInfo.processInfo.environment
+            let saved = UserDefaults.standard.bool(forKey: LaunchWindowPolicy.fullScreenKey)
+            guard LaunchWindowPolicy.restoresFullScreen(saved: saved, alreadyRestored: fullScreenRestored,
+                                                        captureOrDemo: env["SQUEAK_MAC_CAPTURE"] != nil || env["SQUEAK_MAC_DEMO"] != nil) else { return }
+            fullScreenRestored = true
+            // Only once the app is a regular app and the window is on screen and key: a toggle before that makes
+            // AppKit post willEnterFullScreen and then fail, which used to leave the lights hidden for good.
+            var tries = 0
+            func attempt() {
+                tries += 1
+                let ready = LaunchWindowPolicy.canRestoreFullScreen(appIsRegular: NSApp.activationPolicy() == .regular,
+                                                                    windowVisible: w.isVisible, windowIsKey: w.isKeyWindow)
+                if w.styleMask.contains(.fullScreen) { return }
+                if ready {
+                    w.collectionBehavior.insert(.fullScreenPrimary)
+                    w.toggleFullScreen(nil)
+                    // If it did not take, leave the window windowed with its lights.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { syncChrome(w) }
+                } else if tries < 40 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { attempt() }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { attempt() }
+        }
+
+        /// Chrome and the model follow what the window really is, so a transition that failed or was interrupted
+        /// can never leave the traffic lights hidden.
+        @MainActor static func syncChrome(_ w: NSWindow) {
+            let actual = w.styleMask.contains(.fullScreen)
+            setChrome(w, fullScreen: actual)
+            if AppModel.shared.conversationFullScreen != actual { AppModel.shared.conversationFullScreen = actual }
         }
 
         /// Windowed: the system buttons go to an absolute spot (`TitlebarAlignment.windowedButtonOrigin`): the close
@@ -384,7 +447,19 @@ private struct ConversationWindowReader: NSViewRepresentable {
                     }
                 })
             }
-            Task { @MainActor in AppModel.shared.conversationFullScreen = w.styleMask.contains(.fullScreen) }
+            // The transition can fail (AppKit has no public notification for it): look at the real state when it
+            // settles, when the window becomes key, and after a while following the start of a transition.
+            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didBecomeKeyNotification] {
+                tokens.append(nc.addObserver(forName: name, object: w, queue: .main) { _ in
+                    Task { @MainActor in Reader.syncChrome(w) }
+                })
+            }
+            tokens.append(nc.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: w, queue: .main) { _ in
+                for delay in [1.5, 5.0] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { Reader.syncChrome(w) } }
+                }
+            })
+            Task { @MainActor in Reader.syncChrome(w) }
         }
     }
 }

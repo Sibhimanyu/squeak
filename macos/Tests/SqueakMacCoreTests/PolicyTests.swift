@@ -84,6 +84,35 @@ struct NotificationTests {
         #expect(n[0].key.provider == "conductor")
     }
 
+    @Test func squeakChatFinishNotifies() {
+        let prev = [makeSession("a", provider: "claude-squeak", state: .working)]
+        let cur = [makeSession("a", provider: "claude-squeak", state: .finished)]
+        #expect(NotificationPolicy.detect(previous: prev, current: cur).map(\.kind) == [.finished])
+    }
+
+    @Test func squeakFinishWaitsForHelpersAndRowStaysWorking() {
+        var running = makeSession("a", provider: "claude-squeak", state: .finished)
+        running.backgroundCount = 1
+        let prev = [makeSession("a", provider: "claude-squeak", state: .working)]
+        #expect(NotificationPolicy.detect(previous: prev, current: [running]).isEmpty)
+        #expect(SessionGrouping.kind(of: running, now: Date()) == .working)
+        var done = running
+        done.backgroundCount = 0
+        #expect(NotificationPolicy.detect(previous: [running], current: [done]).map(\.kind) == [.finished])
+    }
+
+    @Test func squeakCatalogEndsOptimisticWorkWithoutAStream() {
+        let sent = Date(timeIntervalSince1970: 1_800_000_000)
+        var w = OptimisticWork()
+        w.begin(at: sent.addingTimeInterval(0), baselineSeq: 5)
+        // An older idle before the turn started does not end it.
+        w.observe(catalog: .finished, turnEndedAt: sent.addingTimeInterval(-60))
+        #expect(w.resolve(host: .finished, now: sent.addingTimeInterval(1)) == .working)
+        // The host ended a turn after the send: the row flips without the chat ever being streamed.
+        w.observe(catalog: .finished, turnEndedAt: sent.addingTimeInterval(20))
+        #expect(w.resolve(host: .finished, now: sent.addingTimeInterval(21)) == .finished)
+    }
+
     @Test func errorNotifiesAndUnchangedStatesDoNot() {
         let prev = [makeSession("a", state: .working), makeSession("b", state: .blocked)]
         let cur = [makeSession("a", state: .error), makeSession("b", state: .blocked)]
@@ -262,5 +291,35 @@ struct NotificationTests {
         #expect(p.drain() == nil)
         #expect(p.deliver(key("c"), handlerReady: true) == key("c"))
         #expect(p.drain() == nil)
+    }
+}
+
+
+@Suite("Notification text")
+struct NotificationTextTests {
+    func event(_ kind: NotificationKind, body: String = "x finished", detail: String? = nil) -> NotificationEvent {
+        NotificationEvent(key: SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "a"), kind: kind, title: "Squeak", body: body, detail: detail, label: "Fix login")
+    }
+
+    @Test func finishIsTheAgentsOwnLineWithThreadAndPond() {
+        let c = NotificationText.content(event(.finished), lastAgentText: "## Done\n\nI fixed the **login** bug and added a test.", pond: "greenroom")
+        #expect(c?.title == "Fix login · greenroom")
+        #expect(c?.body == "Done I fixed the login bug and added a test.")
+    }
+
+    @Test func longTextIsCutWithAnEllipsis() {
+        let long = String(repeating: "word ", count: 80)
+        let body = NotificationText.content(event(.finished), lastAgentText: long, pond: nil)?.body ?? ""
+        #expect(body.count <= NotificationText.lineLimit + 1 && body.hasSuffix("…"))
+    }
+
+    @Test func questionShowsTheQuestionAndApprovalSaysSo() {
+        #expect(NotificationText.content(event(.question, detail: "Which branch?"), lastAgentText: nil, pond: nil)?.body == "Which branch?")
+        #expect(NotificationText.content(event(.blocked, body: "Fix login is waiting for your approval"), lastAgentText: nil, pond: nil)?.body == "Wants to run a command")
+    }
+
+    @Test func nothingToShowFallsBack() {
+        #expect(NotificationText.content(event(.finished), lastAgentText: nil, pond: "p") == nil)
+        #expect(NotificationText.content(event(.finished), lastAgentText: "  \n ", pond: "p") == nil)
     }
 }

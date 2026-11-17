@@ -73,18 +73,22 @@ enum WorkbenchNav {
 
     /// A pond's home: every project is one.
     static func openProject(_ model: AppModel, key: String) {
-        NewChatController.shared.hide()
-        model.closeSettings()
-        if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .home(project: key)
+        Signposts.interval(Signposts.Name.pondOpen) {
+            NewChatController.shared.hide()
+            model.closeSettings()
+            if model.navFilter == .usage { model.navFilter = .all }
+            PondsModel.shared.route = .home(project: key)
+        }
     }
 
     private static func showDashboard(_ model: AppModel) {
-        PondsModel.shared.route = nil
-        NewChatController.shared.hide()
-        model.closeSettings()
-        model.select(nil)
-        model.navFilter = .home
+        Signposts.interval(Signposts.Name.dashboardOpen) {
+            PondsModel.shared.route = nil
+            NewChatController.shared.hide()
+            model.closeSettings()
+            model.select(nil)
+            model.navFilter = .home
+        }
     }
 
     static func stepWorkspace(_ model: AppModel, by delta: Int) {
@@ -143,7 +147,6 @@ struct NextAttentionPill: View {
             .buttonStyle(.plain)
             .help("Go to the next chat that needs you (⌥⌘L)")
             .accessibilityLabel(jump.label)
-            .transition(.opacity)
         }
     }
 }

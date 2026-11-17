@@ -46,10 +46,19 @@ struct BrokerTests {
         #expect(await a.discoverCount == 2)
 
         let clock2 = FakeClock(maxTicks: 1)
-        let broker2 = make([a], clock: clock2)
+        let idle = FakeAdapter(sessions: [makeSession("c1", state: .idle)])
+        let broker2 = make([idle], clock: clock2)
         await broker2.setMode(.background)
         await broker2.runPollingLoop()
-        #expect(clock2.recordedSleeps == [.seconds(10)])
+        #expect(clock2.recordedSleeps == [.seconds(5)])
+
+        // A working chat keeps the pace fast even with every window closed, so a finish reaches the notification.
+        let clock3 = FakeClock(maxTicks: 1)
+        let busy = FakeAdapter(sessions: [makeSession("c1", state: .working)])
+        let broker3 = make([busy], clock: clock3)
+        await broker3.setMode(.background)
+        await broker3.runPollingLoop()
+        #expect(clock3.recordedSleeps == [.seconds(2)])
     }
 
     @Test func connectionHealthIsHonestAboutLastSync() async {

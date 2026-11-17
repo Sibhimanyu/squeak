@@ -50,6 +50,19 @@ struct TerminalPanel: View {
     }
 }
 
+/// The shell's view outlives its container (it belongs to `TerminalHost`), so when the zone moves between placements
+/// the new container takes the same view over: keep it filling the container and repaint it once it is in a window.
+private final class TerminalContainer: NSView {
+    override func layout() {
+        super.layout()
+        for v in subviews where v.frame != bounds { v.frame = bounds }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        subviews.forEach { $0.needsLayout = true; $0.needsDisplay = true }
+    }
+}
+
 /// Hosts the selected tab's SwiftTerm view; the views themselves belong to `TerminalHost`.
 private struct TerminalSurface: NSViewRepresentable {
     private let host = TerminalHost.shared
@@ -59,7 +72,7 @@ private struct TerminalSurface: NSViewRepresentable {
     let dark: Bool
 
     func makeNSView(context: Context) -> NSView {
-        let v = NSView()
+        let v = TerminalContainer()
         v.wantsLayer = true
         return v
     }

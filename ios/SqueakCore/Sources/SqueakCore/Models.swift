@@ -903,6 +903,12 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         return (sessions + (recent ?? [])).contains { $0.conductorSessionId != nil }
     }
 
+    /// Whether a chat carries Conductor's badge, marker or Open/Closed tag: only when the Mac's Conductor add-on is
+    /// on (off is the default) and the chat is a Conductor chat. With it off the phone shows no Conductor wording.
+    public func showsConductorMark(for session: Session) -> Bool {
+        conductorEnabled && session.isConductor
+    }
+
     /// Whether RasanAI screens show (the films list, a film's card, the review and progress cards): the Mac says its
     /// RasanAI add-on is on, or (an older Mac that says nothing about add-ons) it sent films or a chat's workflow.
     public var rasanaiEnabled: Bool {

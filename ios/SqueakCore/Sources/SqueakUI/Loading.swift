@@ -47,7 +47,7 @@ struct LoadingLine: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TideGlyph(color: Theme.ink, height: 8)
+            TideGlyph(color: Theme.ink, grid: .mini)
             Text(word).font(.footnote).foregroundStyle(Theme.muted)
         }
         .accessibilityElement(children: .combine)

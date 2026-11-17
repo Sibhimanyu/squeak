@@ -86,8 +86,6 @@ extension NSColor {
 /// jumps between states) and the glyph's vignette fades its overflow, so it never reads as a box. It takes no hits.
 struct WorkingGlyph: View {
     var color: Color = Theme.working
-    /// The glyph's drawn height (the mark grid is 21 x 6, so its width is about 3.6x this).
-    var height: CGFloat = 11
     /// The layout slot's width.
     var slot: CGFloat = 24
     /// Where the glyph sits in the slot: `.trailing` overflows to the left only.
@@ -96,7 +94,7 @@ struct WorkingGlyph: View {
     var grid: TideGlyph.Grid = .mark
 
     var body: some View {
-        TideGlyph(color: color, height: height, grid: grid)
+        TideGlyph(color: color, grid: grid)
             .frame(width: slot, height: 12, alignment: alignment)
             .allowsHitTesting(false)
     }
@@ -112,8 +110,8 @@ struct ChatMarkGlyph: View {
         switch mark.kind {
         case .working:
             Group {
-                if leading { WorkingGlyph(height: 10, slot: TideGlyph.Grid.mark.width(height: 10), alignment: .leading) }
-                else { WorkingGlyph(height: 15, slot: 24, grid: .compact) }
+                if leading { WorkingGlyph(slot: TideGlyph.Grid.mark.size.width, alignment: .leading, grid: .mark) }
+                else { WorkingGlyph(slot: 24, grid: .compact) }
             }.opacity(mark.quiet ? 0.7 : 1)
         case .waiting: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
         case .failed: StatusMark(kind: .failed, color: Theme.negative, size: 14)

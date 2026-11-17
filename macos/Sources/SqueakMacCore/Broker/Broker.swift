@@ -27,6 +27,8 @@ public enum TranscriptRead: Sendable, Equatable {
 public struct NotificationCapture: Sendable, Equatable {
     public var anchor: NotificationAnchor?
     public var messages: [ChatMessage]
+    /// The chat's newest assistant message, for the banner's one line.
+    public var lastAgentText: String? = nil
 }
 
 /// How far back a chat's history has been read, for the row at the top of the conversation.
@@ -112,7 +114,7 @@ public actor Broker {
         cache: EncryptedCache? = nil,
         draftStore: DraftStore? = nil,
         foregroundInterval: Duration = .seconds(2),
-        backgroundInterval: Duration = .seconds(10),
+        backgroundInterval: Duration = .seconds(5),
         transcriptLimit: Int = 200,
         nudgeDebounce: Duration = .milliseconds(200),
         nudgeMinGap: Duration = .seconds(1)
@@ -240,7 +242,13 @@ public actor Broker {
 
     public func setFocused(_ key: SessionKey?) { focused = key }
 
-    public var currentInterval: Duration { mode == .foreground ? foregroundInterval : backgroundInterval }
+    /// A chat working or waiting on the person keeps the poll at the foreground pace even with every window closed:
+    /// a finish or a question must reach the notification within seconds, not after a slow idle tick.
+    public var currentInterval: Duration {
+        if mode == .foreground { return foregroundInterval }
+        let busy = catalog.contains { $0.state == .working || $0.state == .blocked }
+        return busy ? foregroundInterval : backgroundInterval
+    }
 
     // MARK: Polling
 
@@ -535,11 +543,12 @@ public actor Broker {
         guard case .messages(let list, _) = await readTranscript(for: event.key, limit: limit) else {
             return NotificationCapture(anchor: NotificationAnchor(event: event), messages: [])
         }
+        let lastText = list.last(where: { $0.role == .assistant && !$0.text.isEmpty })?.text
         guard let anchor = NotificationContextPolicy.anchorNow(event: event, messages: list) else {
-            return NotificationCapture(anchor: nil, messages: [])
+            return NotificationCapture(anchor: nil, messages: [], lastAgentText: lastText)
         }
         let content = NotificationContextPolicy.resolve(messages: list, anchor: anchor)
-        return NotificationCapture(anchor: anchor, messages: content.cacheable)
+        return NotificationCapture(anchor: anchor, messages: content.cacheable, lastAgentText: lastText)
     }
 
     public func activity(for key: SessionKey) async throws -> [ActivityStep] {

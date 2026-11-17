@@ -130,7 +130,7 @@ final class AppModel {
     let updater = AppUpdater()
 
     // MARK: Selection and conversation
-    private(set) var selected: SessionKey? { didSet { if selected != oldValue { openDuckling = DucklingRef.open(openDuckling, whenSelected: selected); inputsChanged() } } }
+    private(set) var selected: SessionKey? { didSet { if selected != oldValue { DockStore.shared.pruneSideDucklings(keeping: selected); inputsChanged() } } }
     /// Bumped whenever an input of the derived values below changes (sessions, optimistic work, selection, read log,
     /// pins, filters, started chats). Reads of those values register it, so a view re-runs on a real change only;
     /// each value is computed once per bump (`DerivedSessions`), not once per read.
@@ -148,8 +148,6 @@ final class AppModel {
     }
     /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
     var dashboardFilter: DashboardFilter?
-    /// The duckling open in the thread's side panel (`DucklingPanel`); nil when none.
-    var openDuckling: DucklingRef?
     private(set) var messages: [ChatMessage] {
         get { chatStore.messages }
         set { publishIfChanged(chatStore, \.messages, newValue) }
@@ -226,6 +224,9 @@ final class AppModel {
     private(set) var unread: UnreadTracker
     /// Which finished chats this Mac has opened (DESIGN.md §3.3: a chat is unread from a finished turn until opened).
     /// Local only; demo and capture runs neither read nor write the real record.
+    /// The open thread has been at its bottom long enough to count as seen (see `noteBottom`).
+    private(set) var viewingBottom = false { didSet { if viewingBottom != oldValue { inputsChanged() } } }
+    @ObservationIgnored private var dwellTask: Task<Void, Never>?
     private(set) var seenLog: ChatSeenLog { didSet { if seenLog != oldValue { inputsChanged() } } }
     /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
     private(set) var menuReplyPreviews: [SessionKey: String] = [:]
@@ -264,7 +265,9 @@ final class AppModel {
     func streamThreads(_ workspace: SidebarWorkspace) -> [HostSession] {
         let all = pondPageTree.projects.flatMap(\.workspaces).first { $0.id == workspace.id }?.chats ?? workspace.chats
         guard streamTabs.hasStrip(workspace.id) else { return workspace.chats }
-        let byKey = Dictionary((all + workspace.chats).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
+        // The open chat stands in while the list does not carry it yet (a new thread).
+        let standIn = selectedSession.map { [$0] } ?? []
+        let byKey = Dictionary((all + workspace.chats + standIn).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
         return streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil }
     }
 
@@ -281,6 +284,15 @@ final class AppModel {
         guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key),
               !streamTabs.tabs(place.workspace.id).contains(.thread(key.stringValue)) else { return }
         registerTab(key)
+    }
+
+    /// The strip showing `workspace` has the open chat's tab even when the catalog does not list the chat yet (a new
+    /// thread), and a closed-tab memory never hides the chat that is open.
+    func ensureTab(for key: SessionKey, in workspace: SidebarWorkspace) {
+        WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id)
+        let closed = WorkbenchPrefs.shared.closed
+        let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+        if streamTabs.ensureOpen(.thread(key.stringValue), in: workspace.id, seed: seed) { saveStreamTabs() }
     }
 
     private func registerTab(_ key: SessionKey) {
@@ -504,12 +516,19 @@ final class AppModel {
     }
 
     private func handle(_ event: BrokerEvent) async {
+        let post = Signposts.begin(Signposts.Name.pollApply)
+        defer { Signposts.end(Signposts.Name.pollApply, post) }
         switch event {
         case .catalogChanged:
             _ = publishIfChanged(self, \.hostSessions, await broker.sessions())
             // Chats with no seq to compare (Conductor, terminal): the host's word about a turn we started.
-            for s in hostSessions where s.source != .squeak && optimistic[s.key] != nil {
-                noteOptimistic(s.key) { $0.observe(status: s.state) }
+            for s in hostSessions where optimistic[s.key] != nil {
+                if s.source == .squeak {
+                    // The open chat's stream also tells; every other Squeak chat has only the catalog.
+                    noteOptimistic(s.key) { $0.observe(catalog: s.state, turnEndedAt: s.lastTurnEndedAt) }
+                } else {
+                    noteOptimistic(s.key) { $0.observe(status: s.state) }
+                }
             }
             startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()
@@ -518,6 +537,8 @@ final class AppModel {
             await refreshNeedsYouText()
             await refreshAsks()
         case .messagesChanged(let key):
+            let tpost = Signposts.begin(Signposts.Name.transcriptApply)
+            defer { Signposts.end(Signposts.Name.transcriptApply, tpost) }
             let all = await broker.messages(for: key)
             knownMessages[key] = all
             derived.messagesChanged(key)
@@ -591,10 +612,15 @@ final class AppModel {
         let capture = Task { [weak self] in
             let c = await broker.capture(n)
             await self?.record(c, for: n.key)
-            return c.anchor
+            return c
         }
-        let anchor = await Self.race(within: .seconds(1)) { await capture.value }
-        Notifier.shared.post(n, showName: notificationsShowNames, anchor: anchor ?? NotificationAnchor(event: n))
+        let got = await Self.race(within: .seconds(1)) { await capture.value }
+        let anchor = got?.anchor
+        // The agent's own words, if the transcript read made it in time; the generic text otherwise.
+        let session = session(n.key)
+        let content = notificationsShowNames
+            ? NotificationText.content(n, lastAgentText: got?.lastAgentText, pond: session?.workspaceTitle ?? session?.repoName) : nil
+        Notifier.shared.post(n, showName: notificationsShowNames, anchor: anchor ?? NotificationAnchor(event: n), content: content)
     }
 
     private func record(_ capture: NotificationCapture, for key: SessionKey) async {
@@ -674,8 +700,37 @@ final class AppModel {
     }
 
     func isUnread(_ s: HostSession) -> Bool {
-        if s.key == selected, conversationOnScreen { return false }
+        if s.key == selected, viewingSelected { return false }
         return seenLog.isUnread(s)
+    }
+
+    /// The open thread is being looked at: its window is on screen and key, and it has sat at (or within a screen of)
+    /// the bottom for `ReadGate.dwell`. Only then is its reply read (`ReadGate`).
+    private var viewingSelected: Bool {
+        if captureMode { return true }
+        return viewingBottom && conversationOnScreen && (conversationWindow?.isKeyWindow ?? false)
+    }
+
+    /// The thread view says whether the newest end is in view. Arriving starts the dwell; leaving ends it at once.
+    func noteBottom(_ key: SessionKey, atBottom: Bool) {
+        guard key == selected else { return }
+        dwellTask?.cancel()
+        guard atBottom else { if viewingBottom { viewingBottom = false }; return }
+        guard !viewingBottom else { return }
+        dwellTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(ReadGate.dwell))
+            guard !Task.isCancelled, let self, self.selected == key else { return }
+            self.viewingBottom = true
+            self.markOpenChatSeen()
+        }
+    }
+
+    /// Sending in a thread reads it: the person has plainly seen what they are answering.
+    private func readOnSend(_ key: SessionKey) {
+        guard !captureMode, !demoMode, let s = session(key) else { return }
+        let before = seenLog
+        seenLog.markOpened(s)
+        if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
     }
 
     /// The person's "mark as read / unread" (R on a sidebar row): the chat's finished turn counts as opened, or not yet.
@@ -687,7 +742,7 @@ final class AppModel {
 
     /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
     private func markOpenChatSeen() {
-        guard !captureMode, !demoMode, let key = selected, conversationOnScreen, let s = session(key) else { return }
+        guard !captureMode, !demoMode, let key = selected, viewingSelected, let s = session(key) else { return }
         let before = seenLog
         seenLog.markOpened(s)
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
@@ -744,7 +799,8 @@ final class AppModel {
     }
 
     func recomputeVisibility() {
-        inputsChanged()  // what counts as "on screen" moves with the windows (marks read it)
+        inputsChanged()
+        markOpenChatSeen()  // a thread already dwelt on at the bottom reads when its window regains focus  // what counts as "on screen" moves with the windows (marks read it)
         let visible = captureMode || NSApp.windows.contains { w in
             w.isVisible && w.canBecomeKey && !w.isMiniaturized && w.occlusionState.contains(.visible)
         }
@@ -755,6 +811,7 @@ final class AppModel {
         Task { await broker.setMode(visible ? .foreground : .background) }
         if visible { markSelectedDisplayed() }
     }
+
 
     /// The source answered on the last poll, so a transcript read just now is current.
     private var transcriptIsLive: Bool {
@@ -1008,6 +1065,10 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
+        Signposts.interval(Signposts.Name.tabSwitch) { selectUnmeasured(key) }
+    }
+
+    private func selectUnmeasured(_ key: SessionKey?) {
         if let key { lastWorkspaceSession = key; registerTab(key) }
         if key != nil { NewChatController.shared.hide() }
         if key != nil, navFilter == .usage { navFilter = .all }
@@ -1016,6 +1077,8 @@ final class AppModel {
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
+        dwellTask?.cancel()
+        viewingBottom = false
         markOpenChatSeen()
         selectedLoadedAt = nil
         transcriptReadKey = nil
@@ -1568,6 +1631,7 @@ final class AppModel {
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
+        readOnSend(key)
         let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
@@ -1670,8 +1734,11 @@ final class AppModel {
 
     /// A native chat's status from its stream, in the sidebar at once (the catalog read it triggers lands later).
     func applyHostStatus(_ key: SessionKey, _ state: SessionState) {
-        guard let i = hostSessions.firstIndex(where: { $0.key == key }), hostSessions[i].state != state else { return }
-        hostSessions[i].state = state
+        guard let i = hostSessions.firstIndex(where: { $0.key == key }) else { return }
+        // A stream "idle" (also sent on every reconnect) must not turn a finished chat back into an idle one.
+        let next = HostStatusMerge.next(current: hostSessions[i].state, fromStream: state)
+        guard hostSessions[i].state != next else { return }
+        hostSessions[i].state = next
     }
 
     /// The state the chat shows: the host's, but working from the moment of a send newer than what the host last said.
@@ -1870,9 +1937,11 @@ final class AppModel {
 
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {
-        NewChatController.shared.hide()
-        settingsSection = section ?? lastSettingsSection
-        showConversationWindow()
+        Signposts.interval(Signposts.Name.settingsOpen) {
+            NewChatController.shared.hide()
+            settingsSection = section ?? lastSettingsSection
+            showConversationWindow()
+        }
     }
 
     /// Switches the page without opening a window (captures, which host the window themselves).
@@ -2096,17 +2165,39 @@ extension AppModel {
         do {
             let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: nil)
             guard native.key == s.key else { return true }
+            // The host's log is behind what this Mac held (reset or rebuilt): that is from a log that no longer exists.
+            if page.lastSeq < native.timeline.lastSeq { native.timeline = TurnTimeline() }
             native.timeline.load(page.events, hasEarlier: page.hasEarlier)
             native.timelineReady = true
             showTimeline(s.key)
             await closeTimelineGap(s)
+            fillEmptyView(s)
             scheduleDetails(s)
             return true
         } catch let e as AdapterError {
             if case .http(let code) = e, code == 404 || code == 400 { native.hostLacksTimeline = true; return false }
-            // Anything else (the host is down for a moment): the stream's first connection reads it again.
+            // Anything else (the host is down for a moment, a slow read): try again shortly, never leave the chat blank.
+            retryTimelineStart(s)
             return true
-        } catch { return true }
+        } catch { retryTimelineStart(s); return true }
+    }
+
+    /// A first read that failed is read again (a few times, spaced) until the chat has its baseline.
+    private func retryTimelineStart(_ s: HostSession, attempt: Int = 1) {
+        guard attempt <= 5 else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Double(attempt) * 1.5))
+            guard let self, native.key == s.key, !native.timelineReady else { return }
+            if await startNativeTimeline(s), !native.timelineReady { retryTimelineStart(s, attempt: attempt + 1) }
+        }
+    }
+
+    /// A newest page with nothing to draw (all its turns hidden kinds, or no turn at all) while older turns exist pages
+    /// older ones in by itself, a few times, so the chat never sits on a bare "Load earlier messages".
+    func fillEmptyView(_ s: HostSession, budget: Int = 4) {
+        guard budget > 0, native.key == s.key, native.timeline.hasEarlier, !native.olderLoading,
+              TimelinePresentation(native.timeline, now: Date()).messages.isEmpty else { return }
+        loadEarlierTurns(s.key) { [weak self] in self?.fillEmptyView(s, budget: budget - 1) }
     }
 
     /// Reads what the timeline is missing after `lastSeq` (a reconnect, a poll, a gap). Duplicates change nothing.
@@ -2176,8 +2267,10 @@ extension AppModel {
     }
 
     /// The next older page of turns, placed above without moving what is shown.
-    func loadEarlierTurns(_ key: SessionKey) {
-        guard let s = session(key), native.key == key, !native.olderLoading, let before = native.timeline.oldestSeq else { return }
+    func loadEarlierTurns(_ key: SessionKey, then: (@MainActor () -> Void)? = nil) {
+        guard let s = session(key), native.key == key, !native.olderLoading else { return }
+        // No turn held yet (the first page showed none): "before" the newest event reads the newest turns again.
+        let before = native.timeline.oldestSeq ?? (native.timeline.lastSeq + 1)
         native.olderLoading = true
         native.olderError = nil
         showTimeline(key)
@@ -2189,6 +2282,9 @@ extension AppModel {
                 guard native.key == key else { return }
                 native.timeline.prepend(page.events, hasEarlier: page.hasEarlier)
                 scheduleDetails(s)
+                native.olderLoading = false
+                showTimeline(key)
+                then?()
             } catch {
                 native.olderError = "Couldn't load earlier messages"
             }

@@ -58,6 +58,17 @@ final class GenericSessionsTests: XCTestCase {
         XCTAssertFalse(v.conductorEnabled)
     }
 
+    func testConductorMarkShowsOnlyWhenAddonIsOn() throws {
+        let row = #","conductorSessionId":"c1","source":{"id":"conductor","label":"Conductor"}"#
+        let off = try view(#","addons":[]"#, session: session(row))
+        XCTAssertTrue(off.sessions[0].isConductor)
+        XCTAssertFalse(off.showsConductorMark(for: off.sessions[0]))
+        let on = try view(#","addons":["conductor"]"#, session: session(row))
+        XCTAssertTrue(on.showsConductorMark(for: on.sessions[0]))
+        let native = try view(#","addons":["conductor"]"#, session: session(#","conductorSessionId":null,"source":{"id":"squeak","label":"Squeak"}"#))
+        XCTAssertFalse(native.showsConductorMark(for: native.sessions[0]))
+    }
+
     func testAddonsAbsentHidesNothingButAddonsEmptyHidesConductorScreens() throws {
         let off = try view(#","addons":[]"#, session: session(#","conductorSessionId":"c1""#))
         XCTAssertFalse(off.conductorEnabled)

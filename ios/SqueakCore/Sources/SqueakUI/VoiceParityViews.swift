@@ -21,7 +21,7 @@ struct VoiceReadinessRow: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 8) {
                             switch line.style {
-                            case .working: TideGlyph(color: Theme.ink, height: 8)
+                            case .working: TideGlyph(color: Theme.ink, grid: .mini)
                             case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.muted)
                             case .warning: Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.error)
                             }
@@ -110,7 +110,7 @@ struct NaturalVoiceSection: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if busy { TideGlyph(color: Theme.ink, height: 8) }
+                if busy { TideGlyph(color: Theme.ink, grid: .mini) }
             }
             .frame(minHeight: 44)
         }
@@ -229,7 +229,7 @@ struct NaturalVoiceSection: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel(sample.active ? "Stop voice sample" : "Play sample of selected voice")
                 if sample.loading {
-                    TideGlyph(color: Theme.ink, height: 8).accessibilityLabel("Making voice sample")
+                    TideGlyph(color: Theme.ink, grid: .mini).accessibilityLabel("Making voice sample")
                     Text(VoiceParityText.sampleMaking).font(.footnote).foregroundStyle(Theme.muted)
                 } else if sample.playing {
                     Text(VoiceParityText.samplePlaying).font(.footnote).foregroundStyle(Theme.muted)
@@ -358,7 +358,7 @@ struct CallsView: View {
             } else {
                 // The Mac answers with the next view once presence names "calls"; an older Mac never does.
                 HStack(spacing: 10) {
-                    TideGlyph(color: Theme.ink, height: 10)
+                    TideGlyph(color: Theme.ink, grid: .medium)
                     Text(CallText.loading).font(.footnote).foregroundStyle(Theme.muted)
                 }
                 Text(CallText.unavailable).font(.footnote).foregroundStyle(Theme.muted)

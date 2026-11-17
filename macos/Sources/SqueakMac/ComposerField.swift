@@ -29,6 +29,8 @@ struct ComposerField: NSViewRepresentable {
     var onPickerKey: ((ComposerPickerKey) -> Bool)?
     /// Lets the picker replace a range of the text at the caret's place.
     var handle: ComposerFieldHandle?
+    /// The field gained or lost the keyboard (the composer box draws its focus ring from it).
+    var onFocus: ((Bool) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -72,6 +74,7 @@ struct ComposerField: NSViewRepresentable {
         if tv.string != text { tv.string = text }
         tv.placeholder = placeholder
         tv.onImages = onImages
+        tv.onFocus = onFocus
         tv.isEditable = isEnabled
         tv.alphaValue = isEnabled ? 1 : 0.5
         tv.needsDisplay = true
@@ -155,6 +158,19 @@ final class PlaceholderTextView: NSTextView {
     /// True when it took the key; false lets ⌥↩ be an ordinary Return.
     var onOptionReturn: (() -> Bool)?
     var onImages: (([ImageSource]) -> Void)?
+    var onFocus: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { DispatchQueue.main.async { [weak self] in self?.onFocus?(true) } }
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { DispatchQueue.main.async { [weak self] in self?.onFocus?(false) } }
+        return ok
+    }
 
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
         onImages == nil ? super.readablePasteboardTypes : super.readablePasteboardTypes + [.png, .tiff, .fileURL]

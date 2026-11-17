@@ -41,6 +41,8 @@ struct ChatComposerBox<Setup: View>: View {
     var onCompact: (() -> Void)?
     /// `@` file mentions and `/` commands; nil: no pickers.
     var picker: ComposerPickerSource?
+    /// The pond this chat sits in: its accent draws the focus ring (§3.5). Nil: the neutral ring.
+    var pondId: String?
     @ViewBuilder var setup: () -> Setup
 
     @State private var dictation = DictationController()
@@ -49,6 +51,7 @@ struct ChatComposerBox<Setup: View>: View {
     @State private var pick = ComposerPickerModel()
     @State private var fieldHandle = ComposerFieldHandle()
     @State private var caret = 0
+    @State private var focused = false
 
     /// About twice the old box: room for two or three lines before it grows.
     private let minH: CGFloat = 48
@@ -104,7 +107,8 @@ struct ChatComposerBox<Setup: View>: View {
                     onImages: editable && tray != nil ? { tray?.add($0) } : nil,
                     onCaret: { caret = $0 },
                     onPickerKey: pickerKeyHandler,
-                    handle: fieldHandle
+                    handle: fieldHandle,
+                    onFocus: { focused = $0 }
                 )
                 .frame(height: min(max(contentHeight, minH), maxH))
                 .overlay(alignment: .topTrailing) {
@@ -121,6 +125,14 @@ struct ChatComposerBox<Setup: View>: View {
         .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
+        .overlay {
+            // Pond tint (§3.5): while the field has the keyboard, the pond's accent rings the box at low opacity.
+            if focused, editable, pondId != nil {
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(PondColour.focusRing(pondId), lineWidth: 1.5)
+                    .allowsHitTesting(false).transition(.opacity)
+            }
+        }
+        .animation(Motion.quick, value: focused)
     }
 
     /// ↵ and ⌘↵ in the field: while the agent works ↵ queues and ⌘↵ steers; idle either sends (`ComposerKeys`).

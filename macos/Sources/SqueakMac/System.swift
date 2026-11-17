@@ -135,7 +135,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// `anchor` carries only opaque ids and times (never text), so a click opens the composer on
     /// the reply this very notification was about. Each event is its own notification: an older
     /// one still in Notification Center keeps its own context.
-    func post(_ event: NotificationEvent, showName: Bool, anchor: NotificationAnchor? = nil) {
+    func post(_ event: NotificationEvent, showName: Bool, anchor: NotificationAnchor? = nil, content text: NotificationText.Content? = nil) {
         guard let center else { return }
         configure()
         let content = UNMutableNotificationContent()
@@ -143,6 +143,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.title = event.kind == .blocked && event.body.hasSuffix("is waiting for you") ? "Waiting for you" : event.kind.stateTitle
         if showName, let label = event.label, !label.isEmpty { content.subtitle = label }
         content.body = Self.body(event, showName: showName)
+        // Session names on and words to show: the thread and its pond, then what the agent said or asked.
+        if showName, let text {
+            content.title = text.title
+            content.subtitle = ""
+            content.body = text.body
+        }
         content.sound = .default
         content.threadIdentifier = event.key.stringValue
         content.userInfo = anchor?.userInfo(session: event.key) ?? ["session": event.key.stringValue]

@@ -152,7 +152,7 @@ struct NativeRealFixtureTests {
         let toolCard = NativeCards.card(tool, agent: "Claude")
         #expect(toolCard.kind == .approval)
         #expect(toolCard.approval?.tool == "Write")
-        #expect(toolCard.approval?.heading == "Claude wants to use Write")
+        #expect(toolCard.approval?.heading == "Claude wants to write a file")
         #expect(toolCard.approval?.target?.hasSuffix("/mallard/hello.txt") == true)
         #expect(toolCard.approval?.command == nil)
 

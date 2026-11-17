@@ -21,7 +21,6 @@ extension Notification.Name {
 /// One modifier on the conversation window: ⌘K opens the palette, ⌘⌥/ the shortcut sheet.
 struct CommandPaletteHost: ViewModifier {
     @Environment(AppModel.self) private var model
-    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
     @AppStorage("paletteRecents") private var recentsJSON = ""
     @State private var paletteOpen = false
     @State private var shortcutsOpen = false
@@ -116,7 +115,7 @@ struct CommandPaletteHost: ViewModifier {
         case .newWorkspace: if let p = nativeProject { model.nativeMakeWorkspace(projectId: p.id) }
         case .searchChats:
             Task { @MainActor in paletteOpen = true }
-        case .toggleSidebar: sidebarCollapsed.toggle()
+        case .toggleSidebar: DockStore.shared.update { $0.sidebarCollapsed.toggle() }
         case .toggleInspector: DockStore.shared.update { $0.toggleRight() }
         case .toggleTerminal: TerminalActions.toggle(model)
         case .openSettings: model.openSettings()

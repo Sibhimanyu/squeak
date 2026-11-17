@@ -86,8 +86,8 @@ function sessionRow(session, ctx, env) {
       "span",
       { class: "line1" },
       ctx !== "project" ? pondMark(env.icons, subtitleRepo(session), { size: "xs" }) : null,
-      h("span", { class: "title" }, displayTitle(session)),
-      isUnread(session, env.seen) ? h("span", { class: "dot d-done", role: "img", "aria-label": "New reply" }) : null,
+      // Unread is the title's weight, never a dot (DESIGN.md §8.1).
+      h("span", { class: isUnread(session, env.seen) ? "title unread" : "title" }, displayTitle(session)),
       h("span", { class: "age" }, age(session.lastActivityAt)),
     ),
     h(

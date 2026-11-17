@@ -79,7 +79,7 @@ struct FileViewer: View {
                 }
                 Button { files.save(file) } label: {
                     HStack(spacing: 6) {
-                        if file.saving { TideGlyph(color: Theme.muted, height: 4.5) }
+                        if file.saving { TideGlyph(color: Theme.muted, grid: .mini) }
                         Text("Save")
                     }
                 }

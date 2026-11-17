@@ -79,6 +79,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     /// Set by `ClaudeActivity.apply`: the chat reads as ready (its state) but Claude's turn is still open, waiting on a
     /// foreground duckling, so a message is queued or steered, never started as a new turn.
     public var turnOpen: Bool? = nil
+    /// A Squeak chat: when the host last ended a turn. Lets the Mac end its optimistic "working" for a chat it is not streaming.
+    public var lastTurnEndedAt: Date? = nil
 
     public var id: SessionKey { key }
 

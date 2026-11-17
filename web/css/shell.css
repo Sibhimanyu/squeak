@@ -1,7 +1,8 @@
 /* The shell (shell-view.js): topbar, sidebar, main, inspector, tabbar on one grid. Tokens only (DESIGN.md §11).
-   >= 1100   three columns: sidebar 264, main, inspector 340 (collapsible; remembered)
-   761-1099  sidebar + main; the inspector is a drawer from the right
-   <= 760    one column, navigation below the header, the inspector a bottom sheet, Chats = the sidebar as a page */
+   >= 1280   three columns: sidebar 256, main, inspector 340 (collapsible; remembered)
+   761-1279  sidebar + main; the inspector is a drawer from the right (tablet and a small laptop)
+   <= 760    one column, navigation bar at the foot, the inspector a bottom sheet, Chats = the sidebar as a page.
+   The chat tab strip (open chats) shows from 761 up; there is no bottom bar above 760, its places are in the sidebar. */
 
 .shell {
   --shell-sidebar: 256px;
@@ -518,7 +519,7 @@
 }
 
 /* ---------- mid: the inspector is a drawer ---------- */
-@media (max-width: 1099px) {
+@media (max-width: 1279px) {
   .shell,
   .shell.insp-wide {
     grid-template-columns: var(--shell-sidebar) minmax(0, 1fr);
@@ -564,12 +565,12 @@
   .shell,
   .shell.insp-wide {
     --shell-topbar: 48px;
-    grid-template-rows: var(--shell-topbar) auto minmax(0, 1fr);
+    grid-template-rows: var(--shell-topbar) minmax(0, 1fr) auto;
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "topbar"
-      "tabbar"
-      "main";
+      "main"
+      "tabbar";
   }
   .topbar {
     gap: 8px;
@@ -616,17 +617,25 @@
   .tabbar {
     display: block;
     background: var(--sq-sidebar);
-    border-bottom: 1px solid var(--sq-line);
+    border-top: 1px solid var(--sq-line);
+    z-index: 10;
   }
   .tabbar .tabs {
-    padding: 4px 8px;
+    padding: 4px 8px calc(4px + env(safe-area-inset-bottom, 0px));
     border-top: 0;
+  }
+  /* An open chat takes the whole screen: its composer sits at the foot, so the bar steps aside (Back returns). */
+  .shell.has-chat .tabbar {
+    display: none;
+  }
+  .chat-tabs {
+    display: none;
   }
   .main > .list {
     padding: 12px 12px 88px;
   }
   .main > .detail {
-    padding-bottom: 64px;
+    padding-bottom: 8px;
   }
   .main > .detail > .screen:not(.usage):not(.film) {
     padding: 16px 16px 32px;
@@ -1156,4 +1165,86 @@ button.dstat:hover {
   .shell button {
     transition: none;
   }
+}
+
+/* ---------- chat tab strip: the open chats above the chat (tablet and desktop) ---------- */
+.chat-tabs {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--sq-sidebar);
+  border-bottom: 1px solid var(--sq-line);
+}
+.chat-tabs::-webkit-scrollbar {
+  display: none;
+}
+.chat-tab {
+  display: flex;
+  align-items: center;
+  flex: 0 1 200px;
+  min-width: 112px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--sq-radius-control) var(--sq-radius-control) 0 0;
+  color: var(--sq-muted);
+  font-size: 13px;
+}
+.chat-tab:hover {
+  background: var(--sq-line);
+}
+.chat-tab.on {
+  background: var(--sq-bg);
+  border-color: var(--sq-line);
+  color: var(--sq-ink);
+  margin-bottom: -1px;
+}
+.chat-tab-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 4px 0 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.chat-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-tab-close {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--sq-subtle);
+  opacity: 0;
+}
+.chat-tab-close svg {
+  width: 14px;
+  height: 14px;
+}
+.chat-tab:hover .chat-tab-close,
+.chat-tab.on .chat-tab-close,
+.chat-tab-close:focus-visible {
+  opacity: 1;
+}
+.chat-tab-close:hover {
+  background: var(--sq-line-strong);
+  color: var(--sq-ink);
 }

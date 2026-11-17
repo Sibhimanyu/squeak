@@ -13,12 +13,22 @@ import AppKit
 public enum SelectableText {
     /// The path as written, on a run that is a link (the menu asks the app what to offer for it).
     public static let pathKey = NSAttributedString.Key("squeak.path")
-    /// A link's destination, on its label, for "Copy link". Never opened.
+    /// A link's destination, on its label, for "Copy link" and "Open link".
     public static let destinationKey = NSAttributedString.Key("squeak.destination")
     /// Inline code's chip: the value is `InlineChip.Kind.rawValue`; the fill and border colours ride beside it.
     public static let chipKey = NSAttributedString.Key("squeak.chip")
     public static let chipFillKey = NSAttributedString.Key("squeak.chip.fill")
     public static let chipBorderKey = NSAttributedString.Key("squeak.chip.border")
+
+    /// `s` as an http(s) address when it is entirely one (trimmed, no spaces, a host), else nil. The only thing a
+    /// code span, a bare address or a `[text](url)` may open; mailto, file and custom schemes never do.
+    public static func webURL(_ s: String) -> URL? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.contains(where: { $0.isWhitespace }), let u = URL(string: t),
+              let scheme = u.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = u.host, !host.isEmpty else { return nil }
+        return u
+    }
 
     /// Blocks that flow as text in one view.
     public static func isFlowable(_ block: MessageMarkup.Block) -> Bool {
@@ -132,7 +142,9 @@ public enum SelectableText {
             case .code(let s), .path(let s):
                 let shown = ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s
                 let piece = NSMutableAttributedString(attributedString: mono(shown, ctx: ctx, pen: pen, underline: false))
-                let url = pen.pathLinks?.resolve(s)
+                // A code span that is one web address opens it; a path only when the file is there.
+                let web = webURL(s)
+                let url = web ?? pen.pathLinks?.resolve(s)
                 let kind = InlineChip.kind(isLinkedPath: url != nil)
                 let r = NSRange(location: 0, length: piece.length)
                 // A chip, not a flat `.backgroundColor` rectangle: `ChipLayoutManager` draws it (rounded, bordered, baseline-aligned).
@@ -144,17 +156,25 @@ public enum SelectableText {
                 ], range: r)
                 if piece.length > 0 { piece.addAttribute(.kern, value: InlineChip.horizontalPadding, range: NSRange(location: piece.length - 1, length: 1)) }
                 if let url {
-                    piece.addAttributes([.link: url, pathKey: s], range: r)
+                    if web != nil { piece.addAttributes([.link: url, destinationKey: s.trimmingCharacters(in: .whitespacesAndNewlines)], range: r) }
+                    else { piece.addAttributes([.link: url, pathKey: s], range: r) }
                     if let tint = ctx.style.pathTint { piece.addAttribute(.foregroundColor, value: NSColor(tint), range: r) }
                 }
                 out.append(piece)
             case .url(let s):
                 let piece = NSMutableAttributedString(attributedString: mono(s, ctx: ctx, pen: pen, underline: true))
-                piece.addAttribute(destinationKey, value: s, range: NSRange(location: 0, length: piece.length))
+                let whole = NSRange(location: 0, length: piece.length)
+                piece.addAttribute(destinationKey, value: s, range: whole)
+                if let web = webURL(s) { piece.addAttribute(.link, value: web, range: whole) }
                 out.append(piece)
             case .link(let label, let destination):
                 var p = pen; p.underline = true; p.destination = destination
+                let start = out.length
                 append(label, to: out, ctx: ctx, pen: p)
+                if let web = webURL(destination) {
+                    let r = NSRange(location: start, length: out.length - start)
+                    out.enumerateAttribute(.link, in: r) { v, sub, _ in if v == nil { out.addAttribute(.link, value: web, range: sub) } }
+                }
                 let h = InlineRenderer.host(destination)
                 if !out.string.localizedCaseInsensitiveContains(h) {
                     out.append(NSAttributedString(string: " \(h)", attributes: [
@@ -383,6 +403,7 @@ final class SelectableTextView: NSTextView {
         if let raw = storage.attribute(SelectableText.pathKey, at: index, effectiveRange: nil) as? String, let pathLinks {
             for entry in pathLinks.menu(raw) { items.append(Self.item(entry.title) { entry.run() }) }
         } else if let dest = storage.attribute(SelectableText.destinationKey, at: index, effectiveRange: nil) as? String {
+            if let web = SelectableText.webURL(dest) { items.append(Self.item("Open link") { NSWorkspace.shared.open(web) }) }
             items.append(Self.item("Copy link") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(dest, forType: .string)

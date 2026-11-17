@@ -50,7 +50,7 @@ final class DockFilesTests: XCTestCase {
 
     func testZoneVisibleWithOnlyFilesAndPlacement() {
         var l = DockLayout.standard
-        l.close(.pond); l.close(.code); l.close(.terminal)
+        l.close(.thread); l.close(.pond); l.close(.code); l.close(.terminal)
         var f = DockFiles()
         XCTAssertEqual(DockBottomPlacement.of(l, files: f), .none)
         f.move("/a", to: .bottom)
@@ -63,7 +63,7 @@ final class DockFilesTests: XCTestCase {
     @MainActor func testStorePanelAndFileShareAZone() {
         let s = DockStore(defaults: UserDefaults(suiteName: "dock-files-\(UUID().uuidString)")!)
         s.moveFile("/a", to: .right)
-        XCTAssertEqual(s.layout.right.panels, [.pond, .code])
+        XCTAssertEqual(s.layout.right.panels, [.thread, .pond, .code])
         XCTAssertEqual(s.files.selected[.right], "/a")
         XCTAssertFalse(s.layout.right.collapsed)
         s.selectPanel(.code, in: .right)

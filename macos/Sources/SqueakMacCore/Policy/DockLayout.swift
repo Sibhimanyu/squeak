@@ -1,11 +1,12 @@
 import Foundation
 
-/// A panel the person can dock: the Pond, Code and Terminal views. Chats and files are not panels; they are always in the centre.
+/// A panel the person can dock: the Thread, Pond, Code and Terminal views. Chats and files are not panels; they are always in the centre.
 public enum DockPanel: String, Codable, CaseIterable, Sendable {
-    case pond, code, terminal
+    case thread, pond, code, terminal
 
     public var title: String {
         switch self {
+        case .thread: return "Thread"
         case .pond: return "Pond"
         case .code: return "Code"
         case .terminal: return "Terminal"
@@ -14,6 +15,7 @@ public enum DockPanel: String, Codable, CaseIterable, Sendable {
 
     public var symbol: String {
         switch self {
+        case .thread: return "bubble.left"
         case .pond: return "person.2"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .terminal: return "terminal"
@@ -69,17 +71,24 @@ public struct DockLayout: Codable, Equatable, Sendable {
     public var right: DockZoneState
     public var bottom: DockZoneState
     public var hidden: [DockPanel]
+    /// The sidebar is part of the arrangement, so each workspace remembers it: folded or not, and its dragged width (nil = default).
+    public var sidebarCollapsed: Bool
+    public var sidebarWidth: Double?
+    /// Closing the inspector folded the bottom zone (it sat under the inspector); opening it again unfolds it. Not saved.
+    public var bottomFoldedWithInspector = false
 
-    public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = []) {
+    public init(centre: DockZoneState = .init(), right: DockZoneState = .init(), bottom: DockZoneState = .init(), hidden: [DockPanel] = [],
+                sidebarCollapsed: Bool = false, sidebarWidth: Double? = nil) {
         self.centre = centre; self.right = right; self.bottom = bottom; self.hidden = hidden
+        self.sidebarCollapsed = sidebarCollapsed; self.sidebarWidth = sidebarWidth
     }
 
     public static let rightSizeRange: ClosedRange<Double> = PaneWidths.inspectorRange
     public static let bottomSizeRange: ClosedRange<Double> = TerminalPanelSizing.minHeight...1600
 
-    /// Today's layout: Pond and Code on the right, the Terminal collapsed at the bottom.
+    /// Today's layout: Thread, Pond and Code on the right (Thread selected), the Terminal collapsed at the bottom.
     public static let standard = DockLayout(
-        right: DockZoneState(panels: [.pond, .code], selected: .pond),
+        right: DockZoneState(panels: [.thread, .pond, .code], selected: .thread),
         bottom: DockZoneState(panels: [.terminal], selected: .terminal, collapsed: true))
 
     /// The first layout, built from the old `@AppStorage` values.
@@ -144,6 +153,8 @@ public struct DockLayout: Codable, Equatable, Sendable {
 
     /// Moves a panel to `zone`, before `before` (nil = at the end); within a zone this reorders. It becomes that zone's selection.
     public mutating func move(_ panel: DockPanel, to zone: DockZone, before: DockPanel? = nil) {
+        // The Pond tab is ambient awareness beside the work; managing a pond is the dashboard, which is a page, not a tab.
+        guard !(panel == .pond && zone == .centre) else { return }
         let old = self.zone(of: panel)
         let oldIndex = old.flatMap { self[$0].panels.firstIndex(of: panel) }
         detach(panel)
@@ -200,9 +211,24 @@ public struct DockLayout: Codable, Equatable, Sendable {
         self[zone].size = Self.clampedSize(size, zone == .right ? Self.rightSizeRange : Self.bottomSizeRange)
     }
 
+    public mutating func setSidebarWidth(_ width: Double?) {
+        sidebarWidth = Self.clampedSize(width, PaneWidths.sidebarRange)
+    }
+
     public mutating func setCollapsed(_ collapsed: Bool, for zone: DockZone) {
         guard zone != .centre else { return }
+        let wasCollapsed = self[zone].collapsed
         self[zone].collapsed = collapsed
+        if zone == .right, collapsed != wasCollapsed {
+            if collapsed {
+                // The bottom zone sat under the inspector: it folds to its strip (its height is kept), full width.
+                if !bottom.collapsed, !bottom.panels.isEmpty { bottom.collapsed = true; bottomFoldedWithInspector = true }
+            } else if bottomFoldedWithInspector {
+                bottom.collapsed = false; bottomFoldedWithInspector = false
+            }
+        } else if zone == .bottom, !collapsed {
+            bottomFoldedWithInspector = false
+        }
     }
 
     // MARK: Repair
@@ -215,6 +241,11 @@ public struct DockLayout: Codable, Equatable, Sendable {
             var kept: [DockPanel] = []
             for p in out[z].panels where seen.insert(p).inserted { kept.append(p) }
             out[z].panels = kept
+        }
+        // The Pond panel never lives in the centre (an older save may have it there): it goes to the right zone.
+        if let i = out.centre.panels.firstIndex(of: .pond) {
+            out.centre.panels.remove(at: i)
+            out.right.panels.append(.pond)
         }
         var hid: [DockPanel] = []
         for p in out.hidden where seen.insert(p).inserted { hid.append(p) }
@@ -230,10 +261,11 @@ public struct DockLayout: Codable, Equatable, Sendable {
         out.centre.collapsed = false
         out.right.size = Self.clampedSize(out.right.size, Self.rightSizeRange)
         out.bottom.size = Self.clampedSize(out.bottom.size, Self.bottomSizeRange)
+        out.sidebarWidth = Self.clampedSize(out.sidebarWidth, PaneWidths.sidebarRange)
         return out
     }
 
-    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden }
+    private enum CodingKeys: String, CodingKey { case centre, right, bottom, hidden, sidebarCollapsed, sidebarWidth }
 
     /// Lenient, then repaired: a hand-edited, partial or newer layout never fails and never loses a panel.
     public init(from decoder: Decoder) throws {
@@ -243,7 +275,31 @@ public struct DockLayout: Codable, Equatable, Sendable {
         bottom = (try? c.decodeIfPresent(DockZoneState.self, forKey: .bottom)) ?? DockZoneState()
         let raw = (try? c.decodeIfPresent([String].self, forKey: .hidden)) ?? []
         hidden = raw.compactMap(DockPanel.init(rawValue:))
+        sidebarCollapsed = (try? c.decodeIfPresent(Bool.self, forKey: .sidebarCollapsed)) ?? false
+        sidebarWidth = (try? c.decodeIfPresent(Double.self, forKey: .sidebarWidth)) ?? nil
+        gainThreadIfMissing()
         self = normalized()
+    }
+
+    /// A save from before the Thread tab: it joins the right zone in its default place (before Pond). A person who had
+    /// not changed the old default (Pond and Code on the right, Pond showing, nothing else moved) also gets Thread
+    /// showing, as a fresh install does; any other arrangement keeps its own selection.
+    private mutating func gainThreadIfMissing() {
+        guard zone(of: .thread) == nil, !hidden.contains(.thread) else { return }
+        guard !right.panels.isEmpty else { hidden.append(.thread); return }
+        let wasDefault = centre.panels.isEmpty && right.panels == [.pond, .code] && right.selected == .pond
+        right.panels.insert(.thread, at: right.panels.firstIndex(of: .pond) ?? 0)
+        if wasDefault { right.selected = .thread }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(centre, forKey: .centre)
+        try c.encode(right, forKey: .right)
+        try c.encode(bottom, forKey: .bottom)
+        try c.encode(hidden, forKey: .hidden)
+        try c.encode(sidebarCollapsed, forKey: .sidebarCollapsed)
+        try c.encodeIfPresent(sidebarWidth, forKey: .sidebarWidth)
     }
 }
 
@@ -287,10 +343,10 @@ public struct DockWorkspaces: Codable, Equatable, Sendable {
         DockWorkspace(id: "default", name: "Default", builtIn: true, saved: .standard),
         DockWorkspace(id: "terminal", name: "Terminal focus", builtIn: true, saved: DockLayout(
             centre: DockZoneState(panels: [.terminal], selected: .terminal),
-            right: DockZoneState(panels: [.pond, .code], selected: .pond))),
+            right: DockZoneState(panels: [.thread, .pond, .code], selected: .thread))),
         DockWorkspace(id: "review", name: "Review", builtIn: true, saved: DockLayout(
             centre: DockZoneState(panels: [.code], selected: .code),
-            right: DockZoneState(panels: [.pond], selected: .pond),
+            right: DockZoneState(panels: [.thread, .pond], selected: .thread),
             bottom: DockZoneState(panels: [.terminal], selected: .terminal, collapsed: true))),
     ]
 

@@ -154,7 +154,7 @@ struct EarlierView: View {
         let waiting = model.recentWanted > all.count
         return Button { Haptics.play(.tap); model.showMoreRecent() } label: {
             HStack(spacing: 8) {
-                if waiting && model.recentWanted > 10 { TideGlyph(color: Theme.ink, height: 10) }
+                if waiting && model.recentWanted > 10 { TideGlyph(color: Theme.ink, grid: .medium) }
                 Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")
                     .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
             }

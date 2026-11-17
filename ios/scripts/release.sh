@@ -90,7 +90,6 @@ APP="build/Build/Products/Release-iphoneos/Squeak.app"
 # What must and must not be inside anything published to a public URL.
 check() { if eval "$2"; then :; else echo "release check failed: $1" >&2; exit 1; fi; }
 check "build number stamped"          '[[ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")" == "$BUILD" ]]'
-check "camera purpose string present" '/usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$APP/Info.plist" >/dev/null'
 check "no pairing secrets bundled"    '! grep -rqa "squeak://pair?d=eyJ" "$APP"'
 check "no service account bundled"    '! find "$APP" -iname "*adminsdk*" -o -iname "serviceAccount*.json" | grep -q .'
 
@@ -124,12 +123,11 @@ source = {
   "apps": [{
     "name": "Squeak", "bundleIdentifier": bundle, "developerName": "Squeak",
     "subtitle": "Answer your agents from anywhere", "localizedDescription":
-      "See every coding agent running on your Mac, read what it said, and answer its questions. Pairs with Squeak for Mac; replies are end-to-end encrypted and signed by this phone's Secure Enclave.",
+      "See every coding agent running on your Mac, read what it said, and answer its questions. Sign in with the same account as your Mac; replies are end-to-end encrypted and signed by this phone's Secure Enclave.",
     "iconURL": f"{site}/icon.png", "tintColor": "#FCD02C", "category": "developer",
     "version": version, "versionDate": now, "versionDescription": notes,
     "downloadURL": url, "size": int(size),
     "versions": [v] + old, "appPermissions": {"entitlements": [], "privacy": {
-      "NSCameraUsageDescription": "Squeak uses the camera once, to scan the pairing code on your Mac.",
       "NSFaceIDUsageDescription": "Squeak asks for Face ID before it sends anything to your agents."}},
   }],
   "news": [],

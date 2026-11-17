@@ -13,6 +13,14 @@ struct DetailView: View {
         Group {
             if model.navFilter == .usage {
                 UsageDetailView()
+            } else if let s = model.selectedSession, DockStore.shared.threads.isDocked(s.key.stringValue) {
+                let zone = DockStore.shared.threads.zone(of: s.key.stringValue)
+                VStack(spacing: Space.s) {
+                    Text("This thread is in the \(zone.title.lowercased()) panel.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Move it back here") { DockStore.shared.moveThread(s.key.stringValue, to: .centre) }
+                        .buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.ink)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
             } else if let key = model.selected {
@@ -287,7 +295,7 @@ struct SessionDetail: View {
                     .modifier(TranscriptColumnWidth(container: viewportWidth, cap: Metrics.readingColumn + 2 * Metrics.readingInset))
                     .padding(.top, 44)
                     // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
-                    .padding(.bottom, DockFade.bottomPadding(base: Space.l))
+                    .padding(.bottom, TranscriptBottomInset.value(base: Space.l, pillShown: WorkbenchNav.attention(model) != nil))
                     // Short chats sit on the composer: the content is at least as tall as the scroll view, whose measured height already excludes the dock inset.
                     .frame(maxWidth: .infinity, minHeight: TranscriptMinHeight.value(viewport: viewportHeight), alignment: .bottom)
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
@@ -325,6 +333,7 @@ struct SessionDetail: View {
                     if atBottom { return }
                     if TranscriptPin.followsEnd(atBottom: false, lastIsUserMessage: user) { jumpToken += 1 } else { newBelow = TranscriptPin.marksNewBelow(atBottom: false, lastIsUserMessage: user) }
                 }
+                .onChange(of: session.key, initial: true) { _, k in model.noteBottom(k, atBottom: atBottom) }
                 .onChange(of: atBottom) { _, now in
                     guard now else { return }
                     newBelow = false
@@ -365,6 +374,7 @@ struct SessionDetail: View {
 
     private func followChanged(_ following: Bool) {
         atBottom = following
+        model.noteBottom(session.key, atBottom: following)
         if following { reachedBottom = true }
     }
 
@@ -436,6 +446,7 @@ struct SessionDetail: View {
         let attached = PictureLayout.attachedPaths(inTexts: timeline.turns.map(\.prompt))
         NativeTurnsContent(
             feed: feed, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
+            renderKey: "\(needsYouMessageID ?? "-")|\(model.askCardDisplay(for: session.key) == nil)|\(sendBlock == nil && model.isReachable(session))",
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
             stream: live ? model.native.stream : nil,
             message: { m in rowView(.message(m, muted: false), footers: footers) },
@@ -614,12 +625,13 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if dock.showsRow {
-                liveRow
-            } else if WorkbenchNav.attention(model) != nil {
-                HStack {
-                    Spacer(minLength: 0)
-                    NextAttentionPill()
+            // One row, one pill: the live row (when a turn runs) at the left, the next-attention pill at the right.
+            let attentionRow = DockAttentionRow.layout(showsLiveRow: dock.showsRow, hasAttentionJump: WorkbenchNav.attention(model) != nil)
+            if attentionRow.showsRow {
+                HStack(spacing: 10) {
+                    if attentionRow.showsLive { liveRow }
+                    Spacer(minLength: 8)
+                    if attentionRow.showsPill { NextAttentionPill() }
                 }
                 .frame(height: 40)
             }
@@ -716,6 +728,13 @@ struct SessionDetail: View {
         .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
+        // The Next update / Next request pill floats over the transcript's bottom edge, right-aligned just above the
+        // dock, reserving no row of its own: the transcript's bottom padding already clears it (TranscriptBottomInset).
+        .overlay(alignment: .topTrailing) {
+            NextAttentionPill()
+                .padding(.trailing, Metrics.readingInset)
+                .offset(y: -(TranscriptBottomInset.pillHeight + TranscriptBottomInset.pillGap))
+        }
         .frame(maxWidth: .infinity)
         .squeakWindowCanvas()
     }
@@ -836,7 +855,8 @@ struct SessionDetail: View {
                 canCompact: isNative && model.native.key == session.key, working: working,
                 autoCompactAt: session.autoCompactAt),
             onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
-            picker: pickerSource
+            picker: pickerSource,
+            pondId: PondsModel.shared.key(of: session)
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)

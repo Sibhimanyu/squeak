@@ -105,3 +105,40 @@ private func chat(_ id: String, repo: String = "squeak", cwd: String, state: Ses
         #expect(AttentionJump.make(after: nil, in: t, mark: mark([])) == nil)
     }
 }
+
+@Suite struct ReadGateTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func aReplyIsSeenOnlyAfterTheDwellAtTheBottomInAKeyWindow() {
+        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: nil, now: now))
+        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: now.addingTimeInterval(-0.4), now: now))
+        #expect(ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: now.addingTimeInterval(-1), now: now))
+        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: false, bottomSince: now.addingTimeInterval(-5), now: now))
+        #expect(!ReadGate.isViewing(windowOnScreen: false, windowKey: true, bottomSince: now.addingTimeInterval(-5), now: now))
+    }
+
+    private func chat(_ id: String, _ state: SessionState, ago: TimeInterval) -> HostSession {
+        HostSession(key: SessionKey(provider: "conductor", workspaceId: nil, hostSessionId: id), title: id, repoName: "r", branch: nil, cwd: "/w/r/\(id)",
+                    agent: "claude", state: state, lastActivityAt: now.addingTimeInterval(-ago), alive: true)
+    }
+
+    @Test func streamAndPondAreUnreadWhenAnyThreadIs() {
+        let a = chat("a", .finished, ago: 10), b = chat("b", .finished, ago: 20)
+        #expect(ReadGate.anyUnread([a, b]) { $0.key.hostSessionId == "b" })
+        #expect(!ReadGate.anyUnread([a, b]) { _ in false })
+        #expect(!ReadGate.anyUnread([]) { _ in true })
+    }
+
+    @Test func theNextPillWalksNeedsYouThenUnreadNewestFirstAndEmptiesWhenAllSeen() {
+        let list = [chat("old", .finished, ago: 500), chat("new", .finished, ago: 20), chat("ask", .blocked, ago: 900), chat("cur", .finished, ago: 5)]
+        let tree = SidebarTreeBuilder.build(list, now: now)
+        let unread: Set<String> = ["old", "new", "cur"]
+        let mark: (HostSession) -> ChatMark? = { ChatMark.of($0, unread: unread.contains($0.key.hostSessionId), now: self.now) }
+        let cur = list[3].key
+        let order = WorkspaceNavigation.attentionTargets(excluding: cur, in: tree, mark: mark).map(\.chat.key.hostSessionId)
+        #expect(order == ["ask", "new", "old"])
+        #expect(AttentionJump.make(after: cur, in: tree, mark: { ChatMark.of($0, unread: false, now: self.now) })?.kind == .waiting)
+        let seen = SidebarTreeBuilder.build(Array(list.dropFirst(0).filter { $0.state != .blocked }), now: now)
+        #expect(AttentionJump.make(after: cur, in: seen, mark: { ChatMark.of($0, unread: false, now: self.now) }) == nil)
+    }
+}

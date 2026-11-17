@@ -100,4 +100,19 @@ struct RoomFeedTests {
     @Test func queryString() {
         #expect(RoomClient.query(since: 4, before: nil, limit: 50) == "?since=4&limit=50")
     }
+
+    @Test func recentList() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let ms = { (s: Int) in Int64((100_000 - s) * 1000) }
+        let a = RoomThread(sessionId: "a", title: "A", state: .idle, lastState: "finished", lastAt: ms(840))
+        let b = RoomThread(sessionId: "b", title: "B", state: .idle, lastState: "stopped", lastAt: ms(7_300))
+        let c = RoomThread(sessionId: "c", title: "C", state: .error, lastState: "error", lastAt: ms(20))
+        let w = RoomThread(sessionId: "w", title: "W", state: .working, lastState: "finished", lastAt: ms(1))
+        let n = RoomThread(sessionId: "n", title: "N", state: .idle)
+        #expect(RoomPresentation.recent([b, w, a, c, n]).map(\.sessionId) == ["c", "a", "b", "n"])
+        #expect(RoomPresentation.recentLine(a, now: now) == "finished 14m ago")
+        #expect(RoomPresentation.recentLine(b, now: now) == "stopped 2h ago")
+        #expect(RoomPresentation.recentLine(c, now: now) == "hit an error just now")
+        #expect(RoomPresentation.recentLine(n, now: now) == "idle")
+    }
 }

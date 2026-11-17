@@ -19,9 +19,29 @@ public enum PondColours {
         return PondTint.nudgeOutOfDuckBand(Double(n))
     }
 
-    /// The stored value for a hue taken from the logo.
+    /// The stored value for a hue taken from the logo (older Macs wrote this; still read).
     public static func value(hue: Double) -> String { "hue:\(Int(PondTint.nudgeOutOfDuckBand(hue).rounded()) % 360)" }
-    public static func isLogoValue(_ v: String?) -> Bool { v?.hasPrefix("hue:") == true }
+    /// The stored value for a real colour taken from the logo: `#rrggbb`.
+    public static func value(colour: PondTint.RGB) -> String { colour.hexString }
+    /// The nearest value an older daemon accepts for a `#rrggbb` colour: `hue:N`. Nil for anything else.
+    public static func legacyHueValue(for stored: String?) -> String? {
+        guard let stored, stored.hasPrefix("#"), let c = PondTint.RGB(hexString: stored) else { return nil }
+        return "hue:\(Int(PondTint.hsv(c).h.rounded()) % 360)"
+    }
+    public static func isLogoValue(_ v: String?) -> Bool { v?.hasPrefix("hue:") == true || v?.hasPrefix("#") == true }
+
+    /// What a stored colour means: a named colour or old `hue:` value is a hue; `#rrggbb` is the real colour itself.
+    public static func seed(named name: String?) -> PondSeed? {
+        if let name, name.hasPrefix("#") { return PondTint.RGB(hexString: name).map(PondSeed.colour) }
+        return hue(named: name).map(PondSeed.hue)
+    }
+}
+
+/// The colour a pond's look starts from: a hue (a named or old stored colour, rendered in the fixed soft palette) or a
+/// real colour from the logo (kept as it is; only lightness moves, and only as far as legibility needs).
+public enum PondSeed: Equatable, Sendable {
+    case hue(Double)
+    case colour(PondTint.RGB)
 }
 
 public enum PondTint {
@@ -65,12 +85,35 @@ public enum PondTint {
         dark ? hsb(hue, 0.40, 0.30) : hsb(hue, 0.28, 0.96)
     }
 
+    /// The soft fill for a seed. A real colour keeps its exact hue and its saturation's proportion (a third of it on the
+    /// pale light fill, about half on the deep dark one), so a deep green tints a green and never a grey-green or another hue.
+    public static func rgb(seed: PondSeed, dark: Bool) -> RGB {
+        switch seed {
+        case .hue(let h): return rgb(hue: h, dark: dark)
+        case .colour(let c):
+            let (h, s, _) = hsv(c)
+            return dark ? hsb(h, min(1, s * 0.6), 0.30) : hsb(h, min(1, s * 0.35), 0.96)
+        }
+    }
+
     public static func rgb(for id: String, dark: Bool) -> RGB { rgb(hue: hue(for: id), dark: dark) }
 
     /// An avatar's fill: a touch stronger than a pond's tint, so initials sit on a clear disc.
     public static func avatar(index: Int, dark: Bool) -> RGB {
         let hue = avatarHues[((index % avatarHues.count) + avatarHues.count) % avatarHues.count]
         return dark ? hsb(hue, 0.45, 0.42) : hsb(hue, 0.38, 0.90)
+    }
+
+    /// Hue (degrees), saturation and value of a colour.
+    public static func hsv(_ c: RGB) -> (h: Double, s: Double, v: Double) {
+        let mx = max(c.r, c.g, c.b), mn = min(c.r, c.g, c.b), d = mx - mn
+        guard d > 0 else { return (0, 0, mx) }
+        var h: Double
+        if mx == c.r { h = ((c.g - c.b) / d).truncatingRemainder(dividingBy: 6) }
+        else if mx == c.g { h = (c.b - c.r) / d + 2 }
+        else { h = (c.r - c.g) / d + 4 }
+        h = (h * 60 + 360).truncatingRemainder(dividingBy: 360)
+        return (h, d / mx, mx)
     }
 
     static func hsb(_ hue: Double, _ s: Double, _ v: Double) -> RGB {
