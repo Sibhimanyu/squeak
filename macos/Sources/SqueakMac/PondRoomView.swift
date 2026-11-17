@@ -18,6 +18,10 @@ final class PondRoomModel {
     static let pageSize = 50
 
     @ObservationIgnored private var running = false
+    /// What the person is attaching to the next message; survives leaving the room and coming back.
+    @ObservationIgnored let tray = RoomAttachmentTray()
+    /// The attachments of a message still on its way, kept so Retry sends them again.
+    @ObservationIgnored private var outgoing: [String: [OutgoingAttachment]] = [:]
 
     init(projectId: String) { self.projectId = projectId }
 
@@ -82,12 +86,14 @@ final class PondRoomModel {
     }
 
     /// A message to the whole room (or to a person, whose name leads it).
-    func send(_ text: String, host: NativeHostClient) async {
+    func send(_ text: String, attachments: [OutgoingAttachment] = [], host: NativeHostClient) async {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
+        guard !clean.isEmpty || !attachments.isEmpty else { return }
         let level: RoomLevel = .room
         let id = feed.addPending(
-            text: clean, level: level, author: RoomAuthor(kind: .person, name: "You"), at: Int64(Date().timeIntervalSince1970 * 1000))
+            text: clean, level: level, author: RoomAuthor(kind: .person, name: "You"), at: Int64(Date().timeIntervalSince1970 * 1000),
+            attachments: attachments.map(\.placeholder))
+        if !attachments.isEmpty { outgoing[id] = attachments }
         await deliver(pendingId: id, text: clean, level: level, host: host)
     }
 
@@ -142,7 +148,8 @@ final class PondRoomModel {
 
     private func deliver(pendingId: String, text: String, level: RoomLevel, host: NativeHostClient) async {
         do {
-            let post = try await RoomClient(host: host).send(project: projectId, text: text, level: level)
+            let post = try await RoomClient(host: host).send(project: projectId, text: text, level: level, attachments: outgoing[pendingId] ?? [])
+            outgoing[pendingId] = nil
             feed.reconcile(pendingId: pendingId, with: post)
         } catch {
             feed.markFailed(pendingId: pendingId)
@@ -198,6 +205,8 @@ struct PondRoomView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
+        // Files dropped anywhere in the room are attached to the next message.
+        .dropDestination(for: URL.self) { urls, _ in room.tray.add(urls); return !urls.isEmpty }
         .task(id: projectId) { await room.run(host: model.nativeHost) }
     }
 
@@ -312,18 +321,31 @@ struct PondRoomView: View {
         Task { _ = await model.send(text, to: s.key, answering: true) }
     }
 
-    private func sendTo(_ to: RoomAddressee, _ text: String) {
+    /// A sentence when the attachments could not be prepared (nothing was sent), else nil.
+    private func sendTo(_ to: RoomAddressee, _ text: String, _ items: [OutgoingAttachment]) -> String? {
         atBottom = true
         switch to {
         case .thread(let id, _):
-            guard let s = session(id) else { return }
-            Task { _ = await model.send(text, to: s.key) }
+            guard let s = session(id) else { return nil }
+            var words = text
+            if !items.isEmpty {
+                guard let folder = s.cwd, !folder.isEmpty else { return ImageAttachmentError.folderMissing.errorDescription }
+                // A duck's own chat takes pictures and files the way its composer does: saved in its folder, named in the text.
+                do {
+                    let pictures = items.filter { $0.kind == .image }.map { PreparedImage(data: $0.data, ext: ImageAttachments.kind(of: $0.data) ?? "png") }
+                    let imageRefs = try ImageAttachments.save(pictures, into: folder)
+                    let fileRefs = try RoomAttachmentFiles.save(items.filter { $0.kind == .file }.map { ($0.name, $0.data) }, into: folder)
+                    words = RoomAttachmentFiles.compose(text, imageRefs: imageRefs, fileRefs: fileRefs)
+                } catch { return (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the attachments." }
+            }
+            Task { _ = await model.send(words, to: s.key) }
             if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
                 Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
             }
         case .everyone, .person:
-            Task { await room.send(RoomMention.roomText(text, to: to), host: model.nativeHost) }
+            Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
         }
+        return nil
     }
 }
 

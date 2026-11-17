@@ -149,7 +149,7 @@ public struct RoomFeed: Sendable, Equatable {
         // The host's copy of a message sent from here (the stream can beat the POST's answer): the pending row
         // becomes it, in place, under its own id.
         if post.author.kind == .person,
-            let i = rows.firstIndex(where: { $0.pending && !$0.failed && $0.post.text == post.text }) {
+            let i = rows.firstIndex(where: { $0.pending && !$0.failed && $0.post.text == post.text && $0.post.attachments.count == post.attachments.count }) {
             rows[i].post = post; rows[i].pending = false
             return
         }
@@ -163,10 +163,12 @@ public struct RoomFeed: Sendable, Equatable {
     // MARK: Sending
 
     /// A pending row for text just typed; returns its id.
-    public mutating func addPending(text: String, level: RoomLevel, author: RoomAuthor, at: Int64) -> String {
+    public mutating func addPending(
+        text: String, level: RoomLevel, author: RoomAuthor, at: Int64, attachments: [RoomAttachment] = []
+    ) -> String {
         localCounter += 1
         let id = "local-\(localCounter)"
-        let post = RoomPost(seq: 0, id: id, author: author, kind: .message, level: level, text: text, at: at)
+        let post = RoomPost(seq: 0, id: id, author: author, kind: .message, level: level, text: text, attachments: attachments, at: at)
         rows.append(RoomRow(id: id, post: post, pending: true, failed: false, mine: true))
         return id
     }

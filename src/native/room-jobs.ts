@@ -5,6 +5,7 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import type { HostEvents, Room, RoomThread } from "./room.js";
+import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { firstSentence, oneLine } from "./room-turns.js";
 import type { HostEvent } from "./host.js";
 import type { DuckRow, NativeStore, RoomPostRow } from "./store.js";
@@ -157,6 +158,8 @@ export interface StartSpec {
   place?: JobPlace;
   text: string;
   title: string;
+  /** The lines for the job's message's attachments, written under the session's folder once that is known. */
+  attach?: (cwd: string) => string;
 }
 
 /** A stream's recent turns must match the job this strongly (a title word is 3, a turn word 1.5) to continue there. */
@@ -168,7 +171,7 @@ export interface RoomJobsOptions {
   /** A new turn for an existing chat, from the person (queued if busy). */
   send: (sessionId: string, text: string) => Promise<unknown>;
   /** A new thread in the pond with `text`, run by the owner's defaults (used when `start` is absent). */
-  newThread: (projectId: string, text: string, title: string) => Promise<SessionRow>;
+  newThread: (projectId: string, text: string, title: string, attach?: (cwd: string) => string) => Promise<SessionRow>;
   /** Starts a fresh session for `duck` in `place` (creating the stream when it is new) with its identity. */
   start?: (spec: StartSpec) => Promise<SessionRow>;
   /** A free, valid branch name for a new stream slugged from the job text; null when the pond has no streams. */
@@ -277,6 +280,16 @@ export class RoomJobs extends EventEmitter {
     this.inflight.add(run);
   }
 
+  /** "(+2 images, 1 file)": the check hears that something was attached, never what it is. */
+  private attachmentNote(postId: string): string {
+    const { images, files } = this.o.room.attachments.counts(postId);
+    const parts = [
+      images ? `${images} image${images === 1 ? "" : "s"}` : "",
+      files ? `${files} file${files === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
+    return parts.length ? `\n(+${parts.join(", ")})` : "";
+  }
+
   private async runCheck(post: RoomPostRow): Promise<void> {
     const call = (this.call ??= defaultTitleCall());
     const abort = new AbortController();
@@ -288,7 +301,7 @@ export class RoomJobs extends EventEmitter {
       );
       const raw = await Promise.race([
         call({
-          prompt: `Message:\n${post.text.slice(0, 1500)}\n\nJSON:`,
+          prompt: `Message:\n${post.text.slice(0, 1500)}${this.attachmentNote(post.id)}\n\nJSON:`,
           system: JOB_CHECK_SYSTEM,
           signal: abort.signal,
         }),
@@ -323,7 +336,12 @@ export class RoomJobs extends EventEmitter {
   }
 
   private create(projectId: string, messageId: string, rawText: string, reopen?: RoomJob): RoomJob {
-    const text = rawText.replace(/\s+/g, " ").trim().slice(0, 500);
+    let text = rawText.replace(/\s+/g, " ").trim().slice(0, 500);
+    // A message that is only pictures or files still says what to do.
+    if (!text) {
+      const c = this.o.room.attachments.counts(messageId);
+      if (c.images + c.files > 0) text = c.files > 0 ? "See the attached files." : "See the attached images.";
+    }
     const at = this.now();
     const job: RoomJob = {
       id: reopen?.id ?? `job:${randomUUID()}`,
@@ -714,7 +732,7 @@ export class RoomJobs extends EventEmitter {
     // The person sending a job to an off-duty duck puts it back on duty.
     this.o.room.setDutyById(duck.id, true);
     try {
-      await this.o.send(s.id, job.text);
+      await this.o.send(s.id, job.text + this.attachLines(projectId, job, s.cwd));
     } catch (error) {
       delete job.handedTo;
       job.status = "suggested";
@@ -722,6 +740,20 @@ export class RoomJobs extends EventEmitter {
     }
     this.save(projectId, job);
     return this.reconcileJob(projectId, job);
+  }
+
+  private hasAttachments(job: RoomJob): boolean {
+    const c = this.o.room.attachments.counts(job.messageId);
+    return c.images + c.files > 0;
+  }
+
+  /** The attachment lines of the job's message, copied under `cwd` the way a chat's are; a failure refuses the send. */
+  private attachLines(projectId: string, job: RoomJob, cwd: string): string {
+    try {
+      return this.o.room.attachments.forTurn(projectId, job.messageId, cwd);
+    } catch (error) {
+      throw new JobError(error instanceof AttachmentError ? error.message : "Couldn't copy the attachments.", 409);
+    }
   }
 
   /** A fresh session for the duck in `place`; the old one stays as history. A duck busy elsewhere cannot start one. */
@@ -746,9 +778,15 @@ export class RoomJobs extends EventEmitter {
           ...(place ? { place } : {}),
           text: job.text,
           title: jobTitle(job.text),
+          ...(this.hasAttachments(job) ? { attach: (cwd: string) => this.attachLines(projectId, job, cwd) } : {}),
         });
       } else {
-        child = await this.o.newThread(projectId, job.text, jobTitle(job.text));
+        child = await this.o.newThread(
+          projectId,
+          job.text,
+          jobTitle(job.text),
+          this.hasAttachments(job) ? (cwd) => this.attachLines(projectId, job, cwd) : undefined,
+        );
         this.o.store.attachSessionToDuck(duck.id, child.id);
       }
     } catch (error) {
@@ -806,7 +844,7 @@ export class RoomJobs extends EventEmitter {
       : turns.find(
           (t) =>
             t.startedAt >= job.updatedAt - 10_000 &&
-            oneLine(t.prompt) === want &&
+            oneLine(stripAttachmentLines(t.prompt)) === want &&
             !taken.has(`${to.sessionId}:${t.turnId}`),
         );
     if (!turn) return job;

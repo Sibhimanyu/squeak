@@ -65,6 +65,8 @@ public struct RoomMessage: Sendable, Equatable, Identifiable {
     public var canMakeJob = false
     /// The duck this person's message went to (its turn's duck, or the job's handed duck); nil when it went to none.
     public var goesTo: String?
+    /// A person's pictures and files (drawn under the words).
+    public var attachments: [RoomAttachment] = []
 }
 
 public struct RoomMessageGroup: Sendable, Equatable, Identifiable {
@@ -186,7 +188,8 @@ public enum RoomMessages {
                 let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me" || p.author.id == "owner"
                 var m = RoomMessage(
                     id: r.id, at: p.at > 0 ? p.at : Int64(now.timeIntervalSince1970 * 1000),
-                    author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: [.text(p.text, .normal)])
+                    author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: p.text.isEmpty && !p.attachments.isEmpty ? [] : [.text(p.text, .normal)])
+                m.attachments = p.attachments
                 m.pending = r.pending; m.failed = r.failed; m.postId = p.id
                 m.canMakeJob = RoomJobs.canMakeJob(r, jobs: feed.jobs)
                 m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId

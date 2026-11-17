@@ -5,6 +5,7 @@ import { AgentSettings } from "./agent-settings.js";
 import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
+import path from "node:path";
 
 import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
@@ -15,7 +16,8 @@ import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
-import { Room, RoomError, toRoomPost } from "./room.js";
+import { Room, RoomError } from "./room.js";
+import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
 import { slug } from "./workspace-sources.js";
 import { JobError, jobTitle, RoomJobs, type RoomJob, type StartSpec } from "./room-jobs.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
@@ -161,14 +163,19 @@ export class NativeServer {
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
-    this.room = options.room ?? new Room({ store: options.store });
+    this.room =
+      options.room ??
+      new Room({
+        store: options.store,
+        ...(options.supportDir ? { attachmentsDir: path.join(options.supportDir, "room-attachments") } : {}),
+      });
     this.jobs =
       options.jobs ??
       new RoomJobs({
         store: options.store,
         room: this.room,
         send: (id, text) => host.send(id, text),
-        newThread: (projectId, text, title) => this.newJobThread(projectId, text, title),
+        newThread: (projectId, text, title, attach) => this.newJobThread(projectId, text, title, attach),
         start: (spec) => this.startDuckSession(spec),
         newBranch: (projectId, text) => this.newStreamBranch(projectId, text),
         checkBranch: (projectId, branch) => this.checkStreamBranch(projectId, branch),
@@ -413,7 +420,7 @@ export class NativeServer {
     res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
   }
 
-  private async body(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  private async body(req: http.IncomingMessage, maxBytes = MAX_BODY): Promise<Record<string, unknown>> {
     if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) {
       throw new HttpError(415, "JSON only");
     }
@@ -421,7 +428,7 @@ export class NativeServer {
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > MAX_BODY) throw new HttpError(413, "body too large");
+      if (size > maxBytes) throw new HttpError(413, "body too large");
       chunks.push(chunk as Buffer);
     }
     let parsed: unknown;
@@ -956,6 +963,26 @@ export class NativeServer {
         throw error;
       }
     }
+    if (area === "projects" && id && sub === "room" && parts[4] === "attachments" && parts.length === 6) {
+      if (method !== "GET") throw new HttpError(404, "not found");
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      const found = this.room.attachments.read(id, decodeURIComponent(parts[5]!));
+      if (!found) throw new HttpError(404, "no such attachment");
+      // Never let a stored file be taken for a page: pictures render, everything else downloads.
+      res
+        .writeHead(200, {
+          "content-type": found.row.mime,
+          "content-length": found.bytes.length,
+          "cache-control": "private, max-age=3600",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; sandbox",
+          ...(found.row.kind === "file"
+            ? { "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.row.name)}` }
+            : {}),
+        })
+        .end(found.bytes);
+      return;
+    }
     if (
       area === "projects" &&
       id &&
@@ -1006,15 +1033,20 @@ export class NativeServer {
         });
       }
       if (method === "POST") {
-        const b = await this.body(req);
-        const unknown = Object.keys(b).filter((k) => k !== "text" && k !== "level");
+        const b = await this.body(req, ROOM_ATTACH_BODY_BYTES);
+        const unknown = Object.keys(b).filter((k) => k !== "text" && k !== "level" && k !== "attachments");
         if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
         if (b.level !== undefined && b.level !== "room" && b.level !== "agents") {
           throw new HttpError(400, "level must be room or agents");
         }
         try {
-          const post = this.room.personPost(id, b.text, b.level === "agents" ? "agents" : "room");
-          return this.json(res, 201, { post: toRoomPost(post) });
+          const post = this.room.personPost(
+            id,
+            b.text === undefined && b.attachments !== undefined ? "" : b.text,
+            b.level === "agents" ? "agents" : "room",
+            b.attachments,
+          );
+          return this.json(res, 201, { post: this.room.toPosts(id, [post])[0] });
         } catch (error) {
           if (error instanceof RoomError) throw new HttpError(400, error.message);
           throw error;
@@ -1339,13 +1371,18 @@ export class NativeServer {
       permissionMode: NEW_THREAD_PERMISSION_MODE,
       workspaceId,
       title: spec.title,
-      text: spec.text,
+      text: spec.text + (spec.attach?.(cwd) ?? ""),
       duckId: spec.duck.id,
     });
   }
 
   /** A job's new thread: the pond's own folder (Main), the owner's default permission mode, the model of its newest chat. */
-  async newJobThread(projectId: string, text: string, title: string): Promise<SessionRow> {
+  async newJobThread(
+    projectId: string,
+    text: string,
+    title: string,
+    attach?: (cwd: string) => string,
+  ): Promise<SessionRow> {
     const { store, host } = this.options;
     const project = store.getProject(projectId);
     if (!project) throw new JobError("No such pond.", 404);
@@ -1362,7 +1399,7 @@ export class NativeServer {
       permissionMode: NEW_THREAD_PERMISSION_MODE,
       workspaceId: null,
       title: title || jobTitle(text),
-      text,
+      text: text + (attach?.(project.rootPath) ?? ""),
     });
   }
 
@@ -1376,7 +1413,7 @@ export class NativeServer {
     });
     const onPost = (row: RoomPostRow): void => {
       if (row.projectId !== projectId) return;
-      res.write(`id: ${row.seq}\nevent: post\ndata: ${JSON.stringify(toRoomPost(row))}\n\n`);
+      res.write(`id: ${row.seq}\nevent: post\ndata: ${JSON.stringify(room.toPosts(projectId, [row])[0])}\n\n`);
     };
     const onTurn = (f: { projectId: string; turn: unknown }): void => {
       if (f.projectId !== projectId) return;

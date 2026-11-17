@@ -37,11 +37,18 @@ public struct RoomClient: Sendable {
         } catch where PondsClient.isAbsent(error) { return nil }
     }
 
-    public func send(project: String, text: String, level: RoomLevel = .room) async throws -> RoomPost {
+    public func send(project: String, text: String, level: RoomLevel = .room, attachments: [OutgoingAttachment] = []) async throws -> RoomPost {
         struct R: Decodable { var post: RoomPost }
-        let body: NativeJSON = .object(["text": .string(text), "level": .string(level.rawValue)])
-        let data = try await host.call("POST", Self.path(project), body: body, timeout: 20, maybeSent: true)
+        var fields: [String: NativeJSON] = ["text": .string(text), "level": .string(level.rawValue)]
+        if !attachments.isEmpty { fields["attachments"] = RoomAttachmentDraft.wire(attachments) }
+        let data = try await host.call("POST", Self.path(project), body: .object(fields), timeout: attachments.isEmpty ? 20 : 90, maybeSent: true)
         do { return try JSONDecoder().decode(R.self, from: data).post } catch { throw NativeHostError.badResponse }
+    }
+
+    /// An attachment's bytes (`GET` its `url`, token-gated).
+    public func attachment(_ a: RoomAttachment) async throws -> Data {
+        guard a.url.hasPrefix("/native/") else { throw NativeHostError.badResponse }
+        return try await host.call("GET", a.url, timeout: 60)
     }
 
     /// "Make this a job": `POST .../room/jobs { messageId }` answers 201 `{ job }`.
