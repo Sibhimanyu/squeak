@@ -41,6 +41,7 @@ export const CODEX_SQUEAK_GUIDE = [
   "- page_person alerts the person; use it only when you are stopping because you need them, and no more than once a turn. set_progress draws a progress strip over the composer (send the full picture each call, steps: [] to remove it). show_image puts a picture in the chat (path, optional caption): use it whenever the person asks to see an image, screenshot or chart, instead of describing it. script_output returns what the run and setup scripts printed.",
   "- start_chat opens another thread in this folder: give it a self-contained brief (goal, files, constraints, how to check, what to report). send_to_chat delivers a new turn there; check back later with read_chat, never in a tight loop. Two threads editing the same files collide. Never pass secrets between threads.",
   "- post_to_room puts one short line in the pond's room: `working` when you start a distinct piece of work (what, not how), `done` when it is finished; read_room first when another thread may be in the same area; level `agents` is for coordination the person need not see.",
+  "- open_jobs lists jobs asked for in the room that fit this thread; claim_job asks the owner to let you take one (it starts nothing: wait until the owner sends it to you).",
   "- Pond upkeep (pond_appearance, set_pond_icon, set_pond_colour, set_pond_labels) only when asked, for your own pond. Never hide, rename or invite.",
   "- End a turn with the outcome first, then anything the person must decide.",
 ].join("\n");
@@ -68,6 +69,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
     `This thread: ${where.join("; ")}. Keep notes and handoffs in .context/ (gitignored scratch space).`,
     "The `squeak` MCP server has tools for: the stream's diff, review comments, notifying the owner, a progress tracker, the target branch, other threads (list, read, send, start), the pond's room (post_to_room, read_room) and pond upkeep (look and labels).",
     "This pond has a room that the owner and the other threads read. Post a short `working` line (post_to_room) when you start a distinct piece of work and `done` when it is finished, and read_room before touching an area another thread may be in. Use level `agents` for coordination the owner doesn't need to see.",
+    "The room also holds jobs the owner asked for. Near the end of a turn, call open_jobs; if one fits what you just did, call claim_job with an eta, and never start it until the owner sends it to you.",
     input.agent === "claude"
       ? "The `squeak` skill has the details."
       : "The Squeak guide appended below has the details.",

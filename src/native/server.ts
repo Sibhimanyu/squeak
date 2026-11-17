@@ -13,7 +13,9 @@ import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore, RoomPostRow } from "./store.js";
+import type { SessionRow } from "./types.js";
 import { Room, RoomError, toRoomPost } from "./room.js";
+import { JobError, jobTitle, RoomJobs, type RoomJob } from "./room-jobs.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -71,6 +73,8 @@ export interface NativeServerOptions {
   history?: VersionHistory;
   /** The pond rooms; one is made when absent (the same instance must reach `tools` for agents to share it). */
   room?: Room;
+  /** Room jobs; one is made when absent (it must be the one `tools` and main.ts's auto check share). */
+  jobs?: RoomJobs;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -150,11 +154,20 @@ export class NativeServer {
   private readonly cleanup: DiskCleanup;
   private readonly history: VersionHistory;
   readonly room: Room;
+  readonly jobs: RoomJobs;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
     this.room = options.room ?? new Room({ store: options.store });
+    this.jobs =
+      options.jobs ??
+      new RoomJobs({
+        store: options.store,
+        room: this.room,
+        send: (id, text) => host.send(id, text),
+        newThread: (projectId, text, title) => this.newJobThread(projectId, text, title),
+      });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
     this.agentSettings = options.supportDir ? new AgentSettings(options.supportDir) : null;
@@ -198,6 +211,7 @@ export class NativeServer {
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
         room: this.room,
+        jobs: this.jobs,
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
@@ -875,6 +889,28 @@ export class NativeServer {
         throw error;
       }
     }
+    if (
+      area === "projects" &&
+      id &&
+      sub === "room" &&
+      parts[4] === "jobs" &&
+      (parts.length === 5 || parts.length === 6)
+    ) {
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      if (method !== "POST") throw new HttpError(404, "not found");
+      const b = await this.body(req);
+      try {
+        if (parts.length === 5) {
+          const unknown = Object.keys(b).filter((k) => k !== "messageId");
+          if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+          return this.json(res, 201, { job: this.jobs.fromMessage(id, b.messageId) });
+        }
+        return this.json(res, 200, { job: await this.jobs.act(id, decodeURIComponent(parts[5]!), b) });
+      } catch (error) {
+        if (error instanceof JobError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+    }
     if (area === "projects" && id && sub === "room" && (parts.length === 4 || parts.length === 5)) {
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
       if (parts.length === 5) {
@@ -899,6 +935,7 @@ export class NativeServer {
             ...(before !== undefined ? { before } : {}),
             ...(limit !== undefined ? { limit: Math.min(200, Math.max(1, limit)) } : {}),
           }),
+          jobs: this.jobs.list(id),
         });
       }
       if (method === "POST") {
@@ -1155,6 +1192,28 @@ export class NativeServer {
     });
   }
 
+  /** A job's new thread: the pond's own folder (Main), the owner's default permission mode, the model of its newest chat. */
+  async newJobThread(projectId: string, text: string, title: string): Promise<SessionRow> {
+    const { store, host } = this.options;
+    const project = store.getProject(projectId);
+    if (!project) throw new JobError("No such pond.", 404);
+    const sessions = store.listSessions().filter((s) => s.model && s.model !== "default");
+    const pick =
+      sessions.filter(
+        (s) => !s.archivedAt && this.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id),
+      )[0] ?? sessions[0];
+    if (!pick) throw new JobError("Squeak has no chat to take a model from yet; start a chat first.", 409);
+    return host.create({
+      cwd: project.rootPath,
+      agent: pick.agent,
+      model: pick.model,
+      permissionMode: NEW_THREAD_PERMISSION_MODE,
+      workspaceId: null,
+      title: title || jobTitle(text),
+      text,
+    });
+  }
+
   /** `event: hello` with the newest seq, then `event: post` for each new post and `event: turn` for a turn's upsert; a comment heartbeat every 25 s. */
   private roomStream(req: http.IncomingMessage, res: http.ServerResponse, projectId: string): void {
     const { room } = this;
@@ -1171,9 +1230,14 @@ export class NativeServer {
       if (f.projectId !== projectId) return;
       res.write(`event: turn\ndata: ${JSON.stringify(f.turn)}\n\n`);
     };
+    const onJob = (f: { projectId: string; job: RoomJob }): void => {
+      if (f.projectId !== projectId) return;
+      res.write(`event: job\ndata: ${JSON.stringify(f.job)}\n\n`);
+    };
     // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
     room.on("post", onPost);
     room.on("turn", onTurn);
+    this.jobs.on("job", onJob);
     room.streamOpened(projectId);
     res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: this.options.store.latestRoomSeq(projectId) })}\n\n`);
     const beat = setInterval(() => {
@@ -1185,6 +1249,7 @@ export class NativeServer {
       clearInterval(beat);
       room.off("post", onPost);
       room.off("turn", onTurn);
+      this.jobs.off("job", onJob);
       room.streamClosed(projectId);
     });
   }

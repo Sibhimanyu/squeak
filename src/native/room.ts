@@ -358,6 +358,23 @@ export class Room extends EventEmitter {
       .filter((s) => !s.archivedAt && (s.workspaceId ? streams.has(s.workspaceId) : s.cwd === project.rootPath));
   }
 
+  /** A chat's turns (not agent-run ones), oldest first. */
+  sessionTurns(sessionId: string): TurnBase[] {
+    return this.reader.turns(sessionId);
+  }
+
+  /** The pond's non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
+  candidates(
+    projectId: string,
+    windowMs: number,
+  ): Array<{ session: SessionRow; state: RoomThread["state"]; at: number }> {
+    const cutoff = this.now() - windowMs;
+    return this.sessionsOf(projectId)
+      .map((s) => ({ session: s, state: threadState(s.status, s.lastTurnEndedAt), at: Date.parse(s.updatedAt) }))
+      .filter((x) => Number.isFinite(x.at) && x.at >= cutoff)
+      .sort((a, b) => b.at - a.at || a.session.id.localeCompare(b.session.id));
+  }
+
   /** The pond's non-archived chats active in the last 24 h, newest activity first, with what each is working on. */
   threads(projectId: string): RoomThread[] {
     if (!this.store.getProject(projectId)) return [];

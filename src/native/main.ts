@@ -17,6 +17,7 @@ import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
+import { RoomJobs } from "./room-jobs.js";
 import { RoomSummariser } from "./room-summary.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
@@ -54,6 +55,13 @@ export async function runHost(supportDir: string): Promise<void> {
     /* only tidying old noise */
   }
   new RoomSummariser({ host, store, room }).start();
+  const jobs = new RoomJobs({
+    store,
+    room,
+    send: (id, text) => host.send(id, text),
+    newThread: (projectId, text, title) => server!.newJobThread(projectId, text, title),
+  });
+  jobs.attach(host);
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
@@ -88,6 +96,7 @@ export async function runHost(supportDir: string): Promise<void> {
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
         room,
+        jobs,
         pond: {
           prefs: new ProjectPrefs(supportDir),
           // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
@@ -112,6 +121,7 @@ export async function runHost(supportDir: string): Promise<void> {
     workspaces,
     ...(flotilla && shared ? { flotilla, ...shared } : {}),
     room,
+    jobs,
     supportDir,
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,

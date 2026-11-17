@@ -1164,6 +1164,49 @@ export class NativeStore {
     );
   }
 
+  private jobsReady = false;
+
+  private jobsTable(): void {
+    if (this.jobsReady) return;
+    // Created here, not as a migration (like room_backfill): a job is JSON the room-jobs module owns.
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS room_jobs (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, message_id TEXT NOT NULL,
+         data TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
+    );
+    this.db.exec("CREATE INDEX IF NOT EXISTS room_jobs_project ON room_jobs(project_id, updated_at)");
+    this.jobsReady = true;
+  }
+
+  saveRoomJob(row: { id: string; projectId: string; messageId: string; data: string; updatedAt: number }): void {
+    this.jobsTable();
+    this.db
+      .prepare(
+        `INSERT INTO room_jobs (id, project_id, message_id, data, updated_at) VALUES (?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
+      )
+      .run(row.id, row.projectId, row.messageId, row.data, row.updatedAt);
+  }
+
+  roomJobRows(projectId: string): Array<{ id: string; projectId: string; messageId: string; data: string }> {
+    this.jobsTable();
+    return (
+      this.db.prepare("SELECT * FROM room_jobs WHERE project_id=? ORDER BY updated_at ASC").all(projectId) as Row[]
+    ).map(jobRow);
+  }
+
+  roomJobRow(id: string): { id: string; projectId: string; messageId: string; data: string } | null {
+    this.jobsTable();
+    const r = this.db.prepare("SELECT * FROM room_jobs WHERE id=?").get(id) as Row | undefined;
+    return r ? jobRow(r) : null;
+  }
+
+  roomJobRowByMessage(messageId: string): { id: string; projectId: string; messageId: string; data: string } | null {
+    this.jobsTable();
+    const r = this.db.prepare("SELECT * FROM room_jobs WHERE message_id=?").get(messageId) as Row | undefined;
+    return r ? jobRow(r) : null;
+  }
+
   /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
   replaceRoomPosts(projectId: string, rows: Array<Omit<RoomPostRow, "seq">>): void {
     this.db.transaction(() => {
@@ -1211,5 +1254,14 @@ function roomPostRow(r: Row): RoomPostRow {
     text: r.text as string,
     toSessionId: (r.to_session_id as string | null) ?? null,
     at: r.at as number,
+  };
+}
+
+function jobRow(r: Row): { id: string; projectId: string; messageId: string; data: string } {
+  return {
+    id: r.id as string,
+    projectId: r.project_id as string,
+    messageId: r.message_id as string,
+    data: r.data as string,
   };
 }

@@ -554,3 +554,33 @@ mirrored as an `agents` message. While a chat works and its room was viewed in t
 a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-written `working` line posted for it
 (`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it);
 that line (or an agent's own) is the running turn's `intent`.
+
+### Jobs
+
+A person's room message that asks for work becomes a **job** Squeak routes to a thread (`room-jobs.ts`). Rules: Squeak
+never chats (its only words are action and status lines); nothing is taken or started without the person's Go or
+Allow; plain chat stays a note. Stored as JSON in `native.db` `room_jobs` (created lazily, like `room_backfill`).
+
+```
+RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"handed"|"running"|"done"|"failed",
+            suggestion?: { sessionId, title, reason, state: "working"|"idle" }, candidates?: [same, up to 3],
+            claim?: { sessionId, title, eta?, at, status: "asking"|"allowed"|"denied" },
+            handedTo?: { sessionId, title, turnId? /* "<sessionId>:<turnId>", the RoomTurn id */, newThread },
+            outcomeText?, createdAt, updatedAt }
+```
+
+- **Check**: after a person posts to the `room` level, one Haiku call (the auto-title helper, 20 s timeout) answers strict
+  JSON `{job, text}`; a failure or timeout is no job. Messages under 3 words are skipped unless they start with an
+  imperative verb; 30 checks an hour per pond; `SQUEAK_ROOM_JOBS=off` stops the automatic check (a manual job still works).
+- **Matching** is rules only: the pond's non-archived chats active in 7 days are scored by word overlap of the job with
+  the title (3), the `working` intent (2) and the last four turns' prompts and outcomes (1.5), plus a recency bonus;
+  below 3 there is no suggestion (the person can start a new thread). `reason` is built from the evidence ("worked on
+  layout builder 10 min ago"); a working chat has `state: "working"`.
+- Routes: `GET .../room` adds `jobs` (open ones and those updated in 24 h, newest last); `POST .../room/jobs {messageId}`
+  -> 201 `{job}`; `POST .../room/jobs/<jobId>` strict `{action: "go", sessionId?}`, `{action: "new"}` (a thread in the
+  pond's folder, owner's default permission mode, the model of its newest chat), `dismiss`, `allow`, `deny` -> `{job}`,
+  409 with a sentence when the state no longer allows it. SSE sends `event: job` (upsert by id).
+- `go`/`allow` send the job text as a new turn from the person (queued when busy). The job follows the turn its text
+  starts: `handed`, then `running` while it runs, then `done` (or `failed`) with `outcomeText`, read from the chat's timeline.
+- Agents: `open_jobs` (suggested jobs fitting this thread) and `claim_job {jobId, eta?}` (sets `claim` to `asking`; starts
+  nothing; one claim at a time, a newer chat replaces it only after a deny; 10 an hour a chat).

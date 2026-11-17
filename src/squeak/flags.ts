@@ -78,6 +78,15 @@ export const FLAGS = [
     stage: "off-switch",
     parse: "off-word",
   },
+  {
+    name: "roomJobs",
+    env: "SQUEAK_ROOM_JOBS",
+    default: true,
+    description:
+      "Check each person message in a pond room for a job with one small Claude call (manual jobs still work).",
+    stage: "off-switch",
+    parse: "off-word",
+  },
 ] as const satisfies readonly FlagDefinition[];
 
 export type FlagName = (typeof FLAGS)[number]["name"];

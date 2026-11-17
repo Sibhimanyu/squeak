@@ -15,6 +15,7 @@ import {
   readLabels,
   type ProjectPrefs,
 } from "./project-prefs.js";
+import { JobError, type RoomJobs } from "./room-jobs.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
@@ -81,6 +82,8 @@ export interface AgentToolDeps {
   };
   /** The pond's room (`post_to_room`, `read_room`, and `send_to_chat` mirrored into it). Absent: those tools say so. */
   room?: Room;
+  /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
+  jobs?: RoomJobs;
   now?: () => number;
   /** git, injectable for tests. */
   git?: (cwd: string, args: string[]) => Promise<string>;
@@ -256,6 +259,20 @@ export const TOOLS: ToolDef[] = [
       level: { type: "string", enum: ["room", "agents", "all"] },
     }),
     readOnly: true,
+  },
+  {
+    name: "open_jobs",
+    description:
+      "Jobs the person has asked for in this pond's room that nobody has taken and that fit what you work on, with their ids and why. Call it near the end of a turn. Never start a job from it: use claim_job to ask, then wait for the person to allow it.",
+    inputSchema: obj({}),
+    readOnly: true,
+  },
+  {
+    name: "claim_job",
+    description:
+      'Ask the person to let you take one open job (from open_jobs), with a rough eta such as "10 min". This only asks; it starts nothing. Do the job only if the person then sends it to you as a message. One chat can hold a job\'s claim at a time.',
+    inputSchema: obj({ jobId: { type: "string" }, eta: { type: "string" } }, ["jobId"]),
+    readOnly: false,
   },
   {
     name: "start_chat",
@@ -524,6 +541,10 @@ export class AgentTools {
         return this.postToRoom(s, args);
       case "read_room":
         return this.readRoom(s, args);
+      case "open_jobs":
+        return this.openJobs(s);
+      case "claim_job":
+        return this.claimJob(s, args);
       case "script_output":
         return this.terminalOutput(s, str("script"), args.lines);
       case "pond_appearance":
@@ -641,6 +662,33 @@ export class AgentTools {
       throw error;
     }
     return level === "agents" ? "Posted to the agents level of the room." : "Posted to the room.";
+  }
+
+  private jobsOf(s: SessionRow): { jobs: RoomJobs; pond: { id: string; name: string } } {
+    if (!this.deps.jobs) throw new ToolError("Jobs aren't available here.");
+    const pond = projectOfSession(this.deps.store, s);
+    if (!pond) throw new ToolError("This chat isn't in a pond, so it has no jobs.");
+    return { jobs: this.deps.jobs, pond };
+  }
+
+  private openJobs(s: SessionRow): string {
+    const { jobs, pond } = this.jobsOf(s);
+    const open = jobs.openFor(pond.id, s);
+    if (open.length === 0) return "No open jobs fit this chat.";
+    return open.map(({ job, why }) => `${job.id}: ${job.text}${why ? ` (${why})` : ""}`).join("\n");
+  }
+
+  private claimJob(s: SessionRow, args: Record<string, unknown>): string {
+    const { jobs, pond } = this.jobsOf(s);
+    if (typeof args.jobId !== "string" || !args.jobId) throw new ToolError("jobId is required.");
+    if (args.eta !== undefined && typeof args.eta !== "string") throw new ToolError("eta must be text.");
+    try {
+      jobs.claim(s, pond.id, args.jobId, args.eta as string | undefined);
+    } catch (error) {
+      if (error instanceof JobError) throw new ToolError(error.message);
+      throw error;
+    }
+    return "Asked the person. Do not start this job unless they send it to you.";
   }
 
   private readRoom(s: SessionRow, args: Record<string, unknown>): string {
