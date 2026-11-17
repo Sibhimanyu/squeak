@@ -332,3 +332,64 @@ final class TideSheetTests: XCTestCase {
         try rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))
     }
 }
+
+/// The shared clock's speed must not depend on how many glyphs read it, how often a body re-runs, or glyphs appearing and going.
+final class TideClockTests: XCTestCase {
+    /// A 30 fps loop of `glyphs` views, each reading at its own phase inside the frame and `extra` more times (a re-rendered
+    /// parent), glyphs coming and going. Returns the shown seconds per real second over every 1 s window.
+    func rates(glyphs: Int, extra: Int, churn: Bool) -> [Double] {
+        let clock = TideMotion.Clock(), epoch = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        var out: [Double] = [], windowStart = clock.time(at: epoch), n = 0
+        _ = windowStart
+        for i in 0..<(30 * 20) {
+            let frame = Double(i) / 30
+            let visible = churn ? max(1, glyphs - (i / 45) % glyphs) : glyphs
+            for g in 0..<visible {
+                let d = epoch.addingTimeInterval(frame + Double(g) * 0.0007)
+                for _ in 0...extra { _ = clock.time(at: d) }
+            }
+            n += 1
+            if n == 30 { let t = clock.time(at: epoch.addingTimeInterval(frame)); out.append(t - windowStart); windowStart = t; n = 0 }
+        }
+        return out.dropFirst().map { $0 }
+    }
+
+    func testRateIsRealTimeWhateverTheRenderCount() {
+        for glyphs in [1, 2, 5, 12] { for extra in [0, 1, 5, 30] { for churn in [false, true] {
+            for r in rates(glyphs: glyphs, extra: extra, churn: churn) {
+                XCTAssertEqual(r, 1.0, accuracy: 0.1, "glyphs \(glyphs) extra \(extra) churn \(churn)")
+            }
+        } } }
+    }
+
+    /// Reads inside one frame, in any order, are one advance; and a stall moves the clock by one capped step only.
+    func testOneAdvancePerFrameAndBoundedStep() {
+        let clock = TideMotion.Clock(), epoch = Date(timeIntervalSinceReferenceDate: 5)
+        _ = clock.time(at: epoch)
+        let a = clock.time(at: epoch.addingTimeInterval(1.0 / 30))
+        XCTAssertEqual(clock.time(at: epoch.addingTimeInterval(1.0 / 30 + 0.002)), a)
+        XCTAssertEqual(clock.time(at: epoch.addingTimeInterval(0.01)), a)
+        let b = clock.time(at: epoch.addingTimeInterval(30))
+        XCTAssertLessThanOrEqual(b - a, TideMotion.Clock.maxStep + 1e-9)
+        var worst = 0.0, p = b
+        for i in 1..<2000 {
+            let t = clock.time(at: epoch.addingTimeInterval(30 + Double(i) / 30))
+            worst = max(worst, t - p); p = t
+        }
+        XCTAssertLessThanOrEqual(worst, 1.5 / 30 + 1e-9, "no frame moves more than 1.5x a normal one")
+    }
+
+    /// The motion itself: whatever the time stepping, a cell's brightness changes by a bounded amount per frame.
+    func testFrameToFrameChangeBounded() {
+        for sd in UInt64(1)...8 {
+            var prev = (0..<80).map { TideMotion.smoothAlpha(col: $0 % 16, row: $0 / 16, cols: 16, rows: 5, t: 0, seed: sd) }
+            var t = 0.0
+            while t < 120 {
+                t += TideMotion.Clock.maxStep
+                let cur = (0..<80).map { TideMotion.smoothAlpha(col: $0 % 16, row: $0 / 16, cols: 16, rows: 5, t: t, seed: sd) }
+                XCTAssertLessThan(zip(cur, prev).map { abs($0 - $1) }.max()!, 0.5)
+                prev = cur
+            }
+        }
+    }
+}

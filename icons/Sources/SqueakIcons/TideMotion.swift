@@ -39,12 +39,16 @@ public enum TideMotion {
         private func f(_ v: Double) -> String { String(format: "%.3g", v) }
     }
 
-    /// The clock every view reads: seconds of *shown* motion, shared by all glyphs. It advances by the wall time between
-    /// reads but never by more than `maxStep` at once, and never backwards, so a stall (a paused or occluded view, sleep,
-    /// a busy main thread, a clock change) resumes where the water left off instead of jumping ahead and reading as a
-    /// sudden burst of speed. Combined with the bounded pace below, the flow's rate stays within 0.7x-1.1x of nominal.
+    /// The clock every view reads: seconds of *shown* motion, shared by all glyphs and a pure function of the frames it has seen,
+    /// never of how many views read it or how often. A read advances it by the wall time since the last advance, but by at most
+    /// `maxStep` (about a frame and a half at 30 fps), so a stall (a busy main thread, a paused or occluded view, sleep, a clock
+    /// change) resumes where the water left off and no single frame ever moves more than 1.5x a normal one. Reads within
+    /// `frameSlop` of the last advance (the other glyphs of the same frame, a body that runs again) return the same time and
+    /// never advance it; a read from the past never moves it back. Combined with the bounded pace below, the flow's rate stays
+    /// within 0.7x-1.1x of nominal.
     public final class Clock: @unchecked Sendable {
-        public static let maxStep = 0.1
+        public static let maxStep = 0.05
+        public static let frameSlop = 0.004
         private let lock = NSLock()
         private var last: Date?
         private var t = 0.0
@@ -53,7 +57,7 @@ public enum TideMotion {
             lock.lock(); defer { lock.unlock() }
             guard let l = last else { last = date; return t }
             let dt = date.timeIntervalSince(l)
-            if dt > 0 { t += min(dt, Clock.maxStep); last = date }
+            if dt > Clock.frameSlop { t += min(dt, Clock.maxStep); last = date }
             return t
         }
     }
