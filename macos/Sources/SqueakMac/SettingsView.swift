@@ -25,6 +25,7 @@ private extension SettingsSection {
     var symbol: LucideName {
         switch self {
         case .account: .users
+        case .ponds: .layers
         case .models: .sparkles
         case .messages: .messageSquare
         case .general: .settings
@@ -46,7 +47,7 @@ private extension SettingsSection {
     var headerColor: Color {
         switch self {
         case .general, .models: Theme.info
-        case .account: Theme.success
+        case .account, .ponds: Theme.success
         case .notifications, .awake: Theme.negative
         case .addons, .conductor, .rasanai, .connections, .messages, .service: Theme.success
         case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
@@ -57,6 +58,7 @@ private extension SettingsSection {
 
     var subtitle: String {
         switch self {
+        case .ponds: "Each pond\u{2019}s look, people, invites and how agents work in it."
         case .account: "Sign in to see this Mac from your browser and iPhone, and whether it is connected."
         case .models: "The starting points for new ducks, shared with your iPhone and the web."
         case .messages: "What a message does when the agent is already working."
@@ -80,6 +82,7 @@ private extension SettingsSection {
     var searchAliases: [String] {
         switch self {
         case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
+        case .ponds: ["pond", "project", "colour", "icon", "members", "invite", "people", "labels", "streams"]
         case .models: ["model", "preset", "thinking", "effort", "plan first", "claude", "codex", "new duck"]
         case .messages: ["send", "sending", "queue", "steer"]
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "quick message"]
@@ -345,6 +348,7 @@ private struct SettingsPage: View {
     @ViewBuilder private var page: some View {
         switch section {
         case .account: AccountSettings()
+        case .ponds: PondsSettings()
         case .models: ModelsSettings()
         case .messages: MessagesSettings()
         case .general: GeneralSettings()

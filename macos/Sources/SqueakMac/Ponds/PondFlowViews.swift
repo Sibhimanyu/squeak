@@ -68,7 +68,7 @@ extension AppModel {
 // MARK: Two pages
 
 /// Where the two-page strip is: 0 the Dashboard, 1 the Room. Only this changes while the fingers move, and only the small
-/// views that read it (`PanPage`, `PanFade`, the hint) re-evaluate: the pages themselves are built once by `PondSpace` and
+/// views that read it (`PanPage`, the hint) re-evaluate: the pages themselves are built once by `PondSpace` and
 /// never rebuilt per scroll tick.
 @MainActor @Observable
 final class PondPanState {
@@ -168,22 +168,6 @@ private struct PanPage: ViewModifier {
             .overlay {
                 Theme.bg.opacity(0.28 * min(1, abs(x) / max(1, Double(width)))).allowsHitTesting(false)
             }
-    }
-}
-
-/// An inspector section that is not on both pages fades out in step with the drag: the cross-fade amount is the progress.
-struct PanFade: ViewModifier {
-    let key: String
-    let fades: Bool
-
-    func body(content: Content) -> some View {
-        if fades {
-            let state = PondPanStore.shared.state(for: key)
-            let page = RoomViewPref.shared.mode(for: key)
-            content.opacity(1 - PondDrag.travel(position: state.drawn, page: page))
-        } else {
-            content
-        }
     }
 }
 

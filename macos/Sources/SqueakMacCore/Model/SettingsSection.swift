@@ -3,13 +3,14 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case account, notifications, privacy, models, messages, general, awake, service, iphone, connections, addons, telegram, cliq, voice, conductor, rasanai, about
+    case account, ponds, notifications, privacy, models, messages, general, awake, service, iphone, connections, addons, telegram, cliq, voice, conductor, rasanai, about
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .account: "Account"
+        case .ponds: "Ponds"
         case .models: "Models & presets"
         case .messages: "Messages"
         case .general: "General"
@@ -45,7 +46,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         }
         public var sections: [SettingsSection] {
             switch self {
-            case .you: [.account, .notifications, .privacy]
+            case .you: [.account, .ponds, .notifications, .privacy]
             case .agents: [.models, .messages]
             case .mac: [.general, .awake, .service]
             case .devices: [.iphone, .connections]
@@ -73,6 +74,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         guard let raw = link?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else { return nil }
         switch raw {
         case "channels": self = .telegram
+        case "pond", "pond settings": self = .ponds
         case "notify", "notification": self = .notifications
         case "mac", "this mac": self = .general
         case "presets", "preset", "models & presets", "models-presets": self = .models

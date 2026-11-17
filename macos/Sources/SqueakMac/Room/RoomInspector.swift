@@ -2,24 +2,20 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The room's right column (draft A): People, then Ducks with role and presence; below, Invite by email and Pond controls.
-// Only rows with a real setting behind them.
+// The pond inspector: what needs the person, the ducks, the people. Settings (colour, invites) live in the header's
+// "Pond settings\u{2026}" sheet, not here.
 
-/// The pond inspector: one column beside both pond pages, in place while the centre slides. Its sections follow the page
-/// (`PondInspectorSections`); the shared ones keep their identity and move, Ducks cross-fades.
+/// The pond inspector: one column beside both pond pages, in place while the centre slides. Both pages show the same
+/// sections in the same order (`PondInspectorSections`), so nothing fades or moves with the page.
 struct RoomInspector: View {
     let key: String
     let room: PondRoomModel
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editing: DuckEdit?
     @State private var search = ""
     @State private var adding = false
     @State private var notice: String?
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
-    @State private var email = ""
-    @State private var inviting = false
-    @State private var inviteLine: String?
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { ponds.detail(key: key) }
@@ -27,35 +23,49 @@ struct RoomInspector: View {
     private var me: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
 
     var body: some View {
-        let page = RoomViewPref.shared.mode(for: key)
-        let sections = PondInspectorSections.sections(for: page, canInvite: role.canInvite)
+        let needs = PondInspectorSections.needsYou(room.feed.threads)
+        let sections = PondInspectorSections.sections(needsYou: needs.count, ducks: allDucks.count)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 ForEach(sections) { section in
-                    view(for: section, page: page).transition(.opacity)
-                        .modifier(PanFade(key: key, fades: !PondInspectorSections.shared(canInvite: role.canInvite).contains(section)))
+                    view(for: section, needs: needs)
                 }
             }
             .padding(.horizontal, Space.xl).padding(.vertical, Space.xl)
-            .animation(reduceMotion ? nil : Motion.standard, value: page)
         }
         .background(Theme.bg)
     }
 
-    @ViewBuilder private func view(for section: PondInspectorSection, page: PondPage) -> some View {
+    @ViewBuilder private func view(for section: PondInspectorSection, needs: [InspectorNeedsYouRow]) -> some View {
         switch section {
+        case .needsYou: needsYou(needs)
         case .ducks: ducksList
         case .people: flock
-        case .invite: invite(page: page)
-        case .controls: controls
         }
     }
 
-    private func heading(_ t: String, trailing: String? = nil) -> some View {
-        HStack {
-            Text(verbatim: t).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-            Spacer()
-            if let trailing { Text(verbatim: trailing).font(.system(size: 12)).foregroundStyle(Theme.subtle) }
+    /// Needs you: one row per duck waiting on the person (the amber triangle is the only colour); a click opens its tab.
+    private func needsYou(_ rows: [InspectorNeedsYouRow]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            label("Needs you", rows.count)
+            ForEach(rows) { r in
+                Button {
+                    _ = model.openFromPond(.duck(r.sessionId), pond: key, page: .room)
+                } label: {
+                    HStack(spacing: 11) {
+                        DuckAvatar(sessionId: r.colourSeed, agent: r.agent, size: 30, off: false)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(verbatim: r.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(verbatim: r.text).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        Lucide(.triangleAlert, size: 12, color: Theme.warning)
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 7).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(r.name), \(r.text)").accessibilityHint("Opens the duck")
+            }
         }
     }
 
@@ -71,7 +81,16 @@ struct RoomInspector: View {
     private var flock: some View {
         let count = detail?.members.count ?? 1
         return VStack(alignment: .leading, spacing: 6) {
-            label("People", count)
+            HStack {
+                label("People", count)
+                Spacer()
+                if role.canInvite, let pond {
+                    Button("Invite") { ponds.startInvite(pondId: pond.id, account: model.account) }
+                        .buttonStyle(SecondaryButtonStyle()).controlSize(.small)
+                        .disabled(!ponds.freshness(pond).canWrite)
+                        .help(ponds.freshness(pond).writesDisabledReason ?? "Invite someone to this pond")
+                }
+            }
             PondFlockSection(key: key, dashboard: true, showsHeading: false)
         }
     }
@@ -161,73 +180,6 @@ struct RoomInspector: View {
             guard model.openFromPond(.duck(sessionId), pond: key, page: .room) else { return }
             if !d.onDuty { Task { await roster.perform(.duty(duck: d.id, on: true), host: model.nativeHost) } }
         }
-    }
-
-    // MARK: Invite
-
-    private func invite(page: PondPage) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            heading("Invite")
-            HStack(spacing: 8) {
-                Image(systemName: "envelope").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                TextField("Email address", text: $email).textFieldStyle(.plain).font(.system(size: 14)).onSubmit(send)
-                    .accessibilityLabel("Email address to invite")
-            }
-            .padding(.horizontal, 12).frame(height: 36)
-            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
-            HStack(alignment: .top, spacing: 10) {
-                Text(verbatim: inviteLine ?? "Members can start ducks and answer.").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                Button(inviting ? "Inviting\u{2026}" : "Invite", action: send).buttonStyle(SecondaryButtonStyle())
-                    .disabled(inviting || !(pond.map { ponds.freshness($0).canWrite } ?? true))
-            }
-            if page == .dashboard, let pond, !pond.local { PondInvitesSection(pond: pond) }
-        }
-    }
-
-    /// A valid address goes out as an email invite (the same call as the invite sheet); anything else opens the sheet.
-    private func send() {
-        guard let pond else { return }
-        let address = email.trimmingCharacters(in: .whitespaces)
-        guard EmailAddress.isValid(address), !pond.local, model.account.state?.linked == true else {
-            ponds.startInvite(pondId: pond.id, account: model.account)
-            return
-        }
-        inviting = true
-        Task {
-            let result = await ponds.inviteByEmail(pond: pond.id, emails: [address], role: .member)
-            inviting = false
-            if let result, result.failed.isEmpty { inviteLine = "Invite sent to \(address)."; email = "" }
-            else if let f = result?.failed.first { inviteLine = f.reason }
-            else { inviteLine = ponds.note ?? "The invite did not go. Try again." }
-        }
-    }
-
-    // MARK: Controls
-
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            heading("Pond controls").padding(.bottom, 6)
-            controlRow("Pond colour", value: ponds.native(key: key)?.colour?.capitalized ?? "Automatic", swatch: PondColour.tint(pond?.id))
-            controlRow("All pond settings", value: nil, swatch: nil)
-        }
-    }
-
-    private func controlRow(_ title: String, value: String?, swatch: Color?) -> some View {
-        Button { ponds.route = .settings(project: key) } label: {
-            HStack(spacing: 8) {
-                Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted)
-                Spacer()
-                if let swatch { RoundedRectangle(cornerRadius: 3).fill(swatch).frame(width: 12, height: 12) }
-                if let value { Text(verbatim: value).font(.system(size: 14)).foregroundStyle(Theme.ink) }
-                else { Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.subtle) }
-            }
-            .frame(height: 38).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
-        .accessibilityLabel(value.map { "\(title), \($0)" } ?? title).accessibilityHint("Opens pond settings")
     }
 }
 

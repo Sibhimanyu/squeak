@@ -246,29 +246,47 @@ public struct DuckClient: Sendable {
     }
 }
 
-/// The pond inspector's sections per page (Dashboard and Room share one column that stays put while the centre slides).
-/// A section's id is its identity: the ones both pages list keep it across a swipe and move to their new position, a
-/// page-only one (Ducks) cross-fades in or out.
+/// The pond inspector's sections (DESIGN.md §1: needs-you outranks everything, quiet until it matters). Dashboard and Room
+/// show the same column in the same order, so a section keeps its identity across a swipe and nothing needs to fade.
 public enum PondInspectorSection: String, Sendable, Equatable, CaseIterable, Identifiable {
-    case ducks, people, invite, controls
+    case needsYou, ducks, people
     public var id: String { rawValue }
 }
 
+/// A duck that waits on the person: one Needs you row.
+public struct InspectorNeedsYouRow: Sendable, Equatable, Identifiable {
+    public var id: String { sessionId }
+    public var sessionId: String
+    public var name: String
+    public var colourSeed: String
+    public var agent: String?
+    /// "asks: <first line of the question>" or "wants approval".
+    public var text: String
+}
+
 public enum PondInspectorSections {
-    /// Top to bottom. Dashboard: People, Invite, Pond controls. Room: Ducks, People, Invite, Pond controls. Invite only for
-    /// a role that may invite.
-    public static func sections(for page: PondPage, canInvite: Bool) -> [PondInspectorSection] {
-        var s: [PondInspectorSection] = page == .room ? [.ducks] : []
+    /// Top to bottom: Needs you (only while a duck waits), Ducks (while there are some, or one can be added), People.
+    public static func sections(needsYou: Int, ducks: Int, canAddDuck: Bool = true) -> [PondInspectorSection] {
+        var s: [PondInspectorSection] = []
+        if needsYou > 0 { s.append(.needsYou) }
+        if ducks > 0 || canAddDuck { s.append(.ducks) }
         s.append(.people)
-        if canInvite { s.append(.invite) }
-        s.append(.controls)
         return s
     }
 
-    /// The sections that keep their identity when the page changes.
-    public static func shared(canInvite: Bool) -> [PondInspectorSection] {
-        let d = sections(for: .dashboard, canInvite: canInvite), r = sections(for: .room, canInvite: canInvite)
-        return d.filter(r.contains)
+    /// The ducks waiting on the person, newest first (ties by name): on duty, state waiting, with a chat to open.
+    public static func needsYou(_ threads: [RoomThread]) -> [InspectorNeedsYouRow] {
+        threads.filter { $0.state == .waiting && $0.onDuty && !$0.sessionId.isEmpty }
+            .sorted { a, b in
+                let ka = a.lastActiveAt ?? a.lastAt ?? 0, kb = b.lastActiveAt ?? b.lastAt ?? 0
+                return ka != kb ? ka > kb : (a.duckName.lowercased(), a.sessionId) < (b.duckName.lowercased(), b.sessionId)
+            }
+            .map { InspectorNeedsYouRow(sessionId: $0.sessionId, name: $0.duckName, colourSeed: $0.colourSeed ?? $0.sessionId, agent: $0.agent, text: needsYouText($0.ask)) }
+    }
+
+    public static func needsYouText(_ ask: RoomAsk?) -> String {
+        let line = ask?.question.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+        return line.map { "asks: \($0)" } ?? "wants approval"
     }
 
     /// The widest the Dashboard's own content gets: it shows streams, threads and work, centred.

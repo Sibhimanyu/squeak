@@ -133,10 +133,7 @@ struct WorkbenchSidebar: View {
 
     /// A pond's settings page in the centre.
     private func openSettings(_ key: String) {
-        NewChatController.shared.hide()
-        model.closeSettings()
-        if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .settings(project: key)
+        model.openSettings(.pond(key))
     }
 
     // MARK: Tree

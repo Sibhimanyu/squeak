@@ -122,15 +122,55 @@ import Testing
 }
 
 @Suite struct PondInspectorSectionsTests {
-    @Test func sectionsPerPage() {
-        #expect(PondInspectorSections.sections(for: .dashboard, canInvite: true) == [.people, .invite, .controls])
-        #expect(PondInspectorSections.sections(for: .room, canInvite: true) == [.ducks, .people, .invite, .controls])
-        #expect(PondInspectorSections.sections(for: .room, canInvite: false) == [.ducks, .people, .controls])
+    @Test func orderIsNeedsYouDucksPeople() {
+        #expect(PondInspectorSections.sections(needsYou: 2, ducks: 3) == [.needsYou, .ducks, .people])
+        #expect(PondInspectorSections.sections(needsYou: 0, ducks: 3) == [.ducks, .people])
     }
 
-    @Test func sharedSectionsKeepIdentityAndDucksIsRoomOnly() {
-        #expect(PondInspectorSections.shared(canInvite: true) == [.people, .invite, .controls])
-        #expect(!PondInspectorSections.sections(for: .dashboard, canInvite: true).contains(.ducks))
-        #expect(PondInspectorSections.sections(for: .room, canInvite: true).first == .ducks)
+    @Test func emptySectionsHide() {
+        #expect(PondInspectorSections.sections(needsYou: 0, ducks: 0, canAddDuck: false) == [.people])
+        #expect(PondInspectorSections.sections(needsYou: 0, ducks: 0) == [.ducks, .people])
+    }
+
+    @Test func needsYouRows() {
+        let ask = RoomAsk(question: "\n Use Postgres or SQLite?\nMore detail")
+        let threads = [
+            RoomThread(sessionId: "a", title: "A", state: .waiting, ask: ask, name: "Ada", lastActiveAt: 10),
+            RoomThread(sessionId: "b", title: "B", state: .waiting, name: "Bo", lastActiveAt: 20),
+            RoomThread(sessionId: "c", title: "C", state: .working),
+            RoomThread(sessionId: "d", title: "D", state: .waiting, duty: .off),
+        ]
+        let rows = PondInspectorSections.needsYou(threads)
+        #expect(rows.map(\.sessionId) == ["b", "a"])
+        #expect(rows[0].text == "wants approval" && rows[1].text == "asks: Use Postgres or SQLite?")
+        #expect(rows[1].name == "Ada")
+        #expect(PondInspectorSections.needsYou([]).isEmpty)
+    }
+}
+
+@Suite struct SettingsPondsTests {
+    private func pond(_ id: String, _ name: String, _ at: String?) -> PondDirectory.Pond {
+        PondDirectory.Pond(id: id, name: name, lastActivityAt: at)
+    }
+
+    @Test func newestActivityFirstThenNone() {
+        let l = SettingsPonds.ordered([
+            pond("a", "Alpha", "2026-11-01T10:00:00Z"), pond("c", "Cedar", nil),
+            pond("b", "Beta", "2026-11-05T10:00:00.500Z"), pond("d", "Birch", nil),
+        ])
+        #expect(l.map(\.id) == ["b", "a", "d", "c"])
+    }
+
+    @Test func selectionKeepsRequestedElseFirst() {
+        let l = SettingsPonds.ordered([pond("a", "A", "2026-11-01T10:00:00Z"), pond("b", "B", "2026-11-05T10:00:00Z")])
+        #expect(SettingsPonds.selection(requested: "a", in: l) == "a")
+        #expect(SettingsPonds.selection(requested: "gone", in: l) == "b")
+        #expect(SettingsPonds.selection(requested: nil, in: l) == "b")
+        #expect(SettingsPonds.selection(requested: "a", in: []) == nil)
+    }
+
+    @Test func deepLinkRoute() {
+        #expect(SettingsRoute.pond("k") == SettingsRoute(section: .ponds, pond: "k"))
+        #expect(SettingsSection(link: "pond") == .ponds && SettingsSection.titledGroups.flatMap(\.sections).contains(.ponds))
     }
 }

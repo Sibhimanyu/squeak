@@ -38,7 +38,7 @@ struct PondRouteView: View {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
                 if sidebarHidden { Color.clear.frame(width: sidebarClearance) }
                 Spacer(minLength: 0)
-                if case .home(let project) = route, PondsModel.shared.native(key: project) != nil { RoomModeSwitch(key: project).padding(.trailing, Space.xl) }
+                if case .home(let project) = route, PondsModel.shared.native(key: project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
@@ -222,7 +222,7 @@ struct PondHomeView: View {
     }
 
     private var settingsAction: some View {
-        Button { ponds.route = .settings(project: key) } label: {
+        Button { model.openSettings(.pond(key)) } label: {
             Lucide(.settings, size: 16, color: Theme.muted).frame(width: 32, height: 32).contentShape(Rectangle())
         }
         .buttonStyle(.borderless).help(PondWords.settings).accessibilityLabel(PondWords.settings)
@@ -603,7 +603,7 @@ struct PondFlockSection: View {
         let canWrite = ponds.freshness(pond).canWrite
         return PondSection("Flock", showsHeading: showsHeading) {
             VStack(alignment: .leading, spacing: Space.s) {
-                Text(verbatim: PondStates.flockGloss).font(Typo.footnote).foregroundStyle(Theme.muted)
+                if !dashboard { Text(verbatim: PondStates.flockGloss).font(Typo.footnote).foregroundStyle(Theme.muted) }
                 if unread {
                     Text(verbatim: ponds.freshness(pond).line ?? "Reading the pond\u{2026}").font(Typo.footnote).foregroundStyle(Theme.muted)
                 }
@@ -627,6 +627,28 @@ struct PondFlockSection: View {
         }
     }
 
+    @ViewBuilder private func memberActions(_ m: FlockMember) -> some View {
+            ForEach(PondMembers.rolesToChangeTo(m), id: \.self) { r in
+                Button("Make \(r.word.lowercased())") { if let p = pond { Task { await ponds.setRole(pond: p.id, member: m.id, role: r) } } }
+            }
+            if m.role != .owner {
+                Divider()
+                ForEach(PondPresets.presets(ownThreads: ponds.ownThreads), id: \.key) { preset in
+                    Button((PondPresets.current(m) == preset.key ? "\u{2713} " : "") + preset.title) {
+                        if let p = pond { Task { await ponds.setPreset(pond: p.id, member: m.id, preset: preset.key) } }
+                    }
+                }
+                ForEach(PondPresets.switches(ownThreads: ponds.ownThreads), id: \.key) { sw in
+                    let on = PondPresets.value(m, sw.key)
+                    Button((on ? "\u{2713} " : "") + sw.title) {
+                        if let p = pond { Task { await ponds.setCap(pond: p.id, member: m.id, cap: sw.key, on: !on) } }
+                    }
+                }
+                Divider()
+            }
+            Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
+    }
+
     private func memberRow(_ m: FlockMember, counts: [String: Int], presence: [PondPresenceEntry], offline: Bool, canWrite: Bool) -> some View {
         let removingNow = pond.map { ponds.isBusy("remove:\($0.id):\(m.id)") } ?? false
         let changing = pond.map { ponds.isBusy("role:\($0.id):\(m.id)") } ?? false
@@ -648,33 +670,16 @@ struct PondFlockSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            if role.canRemoveMembers, !m.you, pond != nil {
-                SqueakMenu {
-                    ForEach(PondMembers.rolesToChangeTo(m), id: \.self) { r in
-                        Button("Make \(r.word.lowercased())") { if let p = pond { Task { await ponds.setRole(pond: p.id, member: m.id, role: r) } } }
-                    }
-                    if m.role != .owner {
-                        Divider()
-                        ForEach(PondPresets.presets(ownThreads: ponds.ownThreads), id: \.key) { preset in
-                            Button((PondPresets.current(m) == preset.key ? "\u{2713} " : "") + preset.title) {
-                                if let p = pond { Task { await ponds.setPreset(pond: p.id, member: m.id, preset: preset.key) } }
-                            }
-                        }
-                        ForEach(PondPresets.switches(ownThreads: ponds.ownThreads), id: \.key) { sw in
-                            let on = PondPresets.value(m, sw.key)
-                            Button((on ? "\u{2713} " : "") + sw.title) {
-                                if let p = pond { Task { await ponds.setCap(pond: p.id, member: m.id, cap: sw.key, on: !on) } }
-                            }
-                        }
-                        Divider()
-                    }
-                    Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
-                } label: { Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
+            if !dashboard, role.canRemoveMembers, !m.you, pond != nil {
+                SqueakMenu { memberActions(m) } label: { Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("More for \(m.name)")
                     .disabled(removingNow || changing || !canWrite)
             }
         }
         .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .opacity(removingNow ? 0.6 : 1)
+        .contextMenu {
+            if dashboard, role.canRemoveMembers, !m.you, pond != nil, !removingNow, !changing, canWrite { memberActions(m) }
+        }
     }
 }

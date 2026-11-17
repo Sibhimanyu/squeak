@@ -59,9 +59,9 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         }
 
         public init(id: String, kind: String = "project", name: String, projectId: String? = nil, pondId: String? = nil, shared: Bool = false,
-                    hidden: Bool = false, labels: [String] = [], streams: [Stream] = [], folder: String? = nil) {
+                    hidden: Bool = false, labels: [String] = [], streams: [Stream] = [], folder: String? = nil, lastActivityAt: String? = nil) {
             self.id = id; self.kind = kind; self.name = name; self.projectId = projectId; self.pondId = pondId; self.shared = shared
-            self.members = []; self.hidden = hidden; self.colour = nil; self.labels = labels; self.lastActivityAt = nil
+            self.members = []; self.hidden = hidden; self.colour = nil; self.labels = labels; self.lastActivityAt = lastActivityAt
             self.streams = streams; self.archivedStreams = 0; self.counts = Counts(); self.folder = folder
         }
     }

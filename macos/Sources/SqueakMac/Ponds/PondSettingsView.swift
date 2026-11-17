@@ -10,6 +10,8 @@ import SwiftUI
 struct PondSettingsView: View {
     /// The pond's directory key; `project` reads its name.
     let key: String
+    /// Inside Settings › Ponds: no back bar, and the page scrolls with Settings' own scroll view.
+    var embedded = false
     private var project: String { ponds.name(key: key) }
     @Environment(AppModel.self) private var model
     @State private var original: NativeProjectSettings?
@@ -34,9 +36,9 @@ struct PondSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
+            if !embedded { topBar }
             ScrollViewReader { scroll in
-                ScrollView {
+                MaybeScroll(embedded: embedded) {
                     VStack(alignment: .leading, spacing: 28) {
                         introduction
                         if let native {
@@ -555,5 +557,13 @@ struct PondSettingsView: View {
                 }
             }
         }
+    }
+}
+
+private struct MaybeScroll<C: View>: View {
+    let embedded: Bool
+    @ViewBuilder let content: () -> C
+    var body: some View {
+        if embedded { content() } else { ScrollView { content() } }
     }
 }

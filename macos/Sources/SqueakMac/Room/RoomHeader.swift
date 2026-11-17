@@ -86,6 +86,7 @@ struct RoomHeader: View {
             }
             .padding(.trailing, 6)
             RoomModeSwitch(key: key)
+            PondHeaderMenu(key: key)
         }
         .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }

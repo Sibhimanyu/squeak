@@ -1921,6 +1921,8 @@ final class AppModel {
     /// Settings is a mode of the main window: the page on screen, or nil while it shows sessions.
     /// Leaving and coming back keeps the sidebar filter and the open chat, which Settings never touches.
     var settingsSection: SettingsSection?
+    /// Settings › Ponds: the pond (directory key) whose page shows; nil = the first of the list.
+    var settingsPond: String?
     /// One-time destination requested by the phone-call setup checklist.
     var voiceSettingsTarget: VoiceSettingsTarget?
     /// The page the next visit starts on, so reopening Settings lands where it was left.
@@ -1942,6 +1944,12 @@ final class AppModel {
             settingsSection = section ?? lastSettingsSection
             showConversationWindow()
         }
+    }
+
+    /// Opens Settings on a route (a section, and for Ponds the pond): every "Pond settings…" link ends here.
+    func openSettings(_ route: SettingsRoute) {
+        settingsPond = route.pond
+        openSettings(route.section)
     }
 
     /// Switches the page without opening a window (captures, which host the window themselves).
