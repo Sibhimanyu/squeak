@@ -10,25 +10,38 @@ public enum PondPage: String, CaseIterable, Sendable, Equatable {
     public var title: String { self == .room ? "Room" : "Dashboard" }
 }
 
-/// Stashed 2026-11-17, owner: bring back later. While `enabled` is false the inspectors (the pond room's inspector and the
-/// thread's Who / Controls / Approvals / Model, i.e. the Thread and Pond panels) are not shown anywhere. The right zone
-/// itself stays for what else is docked there (Code, files, terminals, ducklings, threads) and collapses away when an
-/// inspector would be its only content. All inspector code still builds and its tests still run.
+/// Which inspectors are shown. The room's inspector (the pond's duck control centre) and the Pond panel are on; the
+/// per-chat thread inspector (Who / Controls / Approvals / Model) is stashed, one flag each. A stashed inspector is never
+/// drawn or counted, and the right zone collapses when it would be its only content. Its code still builds and is tested.
 public enum InspectorStash {
-    public static let enabled = false
+    /// Per inspector. The room inspector (open on arrival whenever the Room is on screen) and the Pond panel are shown; the
+    /// per-chat thread inspector stays stashed.
+    public static let roomEnabled = true
+    public static let pondEnabled = true
+    public static let threadEnabled = false
 
     /// Whether a docked panel is an inspector.
     public static func isInspector(_ panel: DockPanel) -> Bool { panel == .thread || panel == .pond }
-    /// An inspector panel that is stashed: never drawn, never counted.
-    public static func hides(_ panel: DockPanel, enabled: Bool = InspectorStash.enabled) -> Bool { !enabled && isInspector(panel) }
 
-    /// Whether the right zone has anything to show: with the stash on, an inspector alone does not count.
+    /// Whether one inspector's flag is on. `enabled` overrides every flag (tests).
+    public static func isEnabled(_ panel: DockPanel, enabled: Bool? = nil) -> Bool {
+        if let enabled { return enabled }
+        switch panel {
+        case .thread: return threadEnabled
+        case .pond: return pondEnabled
+        default: return true
+        }
+    }
+
+    /// An inspector panel that is stashed: never drawn, never counted.
+    public static func hides(_ panel: DockPanel, enabled: Bool? = nil) -> Bool { isInspector(panel) && !isEnabled(panel, enabled: enabled) }
+
+    /// Whether the right zone has anything to show: a stashed inspector alone does not count.
     public static func rightVisible(
         _ layout: DockLayout, files: DockFiles, terminals: DockTerminals, threads: DockThreads = DockThreads(),
-        ducklings: DockDucklings = DockDucklings(), enabled: Bool = InspectorStash.enabled
+        ducklings: DockDucklings = DockDucklings(), enabled: Bool? = nil
     ) -> Bool {
-        if enabled { return layout.isZoneVisible(.right, files: files, terminals: terminals, threads: threads, ducklings: ducklings) }
-        return layout.right.panels.contains { !isInspector($0) } || files.hasFiles(in: .right) || terminals.has(in: .right)
+        layout.right.panels.contains { !hides($0, enabled: enabled) } || files.hasFiles(in: .right) || terminals.has(in: .right)
             || threads.has(in: .right) || ducklings.has(in: .right)
     }
 }

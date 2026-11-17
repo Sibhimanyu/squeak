@@ -163,18 +163,25 @@ struct PondFlowTests {
 
     // MARK: Inspector stash
 
-    private func visible(_ l: DockLayout, enabled: Bool = false) -> Bool {
+    private func visible(_ l: DockLayout, enabled: Bool? = nil) -> Bool {
         InspectorStash.rightVisible(l, files: DockFiles(), terminals: DockTerminals(), enabled: enabled)
     }
 
-    @Test func stashedInspectorsAloneLeaveNoRightZone() {
+    @Test func eachInspectorHasItsOwnFlag() {
+        #expect(InspectorStash.roomEnabled && InspectorStash.pondEnabled && !InspectorStash.threadEnabled)
+        #expect(InspectorStash.hides(.thread) && !InspectorStash.hides(.pond))
+        #expect(!InspectorStash.hides(.thread, enabled: true))
+        #expect(InspectorStash.hides(.pond, enabled: false))
+    }
+
+    @Test func aStashedThreadInspectorAloneLeavesNoRightZone() {
         var l = DockLayout.standard
         l.close(.code)
-        #expect(l.right.panels == [.thread, .pond])
+        l.close(.pond)
+        #expect(l.right.panels == [.thread])
         #expect(!visible(l))
         #expect(visible(l, enabled: true))
-        #expect(InspectorStash.hides(.thread) && InspectorStash.hides(.pond))
-        #expect(!InspectorStash.hides(.thread, enabled: true))
+        #expect(visible(DockLayout.standard))  // the Pond panel is shown
     }
 
     @Test func otherPanelsKeepTheRightZone() {

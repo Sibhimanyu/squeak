@@ -84,6 +84,10 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var role: String?
     public var duty: RoomDuty
     public var lastActiveAt: Int64?
+    /// Pond-level ducks: the duck's own id, the seed its colour comes from, and where it works. All optional (older host).
+    public var duckId: String?
+    public var colourSeed: String?
+    public var place: RoomPlace?
     public var id: String { sessionId }
 
     /// The duck's name: the chosen one, else the chat's title.
@@ -107,7 +111,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, title, agent, state, workingOn, workingOnAt, lastState, lastAt, progress, ask, turnStartedAt, filesChanged
-        case name, role, duty, lastActiveAt
+        case name, role, duty, lastActiveAt, duckId, colourSeed, place
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -127,7 +131,18 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         role = (try? c.decode(String.self, forKey: .role)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         duty = (try? c.decode(String.self, forKey: .duty)).flatMap(RoomDuty.init(rawValue:)) ?? .on
         lastActiveAt = try? c.decode(Int64.self, forKey: .lastActiveAt)
+        duckId = (try? c.decode(String.self, forKey: .duckId)).flatMap { $0.isEmpty ? nil : $0 }
+        colourSeed = (try? c.decode(String.self, forKey: .colourSeed)).flatMap { $0.isEmpty ? nil : $0 }
+        place = try? c.decode(RoomPlace.self, forKey: .place)
     }
+}
+
+/// Where a duck works: a stream (a branch of the pond's repository). Absent: Main, a plain folder, or no job yet.
+public struct RoomPlace: Sendable, Equatable, Decodable {
+    public var kind: String
+    public var workspaceId: String?
+    public var branch: String?
+    public init(kind: String = "stream", workspaceId: String? = nil, branch: String? = nil) { self.kind = kind; self.workspaceId = workspaceId; self.branch = branch }
 }
 
 public enum RoomDuty: String, Sendable, Equatable { case on, off }

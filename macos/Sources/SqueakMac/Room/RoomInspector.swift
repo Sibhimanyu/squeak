@@ -10,6 +10,10 @@ struct RoomInspector: View {
     let room: PondRoomModel
     @Environment(AppModel.self) private var model
     @State private var editing: DuckEdit?
+    @State private var showOff = false
+    @State private var adding = false
+    @State private var notice: String?
+    private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
     @State private var email = ""
     @State private var inviting = false
     @State private var inviteLine: String?
@@ -22,8 +26,8 @@ struct RoomInspector: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                flock
                 ducksList
+                flock
                 if role.canInvite { invite }
                 controls
             }
@@ -85,31 +89,81 @@ struct RoomInspector: View {
         }
     }
 
+    private var allDucks: [PondDuck] { roster.ducks ?? room.feed.threads.map(PondDuck.init(thread:)) }
+
     private var ducksList: some View {
-        let ducks = RoomDucks.roster(room.feed.threads)
+        let r = RoomRoster.roster(allDucks, threads: room.feed.threads)
         return VStack(alignment: .leading, spacing: 4) {
-            label("Ducks", ducks.count)
-            if ducks.isEmpty {
+            HStack {
+                Text(verbatim: RoomRoster.header(r.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button { withAnimation(Motion.standard) { adding.toggle() } } label: {
+                    HStack(spacing: 4) { Lucide(.plus, size: 11, color: Theme.muted); Text("New duck").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink) }
+                        .padding(.horizontal, 8).frame(height: 24)
+                        .background(Theme.selected, in: RoundedRectangle(cornerRadius: 6, style: .continuous)).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel("New duck")
+            }
+            if adding {
+                NewDuckForm(roster: roster, room: room, close: { withAnimation(Motion.standard) { adding = false } })
+            }
+            if r.count == 0 && !adding {
                 Text("No ducks yet. Start one and it joins the room.").font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             }
-            ForEach(ducks) { d in DuckRow(duck: d, open: { openDuck(d.sessionId) }, edit: { editing = DuckEdit(sessionId: d.sessionId, field: $0, text: $0 == .name ? d.name : (d.role ?? "")) },
-                                          duty: { on in Task { await room.setDuty(sessionId: d.sessionId, on: on, host: model.nativeHost) } }) }
+            ForEach(r.onDuty) { d in duckRow(d) }
+            if !r.offDuty.isEmpty {
+                Button { withAnimation(Motion.standard) { showOff.toggle() } } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(showOff ? 90 : 0))
+                        Text(verbatim: RoomRoster.offDutyLabel(r.offDuty.count)).font(.system(size: 11))
+                    }
+                    .foregroundStyle(Theme.subtle).padding(.horizontal, 6).padding(.top, 6).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(RoomRoster.offDutyLabel(r.offDuty.count)).accessibilityHint(showOff ? "Collapses the list" : "Expands the list")
+                if showOff { ForEach(r.offDuty) { d in duckRow(d) } }
+            }
+            if let e = roster.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).padding(.horizontal, 6).padding(.top, 4) }
+        }
+        .task(id: room.feed.threads) {
+            try? await Task.sleep(for: .milliseconds(250))
+            if !Task.isCancelled { await roster.refresh(host: model.nativeHost) }
         }
         .sheet(item: $editing) { e in
             DuckEditSheet(edit: e) { text in
                 let field: RoomDuckField = e.field == .name ? (RoomDucks.cleanName(text).map { .set($0) } ?? .unchanged) : (RoomDucks.cleanRole(text) ?? .unchanged)
-                if field == .unchanged { return "That is too long." }
-                return await room.edit(sessionId: e.sessionId, name: e.field == .name ? field : .unchanged, role: e.field == .role ? field : .unchanged, host: model.nativeHost)
+                if field == .unchanged { return e.field == .name ? NewDuckForm.Problem.nameTooLong.rawValue : NewDuckForm.Problem.roleTooLong.rawValue }
+                let action: DuckAction
+                switch (e.field, field) {
+                case (.name, .set(let n)): action = .rename(duck: e.duckId, name: n)
+                case (_, .set(let r)): action = .setRole(duck: e.duckId, role: r)
+                default: action = .setRole(duck: e.duckId, role: nil)
+                }
+                await roster.perform(action, host: model.nativeHost)
+                return roster.error
             }
         }
     }
 
-    private func openDuck(_ sessionId: String) {
-        guard let s = model.allSessions.first(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
-        PondsModel.shared.route = nil
-        model.select(s.key)
-        if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
-            Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
+    private func duckRow(_ d: RosterDuck) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DuckRow(
+                duck: d, open: { open(d) },
+                edit: { editing = DuckEdit(duckId: d.id, field: $0, text: $0 == .name ? d.name : (d.role ?? "")) },
+                duty: { on in Task { await roster.perform(.duty(duck: d.id, on: on), host: model.nativeHost) } })
+            if notice == d.id { Text(verbatim: RoomRoster.noJobLine).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.leading, 51).padding(.bottom, 4) }
+        }
+    }
+
+    /// A duck's tab through the same path as a click in the room; a duck with no session opens nothing.
+    private func open(_ d: RosterDuck) {
+        switch RoomRoster.click(d) {
+        case .noJob: notice = notice == d.id ? nil : d.id
+        case .open(let sessionId):
+            notice = nil
+            guard model.allSessions.contains(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
+            model.openFromPond(.duck(sessionId), pond: key, page: .room)
+            if !d.onDuty { Task { await roster.perform(.duty(duck: d.id, on: true), host: model.nativeHost) } }
         }
     }
 
@@ -200,49 +254,58 @@ struct RoomRightColumn: View {
 
 struct DuckEdit: Identifiable {
     enum Field { case name, role }
-    var id: String { sessionId + (field == .name ? ":name" : ":role") }
-    var sessionId: String
+    var id: String { duckId + (field == .name ? ":name" : ":role") }
+    var duckId: String
     var field: Field
     var text: String
 }
 
-/// One duck in the roster: avatar, name and agent, role, presence. Click opens its tab; the menu renames, sets a role or
-/// changes its duty.
+/// One duck in the roster: avatar, name and agent, role, place, presence. Click opens its tab; hover shows Open and
+/// Close (off duty) or Bring back; the menu renames, sets a role or changes its duty.
 private struct DuckRow: View {
-    let duck: RoomDuck
+    let duck: RosterDuck
     let open: () -> Void
     let edit: (DuckEdit.Field) -> Void
     let duty: (Bool) -> Void
     @State private var hover = false
 
     var body: some View {
-        Button(action: open) {
-            HStack(alignment: .center, spacing: 11) {
-                DuckAvatar(sessionId: duck.sessionId, agent: duck.agent, size: 34, off: !duck.onDuty)
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: duck.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                        if let l = duck.agentLabel { Text(verbatim: l).font(.system(size: 11)).foregroundStyle(Theme.subtle) }
-                    }
-                    if let r = duck.roleLine { Text(verbatim: r).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1) }
-                    HStack(spacing: 5) {
-                        switch duck.presence {
-                        case .working: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .leading, grid: .micro)
-                        case .waiting: Lucide(.triangleAlert, size: 11, color: Theme.warning)
-                        case .idle, .off: EmptyView()
-                        }
-                        Text(verbatim: duck.presenceLine).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
-                    }
-                    .padding(.top, 1)
+        HStack(alignment: .center, spacing: 11) {
+            DuckAvatar(sessionId: duck.colourSeed, agent: duck.agent, size: 34, off: !duck.onDuty)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: duck.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    if let l = duck.agentLabel { Text(verbatim: l).font(.system(size: 11)).foregroundStyle(Theme.subtle) }
                 }
-                Spacer(minLength: 0)
+                if let r = duck.role { Text(verbatim: r).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1) }
+                HStack(spacing: 5) {
+                    switch duck.presence {
+                    case .working: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .leading, grid: .micro)
+                    case .waiting: Lucide(.triangleAlert, size: 11, color: Theme.warning)
+                    case .idle, .off: EmptyView()
+                    }
+                    Text(verbatim: duck.presenceLine).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    if let chip = duck.placeChip {
+                        Text(verbatim: chip).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                            .padding(.horizontal, 5).frame(height: 16).background(Theme.selected, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
+                .padding(.top, 1)
             }
-            .opacity(duck.onDuty ? 1 : 0.5)
-            .padding(.horizontal, 6).padding(.vertical, 7)
-            .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .contentShape(Rectangle())
+            Spacer(minLength: 0)
+            if hover {
+                HStack(spacing: 2) {
+                    if duck.hasJob { hoverButton("Open", action: open) }
+                    hoverButton(duck.onDuty ? "Close" : "Bring back") { duty(!duck.onDuty) }
+                }
+            }
         }
-        .buttonStyle(.plain).onHover { hover = $0 }
+        .opacity(duck.onDuty ? 1 : 0.5)
+        .padding(.horizontal, 6).padding(.vertical, 7)
+        .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { hover = $0 }
         .contextMenu {
             Button("Rename\u{2026}") { edit(.name) }
             Button("Set role\u{2026}") { edit(.role) }
@@ -250,8 +313,69 @@ private struct DuckRow: View {
             if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring on duty") { duty(true) } }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.roleLine ?? ""). \(duck.presenceLine)")
-        .accessibilityHint("Opens the duck")
+        .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.placeChip ?? ""). \(duck.presenceLine)")
+        .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { open() }
+    }
+
+    private func hoverButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(verbatim: title).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.ink).padding(.horizontal, 7).frame(height: 22)
+                .background(Theme.selectedStrong, in: RoundedRectangle(cornerRadius: 6, style: .continuous)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityLabel("\(title) \(duck.name)")
+    }
+}
+
+/// The inline New duck form: name, optional role, optional first job (posted to the room as "@name ..."), Create.
+private struct NewDuckForm: View {
+    typealias Problem = SqueakMacCore.NewDuckForm.Problem
+    let roster: RoomRosterModel
+    let room: PondRoomModel
+    let close: () -> Void
+    @Environment(AppModel.self) private var model
+    @State private var name = ""
+    @State private var role = ""
+    @State private var job = ""
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            field("Name", text: $name)
+            field("Role (optional)", text: $role)
+            field("Give it a job (optional)", text: $job)
+            if let p = problem ?? roster.error { Text(verbatim: p).font(.system(size: 12)).foregroundStyle(Theme.negative) }
+            HStack {
+                Spacer()
+                Button("Cancel", action: close).buttonStyle(SecondaryButtonStyle())
+                Button(roster.creating ? "Creating\u{2026}" : "Create", action: create).buttonStyle(SecondaryButtonStyle()).disabled(roster.creating)
+            }
+        }
+        .padding(10)
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.line))
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text).textFieldStyle(.plain).font(.system(size: 13)).onSubmit(create)
+            .padding(.horizontal, 10).frame(height: 30)
+            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
+            .accessibilityLabel(placeholder)
+    }
+
+    private func create() {
+        switch SqueakMacCore.NewDuckForm.validate(name: name, role: role) {
+        case .failure(let p): problem = p.rawValue
+        case .success(let v):
+            problem = nil
+            let jobText = job
+            Task {
+                guard let duck = await roster.create(name: v.name, role: v.role, host: model.nativeHost) else { return }
+                if let text = RoomRoster.jobMessage(duckName: duck.name, text: jobText) { await room.send(text, host: model.nativeHost) }
+                close()
+            }
+        }
     }
 }
 

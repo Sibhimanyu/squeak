@@ -96,12 +96,12 @@ struct ConversationView: View {
             .overlay(alignment: .topLeading) { windowContent }
     }
 
-    @AppStorage("roomInspectorOpen") private var roomInspectorOpen = true
+    /// The room inspector is open on arrival; hiding it is remembered for this app session only.
+    @State private var roomInspectorOpen = true
 
     /// The pond room on screen, if any: its project id and the pond's directory key (the pond page's Room view).
     private var roomContext: (projectId: String, key: String)? {
-        // The room's inspector is stashed with the rest of the right zone (`InspectorStash`).
-        guard InspectorStash.enabled else { return nil }
+        guard InspectorStash.roomEnabled else { return nil }
         if let route = PondsModel.shared.route {
             guard case .home(let key) = route, RoomViewPref.shared.mode(for: key) == .room else { return nil }
             if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
@@ -139,7 +139,7 @@ struct ConversationView: View {
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
         let showingSettings = model.settingsSection != nil
-        let toggleRightPane: () -> Void = { guard rightAvailable else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
+        let toggleRightPane: () -> Void = { guard rightAvailable || roomCtx != nil else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
             && PondsModel.shared.route == nil
@@ -234,7 +234,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && rightAvailable, window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && (rightAvailable || roomCtx != nil), window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)
