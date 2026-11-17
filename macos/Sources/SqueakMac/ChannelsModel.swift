@@ -68,8 +68,6 @@ final class ChannelsModel {
     // Shared state.
     private(set) var restarting = false
     private(set) var notice: String?
-    private(set) var pairingURL: String?
-    private(set) var pairingError: String?
     private(set) var candidates: [TelegramCandidate] = []
 
     init(client: DaemonClient, demo: Bool, env: EnvFile = EnvFile(), service: DaemonService = DaemonService()) {
@@ -1015,7 +1013,7 @@ final class ChannelsModel {
     // MARK: iPhone
 
 
-    /// Turns the iPhone channel on with these keys and restarts the daemon; the caller opens pairing.
+    /// Turns the iPhone channel on with these keys and restarts the daemon.
     @discardableResult func enablePhone(_ change: [String: String?]) async -> Bool {
         if demo { return true }
         guard write(change) else { return false }
@@ -1023,32 +1021,6 @@ final class ChannelsModel {
         await restartAndRefresh()
         return true
     }
-
-    func startPairing() async {
-        pairingError = nil
-        pairingURL = nil
-        if demo { pairingURL = "squeak://pair?d=demo-not-a-real-code"; return }
-        do {
-            if let p = try await client.remotePair() {
-                pairingURL = p.url
-                AppLog.info("pairing window opened")
-            } else {
-                pairingError = "This Squeak service can't pair phones. Update it, then try again."
-            }
-        } catch {
-            pairingError = "Couldn't start pairing: \(Self.describe(error))"
-        }
-        await refreshRemote()
-    }
-
-    /// Puts the pairing code (exactly the QR's text) on the clipboard, for Squeak for Web.
-    @discardableResult func copyPairingCode() -> Bool {
-        guard let url = pairingURL, !url.isEmpty else { return false }
-        NSPasteboard.general.clearContents()
-        return NSPasteboard.general.setString(url, forType: .string)
-    }
-
-    func endPairing() { pairingURL = nil; pairingError = nil }
 
     /// Called once for each device the daemon added through the account without a code.
     @ObservationIgnored var onDeviceAutoAdded: ((RemoteStatus.Device, String?) -> Void)?

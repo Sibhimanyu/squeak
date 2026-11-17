@@ -505,10 +505,7 @@ struct WorkbenchLiveRow: View {
             TideGlyph(color: Theme.working, grid: .stream)
             if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
             if let since { LiveClockText(since: since) }
-            Spacer(minLength: 8)
-            NextAttentionPill()
         }
-        .frame(height: 40)
         .background {
             if let onStop {
                 Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)

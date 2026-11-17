@@ -529,10 +529,14 @@ extension NativeNewChatForm {
         if let l = s.level { pick(effort: l) }
         splitOn = s.code != nil || s.run != nil
         if splitOn { splitCode = s.code; splitRun = s.run }
-        mode = s.planFirst ? .plan : .ask
+        set(planFirst: s.planFirst)
         presetPicked = true
     }
 
     public var planFirst: Bool { mode == .plan }
-    public mutating func set(planFirst on: Bool) { mode = on ? .plan : .ask }
+    /// Plan first is Plan mode; turning it off leaves Plan for the new-thread default (Skip approvals), never Ask,
+    /// and keeps any other mode the person picked.
+    public mutating func set(planFirst on: Bool) {
+        if on { mode = .plan } else if mode == .plan { mode = .skipApprovals }
+    }
 }

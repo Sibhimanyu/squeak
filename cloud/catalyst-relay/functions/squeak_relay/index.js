@@ -4,6 +4,7 @@ const { zcAuth, UserManagement } = require("@zcatalyst/auth");
 const { DataStreams } = require("@zcatalyst/datastreams");
 const { pondStreamName } = require("./scoped");
 const { NoSQL, NoSQLItem, NoSQLEnum, NoSQLMarshall } = require("@zcatalyst/nosql");
+const { Mail } = require("@zcatalyst/mail");
 const { createRelay } = require("./handler");
 const { createChannelsCache } = require("./channels-cache");
 
@@ -99,7 +100,7 @@ function streamsFor(app) {
 
 /**
  * The signed-in Catalyst user of this request (Hosted login's cookie), or null. The user-scope app is made lazily and any
- * failure reads as anonymous. Unverified against a real deploy: the SDK's \`getCurrentUser\` shape (user_id, email_id,
+ * failure reads as anonymous. Unverified against a real deploy: the SDK's `getCurrentUser` shape (user_id, email_id,
  * first_name, last_name per its typings).
  */
 const toUser = (u) =>
@@ -165,6 +166,27 @@ const currentUserOf = (req, app) => async () => {
   }
 };
 
+/**
+ * Invitation email through Catalyst Mail (docs/cloud-layer.md, "Invite email"). The sender address is SQUEAK_MAIL_FROM, an
+ * address verified in the console under Cloud Scale > Mail; unset (or the committed placeholder) means no mail is sent.
+ * Unverified against a real deploy: the SDK's `sendMail({from_email, to_email, subject, content, html_mode})`.
+ */
+const mailerFor = (app) => {
+  const from = process.env.SQUEAK_MAIL_FROM;
+  if (!from || from === "REPLACED_AT_DEPLOY") return undefined;
+  return {
+    send: ({ to, subject, html }) =>
+      new Mail(app).sendMail({
+        from_email: from,
+        to_email: [to],
+        subject,
+        content: html,
+        html_mode: true,
+        display_name: "Squeak",
+      }),
+  };
+};
+
 /** An env value that was really provided: the committed placeholder counts as unset. */
 const set = (v) => (v && v !== "REPLACED_AT_DEPLOY" ? v : undefined);
 
@@ -175,6 +197,7 @@ module.exports = async (req, res) => {
     cliqKey: process.env.CLIQ_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
+    mail: mailerFor(app),
     // AppSail: no Catalyst user, ever (signing in is the function's job); the account-token routes still verify their own signature.
     currentUser: process.env.SQUEAK_NO_CATALYST_USER === "1" ? async () => null : currentUserOf(req, app),
     zoho: {

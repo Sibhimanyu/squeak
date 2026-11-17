@@ -20,7 +20,7 @@ if(!key){console.error("No RELAY_KEY");process.exit(1);}
 let cliq=process.env.SQUEAK_CLIQ_KEY;
 if(!cliq){try{const l=fs.readFileSync(path.join(process.env.SUPPORT,".env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_CLIQ_KEY\s*=/.test(x));cliq=l&&l.slice(l.indexOf("=")+1).trim();}catch{}}
 const e=cfg.env_variables; e.RELAY_KEY=key; e.SQUEAK_RELAY_HOSTED="1"; if(cliq)e.CLIQ_KEY=cliq;
-for(const k of ["SQUEAK_ZOHO_CLIENT_ID","SQUEAK_ZOHO_CLIENT_SECRET","SQUEAK_ZOHO_REDIRECT_URI"])if(process.env[k])e[k]=process.env[k];
+for(const k of ["SQUEAK_ZOHO_CLIENT_ID","SQUEAK_ZOHO_CLIENT_SECRET","SQUEAK_ZOHO_REDIRECT_URI","SQUEAK_MAIL_FROM"])if(process.env[k])e[k]=process.env[k];if(!process.env.SQUEAK_MAIL_FROM){const m=(()=>{try{const l=require("fs").readFileSync(require("path").join(process.env.HOME,"Library/Application Support/squeak/.env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_MAIL_FROM\s*=/.test(x));return l&&l.slice(l.indexOf("=")+1).trim();}catch{return undefined}})();if(m)e.SQUEAK_MAIL_FROM=m;}
 const out=JSON.stringify(cfg,null,2)+"\n";fs.writeFileSync(path.join(process.env.APP,"app-config.json"),out,{mode:0o600});fs.writeFileSync(path.join(path.dirname(process.env.APP),"app-config.json"),out,{mode:0o600});'
 cd "$TMP"
 catalyst deploy appsail --name squeak-relay --build-path "$TMP/app" --stack node22 --command "node server.js"

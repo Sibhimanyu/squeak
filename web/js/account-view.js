@@ -27,8 +27,8 @@ export function linkedLine(value) {
 
 /**
  * The start when no Mac is open. Signed out it is one sign-in screen. Signed in it is "Your Macs": every Mac on the account
- * (`macs`, null while loading) with whether it is online, asleep or offline; `pick` opens one. `oldMac()` (optional) is the
- * small "Mac not on an account yet?" link for a Mac too old to sign in; `signOut` (optional) adds Sign out to the identity chip.
+ * (`macs`, null while loading) with whether it is online, asleep or offline; `pick` opens one. `note` (optional) is one plain
+ * line on the signed-out card; `signOut` (optional) adds Sign out to the identity chip.
  */
 export function accountStartScreen({
   state,
@@ -38,7 +38,7 @@ export function accountStartScreen({
   error,
   pick,
   signIn,
-  oldMac = null,
+  note = null,
   signOut = null,
   photo = null,
   mountLogin = null,
@@ -90,10 +90,6 @@ export function accountStartScreen({
         ),
       );
     }
-    const actions = [
-      !macs?.length && oldMac ? wlButton("Mac not on an account yet?", oldMac, { quiet: true, build }) : null,
-    ].filter(Boolean);
-    if (actions.length) parts.push(build("div", { class: "wl-actions" }, ...actions));
   } else {
     // Signed out: the calm card (direction A), the sign-in form inside it, and nothing else to choose.
     return calmLayout({
@@ -102,8 +98,8 @@ export function accountStartScreen({
         calmEyebrow("Squeak for Web", build),
         build("h1", null, "Sign in to Squeak"),
         build("p", { class: "cl-lead" }, "Your agents, in view. Sign in with your Squeak account to see your Macs."),
+        note ? build("p", { class: "cl-lead", role: "status" }, note) : null,
         loginForm({ fallback: signIn, mount: mountLogin, build }),
-        oldMac ? calmButton("Mac not on an account yet?", oldMac, { kind: "link", build }) : null,
         calmError(macsError, build),
         calmError(error, build),
       ],
@@ -111,6 +107,28 @@ export function accountStartScreen({
   }
   parts.push(wlError(macsError, build), wlError(error, build));
   return welcomeLayout({ children: parts, build });
+}
+
+/**
+ * The page could not tell whether anyone is signed in (the network, a blocked cross-origin call, the sign-in service down).
+ * Never a pairing screen: all it offers is to ask again, or to sign in.
+ */
+export function unreachableScreen({ error = null, retry, signIn, build = h }) {
+  return calmLayout({
+    build,
+    children: [
+      calmEyebrow("Squeak for Web", build),
+      build("h1", null, "Can't reach Squeak right now"),
+      build(
+        "p",
+        { class: "cl-lead" },
+        "Check your connection and try again. If it keeps happening, Squeak's sign-in service may be down.",
+      ),
+      calmButton("Try again", retry, { kind: "primary", build }),
+      calmButton("Sign in", signIn, { kind: "provider", build }),
+      calmError(error, build),
+    ],
+  });
 }
 
 /** While the account is being asked (the first look, before either screen). */

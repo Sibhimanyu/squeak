@@ -19,6 +19,11 @@
 //                         x-squeak-join-attest on a join request, where it fills the relay-owned joinids (never an account token)
 //   POST   /account/names {ids:[userId]} (relay key or Mac key, at most 50) -> {names:{id:{name,email?}}, self?}: the display names
 //                         relay-side accounts signed in with ("names", relay-owned); a Mac key also gets its own account as self
+//   POST   /ponds/<pondId>/members/accounts {ownerKey, name?, add:[userId], remove:[userId]} (the pond's own Mac): the account
+//                         index "acctponds/<userId>" (relay-owned); GET /account/ponds (account token or Mac key) -> {ponds:[{pondId,
+//                         ownerKey, name?}]} for the caller's own account only; POST /account/pond-devices {pondId, publicKey, boxKey?,
+//                         client, nest?} (same callers, 10 a minute per account) writes the relay-owned channels/<pond>/devreqs/<deviceId>
+//                         and answers a join-scope token (docs/ponds.md, "Members are accounts")
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
 //   GET    /account/handoff?return=<pinned web origin> (cookie): the web app on another origin (squeak.onslate.in) signs in HERE
 //                         (the function's own origin, where Catalyst can read the session) and gets an app token back in the URL
@@ -60,6 +65,7 @@
 const crypto = require("node:crypto");
 const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
 const scoped = require("./scoped");
+const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 
 const VERSION = require("./package.json").version;
@@ -107,6 +113,19 @@ const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const B64_ANY_200 = /^[A-Za-z0-9+/_-]{1,200}={0,2}$/;
 const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
+/**
+ * Account-wide pond membership (docs/ponds.md, "Members are accounts"). \`acctponds/<userId>\` holds one row per pond whose
+ * owner's Mac wrote that account as a member (\`POST /ponds/<id>/members/accounts\`, the channel's own Mac); only that
+ * account reads it (\`GET /account/ponds\`). A device of the account asks to be added with \`POST /account/pond-devices\`,
+ * which writes the relay-owned \`devreqs\` document in the pond's channel: its presence is the relay's attestation.
+ */
+const ACCT_PONDS_PK = "acctponds";
+const PONDDEV_RATE_PK = "ponddev-rate";
+const PONDDEV_PER_MINUTE = 10;
+const PONDDEV_TOKEN_TTL_SEC = 24 * 60 * 60;
+const ACCT_INDEX_MAX = 50;
+const ACCT_PONDS_MAX = 100;
+const DEVICE_CLIENTS = new Set(["mac", "web", "ios"]);
 /** The profile photo: relay-owned partition keys (not channels/..., so parseDocPath/parseKindPath can never name them). */
 const AVATAR_PK = "avatars";
 const NAMES_PK = "names";
@@ -128,11 +147,13 @@ const ZOHO_ACCOUNTS = /^accounts\.zoho\.(com|in|eu|com\.au|jp|com\.cn|sa|ca)$/;
 const ZOHO_APP_PATH = "/app/index.html";
 /** The only places a sign-in handoff may return to (exact origin, no wildcard): the web app's Slate home. */
 const HANDOFF_ORIGINS = ["https://squeak.onslate.in"];
+/** Home, or the invite page (an emailed link opens /join#<code>; the code stays in the fragment, which the handoff never sees). */
+const HANDOFF_PATHS = ["/", "/index.html", "/join"];
 const handoffReturn = (value) => {
   try {
     const u = new URL(String(value));
     if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash) return null;
-    if (!HANDOFF_ORIGINS.includes(u.origin) || (u.pathname !== "/" && u.pathname !== "/index.html")) return null;
+    if (!HANDOFF_ORIGINS.includes(u.origin) || !HANDOFF_PATHS.includes(u.pathname)) return null;
     return `${u.origin}${u.pathname}`;
   } catch {
     return null;
@@ -153,6 +174,15 @@ const SHORT_LOCK_MS = 10 * 60 * 1000;
 const SHORT_BODY_MAX = 4096;
 /** What a short code's details may hold: the invite's fields except the pond key (`k`, `kv`), which never goes to the relay. */
 const SHORT_DETAIL_KEYS = ["v", "p", "o", "n", "s", "e", "r", "on", "l", "jt"];
+/** Invite email (docs/cloud-layer.md): limits and the fixed sentences a failure may carry. */
+const INVITE_MAIL_PK = "invite-mail";
+const INVITE_MAIL_MAX = 10;
+const INVITE_MAIL_PER_MAC_DAY = 20;
+const INVITE_MAIL_PER_POND_HOUR = 10;
+const INVITE_MAIL_BODY_MAX = 32 * 1024;
+const DAY_MS = 24 * HOUR_MS;
+const MAIL_NOT_SET = "Squeak's email isn't set up yet.";
+const MAIL_FAILED = "Squeak couldn't send the email right now. Try again later.";
 const normEmail = (e) => String(e).trim().toLowerCase();
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
@@ -308,7 +338,8 @@ function createRelay(deps) {
       }
     }
     if (!user && (pinned || deps.signin === "required")) return { status: 401, body: { error: "signin" } };
-    if (pinned && normEmail(user.email) !== normEmail(pinned)) return { status: 403, body: { error: "email" } };
+    if (pinned && normEmail(user.email) !== normEmail(pinned))
+      return { status: 403, body: { error: "email", masked: mailing.maskEmail(pinned) } };
     return { user };
   }
 
@@ -873,14 +904,77 @@ function createRelay(deps) {
     return d;
   }
   /** Counts one more use in a window kept under (pk, id); false once `limit` uses are spent. */
-  async function spend(pk, id, windowMs, limit) {
+  async function spend(pk, id, windowMs, limit, n = 1) {
     const now = clock();
     const rate = parseOr(await deps.store.get(pk, id));
     const fresh = !rate || typeof rate.since !== "number" || rate.since + windowMs <= now;
     const used = fresh ? 0 : Number(rate.n) || 0;
-    if (used >= limit) return false;
-    await deps.store.put(pk, id, JSON.stringify({ since: fresh ? now : rate.since, n: used + 1 }));
+    if (used + n > limit) return false;
+    await deps.store.put(pk, id, JSON.stringify({ since: fresh ? now : rate.since, n: used + n }));
     return true;
+  }
+
+  /**
+   * POST /ponds/<pondId>/invites/email (a Mac's own key, or the operator's): sends each address its invitation through the
+   * injected mail sender (Catalyst Mail). The join token behind each link is already bound to its address (/pond-token);
+   * this route only delivers. Strict body { emails, inviteUrls: { <email>: <link> }, pondName, inviterName }.
+   * 20 emails per Mac per day, 10 per pond per hour. A mail failure is a fixed 503 {error:"mail", reason}, never the SDK's words.
+   */
+  async function handleInviteEmail(req, res, method, mac, pondId) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
+    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
+    const body = await readJson(req, INVITE_MAIL_BODY_MAX);
+    const keys = Object.keys(body || {});
+    const emails = body && body.emails;
+    const urls = body && body.inviteUrls;
+    const oneLine = (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 200;
+    if (
+      keys.some((k) => !["emails", "inviteUrls", "pondName", "inviterName"].includes(k)) ||
+      !Array.isArray(emails) ||
+      emails.length < 1 ||
+      emails.length > INVITE_MAIL_MAX ||
+      !emails.every((e) => mailing.validEmail(e)) ||
+      !urls ||
+      typeof urls !== "object" ||
+      Array.isArray(urls) ||
+      !oneLine(body.pondName) ||
+      !oneLine(body.inviterName)
+    )
+      return out(400, { error: "body" });
+    const list = [...new Set(emails.map(mailing.normEmail))];
+    if (!list.every((e) => mailing.linkOk(urls[e]))) return out(400, { error: "links" });
+    if (!deps.mail || !deps.mail.send) return out(503, { error: "mail", reason: MAIL_NOT_SET });
+    const who = mac ? mac.macId : "operator";
+    // The pond's hour first, then the Mac's day; a refusal by the second gives the first back.
+    if (!(await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, list.length)))
+      return out(429, { error: "busy" });
+    if (!(await spend(INVITE_MAIL_PK, `d-${who}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, list.length))) {
+      await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, -list.length);
+      return out(429, { error: "busy" });
+    }
+    const sent = [];
+    const failed = [];
+    for (const email of list) {
+      const m = mailing.buildInviteMail({
+        inviterName: body.inviterName,
+        pondName: body.pondName,
+        email,
+        url: urls[email],
+      });
+      try {
+        await deps.mail.send({ to: email, subject: m.subject, text: m.text, html: m.html });
+        sent.push(email);
+      } catch (error) {
+        // The provider's own words go to the function's log only (the operator reads them there), never into a response.
+        log("invite email not sent", String((error && (error.message || error.code)) || error).slice(0, 300));
+        failed.push(email);
+      }
+    }
+    // Nothing went out: say so as a failure (quota or a sender that is not set up are the usual causes), no SDK words.
+    if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed });
+    return out(200, { sent, failed });
   }
 
   /** POST /ponds/short: an owner's Mac (or the operator) makes a short code for the join details it hands over. */
@@ -914,6 +1008,124 @@ function createRelay(deps) {
       return out(200, { code: shortShow(code), expiresAt: exp });
     }
     return out(503, { error: "busy" });
+  }
+
+  /**
+   * POST /ponds/<pondId>/members/accounts (the pond's own Mac, or the operator's key): the owner's Mac says which accounts
+   * are members of the pond now. { ownerKey, name?, add: [userId], remove: [userId] }. This is the only writer of the
+   * account index; a Mac that does not own the channel is refused (`channelAllowed`), so nobody can list an account in
+   * someone else's pond. Listing grants nothing: a device still needs the owner's Mac to add it.
+   */
+  async function handlePondAccounts(req, res, method, mac, pondId) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
+    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
+    const body = await readJson(req, 8192);
+    const ids = (v) =>
+      Array.isArray(v) && v.length <= ACCT_INDEX_MAX && v.every((x) => typeof x === "string" && USER_ID.test(x));
+    const add = body.add === undefined ? [] : body.add;
+    const remove = body.remove === undefined ? [] : body.remove;
+    if (!ids(add) || !ids(remove)) return out(400, { error: "ids" });
+    if (add.length > 0 && (typeof body.ownerKey !== "string" || !B64_ANY_200.test(body.ownerKey)))
+      return out(400, { error: "key" });
+    const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
+    const at = Date.now();
+    for (const userId of new Set(add)) {
+      await deps.store.put(
+        `${ACCT_PONDS_PK}/${userId}`,
+        pondId,
+        JSON.stringify({ v: 1, ownerKey: body.ownerKey, ...(name ? { name } : {}), at }),
+      );
+    }
+    for (const userId of new Set(remove)) await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
+    return out(204);
+  }
+
+  /** The signed-in account behind a request: a Mac's own key, or an account token (never the operator's key, a pond token or a cookie-less call). */
+  async function accountOf(req, mac) {
+    if (req.headers["x-squeak-pond-token"] !== undefined) return null;
+    if (mac) return USER_ID.test(String(mac.userId)) ? { userId: mac.userId } : null;
+    if (req.headers["x-squeak-relay"] !== undefined) return null;
+    const user = await accountUser(req, true);
+    return user && USER_ID.test(String(user.userId)) ? user : null;
+  }
+
+  /** GET /account/ponds: the ponds the caller's own account is a member of. Only that account reads its own row. */
+  async function handleAccountPonds(req, res, method, mac) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "GET") return out(405, {});
+    const user = await accountOf(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    const rows = await deps.store.list(`${ACCT_PONDS_PK}/${user.userId}`);
+    const ponds = [];
+    for (const r of rows) {
+      const v = parseOr(r.json);
+      if (!v || typeof v.ownerKey !== "string" || !scoped.POND.test(r.doc)) continue;
+      ponds.push({
+        pondId: r.doc,
+        ownerKey: v.ownerKey,
+        ...(typeof v.name === "string" && v.name ? { name: v.name } : {}),
+      });
+      if (ponds.length >= ACCT_PONDS_MAX) break;
+    }
+    return out(200, { ponds });
+  }
+
+  /**
+   * POST /account/pond-devices { pondId, publicKey, boxKey?, client, nest? }: a device of an account that is a member of
+   * the pond asks to be added. The relay checks the account is in the pond's index and writes the relay-owned
+   * `channels/<pondId>/devreqs/<deviceId>` = { v:1, reqId, userId, email, name, publicKey, boxKey, client, nest, at }
+   * (no client token can write that kind: its presence says which account asked). It answers a join-scope token for the
+   * device, with which the device reads what the owner's Mac writes for it. A device the owner removed (revoked) is refused.
+   */
+  async function handlePondDevice(req, res, method, mac) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    const user = await accountOf(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    const body = await readJson(req, 2048);
+    if (typeof body.pondId !== "string" || !scoped.POND.test(body.pondId)) return out(400, { error: "ids" });
+    const keys = {};
+    for (const k of ["publicKey", "boxKey"]) {
+      const given = k === "boxKey" && body.boxKey === undefined ? body.publicKey : body[k];
+      if (typeof given !== "string" || !B64_ANY_200.test(given)) return out(400, { error: "key" });
+      keys[k] = given;
+    }
+    if (typeof body.client !== "string" || !DEVICE_CLIENTS.has(body.client)) return out(400, { error: "client" });
+    if (body.nest !== undefined && body.nest !== null && (typeof body.nest !== "string" || body.nest.length > 100))
+      return out(400, { error: "nest" });
+    const member = parseOr(await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, body.pondId));
+    if (!member) return out(403, { error: "pond" });
+    if (!(await spend(PONDDEV_RATE_PK, user.userId, 60 * 1000, PONDDEV_PER_MINUTE))) return out(429, { error: "rate" });
+    const deviceId = crypto
+      .createHash("sha256")
+      .update(Buffer.from(keys.publicKey, "base64"))
+      .digest()
+      .subarray(0, 12)
+      .toString("base64url");
+    const revoked = await deps.store.get(`revoked/${body.pondId}`, deviceId);
+    if (revoked !== null && revoked !== undefined) return out(403, { error: "removed" });
+    const rec = await namesOf(user.userId).catch(() => null);
+    const now = Date.now();
+    const pk = `channels/${body.pondId}/devreqs`;
+    const value = {
+      v: 1,
+      reqId: deviceId,
+      userId: user.userId,
+      email: user.email || (rec && rec.email) || "",
+      name: (user.name || (rec && rec.name) || "").slice(0, 100),
+      publicKey: keys.publicKey,
+      boxKey: keys.boxKey,
+      client: body.client,
+      nest: typeof body.nest === "string" ? body.nest : null,
+      at: now,
+    };
+    await deps.store.put(pk, deviceId, JSON.stringify(value));
+    await publishNotice(pk, deviceId);
+    const issued = scoped.issue(deps.key, body.pondId, deviceId, now, PONDDEV_TOKEN_TTL_SEC, "join");
+    if (!issued) return out(400, { error: "ids" });
+    return out(200, { reqId: deviceId, token: issued.token, expiresAt: issued.expiresAt });
   }
 
   /** POST /ponds/short/redeem: a signed-in account trades a code for the details, once. */
@@ -1030,6 +1242,13 @@ function createRelay(deps) {
       }
       const forbidden = () => send(res, 403, {});
       if (route === "/ponds/short/redeem") return await handleShortRedeem(req, res, method, mac);
+      if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
+      if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
+      {
+        const m = /^\/ponds\/([^/]+)\/members\/accounts$/.exec(route);
+        if (m && (mac || (relayGiven !== undefined && sameKey(relayGiven, deps.key))))
+          return await handlePondAccounts(req, res, method, mac, m[1]);
+      }
       if (route === "/account/avatar") {
         const keyGiven = req.headers["x-squeak-relay"];
         if (mac) return await handleAvatarMac(res, url, method, mac);
@@ -1137,6 +1356,10 @@ function createRelay(deps) {
       }
 
       if (route === "/ponds/short") return await handleShortCreate(req, res, method, mac);
+      {
+        const m = /^\/ponds\/([^/]+)\/invites\/email$/.exec(route);
+        if (m) return await handleInviteEmail(req, res, method, mac, m[1]);
+      }
 
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});

@@ -32,7 +32,7 @@ import {
   requestDevice,
 } from "./account.js";
 import { createAvatarController, takeZohoPhotoFragment } from "./avatar.js";
-import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
+import { accountLoadingScreen, accountStartScreen, requestScreen, unreachableScreen } from "./account-view.js";
 import {
   accountRelayBase,
   onWebOrigin,
@@ -42,10 +42,10 @@ import {
   takeHandoffToken,
 } from "./catalyst-session.js";
 import { mountEmbeddedLogin } from "./embedded-login.js";
-import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
+import { awaitApproval, channelFor, deviceNameFor } from "./pairing.js";
 import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
-import { PairingError, takePairingFragment } from "./pairing-link.js";
-import { duck, waitingScreen, welcomeScreen } from "./pairing-view.js";
+import { takePairingFragment } from "./pairing-link.js";
+import { duck, waitingScreen } from "./pairing-view.js";
 import { groupingPref, homeViewPref, inspectorPref, verbosePref } from "./prefs.js";
 import { demoAllowed, demoOptions } from "./demo-guard.js";
 import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
@@ -101,7 +101,7 @@ const ui = {
   /** After a Mac was removed or this browser forgot everything, "Your Macs" waits for a tap instead of opening the only Mac. */
   noAutoOpen: false,
   requestSlow: false,
-  qrInstead: false,
+  pairNote: null,
   request: null,
   accountBusy: null,
   accountNote: null,
@@ -202,8 +202,8 @@ function touch() {
 
 async function boot() {
   if (demoAllowed(globalThis.location)) return startDemo();
-  // A scanned QR opens `/#pair=<payload>`; the secret leaves the address bar before anything else runs.
-  const scanned = takePairingFragment(globalThis.location, globalThis.history);
+  // An old pairing link (`/#pair=<payload>`) pairs nothing any more: the secret leaves the address bar and the sign-in says so.
+  if (takePairingFragment(globalThis.location, globalThis.history)) ui.pairNote = PAIRING_GONE;
   // Back from Zoho's consent: `#zoho-photo=<result>` is read once, applied when the account loads.
   zohoPhotoResult = takeZohoPhotoFragment(globalThis.location, globalThis.history);
   try {
@@ -215,28 +215,10 @@ async function boot() {
     return render(true);
   }
   if (ui.record?.state === "paired") return startPaired();
-  if (scanned) return pair(scanned);
   if (ui.record?.state === "pending") return resumePending();
   ui.screen = "unpaired";
   render(true);
   void loadAccount();
-}
-
-async function pair(text) {
-  ui.error = null;
-  try {
-    const { record, channel, code } = await beginPairing(text, { store, name: deviceNameFor(navigator.userAgent) });
-    ui.record = record;
-    ui.code = code;
-    waitForApproval(channel);
-  } catch (error) {
-    ui.screen = "unpaired";
-    ui.error =
-      error instanceof PairingError
-        ? error.message
-        : "Could not reach Squeak's server. Check your connection and try again.";
-    render(true);
-  }
 }
 
 /** `?demo=1` on a local page: a made-up paired Mac (demo-data.js), so the layout can be seen and photographed with no Mac. */
@@ -300,7 +282,7 @@ async function startWelcomeDemo(name) {
       code: "482913",
       request: { mac: { name: "Sibhi's MacBook Pro" }, name: "Web · Chrome" },
     },
-    qr: { qrInstead: true },
+    unreachable: { accountState: "unknown" },
   };
   if (name in rest) {
     Object.assign(ui, owner, rest[name]);
@@ -357,7 +339,7 @@ const photoFor = () =>
 /** What Zoho's callback left in the address (`#zoho-photo=`), kept until the account is known to be signed in. */
 let zohoPhotoResult = null;
 
-/** Who is signed in (and, on the unpaired start, their Macs). A relay with no accounts leaves today's QR screen. */
+/** Who is signed in (and, on the unpaired start, their Macs). A page that cannot reach the relay says so (`unreachableScreen`), never a pairing screen. */
 async function loadAccount() {
   if (!accountApi) {
     ui.accountState = "unknown";
@@ -880,7 +862,7 @@ function resetUi(message, { keepAccount = false } = {}) {
     renaming: null,
     reconciled: false,
     accountState: keepAccount ? ui.accountState : "loading",
-    qrInstead: false,
+    pairNote: null,
     request: null,
     accountBusy: null,
     accountNote: keepAccount ? ui.accountNote : null,
@@ -1207,11 +1189,17 @@ function splashing() {
   });
 }
 
-/** The unpaired start: the account's Mac list or sign-in when the relay has accounts, else (or by choice) the QR code. */
+/** What an old `#pair=` / `squeak://pair` link gets: no pairing, a pointer to the sign-in. */
+const PAIRING_GONE = "Pairing codes are gone. Sign in with the same account as your Mac.";
+
+/**
+ * The unpaired start: sign-in, or the account's Macs. Never a pairing screen. When the page cannot tell whether anyone is
+ * signed in (`unknown`: network, blocked cross-origin call, no account API) it says so and offers to try again.
+ */
 function unpairedScreen() {
-  const accounts = ui.accountState === "in" || ui.accountState === "out";
+  const signIn = () => signInRedirect(globalThis);
   if (ui.accountState === "loading" && !ui.error) return accountLoadingScreen();
-  if (accounts && !ui.qrInstead) {
+  if (ui.accountState === "in" || ui.accountState === "out") {
     return accountStartScreen({
       state: ui.accountState,
       user: ui.me,
@@ -1219,27 +1207,22 @@ function unpairedScreen() {
       macs: ui.macs,
       macsError: ui.macsError,
       error: ui.error,
+      note: ui.pairNote,
       pick: (mac) => openMac(mac),
       signOut: ui.demo ? null : () => void signOutEverywhere(),
-      signIn: () => signInRedirect(globalThis),
+      signIn,
       mountLogin: ui.demo ? null : (box, report) => mountEmbeddedLogin(box, report),
-      oldMac: () => {
-        ui.qrInstead = true;
-        ui.error = null;
-        render(true);
-      },
     });
   }
-  return welcomeScreen({
+  return unreachableScreen({
     error: ui.error,
-    pair: (text) => void pair(text),
-    back: accounts
-      ? () => {
-          ui.qrInstead = false;
-          ui.error = null;
-          render(true);
-        }
-      : null,
+    retry: () => {
+      ui.error = null;
+      ui.accountState = "loading";
+      render(true);
+      void loadAccount();
+    },
+    signIn,
   });
 }
 
@@ -1252,7 +1235,7 @@ function render(force = false) {
     ui.pane,
     ui.confirmChoice,
     ui.confirmForget,
-    [ui.accountState, ui.me?.email, ui.macs?.length, ui.macsError, ui.qrInstead, ui.accountBusy, ui.accountNote],
+    [ui.accountState, ui.me?.email, ui.macs?.length, ui.macsError, ui.pairNote, ui.accountBusy, ui.accountNote],
     [avatar?.state.url, avatar?.state.busy, avatar?.state.error],
     ui.verbose,
     ui.grouping,
@@ -1361,7 +1344,7 @@ function render(force = false) {
 let nudgedFor = null;
 function tellHeresay() {
   if (ui.demo) return;
-  let name = "Pair";
+  let name = "Sign in";
   let main = false;
   if (ui.screen === "paired") {
     const pane = ui.pane === null ? null : isScreen(ui.pane) ? (getScreen(ui.pane)?.title ?? ui.pane) : ui.pane;
@@ -1369,8 +1352,8 @@ function tellHeresay() {
     main = !splashing();
   } else if (ui.screen === "unpaired") {
     const accounts = ui.accountState === "in" || ui.accountState === "out";
-    name = accounts && !ui.qrInstead ? "Your Macs" : "Pair";
-    main = accounts && !ui.qrInstead && ui.accountState === "in";
+    name = accounts ? "Your Macs" : "Sign in";
+    main = accounts && ui.accountState === "in";
   }
   setScreen(name);
   if (main) introduce();

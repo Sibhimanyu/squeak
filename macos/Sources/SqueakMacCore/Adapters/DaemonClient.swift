@@ -554,7 +554,7 @@ public struct DaemonClient: Sendable {
         }
     }
 
-    // MARK: iPhone pairing (RemoteBridge through /control/remote/*)
+    // MARK: iPhone devices (RemoteBridge through /control/remote/*)
 
     /// nil when the daemon has no such route (404) or no phone channel behind it (503).
     public func remoteStatus() async throws -> RemoteStatus? {
@@ -562,15 +562,6 @@ public struct DaemonClient: Sendable {
         if r.status == 404 || r.status == 503 { return nil }
         try Self.check(r.status)
         return try decode(RemoteStatus.self, r.body)
-    }
-
-    /// Opens the pairing window; the URL is the QR payload and a secret.
-    public func remotePair() async throws -> RemotePairing? {
-        let r = try await post("/control/remote/pair")
-        if r.status == 404 || r.status == 503 { return nil }
-        try Self.check(r.status)
-        guard let p = try? JSONDecoder().decode(RemotePairing.self, from: r.body), !p.url.isEmpty else { return nil }
-        return p
     }
 
     public func remoteApprove(deviceId: String) async throws -> Bool { try await remoteAction("approve", deviceId) }

@@ -87,6 +87,19 @@ public struct PondsClient: Sendable {
         _ = try await host.call("POST", "\(Self.p(pond))/leave", body: .object(["pondId": .string(pond)]), timeout: 60)
     }
 
+    /// A member ends one of their own devices here (409 for the only one: leave the pond instead).
+    public func removeMyDevice(pond: String, deviceKeyId: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/devices/remove-mine", body: .object(["deviceKeyId": .string(deviceKeyId)]), timeout: 60)
+    }
+
+    /// Asks the account's ponds (those joined in a browser appear). Answers how many were asked; nil from an older host.
+    @discardableResult
+    public func syncAccount() async throws -> Int? {
+        struct R: Decodable { var asked: Int? }
+        do { return try decode(R.self, try await host.call("POST", "/native/ponds/sync-account", body: .object([:]), timeout: 60)).asked }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
     public func rename(pond: String, name: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/rename", body: .object(["name": .string(name)]), timeout: 30)
     }
@@ -116,6 +129,12 @@ public struct PondsClient: Sendable {
         var body: [String: NativeJSON] = ["role": .string(role.rawValue)]
         if short { body["short"] = .bool(true) }
         return try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 60))
+    }
+
+    /// Invite by email: one email-bound invite per address, the links sent by Squeak's cloud. Answers who got one.
+    public func inviteByEmail(pond: String, emails: [String], role: PondRole) async throws -> PondEmailInviteResult {
+        let body: [String: NativeJSON] = ["emails": .array(emails.map { .string($0) }), "role": .string(role.rawValue)]
+        return try decode(PondEmailInviteResult.self, try await host.call("POST", "\(Self.p(pond))/invites/email", body: .object(body), timeout: 90))
     }
 
     public func join(code: String) async throws -> PondJoinResult {

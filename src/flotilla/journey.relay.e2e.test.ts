@@ -161,7 +161,7 @@ async function signIn(user: TestUser) {
 }
 
 type Mac = Awaited<ReturnType<typeof mac>>;
-async function mac(user: TestUser) {
+async function mac(user: TestUser, nest: string | null = `${user.name}-mac`) {
   const { key } = await signIn(user);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-relay-"));
   dirs.push(dir);
@@ -181,7 +181,7 @@ async function mac(user: TestUser) {
     store: createCloudStore(location, { fetch: doFetch, socket: streams.socket }),
     supportDir: dir,
     displayName: user.name,
-    nest: `${user.name}-mac`,
+    nest,
     location,
     inviteLinkBase: "https://x.test/join",
     relay,
@@ -361,6 +361,27 @@ describe("the multiplayer journey over the real relay", () => {
       headers: { "x-squeak-pond-token": oldToken },
     });
     expect(res.status).toBe(401);
+  });
+
+  it("8. joins on the web, then their Mac picks up the pond by signing in: no invite, code or approval", async () => {
+    const carol = { userId: "u-carol", email: "carol@example.com", name: "Carol" };
+    const web = await mac(carol, null);
+    await web.service.join((await A.service.invite(pondId, "member", carol.email)).link!);
+    const [join] = (await A.service.view(pondId)).joins;
+    await A.service.decideJoin(pondId, join!.requestId, { approve: true });
+    await web.service.refresh(pondId);
+    expect((await web.service.view(pondId)).me.role).toBe("member");
+    // later she signs in on her Mac: it asks, the owner's Mac adds the device, the pond appears
+    const laptop = await mac(carol);
+    expect(await laptop.service.syncAccountPonds()).toBe(1);
+    await A.service.refresh(pondId);
+    await laptop.service.refresh(pondId);
+    const view = await laptop.service.view(pondId);
+    expect(view.me.role).toBe("member");
+    expect(view.members.filter((m) => m.name === "Carol")).toHaveLength(1);
+    expect((await laptop.bridge.message(pondId, shared, "from my Mac")).ok).toBe(true);
+    await A.bridge.runCommands(pondId);
+    expect(A.host.sent.at(-1)).toMatchObject({ text: "from my Mac", author: { name: "Carol" } });
   });
 
   it("the relay refuses what a Mac key may not do", async () => {

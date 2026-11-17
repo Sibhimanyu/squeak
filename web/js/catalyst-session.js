@@ -12,8 +12,10 @@
 export const WEB_APP_ORIGIN = "https://squeak.onslate.in";
 export const ACCOUNT_ORIGIN = "https://squeak-60083782173.development.catalystserverless.in";
 export const onWebOrigin = (location) => location?.origin === WEB_APP_ORIGIN;
-export const handoffUrl = () =>
-  `${ACCOUNT_ORIGIN}/server/squeak_relay/account/handoff?return=${encodeURIComponent(`${WEB_APP_ORIGIN}/`)}`;
+/** Where an invite link lives on the web app: `/join#<code>`. Signing in from there returns there (the relay allows exactly this path). */
+export const JOIN_PATH = "/join";
+export const handoffUrl = (path = "/") =>
+  `${ACCOUNT_ORIGIN}/server/squeak_relay/account/handoff?return=${encodeURIComponent(`${WEB_APP_ORIGIN}${path === JOIN_PATH ? JOIN_PATH : "/"}`)}`;
 
 export const TOKEN_KEY = "squeak-account-token";
 const TOKEN_FRAGMENT =
@@ -118,7 +120,7 @@ export const signOutFailure = (error) =>
 // Catalyst returns to /app/ by default, which web client hosting does not serve (only /app/index.html answers).
 export const signInRedirect = (win) =>
   onWebOrigin(win.location)
-    ? win.location.assign(handoffUrl())
+    ? win.location.assign(handoffUrl(win.location.pathname))
     : win.location.assign(`${LOGIN_PATH}?redirect_url=${encodeURIComponent(RETURN_PATH)}`);
 
 /** This page's own relay (`<origin>/server/squeak_relay`), or null off http(s) (a file, a test with no origin). */

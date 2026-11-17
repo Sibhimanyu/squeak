@@ -206,23 +206,12 @@ struct ChannelRouteTests {
         #expect(try await client(t).remoteStatus() == nil)
     }
 
-    @Test func pairingCodeKeepsTheExactQRTextAndNamesTheWebApp() async throws {
-        let code = "squeak://pair?d=eyJhIjoxLCJiIjoiPT0rLy8ifQ%3D%3D&x=1"
+    @Test func actionsUseTheDaemonsPaths() async throws {
         let t = FakeTransport()
-        await t.json("POST", "/control/remote/pair", #"{"url":"\#(code)"}"#)
-        #expect(try await client(t).remotePair()?.url == code)
-        #expect(RemotePairing.webAppAddress() == "squeak-60083782173.development.catalystserverless.in/app/index.html")
-        #expect(RemotePairing.webAppAddress(signInUrl: "https://r.example.in/app/index.html") == "r.example.in/app/index.html")
-    }
-
-    @Test func pairingAndActionsUseTheDaemonsPaths() async throws {
-        let t = FakeTransport()
-        await t.json("POST", "/control/remote/pair", #"{"url":"squeak://pair?d=abc"}"#)
         await t.json("POST", "/control/remote/approve/d3", #"{"ok":true}"#)
         await t.json("POST", "/control/remote/reject/d3", #"{"ok":false}"#)
         await t.json("POST", "/control/remote/revoke/d1", #"{"ok":true}"#)
         let c = client(t)
-        #expect(try await c.remotePair()?.url == "squeak://pair?d=abc")
         #expect(try await c.remoteApprove(deviceId: "d3"))
         #expect(try await c.remoteReject(deviceId: "d3") == false)
         #expect(try await c.remoteRevoke(deviceId: "d1"))

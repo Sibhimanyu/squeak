@@ -324,6 +324,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             if state?.linked == true, AccountFlow.needsSeparateConnect(tokenHandedOver: handedToken) {
                 Task { @MainActor in await self.connectCloudIfNeeded() }
             }
+            if state?.linked == true { PondsModel.shared.syncAccount() }
             if state?.linked == true, let next = afterSignIn { afterSignIn = nil; next() }
         }
     }

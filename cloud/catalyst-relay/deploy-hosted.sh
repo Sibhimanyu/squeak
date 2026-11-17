@@ -4,6 +4,7 @@
 #
 #   RELAY_KEY                  default: the relay key already in ~/Library/Application Support/squeak/cloud.json
 #                              (catalyst block), so the current Mac keeps working
+#   SQUEAK_MAIL_FROM  optional; the verified Catalyst Mail sender for pond invite emails (unset = no invite email)
 #   SQUEAK_ZOHO_CLIENT_ID/SECRET  optional; left as the REPLACED_AT_DEPLOY placeholder (= unset) when absent
 #   SQUEAK_CLIQ_KEY            default: SQUEAK_CLIQ_KEY in <support dir>/.env; becomes the function's CLIQ_KEY (never printed).
 #                              Without it CLIQ_KEY stays UNSET and Cliq's handlers get a 401.
@@ -55,6 +56,9 @@ e.RELAY_KEY = key;
 e.SQUEAK_RELAY_HOSTED = "1";
 if (process.env.SQUEAK_ZOHO_CLIENT_ID) e.SQUEAK_ZOHO_CLIENT_ID = process.env.SQUEAK_ZOHO_CLIENT_ID;
 if (process.env.SQUEAK_ZOHO_CLIENT_SECRET) e.SQUEAK_ZOHO_CLIENT_SECRET = process.env.SQUEAK_ZOHO_CLIENT_SECRET;
+const mailFrom = process.env.SQUEAK_MAIL_FROM || (()=>{try{const l=require("fs").readFileSync(require("path").join(process.env.HOME,"Library/Application Support/squeak/.env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_MAIL_FROM\s*=/.test(x));return l&&l.slice(l.indexOf("=")+1).trim();}catch{return undefined}})();
+if (mailFrom) e.SQUEAK_MAIL_FROM = mailFrom;
+else console.error("Note: no SQUEAK_MAIL_FROM in env or .env; pond invite emails stay off.");
 fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 '
 

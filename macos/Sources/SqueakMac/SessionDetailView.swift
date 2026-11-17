@@ -625,8 +625,15 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if dock.showsRow {
-                liveRow
+            // One row, one pill: the live row (when a turn runs) at the left, the next-attention pill at the right.
+            let attentionRow = DockAttentionRow.layout(showsLiveRow: dock.showsRow, hasAttentionJump: WorkbenchNav.attention(model) != nil)
+            if attentionRow.showsRow {
+                HStack(spacing: 10) {
+                    if attentionRow.showsLive { liveRow }
+                    Spacer(minLength: 8)
+                    if attentionRow.showsPill { NextAttentionPill() }
+                }
+                .frame(height: 40)
             }
             if let set = ducklings, DucklingWords.barText(set) != nil {
                 DucklingsBar(session: session, set: set, readyLine: dock.readyLine, onStop: session.turnOpen == true ? { stop() } : nil)

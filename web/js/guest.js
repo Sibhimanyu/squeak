@@ -8,10 +8,12 @@ import {
   endCopy,
   foldEvents,
   joiningLine,
+  maskEmail,
   parkedInviteUsable,
   pendingSends,
   workingRow,
 } from "./guest-model.js";
+import { loadAccountPonds, syncAccountPonds } from "./guest-account.js";
 import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
 import { fetchMe, redeemShortCode, watchPond } from "./guest-relay.js";
 import {
@@ -35,6 +37,7 @@ import {
   accountTokenFor,
   sdkSignOut,
   signInRedirect,
+  takeHandoffToken,
 } from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
@@ -75,6 +78,8 @@ export function startGuest({
   let dirty = false;
   let last = 0;
   let timer = null;
+  /** The account's ponds asked for in this load: one ask a minute, a refused pond is not asked for again (guest-account.js). */
+  const accountSync = { lastAt: 0, refused: new Set() };
 
   const mount = (...nodes) => {
     root.replaceChildren(...nodes.filter(Boolean));
@@ -105,6 +110,7 @@ export function startGuest({
   /** Who is asking, before any join screen: joining needs a Squeak account, so the first step is signing in. */
   async function entry() {
     ui.threadUi = null;
+    ui.wrongEmail = null;
     const me = await fetchMe({
       baseUrl: ui.invite.relayUrl,
       fetch,
@@ -194,11 +200,21 @@ export function startGuest({
     mount(
       signInScreen({
         pondName: ui.invite.name,
+        ownerName: ui.invite.ownerName ?? null,
+        forEmail: ui.invite.email ? maskEmail(ui.invite.email) : null,
         error: ui.error,
         onSignIn: () => signIn(win),
         onCancel: cancel,
       }),
     );
+  }
+
+  /** The masked address an emailed invite is for when this account is another one, else null. */
+  function wrongAccount() {
+    const want = ui.invite?.email;
+    const have = ui.user?.email;
+    if (!want || !have) return null;
+    return want.trim().toLowerCase() === have.trim().toLowerCase() ? null : maskEmail(want);
   }
 
   function showSignedIn() {
@@ -207,7 +223,10 @@ export function startGuest({
       signedInScreen({
         line: joiningLine(ui.user),
         pondName: ui.invite.name,
+        ownerName: ui.invite.ownerName ?? null,
         role: ui.invite.role,
+        // Signed in under another address than an emailed invite names (known before asking, or told by the relay).
+        wrongEmail: ui.wrongEmail ?? wrongAccount(),
         error: ui.error,
         busy: ui.busy,
         onJoin: join,
@@ -254,6 +273,13 @@ export function startGuest({
         ui.error = joinRefusal("signin");
         await park();
         return showSignIn();
+      }
+      const masked = error instanceof GuestError && error.code === "email" ? (error.masked ?? null) : null;
+      if (masked || (error instanceof GuestError && error.code === "email" && ui.invite.email)) {
+        // The relay refused this account for an emailed invite: say whose it is (masked) and offer to switch.
+        ui.wrongEmail = masked ?? maskEmail(ui.invite.email);
+        ui.error = null;
+        return back();
       }
       ui.error =
         error instanceof GuestError ? error.message : "I couldn't reach the pond. Check your connection and try again.";
@@ -345,6 +371,13 @@ export function startGuest({
       paint();
       return;
     }
+    if (status === "dropped") {
+      // A device request that lapsed unanswered leaves nothing behind; the next load asks again.
+      stopLive();
+      ui.pond = null;
+      showCodeEntry();
+      return;
+    }
     if (status !== "active") {
       paint();
       return;
@@ -393,6 +426,12 @@ export function startGuest({
     if (!pond) return;
     switch (pond.status) {
       case "pending":
+        if (pond.record.deviceJoin) {
+          // A pond that came with the account: no code, words or approval, only a quiet wait for the owner's Mac.
+          ui.screen = "loading";
+          mount(banner(), page(h("p", { class: "g-lead" }, "Getting your ponds…")));
+          return;
+        }
         ui.screen = "waiting";
         mount(
           banner(),
@@ -432,10 +471,25 @@ export function startGuest({
     const sig = JSON.stringify([ui.view, ui.note]);
     if (ui.screen === "pond" && sig === ui.sig) return;
     ui.screen = "pond";
-    const screen = pondScreen({ view: ui.view, now: Date.now(), onOpen: openThread, onLeave: leave });
+    const screen = pondScreen({
+      view: ui.view,
+      now: Date.now(),
+      onOpen: openThread,
+      onLeave: leave,
+      macPrompt: ui.macCardDismissed ? null : { onDismiss: dismissMacCard },
+    });
     mount(screen);
     if (ui.note) root.prepend(banner());
     ui.sig = sig;
+  }
+
+  /** The Mac-app card is shown until dismissed once in this browser (kept in the vault, never in web storage). */
+  const MAC_CARD = "mac-card-dismissed";
+  function dismissMacCard() {
+    ui.macCardDismissed = true;
+    void vault.write(MAC_CARD, true).catch(() => undefined);
+    ui.sig = "";
+    paintPond();
   }
 
   function paintThread() {
@@ -579,6 +633,10 @@ export function startGuest({
 
   return (async () => {
     mount(page(h("p", { class: "g-lead" }, "One moment…")));
+    // Back from the sign-in handoff on this origin: keep the account token (it leaves the address bar); the invite itself
+    // was parked in IndexedDB before leaving, so there is no fragment left to read.
+    takeHandoffToken(win);
+    ui.macCardDismissed = !!(await vault.read(MAC_CARD).catch(() => null));
     const code = codeFrom(win.location?.hash);
     const short = code ? normalizeShortCode(code) : null;
     const parsed = code && !short ? readInvite(code, Date.now(), win.location.origin) : null;
@@ -603,6 +661,18 @@ export function startGuest({
       else if (parked) await unpark();
     }
     const saved = await GuestPond.load({ vault, fetch }).catch(() => null);
+    // Signed in, with no invite in hand: the ponds the account is already in come to this browser by themselves.
+    let fromAccount = [];
+    if (!ui.invite) {
+      const relayUrl = accountRelayBase(win.location);
+      fromAccount = await syncAccountPonds({
+        relayUrl,
+        token: () => (relayUrl ? accountTokenFor(relayUrl) : null),
+        vault,
+        fetch,
+        state: accountSync,
+      }).catch(() => loadAccountPonds({ vault, fetch }).catch(() => []));
+    }
     if (
       saved &&
       (saved.status === "active" || saved.status === "pending") &&
@@ -625,6 +695,10 @@ export function startGuest({
           },
         },
       );
+    }
+    if (!saved && !ui.invite && fromAccount.length > 0) {
+      ui.pond = fromAccount.find((p) => p.status === "active") ?? fromAccount[0];
+      return resume();
     }
     if (saved) {
       if (!ui.invite) {

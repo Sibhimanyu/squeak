@@ -320,7 +320,7 @@ struct DockDucklingTab: View {
         let chip = model.ducklings(for: session)?.items.first { $0.id == ref.taskId }
         DockItemTab(item: .duckling(ref), title: chip?.title ?? "Duckling", zone: zone, selected: selected, height: height, indicator: indicator,
                     activity: chip?.status == .running ? .working : .idle,
-                    select: { DockStore.shared.selectDuckling(ref); if zone == .centre { model.select(ref.session) } },
+                    select: { if zone == .centre { RoomSelection.shared.close() }; DockStore.shared.selectDuckling(ref); if zone == .centre { model.select(ref.session) } },
                     close: {
                         let wasShown = DockStore.shared.ducklings.selected[zone] == ref
                         DockStore.shared.closeDuckling(ref)

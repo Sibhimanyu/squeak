@@ -20,12 +20,9 @@ final class SignInScreenSourceTests: XCTestCase {
 
     func testSignInViewHasNoScannerPasteOrCode() throws {
         let view = try section(try source("MacsView.swift"), from: "struct SignInView", to: "/// Signed in, no Mac open")
-        for banned in ["QRScanner", "DataScanner", "Paste", "paste", "squeak://pair", "PairingScreen", "AwaitingApproval", "pairing code"] {
+        for banned in ["QRScanner", "DataScanner", "Paste", "paste", "squeak://pair", "PairingScreen", "AwaitingApproval", "pairing code", "onFallback"] {
             XCTAssertFalse(view.contains(banned), "SignInView must not mention \(banned)")
         }
-        // The one entry to the fallback is the link, built from the shared label.
-        XCTAssertEqual(view.components(separatedBy: "onFallback()").count - 1, 1)
-        XCTAssertTrue(view.contains("SignInScreen.fallbackLabel"))
     }
 
     func testTheMacListNeverShowsACodeOrAnApproveOnYourMacLine() throws {
@@ -39,14 +36,17 @@ final class SignInScreenSourceTests: XCTestCase {
         }
     }
 
-    func testOnlyTheFallbackHostsTheScannerAndTheUnpairedScreenRoutesThereFromTheLink() throws {
+    func testTheUnpairedScreenIsSignInOrYourMacsAndNoScannerExistsAnywhere() throws {
         let unpaired = try section(try source("MacsView.swift"), from: "struct UnpairedView", to: "/// First run")
-        XCTAssertTrue(unpaired.contains("PairView(onBack"))
-        XCTAssertTrue(unpaired.contains("SignInView(onFallback"))
-        let root = try source("SqueakRootView.swift")
-        XCTAssertTrue(root.contains("UnpairedView()"))
-        XCTAssertFalse(root.contains("case .unpaired: PairView"))
-        XCTAssertEqual(SignInScreen.entries, [.signIn, .macNotOnAccount])
+        XCTAssertTrue(unpaired.contains("SignInView()"))
+        XCTAssertFalse(unpaired.contains("PairView"))
+        XCTAssertTrue(try source("SqueakRootView.swift").contains("UnpairedView()"))
+        for file in ["SqueakRootView.swift", "AppModel.swift", "SqueakRouter.swift", "MacsView.swift"] {
+            let text = try source(file)
+            for banned in ["QRScanner", "DataScanner", "awaitingApproval", "pair(with"] {
+                XCTAssertFalse(text.contains(banned), "\(file) must not mention \(banned)")
+            }
+        }
     }
 
     func testSettingsRemovesThisIPhoneFromAMacRatherThanUnpairing() throws {

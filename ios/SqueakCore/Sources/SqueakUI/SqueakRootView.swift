@@ -63,11 +63,11 @@ public struct SqueakRootView: View {
             .onChange(of: model.freshSnapshotAt) { _, _ in evaluateSplash() }
             .onChange(of: model.phase) { _, _ in evaluateSplash() }
             .onChange(of: model.showingSaved) { _, _ in evaluateSplash() }
-            // The Mac's QR scanned with the Camera app opens Squeak here: pair with it as if it had been scanned in the app.
-            .onChange(of: router.pendingPairing, initial: true) { _, link in
-                guard let link else { return }
-                router.consumePairing()
-                if model.phase == .unpaired { Task { await model.pair(with: link) } }
+            // An old pairing link (a Mac's QR code opened from the Camera app) is no way in: say to sign in.
+            .onChange(of: router.pairingLinkOpened, initial: true) { _, opened in
+                guard opened else { return }
+                router.consumePairingLink()
+                if model.phase == .unpaired { model.account.say(SignInScreen.pairingLinkGone) }
             }
             .task(id: splashSince) {
                 guard let since = splashSince else { return }
@@ -121,7 +121,6 @@ struct RootView: View {
     var body: some View {
         switch model.phase {
         case .unpaired: UnpairedView().onAppear { screen.report?("Sign in") }
-        case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
         case .paired:
             if let mac = model.pairingCelebration {
                 PairingCelebrationView(mac: mac)
