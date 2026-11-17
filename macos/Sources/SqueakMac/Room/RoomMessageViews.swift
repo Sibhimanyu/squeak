@@ -43,6 +43,7 @@ struct RoomItemView: View {
     let ducks: [RoomThread]
     let ledger: RoomFadeLedger
     let open: (String) -> Void
+    let openTarget: (PondOpenTarget) -> Void
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
@@ -65,8 +66,8 @@ struct RoomItemView: View {
         case .day(_, let label):
             Text(verbatim: label).font(.system(size: 11)).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity)
                 .padding(.vertical, 2).accessibilityAddTraits(.isHeader)
-        case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, answer: answer, retry: retry, makeJob: makeJob, act: act)
-        case .system(let s): RoomSystemView(line: s, act: act)
+        case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, openTarget: openTarget, answer: answer, retry: retry, makeJob: makeJob, act: act)
+        case .system(let s): RoomSystemView(line: s, act: act, open: PondClick.target(line: s).map { t in { openTarget(t) } })
         }
     }
 }
@@ -77,6 +78,7 @@ private struct RoomGroupView: View {
     let group: RoomMessageGroup
     let ducks: [RoomThread]
     let open: (String) -> Void
+    let openTarget: (PondOpenTarget) -> Void
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
@@ -92,7 +94,9 @@ private struct RoomGroupView: View {
             VStack(alignment: .trailing, spacing: 3) {
                 ForEach(group.messages) { m in
                     ForEach(Array(m.parts.enumerated()), id: \.offset) { _, part in
-                        if case .text(let t, _) = part { MessageBubble(message: m, text: t, tone: .normal, mine: true, first: false, retry: retry, makeJob: makeJob) }
+                        if case .text(let t, _) = part {
+                            MessageBubble(message: m, text: t, tone: .normal, mine: true, first: false, retry: retry, makeJob: makeJob, open: opener(PondClick.target(message: m)))
+                        }
                     }
                 }
                 Text(verbatim: RoomRipples.clock(group.lastAt)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle).padding(.top, 2)
@@ -117,9 +121,19 @@ private struct RoomGroupView: View {
         }
     }
 
+    /// What clicking this group's avatar or name opens: a duck, or the duck a person's first message went to.
+    private var groupTarget: PondOpenTarget? { PondClick.target(author: group.author, goesTo: group.messages.compactMap(\.goesTo).first) }
+
+    private func opener(_ target: PondOpenTarget?) -> (() -> Void)? { target.map { t in { openTarget(t) } } }
+
     @ViewBuilder private var avatar: some View {
         let a = group.author
-        if a.kind == .duck, let id = a.sessionId {
+        if let t = groupTarget {
+            Button { openTarget(t) } label: {
+                if a.kind == .duck, let id = a.sessionId { DuckAvatar(sessionId: id, agent: a.agent) } else { PersonAvatar(name: a.name) }
+            }
+            .buttonStyle(.plain).pointerHand().help("Open \(a.kind == .duck ? a.name : "the duck it went to")")
+        } else if a.kind == .duck, let id = a.sessionId {
             Button { open(id) } label: { DuckAvatar(sessionId: id, agent: a.agent) }.buttonStyle(.plain).help("Open \(a.name)")
         } else {
             PersonAvatar(name: a.name)
@@ -128,7 +142,7 @@ private struct RoomGroupView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: group.author.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+            nameText
             if let l = group.author.agentLabel { Text(verbatim: l).font(.system(size: 12)).foregroundStyle(Theme.muted) }
             Text(verbatim: RoomRipples.clock(group.at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
         }
@@ -136,11 +150,18 @@ private struct RoomGroupView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder private var nameText: some View {
+        let name = Text(verbatim: group.author.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+        if let t = groupTarget { Button { openTarget(t) } label: { name }.buttonStyle(.plain).pointerHand().help("Open") } else { name }
+    }
+
     @ViewBuilder private func partView(_ m: RoomMessage, _ part: RoomPart, first: Bool) -> some View {
         switch part {
-        case .text(let t, let tone): MessageBubble(message: m, text: t, tone: tone, mine: false, first: first, retry: retry, makeJob: makeJob)
+        case .text(let t, let tone): MessageBubble(message: m, text: t, tone: tone, mine: false, first: first, retry: retry, makeJob: makeJob, open: opener(PondClick.target(part: part, in: m)))
         case .chip(let sid, let text): FilesChip(text: text) { open(sid) }.padding(.top, 5)
-        case .ducklings(let d): DucklingsDisclosure(ducklings: d)
+        case .ducklings(let d):
+            DucklingsDisclosure(ducklings: d, openAll: opener(PondClick.target(part: part, in: m)),
+                                openOne: { item in m.author.sessionId.map { id in { openTarget(PondClick.target(duckling: item, of: id)) } } })
         case .ask(let card): AskCardView(card: card, answer: answer, open: open)
         case .offer(let o): OfferView(offer: o, ducks: ducks, act: act)
         }
@@ -156,6 +177,8 @@ private struct MessageBubble: View {
     let first: Bool
     let retry: (String) -> Void
     let makeJob: (String) -> Void
+    /// Opens the tab this bubble belongs to (the duck, or the duck a person's message went to); nil opens nothing.
+    var open: (() -> Void)?
     @State private var hover = false
 
     var body: some View {
@@ -174,6 +197,8 @@ private struct MessageBubble: View {
             .overlay { if !mine { shape.strokeBorder(Theme.line) } }
             .frame(maxWidth: 640, alignment: mine ? .trailing : .leading)
             .opacity(message.pending ? 0.6 : 1)
+            .onTapGesture { open?() }
+            .pointerHand(open != nil)
             .contextMenu {
                 if message.canMakeJob, let id = message.postId { Button("Make this a job") { makeJob(id) } }
                 Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
@@ -224,32 +249,41 @@ private struct FilesChip: View {
 /// "> handed 2 pieces to ducklings": expands to the pieces with their state.
 private struct DucklingsDisclosure: View {
     let ducklings: RoomDucklings
+    /// Opens the duck and its duckling tabs; each piece opens its own.
+    var openAll: (() -> Void)?
+    var openOne: (RoomDuckling) -> (() -> Void)? = { _ in nil }
     @State private var open = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button { open.toggle() } label: {
-                HStack(spacing: 5) {
+            HStack(spacing: 5) {
+                Button { open.toggle() } label: {
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(open ? 90 : 0))
-                    Text(verbatim: RoomMessages.ducklingsLine(ducklings)).font(.system(size: 12))
+                        .frame(width: 16, height: 16).contentShape(Rectangle())
                 }
-                .foregroundStyle(Theme.subtle).contentShape(Rectangle())
+                .buttonStyle(.plain).accessibilityLabel(open ? "Hide the pieces" : "Show the pieces")
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                Button { openAll?() ?? open.toggle() } label: {
+                    Text(verbatim: RoomMessages.ducklingsLine(ducklings)).font(.system(size: 12)).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand().help("Open the ducklings")
             }
-            .buttonStyle(.plain).accessibilityAddTraits(.isButton).accessibilityValue(open ? "Expanded" : "Collapsed")
+            .foregroundStyle(Theme.subtle)
             if open {
                 VStack(alignment: .leading, spacing: 3) {
                     if ducklings.items.isEmpty {
                         Text("\(ducklings.done) of \(ducklings.count) done").font(.system(size: 12)).foregroundStyle(Theme.muted)
                     }
                     ForEach(ducklings.items) { d in
-                        HStack(spacing: 6) {
+                        Button { openOne(d)?() } label: { HStack(spacing: 6) {
                             switch d.state {
                             case .running: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .leading, grid: .micro)
                             case .done: Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.done)
                             case .failed: Lucide(.circleX, size: 12, color: Theme.negative)
                             }
                             Text(verbatim: d.label).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
-                        }
+                        }.contentShape(Rectangle()) }
+                        .buttonStyle(.plain).pointerHand(openOne(d) != nil).disabled(openOne(d) == nil)
                     }
                 }
                 .padding(.leading, 14)
@@ -381,11 +415,14 @@ private struct OfferView: View {
 private struct RoomSystemView: View {
     let line: RoomSystemLine
     let act: (String, RoomJobAction, String?) -> Void
+    /// A handoff line opens the duck it went to.
+    var open: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
                 Text(verbatim: line.text).font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                    .onTapGesture { open?() }.pointerHand(open != nil)
                 if let n = line.note { Text(verbatim: n).font(.system(size: 12)).foregroundStyle(Theme.muted) }
                 if let id = line.jobId {
                     ForEach(line.buttons) { b in Button(b.title) { act(id, b.action, nil) }.buttonStyle(SmallButtonStyle(role: b.role)) }

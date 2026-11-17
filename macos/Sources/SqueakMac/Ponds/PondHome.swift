@@ -13,10 +13,9 @@ struct PondRouteView: View {
     let sidebarHidden: Bool
     @Environment(AppModel.self) private var model
 
-    /// The room is a pond's landing view; its Dashboard is the other half of the switch, remembered per pond. A pond with no
-    /// native project (or still waiting to join) has no room, so it keeps the dashboard.
+    /// A pond opens on its Dashboard; the Room is the other page beside it (`PondSpace`), swapped by the switch or a
+    /// two-finger swipe. A pond with no native project (or still waiting to join) has no room, so it keeps the dashboard.
     private func roomProject(_ key: String) -> String? {
-        guard RoomViewPref.shared.mode(for: key) == .room else { return nil }
         if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
         return PondsModel.shared.native(key: key)?.id
     }
@@ -27,7 +26,7 @@ struct PondRouteView: View {
 
     var body: some View {
         if case .home(let project) = route, let projectId = roomProject(project) {
-            PondRoomView(projectId: projectId, key: project, leadingInset: sidebarClearance).id(project).screen("Pond room")
+            PondSpace(key: project, projectId: projectId, leadingInset: sidebarClearance) { standard }
         } else {
             standard
         }
@@ -111,6 +110,7 @@ struct PondHomeView: View {
                 }
                 .padding(geometry.size.width < 600 ? 20 : 32)
                 .frame(maxWidth: 1200, alignment: .leading).frame(maxWidth: .infinity)
+                .background(ScrollMemory(id: "pond:\(key):dashboard"))
             }
         }
         .background(Theme.bg)
@@ -347,7 +347,7 @@ struct PondHomeView: View {
                 if archivedOpen {
                     VStack(spacing: 0) {
                         ForEach(archived) { s in
-                            RowOrButton(editing: model.isRenaming(s), action: { ponds.route = nil; model.select(s.key) }) {
+                            RowOrButton(editing: model.isRenaming(s), action: { model.openFromPond(s.key, pond: key, page: .dashboard) }) {
                                 HStack(spacing: 8) {
                                     ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.sidebarRow)
                                     if model.isRenaming(s) { InlineTitleEditor(session: s, font: Typo.body) }
@@ -426,9 +426,8 @@ struct PondHomeView: View {
     }
 
     private func open(_ r: PondChatRow) {
-        if let key = r.local {
-            ponds.route = nil
-            model.select(key)
+        if let tab = r.local {
+            model.openFromPond(tab, pond: key, page: .dashboard)
         } else if let p = pond, let id = r.pondThread {
             ponds.route = .thread(project: key, pondId: p.id, threadId: id)
         }

@@ -77,7 +77,7 @@ struct ConversationView: View {
 
     /// The window's narrowest content: sidebar min + centre min (+ right min while the right zone is shown).
     private var minContentWidth: CGFloat {
-        let right = dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
+        let right = InspectorStash.enabled && dock.layout.isZoneVisible(.right, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
             && model.settingsSection == nil && model.selectedSession != nil
         return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.settingsSection != nil || !sidebarHidden, rightShown: right))
     }
@@ -100,6 +100,8 @@ struct ConversationView: View {
 
     /// The pond room on screen, if any: its project id and the pond's directory key (the pond page's Room view).
     private var roomContext: (projectId: String, key: String)? {
+        // The room's inspector is stashed with the rest of the right zone (`InspectorStash`).
+        guard InspectorStash.enabled else { return nil }
         if let route = PondsModel.shared.route {
             guard case .home(let key) = route, RoomViewPref.shared.mode(for: key) == .room else { return nil }
             if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
@@ -116,7 +118,7 @@ struct ConversationView: View {
         let dockTerminals = dock.activeTerminals
         let dockThreads = dock.threads
         let dockDucklings = dock.ducklings
-        let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) && !layout.right.collapsed
+        let rightWanted = InspectorStash.enabled && layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) && !layout.right.collapsed
         // While the pond room is shown, the right zone is the room's inspector (Flock, Invite, Today, Pond controls), at
         // any window width the solver can fit, with its own open/closed choice.
         let roomCtx = (model.settingsSection == nil && NewChatController.shared.page == nil && model.navFilter != .usage) ? roomContext : nil
@@ -136,7 +138,7 @@ struct ConversationView: View {
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
         let showingSettings = model.settingsSection != nil
-        let toggleRightPane: () -> Void = { if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
+        let toggleRightPane: () -> Void = { guard InspectorStash.enabled else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
             && PondsModel.shared.route == nil
@@ -203,7 +205,7 @@ struct ConversationView: View {
                 })
                 // Thin strips at the edges that have no zone, while a panel is being dragged.
                 .overlay(alignment: .trailing) {
-                    if chatOpen, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
+                    if chatOpen, InspectorStash.enabled, dock.dragging != nil, !showsInspector { DockEdgeStrip(zone: .right) }
                 }
                 .overlay(alignment: .bottom) {
                     if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) { DockEdgeStrip(zone: .bottom) }
@@ -231,7 +233,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen, window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && InspectorStash.enabled, window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)

@@ -63,6 +63,8 @@ public struct RoomMessage: Sendable, Equatable, Identifiable {
     /// The room post a person's text came from: "Make this a job" and Retry act on it.
     public var postId: String?
     public var canMakeJob = false
+    /// The duck this person's message went to (its turn's duck, or the job's handed duck); nil when it went to none.
+    public var goesTo: String?
 }
 
 public struct RoomMessageGroup: Sendable, Equatable, Identifiable {
@@ -83,6 +85,8 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     public var buttons: [RoomJobButton]
     public var error: String?
     public var note: String?
+    /// The duck whose tab the line opens (a handoff opens the duck it went to); nil for a line about no duck.
+    public var opens: String?
 }
 
 public enum RoomItem: Sendable, Equatable, Identifiable {
@@ -140,7 +144,9 @@ public enum RoomMessages {
             let thread = threads[t.sessionId]
             if !jobTurns.contains(t.id), let text = promptText(t, feed: feed) {
                 let who: RoomMessageAuthor = RoomRipples.isOwner(t.author, owner: owner) ? .me : .person(t.author.name.isEmpty ? "Someone" : t.author.name)
-                add(RoomMessage(id: "t:\(t.id):q", at: t.startedAt, author: who, parts: [.text(text, .normal)]), order: 0)
+                var asked = RoomMessage(id: "t:\(t.id):q", at: t.startedAt, author: who, parts: [.text(text, .normal)])
+                asked.goesTo = t.sessionId
+                add(asked, order: 0)
             }
             let asking = thread?.state == .waiting && newest[t.sessionId]?.id == t.id
             let a = author(t.sessionId, t.threadTitle, t.agent)
@@ -173,7 +179,8 @@ public enum RoomMessages {
                     let from = p.sessionId.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
                     let to = p.toSessionId.flatMap { threads[$0]?.duckName } ?? "another duck"
                     entries.append(Entry(at: p.at, order: 0, content: .system(RoomSystemLine(
-                        id: r.id, at: p.at, text: "\(from) handed off to \(to) \u{2014} \u{201C}\(p.text)\u{201D}", jobId: nil, buttons: []))))
+                        id: r.id, at: p.at, text: "\(from) handed off to \(to) \u{2014} \u{201C}\(p.text)\u{201D}", jobId: nil, buttons: [],
+                        opens: p.toSessionId ?? p.sessionId))))
                 }
             } else if p.author.kind == .person, p.level == .room {
                 let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me" || p.author.id == "owner"
@@ -182,6 +189,7 @@ public enum RoomMessages {
                     author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: [.text(p.text, .normal)])
                 m.pending = r.pending; m.failed = r.failed; m.postId = p.id
                 m.canMakeJob = RoomJobs.canMakeJob(r, jobs: feed.jobs)
+                m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId
                 add(m, order: 0)
             } else if p.level == .room, p.author.kind == .agent, p.kind == .message || !feed.servesTurns {
                 // A duck speaking in the room (or, from a host without turns, its working / done / needs line).
@@ -211,7 +219,7 @@ public enum RoomMessages {
             case .failed:
                 let who = job.handedTo.flatMap { h in threads[h.sessionId]?.duckName ?? (h.title.isEmpty ? nil : h.title) } ?? "A duck"
                 entries.append(Entry(at: max(at, job.updatedAt), order: 2, content: .system(RoomSystemLine(
-                    id: "job:\(job.id):sys", at: max(at, job.updatedAt), text: "\(who) didn\u{2019}t finish this", jobId: job.id, buttons: []))))
+                    id: "job:\(job.id):sys", at: max(at, job.updatedAt), text: "\(who) didn\u{2019}t finish this", jobId: job.id, buttons: [], opens: job.handedTo?.sessionId))))
             case .dismissed, .handed, .running, .done: break
             }
         }

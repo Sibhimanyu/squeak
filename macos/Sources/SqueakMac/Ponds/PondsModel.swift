@@ -122,7 +122,11 @@ final class PondsModel {
     var allJoins: [(pond: PondSummary, join: JoinRequest)] {
         ponds.flatMap { p in (details[p.id].map { $0.myRole.canApproveJoins ? $0.joins : [] } ?? []).map { (p, $0) } }
     }
-    var route: PondRoute?
+    var route: PondRoute? {
+        // A pond opened on its own (the sidebar, a picker, a crumb) has nothing waiting to come back to; the way back is
+        // `PondOrigin.goBack`, which keeps it.
+        didSet { if case .home = route, route != oldValue, !PondOrigin.shared.returning { PondOrigin.shared.clear() } }
+    }
     var sheet: PondSheet?
     /// A refusal or failure in the host's own words, quiet, under the home header.
     var note: String?

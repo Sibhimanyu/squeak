@@ -331,8 +331,11 @@ struct DockDucklingTab: View {
                     close: {
                         let wasShown = DockStore.shared.ducklings.selected[zone] == ref
                         DockStore.shared.closeDuckling(ref)
-                        // Closing the open one in the centre returns to the thread it came from.
-                        if zone == .centre, wasShown { model.select(ref.session) }
+                        let back = PondOrigin.shared.closed(tab: PondOrigin.ducklingTab(ref))
+                        // Closing the open one in the centre returns to the pond it was opened from, else the thread it came from.
+                        if zone == .centre, wasShown {
+                            if let back { PondOrigin.shared.goBack(to: back) } else { model.select(ref.session) }
+                        }
                     }) {
             if let chip { DucklingStatusMark(duckling: chip) } else { Lucide(.circleCheck, size: 11, color: Theme.subtle) }
         }

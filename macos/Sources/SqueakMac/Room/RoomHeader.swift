@@ -5,21 +5,16 @@ import SwiftUI
 // The room's chrome: the header (pond icon and name, member avatars, a state summary built from marks, the Room |
 // Dashboard switch) and the segmented control both it and the Ripples filters use. Colour only on marks.
 
-/// Which of the pond's two pages a person lands on, remembered per pond.
+/// Which of the pond's two pages is showing, remembered per pond for the session only: a pond opens on its Dashboard,
+/// and what the person last picked holds until the app quits.
 @MainActor @Observable
 final class RoomViewPref {
     static let shared = RoomViewPref()
-    enum Mode: String, CaseIterable { case room, dashboard
-        var title: String { self == .room ? "Room" : "Dashboard" }
-    }
-    private static let defaultsKey = "pondRoomMode"
-    private(set) var modes: [String: String] = UserDefaults.standard.dictionary(forKey: RoomViewPref.defaultsKey) as? [String: String] ?? [:]
+    typealias Mode = PondPage
+    private(set) var modes: [String: PondPage] = [:]
 
-    func mode(for key: String) -> Mode { modes[key].flatMap(Mode.init(rawValue:)) ?? .room }
-    func set(_ mode: Mode, for key: String) {
-        modes[key] = mode.rawValue
-        UserDefaults.standard.set(modes, forKey: Self.defaultsKey)
-    }
+    func mode(for key: String) -> Mode { modes[key] ?? .dashboard }
+    func set(_ mode: Mode, for key: String) { modes[key] = mode }
 }
 
 /// A small segmented control: a `surface` track, the selected item raised.

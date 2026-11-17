@@ -163,7 +163,7 @@ private struct WorkbenchHeader: View {
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
             if session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
-            if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
+            if !inspectorOpen, InspectorStash.enabled { Color.clear.frame(width: PaneToggle.size) }
         }
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
@@ -442,9 +442,16 @@ private struct WorkbenchTabs: View {
         guard ChatTabs.canClose(shown: shown.count) else { return }
         setDuty(s, on: false)
         let wasOpen = s.key == model.selected
-        for r in dock.ducklings.ducklings(in: .centre) where r.session == s.key { dock.closeDuckling(r) }
+        // A tab opened from a pond (the room or the dashboard): when it was the last of them, closing it comes back there.
+        var back: PondOriginStack.Origin?
+        for r in dock.ducklings.ducklings(in: .centre) where r.session == s.key {
+            dock.closeDuckling(r)
+            back = back ?? PondOrigin.shared.closed(tab: PondOrigin.ducklingTab(r))
+        }
+        back = PondOrigin.shared.closed(tab: s.key.stringValue) ?? back
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
         let next = model.closeStreamTab(s.key, in: workspace.id)
+        if let back, wasOpen { PondOrigin.shared.goBack(to: back); return }
         if shown.count == 1 {
             if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage, let pond = PondsModel.shared.key(of: s) {
                 WorkbenchNav.openProject(model, key: pond)

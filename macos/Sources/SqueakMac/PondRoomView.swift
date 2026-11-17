@@ -230,7 +230,7 @@ struct PondRoomView: View {
                     }
                     ForEach(items) { item in
                         RoomItemView(
-                            item: item, ducks: room.feed.threads, ledger: ledger, open: openThread, answer: answer,
+                            item: item, ducks: room.feed.threads, ledger: ledger, open: openThread, openTarget: openTarget, answer: answer,
                             retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
                             makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
                             act: { jobId, a, title in Task { await room.act(jobId: jobId, a, title: title, host: model.nativeHost) } })
@@ -247,6 +247,7 @@ struct PondRoomView: View {
                 }
                 .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.m)
                 .frame(maxWidth: 740 + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
+                .background(ScrollMemory(id: "pond:\(key ?? projectId):room", fromBottom: true))
             }
             .defaultScrollAnchor(.bottom)
             .onAppear { ledger.freeze(items.map(\.id)) }
@@ -278,11 +279,14 @@ struct PondRoomView: View {
         model.allSessions.first { $0.key.hostSessionId == id && $0.source == .squeak }
     }
 
-    /// Opens the duck's tab; an off-duty duck goes back on duty.
-    private func openThread(_ sessionId: String) {
-        guard let s = session(sessionId) else { return }
-        PondsModel.shared.route = nil
-        model.select(s.key)
+    /// Opens the duck's tab; an off-duty duck goes back on duty. Closing the tab comes back to the room.
+    private func openThread(_ sessionId: String) { openTarget(.duck(sessionId)) }
+
+    /// A duck's tab, or its tab with its ducklings' tabs (`PondClick` decides which).
+    private func openTarget(_ target: PondOpenTarget) {
+        let sessionId = target.duck
+        guard session(sessionId) != nil else { return }
+        model.openFromPond(target, pond: key, page: .room)
         if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
             Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
         }
