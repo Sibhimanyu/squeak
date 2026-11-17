@@ -31,6 +31,14 @@ export interface RoomTurn {
   filesChanged?: number;
   intent?: string;
   progress?: { current: number; total: number };
+  /** Subagents this turn started (Agent/Task tool calls); absent when none. */
+  ducklings?: RoomDucklings;
+}
+
+export interface RoomDucklings {
+  count: number;
+  done: number;
+  items?: Array<{ label: string; state: "running" | "done" | "failed" }>;
 }
 
 export interface RoomProgress {

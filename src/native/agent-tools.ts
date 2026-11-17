@@ -903,6 +903,9 @@ export class AgentTools {
     const target = this.deps.store.getSession(chatId);
     if (!target) throw new ToolError("No chat with that id.");
     if (message.length > LIMITS.maxMessage) throw new ToolError(`Keep it under ${LIMITS.maxMessage} characters.`);
+    if (this.deps.store.duckOf(chatId).duty === "off") {
+      throw new ToolError("That chat is off duty; the person has to put it back on duty or message it themselves.");
+    }
     this.prune();
     if (this.sent.filter((x) => x.from === s.id && x.to === chatId).length >= LIMITS.perTargetPerHour) {
       throw new ToolError("Too many messages to that chat this hour; wait for its answer or ask the person.");

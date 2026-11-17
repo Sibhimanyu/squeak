@@ -493,8 +493,31 @@ export class NativeServer {
         if (!text) throw new HttpError(400, "text is required");
         const mode = b.mode === "steer" ? "steer" : "queue";
         const clientNonce = str(b.clientNonce)?.slice(0, 80);
+        // The person messaging an off-duty duck puts it back on duty.
+        if (store.duckOf(id).duty === "off") this.room.setDuty(id, true);
         return this.json(res, 200, await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}) }));
       }
+    }
+    if (area === "sessions" && id && sub === "duck" && parts.length === 4 && method === "PATCH") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "name" && k !== "role");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (b.name === undefined && b.role === undefined) throw new HttpError(400, "name or role is required");
+      try {
+        return this.json(res, 200, this.room.setDuck(id, b));
+      } catch (error) {
+        if (error instanceof RoomError) throw new HttpError(400, error.message);
+        throw error;
+      }
+    }
+    if (area === "sessions" && id && sub === "duty" && parts.length === 4 && method === "POST") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "on");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (typeof b.on !== "boolean") throw new HttpError(400, "on must be true or false");
+      return this.json(res, 200, { duty: this.room.setDuty(id, b.on) });
     }
     if (area === "sessions" && id && sub === "timeline" && parts.length === 4 && method === "GET") {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -1232,6 +1255,10 @@ export class NativeServer {
       if (f.projectId !== projectId) return;
       res.write(`event: turn\ndata: ${JSON.stringify(f.turn)}\n\n`);
     };
+    const onThread = (f: { projectId: string; thread: unknown }): void => {
+      if (f.projectId !== projectId) return;
+      res.write(`event: thread\ndata: ${JSON.stringify(f.thread)}\n\n`);
+    };
     const onJob = (f: { projectId: string; job: RoomJob }): void => {
       if (f.projectId !== projectId) return;
       res.write(`event: job\ndata: ${JSON.stringify(f.job)}\n\n`);
@@ -1239,6 +1266,7 @@ export class NativeServer {
     // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
     room.on("post", onPost);
     room.on("turn", onTurn);
+    room.on("thread", onThread);
     this.jobs.on("job", onJob);
     room.streamOpened(projectId);
     res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: this.options.store.latestRoomSeq(projectId) })}\n\n`);
@@ -1251,6 +1279,7 @@ export class NativeServer {
       clearInterval(beat);
       room.off("post", onPost);
       room.off("turn", onTurn);
+      room.off("thread", onThread);
       this.jobs.off("job", onJob);
       room.streamClosed(projectId);
     });

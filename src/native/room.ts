@@ -10,6 +10,7 @@ import {
   askOf,
   firstSentence,
   type RoomAsk,
+  type RoomDucklings,
   type RoomProgress,
   type RoomTurn,
   type TurnBase,
@@ -49,6 +50,14 @@ export interface RoomPost {
 export interface RoomThread {
   sessionId: string;
   title: string;
+  /** The duck's name: the person's chosen one, else the chat title. */
+  name: string;
+  /** One line the person set for what this duck is for. */
+  role?: string;
+  /** "off" = the person closed the duck's tab: never suggested for jobs, never woken. */
+  duty: "on" | "off";
+  /** When the chat last did anything (ms epoch). */
+  lastActiveAt: number;
   agent: string;
   state: "working" | "waiting" | "idle" | "error";
   workingOn?: string;
@@ -67,7 +76,10 @@ export interface RoomThread {
   filesChanged?: number;
 }
 
-export type { RoomAsk, RoomProgress, RoomTurn } from "./room-turns.js";
+export type { RoomAsk, RoomDucklings, RoomProgress, RoomTurn } from "./room-turns.js";
+
+export const DUCK_NAME_MAX = 32;
+export const DUCK_ROLE_MAX = 80;
 
 export const ROOM_TURNS_MAX = 100;
 export const ROOM_TURN_FRAME_MS = 500;
@@ -125,6 +137,8 @@ export class Room extends EventEmitter {
   private readonly sent = new Map<string, number[]>();
   private readonly log: TimelineLog;
   private readonly reader: TurnReader;
+  /** Per chat: each subagent's state by tool-use id, as the host's tracker last said (a task-notification ends an async one). */
+  private readonly helperStates = new Map<string, Map<string, "running" | "done" | "failed">>();
   private readonly frames = new Map<string, { last: number; timer: NodeJS.Timeout | null }>();
 
   constructor(private readonly options: RoomOptions) {
@@ -264,10 +278,11 @@ export class Room extends EventEmitter {
     const progress = running ? this.progressOf(s.id, t.startSeq) : undefined;
     const outcomeText = !running && t.reply ? firstSentence(t.reply) : "";
     const owner = t.authorName === undefined;
+    const ducklings = this.ducklingsOf(s.id, t.turnId);
     return {
       id: `${s.id}:${t.turnId}`,
       sessionId: s.id,
-      threadTitle: s.title ?? "Untitled",
+      threadTitle: this.duckName(s),
       agent: s.agent,
       startedAt: t.startedAt,
       ...(t.endedAt !== undefined ? { endedAt: t.endedAt, durationMs: Math.max(0, t.endedAt - t.startedAt) } : {}),
@@ -278,6 +293,27 @@ export class Room extends EventEmitter {
       ...(outcomeText ? { outcomeText } : {}),
       ...(intent ? { intent } : {}),
       ...(progress ? { progress: { current: progress.current, total: progress.total } } : {}),
+      ...(ducklings ? { ducklings } : {}),
+    };
+  }
+
+  /** The subagents a turn started, from its Agent/Task tool steps: how many, how many are over, and each one. */
+  private ducklingsOf(sessionId: string, turnId: string): RoomDucklings | undefined {
+    const byStep = new Map<string, { label: string; state: "running" | "done" | "failed" }>();
+    const tracked = this.helperStates.get(sessionId);
+    for (const e of this.log.duckSteps(sessionId, turnId)) {
+      // An async launch's step ends at once; the helper runs until its <task-notification> says how it ended.
+      byStep.set(e.stepId, { label: e.label, state: tracked?.get(e.stepId) ?? e.status });
+    }
+    const items = [...byStep.values()].slice(0, 12).map((i) => ({
+      label: i.label.replace(/^Start (a |the )?/i, "").replace(/ in the background$/, "") || i.label,
+      state: i.state,
+    }));
+    if (byStep.size === 0) return undefined;
+    return {
+      count: byStep.size,
+      done: [...byStep.values()].filter((i) => i.state !== "running").length,
+      items,
     };
   }
 
@@ -303,9 +339,30 @@ export class Room extends EventEmitter {
       t === "turn.started" ||
       t === "turn.ended" ||
       t === "reply.done" ||
-      (t === "step.updated" && (event as { stepId?: string }).stepId === "progress");
+      (t === "step.updated" && (event as { stepId?: string }).stepId === "progress") ||
+      // A duckling (Agent/Task step) starting or ending changes the turn's ducklings.
+      ((t === "step.added" || t === "step.updated") && isDucklingStep(event));
     if (!relevant || !turnId) return;
     this.scheduleTurn(sessionId, turnId);
+  }
+
+  /**
+   * The host's helper list for a chat changed (a start, or a report ending an async one): remember each helper's
+   * state by tool-use id and send a `turn` frame for every turn whose subagent changed.
+   */
+  noteHelpers(sessionId: string, items: Array<{ id: string; status: string }>): void {
+    const next = new Map<string, "running" | "done" | "failed">();
+    for (const i of items) next.set(i.id, i.status === "running" ? "running" : i.status === "done" ? "done" : "failed");
+    const prev = this.helperStates.get(sessionId);
+    if (next.size === 0) this.helperStates.delete(sessionId);
+    else this.helperStates.set(sessionId, next);
+    const changed = [...next].filter(([id, st]) => prev?.get(id) !== st).map(([id]) => id);
+    if (changed.length === 0) return;
+    for (const t of this.reader.turns(sessionId).slice(-6)) {
+      if (this.log.duckSteps(sessionId, t.turnId).some((e) => changed.includes(e.stepId))) {
+        this.scheduleTurn(sessionId, t.turnId);
+      }
+    }
   }
 
   /** A `working` post names what the chat's running turn is doing. */
@@ -363,13 +420,16 @@ export class Room extends EventEmitter {
     return this.reader.turns(sessionId);
   }
 
-  /** The pond's non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
+  /** The pond's on-duty, non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
   candidates(
     projectId: string,
     windowMs: number,
+    opts: { offDuty?: boolean } = {},
   ): Array<{ session: SessionRow; state: RoomThread["state"]; at: number }> {
     const cutoff = this.now() - windowMs;
+    const off = opts.offDuty ? new Set<string>() : this.store.offDutyIds();
     return this.sessionsOf(projectId)
+      .filter((s) => !off.has(s.id))
       .map((s) => ({ session: s, state: threadState(s.status, s.lastTurnEndedAt), at: Date.parse(s.updatedAt) }))
       .filter((x) => Number.isFinite(x.at) && x.at >= cutoff)
       .sort((a, b) => b.at - a.at || a.session.id.localeCompare(b.session.id));
@@ -384,36 +444,99 @@ export class Room extends EventEmitter {
       .map((s) => ({ s, at: Date.parse(s.updatedAt) }))
       .filter((x) => Number.isFinite(x.at) && x.at >= cutoff)
       .sort((a, b) => b.at - a.at || a.s.id.localeCompare(b.s.id))
-      .map(({ s }): RoomThread => {
-        const m = marks.get(s.id);
-        const ended = this.log.lastEnded(s.id);
-        const endedAt = ended ? Date.parse(ended.at) : NaN;
-        const on = m?.working && !(m.done && m.done.seq > m.working.seq) ? m.working : undefined;
-        const state = threadState(s.status, s.lastTurnEndedAt);
-        const turns = this.reader.turns(s.id);
-        const last = turns[turns.length - 1];
-        const open = last && last.endedAt === undefined ? last : undefined;
-        const progress = state === "working" && open ? this.progressOf(s.id, open.startSeq) : undefined;
-        const ask = state === "waiting" ? askOf(last?.reply) : null;
-        return {
-          sessionId: s.id,
-          title: s.title ?? "Untitled",
-          agent: s.agent,
-          state,
-          ...(on ? { workingOn: on.text, workingOnAt: on.at } : {}),
-          lastState: !ended
-            ? "idle"
-            : ended.outcome === "done"
-              ? "finished"
-              : ended.outcome === "stopped"
-                ? "stopped"
-                : "error",
-          lastAt: Number.isFinite(endedAt) ? endedAt : Date.parse(s.updatedAt),
-          ...(progress ? { progress } : {}),
-          ...(ask ? { ask } : {}),
-          ...(open ? { turnStartedAt: open.startedAt } : {}),
-        };
-      });
+      .map(({ s }): RoomThread => this.threadOf(s, marks));
+  }
+
+  /** One chat as a room thread (a `thread` frame carries it alone). */
+  threadOf(s: SessionRow, marks = this.store.latestRoomMarks(projectIdOf(this.store, s))): RoomThread {
+    const m = marks.get(s.id);
+    const ended = this.log.lastEnded(s.id);
+    const endedAt = ended ? Date.parse(ended.at) : NaN;
+    const on = m?.working && !(m.done && m.done.seq > m.working.seq) ? m.working : undefined;
+    const state = threadState(s.status, s.lastTurnEndedAt);
+    const turns = this.reader.turns(s.id);
+    const last = turns[turns.length - 1];
+    const open = last && last.endedAt === undefined ? last : undefined;
+    const progress = state === "working" && open ? this.progressOf(s.id, open.startSeq) : undefined;
+    const ask = state === "waiting" ? askOf(last?.reply) : null;
+    const duck = this.store.duckOf(s.id);
+    return {
+      sessionId: s.id,
+      title: s.title ?? "Untitled",
+      name: duck.name ?? agentName(s),
+      ...(duck.role ? { role: duck.role } : {}),
+      duty: duck.duty,
+      lastActiveAt: Date.parse(s.updatedAt),
+      agent: s.agent,
+      state,
+      ...(on ? { workingOn: on.text, workingOnAt: on.at } : {}),
+      lastState: !ended
+        ? "idle"
+        : ended.outcome === "done"
+          ? "finished"
+          : ended.outcome === "stopped"
+            ? "stopped"
+            : "error",
+      lastAt: Number.isFinite(endedAt) ? endedAt : Date.parse(s.updatedAt),
+      ...(progress ? { progress } : {}),
+      ...(ask ? { ask } : {}),
+      ...(open ? { turnStartedAt: open.startedAt } : {}),
+    };
+  }
+
+  /** The duck's name: the person's, else the chat title. */
+  duckName(s: SessionRow): string {
+    return this.store.duckOf(s.id).name ?? agentName(s);
+  }
+
+  /** Changes a duck's name and/or role (null clears) and tells `thread` listeners. */
+  setDuck(sessionId: string, patch: { name?: unknown; role?: unknown }): { name: string; role?: string } {
+    const s = this.store.getSession(sessionId);
+    if (!s) throw new RoomError("No such chat.");
+    const clean: { name?: string | null; role?: string | null } = {};
+    if (patch.name !== undefined) {
+      if (patch.name === null) clean.name = null;
+      else if (typeof patch.name !== "string") throw new RoomError("name must be text or null");
+      else {
+        const n = patch.name.replace(/\s+/g, " ").trim();
+        if (n.length < 1 || [...n].length > DUCK_NAME_MAX)
+          throw new RoomError(`name is 1 to ${DUCK_NAME_MAX} characters`);
+        clean.name = n;
+      }
+    }
+    if (patch.role !== undefined) {
+      if (patch.role === null) clean.role = null;
+      else if (typeof patch.role !== "string") throw new RoomError("role must be text or null");
+      else {
+        const r = patch.role.replace(/\s+/g, " ").trim();
+        if ([...r].length > DUCK_ROLE_MAX) throw new RoomError(`role is at most ${DUCK_ROLE_MAX} characters`);
+        clean.role = r || null;
+      }
+    }
+    this.store.setDuck(sessionId, clean);
+    this.emitThread(s);
+    const t = this.store.duckOf(sessionId);
+    return { name: t.name ?? agentName(s), ...(t.role ? { role: t.role } : {}) };
+  }
+
+  /** Puts a duck on or off duty; tells `thread` listeners only on a change. */
+  setDuty(sessionId: string, on: boolean): "on" | "off" {
+    const s = this.store.getSession(sessionId);
+    if (!s) throw new RoomError("No such chat.");
+    const before = this.store.duckOf(sessionId).duty;
+    this.store.setDuty(sessionId, on);
+    if (before !== (on ? "on" : "off")) this.emitThread(s);
+    return on ? "on" : "off";
+  }
+
+  private emitThread(s: SessionRow): void {
+    const pond = projectOfSession(this.store, s);
+    if (!pond) return;
+    try {
+      this.emit("thread", { projectId: pond.id, thread: this.threadOf(s) });
+    } catch (error) {
+      logger.warn("room thread frame failed", { error: String(error) });
+    }
   }
 
   /** A person (or a stream) looked at the room. */
@@ -439,6 +562,15 @@ export class Room extends EventEmitter {
     const at = this.viewed.get(projectId);
     return at !== undefined && this.now() - at <= ROOM_VIEWED_MS;
   }
+}
+
+function isDucklingStep(event: object): boolean {
+  const e = event as { kind?: string; label?: string };
+  return e.kind === "tool" && typeof e.label === "string" && e.label.startsWith("Start ");
+}
+
+function projectIdOf(store: NativeStore, s: SessionRow): string {
+  return projectOfSession(store, s)?.id ?? "";
 }
 
 export function agentName(s: SessionRow): string {
@@ -478,6 +610,7 @@ export function attachSqueakPosts(host: HostEvents, _store: NativeStore, room: R
   const onEvent = (e: HostEvent): void => {
     try {
       if (e.type === "timeline") room.noteTimeline(e.sessionId, e.event);
+      else if (e.type === "status") room.noteHelpers(e.sessionId, e.ducklings?.items ?? []);
     } catch (error) {
       logger.warn("room watcher failed", { error: String(error) });
     }

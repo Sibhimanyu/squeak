@@ -1207,6 +1207,62 @@ export class NativeStore {
     return r ? jobRow(r) : null;
   }
 
+  private ducksReady = false;
+
+  private ducksTable(): void {
+    if (this.ducksReady) return;
+    // Created here, not as a migration (like room_jobs): a duck's name, role and duty are the room's own.
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS session_ducks (
+         session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on')`,
+    );
+    this.ducksReady = true;
+  }
+
+  /** A chat's duck settings: the person's name and role (null = none) and whether it is on duty (default on). */
+  duckOf(sessionId: string): { name: string | null; role: string | null; duty: "on" | "off" } {
+    this.ducksTable();
+    const r = this.db.prepare("SELECT * FROM session_ducks WHERE session_id=?").get(sessionId) as Row | undefined;
+    return {
+      name: (r?.name as string | null | undefined) ?? null,
+      role: (r?.role as string | null | undefined) ?? null,
+      duty: r?.duty === "off" ? "off" : "on",
+    };
+  }
+
+  /** Sets the name and/or role (null clears); a key left out is kept. */
+  setDuck(sessionId: string, patch: { name?: string | null; role?: string | null }): void {
+    this.ducksTable();
+    const cur = this.duckOf(sessionId);
+    const name = patch.name !== undefined ? patch.name : cur.name;
+    const role = patch.role !== undefined ? patch.role : cur.role;
+    this.db
+      .prepare(
+        `INSERT INTO session_ducks (session_id, name, role, duty) VALUES (?,?,?,?)
+         ON CONFLICT(session_id) DO UPDATE SET name=excluded.name, role=excluded.role`,
+      )
+      .run(sessionId, name, role, cur.duty);
+  }
+
+  setDuty(sessionId: string, on: boolean): void {
+    this.ducksTable();
+    this.db
+      .prepare(
+        `INSERT INTO session_ducks (session_id, duty) VALUES (?,?)
+         ON CONFLICT(session_id) DO UPDATE SET duty=excluded.duty`,
+      )
+      .run(sessionId, on ? "on" : "off");
+  }
+
+  offDutyIds(): Set<string> {
+    this.ducksTable();
+    return new Set(
+      (this.db.prepare("SELECT session_id FROM session_ducks WHERE duty='off'").all() as Row[]).map(
+        (r) => r.session_id as string,
+      ),
+    );
+  }
+
   /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
   replaceRoomPosts(projectId: string, rows: Array<Omit<RoomPostRow, "seq">>): void {
     this.db.transaction(() => {

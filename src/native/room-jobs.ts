@@ -22,6 +22,8 @@ export interface JobThreadRef {
   sessionId: string;
   title: string;
   reason: string;
+  /** The reason in the first person, for the duck to say "I <pitch>": "worked on the control bar an hour ago". */
+  pitch: string;
   state: "working" | "idle";
 }
 
@@ -130,6 +132,7 @@ interface Scored {
   state: RoomThread["state"];
   score: number;
   reason: string;
+  pitch: string;
 }
 
 export interface RoomJobsOptions {
@@ -330,7 +333,8 @@ export class RoomJobs extends EventEmitter {
     want: Set<string>,
     intent?: string,
   ): Scored | null {
-    const title = tokens(session.title ?? "");
+    const duck = this.o.store.duckOf(session.id);
+    const title = tokens(`${session.title ?? ""} ${duck.name ?? ""} ${duck.role ?? ""}`);
     const intentWords = tokens(intent ?? "");
     const turns = this.o.room.sessionTurns(session.id).slice(-4);
     let raw = 0;
@@ -358,16 +362,25 @@ export class RoomJobs extends EventEmitter {
     const recency = age <= 3_600_000 ? 1 : age <= JOB_LISTED_MS ? 0.6 : age <= 3 * JOB_LISTED_MS ? 0.3 : 0;
     const phrase = (words: string[]): string => words.slice(0, 3).join(" ");
     let reason: string;
-    if (state === "working") reason = `is working on ${phrase(matched)} now`;
-    else if (bestTurn) reason = `worked on ${phrase(bestTurn.words)} ${ago(this.now() - bestTurn.at)}`;
-    else reason = `its thread is about ${phrase(matched)}`;
-    return { session, state, score: raw + (raw >= JOB_MIN_SCORE ? recency : 0), reason };
+    let pitch: string;
+    if (state === "working") {
+      reason = `is working on ${phrase(matched)} now`;
+      pitch = `am working on ${phrase(matched)} now`;
+    } else if (bestTurn) {
+      reason = pitch = `worked on ${phrase(bestTurn.words)} ${ago(this.now() - bestTurn.at)}`;
+    } else {
+      reason = `its thread is about ${phrase(matched)}`;
+      pitch = `have a thread about ${phrase(matched)}`;
+    }
+    return { session, state, score: raw + (raw >= JOB_MIN_SCORE ? recency : 0), reason, pitch };
   }
 
   /** Suggested jobs of this pond, best fit for `session` first (the agent's `open_jobs`). */
   openFor(projectId: string, session: SessionRow): Array<{ job: RoomJob; why: string }> {
     const marks = this.o.store.latestRoomMarks(projectId);
+    // An off-duty duck is not a candidate, so it is offered nothing.
     const me = this.o.room.candidates(projectId, JOB_MATCH_WINDOW_MS).find((c) => c.session.id === session.id);
+    if (!me) return [];
     const out: Array<{ job: RoomJob; why: string; score: number }> = [];
     for (const job of this.list(projectId)) {
       if (job.status !== "suggested") continue;
@@ -390,6 +403,9 @@ export class RoomJobs extends EventEmitter {
     if (!found || found.projectId !== projectId) throw new JobError("No such job in this pond.", 404);
     const job = found.job;
     if (job.status !== "suggested") throw new JobError("That job is no longer open.", 409);
+    if (this.o.store.duckOf(session.id).duty === "off") {
+      throw new JobError("You are off duty, so you can't take jobs; the person can put you back on duty.", 409);
+    }
     const c = job.claim;
     if (c && c.sessionId === session.id) {
       throw new JobError(
@@ -482,11 +498,16 @@ export class RoomJobs extends EventEmitter {
 
   private async handTo(projectId: string, job: RoomJob, sessionId: string): Promise<RoomJob> {
     const s = this.o.store.getSession(sessionId);
-    const inPond = s && !s.archivedAt && this.o.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id);
+    const inPond =
+      s &&
+      !s.archivedAt &&
+      this.o.room.candidates(projectId, Infinity, { offDuty: true }).some((c) => c.session.id === s.id);
     if (!s || !inPond) throw new JobError("That thread isn't available in this pond any more.", 409);
     job.status = "handed";
-    job.handedTo = { sessionId: s.id, title: s.title ?? "Untitled", newThread: false };
+    job.handedTo = { sessionId: s.id, title: this.o.room.duckName(s), newThread: false };
     job.updatedAt = this.now();
+    // The person sending a job to an off-duty duck puts it back on duty.
+    this.o.room.setDuty(s.id, true);
     try {
       await this.o.send(s.id, job.text);
     } catch (error) {
@@ -557,6 +578,7 @@ function ref(s: Scored): JobThreadRef {
     sessionId: s.session.id,
     title: s.session.title ?? "Untitled",
     reason: s.reason,
+    pitch: s.pitch,
     state: s.state === "working" ? "working" : "idle",
   };
 }
