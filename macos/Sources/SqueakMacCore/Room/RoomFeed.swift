@@ -36,6 +36,8 @@ public struct RoomFeed: Sendable, Equatable {
     public private(set) var jobs: [RoomJob] = []
     /// Actions in flight and refusals, by job id (a failed "Make this a job" is keyed `msg:<message id>`).
     public private(set) var jobLocal: [String: RoomJobLocal] = [:]
+    /// Every question seen waiting, by `<sessionId>|<question>`, so a later "A — <option text>" can say what A was.
+    public private(set) var askOptions: [String: [RoomAskOption]] = [:]
     private var seen: Set<Int> = []
     private var localCounter = 0
 
@@ -50,7 +52,7 @@ public struct RoomFeed: Sendable, Equatable {
     public mutating func apply(page: RoomPage, pageSize: Int? = nil) -> RoomFeedEffect {
         let first = !loaded
         loaded = true
-        threads = page.threads
+        setThreads(page.threads)
         if let t = page.turns { servesTurns = true; for turn in t { upsert(turn: turn) } }
         if let j = page.jobs { for job in j { upsert(job: job) } }
         for p in page.posts.sorted(by: { $0.seq < $1.seq }) { appendReal(p) }
@@ -129,7 +131,17 @@ public struct RoomFeed: Sendable, Equatable {
 
     public var claims: [RoomJobs.ClaimCard] { RoomJobs.claims(jobs: jobs, local: jobLocal, threads: threads) }
 
-    public mutating func setThreads(_ t: [RoomThread]) { threads = t }
+    public mutating func setThreads(_ t: [RoomThread]) {
+        threads = t
+        for th in t { if let a = th.ask, !a.options.isEmpty { askOptions[th.sessionId + "|" + a.question] = a.options } }
+    }
+
+    /// One thread changed (a `thread` frame: name, role, duty): replaced in place, or added.
+    public mutating func upsert(thread: RoomThread) {
+        var t = threads
+        if let i = t.firstIndex(where: { $0.sessionId == thread.sessionId }) { t[i] = thread } else { t.append(thread) }
+        setThreads(t)
+    }
 
     private mutating func appendReal(_ post: RoomPost) {
         guard !seen.contains(post.seq) else { return }

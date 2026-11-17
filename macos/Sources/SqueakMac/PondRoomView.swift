@@ -3,19 +3,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The pond room (DESIGN.md §8.10, the centre): a group chat for the project. Top, who is working now; middle, the
-// feed (the person on the right, agents and Squeak on the left); bottom, a composer that posts to the room.
-
-/// Which stream's pond room fills the centre. In memory only: choosing a chat, file or panel tab closes it.
-@MainActor @Observable
-final class RoomSelection {
-    static let shared = RoomSelection()
-    private(set) var projectId: String?
-
-    func open(_ projectId: String) { self.projectId = projectId }
-    func close() { if projectId != nil { projectId = nil } }
-    func isOpen(_ projectId: String?) -> Bool { projectId != nil && self.projectId == projectId }
-}
+// The pond room (DESIGN.md §8.10, the centre): a group chat with the pond's ducks (people and ducks in one conversation,
+// oldest to newest; the ducks working at the bottom; a composer that posts to the room or to one duck).
 
 @MainActor @Observable
 final class PondRoomModel {
@@ -26,7 +15,6 @@ final class PondRoomModel {
     private(set) var phase: Phase = .loading
     private(set) var loadingOlder = false
     var filter = RoomFilter()
-    var rippleFilter: RoomRippleFilter = .all
     static let pageSize = 50
 
     @ObservationIgnored private var running = false
@@ -51,6 +39,7 @@ final class PondRoomModel {
                 await react(effect, client)
             case .turn(let t): feed.upsert(turn: t)
             case .job(let j): feed.upsert(job: j)
+            case .thread(let t): feed.upsert(thread: t)
             case .reconnected: await catchUp(client)
             }
         }
@@ -116,24 +105,39 @@ final class PondRoomModel {
         catch { feed.failJob(key, message: RoomJobs.refusal(error)) }
     }
 
-    /// Go, New thread, Just a note, Allow, No: shown at once, reconciled by the job the host answers with.
-    func act(_ job: RoomJobLine, _ action: RoomJobAction, host: NativeHostClient) async {
-        guard let id = job.jobId else { return }
-        var title: String?
-        if case .go(let sid?) = action { title = ([job.target].compactMap { $0 } + job.candidates).first { $0.sessionId == sid }?.title }
-        feed.beginJob(id, action: action, title: title)
-        await perform(id, action, host: host)
-    }
-
-    func act(claim: RoomJobs.ClaimCard, allow: Bool, host: NativeHostClient) async {
-        let action: RoomJobAction = allow ? .allow : .deny
-        feed.beginJob(claim.jobId, action: action)
-        await perform(claim.jobId, action, host: host)
+    /// Go, Not now, Start a new duck, Allow, No: shown at once, reconciled by the job the host answers with.
+    func act(jobId: String, _ action: RoomJobAction, title: String? = nil, host: NativeHostClient) async {
+        feed.beginJob(jobId, action: action, title: title)
+        await perform(jobId, action, host: host)
     }
 
     private func perform(_ id: String, _ action: RoomJobAction, host: NativeHostClient) async {
         do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action)) }
         catch { feed.failJob(id, message: RoomJobs.refusal(error)) }
+    }
+
+    // MARK: Ducks
+
+    /// Rename a duck or set its role (`PATCH .../duck`); the host's answer is what shows. Returns a refusal sentence.
+    @discardableResult
+    func edit(sessionId: String, name: RoomDuckField = .unchanged, role: RoomDuckField = .unchanged, host: NativeHostClient) async -> String? {
+        do {
+            let r = try await RoomClient(host: host).patchDuck(sessionId: sessionId, name: name, role: role)
+            if var t = feed.threads.first(where: { $0.sessionId == sessionId }) {
+                if name != .unchanged { t.name = r.name }
+                if role != .unchanged { t.role = r.role }
+                feed.upsert(thread: t)
+            }
+            return nil
+        } catch { return RoomJobs.refusal(error) }
+    }
+
+    /// Put a duck on or off duty (`POST .../duty`): shown at once, put back if the host refuses.
+    func setDuty(sessionId: String, on: Bool, host: NativeHostClient) async {
+        let before = feed.threads.first { $0.sessionId == sessionId }
+        if var t = before, t.onDuty != on { t.duty = on ? .on : .off; feed.upsert(thread: t) }
+        do { try await RoomClient(host: host).setDuty(sessionId: sessionId, on: on) }
+        catch { if let before { feed.upsert(thread: before) } }
     }
 
     private func deliver(pendingId: String, text: String, level: RoomLevel, host: NativeHostClient) async {
@@ -161,13 +165,12 @@ final class PondRoomStore {
 
 // MARK: - View
 
-/// The pond's landing view (the mock-ups: header, Now, Ripples, composer, inspector). `embedded` is the pinned tab inside
-/// a chat's workbench: no header of its own (the chat's header is there) and no inspector.
+/// The pond's room (draft A): header, one conversation, the ducks working, composer. The right zone holds the roster
+/// (`RoomRightColumn`).
 struct PondRoomView: View {
     let projectId: String
-    /// The pond's directory key (nil from the pinned tab, which has no pond page to switch to).
+    /// The pond's directory key.
     var key: String?
-    var embedded = false
     /// Room for the sidebar toggle when the sidebar is closed.
     var leadingInset: CGFloat = 0
 
@@ -178,13 +181,11 @@ struct PondRoomView: View {
     @State private var ledger = RoomFadeLedger()
 
     private var room: PondRoomModel { PondRoomStore.shared.model(for: projectId) }
-    private var ponds: PondsModel { .shared }
 
     var body: some View {
         let room = room
-        // The room inspector (Flock, Invite, Today, Pond controls) lives in the app's right zone (ConversationWindow).
         VStack(spacing: 0) {
-            if !embedded, let key { RoomHeader(key: key, summary: RoomSummary.line(feed: room.feed), leadingInset: leadingInset) }
+            if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset) }
             content(room)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -200,76 +201,55 @@ struct PondRoomView: View {
         case .loading, .failed:
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
-            let unread = unreadThreads(room)
-            let cards = RoomNow.cards(threads: room.feed.threads, unread: unread, filesFor: { model.changesStore(for: $0).changes?.files.count })
-            let ripples = RoomRipples.build(feed: room.feed, filter: room.rippleFilter, owner: NSFullUserName())
+            let items = RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count })
+            let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
-                column {
-                    RoomNowSection(
-                        cards: cards, claims: room.feed.claims, key: key, open: openThread, answer: answer,
-                        decide: { claim, allow in Task { await room.act(claim: claim, allow: allow, host: model.nativeHost) } })
-                }
-                column { ripplesHeader(room) }
-                ripplesFeed(room, ripples)
-                column { RoomComposer(room: room, send: sendTo) }.padding(.bottom, Space.l).padding(.top, Space.s)
+                conversation(room, items, working)
+                column { RoomComposer(room: room, pondName: key.map { PondsModel.shared.name(key: $0) } ?? "the pond", send: sendTo) }
+                    .padding(.bottom, Space.l).padding(.top, Space.s)
             }
         }
     }
 
-    /// The centred reading column (760 at most, 32 from either edge).
+    /// The centred reading column (740 at most).
     private func column<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-        c().padding(.horizontal, Metrics.readingInset).frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
+        c().padding(.horizontal, Metrics.readingInset).frame(maxWidth: 740 + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
     }
 
-    private func ripplesHeader(_ room: PondRoomModel) -> some View {
-        HStack {
-            Text("Ripples").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
-            Spacer()
-            RoomSegmented(
-                items: RoomRippleFilter.allCases, selection: Binding(get: { room.rippleFilter }, set: { room.rippleFilter = $0 }),
-                title: \.title, height: 26)
-        }
-        .padding(.top, Space.m).padding(.bottom, Space.s)
-    }
-
-    private func ripplesFeed(_ room: PondRoomModel, _ ripples: [RoomRipple]) -> some View {
-        let count = ripples.reduce(0) { $0 + RoomRippleView.weight($1) }
+    private func conversation(_ room: PondRoomModel, _ items: [RoomItem], _ working: [RoomWorkingLine]) -> some View {
+        let count = items.count + working.count + items.reduce(0) { n, i in if case .group(let g) = i { n + g.messages.count } else { n } }
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if room.feed.hasMoreBefore {
                         Color.clear.frame(height: 1).onAppear { Task { await room.loadOlder(host: model.nativeHost) } }
                     }
-                    if ripples.isEmpty {
-                        Text(room.rippleFilter == .all ? "When threads in this pond start working, what they're on shows up here." : "Nothing here yet.")
+                    if items.isEmpty && working.isEmpty {
+                        Text("Say something to the room, or start a duck. What the ducks do shows up here.")
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
                     }
-                    ForEach(ripples) { ripple in
-                        // A thread's turns are a section whose header (duck, title, count) stays pinned while any of its
-                        // turns is on screen, so a row never loses its thread when the group starts above the fold.
-                        Section {
-                            RoomRippleView(
-                                ripple: ripple, threads: room.feed.threads, ledger: ledger, open: openThread,
-                                retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
-                                makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
-                                canMakeJob: { RoomJobs.canMakeJob($0, jobs: room.feed.jobs) },
-                                act: { line, a in Task { await room.act(line, a, host: model.nativeHost) } })
-                        } header: {
-                            if case .threadTurns(let g) = ripple { RoomGroupHeader(group: g, open: openThread) }
+                    ForEach(items) { item in
+                        RoomItemView(
+                            item: item, ducks: room.feed.threads, ledger: ledger, open: openThread, answer: answer,
+                            retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
+                            makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
+                            act: { jobId, a, title in Task { await room.act(jobId: jobId, a, title: title, host: model.nativeHost) } })
+                    }
+                    if !working.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(working) { RoomWorkingRow(line: $0, open: openThread) }
                         }
+                        .padding(.top, 2)
                     }
                     Color.clear.frame(height: 1).id("room-bottom")
                         .onAppear { atBottom = true; unseen = 0 }
                         .onDisappear { atBottom = false }
                 }
-                .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.s)
-                .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
+                .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.m)
+                .frame(maxWidth: 740 + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
-            .onAppear { ledger.freeze(ripples.map(\.id)) }
-            .onChange(of: RoomJump.shared.token) { _, _ in
-                if let id = RoomJump.shared.target { withAnimation(reduceMotion ? nil : Motion.standard) { proxy.scrollTo(id, anchor: .center) } }
-            }
+            .onAppear { ledger.freeze(items.map(\.id)) }
             .onChange(of: count) { old, new in
                 guard new > old else { return }
                 if atBottom { proxy.scrollTo("room-bottom", anchor: .bottom) } else { unseen += new - old }
@@ -294,23 +274,18 @@ struct PondRoomView: View {
 
     // MARK: Actions
 
-    private func unreadThreads(_ room: PondRoomModel) -> Set<String> {
-        var out = Set<String>()
-        for t in room.feed.threads where t.state == .idle || t.state == .error {
-            if let s = session(t.sessionId), model.mark(for: s)?.kind == .unread { out.insert(t.sessionId) }
-        }
-        return out
-    }
-
     private func session(_ id: String) -> HostSession? {
         model.allSessions.first { $0.key.hostSessionId == id && $0.source == .squeak }
     }
 
+    /// Opens the duck's tab; an off-duty duck goes back on duty.
     private func openThread(_ sessionId: String) {
         guard let s = session(sessionId) else { return }
-        RoomSelection.shared.close()
         PondsModel.shared.route = nil
         model.select(s.key)
+        if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
+            Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
+        }
     }
 
     /// An answer to a needs-you card goes through the chat's own send path, marked as an answer (a letter is just the letter).
@@ -325,6 +300,9 @@ struct PondRoomView: View {
         case .thread(let id, _):
             guard let s = session(id) else { return }
             Task { _ = await model.send(text, to: s.key) }
+            if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
+                Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
+            }
         case .everyone, .person:
             Task { await room.send(RoomMention.roomText(text, to: to), host: model.nativeHost) }
         }
@@ -344,28 +322,5 @@ extension View {
     /// Reports the view's height (a background reader: `onGeometryChange` needs macOS 15).
     func onGeometryChangeCompat(_ report: @escaping (CGFloat) -> Void) -> some View {
         background(GeometryReader { g in Color.clear.onAppear { report(g.size.height) }.onChange(of: g.size.height) { _, h in report(h) } })
-    }
-}
-
-// MARK: - The pinned tab
-
-/// The first tab of a stream's strip: icon only, no close button, opens the pond room.
-struct PondRoomTab: View {
-    let selected: Bool
-    let height: CGFloat
-    let indicator: Namespace.ID
-    let select: () -> Void
-
-    var body: some View {
-        Button(action: select) {
-            Lucide(.messageSquareText, size: 14, color: selected ? Theme.ink : Theme.muted)
-                .frame(width: 32, height: height).contentShape(Rectangle())
-                .overlay(alignment: .bottom) {
-                    if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: indicator) }
-                }
-        }
-        .buttonStyle(.plain)
-        .help("Pond room").accessibilityLabel("Pond room")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

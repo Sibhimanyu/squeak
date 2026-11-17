@@ -30,13 +30,8 @@ struct WorkbenchCentre: View {
                 workbench
             }
         }
-        .onChange(of: model.selected) { PondsModel.shared.route = nil; RoomSelection.shared.close() }
+        .onChange(of: model.selected) { PondsModel.shared.route = nil }
         .onChange(of: model.navFilter) { _, new in if new == .usage { PondsModel.shared.route = nil } }
-    }
-
-    /// The pond (project id) whose room the stream's pinned tab opens: native workspaces only.
-    private func roomProject(for place: (project: SidebarProject, workspace: SidebarWorkspace)?) -> String? {
-        place.flatMap { model.nativeWorkspace(of: $0.workspace) }?.projectId
     }
 
     @ViewBuilder private var workbench: some View {
@@ -60,8 +55,6 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
-            } else if let chat, let project = roomProject(for: place), RoomSelection.shared.isOpen(project) {
-                PondRoomView(projectId: project).heresayPrivate()
             } else if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
                 DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
                     .id(ref.taskId)
@@ -297,10 +290,6 @@ private struct WorkbenchTabs: View {
         return out
     }
 
-    /// The stream's project (pond) when it is a native one: only those have a room.
-    private var roomProject: String? { model.nativeWorkspace(of: workspace)?.projectId }
-    private var roomOpen: Bool { RoomSelection.shared.isOpen(roomProject) }
-
     private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
     @State private var stripWidth: Double = 0
@@ -321,28 +310,19 @@ private struct WorkbenchTabs: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    if let project = roomProject {
-                        PondRoomTab(selected: roomOpen, height: Metrics.tabStrip, indicator: tabIndicator) {
-                            files?.showChat()
-                            dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
-                            dock.update { $0.selectChats() }
-                            RoomSelection.shared.open(project)
-                        }
-                    }
                     ForEach(stripItems) { item in
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
                         case .duckling(let ref):
                             if let parent = model.allSessions.first(where: { $0.key == ref.session }) {
-                                DockDucklingTab(session: parent, ref: ref, zone: .centre, selected: dock.ducklings.selected[.centre] == ref && !roomOpen,
+                                DockDucklingTab(session: parent, ref: ref, zone: .centre, selected: dock.ducklings.selected[.centre] == ref,
                                                 height: Metrics.tabStrip, indicator: tabIndicator).transition(.opacity)
                             }
                         case .file(let f):
                             if let files, dock.files.zone(of: f.path) == .centre {
-                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil && !roomOpen,
+                                DockFileTab(files: files, file: f, zone: .centre, selected: files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
                                             height: Metrics.tabStrip, indicator: tabIndicator) {
                                     dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
-                                    RoomSelection.shared.close()
                                     dock.update { $0.selectChats() }
                                     files.activePath = f.path
                                 }
@@ -350,8 +330,7 @@ private struct WorkbenchTabs: View {
                         }
                     }
                     ForEach(dock.layout.centre.panels.filter { $0 != .terminal }, id: \.self) { p in
-                        DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p && !roomOpen, height: Metrics.tabStrip, indicator: tabIndicator) {
-                            RoomSelection.shared.close()
+                        DockPanelTab(panel: p, zone: .centre, selected: dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
                             dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                             dock.update { $0.select(p) }
@@ -421,8 +400,7 @@ private struct WorkbenchTabs: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             let box = note.object as? CloseTabAction.Box
-            if roomOpen { RoomSelection.shared.close(); box?.handled = true }
-            else if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
+            if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
             else if let files, let path = files.activePath { files.close(path); box?.handled = true }
             else if let s = chats.first(where: { $0.key == model.selected }), ChatTabs.canClose(shown: chats.count) { closeTab(s); box?.handled = true }
         }
@@ -430,10 +408,10 @@ private struct WorkbenchTabs: View {
             let delta = (note.object as? Int) ?? 1
             let shown = chats
             let current = files?.activePath == nil && files?.review.isOpen != true ? model.selected : nil
-            if let next = ChatTabs.step(from: roomOpen ? nil : current, in: shown.map(\.key), by: delta) { RoomSelection.shared.close(); files?.showChat(); model.select(next) }
+            if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed, and has its tab.
-        .onChange(of: model.selected) { _, key in dock.update { $0.selectChats() }; if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
+        .onChange(of: model.selected) { _, key in dock.update { $0.selectChats() }; if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id); if let s = model.allSessions.first(where: { $0.key == key }), let r = duckRef(s), PondRoomStore.shared.model(for: r.project).feed.threads.first(where: { $0.sessionId == r.id })?.onDuty == false { setDuty(s, on: true) } } }
         .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .animation(Motion.standard, value: model.selected)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
@@ -441,9 +419,28 @@ private struct WorkbenchTabs: View {
 
     /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
     /// the pond's overview page, or stays on a file tab open in the stream.
+    /// The pond's room state for a native duck: its project id and session id on the host.
+    private func duckRef(_ s: HostSession) -> (project: String, id: String)? {
+        guard s.source == .squeak, let project = model.nativeWorkspace(of: workspace)?.projectId else { return nil }
+        return (project, s.key.hostSessionId)
+    }
+
+    /// Closing a duck's tab puts it off duty, and the tooltip says so.
+    private func closeLabel(_ s: HostSession) -> String {
+        guard let r = duckRef(s) else { return "Close \(model.workbenchTitle(s))" }
+        let name = PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.duckName ?? model.workbenchTitle(s)
+        return RoomDucks.closeTooltip(name: name)
+    }
+
+    private func setDuty(_ s: HostSession, on: Bool) {
+        guard let r = duckRef(s) else { return }
+        Task { await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: model.nativeHost) }
+    }
+
     private func closeTab(_ s: HostSession) {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
+        setDuty(s, on: false)
         let wasOpen = s.key == model.selected
         for r in dock.ducklings.ducklings(in: .centre) where r.session == s.key { dock.closeDuckling(r) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
@@ -458,7 +455,10 @@ private struct WorkbenchTabs: View {
     }
 
     private func reopenTab() {
-        if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) { model.select(key) }
+        if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) {
+            model.select(key)
+            if let s = workspace.chats.first(where: { $0.key == key }) { setDuty(s, on: true) }
+        }
     }
 
     /// A working chat's tab leads with Squeak's matrix glyph; any other tab has no mark (no grip: tabs still drag).
@@ -471,12 +471,12 @@ private struct WorkbenchTabs: View {
 
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil && !roomOpen
+        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        let open = { RoomSelection.shared.close(); files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
+        let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
-            StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: "Close \(model.workbenchTitle(s))",
+            StripTab(selected: selected, height: Metrics.tabStrip, indicator: tabIndicator, closeLabel: closeLabel(s),
                      showsClose: !chats.isEmpty,
                      titleWidth: model.isRenaming(s) ? 160 : TabTitleMeasure.width(model.workbenchTitle(s), semibold: model.isUnread(s)),
                      titleExtra: s.showsConductorBadge ? 18 : 0, activity: TabSlotContent.activity(of: model.mark(for: s)?.kind),
@@ -528,7 +528,7 @@ private struct WorkbenchTabs: View {
         .help(model.workbenchTitle(s))
         .squeakContextMenu {
             RenameThreadItem(session: s)
-            Button("Close tab") { closeTab(s) }
+            Button(duckRef(s) == nil ? "Close tab" : "Close tab (goes off duty)") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
     }

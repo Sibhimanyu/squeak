@@ -78,12 +78,28 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var ask: RoomAsk?
     public var turnStartedAt: Int64?
     public var filesChanged: Int?
+    /// Ducks (CONTRACT-ducks): the person's chosen name (else the title), a one-line role, on/off duty and the last activity.
+    /// All optional: an older host sends none (name = title, duty = on).
+    public var name: String?
+    public var role: String?
+    public var duty: RoomDuty
+    public var lastActiveAt: Int64?
     public var id: String { sessionId }
+
+    /// The duck's name: the chosen one, else the chat's title.
+    public var duckName: String {
+        if let n = name?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
+        let t = title.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? "Duck" : t
+    }
+    public var onDuty: Bool { duty == .on }
 
     public init(
         sessionId: String, title: String, agent: String? = nil, state: RoomThreadState, workingOn: String? = nil, workingOnAt: Int64? = nil,
-        lastState: String? = nil, lastAt: Int64? = nil, progress: RoomProgress? = nil, ask: RoomAsk? = nil, turnStartedAt: Int64? = nil, filesChanged: Int? = nil
+        lastState: String? = nil, lastAt: Int64? = nil, progress: RoomProgress? = nil, ask: RoomAsk? = nil, turnStartedAt: Int64? = nil, filesChanged: Int? = nil,
+        name: String? = nil, role: String? = nil, duty: RoomDuty = .on, lastActiveAt: Int64? = nil
     ) {
+        self.name = name; self.role = role; self.duty = duty; self.lastActiveAt = lastActiveAt
         self.sessionId = sessionId; self.title = title; self.agent = agent; self.state = state
         self.workingOn = workingOn; self.workingOnAt = workingOnAt; self.lastState = lastState; self.lastAt = lastAt
         self.progress = progress; self.ask = ask; self.turnStartedAt = turnStartedAt; self.filesChanged = filesChanged
@@ -91,6 +107,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, title, agent, state, workingOn, workingOnAt, lastState, lastAt, progress, ask, turnStartedAt, filesChanged
+        case name, role, duty, lastActiveAt
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -106,6 +123,45 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         ask = (try? c.decode(RoomAsk.self, forKey: .ask)).flatMap { $0.options.isEmpty && $0.question.isEmpty ? nil : $0 }
         turnStartedAt = try? c.decode(Int64.self, forKey: .turnStartedAt)
         filesChanged = try? c.decode(Int.self, forKey: .filesChanged)
+        name = (try? c.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 }
+        role = (try? c.decode(String.self, forKey: .role)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        duty = (try? c.decode(String.self, forKey: .duty)).flatMap(RoomDuty.init(rawValue:)) ?? .on
+        lastActiveAt = try? c.decode(Int64.self, forKey: .lastActiveAt)
+    }
+}
+
+public enum RoomDuty: String, Sendable, Equatable { case on, off }
+
+public enum RoomDucklingState: String, Sendable, Equatable { case running, done, failed }
+
+public struct RoomDuckling: Sendable, Equatable, Decodable, Identifiable {
+    public var label: String
+    public var state: RoomDucklingState
+    public var id: String { label }
+    public init(label: String, state: RoomDucklingState = .running) { self.label = label; self.state = state }
+    private enum CodingKeys: String, CodingKey { case label, state }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(String.self, forKey: .label)
+        state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomDucklingState.init(rawValue:)) ?? .running
+    }
+}
+
+/// The subagents of one turn ("handed 2 pieces to ducklings").
+public struct RoomDucklings: Sendable, Equatable, Decodable {
+    public var count: Int
+    public var done: Int
+    public var items: [RoomDuckling]
+    public init(count: Int, done: Int = 0, items: [RoomDuckling] = []) { self.count = count; self.done = done; self.items = items }
+    private enum CodingKeys: String, CodingKey { case count, done, items }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let items = ((try? c.decode([Failable<RoomDuckling>].self, forKey: .items)) ?? []).compactMap(\.value)
+        let n = (try? c.decode(Int.self, forKey: .count)) ?? items.count
+        guard n >= 1 else { throw DecodingError.dataCorruptedError(forKey: .count, in: c, debugDescription: "count") }
+        count = n
+        done = (try? c.decode(Int.self, forKey: .done)) ?? items.filter { $0.state == .done }.count
+        self.items = items
     }
 }
 
@@ -193,19 +249,21 @@ public struct RoomTurn: Sendable, Equatable, Decodable, Identifiable {
     public var filesChanged: Int?
     public var intent: String?
     public var progress: RoomProgress?
+    public var ducklings: RoomDucklings?
 
     public init(
         id: String, sessionId: String, threadTitle: String, agent: String? = nil, startedAt: Int64, endedAt: Int64? = nil,
         outcome: RoomTurnOutcome? = nil, prompt: String = "", author: RoomTurnAuthor = RoomTurnAuthor(name: ""), answer: RoomTurnAnswer? = nil,
-        outcomeText: String? = nil, durationMs: Int64? = nil, filesChanged: Int? = nil, intent: String? = nil, progress: RoomProgress? = nil
+        outcomeText: String? = nil, durationMs: Int64? = nil, filesChanged: Int? = nil, intent: String? = nil, progress: RoomProgress? = nil, ducklings: RoomDucklings? = nil
     ) {
+        self.ducklings = ducklings
         self.id = id; self.sessionId = sessionId; self.threadTitle = threadTitle; self.agent = agent; self.startedAt = startedAt
         self.endedAt = endedAt; self.outcome = outcome; self.prompt = prompt; self.author = author; self.answer = answer
         self.outcomeText = outcomeText; self.durationMs = durationMs; self.filesChanged = filesChanged; self.intent = intent; self.progress = progress
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, threadTitle, agent, startedAt, endedAt, outcome, prompt, author, answer, outcomeText, durationMs, filesChanged, intent, progress
+        case id, sessionId, threadTitle, agent, startedAt, endedAt, outcome, prompt, author, answer, outcomeText, durationMs, filesChanged, intent, progress, ducklings
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -225,6 +283,7 @@ public struct RoomTurn: Sendable, Equatable, Decodable, Identifiable {
         filesChanged = try? c.decode(Int.self, forKey: .filesChanged)
         intent = (try? c.decode(String.self, forKey: .intent)).flatMap { $0.isEmpty ? nil : $0 }
         progress = try? c.decode(RoomProgress.self, forKey: .progress)
+        ducklings = try? c.decode(RoomDucklings.self, forKey: .ducklings)
     }
 }
 

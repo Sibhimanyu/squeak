@@ -65,7 +65,8 @@ struct RoomModeSwitch: View {
 
 struct RoomHeader: View {
     let key: String
-    let summary: RoomSummary.Line
+    let ducks: [RoomDuck]
+    let open: (String) -> Void
     var leadingInset: CGFloat = 0
     @Environment(AppModel.self) private var model
     private var ponds: PondsModel { .shared }
@@ -73,57 +74,41 @@ struct RoomHeader: View {
     var body: some View {
         let pond = ponds.pond(key: key)
         let name = ponds.name(key: key)
+        let people = ponds.detail(key: key)?.members.count ?? 1
         HStack(spacing: Space.m) {
             if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
-            PondTile(name: name, pondId: pond?.id, projectId: ponds.native(key: key)?.id, size: 24)
-            Text(verbatim: name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-            avatars(pond)
-            summaryView
+            PondTile(name: name, pondId: pond?.id, projectId: ponds.native(key: key)?.id, size: 28)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+            }
             Spacer(minLength: Space.s)
+            HStack(spacing: 14) {
+                ForEach(ducks.prefix(8)) { d in
+                    Button { open(d.sessionId) } label: { HeaderDuck(duck: d) }.buttonStyle(.plain).help("\(d.name) \u{00B7} \(d.presenceLine)")
+                }
+            }
+            .padding(.trailing, 6)
             RoomModeSwitch(key: key)
         }
         .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
+}
 
-    private func avatars(_ pond: PondSummary?) -> some View {
-        let members = ponds.detail(key: key).map { PondFlock.ordered($0.members, presence: $0.presence) } ?? []
-        let shown = Array(members.prefix(4))
-        return HStack(spacing: -6) {
-            ForEach(shown) { m in
-                FlockAvatar(member: m, online: false, size: 24)
-                    .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
-            }
-            if members.count > shown.count {
-                Text("+\(members.count - shown.count)").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .frame(width: 24, height: 24).background(Theme.selected, in: Circle()).overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
-            }
-        }
-        .accessibilityElement(children: .ignore).accessibilityLabel("\(members.count) people in this pond")
-    }
-
-    @ViewBuilder private var summaryView: some View {
-        HStack(spacing: Space.m) {
-            if summary.quiet {
-                Text("All quiet").font(.system(size: 13)).foregroundStyle(Theme.ink)
-                if let d = summary.quietDetail { Text(verbatim: d).font(.system(size: 13)).foregroundStyle(Theme.subtle) }
-            } else {
-                if summary.working > 0 {
-                    HStack(spacing: 6) {
-                        WorkingGlyph(slot: 22, alignment: .leading, grid: .micro)
-                        Text("\(summary.working) working").font(.system(size: 13)).foregroundStyle(Theme.muted)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-                if summary.needsYou > 0 {
-                    HStack(spacing: 6) {
-                        Lucide(.triangleAlert, size: 14, color: Theme.warning)
-                        Text("\(summary.needsYou) needs you").font(.system(size: 13)).foregroundStyle(Theme.muted)
-                    }
-                    .accessibilityElement(children: .combine)
+/// A duck in the header: its avatar with the state mark at the corner (tide while working, triangle while it waits).
+private struct HeaderDuck: View {
+    let duck: RoomDuck
+    var body: some View {
+        DuckAvatar(sessionId: duck.sessionId, agent: duck.agent, size: 30, off: !duck.onDuty)
+            .overlay(alignment: .topTrailing) {
+                switch duck.presence {
+                case .working: WorkingGlyph(slot: 12, alignment: .center, grid: .micro).scaleEffect(0.8).frame(width: 14, height: 14).background(Theme.bg, in: Circle()).offset(x: 5, y: -5)
+                case .waiting: Lucide(.triangleAlert, size: 10, color: Theme.warning).frame(width: 14, height: 14).background(Theme.bg, in: Circle()).offset(x: 5, y: -5)
+                case .idle, .off: EmptyView()
                 }
             }
-        }
-        .lineLimit(1).padding(.leading, Space.xs)
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(duck.name), \(duck.presenceLine)")
     }
 }

@@ -13,16 +13,19 @@ public struct RoomJobTarget: Sendable, Equatable, Decodable {
     public var reason: String
     /// "working" or "idle" (anything else reads as idle).
     public var state: String
-    public init(sessionId: String, title: String, reason: String = "", state: String = "idle") {
-        self.sessionId = sessionId; self.title = title; self.reason = reason; self.state = state
+    /// First person, from the host: "worked on the control bar an hour ago" (the duck says "I <pitch>"). Nil from an older host.
+    public var pitch: String?
+    public init(sessionId: String, title: String, reason: String = "", state: String = "idle", pitch: String? = nil) {
+        self.sessionId = sessionId; self.title = title; self.reason = reason; self.state = state; self.pitch = pitch
     }
-    private enum CodingKeys: String, CodingKey { case sessionId, title, reason, state }
+    private enum CodingKeys: String, CodingKey { case sessionId, title, reason, state, pitch }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try c.decode(String.self, forKey: .sessionId)
         title = (try? c.decode(String.self, forKey: .title)) ?? ""
         reason = (try? c.decode(String.self, forKey: .reason)) ?? ""
         state = (try? c.decode(String.self, forKey: .state)) ?? "idle"
+        pitch = (try? c.decode(String.self, forKey: .pitch)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
     }
 }
 
