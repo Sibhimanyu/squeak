@@ -160,4 +160,31 @@ struct PondFlowTests {
         let mine = items.compactMap { if case .group(let g) = $0 { g } else { nil } }.flatMap(\.messages).first { $0.author.kind == .me }
         #expect(mine?.goesTo == "s1")
     }
+
+    // MARK: Inspector stash
+
+    private func visible(_ l: DockLayout, enabled: Bool = false) -> Bool {
+        InspectorStash.rightVisible(l, files: DockFiles(), terminals: DockTerminals(), enabled: enabled)
+    }
+
+    @Test func stashedInspectorsAloneLeaveNoRightZone() {
+        var l = DockLayout.standard
+        l.close(.code)
+        #expect(l.right.panels == [.thread, .pond])
+        #expect(!visible(l))
+        #expect(visible(l, enabled: true))
+        #expect(InspectorStash.hides(.thread) && InspectorStash.hides(.pond))
+        #expect(!InspectorStash.hides(.thread, enabled: true))
+    }
+
+    @Test func otherPanelsKeepTheRightZone() {
+        var l = DockLayout.standard
+        l.move(.pond, to: .right)
+        l.move(.code, to: .right)
+        #expect(visible(l))
+        var t = DockLayout.standard
+        t.move(.terminal, to: .right)
+        #expect(visible(t))
+        #expect(!InspectorStash.hides(.code) && !InspectorStash.hides(.terminal))
+    }
 }

@@ -163,7 +163,7 @@ private struct WorkbenchHeader: View {
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
             if session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
-            if !inspectorOpen, InspectorStash.enabled { Color.clear.frame(width: PaneToggle.size) }
+            if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)

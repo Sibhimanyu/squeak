@@ -430,7 +430,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         let shownTerminal = dock.activeTerminals.shown(in: zone)
         let shells = dockTerminalTabs(in: zone, session: session)
         let duckRefs = session.map { s in dock.ducklings.ducklings(in: zone).filter { $0.session == s.key } } ?? []
-        let titles: [String] = state.panels.filter { $0 != .terminal }.map(\.title)
+        let titles: [String] = state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.map(\.title)
             + duckRefs.map { ref in session.flatMap { model.ducklings(for: $0)?.items.first { $0.id == ref.taskId }?.title } ?? "Duckling" }
             + dock.threads.threads(in: zone).compactMap { k in model.allSessions.first { $0.key.stringValue == k }.map { model.workbenchTitle($0) } }
             + placed.map(\.name) + (shells?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? [])
@@ -439,7 +439,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
             leading()
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(state.panels.filter { $0 != .terminal }, id: \.self) { p in
+                    ForEach(state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator) {
                             dock.selectPanel(p, in: zone)
                         }
@@ -475,7 +475,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
             // then it scrolls, so a tab is never pushed past the zone's edge.
             .frame(minWidth: 0, maxWidth: .infinity)
             if trailingWidth == 0 || TabStripFit.showsAccessory(
-                strip: stripWidth, tabs: state.panels.filter { $0 != .terminal }.count + dock.threads.threads(in: zone).count + dock.ducklings.ducklings(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
+                strip: stripWidth, tabs: state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.count + dock.threads.threads(in: zone).count + dock.ducklings.ducklings(in: zone).count + placed.count + (shells?.tabs.count ?? 0),
                 leading: leadingWidth, accessory: trailingWidth) {
                 trailing()
             }
@@ -547,7 +547,7 @@ struct DockZoneBody: View {
                 }
             } else if let fileModel, let file {
                 FileViewer(files: fileModel, file: file).id(file.path)
-            } else if let p = DockStore.shared.layout[zone].selected {
+            } else if let p = DockStore.shared.layout[zone].selected.flatMap({ InspectorStash.hides($0) ? DockStore.shared.layout[zone].panels.first { $0 != .terminal && !InspectorStash.hides($0) } : $0 }) {
                 DockPanelContent(panel: p, session: session)
             } else {
                 Color.clear

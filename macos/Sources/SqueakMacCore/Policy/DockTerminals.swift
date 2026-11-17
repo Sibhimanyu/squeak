@@ -115,7 +115,7 @@ public extension DockLayout {
 public extension DockBottomPlacement {
     static func of(_ layout: DockLayout, files: DockFiles, terminals: DockTerminals, threads: DockThreads = DockThreads(), ducklings: DockDucklings = DockDucklings()) -> DockBottomPlacement {
         guard layout.isZoneVisible(.bottom, files: files, terminals: terminals, threads: threads, ducklings: ducklings) else { return .none }
-        let right = layout.isZoneVisible(.right, files: files, terminals: terminals, threads: threads, ducklings: ducklings) && !layout.right.collapsed
+        let right = InspectorStash.rightVisible(layout, files: files, terminals: terminals, threads: threads, ducklings: ducklings) && !layout.right.collapsed
         return right ? .underRight : .underCentre
     }
 }

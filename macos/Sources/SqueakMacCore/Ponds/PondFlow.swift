@@ -10,11 +10,27 @@ public enum PondPage: String, CaseIterable, Sendable, Equatable {
     public var title: String { self == .room ? "Room" : "Dashboard" }
 }
 
-/// Stashed 2026-11-17, owner: bring back later. While `enabled` is false the right-hand inspector zone (the pond room's
-/// inspector and the thread's Who / Controls / Approvals / Model) is not shown anywhere and has no toggle; all of its code
-/// still builds and its tests still run.
+/// Stashed 2026-11-17, owner: bring back later. While `enabled` is false the inspectors (the pond room's inspector and the
+/// thread's Who / Controls / Approvals / Model, i.e. the Thread and Pond panels) are not shown anywhere. The right zone
+/// itself stays for what else is docked there (Code, files, terminals, ducklings, threads) and collapses away when an
+/// inspector would be its only content. All inspector code still builds and its tests still run.
 public enum InspectorStash {
     public static let enabled = false
+
+    /// Whether a docked panel is an inspector.
+    public static func isInspector(_ panel: DockPanel) -> Bool { panel == .thread || panel == .pond }
+    /// An inspector panel that is stashed: never drawn, never counted.
+    public static func hides(_ panel: DockPanel, enabled: Bool = InspectorStash.enabled) -> Bool { !enabled && isInspector(panel) }
+
+    /// Whether the right zone has anything to show: with the stash on, an inspector alone does not count.
+    public static func rightVisible(
+        _ layout: DockLayout, files: DockFiles, terminals: DockTerminals, threads: DockThreads = DockThreads(),
+        ducklings: DockDucklings = DockDucklings(), enabled: Bool = InspectorStash.enabled
+    ) -> Bool {
+        if enabled { return layout.isZoneVisible(.right, files: files, terminals: terminals, threads: threads, ducklings: ducklings) }
+        return layout.right.panels.contains { !isInspector($0) } || files.hasFiles(in: .right) || terminals.has(in: .right)
+            || threads.has(in: .right) || ducklings.has(in: .right)
+    }
 }
 
 /// Decides whether a stream of trackpad scroll events is a two-finger horizontal swipe between the Dashboard and the Room.

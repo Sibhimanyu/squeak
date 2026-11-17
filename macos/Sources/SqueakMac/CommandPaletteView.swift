@@ -116,7 +116,7 @@ struct CommandPaletteHost: ViewModifier {
         case .searchChats:
             Task { @MainActor in paletteOpen = true }
         case .toggleSidebar: DockStore.shared.update { $0.sidebarCollapsed.toggle() }
-        case .toggleInspector: if InspectorStash.enabled { DockStore.shared.update { $0.toggleRight() } }
+        case .toggleInspector: let d = DockStore.shared; if InspectorStash.rightVisible(d.layout, files: d.files, terminals: d.activeTerminals, threads: d.threads, ducklings: d.ducklings) { d.update { $0.toggleRight() } }
         case .toggleTerminal: TerminalActions.toggle(model)
         case .openSettings: model.openSettings()
         case .openUsage: model.openUsage()
