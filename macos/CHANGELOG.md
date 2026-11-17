@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.28.0
+
+- Invite people to a pond by email: type their addresses, pick Member or Viewer, and send. Whoever signs in with that address joins straight away; anyone else is told the invite is for someone else. Codes and QR are gone from the invite sheet (Copy invite link is still there).
+- Pond membership follows the person's account: once someone is in a pond, every device they sign in on (browser, Mac) shows it, with no second invite. People lists each person once with how many devices they use, and pond settings show your own devices with Remove.
+
 ## 2.27.12
 
 - A chat no longer shows Working while only a duckling is working, whether Claude is waiting on it or has finished its part. The ducklings bar shows the work and has its own Stop.
