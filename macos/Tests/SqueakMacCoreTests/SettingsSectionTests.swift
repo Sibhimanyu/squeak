@@ -12,7 +12,7 @@ import Testing
 
     @Test func groupsAreYouAgentsThisMacDevicesExtensionsAbout() {
         #expect(SettingsSection.titledGroups.map(\.title) == ["You", "Agents", "This Mac", "Devices", "Extensions", "About"])
-        #expect(SettingsSection.Group.you.sections == [.account, .notifications, .privacy])
+        #expect(SettingsSection.Group.you.sections == [.account, .ponds, .notifications, .privacy])
         #expect(SettingsSection.Group.agents.sections == [.models, .messages])
         #expect(SettingsSection.Group.mac.sections == [.general, .awake, .service])
         #expect(SettingsSection.Group.devices.sections == [.iphone, .connections])
