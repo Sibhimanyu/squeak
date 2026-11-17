@@ -1,4 +1,5 @@
 import Foundation
+import SqueakIcons
 
 /// What a stream's dot-grid glyph says (DESIGN.md §3.3: state colours; the duck's yellow is never a state). Derived here,
 /// from the daemon's and host's data only: the surfaces draw it and decide nothing.
@@ -37,8 +38,13 @@ public enum StreamGlyphState: Equatable, Sendable {
     }
 
     /// Only the leaf that works moves: a rollup (a stream, a pond) whose chats are on screen shows no working glyph,
-    /// because each working chat already shows its own. Waiting, failed and unread still show (a still mark).
+    /// because each working chat already shows its own. Waiting and failed still show their own marks.
     public func asRollup(childrenVisible: Bool) -> StreamGlyphState { self == .working && childrenVisible ? .idle : self }
+
+    /// The working glyph's one rule (DESIGN.md §3.3): drawn only while something under this mark works right now,
+    /// animated (a distinct non-pixel icon under Reduce Motion); idle, unread, waiting and failed draw none (waiting and
+    /// failed have their own marks, unread is the title's weight).
+    public func glyph(reduceMotion: Bool) -> GlyphPresentation { GlyphPresentation.of(working: self == .working, reduceMotion: reduceMotion) }
 
     /// The word VoiceOver and tooltips add after the stream's name; nil when there is nothing to say.
     public var words: String? {

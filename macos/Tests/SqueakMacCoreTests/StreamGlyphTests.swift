@@ -1,4 +1,5 @@
 import Foundation
+import SqueakIcons
 import Testing
 
 @testable import SqueakMacCore
@@ -48,5 +49,18 @@ import Testing
         #expect(ChatMark(.working, quiet: true).asRollup(childrenVisible: true) == nil)
         #expect(ChatMark(.working).asRollup(childrenVisible: false) == ChatMark(.working))
         #expect(ChatMark(.failed).asRollup(childrenVisible: true) == ChatMark(.failed))
+    }
+
+    @Test func glyphOnlyWhenWorking() {
+        for state in [StreamGlyphState.idle, .unread, .waiting, .failed] {
+            #expect(state.glyph(reduceMotion: false) == .none)
+            #expect(state.glyph(reduceMotion: true) == .none)
+        }
+        #expect(StreamGlyphState.working.glyph(reduceMotion: false) == .animatedGlyph)
+        #expect(StreamGlyphState.working.glyph(reduceMotion: true) == .reduceMotionIcon)
+        // A folded row shows it only when a duck under it works right now; an open one leaves it to the chats.
+        #expect(StreamGlyphState.of(marks: [nil, ChatMark(.unread)]).glyph(reduceMotion: false) == .none)
+        #expect(StreamGlyphState.of(marks: [nil, ChatMark(.working, quiet: true)]).asRollup(childrenVisible: false).glyph(reduceMotion: false) == .animatedGlyph)
+        #expect(StreamGlyphState.working.asRollup(childrenVisible: true).glyph(reduceMotion: false) == .none)
     }
 }

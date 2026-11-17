@@ -152,14 +152,13 @@ struct CornerMark: View {
     }
 }
 
-/// The tide glyph for a working chat, held still in a quiet colour while the Mac is not answering.
+/// The tide glyph for a working chat, drawn only while the Mac is answering (a silent Mac's chat shows no glyph).
 struct LiveTide: View {
     @Environment(AppModel.self) private var model
     var quiet = false
 
     var body: some View {
-        TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle, grid: .mini, still: !model.macIsLive)
-            .opacity(quiet ? 0.7 : 1)
+        if model.macIsLive { TideGlyph(color: Theme.working, grid: .mini).opacity(quiet ? 0.7 : 1) }
     }
 }
 

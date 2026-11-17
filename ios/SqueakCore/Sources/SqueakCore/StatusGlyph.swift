@@ -1,4 +1,5 @@
 import Foundation
+import SqueakIcons
 
 /// A pond's or stream's status at a glance. The Mac decides it (`activity`, `working`, `needsYou` on a pond and on
 /// each of its streams in the phone view; needs you, then working, then error, else idle) and the phone only draws
@@ -8,6 +9,12 @@ public struct StatusRollup: Equatable, Sendable {
     public var activity: Activity
     public var working: Int
     public var needsYou: Int
+
+    /// The working glyph's one rule (DESIGN.md §3.3): drawn only while something under this mark works and the Mac is
+    /// answering (a silent Mac's "working" is stale), animated, or a distinct icon under Reduce Motion; never a frozen glyph.
+    public func glyph(macIsLive: Bool, reduceMotion: Bool) -> GlyphPresentation {
+        GlyphPresentation.of(working: activity == .working && macIsLive, reduceMotion: reduceMotion)
+    }
 
     public init(activity: Activity, working: Int = 0, needsYou: Int = 0) {
         self.activity = activity; self.working = working; self.needsYou = needsYou

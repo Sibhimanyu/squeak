@@ -1,5 +1,6 @@
 import XCTest
 @testable import SqueakCore
+import SqueakIcons
 
 final class StatusGlyphTests: XCTestCase {
     private func chat(_ state: String, ducklings: Int? = nil, question: Bool = false) -> PhoneSnapshot.Session {
@@ -35,5 +36,17 @@ final class StatusGlyphTests: XCTestCase {
         XCTAssertEqual(StatusRollup(activity: .needsYou, working: 1, needsYou: 1).label(for: "greenroom"), "greenroom, 1 working, 1 needs you")
         XCTAssertEqual(StatusRollup(activity: .idle).label(for: "greenroom"), "greenroom")
         XCTAssertEqual(StatusRollup(activity: .error).label(for: "greenroom"), "greenroom, failed")
+    }
+
+    func testGlyphOnlyForWorkAndNeverFrozen() {
+        for a in [StatusRollup.Activity.idle, .needsYou, .error] {
+            XCTAssertEqual(StatusRollup(activity: a).glyph(macIsLive: true, reduceMotion: false), .none)
+            XCTAssertEqual(StatusRollup(activity: a).glyph(macIsLive: true, reduceMotion: true), .none)
+        }
+        let working = StatusRollup(activity: .working, working: 1)
+        XCTAssertEqual(working.glyph(macIsLive: true, reduceMotion: false), .animatedGlyph)
+        XCTAssertEqual(working.glyph(macIsLive: true, reduceMotion: true), .reduceMotionIcon)
+        // A silent Mac's "working" is stale: no glyph, not a held one.
+        XCTAssertEqual(working.glyph(macIsLive: false, reduceMotion: false), .none)
     }
 }

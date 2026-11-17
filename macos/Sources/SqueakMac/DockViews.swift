@@ -173,7 +173,6 @@ struct StripTab<Icon: View, Title: View>: View {
     @ViewBuilder var icon: () -> Icon
     @ViewBuilder var title: () -> Title
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tabMaxWidth) private var maxWidth
     @Environment(AppModel.self) private var model
 
@@ -210,9 +209,8 @@ extension StripTab {
                     .opacity(content.close ? 1 : 0).allowsHitTesting(content.close)
                     .help(closeLabel).accessibilityLabel(closeLabel)
                 }
-                Group {
-                    if reduceMotion { TideGlyph.calm(color: Theme.working, grid: .micro) } else { TideGlyph(color: Theme.working, grid: .micro) }
-                }.opacity(content.workingGlyph ? 1 : 0).accessibilityHidden(!content.workingGlyph).allowsHitTesting(false)
+                TideGlyph(color: Theme.working, grid: .micro)
+                .opacity(content.workingGlyph ? 1 : 0).accessibilityHidden(!content.workingGlyph).allowsHitTesting(false)
                 StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 12)
                     .opacity(content.warning ? 1 : 0).accessibilityHidden(!content.warning).allowsHitTesting(false)
             }

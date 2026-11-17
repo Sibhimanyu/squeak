@@ -3,23 +3,26 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// A stream's state as one mark (DESIGN.md §8.1): working is the tide glyph in `working` (still while the Mac is not
-/// answering), needs you an amber dot (never a count), error the circle-x in `negative`, idle a still frame of the glyph in `subtle`. The slot keeps
+/// A stream's state as one mark (DESIGN.md §8.1): working is the moving tide glyph in `working` (nothing while the Mac is
+/// not answering: a stale "working" is no activity), needs you an amber triangle, error the circle-x in `negative`; idle draws nothing. The slot keeps
 /// its size in every state, so a row never moves. The state is the Mac's rollup (`StatusRollup`); this only draws it.
 struct StreamStateMark: View {
     let activity: StatusRollup.Activity
     var slotWidth: CGFloat = 24
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
             switch activity {
             case .working:
-                TideGlyph(color: model.macIsLive ? Theme.working : Theme.subtle,
-                          grid: .fitting(width: slotWidth, rows: 4), still: !model.macIsLive)
+                // `TideGlyph` itself swaps to the Reduce Motion icon; a silent Mac draws none.
+                if StatusRollup(activity: .working).glyph(macIsLive: model.macIsLive, reduceMotion: reduceMotion) != .none {
+                    TideGlyph(color: Theme.working, grid: .fitting(width: slotWidth, rows: 4))
+                }
             case .needsYou: StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
             case .error: StatusMark(kind: .failed, color: Theme.negative, size: 16)
-            case .idle: TideGlyph.calm(color: Theme.subtle, grid: .fitting(width: slotWidth, rows: 4))
+            case .idle: Color.clear
             }
         }
         .frame(width: slotWidth, height: 20)

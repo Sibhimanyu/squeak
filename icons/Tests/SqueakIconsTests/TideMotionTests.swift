@@ -184,24 +184,6 @@ final class TideMotionTests: XCTestCase {
         XCTAssertGreaterThan(med, 0.12); XCTAssertLessThan(med, 0.9)
     }
 
-    /// The calm frame: fixed (no inputs but the grid), sparser than working, soft (never full), with the same radial fade.
-    func testCalmFrameIsFixedSparseAndFaded() {
-        for g in grids {
-            var lit = 0, n = 0
-            for r in 0..<g.1 { for c in 0..<g.0 {
-                let a = TideMotion.calmAlpha(col: c, row: r, cols: g.0, rows: g.1)
-                XCTAssertEqual(a, TideMotion.calmAlpha(col: c, row: r, cols: g.0, rows: g.1))
-                XCTAssertLessThanOrEqual(a, 0.6)
-                XCTAssertEqual(TideMotion.calmLevel(col: c, row: r, cols: g.0, rows: g.1) == 0, a == 0)
-                n += 1; if a > 0 { lit += 1 }
-            } }
-            XCTAssertLessThan(Double(lit) / Double(n), 0.7, "\(g) calm is sparse")
-            XCTAssertGreaterThan(lit, 0, "\(g) calm shows something")
-        }
-        // Corners fade: on the stream grid the four corners are off.
-        for (c, r) in [(0, 0), (15, 0), (0, 4), (15, 4)] { XCTAssertEqual(TideMotion.calmAlpha(col: c, row: r, cols: 16, rows: 5), 0) }
-    }
-
     /// The pace wanders: always inside 0.5x...1.3x of the base, and the measured flow speed in two 3 s windows differs by
     /// at least 30% for some seed. The clock never goes backwards or jumps.
     func testPaceWandersAndClockIsContinuous() {
@@ -306,22 +288,20 @@ final class TideRateTests: XCTestCase {
 }
 
 final class TideSheetTests: XCTestCase {
-    /// `TIDE_SHEET=<png path> swift test --filter TideSheetTests`: a contact sheet of every grid at 6 times, plus calm frames. Offscreen.
+    /// `TIDE_SHEET=<png path> swift test --filter TideSheetTests`: a contact sheet of every grid at 6 times. Offscreen.
     @MainActor func testWriteContactSheet() throws {
         guard let out = ProcessInfo.processInfo.environment["TIDE_SHEET"] else { throw XCTSkip("set TIDE_SHEET") }
         let grids: [(String, TideGlyph.Grid)] = [("micro 4x2", .micro), ("mini 6x3", .mini), ("medium 7x3", .medium), ("compact 7x4", .compact), ("mark 10x4", .mark), ("large 14x5", .large), ("stream 16x5", .stream)]
         let times = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0].map { $0 + 5 }
-        let bg = Color(red: 0.10, green: 0.08, blue: 0.08), blue = Color(red: 0.30, green: 0.55, blue: 1), subtle = Color(red: 0.55, green: 0.52, blue: 0.5)
-        func cell(_ g: TideGlyph.Grid, _ t: Double?, _ sd: UInt64, calm: Bool) -> some View {
-            TideFrame(color: calm ? subtle : blue, height: g.size.height, grid: g, time: t, seed: sd, scale: 2, calm: calm).padding(4)
+        let bg = Color(red: 0.10, green: 0.08, blue: 0.08), blue = Color(red: 0.30, green: 0.55, blue: 1)
+        func cell(_ g: TideGlyph.Grid, _ t: Double?, _ sd: UInt64) -> some View {
+            TideFrame(color: blue, height: g.size.height, grid: g, time: t, seed: sd, scale: 2).padding(4)
         }
         let sheet = VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(grids.enumerated()), id: \.offset) { _, item in
                 HStack(spacing: 14) {
                     Text(item.0).font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.6)).frame(width: 90, alignment: .leading)
-                    ForEach(Array(times.enumerated()), id: \.offset) { _, t in cell(item.1, t, 7, calm: false) }
-                    Text("calm").font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.4))
-                    cell(item.1, nil, 0, calm: true)
+                    ForEach(Array(times.enumerated()), id: \.offset) { _, t in cell(item.1, t, 7) }
                 }
             }
         }.padding(16).background(bg)

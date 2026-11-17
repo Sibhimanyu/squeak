@@ -81,10 +81,8 @@ public enum TideMotion {
         return max(0, min(1, 1 - tuning.vignette * x * x * (3 - 2 * x)))
     }
 
-    /// The time a still glyph samples.
+    /// The time a preview-tool still frame samples (the shipped glyph is never drawn still).
     public static let stillTime = 3.7
-    /// The seed of the calm (idle) frame: fixed, so every idle mark is the same still pattern.
-    public static let calmSeed: UInt64 = 0
 
     // MARK: noise
 
@@ -224,19 +222,6 @@ public enum TideMotion {
         level(col: col, row: row, cols: cols, rows: rows, t: stillTime, seed: seed)
     }
 
-    /// The calm (idle) frame's alpha: a fixed, sparse, random-looking pattern (the same field and radial fade, a fixed seed and
-    /// instant, a higher off edge and no full level, so most cells are off), drawn in `subtle`. Pure: no clock, so every idle mark is identical.
-    public static func calmAlpha(col: Int, row: Int, cols: Int, rows: Int) -> Double {
-        guard cols > 0, rows > 0 else { return 0 }
-        var tuning = Tuning()
-        tuning.sparkle = 0
-        let v = value(col: col, row: row, cols: cols, rows: rows, t: stillTime, seed: calmSeed, tuning: tuning)
-        return alpha(quantise(v, [0.2, 0.42, 9]))  // dim and sparse: off, 30% or 60%, never full
-    }
-    public static func calmLevel(col: Int, row: Int, cols: Int, rows: Int) -> Int {
-        let a = calmAlpha(col: col, row: row, cols: cols, rows: rows)
-        return a <= 0 ? 0 : a < 0.45 ? 1 : 2
-    }
 }
 
 // MARK: one frame, everything per-glyph worked out once
