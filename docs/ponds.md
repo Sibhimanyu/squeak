@@ -512,7 +512,8 @@ RoomPost   = { seq, id, author: { kind: "person"|"agent"|"squeak", id?, name }, 
                kind: "working"|"done"|"needs"|"message"|"handoff", level: "room"|"agents",
                text, toSessionId?, at /* ms epoch */ }
 RoomThread = { sessionId, title, agent, state: "working"|"waiting"|"idle"|"error",
-               workingOn?, workingOnAt? }   // non-archived chats active in 24 h, newest first;
+               workingOn?, workingOnAt?,
+               lastState: "finished"|"stopped"|"error"|"idle", lastAt }  // non-archived chats active in 24 h, newest first;
                                             // workingOn = newest `working` post, gone once a later `done` exists
 ```
 
@@ -533,3 +534,15 @@ mirrored as an `agents` message. Squeak itself posts `needs` ("<title> needs you
 turn ends with a `working` line still open, `done`. While a chat works and its room was viewed in the last 10 minutes,
 a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-written `working` line posted for it
 (`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it).
+
+Squeak posts on every native turn, whatever the agent: on `turn.started` a `working` line "Started: <first line of the
+message, at most 120 characters>" and on `turn.ended` a `done` line (Finished / Stopped / Hit an error), the latter
+skipped when the agent posted its own `done` during that turn. The author is `squeak`, named after the chat; ids are
+fixed (`sq:start|end:<chat>:<turn>`) so a replayed event is a no-op, and the start line counts as the chat's `working`
+line for the summariser's quiet timer. A turn the agent starts by itself posts nothing.
+
+**Backfill.** The first read of a room (no `since`/`before`) that was never filled synthesises the same lines from each
+non-archived chat's timeline for the last 24 h with their real times, merges them with the posts already there in time
+order (ids kept, seqs renumbered), and records the pond in `room_backfill` so it never runs twice. The Mac shows the
+threads that are not working as a quiet "Recent" list under "Working now" (title, "finished 14m ago"); the empty
+sentence appears only when the pond has no threads and no posts.

@@ -62,6 +62,27 @@ export class TimelineLog {
     return rows.map((r) => ({ ...(JSON.parse(r.body as string) as TimelineBody), seq: r.seq as number }));
   }
 
+  /** The chat's newest `turn.ended`, if it has one. */
+  lastEnded(sessionId: string): Extract<TimelineEvent, { type: "turn.ended" }> | null {
+    const r = this.db
+      .prepare(
+        "SELECT seq, body FROM timeline_events WHERE session_id=? AND type='turn.ended' ORDER BY seq DESC LIMIT 1",
+      )
+      .get(sessionId) as Row | undefined;
+    return r ? (this.read([r])[0] as Extract<TimelineEvent, { type: "turn.ended" }>) : null;
+  }
+
+  /** The `turn.started` and `turn.ended` events at or after an instant (ISO), oldest first. */
+  turnEdges(sessionId: string, sinceIso: string): TimelineEvent[] {
+    return this.read(
+      this.db
+        .prepare(
+          "SELECT seq, body FROM timeline_events WHERE session_id=? AND type IN ('turn.started','turn.ended') AND at>=? ORDER BY seq LIMIT 2000",
+        )
+        .all(sessionId, sinceIso) as Row[],
+    );
+  }
+
   /** Events after `since`, oldest first. */
   after(sessionId: string, since: number, limit = 1000): TimelineEvent[] {
     return this.read(

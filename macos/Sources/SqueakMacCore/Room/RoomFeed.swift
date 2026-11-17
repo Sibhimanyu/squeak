@@ -225,4 +225,24 @@ public enum RoomPresentation {
     public static func workingNow(_ threads: [RoomThread]) -> [RoomThread] {
         threads.filter { $0.state == .working || $0.state == .waiting }
     }
+
+    /// Threads that are not working or waiting, newest end first: the room's quiet "Recent" list.
+    public static func recent(_ threads: [RoomThread]) -> [RoomThread] {
+        threads.filter { $0.state != .working && $0.state != .waiting }
+            .sorted { ($0.lastAt ?? 0) > ($1.lastAt ?? 0) }
+    }
+
+    /// "finished 14m ago", "stopped 2h ago", "hit an error 3h ago"; "idle" when nothing ended.
+    public static func recentLine(_ t: RoomThread, now: Date) -> String {
+        let verb: String
+        switch t.lastState ?? (t.state == .error ? "error" : "idle") {
+        case "finished": verb = "finished"
+        case "stopped": verb = "stopped"
+        case "error": verb = "hit an error"
+        default: return "idle"
+        }
+        guard let at = t.lastAt else { return verb }
+        let age = relativeTime(at: at, now: now)
+        return age == "now" ? "\(verb) just now" : "\(verb) \(age) ago"
+    }
 }

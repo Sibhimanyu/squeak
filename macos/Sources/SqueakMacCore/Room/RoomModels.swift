@@ -68,14 +68,18 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var state: RoomThreadState
     public var workingOn: String?
     public var workingOnAt: Int64?
+    /// How its last turn ended: finished, stopped, error or idle. Nil from an older host.
+    public var lastState: String?
+    /// Milliseconds since 1970 of that end (else the chat's last activity).
+    public var lastAt: Int64?
     public var id: String { sessionId }
 
-    public init(sessionId: String, title: String, agent: String? = nil, state: RoomThreadState, workingOn: String? = nil, workingOnAt: Int64? = nil) {
+    public init(sessionId: String, title: String, agent: String? = nil, state: RoomThreadState, workingOn: String? = nil, workingOnAt: Int64? = nil, lastState: String? = nil, lastAt: Int64? = nil) {
         self.sessionId = sessionId; self.title = title; self.agent = agent; self.state = state
-        self.workingOn = workingOn; self.workingOnAt = workingOnAt
+        self.workingOn = workingOn; self.workingOnAt = workingOnAt; self.lastState = lastState; self.lastAt = lastAt
     }
 
-    private enum CodingKeys: String, CodingKey { case sessionId, title, agent, state, workingOn, workingOnAt }
+    private enum CodingKeys: String, CodingKey { case sessionId, title, agent, state, workingOn, workingOnAt, lastState, lastAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try c.decode(String.self, forKey: .sessionId)
@@ -84,6 +88,8 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomThreadState.init(rawValue:)) ?? .idle
         workingOn = (try? c.decode(String.self, forKey: .workingOn)).flatMap { $0.isEmpty ? nil : $0 }
         workingOnAt = try? c.decode(Int64.self, forKey: .workingOnAt)
+        lastState = try? c.decode(String.self, forKey: .lastState)
+        lastAt = try? c.decode(Int64.self, forKey: .lastAt)
     }
 }
 

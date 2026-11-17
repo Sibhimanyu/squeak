@@ -1114,6 +1114,29 @@ export class NativeStore {
     return rows.map(roomPostRow);
   }
 
+  roomPostById(id: string): RoomPostRow | null {
+    const r = this.db.prepare("SELECT * FROM room_posts WHERE id=?").get(id) as Row | undefined;
+    return r ? roomPostRow(r) : null;
+  }
+
+  /** True once; the first caller for a pond gets false and the pond is marked. */
+  markRoomBackfilled(projectId: string, at: number): boolean {
+    // Created here, not as a migration: a pond whose room was filled once from its chats' timelines never is again.
+    this.db.exec("CREATE TABLE IF NOT EXISTS room_backfill (project_id TEXT PRIMARY KEY, at INTEGER NOT NULL)");
+    return (
+      this.db.prepare("INSERT OR IGNORE INTO room_backfill (project_id, at) VALUES (?,?)").run(projectId, at)
+        .changes === 0
+    );
+  }
+
+  /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
+  replaceRoomPosts(projectId: string, rows: Array<Omit<RoomPostRow, "seq">>): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM room_posts WHERE project_id=?").run(projectId);
+      for (const r of rows) this.addRoomPost(r);
+    })();
+  }
+
   latestRoomSeq(projectId: string): number {
     const r = this.db.prepare("SELECT MAX(seq) AS m FROM room_posts WHERE project_id=?").get(projectId) as Row;
     return (r.m as number | null) ?? 0;

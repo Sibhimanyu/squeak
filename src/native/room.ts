@@ -6,6 +6,7 @@ import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
 import type { NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
+import { TimelineLog } from "./timeline-log.js";
 import type { SessionRow } from "./types.js";
 
 /**
@@ -42,7 +43,31 @@ export interface RoomThread {
   state: "working" | "waiting" | "idle" | "error";
   workingOn?: string;
   workingOnAt?: number;
+  /** How its last turn ended; "idle" when it has none. Set for every thread, working ones included. */
+  lastState: "finished" | "stopped" | "error" | "idle";
+  /** When that turn ended (ms epoch), else the chat's last activity. */
+  lastAt: number;
 }
+
+/** One line for a Started post: the message's first line, clipped. */
+export function startedText(text: string | undefined): string {
+  const first =
+    (text ?? "")
+      .split(/\r?\n/)
+      .find((l) => l.trim())
+      ?.trim()
+      .replace(/\s+/g, " ") ?? "";
+  if (!first) return "Started";
+  const chars = [...first];
+  return `Started: ${chars.length > 120 ? `${chars.slice(0, 119).join("")}…` : first}`;
+}
+
+export function endedText(outcome: string): string {
+  return outcome === "stopped" ? "Stopped" : outcome === "failed" ? "Hit an error" : "Finished";
+}
+
+export const startPostId = (sessionId: string, turnId: string): string => `sq:start:${sessionId}:${turnId}`;
+export const endPostId = (sessionId: string, turnId: string): string => `sq:end:${sessionId}:${turnId}`;
 
 export function toRoomPost(r: RoomPostRow): RoomPost {
   return {
@@ -76,6 +101,9 @@ export interface NewRoomPost {
   level?: RoomLevel;
   text: string;
   toSessionId?: string;
+  /** Squeak's own start/end lines: a fixed id makes a replayed event a no-op. */
+  id?: string;
+  at?: number;
 }
 
 export interface RoomOptions {
@@ -92,12 +120,14 @@ export class Room extends EventEmitter {
   private readonly viewed = new Map<string, number>();
   private readonly streams = new Map<string, number>();
   private readonly sent = new Map<string, number[]>();
+  private readonly log: TimelineLog;
 
   constructor(private readonly options: RoomOptions) {
     super();
     this.setMaxListeners(0);
     this.store = options.store;
     this.now = options.now ?? Date.now;
+    this.log = new TimelineLog(options.store.db);
   }
 
   ownerName(): string {
@@ -120,8 +150,13 @@ export class Room extends EventEmitter {
     const level = input.level ?? "room";
     if (!ROOM_LEVELS.includes(level)) throw new RoomError("level must be room or agents.");
     if (!this.store.getProject(input.projectId)) throw new RoomError("No such pond.");
+    if (input.id) {
+      const existing = this.store.roomPostById(input.id);
+      if (existing) return existing;
+    }
     const name = input.author.name.replace(/[\r\n]+/g, " ").trim() || "Someone";
     const row = this.store.addRoomPost({
+      ...(input.id ? { id: input.id } : {}),
       projectId: input.projectId,
       authorKind: input.author.kind,
       authorId: input.author.id ?? null,
@@ -131,7 +166,7 @@ export class Room extends EventEmitter {
       level,
       text: Room.cleanText(input.text, input.kind),
       toSessionId: input.toSessionId ?? null,
-      at: this.now(),
+      at: input.at ?? this.now(),
     });
     this.emit("post", row);
     return row;
@@ -178,6 +213,13 @@ export class Room extends EventEmitter {
     opts: { since?: number; before?: number; limit?: number },
   ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[] } {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
+    if (opts.since === undefined && opts.before === undefined) {
+      try {
+        this.backfill(projectId);
+      } catch (error) {
+        logger.warn("room backfill failed", { error: String(error) });
+      }
+    }
     const rows = this.store.roomPosts(projectId, {
       ...(opts.since !== undefined ? { since: opts.since } : {}),
       ...(opts.before !== undefined ? { before: opts.before } : {}),
@@ -190,21 +232,74 @@ export class Room extends EventEmitter {
     };
   }
 
-  /** The pond's non-archived chats active in the last 24 h, newest activity first, with what each is working on. */
-  threads(projectId: string): RoomThread[] {
+  /**
+   * Once per pond: Started/Finished lines for the last 24 h of its chats' turns, from their timelines with the real
+   * times, merged with what the room already holds in time order (ids kept, seqs renumbered). Never duplicates a post.
+   */
+  backfill(projectId: string): void {
+    if (!this.store.getProject(projectId)) return;
+    if (this.store.markRoomBackfilled(projectId, this.now())) return;
+    const cutoff = this.now() - ROOM_THREAD_WINDOW_MS;
+    const made: Array<Omit<RoomPostRow, "seq">> = [];
+    for (const s of this.sessionsOf(projectId)) {
+      const name = agentName(s);
+      for (const e of this.log.turnEdges(s.id, new Date(cutoff).toISOString())) {
+        if (e.type !== "turn.started" && e.type !== "turn.ended") continue;
+        if (e.type === "turn.started" && e.auto) continue;
+        const at = Date.parse(e.at);
+        if (!Number.isFinite(at) || at < cutoff) continue;
+        const start = e.type === "turn.started";
+        const id = start ? startPostId(s.id, e.turnId) : endPostId(s.id, e.turnId);
+        if (this.store.roomPostById(id)) continue;
+        made.push({
+          id,
+          projectId,
+          authorKind: "squeak",
+          authorId: null,
+          authorName: name.slice(0, 80),
+          sessionId: s.id,
+          kind: start ? "working" : "done",
+          level: "room",
+          text: start ? startedText(e.text) : endedText(e.outcome),
+          toSessionId: null,
+          at,
+        });
+      }
+    }
+    if (made.length === 0) return;
+    const existing = this.store.roomPosts(projectId, { limit: 100_000 });
+    const merged = [...existing.map((r, i) => ({ r, i })), ...made.map((r, i) => ({ r, i: existing.length + i }))]
+      .sort((a, b) => a.r.at - b.r.at || a.i - b.i)
+      .map(({ r }) => {
+        const rest: Partial<RoomPostRow> = { ...r };
+        delete rest.seq;
+        return rest as Omit<RoomPostRow, "seq">;
+      });
+    this.store.replaceRoomPosts(projectId, merged);
+  }
+
+  private sessionsOf(projectId: string): SessionRow[] {
     const project = this.store.getProject(projectId);
     if (!project) return [];
     const streams = new Set(this.store.listWorkspaces(projectId).map((w) => w.id));
-    const cutoff = this.now() - ROOM_THREAD_WINDOW_MS;
-    const marks = this.store.latestRoomMarks(projectId);
     return this.store
       .listSessions()
-      .filter((s) => !s.archivedAt && (s.workspaceId ? streams.has(s.workspaceId) : s.cwd === project.rootPath))
+      .filter((s) => !s.archivedAt && (s.workspaceId ? streams.has(s.workspaceId) : s.cwd === project.rootPath));
+  }
+
+  /** The pond's non-archived chats active in the last 24 h, newest activity first, with what each is working on. */
+  threads(projectId: string): RoomThread[] {
+    if (!this.store.getProject(projectId)) return [];
+    const cutoff = this.now() - ROOM_THREAD_WINDOW_MS;
+    const marks = this.store.latestRoomMarks(projectId);
+    return this.sessionsOf(projectId)
       .map((s) => ({ s, at: Date.parse(s.updatedAt) }))
       .filter((x) => Number.isFinite(x.at) && x.at >= cutoff)
       .sort((a, b) => b.at - a.at || a.s.id.localeCompare(b.s.id))
       .map(({ s }): RoomThread => {
         const m = marks.get(s.id);
+        const ended = this.log.lastEnded(s.id);
+        const endedAt = ended ? Date.parse(ended.at) : NaN;
         const on = m?.working && !(m.done && m.done.seq > m.working.seq) ? m.working : undefined;
         return {
           sessionId: s.id,
@@ -212,6 +307,14 @@ export class Room extends EventEmitter {
           agent: s.agent,
           state: threadState(s.status, s.lastTurnEndedAt),
           ...(on ? { workingOn: on.text, workingOnAt: on.at } : {}),
+          lastState: !ended
+            ? "idle"
+            : ended.outcome === "done"
+              ? "finished"
+              : ended.outcome === "stopped"
+                ? "stopped"
+                : "error",
+          lastAt: Number.isFinite(endedAt) ? endedAt : Date.parse(s.updatedAt),
         };
       });
   }
@@ -275,16 +378,30 @@ export interface HostEvents {
 }
 
 /**
- * Squeak's own posts: "<title> needs you" once per waiting episode, and "<title> finished" when a turn ends normally
- * while the chat's last `working` line has no `done` after it. Never throws, never waits on anything.
+ * Squeak's own posts: "<title> needs you" once per waiting episode; for every turn, whatever the agent, one
+ * `working` line "Started: <message>" and one `done` line (Finished / Stopped / Hit an error), the latter skipped when
+ * the agent posted its own `done` during the turn. Fixed ids make a replayed event a no-op. Never throws.
  */
 export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Room): () => void {
   const waiting = new Set<string>();
-  const post = (s: SessionRow, kind: "needs" | "done", text: string): void => {
+  const agentDone = new Set<string>();
+  const post = (
+    s: SessionRow,
+    kind: "needs" | "working" | "done",
+    text: string,
+    extra: { id?: string; name?: string } = {},
+  ): void => {
     try {
       const pond = projectOfSession(store, s);
       if (!pond) return;
-      room.post({ projectId: pond.id, author: { kind: "squeak", name: "Squeak" }, sessionId: s.id, kind, text });
+      room.post({
+        projectId: pond.id,
+        author: { kind: "squeak", name: extra.name ?? "Squeak" },
+        sessionId: s.id,
+        kind,
+        text,
+        ...(extra.id ? { id: extra.id } : {}),
+      });
     } catch (error) {
       logger.warn("room post failed", { error: String(error) });
     }
@@ -295,23 +412,35 @@ export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Ro
     const s = store.getSession(sessionId);
     if (s) post(s, "needs", `${agentName(s)} needs you`);
   };
+  const onPost = (p: RoomPostRow): void => {
+    if (p.kind === "done" && p.authorKind === "agent" && p.sessionId) agentDone.add(p.sessionId);
+  };
+  room.on("post", onPost);
   const onEvent = (e: HostEvent): void => {
     try {
       if (e.type === "request") needs(e.sessionId);
       else if (e.type === "status") {
         if (WAITING.has(e.status)) needs(e.sessionId);
         else waiting.delete(e.sessionId);
-      } else if (e.type === "timeline" && e.event.type === "turn.ended" && e.event.outcome === "done") {
+      } else if (e.type === "timeline" && e.event.type === "turn.started" && !e.event.auto) {
+        agentDone.delete(e.sessionId);
         const s = store.getSession(e.sessionId);
-        const pond = s ? projectOfSession(store, s) : null;
-        if (!s || !pond) return;
-        const m = store.latestRoomMarks(pond.id).get(s.id);
-        if (m?.working && !(m.done && m.done.seq > m.working.seq)) post(s, "done", `${agentName(s)} finished`);
+        if (s)
+          post(s, "working", startedText(e.event.text), { id: startPostId(s.id, e.event.turnId), name: agentName(s) });
+      } else if (e.type === "timeline" && e.event.type === "turn.ended") {
+        const s = store.getSession(e.sessionId);
+        if (!s) return;
+        const own = agentDone.delete(e.sessionId);
+        if (!own)
+          post(s, "done", endedText(e.event.outcome), { id: endPostId(s.id, e.event.turnId), name: agentName(s) });
       }
     } catch (error) {
       logger.warn("room watcher failed", { error: String(error) });
     }
   };
   host.on("event", onEvent);
-  return () => host.off("event", onEvent);
+  return () => {
+    host.off("event", onEvent);
+    room.off("post", onPost);
+  };
 }
