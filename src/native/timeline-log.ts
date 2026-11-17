@@ -43,6 +43,12 @@ export class TimelineLog {
     return n;
   }
 
+  /** The newest seq as the database holds it now (another writer included), unlike the memoised `lastSeq`. */
+  peekSeq(sessionId: string): number {
+    const r = this.db.prepare("SELECT MAX(seq) AS m FROM timeline_events WHERE session_id=?").get(sessionId) as Row;
+    return (r.m as number | null) ?? 0;
+  }
+
   hasAny(sessionId: string): boolean {
     return this.lastSeq(sessionId) > 0;
   }
@@ -81,6 +87,37 @@ export class TimelineLog {
         )
         .all(sessionId, sinceIso) as Row[],
     );
+  }
+
+  /**
+   * Turn edges and final replies (`turn.started`, `turn.ended`, `reply.done`) after a seq, or, with no seq, at or after
+   * an instant (ISO): what the room derives its turns from. Oldest first.
+   */
+  roomEvents(sessionId: string, from: { afterSeq: number } | { sinceIso: string }): TimelineEvent[] {
+    const types = "type IN ('turn.started','turn.ended','reply.done')";
+    return this.read(
+      "afterSeq" in from
+        ? (this.db
+            .prepare(`SELECT seq, body FROM timeline_events WHERE session_id=? AND seq>? AND ${types} ORDER BY seq`)
+            .all(sessionId, from.afterSeq) as Row[])
+        : (this.db
+            .prepare(`SELECT seq, body FROM timeline_events WHERE session_id=? AND at>=? AND ${types} ORDER BY seq`)
+            .all(sessionId, from.sinceIso) as Row[]),
+    );
+  }
+
+  /** The newest progress-strip update after a seq (the strip is one step, id `progress`), if any. */
+  latestProgress(
+    sessionId: string,
+    afterSeq: number,
+  ): Extract<TimelineEvent, { type: "step.added" | "step.updated" }> | null {
+    const r = this.db
+      .prepare(
+        `SELECT seq, body FROM timeline_events WHERE session_id=? AND seq>? AND type='step.updated'
+           AND body LIKE '%"stepId":"progress"%' ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(sessionId, afterSeq) as Row | undefined;
+    return r ? (this.read([r])[0] as Extract<TimelineEvent, { type: "step.added" | "step.updated" }>) : null;
   }
 
   /** Events after `since`, oldest first. */

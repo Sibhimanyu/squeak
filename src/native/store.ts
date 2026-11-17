@@ -1130,6 +1130,31 @@ export class NativeStore {
       .run().changes;
   }
 
+  /** Squeak's own per-turn lines and `needs` posts: the room derives turns from timelines now; removed at start. */
+  dropSqueakTurnPosts(): number {
+    return this.db
+      .prepare("DELETE FROM room_posts WHERE author_kind='squeak' AND (id LIKE 'sq:%' OR kind='needs')")
+      .run().changes;
+  }
+
+  /** A chat's newest `working` post at or between two instants (ms): the turn's intent. */
+  latestWorkingPost(sessionId: string, from: number, to: number): RoomPostRow | null {
+    const r = this.db
+      .prepare(
+        "SELECT * FROM room_posts WHERE session_id=? AND kind='working' AND at>=? AND at<=? ORDER BY at DESC, seq DESC LIMIT 1",
+      )
+      .get(sessionId, from, to) as Row | undefined;
+    return r ? roomPostRow(r) : null;
+  }
+
+  /** The time of a pond's post with this seq. */
+  roomPostAtSeq(projectId: string, seq: number): number | null {
+    const r = this.db.prepare("SELECT at FROM room_posts WHERE project_id=? AND seq=?").get(projectId, seq) as
+      | Row
+      | undefined;
+    return r ? (r.at as number) : null;
+  }
+
   markRoomBackfilled(projectId: string, at: number): boolean {
     // Created here, not as a migration: a pond whose room was filled once from its chats' timelines never is again.
     this.db.exec("CREATE TABLE IF NOT EXISTS room_backfill (project_id TEXT PRIMARY KEY, at INTEGER NOT NULL)");

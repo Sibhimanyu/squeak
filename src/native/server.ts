@@ -1155,7 +1155,7 @@ export class NativeServer {
     });
   }
 
-  /** `event: hello` with the newest seq, then `event: post` for each new post; a comment heartbeat every 25 s. */
+  /** `event: hello` with the newest seq, then `event: post` for each new post and `event: turn` for a turn's upsert; a comment heartbeat every 25 s. */
   private roomStream(req: http.IncomingMessage, res: http.ServerResponse, projectId: string): void {
     const { room } = this;
     res.writeHead(200, {
@@ -1167,8 +1167,13 @@ export class NativeServer {
       if (row.projectId !== projectId) return;
       res.write(`id: ${row.seq}\nevent: post\ndata: ${JSON.stringify(toRoomPost(row))}\n\n`);
     };
+    const onTurn = (f: { projectId: string; turn: unknown }): void => {
+      if (f.projectId !== projectId) return;
+      res.write(`event: turn\ndata: ${JSON.stringify(f.turn)}\n\n`);
+    };
     // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
     room.on("post", onPost);
+    room.on("turn", onTurn);
     room.streamOpened(projectId);
     res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: this.options.store.latestRoomSeq(projectId) })}\n\n`);
     const beat = setInterval(() => {
@@ -1179,6 +1184,7 @@ export class NativeServer {
     req.on("close", () => {
       clearInterval(beat);
       room.off("post", onPost);
+      room.off("turn", onTurn);
       room.streamClosed(projectId);
     });
   }

@@ -6,7 +6,17 @@ import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
 import type { NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
+import {
+  askOf,
+  firstSentence,
+  type RoomAsk,
+  type RoomProgress,
+  type RoomTurn,
+  type TurnBase,
+  TurnReader,
+} from "./room-turns.js";
 import { TimelineLog } from "./timeline-log.js";
+import type { TimelineEvent } from "./timeline.js";
 import type { SessionRow } from "./types.js";
 
 /**
@@ -47,27 +57,20 @@ export interface RoomThread {
   lastState: "finished" | "stopped" | "error" | "idle";
   /** When that turn ended (ms epoch), else the chat's last activity. */
   lastAt: number;
+  /** The progress strip the agent set (`set_progress`), while it works. */
+  progress?: RoomProgress;
+  /** What a waiting chat asks: the question and its lettered options, from its last message. */
+  ask?: RoomAsk;
+  /** When the current turn started (ms epoch), while one runs. */
+  turnStartedAt?: number;
+  /** Files changed in the stream: not carried by the host yet (it costs a git run per chat). */
+  filesChanged?: number;
 }
 
-/** One line for a Started post: the message's first line, clipped. */
-export function startedText(text: string | undefined): string {
-  const first =
-    (text ?? "")
-      .split(/\r?\n/)
-      .find((l) => l.trim())
-      ?.trim()
-      .replace(/\s+/g, " ") ?? "";
-  if (!first) return "Started";
-  const chars = [...first];
-  return `Started: ${chars.length > 120 ? `${chars.slice(0, 119).join("")}…` : first}`;
-}
+export type { RoomAsk, RoomProgress, RoomTurn } from "./room-turns.js";
 
-export function endedText(outcome: string): string {
-  return outcome === "stopped" ? "Stopped" : outcome === "failed" ? "Hit an error" : "Finished";
-}
-
-export const startPostId = (sessionId: string, turnId: string): string => `sq:start:${sessionId}:${turnId}`;
-export const endPostId = (sessionId: string, turnId: string): string => `sq:end:${sessionId}:${turnId}`;
+export const ROOM_TURNS_MAX = 100;
+export const ROOM_TURN_FRAME_MS = 500;
 
 export function toRoomPost(r: RoomPostRow): RoomPost {
   return {
@@ -121,6 +124,8 @@ export class Room extends EventEmitter {
   private readonly streams = new Map<string, number>();
   private readonly sent = new Map<string, number[]>();
   private readonly log: TimelineLog;
+  private readonly reader: TurnReader;
+  private readonly frames = new Map<string, { last: number; timer: NodeJS.Timeout | null }>();
 
   constructor(private readonly options: RoomOptions) {
     super();
@@ -128,6 +133,7 @@ export class Room extends EventEmitter {
     this.store = options.store;
     this.now = options.now ?? Date.now;
     this.log = new TimelineLog(options.store.db);
+    this.reader = new TurnReader(this.log, this.now);
   }
 
   ownerName(): string {
@@ -211,75 +217,136 @@ export class Room extends EventEmitter {
   page(
     projectId: string,
     opts: { since?: number; before?: number; limit?: number },
-  ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[] } {
+  ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[]; turns: RoomTurn[] } {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
-    if (opts.since === undefined && opts.before === undefined) {
-      try {
-        this.backfill(projectId);
-      } catch (error) {
-        logger.warn("room backfill failed", { error: String(error) });
-      }
+    const rows = this.store
+      .roomPosts(projectId, {
+        ...(opts.since !== undefined ? { since: opts.since } : {}),
+        ...(opts.before !== undefined ? { before: opts.before } : {}),
+        limit,
+      })
+      .filter((r) => !isSqueakLine(r));
+    const posts = rows.map(toRoomPost);
+    // The turns that started inside the posts' time window: the newest page covers the last 24 h.
+    let from = this.now() - ROOM_THREAD_WINDOW_MS;
+    let to = Infinity;
+    if (opts.since !== undefined) {
+      from = this.store.roomPostAtSeq(projectId, opts.since) ?? posts[0]?.at ?? from;
+    } else if (opts.before !== undefined) {
+      if (posts.length === 0)
+        return { posts, latestSeq: this.store.latestRoomSeq(projectId), threads: this.threads(projectId), turns: [] };
+      from = posts[0]!.at;
+      to = posts[posts.length - 1]!.at;
     }
-    const rows = this.store.roomPosts(projectId, {
-      ...(opts.since !== undefined ? { since: opts.since } : {}),
-      ...(opts.before !== undefined ? { before: opts.before } : {}),
-      limit,
-    });
     return {
-      posts: rows.map(toRoomPost),
+      posts,
       latestSeq: this.store.latestRoomSeq(projectId),
       threads: this.threads(projectId),
+      turns: this.turns(projectId, from, to),
     };
   }
 
-  /**
-   * Once per pond: Started/Finished lines for the last 24 h of its chats' turns, from their timelines with the real
-   * times, merged with what the room already holds in time order (ids kept, seqs renumbered). Never duplicates a post.
-   */
-  backfill(projectId: string): void {
-    if (!this.store.getProject(projectId)) return;
-    if (this.store.markRoomBackfilled(projectId, this.now())) return;
-    const cutoff = this.now() - ROOM_THREAD_WINDOW_MS;
-    const made: Array<Omit<RoomPostRow, "seq">> = [];
+  /** Turns that started in `[from, to]`, oldest to newest, at most the newest 100. */
+  turns(projectId: string, from: number, to = Infinity): RoomTurn[] {
+    const out: RoomTurn[] = [];
     for (const s of this.sessionsOf(projectId)) {
-      const name = agentName(s);
-      const started = new Set<string>();
-      for (const e of this.log.turnEdges(s.id, new Date(cutoff).toISOString())) {
-        if (e.type !== "turn.started" && e.type !== "turn.ended") continue;
-        if (e.type === "turn.started" && e.auto) continue;
-        // A turn the agent ran by itself (a worker reporting in) has no Started line, so it gets no Finished line either.
-        if (e.type === "turn.ended" && !started.has(e.turnId)) continue;
-        if (e.type === "turn.started") started.add(e.turnId);
-        const at = Date.parse(e.at);
-        if (!Number.isFinite(at) || at < cutoff) continue;
-        const start = e.type === "turn.started";
-        const id = start ? startPostId(s.id, e.turnId) : endPostId(s.id, e.turnId);
-        if (this.store.roomPostById(id)) continue;
-        made.push({
-          id,
-          projectId,
-          authorKind: "squeak",
-          authorId: null,
-          authorName: name.slice(0, 80),
-          sessionId: s.id,
-          kind: start ? "working" : "done",
-          level: "room",
-          text: start ? startedText(e.text) : endedText(e.outcome),
-          toSessionId: null,
-          at,
-        });
+      for (const t of this.reader.turns(s.id)) {
+        if (t.startedAt >= from && t.startedAt <= to) out.push(this.toTurn(s, t));
       }
     }
-    if (made.length === 0) return;
-    const existing = this.store.roomPosts(projectId, { limit: 100_000 });
-    const merged = [...existing.map((r, i) => ({ r, i })), ...made.map((r, i) => ({ r, i: existing.length + i }))]
-      .sort((a, b) => a.r.at - b.r.at || a.i - b.i)
-      .map(({ r }) => {
-        const rest: Partial<RoomPostRow> = { ...r };
-        delete rest.seq;
-        return rest as Omit<RoomPostRow, "seq">;
-      });
-    this.store.replaceRoomPosts(projectId, merged);
+    out.sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
+    return out.slice(-ROOM_TURNS_MAX);
+  }
+
+  private toTurn(s: SessionRow, t: TurnBase): RoomTurn {
+    const running = t.endedAt === undefined;
+    const intent = running ? this.store.latestWorkingPost(s.id, t.startedAt, Infinity)?.text : undefined;
+    const progress = running ? this.progressOf(s.id, t.startSeq) : undefined;
+    const outcomeText = !running && t.reply ? firstSentence(t.reply) : "";
+    const owner = t.authorName === undefined;
+    return {
+      id: `${s.id}:${t.turnId}`,
+      sessionId: s.id,
+      threadTitle: s.title ?? "Untitled",
+      agent: s.agent,
+      startedAt: t.startedAt,
+      ...(t.endedAt !== undefined ? { endedAt: t.endedAt, durationMs: Math.max(0, t.endedAt - t.startedAt) } : {}),
+      ...(t.outcome ? { outcome: t.outcome } : {}),
+      prompt: t.prompt,
+      author: { kind: "person", name: owner ? this.ownerName() : t.authorName!, me: owner },
+      ...(t.answer ? { answer: t.answer } : {}),
+      ...(outcomeText ? { outcomeText } : {}),
+      ...(intent ? { intent } : {}),
+      ...(progress ? { progress: { current: progress.current, total: progress.total } } : {}),
+    };
+  }
+
+  /** The progress strip as it stands in the turn that began at `startSeq`: step `current` of `total`. */
+  private progressOf(sessionId: string, startSeq: number): RoomProgress | undefined {
+    const detail = this.log.latestProgress(sessionId, startSeq)?.detail;
+    const steps = Array.isArray(detail?.steps) ? (detail.steps as unknown[]).map(String) : [];
+    if (steps.length === 0) return undefined;
+    const at = typeof detail?.current === "number" ? detail.current : 0;
+    const index = Math.min(steps.length - 1, Math.max(0, at));
+    const label = steps[index] || (typeof detail?.status === "string" ? detail.status : "");
+    return { current: index + 1, total: steps.length, ...(label ? { label } : {}) };
+  }
+
+  /**
+   * A timeline event (or a new `working` post) may change a turn the Mac shows: tell `turn` listeners, at most one
+   * frame per turn per 500 ms (a burst sends its newest state once, after the window).
+   */
+  noteTimeline(sessionId: string, event: TimelineEvent | { type: string }): void {
+    const t = event.type;
+    const turnId = (event as { turnId?: string }).turnId;
+    const relevant =
+      t === "turn.started" ||
+      t === "turn.ended" ||
+      t === "reply.done" ||
+      (t === "step.updated" && (event as { stepId?: string }).stepId === "progress");
+    if (!relevant || !turnId) return;
+    this.scheduleTurn(sessionId, turnId);
+  }
+
+  /** A `working` post names what the chat's running turn is doing. */
+  noteWorking(sessionId: string): void {
+    const open = this.reader
+      .turns(sessionId)
+      .filter((t) => t.endedAt === undefined)
+      .pop();
+    if (open) this.scheduleTurn(sessionId, open.turnId);
+  }
+
+  private scheduleTurn(sessionId: string, turnId: string): void {
+    const key = `${sessionId}:${turnId}`;
+    const f = this.frames.get(key) ?? { last: -Infinity, timer: null };
+    this.frames.set(key, f);
+    if (f.timer) return;
+    const wait = f.last + ROOM_TURN_FRAME_MS - this.now();
+    if (wait <= 0) return this.emitTurn(key, sessionId, turnId);
+    f.timer = setTimeout(() => {
+      f.timer = null;
+      this.emitTurn(key, sessionId, turnId);
+    }, wait);
+    f.timer.unref();
+  }
+
+  private emitTurn(key: string, sessionId: string, turnId: string): void {
+    const f = this.frames.get(key);
+    if (f) f.last = this.now();
+    try {
+      const s = this.store.getSession(sessionId);
+      const pond = s ? projectOfSession(this.store, s) : null;
+      const base = s ? this.reader.turns(sessionId).find((x) => x.turnId === turnId) : undefined;
+      if (!s || !pond || !base) return;
+      this.emit("turn", { projectId: pond.id, turn: this.toTurn(s, base) });
+      if (base.endedAt !== undefined) {
+        // An ended turn changes no more (but a late reply may still land): forget its window soon.
+        setTimeout(() => this.frames.delete(key), 2 * ROOM_TURN_FRAME_MS).unref();
+      }
+    } catch (error) {
+      logger.warn("room turn frame failed", { error: String(error) });
+    }
   }
 
   private sessionsOf(projectId: string): SessionRow[] {
@@ -305,11 +372,17 @@ export class Room extends EventEmitter {
         const ended = this.log.lastEnded(s.id);
         const endedAt = ended ? Date.parse(ended.at) : NaN;
         const on = m?.working && !(m.done && m.done.seq > m.working.seq) ? m.working : undefined;
+        const state = threadState(s.status, s.lastTurnEndedAt);
+        const turns = this.reader.turns(s.id);
+        const last = turns[turns.length - 1];
+        const open = last && last.endedAt === undefined ? last : undefined;
+        const progress = state === "working" && open ? this.progressOf(s.id, open.startSeq) : undefined;
+        const ask = state === "waiting" ? askOf(last?.reply) : null;
         return {
           sessionId: s.id,
           title: s.title ?? "Untitled",
           agent: s.agent,
-          state: threadState(s.status, s.lastTurnEndedAt),
+          state,
           ...(on ? { workingOn: on.text, workingOnAt: on.at } : {}),
           lastState: !ended
             ? "idle"
@@ -319,6 +392,9 @@ export class Room extends EventEmitter {
                 ? "stopped"
                 : "error",
           lastAt: Number.isFinite(endedAt) ? endedAt : Date.parse(s.updatedAt),
+          ...(progress ? { progress } : {}),
+          ...(ask ? { ask } : {}),
+          ...(open ? { turnStartedAt: open.startedAt } : {}),
         };
       });
   }
@@ -366,84 +442,34 @@ function threadState(status: string, lastTurnEndedAt: string | null): RoomThread
   }
 }
 
-const WAITING = new Set([
-  "awaiting_approval",
-  "awaiting_plan",
-  "awaiting_answer",
-  "needs_user_permission",
-  "needs_plan_response",
-  "needs_user_input",
-]);
-
 /** The slice of the host Squeak's own posts listen to. */
 export interface HostEvents {
   on(event: "event", listener: (e: HostEvent) => void): unknown;
   off(event: "event", listener: (e: HostEvent) => void): unknown;
 }
 
+/** The per-turn lines and `needs` posts Squeak used to make (the room derives turns from timelines now). */
+export function isSqueakLine(r: RoomPostRow): boolean {
+  return r.authorKind === "squeak" && (r.id.startsWith("sq:") || r.kind === "needs");
+}
+
 /**
- * Squeak's own posts: "<title> needs you" once per waiting episode; for every turn, whatever the agent, one
- * `working` line "Started: <message>" and one `done` line (Finished / Stopped / Hit an error), the latter skipped when
- * the agent posted its own `done` during the turn. Fixed ids make a replayed event a no-op. Never throws.
+ * Feeds the room's `turn` frames from the host: a turn starting, ending, closing with a reply or moving its progress
+ * strip, and a new `working` line (intent). Squeak no longer posts a line per turn. Never throws.
  */
-export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Room): () => void {
-  const waiting = new Set<string>();
-  const agentDone = new Set<string>();
-  const post = (
-    s: SessionRow,
-    kind: "needs" | "working" | "done",
-    text: string,
-    extra: { id?: string; name?: string } = {},
-  ): void => {
-    try {
-      const pond = projectOfSession(store, s);
-      if (!pond) return;
-      room.post({
-        projectId: pond.id,
-        author: { kind: "squeak", name: extra.name ?? "Squeak" },
-        sessionId: s.id,
-        kind,
-        text,
-        ...(extra.id ? { id: extra.id } : {}),
-      });
-    } catch (error) {
-      logger.warn("room post failed", { error: String(error) });
-    }
-  };
-  const needs = (sessionId: string): void => {
-    if (waiting.has(sessionId)) return;
-    waiting.add(sessionId);
-    const s = store.getSession(sessionId);
-    if (s) post(s, "needs", `${agentName(s)} needs you`);
-  };
-  const onPost = (p: RoomPostRow): void => {
-    if (p.kind === "done" && p.authorKind === "agent" && p.sessionId) agentDone.add(p.sessionId);
-  };
-  room.on("post", onPost);
+export function attachSqueakPosts(host: HostEvents, _store: NativeStore, room: Room): () => void {
   const onEvent = (e: HostEvent): void => {
     try {
-      if (e.type === "request") needs(e.sessionId);
-      else if (e.type === "status") {
-        if (WAITING.has(e.status)) needs(e.sessionId);
-        else waiting.delete(e.sessionId);
-      } else if (e.type === "timeline" && e.event.type === "turn.started" && !e.event.auto) {
-        agentDone.delete(e.sessionId);
-        const s = store.getSession(e.sessionId);
-        if (s)
-          post(s, "working", startedText(e.event.text), { id: startPostId(s.id, e.event.turnId), name: agentName(s) });
-      } else if (e.type === "timeline" && e.event.type === "turn.ended") {
-        const s = store.getSession(e.sessionId);
-        if (!s) return;
-        const own = agentDone.delete(e.sessionId);
-        // Only a turn that got a Started line gets an end line: the agent's own turns (workers reporting in) post nothing.
-        if (!own && store.roomPostById(startPostId(s.id, e.event.turnId)))
-          post(s, "done", endedText(e.event.outcome), { id: endPostId(s.id, e.event.turnId), name: agentName(s) });
-      }
+      if (e.type === "timeline") room.noteTimeline(e.sessionId, e.event);
     } catch (error) {
       logger.warn("room watcher failed", { error: String(error) });
     }
   };
+  const onPost = (p: RoomPostRow): void => {
+    if (p.kind === "working" && p.sessionId) room.noteWorking(p.sessionId);
+  };
   host.on("event", onEvent);
+  room.on("post", onPost);
   return () => {
     host.off("event", onEvent);
     room.off("post", onPost);

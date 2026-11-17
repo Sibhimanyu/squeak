@@ -4,11 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleMcpMessage } from "./agent-tools.js";
 import { SessionHost } from "./host.js";
-import { attachSqueakPosts, endPostId, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
+import { attachSqueakPosts, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
 import { RoomSummariser, SUMMARY_QUIET_MS } from "./room-summary.js";
 import { NativeServer } from "./server.js";
 import { TimelineLog } from "./timeline-log.js";
@@ -138,156 +138,333 @@ describe("Room", () => {
   });
 });
 
-describe("Squeak's own posts", () => {
+describe("room turns", () => {
+  const NOW = Date.parse("2026-11-17T12:00:00Z");
+  const iso = (minAgo: number) => new Date(NOW - minAgo * 60_000).toISOString();
   function rig() {
+    const store = new NativeStore(":memory:");
+    const p = pond(store);
+    const room = new Room({ store, ownerName: () => "Sam", now: () => NOW });
+    const s = p.chat("Wire retry");
+    const log = new TimelineLog(store.db);
+    const start = (turnId: string, text: string, minAgo: number, extra: Record<string, unknown> = {}) =>
+      log.append(s.id, { type: "turn.started", turnId, promptMessageId: "m", text, at: iso(minAgo), ...extra } as any);
+    const reply = (turnId: string, text: string, minAgo: number, id = `r-${turnId}`) =>
+      log.append(s.id, { type: "reply.done", turnId, messageId: id, text, at: iso(minAgo) });
+    const end = (turnId: string, minAgo: number, outcome: "done" | "stopped" | "failed" = "done", extra = {}) =>
+      log.append(s.id, { type: "turn.ended", turnId, outcome, at: iso(minAgo), ...extra });
+    return { store, p, room, s, log, start, reply, end };
+  }
+
+  it("derives a finished turn: prompt, owner author, outcome text, duration", () => {
+    const r = rig();
+    r.start("t1", "add retry\nto the uploader", 30);
+    r.reply("t1", "Working on it.", 29, "early");
+    r.reply(
+      "t1",
+      "## Done\n\nI added **retry** with backoff to `upload()`. It retries 3 times.\n\n- more",
+      20,
+      "final",
+    );
+    r.end("t1", 20, "done", { replyMessageId: "final" });
+    const turns = r.room.page(r.p.project.id, {}).turns;
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toEqual({
+      id: `${r.s.id}:t1`,
+      sessionId: r.s.id,
+      threadTitle: "Wire retry",
+      agent: "claude",
+      startedAt: NOW - 30 * 60_000,
+      endedAt: NOW - 20 * 60_000,
+      durationMs: 10 * 60_000,
+      outcome: "finished",
+      prompt: "add retry",
+      author: { kind: "person", name: "Sam", me: true },
+      outcomeText: "Done",
+    });
+  });
+
+  it("outcomeText is the first sentence of the final reply, markdown stripped, 200 chars at most", () => {
+    const r = rig();
+    r.start("t1", "go", 10);
+    r.reply("t1", "I added **retry** with backoff to `upload()`. It retries 3 times.", 9);
+    r.end("t1", 9);
+    r.start("t2", "again", 8);
+    r.reply("t2", "x".repeat(400), 7);
+    r.end("t2", 7, "failed");
+    const [a, b] = r.room.turns(r.p.project.id, 0);
+    expect(a!.outcomeText).toBe("I added retry with backoff to upload().");
+    expect(b!.outcome).toBe("error");
+    expect([...b!.outcomeText!].length).toBe(200);
+  });
+
+  it("a member's message names them (me false); long prompts are one line of at most 200", () => {
+    const r = rig();
+    r.start("t1", `${"y".repeat(300)}\nsecond`, 5, { author: { id: "u1", name: "Priya", initial: "P" } });
+    const [t] = r.room.turns(r.p.project.id, 0);
+    expect(t!.author).toEqual({ kind: "person", name: "Priya", me: false });
+    expect([...t!.prompt].length).toBe(200);
+    expect(t!.outcome).toBeUndefined();
+    expect(t!.endedAt).toBeUndefined();
+  });
+
+  it("leaves out turns the agent ran by itself, and their ends", () => {
+    const r = rig();
+    r.start("w1", "", 20, { auto: true });
+    r.reply("w1", "A worker reported in.", 19);
+    r.end("w1", 19);
+    r.start("t1", "real", 10);
+    r.end("t1", 9);
+    expect(r.room.turns(r.p.project.id, 0).map((t) => t.id)).toEqual([`${r.s.id}:t1`]);
+  });
+
+  it("maps a lettered prompt to the previous turn's options", () => {
+    const r = rig();
+    r.start("t1", "which way?", 30);
+    r.reply("t1", "Which approach should I take?\n\nA) Retry in the client (recommended)\nB) Retry on the server", 29);
+    r.end("t1", 29);
+    r.start("t2", "b", 20);
+    r.end("t2", 19);
+    r.start("t3", "B", 10);
+    r.end("t3", 9);
+    r.start("t4", "ok go ahead", 5);
+    const turns = r.room.turns(r.p.project.id, 0);
+    expect(turns[1]!.answer).toEqual({ letter: "B", question: "Which approach should I take?" });
+    // t3 follows t2, which offered nothing: not an answer. t4 is plain text.
+    expect(turns[2]!.answer).toBeUndefined();
+    expect(turns[3]!.answer).toBeUndefined();
+  });
+
+  it("a plain page holds the last 24 h and the newest 100 turns; before/since pages follow the posts window", () => {
+    const r = rig();
+    r.start("old", "ancient", 30 * 60, {});
+    r.end("old", 30 * 60 - 1);
+    for (let i = 0; i < 105; i++) {
+      r.start(`t${i}`, `job ${i}`, 600 - i);
+      r.end(`t${i}`, 600 - i - 0.1);
+    }
+    const turns = r.room.page(r.p.project.id, {}).turns;
+    expect(turns).toHaveLength(100);
+    expect(turns[0]!.prompt).toBe("job 5");
+    expect(turns[99]!.prompt).toBe("job 104");
+    const post = (text: string, minAgo: number) =>
+      r.room.post({
+        projectId: r.p.project.id,
+        author: { kind: "person", name: "Sam" },
+        kind: "message",
+        text,
+        at: NOW - minAgo * 60_000,
+      });
+    const p1 = post("one", 595);
+    post("two", 590);
+    const p3 = post("three", 100);
+    const mid = r.room.page(r.p.project.id, { since: p1.seq, limit: 1 });
+    expect(mid.posts.map((x) => x.text)).toEqual(["two"]);
+    expect(mid.turns[0]!.prompt).toBe("job 5");
+    const back = r.room.page(r.p.project.id, { before: p3.seq, limit: 2 });
+    expect(back.posts.map((x) => x.text)).toEqual(["one", "two"]);
+    expect(back.turns.map((t) => t.prompt)).toEqual(["job 5", "job 6", "job 7", "job 8", "job 9", "job 10"]);
+  });
+
+  it("a running turn carries the newest working line of that turn as intent, and its progress", () => {
+    const r = rig();
+    r.room.post({
+      projectId: r.p.project.id,
+      author: { kind: "agent", name: "A" },
+      sessionId: r.s.id,
+      kind: "working",
+      text: "before the turn",
+      at: NOW - 20 * 60_000,
+    });
+    r.start("t1", "go", 10);
+    r.room.post({
+      projectId: r.p.project.id,
+      author: { kind: "agent", name: "A" },
+      sessionId: r.s.id,
+      kind: "working",
+      text: "Wiring retry",
+      at: NOW - 5 * 60_000,
+    });
+    r.log.append(r.s.id, {
+      type: "step.updated",
+      turnId: "t1",
+      stepId: "progress",
+      kind: "progress",
+      label: "Tests",
+      status: "running",
+      detail: { steps: ["Plan", "Code", "Tests"], current: 1 },
+      at: iso(4),
+    });
+    const [t] = r.room.turns(r.p.project.id, 0);
+    expect(t).toMatchObject({ intent: "Wiring retry", progress: { current: 2, total: 3 } });
+    r.end("t1", 1);
+    const [done] = r.room.turns(r.p.project.id, 0);
+    expect(done!.intent).toBeUndefined();
+    expect(done!.progress).toBeUndefined();
+  });
+
+  it("threads carry progress, turnStartedAt and, when waiting, ask with the recommendation", () => {
+    const r = rig();
+    r.start("t1", "decide", 10);
+    r.reply("t1", "Pick one.\n\nWhich do you want?\n\nA) Client side\nB) Server side (recommended)", 9);
+    r.log.append(r.s.id, {
+      type: "step.updated",
+      turnId: "t1",
+      stepId: "progress",
+      kind: "progress",
+      label: "",
+      status: "running",
+      detail: { steps: ["One", "Two"], current: 0, status: "going" },
+      at: iso(8),
+    });
+    r.store.setStatus(r.s.id, "working");
+    let th = r.room.threads(r.p.project.id)[0]!;
+    expect(th.progress).toEqual({ current: 1, total: 2, label: "One" });
+    expect(th.turnStartedAt).toBe(NOW - 10 * 60_000);
+    expect(th.ask).toBeUndefined();
+    r.store.setStatus(r.s.id, "awaiting_answer");
+    th = r.room.threads(r.p.project.id)[0]!;
+    expect(th.progress).toBeUndefined();
+    expect(th.ask).toEqual({
+      question: "Which do you want?",
+      options: [
+        { letter: "A", text: "Client side", recommended: false },
+        { letter: "B", text: "Server side", recommended: true },
+      ],
+    });
+  });
+
+  it("caches per chat by timeline seq: a second read costs no event reads, a new event is picked up", () => {
+    const r = rig();
+    r.start("t1", "go", 10);
+    const spy = vi.spyOn(r.log, "roomEvents");
+    const inner = (r.room as any).reader.log as TimelineLog;
+    const spy2 = vi.spyOn(inner, "roomEvents");
+    r.room.turns(r.p.project.id, 0);
+    r.room.turns(r.p.project.id, 0);
+    expect(spy2).toHaveBeenCalledTimes(1);
+    r.end("t1", 1);
+    expect(r.room.turns(r.p.project.id, 0)[0]!.outcome).toBe("finished");
+    expect(spy2).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+});
+
+describe("Squeak's own lines are gone", () => {
+  it("makes no start/end/needs posts, and filters old ones out of served pages", () => {
     const store = new NativeStore(":memory:");
     const p = pond(store);
     const room = new Room({ store });
     const host = new EventEmitter();
     attachSqueakPosts(host as any, store, room);
     const s = p.chat("Wire retry");
-    const ev = (e: unknown) => host.emit("event", e);
-    const posts = () => store.roomPosts(p.project.id, { limit: 50 });
-    const tl = (event: any) => ev({ type: "timeline", sessionId: s.id, event });
-    return { store, p, room, s, ev, posts, tl };
-  }
-  const started = (turnId: string, text = "add retry\nto the uploader") => ({
-    type: "turn.started",
-    seq: 1,
-    turnId,
-    promptMessageId: "m",
-    text,
-    at: "",
-  });
-  const ended = (turnId: string, outcome = "done") => ({ type: "turn.ended", seq: 2, turnId, outcome, at: "" });
-
-  it("posts 'needs you' once per waiting episode", () => {
-    const r = rig();
-    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_approval" });
-    r.ev({ type: "request", sessionId: r.s.id, request: {} });
-    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_approval" });
-    expect(r.posts().map((x) => [x.authorKind, x.kind, x.text])).toEqual([["squeak", "needs", "Wire retry needs you"]]);
-    r.ev({ type: "status", sessionId: r.s.id, status: "working" });
-    r.ev({ type: "status", sessionId: r.s.id, status: "awaiting_answer" });
-    expect(r.posts()).toHaveLength(2);
-  });
-
-  it("posts one Started and one end line per turn, by how it ended, deduped on replay", () => {
-    const r = rig();
-    r.tl(started("t1"));
-    r.tl(started("t1"));
-    r.tl(ended("t1"));
-    r.tl(ended("t1"));
-    r.tl(started("t2", "x".repeat(300)));
-    r.tl(ended("t2", "stopped"));
-    r.tl(started("t3"));
-    r.tl(ended("t3", "failed"));
-    r.tl({ ...started("t4"), auto: true });
-    const rows = r.posts();
-    expect(rows.map((x) => [x.kind, x.authorKind, x.authorName, x.text.slice(0, 30)])).toEqual([
-      ["working", "squeak", "Wire retry", "Started: add retry"],
-      ["done", "squeak", "Wire retry", "Finished"],
-      ["working", "squeak", "Wire retry", "Started: " + "x".repeat(21)],
-      ["done", "squeak", "Wire retry", "Stopped"],
-      ["working", "squeak", "Wire retry", "Started: add retry"],
-      ["done", "squeak", "Wire retry", "Hit an error"],
-    ]);
-    expect(rows[2]!.text.length).toBeLessThanOrEqual("Started: ".length + 120);
-    expect(rows.every((x) => x.sessionId === r.s.id)).toBe(true);
-  });
-
-  it("an agent-run turn (no Started line) posts no end line, and old orphan end lines are dropped", () => {
-    const r = rig();
-    r.tl({ ...started("w1"), auto: true });
-    r.tl(ended("w1"));
-    r.tl(ended("w2"));
-    expect(r.posts()).toHaveLength(0);
-    r.tl(started("t1"));
-    r.tl(ended("t1"));
-    expect(r.posts().map((x) => x.text)).toEqual(["Started: add retry", "Finished"]);
-    r.room.post({
-      projectId: r.p.project.id,
-      author: { kind: "squeak", name: "Wire retry" },
-      sessionId: r.s.id,
-      kind: "done",
-      text: "Finished",
-      id: endPostId(r.s.id, "old"),
+    host.emit("event", { type: "status", sessionId: s.id, status: "awaiting_approval" });
+    host.emit("event", {
+      type: "timeline",
+      sessionId: s.id,
+      event: { type: "turn.started", seq: 1, turnId: "t", promptMessageId: "m", text: "x", at: "" },
     });
-    expect(r.store.dropOrphanRoomEnds()).toBe(1);
-    expect(r.posts().map((x) => x.text)).toEqual(["Started: add retry", "Finished"]);
-  });
-
-  it("skips Finished when the agent posted its own done in that turn", () => {
-    const r = rig();
-    r.tl(started("t1"));
-    r.room.agentPost(r.s, { kind: "done", text: "retry wired" });
-    r.tl(ended("t1"));
-    expect(r.posts().map((x) => x.kind)).toEqual(["working", "done"]);
-    r.tl(started("t2"));
-    r.tl(ended("t2"));
-    expect(r.posts().map((x) => x.text)).toEqual([
-      "Started: add retry",
-      "retry wired",
-      "Started: add retry",
-      "Finished",
-    ]);
+    host.emit("event", {
+      type: "timeline",
+      sessionId: s.id,
+      event: { type: "turn.ended", seq: 2, turnId: "t", outcome: "done", at: "" },
+    });
+    expect(store.roomPosts(p.project.id, { limit: 50 })).toHaveLength(0);
+    const sq = { projectId: p.project.id, author: { kind: "squeak" as const, name: "Wire retry" }, sessionId: s.id };
+    room.post({ ...sq, kind: "working", text: "Started: x", id: `sq:start:${s.id}:t` });
+    room.post({ ...sq, kind: "done", text: "Finished", id: `sq:end:${s.id}:t` });
+    room.post({ ...sq, kind: "needs", text: "Wire retry needs you" });
+    room.post({ ...sq, kind: "working", text: "Summariser line" });
+    room.agentPost(s, { kind: "working", text: "agent line" });
+    expect(room.page(p.project.id, {}).posts.map((x) => x.text)).toEqual(["Summariser line", "agent line"]);
+    expect(store.dropSqueakTurnPosts()).toBe(3);
+    expect(store.roomPosts(p.project.id, { limit: 50 }).map((x) => x.text)).toEqual(["Summariser line", "agent line"]);
   });
 });
 
-describe("room backfill and thread state", () => {
-  it("fills an empty room once from the last 24 h of timelines, in time order, merged with live posts", () => {
+describe("turn frames", () => {
+  function rig() {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-11-17T12:00:00Z"));
     const store = new NativeStore(":memory:");
     const p = pond(store);
-    const now = Date.parse("2026-11-17T12:00:00Z");
-    const room = new Room({ store, now: () => now });
-    const s = p.chat("Old chat");
-    const log = new TimelineLog(store.db);
-    const iso = (h: number) => new Date(now - h * 3_600_000).toISOString();
-    log.append(s.id, { type: "turn.started", turnId: "a", promptMessageId: "m", text: "first job", at: iso(30) });
-    log.append(s.id, { type: "turn.ended", turnId: "a", outcome: "done", at: iso(29) });
-    log.append(s.id, { type: "turn.started", turnId: "b", promptMessageId: "m", text: "second job", at: iso(3) });
-    log.append(s.id, { type: "turn.ended", turnId: "b", outcome: "done", at: iso(2.5) });
-    log.append(s.id, { type: "turn.started", turnId: "c", promptMessageId: "m", text: "third job", at: iso(1) });
-    log.append(s.id, { type: "turn.ended", turnId: "c", outcome: "failed", at: iso(0.2) });
-    // A live post that happened between b and c.
-    room.post({
-      projectId: p.project.id,
-      author: { kind: "person", name: "me" },
-      kind: "message",
-      text: "hi",
-      at: now - 2 * 3_600_000,
-    } as any);
-    const first = room.page(p.project.id, {});
-    expect(first.posts.map((x) => x.text)).toEqual([
-      "Started: second job",
-      "Finished",
-      "hi",
-      "Started: third job",
-      "Hit an error",
-    ]);
-    expect(first.posts.map((x) => x.at)).toEqual([...first.posts.map((x) => x.at)].sort((a, b) => a - b));
-    expect(first.posts.map((x) => x.seq)).toEqual([...first.posts.map((x) => x.seq)].sort((a, b) => a - b));
-    const second = room.page(p.project.id, {});
-    expect(second.posts.map((x) => x.id)).toEqual(first.posts.map((x) => x.id));
-  });
-
-  it("never duplicates a live post and does not run twice", () => {
-    const store = new NativeStore(":memory:");
-    const p = pond(store);
-    const room = new Room({ store });
+    const room = new Room({ store, ownerName: () => "Sam" });
     const host = new EventEmitter();
     attachSqueakPosts(host as any, store, room);
-    const s = p.chat("Live");
+    const s = p.chat("Wire retry");
     const log = new TimelineLog(store.db);
-    const at = new Date().toISOString();
-    const body = { type: "turn.started", turnId: "a", promptMessageId: "m", text: "go", at } as const;
-    const ev = log.append(s.id, body);
-    host.emit("event", { type: "timeline", sessionId: s.id, event: ev });
-    expect(room.page(p.project.id, {}).posts).toHaveLength(1);
-    store.markRoomBackfilled("other", 0);
-    expect(room.page(p.project.id, {}).posts).toHaveLength(1);
+    const frames: any[] = [];
+    room.on("turn", (f) => frames.push(f));
+    const send = (body: any) =>
+      host.emit("event", { type: "timeline", sessionId: s.id, event: log.append(s.id, body) });
+    return { store, p, room, s, frames, send };
+  }
+  afterEach(() => vi.useRealTimers());
+  const at = () => new Date().toISOString();
+
+  it("emits on start, on a new intent and progress, and on end; coalesced to one frame per turn per 500 ms", () => {
+    const r = rig();
+    r.send({ type: "turn.started", turnId: "t1", promptMessageId: "m", text: "go", at: at() });
+    expect(r.frames).toHaveLength(1);
+    expect(r.frames[0]).toMatchObject({ projectId: r.p.project.id, turn: { id: `${r.s.id}:t1`, prompt: "go" } });
+    expect(r.frames[0].turn.outcome).toBeUndefined();
+    r.room.agentPost(r.s, { kind: "working", text: "Wiring retry" });
+    r.send({
+      type: "step.updated",
+      turnId: "t1",
+      stepId: "progress",
+      kind: "progress",
+      label: "",
+      status: "running",
+      detail: { steps: ["a", "b"], current: 0 },
+      at: at(),
+    });
+    r.send({
+      type: "step.updated",
+      turnId: "t1",
+      stepId: "progress",
+      kind: "progress",
+      label: "",
+      status: "running",
+      detail: { steps: ["a", "b"], current: 1 },
+      at: at(),
+    });
+    expect(r.frames).toHaveLength(1);
+    vi.advanceTimersByTime(499);
+    expect(r.frames).toHaveLength(1);
+    vi.advanceTimersByTime(2);
+    expect(r.frames).toHaveLength(2);
+    expect(r.frames[1].turn).toMatchObject({ intent: "Wiring retry", progress: { current: 2, total: 2 } });
+    // ordinary steps are not a turn change
+    r.send({
+      type: "step.added",
+      turnId: "t1",
+      stepId: "s1",
+      kind: "tool",
+      label: "Reading",
+      status: "done",
+      at: at(),
+    });
+    vi.advanceTimersByTime(2000);
+    expect(r.frames).toHaveLength(2);
+    r.send({ type: "reply.done", turnId: "t1", messageId: "r", text: "All wired. Tests pass.", at: at() });
+    r.send({ type: "turn.ended", turnId: "t1", outcome: "done", at: at() });
+    vi.advanceTimersByTime(600);
+    const last = r.frames[r.frames.length - 1].turn;
+    expect(last).toMatchObject({ id: `${r.s.id}:t1`, outcome: "finished", outcomeText: "All wired." });
+    expect(r.frames.length).toBe(4);
   });
 
+  it("emits nothing for an agent-run turn", () => {
+    const r = rig();
+    r.send({ type: "turn.started", turnId: "w", promptMessageId: "m", text: "", auto: true, at: at() });
+    r.send({ type: "turn.ended", turnId: "w", outcome: "done", at: at() });
+    vi.advanceTimersByTime(1000);
+    expect(r.frames).toHaveLength(0);
+  });
+});
+
+describe("thread state", () => {
   it("threads carry lastState and lastAt", () => {
     const store = new NativeStore(":memory:");
     const p = pond(store);
@@ -452,6 +629,7 @@ interface Harness {
   token: string;
   store: NativeStore;
   server: NativeServer;
+  host: SessionHost;
   room: Room;
   dir: string;
 }
@@ -491,6 +669,7 @@ async function start(): Promise<Harness> {
     token: fs.readFileSync(tokenPath, "utf8").trim(),
     store,
     server,
+    host,
     room: server.room,
     dir,
   };
@@ -512,7 +691,7 @@ describe("room routes", () => {
     const ok = await call(h, "GET", `/native/projects/${p.project.id}/room`);
     expect(ok.status).toBe(200);
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await ok.json()).toEqual({ posts: [], latestSeq: 0, threads: [] });
+    expect(await ok.json()).toEqual({ posts: [], latestSeq: 0, threads: [], turns: [] });
   });
 
   it("POST takes a person's message (strict body) and GET pages it with since/before/limit", async () => {
@@ -576,6 +755,20 @@ describe("room routes", () => {
     h.room.personPost(p.project.id, "live one");
     await until("event: post");
     expect(buf).toContain('"text":"live one"');
+    attachSqueakPosts(h.host as any, h.store, h.room);
+    const sess = p.chat("Live chat");
+    const log = new TimelineLog(h.store.db);
+    const body = {
+      type: "turn.started",
+      turnId: "t1",
+      promptMessageId: "m",
+      text: "go now",
+      at: new Date().toISOString(),
+    } as const;
+    h.host.emit("event", { type: "timeline", sessionId: sess.id, event: log.append(sess.id, body) });
+    await until("event: turn");
+    expect(buf).toContain(`"id":"${sess.id}:t1"`);
+    expect(buf).toContain('"prompt":"go now"');
     await until(": ping");
     await reader.cancel();
   });

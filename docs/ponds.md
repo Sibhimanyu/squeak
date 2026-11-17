@@ -513,36 +513,44 @@ RoomPost   = { seq, id, author: { kind: "person"|"agent"|"squeak", id?, name }, 
                text, toSessionId?, at /* ms epoch */ }
 RoomThread = { sessionId, title, agent, state: "working"|"waiting"|"idle"|"error",
                workingOn?, workingOnAt?,
-               lastState: "finished"|"stopped"|"error"|"idle", lastAt }  // non-archived chats active in 24 h, newest first;
+               lastState: "finished"|"stopped"|"error"|"idle", lastAt,  // non-archived chats active in 24 h, newest first;
                                             // workingOn = newest `working` post, gone once a later `done` exists
+               progress?: { current, total, label? },   // the set_progress strip (1-based current), while working
+               ask?: { question, options: [{ letter, text, recommended }] },  // waiting chats, from the last message (parseChoices)
+               turnStartedAt?,                          // ms, while a turn runs
+               filesChanged? }                          // not sent yet (a git run per chat)
+RoomTurn   = { id: "<sessionId>:<turnId>", sessionId, threadTitle, agent, startedAt, endedAt?,
+               outcome?: "finished"|"stopped"|"error",  // absent while running
+               prompt /* one line, <= 200 */, author: { kind: "person", name, me },
+               answer?: { letter, question },           // the prompt is a lettered pick of the previous turn's options
+               outcomeText? /* first sentence of the closing reply, markdown stripped, <= 200 */,
+               durationMs?, filesChanged?,
+               intent?, progress?: { current, total } } // intent/progress only while running
 ```
+
+**Turns come from timelines** (`room-turns.ts`, no store of their own): one per `turn.started` that is not an
+agent-run turn (`auto`), to its `turn.ended`; the author is the message's pond member (`me: false`) or the owner
+(`me: true`); `intent` is the chat's newest `working` post since the turn began. A per-chat cache is topped up by
+timeline seq. `GET .../room` answers `{ posts, latestSeq, threads, turns }`: turns oldest to newest, those that started
+inside the page's window (a plain page: the last 24 h, newest 100; a `since`/`before` page: the span of its posts).
+Squeak no longer posts a Started/Finished/`needs` line: none are made, any old ones are deleted at start and never
+served; agent, summariser and person posts are unchanged.
 
 Routes (token-gated, no CORS, strict JSON bodies, an unknown key is a 400):
 
-- `GET /native/projects/<id>/room?since=<seq>&before=<seq>&limit=<n>` -> `{ posts, latestSeq, threads }`, posts oldest to
+- `GET /native/projects/<id>/room?since=<seq>&before=<seq>&limit=<n>` -> `{ posts, latestSeq, threads, turns }`, posts oldest to
   newest. `since` gives the first `limit` posts after it, `before` the newest `limit` before it, neither the newest.
   Limit defaults to 100, at most 200.
 - `POST /native/projects/<id>/room` `{ text, level? }` -> 201 `{ post }`; author is the person (pond member name, else
   the macOS full name, else "owner"), kind `message`.
 - `GET /native/projects/<id>/room/stream` -> SSE: `event: hello` `{latestSeq}`, then `event: post` (a `RoomPost`, `id:` =
-  seq), a `: ping` comment every 25 s. Any GET or an open stream marks the room viewed.
+  seq), `event: turn` (a `RoomTurn`, upserted by `id`: sent when a turn starts, gets a new intent or progress, closes
+  with a reply or ends; at most one frame per turn per 500 ms), a `: ping` comment every 25 s. Any GET or an open stream marks the room viewed.
 
 Text is trimmed, at most 500 characters, never empty; everything but `message` is one line. Agents use
 `post_to_room { text, kind, level?, toChatId? }` (30 a chat an hour; `toChatId` must be in the same pond) and
 `read_room { last?, level? }` (compact `[hh:mm] name (kind): text` lines plus "Working now"); every `send_to_chat` is
-mirrored as an `agents` message. Squeak itself posts `needs` ("<title> needs you", once per waiting episode) and, when a
-turn ends with a `working` line still open, `done`. While a chat works and its room was viewed in the last 10 minutes,
+mirrored as an `agents` message. While a chat works and its room was viewed in the last 10 minutes,
 a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-written `working` line posted for it
-(`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it).
-
-Squeak posts on every native turn, whatever the agent: on `turn.started` a `working` line "Started: <first line of the
-message, at most 120 characters>" and on `turn.ended` a `done` line (Finished / Stopped / Hit an error), the latter
-skipped when the agent posted its own `done` during that turn. The author is `squeak`, named after the chat; ids are
-fixed (`sq:start|end:<chat>:<turn>`) so a replayed event is a no-op, and the start line counts as the chat's `working`
-line for the summariser's quiet timer. A turn the agent starts by itself posts nothing.
-
-**Backfill.** The first read of a room (no `since`/`before`) that was never filled synthesises the same lines from each
-non-archived chat's timeline for the last 24 h with their real times, merges them with the posts already there in time
-order (ids kept, seqs renumbered), and records the pond in `room_backfill` so it never runs twice. The Mac shows the
-threads that are not working as a quiet "Recent" list under "Working now" (title, "finished 14m ago"); the empty
-sentence appears only when the pond has no threads and no posts.
+(`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it);
+that line (or an agent's own) is the running turn's `intent`.

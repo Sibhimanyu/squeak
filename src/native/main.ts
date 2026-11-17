@@ -49,7 +49,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const room = new Room({ store, ownerName: () => flotilla?.service?.identity.name ?? null });
   attachSqueakPosts(host, store, room);
   try {
-    store.dropOrphanRoomEnds();
+    store.dropSqueakTurnPosts();
   } catch {
     /* only tidying old noise */
   }
