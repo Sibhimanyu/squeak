@@ -133,6 +133,8 @@ export interface CreateSpec {
   text?: string;
   /** Put in front of the first message for the agent only (Claude's split-the-work brief); the chat shows `text`. */
   agentPrefix?: string;
+  /** A duck taking this session as its current place (made before the agent starts, so its note carries the duck). */
+  duckId?: string;
 }
 
 /** Where in an agent's own history a fork stops. */
@@ -395,6 +397,7 @@ export class SessionHost extends EventEmitter {
       duck: {
         name: this.store.duckOf(s.id).name ?? (s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude")),
         role: this.store.duckOf(s.id).role,
+        notebook: this.store.duckBySession(s.id)?.notebook ?? "",
       },
     });
   }
@@ -741,6 +744,7 @@ export class SessionHost extends EventEmitter {
 
   async create(spec: CreateSpec): Promise<SessionRow> {
     const created = this.store.createSession(spec);
+    if (spec.duckId) this.store.attachSessionToDuck(spec.duckId, created.id);
     if (spec.agentPrefix && spec.text) this.firstBrief.set(created.id, spec.agentPrefix);
     if (spec.text) await this.send(created.id, spec.text);
     return this.store.getSession(created.id)!;

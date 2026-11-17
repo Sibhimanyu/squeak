@@ -563,9 +563,10 @@ Allow; plain chat stays a note. Stored as JSON in `native.db` `room_jobs` (creat
 
 ```
 RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"handed"|"running"|"done"|"failed",
-            suggestion?: { sessionId, title, reason, state: "working"|"idle" }, candidates?: [same, up to 3],
-            claim?: { sessionId, title, eta?, at, status: "asking"|"allowed"|"denied" },
-            handedTo?: { sessionId, title, turnId? /* "<sessionId>:<turnId>", the RoomTurn id */, newThread },
+            suggestion?: { duckId?, name?, sessionId /* current chat, "" if none */, title, reason, pitch, state: "working"|"idle" }, candidates?: [same, up to 3],
+            place?: { kind: "stream", workspaceId, branch } | { kind: "new", branch },   // see "Place"
+            claim?: { sessionId, duckId?, title, eta?, at, status: "asking"|"allowed"|"denied" },
+            handedTo?: { sessionId, duckId?, title, turnId? /* "<sessionId>:<turnId>", the RoomTurn id */, newThread },
             outcomeText?, createdAt, updatedAt }
 ```
 
@@ -580,28 +581,63 @@ RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"
   -> 201 `{job}`; `POST .../room/jobs/<jobId>` strict `{action: "go", sessionId?}`, `{action: "new"}` (a thread in the
   pond's folder, owner's default permission mode, the model of its newest chat), `dismiss`, `allow`, `deny` -> `{job}`,
   409 with a sentence when the state no longer allows it. SSE sends `event: job` (upsert by id).
-- `go`/`allow` send the job text as a new turn from the person (queued when busy). The job follows the turn its text
+- **Place**: every job has one, chosen by the host when it is made (absent in a plain-folder pond, which has no streams): the
+  matched duck's current stream when the job's words match that stream's title, branch and last four turns strongly
+  (a score of 4.5: a title word 3, a turn word 1.5), else a **new stream off the default branch** on a free slug branch
+  made from the job text (`check-ref-format`, `-2`, `-3` when taken, the workspace branch prefix applied). `go`, `allow` and
+  `new` take an optional `place` of the same shape as an override (a stream of this pond, or a free branch git accepts: 400
+  for a bad shape, 409 when the stream is gone or the branch is taken) and `go`/`new` an optional `duckId` instead of
+  `sessionId` (both 400). `sessionId` still works and means "continue in that chat, where it is".
+- On `go`/`allow`: when the duck's current session is in the place, the job text goes to it as the next turn (queued
+  when busy). Otherwise a **fresh session** starts in the place (a new stream is created first, setup scripts included)
+  with the job text, a title from the job, the owner's default permission mode, the model of the duck's chat, and the
+  duck's identity note; it becomes the duck's current session and the old one stays as history. One job per duck: a duck
+  that is working or waiting cannot start a session elsewhere (409); it can claim "after this". `new` with no `duckId`
+  makes a new duck, named from a short list, and starts it in the place.
+- (Older behaviour kept) `go`/`allow` send the job text as a new turn from the person (queued when busy). The job follows the turn its text
   starts: `handed`, then `running` while it runs, then `done` (or `failed`) with `outcomeText`, read from the chat's timeline.
 - Agents: `open_jobs` (suggested jobs fitting this thread) and `claim_job {jobId, eta?}` (sets `claim` to `asking`; starts
   nothing; one claim at a time, a newer chat replaces it only after a deny; 10 an hour a chat).
 
 ### Ducks
 
-In the room a chat is a **duck**: a pond member with a name, a role and a duty (user-facing copy says duck; the code
-keeps session/thread). Squeak never chats. Host side: `room.ts` (`threadOf`, `setDuck`, `setDuty`), `store.ts`
-(`session_ducks`, created lazily like `room_jobs`, no numbered migration).
+A **duck** is a person-like identity that belongs to the **pond**, not to a stream or a chat: a name, a role, a colour, a
+notebook and a duty (user-facing copy says duck; the code keeps session/thread). A duck works in one place at a time.
+Taking a job in another place starts a **fresh session there** carrying its name, role and notebook; the old session
+becomes history (still the duck's: its turns carry the duck's `duckId`). Squeak never chats and nothing starts without
+the person's Go or Allow. Host side: `room.ts` (`duckView`, `listDucks`, `createDuck`, `setDuckById`, `setDutyById`,
+the notebook writer), `store.ts` (`ducks` and `duck_sessions`, created lazily like `room_jobs`, no numbered migration;
+`session_ducks` is only read once, to migrate), `duck-notebook.ts`.
 
-- `RoomThread` adds `name` (the person's, else the chat title), `role?` (0..80 chars), `duty` (`"on"` default, `"off"`
-  = the person closed the duck's tab) and `lastActiveAt`. `RoomTurn.ducklings?` = `{count, done, items?:[{label,
-state}]}` from the turn's Agent/Task tool steps (labels "Start ..."), absent when none; a duckling starting or
-  ending sends a `turn` frame. An async duckling stays running until the host's helper tracker sees its `<task-notification>` (done or failed), even after its turn ends; each change sends a `turn` frame.
-- Routes (token-gated, strict bodies): `PATCH /native/sessions/<id>/duck {name?: 1..32 | null, role?: 0..80 | null}` ->
-  `{name, role?}`; `POST /native/sessions/<id>/duty {on: boolean}` -> `{duty}`. Unknown keys or bad lengths are 400.
-  SSE `event: thread` carries the `RoomThread` on a name, role or duty change.
-- Off duty: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to it refused.
-  A person's message to it (`POST .../messages`) or a Go/Allow on a job puts it back on duty; the person can always
-  open it.
-- Matching counts name and role words like title words (3 each). `job.suggestion.pitch` (and each candidate's) is the
-  reason in first person, said after "I": "worked on the control bar an hour ago", "am working on ... now", "have a
-  thread about ...". `reason` is unchanged.
-- The agent note adds "You are <name>, a duck in <pond>; your role: <role>" (a running agent gets it at its next start).
+```
+Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessionId?, place?: Place,
+         state: "working"|"waiting"|"idle"|"error", lastActiveAt, sessions /* how many it has had */,
+         notebook, createdAt }
+Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
+```
+
+- **Migration** (first start, idempotent): every non-archived session in a pond, and every session with an old
+  `session_ducks` row, becomes one duck (its name, role and duty kept). A migrated duck's `colourSeed` is its first
+  session id, so colours do not change; a new duck's is its own id. A chat that appears later gets its duck the first time
+  the room sees it. A `name` of null follows the chat title.
+- Routes (token-gated, strict bodies, unknown keys 400): `GET /native/projects/<id>/ducks` -> `{ducks: Duck[]}` (ducks
+  with no session, and those whose chat was active in 30 days, newest first); `POST /native/projects/<id>/ducks
+{name: 1..32, role?: 0..80}` -> 201 `{duck}` (identity only: idle, no place, no session);
+  `PATCH /native/ducks/<id> {name?, role?}` -> `{duck}`; `POST /native/ducks/<id>/duty {on}` -> `{duty, duck}`. The
+  session routes `PATCH /native/sessions/<id>/duck` and `POST .../duty` still work and resolve the session's duck.
+  SSE `event: thread` carries the `RoomThread` on a name, role, duty or place change.
+- **The room page's `threads` are one per duck** (a duck with no session has `sessionId: ""`, state idle). Each adds
+  `duckId`, `colourSeed` and `place`; `sessionId` is the duck's current session. A duck is listed while its chat was
+  active in 24 h, and always while it has had no session. `RoomTurn.duckId` names the duck that worked a turn.
+  `RoomThread` still carries `name`, `role?`, `duty`, `lastActiveAt` and `RoomTurn.ducklings?` as before.
+- Off duty: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to the duck's chats
+  refused. A person's message to it, or a Go/Allow on a job, puts it back on duty.
+- Matching ranks **ducks**: name, role and the current chat's title count 3 each, the `working` intent 2, notebook words and
+  the duck's last four turns (across all its sessions) 1.5. `suggestion.sessionId` is its current session ("" for a duck
+  with none), `suggestion.duckId` its id; a working duck is suggested with `state: "working"` (it can claim "after this").
+  `pitch` and `reason` read as before.
+- **Notebook**: when a duck's turn ends, one line is appended: `- <date> <job> -> <outcome sentence> [<branch>]` (the
+  outcome from a Haiku call when the reply is long and `SQUEAK_ROOM_SUMMARY` is not off, 8 s timeout; a failure or timeout
+  writes the closing reply's first sentence). Capped at 3000 characters, oldest lines trimmed.
+- The agent note adds "You are <name>, a duck in <pond>; your role: <role>", the current stream (from the note's own
+  "This thread" line) and the notebook (a running agent gets it at its next start, which a fresh session always is).

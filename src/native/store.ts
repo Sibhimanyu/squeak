@@ -174,6 +174,20 @@ export type RoomAuthorKind = "person" | "agent" | "squeak";
 export type RoomPostKind = "working" | "done" | "needs" | "message" | "handoff";
 export type RoomLevel = "room" | "agents";
 
+export interface DuckRow {
+  id: string;
+  projectId: string;
+  /** The person's name for it; null = follows its current chat's title. */
+  name: string | null;
+  role: string | null;
+  /** Seeds the duck's colour: a migrated duck's first session id, else its own id. */
+  colourSeed: string;
+  notebook: string;
+  currentSessionId: string | null;
+  createdAt: string;
+  duty: "on" | "off";
+}
+
 export interface RoomPostRow {
   seq: number;
   id: string;
@@ -1211,55 +1225,189 @@ export class NativeStore {
 
   private ducksTable(): void {
     if (this.ducksReady) return;
-    // Created here, not as a migration (like room_jobs): a duck's name, role and duty are the room's own.
+    // Created here, not as a migration (like room_jobs): a duck is the pond's own person-like identity (name, role,
+    // notebook) that moves between streams, so it lives beside the room, not in the session schema.
+    // `session_ducks` is the older per-session table; it is only read once, to turn its rows into ducks.
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS session_ducks (
-         session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on')`,
+         session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on');
+       CREATE TABLE IF NOT EXISTS ducks (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, role TEXT, colour_seed TEXT NOT NULL,
+         notebook TEXT NOT NULL DEFAULT '', current_session_id TEXT, created_at TEXT NOT NULL,
+         duty TEXT NOT NULL DEFAULT 'on');
+       CREATE INDEX IF NOT EXISTS ducks_project ON ducks(project_id);
+       CREATE TABLE IF NOT EXISTS duck_sessions (
+         session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
+       CREATE INDEX IF NOT EXISTS duck_sessions_duck ON duck_sessions(duck_id)`,
     );
     this.ducksReady = true;
   }
 
-  /** A chat's duck settings: the person's name and role (null = none) and whether it is on duty (default on). */
+  /** A chat's duck settings: its duck's name and role (null = none) and duty (default on). */
   duckOf(sessionId: string): { name: string | null; role: string | null; duty: "on" | "off" } {
+    const d = this.duckBySession(sessionId);
+    return { name: d?.name ?? null, role: d?.role ?? null, duty: d?.duty ?? "on" };
+  }
+
+  duckRow(id: string): DuckRow | null {
     this.ducksTable();
-    const r = this.db.prepare("SELECT * FROM session_ducks WHERE session_id=?").get(sessionId) as Row | undefined;
-    return {
-      name: (r?.name as string | null | undefined) ?? null,
-      role: (r?.role as string | null | undefined) ?? null,
-      duty: r?.duty === "off" ? "off" : "on",
-    };
+    const r = this.db.prepare("SELECT * FROM ducks WHERE id=?").get(id) as Row | undefined;
+    return r ? duckRow(r) : null;
+  }
+
+  duckBySession(sessionId: string): DuckRow | null {
+    this.ducksTable();
+    const r = this.db
+      .prepare("SELECT d.* FROM ducks d JOIN duck_sessions ds ON ds.duck_id=d.id WHERE ds.session_id=?")
+      .get(sessionId) as Row | undefined;
+    return r ? duckRow(r) : null;
+  }
+
+  listDucks(projectId: string): DuckRow[] {
+    this.ducksTable();
+    return (
+      this.db.prepare("SELECT * FROM ducks WHERE project_id=? ORDER BY created_at, id").all(projectId) as Row[]
+    ).map(duckRow);
+  }
+
+  /** The sessions a duck has had, oldest first. */
+  duckSessionIds(duckId: string): string[] {
+    this.ducksTable();
+    return (
+      this.db
+        .prepare("SELECT session_id FROM duck_sessions WHERE duck_id=? ORDER BY started_at, session_id")
+        .all(duckId) as Row[]
+    ).map((r) => r.session_id as string);
+  }
+
+  mappedSessionIds(): Set<string> {
+    this.ducksTable();
+    return new Set(
+      (this.db.prepare("SELECT session_id FROM duck_sessions").all() as Row[]).map((r) => r.session_id as string),
+    );
+  }
+
+  createDuck(input: {
+    projectId: string;
+    name?: string | null;
+    role?: string | null;
+    colourSeed?: string;
+    currentSessionId?: string | null;
+    duty?: "on" | "off";
+    createdAt?: string;
+  }): DuckRow {
+    this.ducksTable();
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO ducks (id, project_id, name, role, colour_seed, notebook, current_session_id, created_at, duty)
+         VALUES (?,?,?,?,?,'',?,?,?)`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.name ?? null,
+        input.role ?? null,
+        input.colourSeed ?? id,
+        input.currentSessionId ?? null,
+        input.createdAt ?? nowIso(),
+        input.duty ?? "on",
+      );
+    return this.duckRow(id)!;
+  }
+
+  /** Name, role (null clears), notebook, duty and current session; a key left out is kept. */
+  updateDuck(
+    id: string,
+    patch: {
+      name?: string | null;
+      role?: string | null;
+      notebook?: string;
+      duty?: "on" | "off";
+      currentSessionId?: string | null;
+      projectId?: string;
+    },
+  ): void {
+    const cur = this.duckRow(id);
+    if (!cur) return;
+    this.db
+      .prepare("UPDATE ducks SET name=?, role=?, notebook=?, duty=?, current_session_id=?, project_id=? WHERE id=?")
+      .run(
+        patch.name !== undefined ? patch.name : cur.name,
+        patch.role !== undefined ? patch.role : cur.role,
+        patch.notebook !== undefined ? patch.notebook : cur.notebook,
+        patch.duty !== undefined ? patch.duty : cur.duty,
+        patch.currentSessionId !== undefined ? patch.currentSessionId : cur.currentSessionId,
+        patch.projectId !== undefined ? patch.projectId : cur.projectId,
+        id,
+      );
+  }
+
+  /** The duck takes `sessionId` as its current place (the older ones stay as its history). */
+  attachSessionToDuck(duckId: string, sessionId: string): void {
+    this.ducksTable();
+    this.db.transaction(() => {
+      this.db
+        .prepare("INSERT OR REPLACE INTO duck_sessions (session_id, duck_id, started_at) VALUES (?,?,?)")
+        .run(sessionId, duckId, nowIso());
+      this.db.prepare("UPDATE ducks SET current_session_id=? WHERE id=?").run(sessionId, duckId);
+    })();
+  }
+
+  /**
+   * One duck per session that has none: the session's own pond, its first session id as the colour seed, and the
+   * older `session_ducks` row's name, role and duty when it has one. Idempotent. Returns the duck.
+   */
+  duckForSession(sessionId: string, projectId: string): DuckRow | null {
+    const had = this.duckBySession(sessionId);
+    if (had) {
+      if (!had.projectId && projectId) this.updateDuck(had.id, { projectId });
+      return this.duckBySession(sessionId);
+    }
+    const s = this.getSession(sessionId);
+    if (!s) return null;
+    const old = this.db.prepare("SELECT * FROM session_ducks WHERE session_id=?").get(sessionId) as Row | undefined;
+    const duck = this.createDuck({
+      projectId,
+      name: (old?.name as string | null | undefined) ?? null,
+      role: (old?.role as string | null | undefined) ?? null,
+      colourSeed: sessionId,
+      currentSessionId: sessionId,
+      duty: old?.duty === "off" ? "off" : "on",
+      createdAt: s.createdAt,
+    });
+    this.db
+      .prepare("INSERT OR IGNORE INTO duck_sessions (session_id, duck_id, started_at) VALUES (?,?,?)")
+      .run(sessionId, duck.id, s.createdAt);
+    return this.duckBySession(sessionId);
   }
 
   /** Sets the name and/or role (null clears); a key left out is kept. */
   setDuck(sessionId: string, patch: { name?: string | null; role?: string | null }): void {
-    this.ducksTable();
-    const cur = this.duckOf(sessionId);
-    const name = patch.name !== undefined ? patch.name : cur.name;
-    const role = patch.role !== undefined ? patch.role : cur.role;
-    this.db
-      .prepare(
-        `INSERT INTO session_ducks (session_id, name, role, duty) VALUES (?,?,?,?)
-         ON CONFLICT(session_id) DO UPDATE SET name=excluded.name, role=excluded.role`,
-      )
-      .run(sessionId, name, role, cur.duty);
+    const d = this.duckForSession(sessionId, "");
+    if (d) this.updateDuck(d.id, patch);
   }
 
   setDuty(sessionId: string, on: boolean): void {
-    this.ducksTable();
-    this.db
-      .prepare(
-        `INSERT INTO session_ducks (session_id, duty) VALUES (?,?)
-         ON CONFLICT(session_id) DO UPDATE SET duty=excluded.duty`,
-      )
-      .run(sessionId, on ? "on" : "off");
+    const d = this.duckForSession(sessionId, "");
+    if (d) this.updateDuck(d.id, { duty: on ? "on" : "off" });
   }
 
+  /** Sessions the older per-session duck table has a row for (read once, to migrate them). */
+  legacyDuckSessionIds(): string[] {
+    this.ducksTable();
+    return (this.db.prepare("SELECT session_id FROM session_ducks").all() as Row[]).map((r) => r.session_id as string);
+  }
+
+  /** Every session of an off-duty duck. */
   offDutyIds(): Set<string> {
     this.ducksTable();
     return new Set(
-      (this.db.prepare("SELECT session_id FROM session_ducks WHERE duty='off'").all() as Row[]).map(
-        (r) => r.session_id as string,
-      ),
+      (
+        this.db
+          .prepare("SELECT ds.session_id FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id WHERE d.duty='off'")
+          .all() as Row[]
+      ).map((r) => r.session_id as string),
     );
   }
 
@@ -1310,6 +1458,20 @@ function roomPostRow(r: Row): RoomPostRow {
     text: r.text as string,
     toSessionId: (r.to_session_id as string | null) ?? null,
     at: r.at as number,
+  };
+}
+
+function duckRow(r: Row): DuckRow {
+  return {
+    id: r.id as string,
+    projectId: r.project_id as string,
+    name: (r.name as string | null) ?? null,
+    role: (r.role as string | null) ?? null,
+    colourSeed: r.colour_seed as string,
+    notebook: (r.notebook as string | null) ?? "",
+    currentSessionId: (r.current_session_id as string | null) ?? null,
+    createdAt: r.created_at as string,
+    duty: r.duty === "off" ? "off" : "on",
   };
 }
 

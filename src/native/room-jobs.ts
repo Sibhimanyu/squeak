@@ -7,7 +7,7 @@ import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-
 import type { HostEvents, Room, RoomThread } from "./room.js";
 import { firstSentence, oneLine } from "./room-turns.js";
 import type { HostEvent } from "./host.js";
-import type { NativeStore, RoomPostRow } from "./store.js";
+import type { DuckRow, NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
 
 /**
@@ -18,7 +18,13 @@ import type { SessionRow } from "./types.js";
 
 export type RoomJobStatus = "suggested" | "dismissed" | "handed" | "running" | "done" | "failed";
 
+/** Where a job runs: an existing stream, or a new stream (a worktree off the default branch) on this branch. */
+export type JobPlace = { kind: "stream"; workspaceId: string; branch: string } | { kind: "new"; branch: string };
+
 export interface JobThreadRef {
+  /** The duck (a pond-level identity); `sessionId` is its current chat, empty when it has not worked yet. */
+  duckId?: string;
+  name?: string;
   sessionId: string;
   title: string;
   reason: string;
@@ -34,8 +40,17 @@ export interface RoomJob {
   status: RoomJobStatus;
   suggestion?: JobThreadRef;
   candidates?: JobThreadRef[];
-  claim?: { sessionId: string; title: string; eta?: string; at: number; status: "asking" | "allowed" | "denied" };
-  handedTo?: { sessionId: string; title: string; turnId?: string; newThread: boolean };
+  /** Chosen by the host when the job is made; the person can override it on Go. Absent in a plain-folder pond. */
+  place?: JobPlace;
+  claim?: {
+    sessionId: string;
+    duckId?: string;
+    title: string;
+    eta?: string;
+    at: number;
+    status: "asking" | "allowed" | "denied";
+  };
+  handedTo?: { sessionId: string; duckId?: string; title: string; turnId?: string; newThread: boolean };
   outcomeText?: string;
   createdAt: number;
   updatedAt: number;
@@ -128,20 +143,38 @@ export function ago(ms: number): string {
 }
 
 interface Scored {
-  session: SessionRow;
+  duck: DuckRow;
+  session: SessionRow | null;
   state: RoomThread["state"];
   score: number;
   reason: string;
   pitch: string;
 }
 
+export interface StartSpec {
+  projectId: string;
+  duck: DuckRow;
+  place?: JobPlace;
+  text: string;
+  title: string;
+}
+
+/** A stream's recent turns must match the job this strongly (a title word is 3, a turn word 1.5) to continue there. */
+export const JOB_CONTINUE_SCORE = 4.5;
+
 export interface RoomJobsOptions {
   store: NativeStore;
   room: Room;
   /** A new turn for an existing chat, from the person (queued if busy). */
   send: (sessionId: string, text: string) => Promise<unknown>;
-  /** A new thread in the pond with `text`, run by the owner's defaults. */
+  /** A new thread in the pond with `text`, run by the owner's defaults (used when `start` is absent). */
   newThread: (projectId: string, text: string, title: string) => Promise<SessionRow>;
+  /** Starts a fresh session for `duck` in `place` (creating the stream when it is new) with its identity. */
+  start?: (spec: StartSpec) => Promise<SessionRow>;
+  /** A free, valid branch name for a new stream slugged from the job text; null when the pond has no streams. */
+  newBranch?: (projectId: string, text: string) => string | null;
+  /** The typed branch as git accepts it for a new stream, or a JobError saying why not. */
+  checkBranch?: (projectId: string, branch: string) => string;
   call?: TitleModelCall;
   /** Defaults to the SQUEAK_ROOM_JOBS switch. */
   enabled?: () => boolean;
@@ -307,36 +340,108 @@ export class RoomJobs extends EventEmitter {
       const rest = ranked.slice(1, 4).map(ref);
       if (rest.length) job.candidates = rest;
     }
+    const place = this.choosePlace(projectId, text, best?.duck ?? null, best?.session ?? null);
+    if (place) job.place = place;
     return this.save(projectId, job);
+  }
+
+  // ---- places ----
+
+  /**
+   * Where a job runs. A duck that already works in a stream whose recent turns match the job strongly continues
+   * there; anything else goes to a new stream off the default branch (a plain-folder pond has no streams: absent).
+   */
+  choosePlace(projectId: string, text: string, duck: DuckRow | null, session: SessionRow | null): JobPlace | undefined {
+    const project = this.o.store.getProject(projectId);
+    if (!project || project.kind === "folder") return undefined;
+    const here = this.o.room.placeOf(session);
+    if (here && duck && this.streamScore(session!, tokens(text)) >= JOB_CONTINUE_SCORE) return here;
+    const branch = this.o.newBranch?.(projectId, text);
+    return branch ? { kind: "new", branch } : undefined;
+  }
+
+  /** How well a chat's stream (title, branch) and its last turns fit a job's words. */
+  private streamScore(session: SessionRow, want: Set<string>): number {
+    const ws = session.workspaceId ? this.o.store.getWorkspace(session.workspaceId) : null;
+    const named = tokens(`${session.title ?? ""} ${ws?.title ?? ""} ${ws?.branch.replace(/[-_/]+/g, " ") ?? ""}`);
+    const turns = this.o.room
+      .sessionTurns(session.id)
+      .slice(-4)
+      .map((t) => tokens(`${t.prompt} ${firstSentence(t.reply ?? "")}`));
+    let raw = 0;
+    for (const w of want) raw += named.has(w) ? 3 : turns.some((x) => x.has(w)) ? 1.5 : 0;
+    return raw;
+  }
+
+  /** A place the person (or the host) names, checked: a stream of this pond that is not archived, or a free branch. */
+  private cleanPlace(projectId: string, raw: unknown): JobPlace {
+    const bad = (m: string): never => {
+      throw new JobError(m, 400);
+    };
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return bad("place must be an object");
+    const o = raw as Record<string, unknown>;
+    if (o.kind === "stream") {
+      const extra = Object.keys(o).filter((k) => !["kind", "workspaceId", "branch"].includes(k));
+      if (extra.length) return bad(`unknown key in place: ${extra[0]}`);
+      if (typeof o.workspaceId !== "string" || !o.workspaceId) return bad("place.workspaceId is required");
+      const ws = this.o.store.getWorkspace(o.workspaceId);
+      if (!ws || ws.projectId !== projectId || ws.state === "archived") {
+        throw new JobError("That stream isn't available in this pond any more.", 409);
+      }
+      return { kind: "stream", workspaceId: ws.id, branch: ws.branch };
+    }
+    if (o.kind === "new") {
+      const extra = Object.keys(o).filter((k) => !["kind", "branch"].includes(k));
+      if (extra.length) return bad(`unknown key in place: ${extra[0]}`);
+      if (typeof o.branch !== "string" || !o.branch.trim() || o.branch.length > 200) {
+        return bad("place.branch must be a branch name");
+      }
+      const project = this.o.store.getProject(projectId);
+      if (project?.kind === "folder") throw new JobError("This pond has no streams to start in.", 409);
+      return { kind: "new", branch: this.o.checkBranch ? this.o.checkBranch(projectId, o.branch) : o.branch.trim() };
+    }
+    return bad("place.kind must be stream or new");
   }
 
   // ---- matching ----
 
-  /** The pond's recent threads that fit `text`, best first; empty when none fits well enough. */
+  /** The pond's ducks that fit `text`, best first; empty when none fits well enough. */
   rank(projectId: string, text: string): Scored[] {
     const want = tokens(text);
     if (want.size === 0) return [];
     const marks = this.o.store.latestRoomMarks(projectId);
     const out: Scored[] = [];
-    for (const c of this.o.room.candidates(projectId, JOB_MATCH_WINDOW_MS)) {
-      const hit = this.score(c.session, c.state, c.at, want, marks.get(c.session.id)?.working?.text);
+    for (const c of this.o.room.duckCandidates(projectId, JOB_MATCH_WINDOW_MS)) {
+      const hit = this.score(
+        c.duck,
+        c.session,
+        c.state,
+        c.at,
+        want,
+        c.session ? marks.get(c.session.id)?.working?.text : undefined,
+      );
       if (hit && hit.score >= JOB_MIN_SCORE) out.push(hit);
     }
-    return out.sort((a, b) => b.score - a.score || a.session.id.localeCompare(b.session.id));
+    return out.sort((a, b) => b.score - a.score || a.duck.id.localeCompare(b.duck.id));
   }
 
-  /** How well one thread fits a job's words, with a phrase for why. Null: nothing in common. */
+  /** How well one duck fits a job's words (name, role, chat title, notebook, last turns), with a phrase for why. */
   score(
-    session: SessionRow,
+    duck: DuckRow,
+    session: SessionRow | null,
     state: RoomThread["state"],
     at: number,
     want: Set<string>,
     intent?: string,
   ): Scored | null {
-    const duck = this.o.store.duckOf(session.id);
-    const title = tokens(`${session.title ?? ""} ${duck.name ?? ""} ${duck.role ?? ""}`);
+    const title = tokens(`${session?.title ?? ""} ${duck.name ?? ""} ${duck.role ?? ""}`);
     const intentWords = tokens(intent ?? "");
-    const turns = this.o.room.sessionTurns(session.id).slice(-4);
+    const notebook = tokens(duck.notebook);
+    const turns = this.o.store
+      .duckSessionIds(duck.id)
+      .flatMap((id) => this.o.room.sessionTurns(id))
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .slice(-4);
     let raw = 0;
     const matched: string[] = [];
     let bestTurn: { at: number; words: string[] } | null = null;
@@ -345,7 +450,7 @@ export class RoomJobs extends EventEmitter {
       let weight = 0;
       if (title.has(w)) weight = 3;
       else if (intentWords.has(w)) weight = 2;
-      else if (turnSets.some((x) => x.words.has(w))) weight = 1.5;
+      else if (notebook.has(w) || turnSets.some((x) => x.words.has(w))) weight = 1.5;
       if (weight) {
         raw += weight;
         matched.push(w);
@@ -368,28 +473,38 @@ export class RoomJobs extends EventEmitter {
       pitch = `am working on ${phrase(matched)} now`;
     } else if (bestTurn) {
       reason = pitch = `worked on ${phrase(bestTurn.words)} ${ago(this.now() - bestTurn.at)}`;
+    } else if (notebook.size && matched.some((w) => notebook.has(w) && !title.has(w))) {
+      reason = `has notes about ${phrase(matched)}`;
+      pitch = `have notes about ${phrase(matched)}`;
     } else {
       reason = `its thread is about ${phrase(matched)}`;
       pitch = `have a thread about ${phrase(matched)}`;
     }
-    return { session, state, score: raw + (raw >= JOB_MIN_SCORE ? recency : 0), reason, pitch };
+    return { duck, session, state, score: raw + (raw >= JOB_MIN_SCORE ? recency : 0), reason, pitch };
   }
 
-  /** Suggested jobs of this pond, best fit for `session` first (the agent's `open_jobs`). */
+  /** Suggested jobs of this pond, best fit for `session`'s duck first (the agent's `open_jobs`). */
   openFor(projectId: string, session: SessionRow): Array<{ job: RoomJob; why: string }> {
     const marks = this.o.store.latestRoomMarks(projectId);
     // An off-duty duck is not a candidate, so it is offered nothing.
-    const me = this.o.room.candidates(projectId, JOB_MATCH_WINDOW_MS).find((c) => c.session.id === session.id);
+    const me = this.o.room.duckCandidates(projectId, JOB_MATCH_WINDOW_MS).find((c) => c.session?.id === session.id);
     if (!me) return [];
     const out: Array<{ job: RoomJob; why: string; score: number }> = [];
     for (const job of this.list(projectId)) {
       if (job.status !== "suggested") continue;
       if (job.claim && job.claim.status !== "denied" && job.claim.sessionId !== session.id) continue;
       if (job.claim?.status === "denied" && job.claim.sessionId === session.id) continue;
-      const hit = me
-        ? this.score(me.session, me.state, me.at, tokens(job.text), marks.get(session.id)?.working?.text)
-        : null;
-      const named = job.suggestion?.sessionId === session.id;
+      const hit = this.score(
+        me.duck,
+        me.session,
+        me.state,
+        me.at,
+        tokens(job.text),
+        marks.get(session.id)?.working?.text,
+      );
+      const named = job.suggestion?.duckId
+        ? job.suggestion.duckId === me.duck.id
+        : job.suggestion?.sessionId === session.id;
       if (!named && (!hit || hit.score < JOB_MIN_SCORE / 2)) continue;
       out.push({ job, why: hit?.reason ?? job.suggestion?.reason ?? "", score: (hit?.score ?? 0) + (named ? 10 : 0) });
     }
@@ -422,8 +537,10 @@ export class RoomJobs extends EventEmitter {
     if (recent.length >= JOB_CLAIMS_PER_HOUR) throw new JobError("This chat has asked for enough jobs this hour.", 429);
     recent.push(this.now());
     const cleanEta = eta?.replace(/\s+/g, " ").trim().slice(0, 60);
+    const duck = this.o.store.duckBySession(session.id);
     job.claim = {
       sessionId: session.id,
+      ...(duck ? { duckId: duck.id } : {}),
       title: session.title ?? "Untitled",
       ...(cleanEta ? { eta: cleanEta } : {}),
       at: this.now(),
@@ -435,7 +552,7 @@ export class RoomJobs extends EventEmitter {
   // ---- the person's actions ----
 
   async act(projectId: string, jobId: string, body: Record<string, unknown>): Promise<RoomJob> {
-    const unknown = Object.keys(body).filter((k) => k !== "action" && k !== "sessionId");
+    const unknown = Object.keys(body).filter((k) => !["action", "sessionId", "duckId", "place"].includes(k));
     if (unknown.length) throw new JobError(`unknown key: ${unknown[0]}`, 400);
     const action = body.action;
     if (!["go", "new", "dismiss", "allow", "deny"].includes(action as string)) {
@@ -443,6 +560,18 @@ export class RoomJobs extends EventEmitter {
     }
     if (body.sessionId !== undefined && (action !== "go" || typeof body.sessionId !== "string")) {
       throw new JobError("sessionId is only for go, and must be text", 400);
+    }
+    if (
+      body.duckId !== undefined &&
+      (!["go", "allow", "new"].includes(action as string) || typeof body.duckId !== "string")
+    ) {
+      throw new JobError("duckId is only for go, allow and new, and must be text", 400);
+    }
+    if (body.sessionId !== undefined && body.duckId !== undefined) {
+      throw new JobError("give a duckId or a sessionId, not both", 400);
+    }
+    if (body.place !== undefined && !["go", "allow", "new"].includes(action as string)) {
+      throw new JobError("place is only for go, allow and new", 400);
     }
     const found = this.get(jobId);
     if (!found || found.projectId !== projectId) throw new JobError("No such job.", 404);
@@ -454,6 +583,7 @@ export class RoomJobs extends EventEmitter {
         409,
       );
     }
+    const override = body.place !== undefined ? this.cleanPlace(projectId, body.place) : undefined;
     this.busy.add(jobId);
     try {
       switch (action) {
@@ -466,29 +596,68 @@ export class RoomJobs extends EventEmitter {
           return this.save(projectId, job);
         case "allow": {
           if (job.claim?.status !== "asking") throw new JobError("No thread is asking to take this job.", 409);
-          const done = await this.handTo(projectId, job, job.claim.sessionId);
+          const claimer = this.o.store.getSession(job.claim.sessionId);
+          const duck = claimer ? this.o.room.duckOfSession(claimer) : null;
+          if (!duck) throw new JobError("That thread isn't available in this pond any more.", 409);
+          if (body.duckId !== undefined && body.duckId !== duck.id) {
+            throw new JobError("Only the duck that asked can be allowed.", 409);
+          }
+          const done = await this.handTo(
+            projectId,
+            job,
+            duck,
+            override ?? this.placeFor(projectId, job, duck, claimer),
+          );
           if (done.claim) done.claim.status = "allowed";
           return this.save(projectId, done);
         }
         case "go": {
-          const id = (body.sessionId as string | undefined) ?? job.suggestion?.sessionId;
-          if (!id) throw new JobError("There is no thread to send this to; start a new one.", 409);
-          return this.save(projectId, await this.handTo(projectId, job, id));
+          let duck: DuckRow | null = null;
+          let place = override;
+          let pinned = override !== undefined;
+          if (typeof body.duckId === "string") {
+            duck = this.o.store.duckRow(body.duckId);
+            if (!duck || duck.projectId !== projectId) throw new JobError("That duck isn't in this pond.", 409);
+          } else {
+            const id = (body.sessionId as string | undefined) ?? job.suggestion?.sessionId;
+            if (id) {
+              const s = this.o.store.getSession(id);
+              const inPond =
+                s &&
+                !s.archivedAt &&
+                this.o.room.candidates(projectId, Infinity, { offDuty: true }).some((c) => c.session.id === s.id);
+              if (!s || !inPond) throw new JobError("That thread isn't available in this pond any more.", 409);
+              duck = this.o.room.duckOfSession(s);
+              // The person picked that very thread: it continues there, wherever it is.
+              if (!pinned && body.sessionId !== undefined) {
+                place = this.o.room.placeOf(s);
+                pinned = true;
+              }
+            } else if (job.suggestion?.duckId) {
+              duck = this.o.store.duckRow(job.suggestion.duckId);
+            }
+          }
+          if (!duck) throw new JobError("There is no thread to send this to; start a new one.", 409);
+          const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
+          return this.save(
+            projectId,
+            await this.handTo(projectId, job, duck, pinned ? place : this.placeFor(projectId, job, duck, cur)),
+          );
         }
         default: {
           const project = this.o.store.getProject(projectId);
           if (!project) throw new JobError("No such pond.", 404);
-          let child: SessionRow;
-          try {
-            child = await this.o.newThread(projectId, job.text, jobTitle(job.text));
-          } catch (error) {
-            if (error instanceof JobError) throw error;
-            throw new JobError(error instanceof Error ? error.message : "Could not start a thread.", 409);
+          let duck: DuckRow | null = null;
+          if (typeof body.duckId === "string") {
+            duck = this.o.store.duckRow(body.duckId);
+            if (!duck || duck.projectId !== projectId) throw new JobError("That duck isn't in this pond.", 409);
+          } else {
+            duck = this.o.store.createDuck({ projectId, name: this.freshDuckName(projectId, job.text) });
           }
-          job.status = "handed";
-          job.handedTo = { sessionId: child.id, title: child.title ?? jobTitle(job.text), newThread: true };
-          this.save(projectId, job);
-          return this.reconcileJob(projectId, job);
+          const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
+          // "New": always a session of its own, in the chosen place, even for a duck that works elsewhere.
+          const place = override ?? this.placeFor(projectId, job, duck, cur, true);
+          return this.save(projectId, await this.startFor(projectId, job, duck, place, cur));
         }
       }
     } finally {
@@ -496,18 +665,54 @@ export class RoomJobs extends EventEmitter {
     }
   }
 
-  private async handTo(projectId: string, job: RoomJob, sessionId: string): Promise<RoomJob> {
-    const s = this.o.store.getSession(sessionId);
-    const inPond =
-      s &&
-      !s.archivedAt &&
-      this.o.room.candidates(projectId, Infinity, { offDuty: true }).some((c) => c.session.id === s.id);
-    if (!s || !inPond) throw new JobError("That thread isn't available in this pond any more.", 409);
+  /** The place for `duck`: the job's own when the suggested duck takes it, else chosen for this duck. */
+  private placeFor(
+    projectId: string,
+    job: RoomJob,
+    duck: DuckRow,
+    cur: SessionRow | null,
+    forceNew = false,
+  ): JobPlace | undefined {
+    const stored = job.suggestion?.duckId === duck.id ? job.place : undefined;
+    if (stored?.kind === "new" && this.o.checkBranch) {
+      // The branch was free when the job was made; take another one if it is not any more.
+      try {
+        return { kind: "new", branch: this.o.checkBranch(projectId, stored.branch) };
+      } catch {
+        const fresh = this.o.newBranch?.(projectId, job.text);
+        return fresh ? { kind: "new", branch: fresh } : undefined;
+      }
+    }
+    if (stored && !forceNew) return stored;
+    if (forceNew) {
+      const project = this.o.store.getProject(projectId);
+      if (!project || project.kind === "folder") return undefined;
+      const branch = this.o.newBranch?.(projectId, job.text);
+      return branch ? { kind: "new", branch } : undefined;
+    }
+    return this.choosePlace(projectId, job.text, duck, cur);
+  }
+
+  private freshDuckName(projectId: string, text: string): string {
+    const taken = new Set(this.o.store.listDucks(projectId).map((d) => (d.name ?? "").toLowerCase()));
+    const names = DUCK_NAMES.filter((n) => !taken.has(n.toLowerCase()));
+    const h = [...text].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+    const pick = names.length ? names[h % names.length]! : `Duck ${taken.size + 1}`;
+    return pick;
+  }
+
+  /** Hands the job to `duck`: the next turn of its current chat when that is in the place, else a fresh session there. */
+  private async handTo(projectId: string, job: RoomJob, duck: DuckRow, place: JobPlace | undefined): Promise<RoomJob> {
+    const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
+    const live = cur && !cur.archivedAt ? cur : null;
+    const inPlace = live && (!place || (place.kind === "stream" && live.workspaceId === place.workspaceId));
+    if (!inPlace) return this.startFor(projectId, job, duck, place, live);
+    const s = live;
     job.status = "handed";
-    job.handedTo = { sessionId: s.id, title: this.o.room.duckName(s), newThread: false };
+    job.handedTo = { sessionId: s.id, duckId: duck.id, title: this.o.room.duckName(s), newThread: false };
     job.updatedAt = this.now();
     // The person sending a job to an off-duty duck puts it back on duty.
-    this.o.room.setDuty(s.id, true);
+    this.o.room.setDutyById(duck.id, true);
     try {
       await this.o.send(s.id, job.text);
     } catch (error) {
@@ -515,6 +720,51 @@ export class RoomJobs extends EventEmitter {
       job.status = "suggested";
       throw new JobError(error instanceof Error ? error.message : "Could not send it.", 409);
     }
+    this.save(projectId, job);
+    return this.reconcileJob(projectId, job);
+  }
+
+  /** A fresh session for the duck in `place`; the old one stays as history. A duck busy elsewhere cannot start one. */
+  private async startFor(
+    projectId: string,
+    job: RoomJob,
+    duck: DuckRow,
+    place: JobPlace | undefined,
+    cur: SessionRow | null,
+  ): Promise<RoomJob> {
+    if (cur && !cur.archivedAt && this.o.room.duckView(duck).state !== "idle") {
+      const name = duck.name ?? this.o.room.duckName(cur);
+      throw new JobError(`${name} is busy in another stream; wait for it to finish, or let it claim this after.`, 409);
+    }
+    this.o.room.setDutyById(duck.id, true);
+    let child: SessionRow;
+    try {
+      if (this.o.start) {
+        child = await this.o.start({
+          projectId,
+          duck,
+          ...(place ? { place } : {}),
+          text: job.text,
+          title: jobTitle(job.text),
+        });
+      } else {
+        child = await this.o.newThread(projectId, job.text, jobTitle(job.text));
+        this.o.store.attachSessionToDuck(duck.id, child.id);
+      }
+    } catch (error) {
+      if (error instanceof JobError) throw error;
+      throw new JobError(error instanceof Error ? error.message : "Could not start a thread.", 409);
+    }
+    this.o.store.attachSessionToDuck(duck.id, child.id);
+    this.o.room.emitDuck(duck.id);
+    job.status = "handed";
+    job.handedTo = {
+      sessionId: child.id,
+      duckId: duck.id,
+      title: child.title ?? jobTitle(job.text),
+      newThread: true,
+    };
+    if (place) job.place = place;
     this.save(projectId, job);
     return this.reconcileJob(projectId, job);
   }
@@ -573,10 +823,36 @@ export class RoomJobs extends EventEmitter {
   }
 }
 
+/** Short names a new duck is given (the first one not used in the pond, picked by the job's words). */
+const DUCK_NAMES = [
+  "Pip",
+  "Mallow",
+  "Dabble",
+  "Quill",
+  "Teal",
+  "Bobbin",
+  "Puddle",
+  "Waddle",
+  "Sorrel",
+  "Pebble",
+  "Nib",
+  "Ripple",
+  "Tansy",
+  "Mina",
+  "Otter",
+  "Fennel",
+  "Bramble",
+  "Juniper",
+  "Wren",
+  "Clover",
+];
+
 function ref(s: Scored): JobThreadRef {
   return {
-    sessionId: s.session.id,
-    title: s.session.title ?? "Untitled",
+    duckId: s.duck.id,
+    name: s.duck.name ?? s.session?.title ?? "Duck",
+    sessionId: s.session?.id ?? "",
+    title: s.session?.title ?? s.duck.name ?? "Untitled",
     reason: s.reason,
     pitch: s.pitch,
     state: s.state === "working" ? "working" : "idle",

@@ -20,7 +20,7 @@ export interface ThreadContextInput {
   /** Someone other than the owner has already written in this thread. */
   shared?: boolean;
   /** This chat's duck: its name (the person's, else the chat title) and the role the person gave it. */
-  duck?: { name: string; role?: string | null };
+  duck?: { name: string; role?: string | null; notebook?: string | null };
 }
 
 /** The one paragraph of the ask format the note carries: question above lettered options. Reuses the constant. */
@@ -74,7 +74,12 @@ export function buildThreadContext(input: ThreadContextInput): string {
     "The room also holds jobs the owner asked for. Near the end of a turn, call open_jobs; if one fits what you just did, call claim_job with an eta, and never start it until the owner sends it to you.",
     ...(input.duck
       ? [
-          `You are ${input.duck.name}, a duck in ${input.pond ?? "this pond"}${input.duck.role ? `; your role: ${input.duck.role}` : ""}.`,
+          `You are ${input.duck.name}, a duck in ${input.pond ?? "this pond"}${input.duck.role ? `; your role: ${input.duck.role}` : ""}. A duck belongs to the pond and moves between streams per job; you work in the stream named above, and the person may later start you in another one with a fresh chat.`,
+          ...(input.duck.notebook?.trim()
+            ? [
+                `Your notebook (what you did in earlier jobs, oldest first; trust it as your own memory, check the code before relying on details):\n${input.duck.notebook.trim()}`,
+              ]
+            : []),
         ]
       : []),
     input.agent === "claude"

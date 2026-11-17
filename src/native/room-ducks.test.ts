@@ -157,7 +157,7 @@ describe("ducks", () => {
     expect(noRole).toEqual([]);
     h.srv.room.setDuck(s.id, { role: "Webcam layout builder" });
     const [hit] = h.srv.jobs.rank(h.project.id, "fix webcam layout");
-    expect(hit!.session.id).toBe(s.id);
+    expect(hit!.session!.id).toBe(s.id);
     expect(hit!.score).toBeGreaterThanOrEqual(6);
 
     const pond = h.srv.room;
@@ -180,7 +180,7 @@ describe("ducks", () => {
     h.store.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(iso(60), t.id);
     const ranked = pond && h.srv.jobs.rank(h.project.id, "tweak the control bar");
     const top = ranked![0]!;
-    expect(top.session.id).toBe(t.id);
+    expect(top.session!.id).toBe(t.id);
     expect(top.pitch).toMatch(/^worked on .*(control|bar).* (1 h|60 min) ago$/);
     const post = h.srv.room.personPost(h.project.id, "tweak the control bar");
     const job = h.srv.jobs.fromMessage(h.project.id, post.id);

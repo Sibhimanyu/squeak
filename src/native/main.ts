@@ -1,3 +1,4 @@
+import { flag } from "../squeak/flags.js";
 import path from "node:path";
 
 import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
@@ -47,7 +48,11 @@ export async function runHost(supportDir: string): Promise<void> {
     claudeAiConnectors: () => new AgentSettings(supportDir).get().claudeAiConnectors,
     ownerName: () => flotilla?.service?.identity.name ?? null,
   });
-  const room = new Room({ store, ownerName: () => flotilla?.service?.identity.name ?? null });
+  const room = new Room({
+    store,
+    ownerName: () => flotilla?.service?.identity.name ?? null,
+    ...(flag("roomSummary") ? { notebookSummary: "default" as const } : {}),
+  });
   attachSqueakPosts(host, store, room);
   try {
     store.dropSqueakTurnPosts();
@@ -60,6 +65,9 @@ export async function runHost(supportDir: string): Promise<void> {
     room,
     send: (id, text) => host.send(id, text),
     newThread: (projectId, text, title) => server!.newJobThread(projectId, text, title),
+    start: (spec) => server!.startDuckSession(spec),
+    newBranch: (projectId, text) => server!.newStreamBranch(projectId, text),
+    checkBranch: (projectId, branch) => server!.checkStreamBranch(projectId, branch),
   });
   jobs.attach(host);
   const workspaces = new WorkspaceManager({ store });
