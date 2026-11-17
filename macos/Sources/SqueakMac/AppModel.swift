@@ -516,6 +516,8 @@ final class AppModel {
     }
 
     private func handle(_ event: BrokerEvent) async {
+        let post = Signposts.begin(Signposts.Name.pollApply)
+        defer { Signposts.end(Signposts.Name.pollApply, post) }
         switch event {
         case .catalogChanged:
             _ = publishIfChanged(self, \.hostSessions, await broker.sessions())
@@ -535,6 +537,8 @@ final class AppModel {
             await refreshNeedsYouText()
             await refreshAsks()
         case .messagesChanged(let key):
+            let tpost = Signposts.begin(Signposts.Name.transcriptApply)
+            defer { Signposts.end(Signposts.Name.transcriptApply, tpost) }
             let all = await broker.messages(for: key)
             knownMessages[key] = all
             derived.messagesChanged(key)
@@ -1061,6 +1065,10 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
+        Signposts.interval(Signposts.Name.tabSwitch) { selectUnmeasured(key) }
+    }
+
+    private func selectUnmeasured(_ key: SessionKey?) {
         if let key { lastWorkspaceSession = key; registerTab(key) }
         if key != nil { NewChatController.shared.hide() }
         if key != nil, navFilter == .usage { navFilter = .all }
@@ -1926,9 +1934,11 @@ final class AppModel {
 
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {
-        NewChatController.shared.hide()
-        settingsSection = section ?? lastSettingsSection
-        showConversationWindow()
+        Signposts.interval(Signposts.Name.settingsOpen) {
+            NewChatController.shared.hide()
+            settingsSection = section ?? lastSettingsSection
+            showConversationWindow()
+        }
     }
 
     /// Switches the page without opening a window (captures, which host the window themselves).

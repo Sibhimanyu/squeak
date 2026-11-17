@@ -130,3 +130,33 @@ struct PollThrottleTests {
         do { let r = t.shouldRead(base: 3, max: 12, presence: .active, now: now); #expect(r == true) }
     }
 }
+
+@Suite("Perf: an unchanged poll publishes nothing")
+struct PollDiffTests {
+    @Observable final class Store { var sessions: [HostSession] = [] }
+
+    private func session(_ n: Int, title: String = "t") -> HostSession {
+        HostSession(key: SessionKey(provider: "squeak", hostSessionId: "s\(n)"), title: "\(title)\(n)", state: .finished)
+    }
+
+    @Test func samePollTwiceWakesNobodyAndOneChangedSessionWakesOnce() {
+        let store = Store()
+        let list = (0..<200).map { session($0) }
+        #expect(publishIfChanged(store, \.sessions, list))
+        final class Counter: @unchecked Sendable { var n = 0 }
+        let counter = Counter()
+        func watch() { withObservationTracking { _ = store.sessions } onChange: { counter.n += 1 } }
+        watch()
+        // A poll that decodes to an equal list (a fresh array, fresh values) changes nothing.
+        #expect(!publishIfChanged(store, \.sessions, (0..<200).map { session($0) }))
+        #expect(counter.n == 0)
+        var next = list
+        next[37].title = "renamed"
+        #expect(publishIfChanged(store, \.sessions, next))
+        #expect(counter.n == 1)
+    }
+
+    @Test func signpostIntervalReturnsTheBodysValue() {
+        #expect(Signposts.interval(Signposts.Name.tabSwitch) { 42 } == 42)
+    }
+}
