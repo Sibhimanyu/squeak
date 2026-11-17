@@ -37,12 +37,20 @@ extension AppModel {
         openInStream(key)
     }
 
-    /// What a click in the room opens: a duck's tab, or a duck's tab with its ducklings' tabs. An off-duty duck is the
-    /// caller's to put back on duty.
-    func openFromPond(_ target: PondOpenTarget, pond: String?, page: PondPage) {
-        guard let s = allSessions.first(where: { $0.key.hostSessionId == target.duck && $0.source == .squeak }) else { return }
+    /// The chat a clicked duck id names (a turn id is read as its session), among the Squeak chats the host lists.
+    func pondDuckSession(_ clicked: String) -> HostSession? {
+        let ducks = allSessions.filter { $0.source == .squeak }
+        guard let id = PondOpenResolver.sessionId(for: clicked, among: Set(ducks.map(\.key.hostSessionId))) else { return nil }
+        return ducks.first { $0.key.hostSessionId == id }
+    }
+
+    /// What a click in the room opens: a duck's tab, or a duck's tab with its ducklings' tabs. False when no chat is known
+    /// for the duck (nothing opened); an off-duty duck is the caller's to put back on duty.
+    @discardableResult
+    func openFromPond(_ target: PondOpenTarget, pond: String?, page: PondPage) -> Bool {
+        guard let s = pondDuckSession(target.duck) else { return false }
         openFromPond(s.key, pond: pond, page: page)
-        guard case .ducklings(_, let labels) = target, let items = ducklings(for: s)?.items else { return }
+        guard case .ducklings(_, let labels) = target, let items = ducklings(for: s)?.items else { return true }
         let wanted = labels.isEmpty ? items : items.filter { d in
             labels.contains { l in d.title.localizedCaseInsensitiveContains(l) || l.localizedCaseInsensitiveContains(d.title) }
         }
@@ -51,6 +59,7 @@ extension AppModel {
             if let pond { PondOrigin.shared.opened(tab: PondOrigin.ducklingTab(ref), pond: pond, page: page) }
             DockStore.shared.openDuckling(ref)
         }
+        return true
     }
 }
 
