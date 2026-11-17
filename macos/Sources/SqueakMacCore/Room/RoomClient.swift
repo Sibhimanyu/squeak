@@ -7,6 +7,8 @@ public enum RoomStreamEvent: Sendable, Equatable {
     case turn(RoomTurn)
     /// A job appeared or changed (room jobs): upsert by id.
     case job(RoomJob)
+    /// A duck's name, role or duty changed (`thread` frame): upsert by session id.
+    case thread(RoomThread)
     /// The stream (re)connected after a drop: read `since` what is held.
     case reconnected
 }
@@ -52,6 +54,22 @@ public struct RoomClient: Sendable {
     public func act(project: String, jobId: String, action: RoomJobAction) async throws -> RoomJob {
         let path = Self.path(project) + "/jobs/" + NativeHostClient.id(jobId)
         return try Self.job(try await host.call("POST", path, body: action.body, timeout: 20))
+    }
+
+    /// Rename a duck or set its role: `PATCH /native/sessions/<id>/duck { name?, role? }` (null clears). Answers the chosen pair.
+    @discardableResult
+    public func patchDuck(sessionId: String, name: RoomDuckField = .unchanged, role: RoomDuckField = .unchanged) async throws -> (name: String?, role: String?) {
+        var o: [String: NativeJSON] = [:]
+        if let v = name.json { o["name"] = v }
+        if let v = role.json { o["role"] = v }
+        let data = try await host.call("PATCH", "/native/sessions/\(NativeHostClient.id(sessionId))/duck", body: .object(o), timeout: 15)
+        let j = NativeJSON.parse(String(decoding: data, as: UTF8.self))
+        return (j?["name"]?.string, j?["role"]?.string)
+    }
+
+    /// Put a duck on or off duty: `POST /native/sessions/<id>/duty { on }`.
+    public func setDuty(sessionId: String, on: Bool) async throws {
+        _ = try await host.call("POST", "/native/sessions/\(NativeHostClient.id(sessionId))/duty", body: .object(["on": .bool(on)]), timeout: 15)
     }
 
     /// The stream sends the bare job; a wrapped `{ job }` is read too.
@@ -104,6 +122,10 @@ public struct RoomClient: Sendable {
                                 }
                             case "job":
                                 if let data = frame.data.data(using: .utf8), let j = Self.streamedJob(data) { continuation.yield(.job(j)) }
+                            case "thread":
+                                if let data = frame.data.data(using: .utf8), let t = try? JSONDecoder().decode(RoomThread.self, from: data) {
+                                    continuation.yield(.thread(t))
+                                }
                             default: break
                             }
                         }
@@ -118,5 +140,13 @@ public struct RoomClient: Sendable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+}
+
+/// A field of a duck PATCH: left alone, set, or cleared (null).
+public enum RoomDuckField: Sendable, Equatable {
+    case unchanged, set(String), clear
+    var json: NativeJSON? {
+        switch self { case .unchanged: nil; case .set(let s): .string(s); case .clear: .null }
     }
 }

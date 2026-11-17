@@ -98,18 +98,14 @@ struct ConversationView: View {
 
     @AppStorage("roomInspectorOpen") private var roomInspectorOpen = true
 
-    /// The pond room on screen, if any: its project id and the pond's directory key.
+    /// The pond room on screen, if any: its project id and the pond's directory key (the pond page's Room view).
     private var roomContext: (projectId: String, key: String)? {
         if let route = PondsModel.shared.route {
             guard case .home(let key) = route, RoomViewPref.shared.mode(for: key) == .room else { return nil }
             if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
             return PondsModel.shared.native(key: key).map { ($0.id, key) }
         }
-        guard let s = model.selectedSession, let place = model.sidebarTree.place(of: s.key),
-            let project = model.nativeWorkspace(of: place.workspace)?.projectId, RoomSelection.shared.isOpen(project),
-            let key = PondsModel.shared.key(of: s)
-        else { return nil }
-        return (project, key)
+        return nil
     }
 
     @ViewBuilder private var windowContent: some View {

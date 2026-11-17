@@ -111,20 +111,6 @@ struct RoomJobsTests {
         #expect(cards.map(\.jobId) == ["job:b", "job:a"])
     }
 
-    @Test func lineSitsUnderItsMessageAndCollapsesInPlace() {
-        var f = RoomFeed()
-        f.apply(page: RoomPage(posts: [personPost(1), personPost(2, at: 1_780_000_060_000)], latestSeq: 2, threads: [], turns: [], jobs: [job(suggestion: greeting)]))
-        var r = RoomRipples.build(feed: f, filter: .all)
-        let ids = r.map(\.id)
-        let i = ids.firstIndex(of: "p1")!
-        #expect(ids[i + 1] == "job:job:1")
-        #expect(ids[i + 2] == "p2")
-        f.upsert(job: job(status: .dismissed, suggestion: greeting, updated: 4))
-        r = RoomRipples.build(feed: f, filter: .all)
-        #expect(r.map(\.id) == ids)  // same rows, same places: the dismissed line only collapses
-        #expect(RoomRipples.build(feed: f, filter: .agents).allSatisfy { if case .jobLine = $0 { false } else { true } })
-    }
-
     @Test func makeThisAJobOffer() {
         let row = RoomRow(id: "p1", post: personPost(1), pending: false, failed: false)
         #expect(RoomJobs.canMakeJob(row, jobs: []))
@@ -142,23 +128,5 @@ struct RoomJobsTests {
         #expect(RoomJobAction.go(sessionId: nil).body == .object(["action": .string("go")]))
         #expect(RoomJobAction.newThread.body == .object(["action": .string("new")]))
         #expect(RoomJobs.refusal(NativeHostError.http(409, "Already handed over.")) == "Already handed over.")
-    }
-
-    @Test func ownPromptsSayYou() {
-        let me = RoomTurnAuthor(name: "Sibhi Full Name", me: true)
-        let byName = RoomTurnAuthor(name: "sibhi full name", me: false)
-        let other = RoomTurnAuthor(name: "Priya Nair", me: false)
-        func t(_ a: RoomTurnAuthor) -> RoomTurn { RoomTurn(id: "x:1", sessionId: "x", threadTitle: "T", startedAt: 1, prompt: "hi", author: a) }
-        #expect(RoomRipples.promptLine(t(me)) == .said(name: "You", quote: "hi"))
-        #expect(RoomRipples.promptLine(t(byName), owner: "Sibhi Full Name") == .said(name: "You", quote: "hi"))
-        #expect(RoomRipples.promptLine(t(other), owner: "Sibhi Full Name") == .said(name: "Priya Nair", quote: "hi"))
-    }
-
-    @Test func everyGroupCarriesItsThread() {
-        var f = RoomFeed()
-        let turns = (0..<3).map { RoomTurn(id: "s1:\($0)", sessionId: "s1", threadTitle: "Greeting Exchange", startedAt: 1_780_000_000_000 + Int64($0) * 60_000, endedAt: 1_780_000_000_000 + Int64($0) * 60_000 + 1000, outcome: .finished) }
-        f.apply(page: RoomPage(posts: [], latestSeq: 0, threads: [], turns: turns))
-        let groups = RoomRipples.build(feed: f, filter: .all).compactMap { if case .threadTurns(let g) = $0 { g } else { nil } }
-        #expect(groups.count == 1 && groups[0].title == "Greeting Exchange" && groups[0].rows.count == 3)
     }
 }

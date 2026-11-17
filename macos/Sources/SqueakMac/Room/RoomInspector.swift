@@ -2,12 +2,14 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The room's right column: Flock, Invite by email, Today, Pond controls. Only rows with a real setting behind them.
+// The room's right column (draft A): People, then Ducks with role and presence; below, Invite by email and Pond controls.
+// Only rows with a real setting behind them.
 
 struct RoomInspector: View {
     let key: String
-    let today: RoomSummary.Today
+    let room: PondRoomModel
     @Environment(AppModel.self) private var model
+    @State private var editing: DuckEdit?
     @State private var email = ""
     @State private var inviting = false
     @State private var inviteLine: String?
@@ -21,8 +23,8 @@ struct RoomInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 flock
+                ducksList
                 if role.canInvite { invite }
-                todayTiles
                 controls
             }
             .padding(.horizontal, Space.xl).padding(.vertical, Space.xl)
@@ -38,7 +40,12 @@ struct RoomInspector: View {
         }
     }
 
-    // MARK: Flock
+    // MARK: People and ducks
+
+    private func label(_ t: String, _ n: Int) -> some View {
+        Text(verbatim: "\(t) \u{00B7} \(n)").font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
+            .accessibilityAddTraits(.isHeader)
+    }
 
     private var flock: some View {
         let presence = detail?.presence ?? []
@@ -46,35 +53,63 @@ struct RoomInspector: View {
             ?? [FlockMember(id: "me", name: me, role: .owner, nest: "This Mac", online: true, you: true)]
         let waiting = PondInvites.rows(detail?.invites ?? [], now: Date()).filter(\.pending)
         let offline = ponds.freshness(pond).isProblem
-        return VStack(alignment: .leading, spacing: 12) {
-            heading("Flock", trailing: members.count == 1 ? "1 person" : "\(members.count) people")
+        return VStack(alignment: .leading, spacing: 4) {
+            label("People", members.count)
             ForEach(members) { m in
                 let online = PondFlock.isOnline(m, presence: presence) && !offline
-                let seen = detail.flatMap { PondMembers.seen(m, presence: presence, threads: $0.threads, pondOffline: offline, now: Date()) }
-                HStack(spacing: 10) {
-                    FlockAvatar(member: m, online: online, size: 32)
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 4) {
-                            Text(verbatim: m.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                            if m.you { Text("(you)").font(.system(size: 14)).foregroundStyle(Theme.muted) }
+                HStack(spacing: 11) {
+                    PersonAvatar(name: m.name, size: 34)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(verbatim: m.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                            if m.you { Text("You").font(.system(size: 11)).foregroundStyle(Theme.subtle) }
                         }
-                        Text(verbatim: [PondMembers.chip(m), m.you ? "on this Mac" : seen].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                            .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(verbatim: m.you ? PondMembers.chip(m) : [PondMembers.chip(m), online ? "online" : nil].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                            .font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                 }
+                .padding(.horizontal, 6).padding(.vertical, 7)
                 .accessibilityElement(children: .combine)
             }
             ForEach(waiting) { r in
-                HStack(spacing: 10) {
-                    Text(verbatim: String(r.title.prefix(2)).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 32).background(Theme.selected, in: Circle())
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(verbatim: r.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
-                        Text("Invited \u{00B7} waiting").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                HStack(spacing: 11) {
+                    PersonAvatar(name: r.title, size: 34)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(verbatim: r.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                        Text("Invited \u{00B7} waiting").font(.system(size: 11)).foregroundStyle(Theme.muted)
                     }
                 }
+                .padding(.horizontal, 6).padding(.vertical, 7)
                 .accessibilityElement(children: .combine)
             }
+        }
+    }
+
+    private var ducksList: some View {
+        let ducks = RoomDucks.roster(room.feed.threads)
+        return VStack(alignment: .leading, spacing: 4) {
+            label("Ducks", ducks.count)
+            if ducks.isEmpty {
+                Text("No ducks yet. Start one and it joins the room.").font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
+            }
+            ForEach(ducks) { d in DuckRow(duck: d, open: { openDuck(d.sessionId) }, edit: { editing = DuckEdit(sessionId: d.sessionId, field: $0, text: $0 == .name ? d.name : (d.role ?? "")) },
+                                          duty: { on in Task { await room.setDuty(sessionId: d.sessionId, on: on, host: model.nativeHost) } }) }
+        }
+        .sheet(item: $editing) { e in
+            DuckEditSheet(edit: e) { text in
+                let field: RoomDuckField = e.field == .name ? (RoomDucks.cleanName(text).map { .set($0) } ?? .unchanged) : (RoomDucks.cleanRole(text) ?? .unchanged)
+                if field == .unchanged { return "That is too long." }
+                return await room.edit(sessionId: e.sessionId, name: e.field == .name ? field : .unchanged, role: e.field == .role ? field : .unchanged, host: model.nativeHost)
+            }
+        }
+    }
+
+    private func openDuck(_ sessionId: String) {
+        guard let s = model.allSessions.first(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
+        PondsModel.shared.route = nil
+        model.select(s.key)
+        if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
+            Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
         }
     }
 
@@ -118,26 +153,7 @@ struct RoomInspector: View {
         }
     }
 
-    // MARK: Today and controls
-
-    private var todayTiles: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            heading("Today")
-            HStack(spacing: 8) {
-                tile(today.turns, "turns"); tile(today.files, "files"); tile(today.threads, "threads")
-            }
-        }
-    }
-
-    private func tile(_ n: Int, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(n)").font(.system(size: 20, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.ink)
-            Text(verbatim: label).font(.system(size: 12)).foregroundStyle(Theme.muted)
-        }
-        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-        .accessibilityElement(children: .ignore).accessibilityLabel("\(n) \(label) today")
-    }
+    // MARK: Controls
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -174,10 +190,106 @@ struct RoomRightColumn: View {
         let room = PondRoomStore.shared.model(for: projectId)
         VStack(spacing: 0) {
             Color.clear.frame(height: Metrics.header).background(WindowDragArea())
-            RoomInspector(key: key, today: RoomSummary.today(turns: room.feed.turns))
+            RoomInspector(key: key, room: room)
         }
         .frame(width: width).frame(maxHeight: .infinity).clipped()
         .background(Theme.bg.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
+    }
+}
+
+struct DuckEdit: Identifiable {
+    enum Field { case name, role }
+    var id: String { sessionId + (field == .name ? ":name" : ":role") }
+    var sessionId: String
+    var field: Field
+    var text: String
+}
+
+/// One duck in the roster: avatar, name and agent, role, presence. Click opens its tab; the menu renames, sets a role or
+/// changes its duty.
+private struct DuckRow: View {
+    let duck: RoomDuck
+    let open: () -> Void
+    let edit: (DuckEdit.Field) -> Void
+    let duty: (Bool) -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(alignment: .center, spacing: 11) {
+                DuckAvatar(sessionId: duck.sessionId, agent: duck.agent, size: 34, off: !duck.onDuty)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(verbatim: duck.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        if let l = duck.agentLabel { Text(verbatim: l).font(.system(size: 11)).foregroundStyle(Theme.subtle) }
+                    }
+                    if let r = duck.roleLine { Text(verbatim: r).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 5) {
+                        switch duck.presence {
+                        case .working: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .leading, grid: .micro)
+                        case .waiting: Lucide(.triangleAlert, size: 11, color: Theme.warning)
+                        case .idle, .off: EmptyView()
+                        }
+                        Text(verbatim: duck.presenceLine).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    }
+                    .padding(.top, 1)
+                }
+                Spacer(minLength: 0)
+            }
+            .opacity(duck.onDuty ? 1 : 0.5)
+            .padding(.horizontal, 6).padding(.vertical, 7)
+            .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).onHover { hover = $0 }
+        .contextMenu {
+            Button("Rename\u{2026}") { edit(.name) }
+            Button("Set role\u{2026}") { edit(.role) }
+            Divider()
+            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring on duty") { duty(true) } }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.roleLine ?? ""). \(duck.presenceLine)")
+        .accessibilityHint("Opens the duck")
+    }
+}
+
+/// Rename a duck or set its role: one field, Save sends it (`PATCH .../duck`), a refusal shows under it.
+private struct DuckEditSheet: View {
+    let edit: DuckEdit
+    let save: (String) async -> String?
+    @State private var text: String
+    @State private var problem: String?
+    @State private var saving = false
+    @Environment(\.dismiss) private var dismiss
+
+    init(edit: DuckEdit, save: @escaping (String) async -> String?) {
+        self.edit = edit; self.save = save; _text = State(initialValue: edit.text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(edit.field == .name ? "Rename duck" : "Set role").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+            TextField(edit.field == .name ? "Name" : "One line, like \u{201C}Layout builder\u{201D}", text: $text).textFieldStyle(.plain).font(.system(size: 14)).onSubmit(go)
+                .padding(.horizontal, 12).frame(height: 36)
+                .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
+            if let p = problem { Text(verbatim: p).font(.system(size: 12)).foregroundStyle(Theme.negative) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+                Button(saving ? "Saving\u{2026}" : "Save", action: go).buttonStyle(SecondaryButtonStyle()).disabled(saving)
+            }
+        }
+        .padding(20).frame(width: 340).background(Theme.bg)
+    }
+
+    private func go() {
+        saving = true
+        Task {
+            let r = await save(text)
+            saving = false
+            if let r { problem = r } else { dismiss() }
+        }
     }
 }

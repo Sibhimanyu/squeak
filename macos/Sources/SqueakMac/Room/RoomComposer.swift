@@ -2,11 +2,12 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The composer: "To [Everyone v]", an @ picker for a thread or a person, Return sends, Shift-Return starts a line.
-// To a thread it is that chat's own send path (RoomView.sendTo); to Everyone it is a room message.
+// The composer (draft A): "Message <Pond>, or @ a duck…", an @ picker for a duck or a person, Return sends, Shift-Return
+// starts a line. To a duck it is that chat's own send path (PondRoomView.sendTo); to the room it is a room message.
 
 struct RoomComposer: View {
     let room: PondRoomModel
+    let pondName: String
     let send: (RoomAddressee, String) -> Void
     @Environment(AppModel.self) private var model
     @State private var draft = ""
@@ -31,16 +32,16 @@ struct RoomComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            addressRow
             ComposerField(
-                text: $draft, sendKey: .returnSends, placeholder: "Message the pond, or type @ to steer a thread",
+                text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
                 onSend: submit, onContentHeight: { contentHeight = $0 }, onPickerKey: pickerKey, onFocus: { focused = $0 }
             )
-            .frame(height: min(max(contentHeight, 30), 140)).padding(.horizontal, 10)
-            hintsRow
+            .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
+            bar
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
+        .padding(.horizontal, 14).padding(.bottom, 10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
         .overlay(alignment: .bottomLeading) {
             if mention != nil, !candidates.isEmpty { picker(candidates).offset(y: -(contentHeight + 56)).padding(.leading, 12) }
         }
@@ -48,56 +49,36 @@ struct RoomComposer: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var addressRow: some View {
+    private var bar: some View {
         HStack(spacing: 8) {
-            Text("To").font(.system(size: 13)).foregroundStyle(Theme.subtle)
             Button { chooser.toggle() } label: {
-                HStack(spacing: 6) {
-                    if case .thread(let id, _) = to { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 16) }
-                    Text(verbatim: to.label).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, 8).frame(height: 24).background(Theme.selected, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .contentShape(Rectangle())
+                Image(systemName: "at").font(.system(size: 14)).foregroundStyle(Theme.subtle).frame(width: 24, height: 24).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).accessibilityLabel("Send to \(to.label)").accessibilityHint("Choose who this goes to")
+            .buttonStyle(.plain).accessibilityLabel("Choose who this goes to").help("Send to a duck or a person")
             .popover(isPresented: $chooser, arrowEdge: .top) {
                 picker(RoomMention.candidates(query: "", threads: room.feed.threads, people: people), everyone: true)
             }
-            if to == .everyone {
-                Text("Press @ to pick a thread or a person").font(.system(size: 13)).foregroundStyle(Theme.subtle).lineLimit(1)
+            if to != .everyone {
+                HStack(spacing: 6) {
+                    if case .thread(let id, _) = to { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 14) }
+                    Text(verbatim: "To \(to.label)").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Button { to = .everyone } label: { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(Theme.muted) }
+                        .buttonStyle(.plain).accessibilityLabel("Send to the whole pond instead")
+                }
+                .padding(.horizontal, 8).frame(height: 22).background(Theme.selected, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14).padding(.top, 10)
-    }
-
-    private var hintsRow: some View {
-        HStack(spacing: 14) {
-            hint("@", "thread"); hint("Return", "send"); hint("Shift Return", "new line")
-            Spacer(minLength: 0)
             Button(action: submit) {
-                Lucide(.arrowUp, size: 16, color: canSend ? Theme.primaryText : Theme.muted)
-                    .frame(width: 28, height: 28)
-                    .background(canSend ? Theme.primaryFill : Theme.selected, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Lucide(.arrowUp, size: 14, color: canSend ? Theme.primaryText : Theme.ink)
+                    .frame(width: 26, height: 26).background(canSend ? Theme.primaryFill : Theme.selectedStrong, in: Circle())
             }
             .buttonStyle(.plain).disabled(!canSend).accessibilityLabel("Send")
         }
-        .padding(.horizontal, 12).padding(.bottom, 10).padding(.top, 4)
-    }
-
-    private func hint(_ key: String, _ word: String) -> some View {
-        HStack(spacing: 6) {
-            Text(verbatim: key).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 6).frame(height: 18).background(Theme.selected, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-            Text(verbatim: word).font(.system(size: 12)).foregroundStyle(Theme.subtle)
-        }
-        .accessibilityElement(children: .combine)
     }
 
     private func picker(_ list: [RoomMention.Candidate], everyone: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if everyone { row(.init(id: "all", addressee: .everyone, subtitle: "The whole pond"), index: -1) }
+            if everyone { row(.init(id: "all", addressee: .everyone, subtitle: "Everyone in the room"), index: -1) }
             ForEach(Array(list.prefix(8).enumerated()), id: \.element.id) { i, c in row(c, index: everyone ? -1 : i) }
         }
         .padding(6).frame(width: 300)
