@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.29.2
+
+- Coming back to Squeak from another Space no longer flips a finished chat to Idle and back.
+
 ## 2.29.1
 
 - New threads really start in Skip approvals now: picking a preset no longer switches them back to Ask.
