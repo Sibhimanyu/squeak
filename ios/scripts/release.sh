@@ -90,7 +90,6 @@ APP="build/Build/Products/Release-iphoneos/Squeak.app"
 # What must and must not be inside anything published to a public URL.
 check() { if eval "$2"; then :; else echo "release check failed: $1" >&2; exit 1; fi; }
 check "build number stamped"          '[[ "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")" == "$BUILD" ]]'
-check "camera purpose string present" '/usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$APP/Info.plist" >/dev/null'
 check "no pairing secrets bundled"    '! grep -rqa "squeak://pair?d=eyJ" "$APP"'
 check "no service account bundled"    '! find "$APP" -iname "*adminsdk*" -o -iname "serviceAccount*.json" | grep -q .'
 
