@@ -245,7 +245,7 @@ export class RoomJobs extends EventEmitter {
     const call = (this.call ??= defaultTitleCall());
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), this.o.timeoutMs ?? TITLE_TIMEOUT_MS);
-    let answer: { job: boolean; text: string } | null = null;
+    let answer: { job: boolean; text: string } | null;
     try {
       const timedOut = new Promise<never>((_, reject) =>
         abort.signal.addEventListener("abort", () => reject(new Error("job check timed out")), { once: true }),

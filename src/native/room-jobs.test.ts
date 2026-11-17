@@ -342,7 +342,7 @@ describe("tools and routes", () => {
     const post = h.srv.room.personPost(h.project.id, "fix the layout builder spacing");
     const job = h.srv.jobs.fromMessage(h.project.id, post.id);
     const tool = async (name: string, args: Record<string, unknown> = {}) => {
-      const res = await handleMcpMessage(h.srv.tools, s.id, {
+      const res = await handleMcpMessage((h.srv as any).tools, s.id, {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
