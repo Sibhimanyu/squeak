@@ -209,6 +209,24 @@ import Testing
         #expect(f.activePreset == .custom && f.presetChoices == [.best, .balanced, .save, .custom])
     }
 
+    @Test func presetsAndPlanFirstNeverDropANewThreadToAsk() {
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        #expect(f.mode == .skipApprovals)
+        f.apply(preset: .balanced)
+        #expect(f.mode == .skipApprovals && NativeModes.permissionMode(f.mode) == "bypassPermissions")
+        f.set(planFirst: true)
+        #expect(f.mode == .plan)
+        f.set(planFirst: false)
+        #expect(f.mode == .skipApprovals)
+        f.apply(preset: .save)
+        #expect(f.mode == .skipApprovals)
+        f.mode = .acceptEdits // the person's own pick survives a preset
+        f.apply(preset: .best)
+        f.set(planFirst: false)
+        #expect(f.mode == .acceptEdits)
+    }
+
     @Test func presetRowsSayWhatTheyDoAndCustomIsDetected() {
         var f = NativeNewChatForm()
         f.setModels(Self.composerModels)

@@ -614,12 +614,13 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if dock.showsRow {
-                liveRow
-            } else if WorkbenchNav.attention(model) != nil {
-                HStack {
-                    Spacer(minLength: 0)
-                    NextAttentionPill()
+            // One row, one pill: the live row (when a turn runs) at the left, the next-attention pill at the right.
+            let attentionRow = DockAttentionRow.layout(showsLiveRow: dock.showsRow, hasAttentionJump: WorkbenchNav.attention(model) != nil)
+            if attentionRow.showsRow {
+                HStack(spacing: 10) {
+                    if attentionRow.showsLive { liveRow }
+                    Spacer(minLength: 8)
+                    if attentionRow.showsPill { NextAttentionPill() }
                 }
                 .frame(height: 40)
             }

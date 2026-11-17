@@ -143,7 +143,6 @@ struct NextAttentionPill: View {
             .buttonStyle(.plain)
             .help("Go to the next chat that needs you (⌥⌘L)")
             .accessibilityLabel(jump.label)
-            .transition(.opacity)
         }
     }
 }
