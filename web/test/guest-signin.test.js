@@ -139,11 +139,11 @@ describe("the guest page with accounts", () => {
     const p = page({ account: null });
     await p.started;
     expect(text(p.root)).toContain("Join Site");
-    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Continue with Zoho, Google or email", "Cancel"]);
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Sign in to join", "Cancel"]);
     expect(all(p.root).some((n) => n.tag === "input")).toBe(false);
     const parked = await p.vault.read(PENDING);
     expect(parked.pondId).toBe(pondId);
-    p.press("Continue with");
+    p.press("Sign in to join");
     expect(p.calls.signIn).toBe(1);
   });
 
@@ -189,7 +189,7 @@ describe("the guest page with accounts", () => {
     expect(text(p.root)).toContain("Join Site");
     expect(text(p.root)).toContain("I couldn't check your sign-in");
     expect(all(p.root).some((n) => n.tag === "input")).toBe(false);
-    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Continue with Zoho, Google or email", "Cancel"]);
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Sign in to join", "Cancel"]);
   });
 
   it("403 email: says the invite is for another email and keeps the invite for another account", async () => {
@@ -211,8 +211,166 @@ describe("the guest page with accounts", () => {
     });
     await p.started;
     p.press("Join");
-    await until(() => text(p.root).includes("Continue with Zoho, Google or email"));
+    await until(() => text(p.root).includes("Sign in to join"));
     expect(text(p.root)).toContain("You need to sign in to join");
     expect((await p.vault.read(PENDING)).pondId).toBe(pondId);
+  });
+});
+
+describe("an emailed invite (docs/ponds.md, 'Invite by email')", () => {
+  const ORIGIN = "https://squeak.onslate.in";
+  const relay = fakeRelay();
+  let pondId;
+  let hash;
+  const until = async (check) => {
+    for (let i = 0; i < 400; i++) {
+      if (await check()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("timed out");
+  };
+  const owner = mac(relay, "Sibhi", { owner: true });
+  beforeAll(async () => {
+    installDom();
+    pondId = (await owner.createPond({ name: "Site", projectId: "proj-site" })).id;
+    // As the daemon makes it: keyless, bound to one address, named in the code.
+    const made = await owner.invite(pondId, "member", "bea@example.com", { keyless: true });
+    hash = made.link.slice(made.link.indexOf("#"));
+  });
+  const page = ({ account, vault = new KeyStore(fakeIndexedDB()) } = {}) => {
+    const root = document.createElement("div");
+    const calls = { signOut: 0, signIn: 0 };
+    const win = {
+      location: { hash, origin: ORIGIN, pathname: "/join", search: "" },
+      history: { state: null, replaceState: () => undefined, pushState: () => undefined },
+      addEventListener: () => undefined,
+      document: { visibilityState: "visible", addEventListener: () => undefined },
+    };
+    const fetch = async (url, init = {}) => {
+      if (url.endsWith("/me")) return account ? json(200, account) : json(401, { error: "signin" });
+      const session = account ? { userId: account.userId, ...account } : null;
+      return relay.as(session).fetch(new URL(url, ORIGIN).href, init);
+    };
+    const started = startGuest({
+      root,
+      win,
+      vault,
+      fetch,
+      signIn: () => void calls.signIn++,
+      signOut: async () => void calls.signOut++,
+      socket: () => ({ send() {}, close() {} }),
+      minGapMs: 0,
+    });
+    const buttons = () => all(root).filter((n) => n.tag === "button");
+    return { root, calls, started, buttons, press: (l) => click(buttons().find((b) => text(b).includes(l))) };
+  };
+
+  it("signed out: the pond, who invited you, what Squeak is, and one button", async () => {
+    const p = page({ account: null });
+    await p.started;
+    expect(text(p.root)).toContain("Join Site");
+    expect(text(p.root)).toContain("Sibhi invited you");
+    expect(text(p.root)).toContain("Squeak lets a team watch, steer and talk to coding agents together.");
+    expect(text(p.root)).toContain("Sign in with b***@e***.com");
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Sign in to join", "Cancel"]);
+  });
+
+  it("another account: says whose invite it is, masked, and offers to switch; never Join", async () => {
+    const p = page({ account: { userId: "u-eve", email: "eve@example.com", name: "Eve" } });
+    await p.started;
+    expect(text(p.root)).toContain("This invite is for b***@e***.com. Sign in with that address.");
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Sign out and switch account"]);
+    p.press("Sign out");
+    await until(() => p.calls.signOut === 1);
+  });
+
+  it("the relay's own refusal (403 email, masked address) shows the same sentence when the link did not say", async () => {
+    // an invite bound to an address at the relay whose code does not name it (an older Mac)
+    const bound = await owner.invite(pondId, "member", "bea@example.com");
+    const keep = hash;
+    hash = bound.link.slice(bound.link.indexOf("#"));
+    try {
+      const p = page({ account: { userId: "u-eve", email: "eve@example.com", name: "Eve" } });
+      await p.started;
+      expect(p.buttons().map((b) => text(b).trim())).toEqual(["Join", "Not you? Sign out"]);
+      p.press("Join");
+      await until(() => text(p.root).includes("This invite is for b***@e***.com. Sign in with that address."));
+      expect(p.buttons().map((b) => text(b).trim())).toEqual(["Sign out and switch account"]);
+    } finally {
+      hash = keep;
+    }
+  });
+
+  it("the matching account (any case) is asked to join and the request reaches the owner, verified", async () => {
+    const p = page({ account: { userId: "u-bea", email: "Bea@Example.com", name: "Bea Lee" } });
+    await p.started;
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Join", "Not you? Sign out"]);
+    p.press("Join");
+    await until(() => text(p.root).includes("Waiting for"));
+    const request = (await owner.view(pondId)).joins.find((j) => j.verifiedEmail === "Bea@Example.com");
+    expect(request).toBeTruthy();
+  });
+});
+
+describe("emailed-invite plumbing", () => {
+  it("masks an address the way the relay does, and takes initials", async () => {
+    const { maskEmail, initialsOf } = await import("../js/guest-model.js");
+    expect(maskEmail(" Pat.Lee@Example.com ")).toBe("p***@e***.com");
+    expect(maskEmail("nope")).toBe("***");
+    expect(initialsOf("Sibhi R")).toBe("SR");
+    expect(initialsOf("  ")).toBe("?");
+  });
+
+  it("the sign-in handoff returns to /join from the invite page and to / elsewhere", async () => {
+    const cs = await import("../js/catalyst-session.js");
+    const back = (path) => decodeURIComponent(cs.handoffUrl(path).split("return=")[1]);
+    expect(back("/join")).toBe("https://squeak.onslate.in/join");
+    expect(back("/")).toBe("https://squeak.onslate.in/");
+    expect(back("/anything-else")).toBe("https://squeak.onslate.in/");
+  });
+
+  it("back from the handoff on /join opens the guest page, not the owner app", async () => {
+    globalThis.__squeakNoEntry = true;
+    document.getElementById ??= () => null;
+    const { chooseEntry } = await import("../js/entry.js");
+    const token = `#squeak-token=at.u1.${Date.now() + 1e7}.${"a".repeat(20)}.${"b".repeat(43)}&exp=${Date.now() + 1e7}`;
+    const vault = { load: async () => false, read: async () => null };
+    expect(await chooseEntry({ hash: token, pathname: "/join", vault })).toBe("guest");
+    expect(await chooseEntry({ hash: token, pathname: "/", vault })).toBe("owner");
+  });
+
+  it("an emailed invite code names its address; a keyless code is accepted without a pond key", async () => {
+    const { readInvite } = await import("../js/guest-invite.js");
+    const body = {
+      v: 1,
+      p: "P".repeat(30),
+      k: "",
+      kv: 0,
+      o: "owner",
+      n: "Site",
+      s: "secret",
+      e: Date.now() + 1e6,
+      r: "member",
+      on: "Sibhi",
+      em: "Bea@Example.com",
+      l: { provider: "catalyst", relayUrl: "https://squeak.catalystserverless.in/server/squeak_relay" },
+      jt: "pj.x",
+    };
+    const code = Buffer.from(JSON.stringify(body)).toString("base64url");
+    const r = readInvite(code);
+    expect(r.ok).toBe(true);
+    expect(r.invite).toMatchObject({ key: null, email: "bea@example.com", ownerName: "Sibhi" });
+  });
+
+  it("the Mac card names the pond, links the download page, and can be dismissed", async () => {
+    installDom();
+    const { macCard, MAC_DOWNLOAD_URL } = await import("../js/guest-view.js");
+    let dismissed = 0;
+    const node = macCard({ pondName: "Site", onDismiss: () => dismissed++ });
+    expect(text(node)).toContain("Run your own agents in Site: get Squeak for Mac");
+    const link = all(node).find((n) => n.tag === "a");
+    expect(link.attrs?.href ?? link.href).toBe(MAC_DOWNLOAD_URL);
+    click(all(node).find((n) => n.tag === "button"));
+    expect(dismissed).toBe(1);
   });
 });

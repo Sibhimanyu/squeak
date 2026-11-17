@@ -420,3 +420,35 @@ small {
   color: var(--sq-muted);
   margin: 0;
 }
+
+/* An emailed invite: who invited you, and the one-time card pointing at the Mac app. */
+.g-inviter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sq-muted);
+}
+.g-initials {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--sq-surface);
+  color: var(--sq-ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+.g-maccard {
+  background: var(--sq-surface);
+  border-radius: var(--sq-radius-card);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.g-maccard p {
+  margin: 0 0 10px;
+}
+.g-maccard a.g-btn {
+  text-decoration: none;
+  display: inline-block;
+}

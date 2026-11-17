@@ -1,6 +1,8 @@
 // The checks every reader applies to a pond document it opened (src/flotilla/types.ts): a document that fails is dropped,
 // never repaired. Compact ports of the Mac's `readMember`, `readThread`, `readThreadEvent` and the rest.
 
+import { memberIdOf } from "./guest-crypto.js";
+
 const rec = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const s = (v, max = 500) => typeof v === "string" && v.length <= max;
 const n = (v) => typeof v === "number" && Number.isFinite(v);
@@ -43,6 +45,60 @@ export function effectiveCaps(role, patch) {
   return out;
 }
 
+export const MAX_DEVICES_PER_MEMBER = 8;
+
+/**
+ * A member's `devices` list as written (docs/ponds.md, "Members are accounts"): well-formed entries only, duplicates and
+ * overflow dropped. An entry's id must also equal the id derived from its key: `trustedDevices` checks that (it needs SHA-256).
+ */
+export function readDevices(list) {
+  const out = [];
+  const seen = new Set();
+  for (const d of list.slice(0, MAX_DEVICES_PER_MEMBER)) {
+    if (!rec(d) || !s(d.id, 64) || !s(d.publicKey, 200) || !s(d.boxKey, 200) || !n(d.addedAt)) continue;
+    if (d.client !== "mac" && d.client !== "web" && d.client !== "ios") continue;
+    if (!(d.nest === undefined || d.nest === null || s(d.nest, 100))) continue;
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
+    out.push({
+      id: d.id,
+      publicKey: d.publicKey,
+      boxKey: d.boxKey,
+      client: d.client,
+      ...(d.nest !== undefined ? { nest: d.nest } : {}),
+      addedAt: d.addedAt,
+    });
+  }
+  return out;
+}
+
+/** The member with only the devices whose id is derived from their key (a document that claims another id is not trusted). */
+export async function trustedDevices(member) {
+  if (!member.devices) return member;
+  const devices = [];
+  for (const d of member.devices) if ((await memberIdOf(d.publicKey).catch(() => null)) === d.id) devices.push(d);
+  return { ...member, devices };
+}
+
+/** One member's keys as a flat list: the first key (unless retired), then `devices`. */
+export function devicesOf(member) {
+  const primary = member.primaryRetired
+    ? []
+    : [{ id: member.id, publicKey: member.publicKey, boxKey: member.publicKey, client: member.client ?? "web" }];
+  return [...primary, ...(member.devices ?? [])];
+}
+
+/** The keys whose signature counts as this member (none for an unknown member). */
+export const keysOfMember = (member) => (member ? devicesOf(member).map((d) => d.publicKey) : []);
+
+/** The member a device key id belongs to: its own id, or one of its devices. */
+export function memberOfDevice(members, deviceId) {
+  const direct = members.get(deviceId);
+  if (direct && !direct.primaryRetired) return direct;
+  for (const m of members.values()) if ((m.devices ?? []).some((d) => d.id === deviceId)) return m;
+  return undefined;
+}
+
 export function readMember(v) {
   if (!rec(v) || !s(v.id, 64) || !s(v.name, 100) || !s(v.publicKey, 200)) return null;
   if (!["owner", "member", "viewer"].includes(v.role)) return null;
@@ -50,6 +106,7 @@ export function readMember(v) {
     return null;
   }
   if (!n(v.addedAt)) return null;
+  const withDevices = Array.isArray(v.devices) && v.devices.length > 0;
   return {
     id: v.id,
     name: v.name,
@@ -59,6 +116,8 @@ export function readMember(v) {
     client: v.client,
     addedAt: v.addedAt,
     caps: readCapsPatch(v.caps),
+    ...(withDevices ? { devices: readDevices(v.devices) } : {}),
+    ...(withDevices && v.primaryRetired === true ? { primaryRetired: true } : {}),
   };
 }
 

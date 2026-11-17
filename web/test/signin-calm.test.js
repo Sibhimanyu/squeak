@@ -16,7 +16,7 @@ describe("the calm sign-in pages", () => {
     expect(words).toContain("Sign in to Squeak");
     expect(words).toContain("Signing in for your Mac");
     expect(words).toContain("sent back to Squeak");
-    expect(words).toContain("A pager for your coding agents");
+    expect(words).toContain("Your coding agents, from anywhere.");
     click(buttons(page)[0]);
     expect(hosted).toBe(1);
     expect(text(signedOutScreen({ mode: "app", signIn: noop }))).toContain("Squeak on iPhone");

@@ -1,11 +1,12 @@
 {
   "name": "squeak_relay",
-  "version": "1.5.0",
+  "version": "1.7.0",
   "private": true,
   "main": "index.js",
   "dependencies": {
     "@zcatalyst/auth": "1.0.0",
     "@zcatalyst/datastreams": "1.0.1",
+    "@zcatalyst/mail": "1.0.0",
     "@zcatalyst/nosql": "1.0.0"
   }
 }

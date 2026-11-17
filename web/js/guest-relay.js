@@ -19,6 +19,8 @@ export class RelayError extends Error {
     this.status = status;
     /** The relay's `{ "error": "signin" | "email" }` word, when it sent one. */
     this.code = code;
+    /** The masked address a refused email-bound join carries (`{ "error": "email", "masked": "p***@e***.com" }`). */
+    this.masked = null;
   }
 }
 
@@ -151,11 +153,11 @@ export class RelayStore {
       body: JSON.stringify({ doc: wireDoc(doc) }),
     });
     if (!response.ok) {
-      const code = await response
-        .json()
-        .then((b) => (typeof b?.error === "string" ? b.error : null))
-        .catch(() => null);
-      throw new RelayError("set", response.status, code);
+      const body = await response.json().catch(() => null);
+      const code = typeof body?.error === "string" ? body.error : null;
+      const failure = new RelayError("set", response.status, code);
+      if (typeof body?.masked === "string" && body.masked.length <= 300) failure.masked = body.masked;
+      throw failure;
     }
   }
 

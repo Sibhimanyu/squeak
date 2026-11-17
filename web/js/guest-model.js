@@ -87,6 +87,32 @@ export function waitingLine(pondName, ownerName, requestedAt, expiresAt, now = D
   return `${asked}You asked to join ${pondName}. You can close this tab: ${owner} has to open Squeak on their Mac to let you in. Open this link again to check.${lapse}`;
 }
 
+/** "pat.lee@example.com" -> "p***@e***.com" (the relay's `maskEmail`): recognisable to its owner, not to anyone else. */
+export function maskEmail(email) {
+  const e = String(email ?? "")
+    .trim()
+    .toLowerCase();
+  const at = e.lastIndexOf("@");
+  if (at < 1) return "***";
+  const host = e.slice(at + 1);
+  const dot = host.lastIndexOf(".");
+  const name = dot > 0 ? host.slice(0, dot) : host;
+  return `${e[0]}***@${name[0] ?? ""}***${dot > 0 ? host.slice(dot) : ""}`;
+}
+
+/** One or two capital letters for a name's avatar ("Sibhi R" -> "SR"). */
+export function initialsOf(name) {
+  const words = String(name ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase();
+}
+
+/** The sentence for an invite signed in under the wrong account, naming the (masked) address it is for. */
+export const wrongEmailLine = (masked) => `This invite is for ${masked}. Sign in with that address.`;
+
 /** The pond's header line: "3 in the flock · 5 threads". */
 export function pondLine(view) {
   const people = view.members.length;

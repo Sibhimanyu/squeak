@@ -125,6 +125,22 @@ export class CatalystStore implements CloudStore {
     }
   }
 
+  /** A collection's documents as the relay stores them, unparsed: the relay-owned plain-JSON kinds (`devreqs`). Empty on any failure. */
+  async listRaw(collection: string): Promise<Array<{ id: string; doc: unknown }>> {
+    try {
+      const response = await this.call(`/list?prefix=${encodeURIComponent(collection)}`, { method: "GET" }, 10_000);
+      if (!response.ok) return [];
+      const body = (await response.json()) as { items?: unknown };
+      if (!Array.isArray(body.items)) return [];
+      return body.items.flatMap((item: unknown) => {
+        const { id, doc } = (item ?? {}) as { id?: unknown; doc?: unknown };
+        return typeof id === "string" ? [{ id, doc }] : [];
+      });
+    } catch {
+      return [];
+    }
+  }
+
   async set(path: string, doc: ChannelDoc, options: { timeoutMs?: number } = {}): Promise<void> {
     const response = await this.call(
       `/doc?path=${encodeURIComponent(path)}`,
