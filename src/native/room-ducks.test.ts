@@ -231,6 +231,38 @@ describe("ducks", () => {
     });
   });
 
+  it("an async duckling stays running past its launch step and the turn's end, until its report", async () => {
+    const h = await server();
+    const s = h.chat("Layout builder");
+    const frames: any[] = [];
+    h.srv.room.on("turn", (f) => frames.push(f));
+    const now = new Date().toISOString();
+    h.log.append(s.id, { type: "turn.started", turnId: "t1", promptMessageId: "m", text: "go", at: now } as any);
+    const label = "Start fix the bar in the background";
+    // launch step ends at once (async_launched) and the turn ends
+    h.log.append(s.id, {
+      type: "step.updated",
+      turnId: "t1",
+      stepId: "a1",
+      kind: "tool",
+      label,
+      status: "done",
+      at: now,
+    } as any);
+    h.log.append(s.id, { type: "turn.ended", turnId: "t1", outcome: "done", at: now } as any);
+    const get = () => h.srv.room.turns(h.project.id, 0).find((t) => t.id === `${s.id}:t1`)!;
+    h.srv.room.noteHelpers(s.id, [{ id: "a1", status: "running" }]);
+    expect(get().ducklings).toMatchObject({ count: 1, done: 0, items: [{ state: "running" }] });
+    const before = frames.length;
+    h.srv.room.noteHelpers(s.id, [{ id: "a1", status: "done" }]);
+    expect(get().ducklings).toMatchObject({ count: 1, done: 1, items: [{ state: "done" }] });
+    await new Promise((r) => setTimeout(r, 650)); // frames are coalesced to one per 500 ms
+    expect(frames.length).toBeGreaterThan(before);
+    expect(frames[frames.length - 1].turn.ducklings.done).toBe(1);
+    h.srv.room.noteHelpers(s.id, [{ id: "a1", status: "failed" }]);
+    expect(get().ducklings!.items![0]!.state).toBe("failed");
+  });
+
   it("a turn with no subagents has no ducklings", async () => {
     const h = await server();
     const s = h.chat("Layout builder");

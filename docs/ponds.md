@@ -594,7 +594,7 @@ keeps session/thread). Squeak never chats. Host side: `room.ts` (`threadOf`, `se
 - `RoomThread` adds `name` (the person's, else the chat title), `role?` (0..80 chars), `duty` (`"on"` default, `"off"`
   = the person closed the duck's tab) and `lastActiveAt`. `RoomTurn.ducklings?` = `{count, done, items?:[{label,
 state}]}` from the turn's Agent/Task tool steps (labels "Start ..."), absent when none; a duckling starting or
-  ending sends a `turn` frame. A duckling counts as done when its tool step ends: an async one's launch result.
+  ending sends a `turn` frame. An async duckling stays running until the host's helper tracker sees its `<task-notification>` (done or failed), even after its turn ends; each change sends a `turn` frame.
 - Routes (token-gated, strict bodies): `PATCH /native/sessions/<id>/duck {name?: 1..32 | null, role?: 0..80 | null}` ->
   `{name, role?}`; `POST /native/sessions/<id>/duty {on: boolean}` -> `{duty}`. Unknown keys or bad lengths are 400.
   SSE `event: thread` carries the `RoomThread` on a name, role or duty change.

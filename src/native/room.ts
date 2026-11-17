@@ -137,6 +137,8 @@ export class Room extends EventEmitter {
   private readonly sent = new Map<string, number[]>();
   private readonly log: TimelineLog;
   private readonly reader: TurnReader;
+  /** Per chat: each subagent's state by tool-use id, as the host's tracker last said (a task-notification ends an async one). */
+  private readonly helperStates = new Map<string, Map<string, "running" | "done" | "failed">>();
   private readonly frames = new Map<string, { last: number; timer: NodeJS.Timeout | null }>();
 
   constructor(private readonly options: RoomOptions) {
@@ -298,8 +300,10 @@ export class Room extends EventEmitter {
   /** The subagents a turn started, from its Agent/Task tool steps: how many, how many are over, and each one. */
   private ducklingsOf(sessionId: string, turnId: string): RoomDucklings | undefined {
     const byStep = new Map<string, { label: string; state: "running" | "done" | "failed" }>();
+    const tracked = this.helperStates.get(sessionId);
     for (const e of this.log.duckSteps(sessionId, turnId)) {
-      byStep.set(e.stepId, { label: e.label, state: e.status });
+      // An async launch's step ends at once; the helper runs until its <task-notification> says how it ended.
+      byStep.set(e.stepId, { label: e.label, state: tracked?.get(e.stepId) ?? e.status });
     }
     const items = [...byStep.values()].slice(0, 12).map((i) => ({
       label: i.label.replace(/^Start (a |the )?/i, "").replace(/ in the background$/, "") || i.label,
@@ -340,6 +344,25 @@ export class Room extends EventEmitter {
       ((t === "step.added" || t === "step.updated") && isDucklingStep(event));
     if (!relevant || !turnId) return;
     this.scheduleTurn(sessionId, turnId);
+  }
+
+  /**
+   * The host's helper list for a chat changed (a start, or a report ending an async one): remember each helper's
+   * state by tool-use id and send a `turn` frame for every turn whose subagent changed.
+   */
+  noteHelpers(sessionId: string, items: Array<{ id: string; status: string }>): void {
+    const next = new Map<string, "running" | "done" | "failed">();
+    for (const i of items) next.set(i.id, i.status === "running" ? "running" : i.status === "done" ? "done" : "failed");
+    const prev = this.helperStates.get(sessionId);
+    if (next.size === 0) this.helperStates.delete(sessionId);
+    else this.helperStates.set(sessionId, next);
+    const changed = [...next].filter(([id, st]) => prev?.get(id) !== st).map(([id]) => id);
+    if (changed.length === 0) return;
+    for (const t of this.reader.turns(sessionId).slice(-6)) {
+      if (this.log.duckSteps(sessionId, t.turnId).some((e) => changed.includes(e.stepId))) {
+        this.scheduleTurn(sessionId, t.turnId);
+      }
+    }
   }
 
   /** A `working` post names what the chat's running turn is doing. */
@@ -587,6 +610,7 @@ export function attachSqueakPosts(host: HostEvents, _store: NativeStore, room: R
   const onEvent = (e: HostEvent): void => {
     try {
       if (e.type === "timeline") room.noteTimeline(e.sessionId, e.event);
+      else if (e.type === "status") room.noteHelpers(e.sessionId, e.ducklings?.items ?? []);
     } catch (error) {
       logger.warn("room watcher failed", { error: String(error) });
     }
