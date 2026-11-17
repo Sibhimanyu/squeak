@@ -461,33 +461,6 @@ button {
   margin-top: 16px;
 }
 
-/* Pairing: scan the Mac's QR code */
-.scan {
-  margin-top: 12px;
-}
-.scan-panel {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--sq-surface);
-  border: 1px solid var(--sq-line-strong);
-  border-radius: var(--sq-radius-card);
-}
-.scan-panel[hidden],
-.scan-video[hidden] {
-  display: none;
-}
-.scan-video {
-  display: block;
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  background: var(--sq-bg);
-  border-radius: var(--sq-radius-control);
-}
-.scan-panel .scan-status {
-  margin: 12px 0;
-}
-
 /* A chat: header, the timeline that scrolls, the queue and composer that stay */
 .detail {
   display: flex;

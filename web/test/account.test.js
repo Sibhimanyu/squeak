@@ -1,7 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { sealToMember } from "../../src/flotilla/crypto.js";
-import { accountSection, accountStartScreen, linkedLine, requestScreen } from "../js/account-view.js";
+import {
+  accountSection,
+  accountStartScreen,
+  linkedLine,
+  requestScreen,
+  unreachableScreen,
+} from "../js/account-view.js";
 import {
   AccountApi,
   accountSentence,
@@ -19,7 +25,6 @@ import { generateDeviceKey, pairingCode } from "../js/channel-crypto.js";
 import { shape } from "../js/command-shapes.js";
 import { fromBase64, fromBase64Url, toBase64, toBase64Url } from "../js/encoding.js";
 import { KeyStore } from "../js/key-store.js";
-import { welcomeScreen } from "../js/pairing-view.js";
 import { render as renderSettings } from "../js/settings-view.js";
 import { all, click, installDom, text } from "./fake-dom.js";
 import { KEY, RELAY_URL } from "./guest-helpers.js";
@@ -61,7 +66,7 @@ const api = (fetch) => new AccountApi({ baseUrl: "/server/squeak_relay", fetch }
 const visible = { hidden: () => false, onVisible: () => () => undefined };
 
 describe("the unpaired start", () => {
-  const base = { macsError: null, error: null, pick() {}, signIn() {}, oldMac() {} };
+  const base = { macsError: null, error: null, pick() {}, signIn() {} };
   const NOW = Date.UTC(2026, 10, 14, 12);
 
   it("signed in lists the Macs as buttons with their status, and offers no QR code while there are Macs", () => {
@@ -110,27 +115,55 @@ describe("the unpaired start", () => {
     expect(macStatus({}, NOW).tone).toBeNull();
   });
 
-  it("signed out is one sign-in screen: no QR, no code, no 'your Mac approves'; the old path is one small link", () => {
+  it("signed out is one sign-in screen: no QR, no code, no 'your Mac approves', no old-Mac link", () => {
     let signedIn = 0;
-    let old = 0;
+    const screen = accountStartScreen({ ...base, state: "out", macs: null, signIn: () => signedIn++ });
+    const words = text(screen);
+    expect(words).toContain("Sign in to Squeak");
+    expect(words).not.toMatch(/QR|approves|pairing code|Mac not on an account/i);
+    const buttons = all(screen).filter((n) => n.tag === "button");
+    expect(text(buttons[0]).trim()).toBe("Continue with Zoho, Google or email");
+    click(buttons[0]);
+    expect(signedIn).toBe(1);
+    expect(buttons).toHaveLength(1);
+  });
+
+  it("an old pairing link shows its one-line note on the sign-in screen", () => {
     const screen = accountStartScreen({
       ...base,
       state: "out",
       macs: null,
-      signIn: () => signedIn++,
-      oldMac: () => old++,
+      note: "Pairing codes are gone. Sign in with the same account as your Mac.",
     });
+    expect(text(screen)).toContain("Pairing codes are gone. Sign in with the same account as your Mac.");
+  });
+
+  it("when the page cannot reach Squeak it says so, with Try again and Sign in, never a pairing screen", () => {
+    let tried = 0;
+    let signedIn = 0;
+    const screen = unreachableScreen({ retry: () => tried++, signIn: () => signedIn++ });
     const words = text(screen);
-    expect(words).toContain("Sign in to Squeak");
-    expect(words).not.toMatch(/QR|approves|pairing code/i);
-    expect(words).toContain("Mac not on an account yet?");
+    expect(words).toContain("Can't reach Squeak right now");
+    expect(words).toContain("Check your connection and try again.");
+    expect(words).not.toMatch(/QR|Pair|code/i);
     const buttons = all(screen).filter((n) => n.tag === "button");
-    expect(text(buttons[0]).trim()).toBe("Continue with Zoho, Google or email");
+    expect(buttons.map((b) => text(b).trim())).toEqual(["Try again", "Sign in"]);
     click(buttons[0]);
     click(buttons[1]);
-    expect([signedIn, old]).toEqual([1, 1]);
-    const none = accountStartScreen({ ...base, state: "out", macs: null, oldMac: null });
-    expect(text(none)).not.toContain("Mac not on an account yet?");
+    expect([tried, signedIn]).toEqual([1, 1]);
+  });
+
+  it("a fetch that throws (CORS or network) is accountState unknown, and unknown is the unreachable screen", async () => {
+    const failing = new AccountApi({
+      baseUrl: "https://x.catalystserverless.in/server/squeak_relay",
+      fetch: () => Promise.reject(new TypeError("Failed to fetch")),
+    });
+    expect((await failing.me()).state).toBe("unknown");
+    const out = new AccountApi({
+      baseUrl: "https://x.catalystserverless.in/server/squeak_relay",
+      fetch: async () => new Response("", { status: 401 }),
+    });
+    expect((await out.me()).state).toBe("out");
   });
 
   it("says plainly when no Mac is signed in, and when the list could not load", () => {
@@ -139,13 +172,6 @@ describe("the unpaired start", () => {
     expect(text(empty)).not.toMatch(/QR/);
     const failed = accountStartScreen({ ...base, state: "in", user: {}, macs: null, macsError: SENTENCES.network });
     expect(text(failed)).toContain("Could not reach Squeak's server");
-  });
-
-  it("is today's QR screen alone when there are no accounts, with a way back only when there are", () => {
-    const plain = welcomeScreen({ error: null, pair() {}, scan: () => null });
-    expect(text(plain)).not.toContain("Use my account instead");
-    const withBack = welcomeScreen({ error: null, pair() {}, scan: () => null, back() {} });
-    expect(text(withBack)).toContain("Use my account instead");
   });
 
   it("reads this page's relay from its own origin", () => {
