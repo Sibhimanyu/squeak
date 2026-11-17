@@ -13,8 +13,8 @@ public final class SqueakRouter: ObservableObject {
     /// A Conductor session id waiting to be opened.
     @Published public private(set) var pendingSessionId: String?
 
-    /// A `squeak://pair?d=…` link, from the Camera app scanning the Mac's QR code, waiting for the app to pair with.
-    @Published public private(set) var pendingPairing: String?
+    /// An old `squeak://pair?…` link was opened: there is no pairing by code any more, so the app says to sign in.
+    @Published public private(set) var pairingLinkOpened = false
 
     public func open(sessionId: String) { pendingSessionId = sessionId }
 
@@ -22,7 +22,7 @@ public final class SqueakRouter: ObservableObject {
     @discardableResult
     public func handle(_ url: URL) -> Bool {
         if url.scheme?.lowercased() == "squeak", url.host == "pair" {
-            pendingPairing = url.absoluteString
+            pairingLinkOpened = true
             return true
         }
         guard let id = SqueakLink.sessionId(from: url) else { return false }
@@ -32,6 +32,6 @@ public final class SqueakRouter: ObservableObject {
 
     func consume() { pendingSessionId = nil }
 
-    func consumePairing() { pendingPairing = nil }
+    func consumePairingLink() { pairingLinkOpened = false }
 }
 #endif

@@ -220,7 +220,7 @@ struct AccountStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
-            stepTitle("Account", "Optional. Sign in with Zoho, Google or email to see this Mac from your browser and iPhone without a QR code. Everything works without one.")
+            stepTitle("Account", "Optional. Sign in with Zoho, Google or email to see this Mac from your browser and iPhone. Everything works without one.")
             Card {
                 VStack(alignment: .leading, spacing: Space.m) {
                     if let email = m.email {
@@ -255,8 +255,7 @@ struct PhoneStep: View {
         VStack(alignment: .leading, spacing: Space.l) {
             stepTitle("Your phone", "Optional. Follow your agents and answer them from your iPhone.")
             if model.account.email != nil { signedIn }
-            else if model.cloud.hosted?.legacy != nil { legacyPairing }
-            else { PhoneChannelGate { signedIn } }
+            else { signedOut }
         }
     }
 
@@ -275,19 +274,17 @@ struct PhoneStep: View {
         }
     }
 
-    /// Only an install still on its own Firebase or the old shared server, which has no account to sign in with: the QR
-    /// code stays for it until it moves. A Mac on Squeak's cloud never sees this.
-    private var legacyPairing: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            HStack(spacing: Space.s) {
-                Text("Needs iOS 18 or later.").font(Typo.body).foregroundStyle(Theme.muted)
-                Button("Get the iPhone app") { open("https://sibhimanyu.github.io/squeak/ios/") }.buttonStyle(QuietButtonStyle())
-            }
-            PhoneChannelGate {
-                if paired {
-                    StatusRow(state: .done, title: "Your iPhone is paired")
-                } else {
-                    PairPanel(text: { $0 }, caption: "1. Open Squeak on your iPhone.\n2. Choose Pair with a Mac, then scan this code.\n3. Check the code on the phone matches the one that appears here, then approve.")
+    private var signedOut: some View {
+        Card {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Sign in to Squeak first.").font(Typo.label).foregroundStyle(Theme.ink)
+                Text("Then sign in with the same account on your iPhone. It finds this Mac by itself. Needs iOS 18 or later.")
+                    .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Sign in") { model.account.openSignIn(from: .setup) }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(model.account.busy)
+                    Button("Get the iPhone app") { open("https://sibhimanyu.github.io/squeak/ios/") }.buttonStyle(SecondaryButtonStyle())
+                    Spacer()
                 }
             }
         }

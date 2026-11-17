@@ -1,5 +1,4 @@
 import AppKit
-import CoreImage.CIFilterBuiltins
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -613,23 +612,29 @@ struct IPhoneSettings: View {
         }
         SettingsCard(title: "Devices", subtitle: "iPhones and browsers using your account.", symbol: "iphone.gen3") {
             let rows = DeviceList.rows(devices)
-            if rows.isEmpty, app.account.email == nil {
-                HStack {
-                    Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
-                    Spacer()
-                }
-            } else if rows.isEmpty {
-                HStack(spacing: Space.m) {
+            if let email = app.account.email {
+                let address = WebAppLink.address(signInUrl: app.cloud.hosted?.signInUrl, webUrl: app.cloud.hosted?.webUrl)
+                HStack(alignment: .top, spacing: Space.m) {
                     Image(systemName: "iphone.gen3")
                         .font(.system(size: 19, weight: .medium)).foregroundStyle(Theme.muted)
                         .frame(width: 40, height: 40)
                         .background(Theme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No devices yet").font(Typo.label).foregroundStyle(Theme.ink)
-                        Text(DeviceList.emptyLine(accountEmail: app.account.email))
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        if rows.isEmpty { Text("No devices yet").font(Typo.label).foregroundStyle(Theme.ink) }
+                        Text(DeviceList.signInLine(email: email, address: address))
                             .font(Typo.body).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
+                        Button("Copy web address") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(WebAppLink.base(signInUrl: app.cloud.hosted?.signInUrl, webUrl: app.cloud.hosted?.webUrl), forType: .string)
+                        }.buttonStyle(SecondaryButtonStyle())
                     }
+                }
+            } else {
+                Text(DeviceList.signedOutLine).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
+                    Spacer()
                 }
             }
             ForEach(rows) { row in
@@ -653,7 +658,7 @@ struct IPhoneSettings: View {
                 }
             }
 
-            if app.account.email != nil { Footnote(DeviceList.footnote()) }
+            if !rows.isEmpty { Footnote(DeviceList.footnote()) }
         }
         if let n = m.notice { SettingsCard(title: "Channel notice", subtitle: "The latest update from this connection.", symbol: "info.circle") { Footnote(n) } }
     }
@@ -680,25 +685,5 @@ struct PendingRow: View {
             Button("Reject") { Task { await app.channels.reject(request.id) } }.buttonStyle(SecondaryButtonStyle())
             Button("Approve") { Task { await app.channels.approve(request.id) } }.buttonStyle(PrimaryButtonStyle())
         }
-    }
-}
-
-// MARK: - QR
-
-enum QRCode {
-    /// Includes a four-module white quiet zone; every module occupies whole backing pixels.
-    static func image(for text: String, points: CGFloat, displayScale: CGFloat) -> NSImage? {
-        guard points > 0, displayScale > 0 else { return nil }
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage else { return nil }
-        let extent = output.extent.insetBy(dx: -4, dy: -4)
-        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: extent)
-        let padded = output.composited(over: white)
-        let scale = max(1, (points * displayScale / extent.width).rounded(.down))
-        let scaled = padded.samplingNearest().transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        guard let cg = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(scaled, from: scaled.extent) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / displayScale, height: CGFloat(cg.height) / displayScale))
     }
 }

@@ -76,6 +76,8 @@ final class AccountModel {
     }
 
     func clearMessage() { message = nil }
+    /// Says something on the sign-in screen without an error behind it (an old pairing link was opened).
+    func say(_ text: String) { message = text }
 
     /// A photo call's failure: a 401 drops the sign-in like every other account call.
     private func photoFail(_ error: Error) {

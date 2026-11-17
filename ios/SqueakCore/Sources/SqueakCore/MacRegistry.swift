@@ -229,17 +229,19 @@ public enum MacList {
 }
 
 /// What the signed-out screen offers, decided here so it is tested and the view only draws. Signing in is the one
-/// way in; the scanner and the pasted link live behind a single small link for a Mac that is not on an account yet.
+/// way in: no code, no scanner.
 public enum SignInScreen {
-    public enum Entry: Equatable, Sendable { case signIn, macNotOnAccount }
-
     public static let title = "Sign in to Squeak"
     public static let detail = "Your Macs are here as soon as you do."
     public static let signInLabel = "Sign in"
     public static let providers = "Zoho, Google or email"
-    /// The only way to the scanner and the code; for a Mac that has not moved to an account.
-    public static let fallbackLabel = "Mac not on an account yet?"
-    public static let entries: [Entry] = [.signIn, .macNotOnAccount]
+    /// An old `squeak://pair` link (a code, a QR from an older Mac) is no longer a way in.
+    public static let pairingLinkGone = "Pairing codes are gone. Sign in with the same account as your Mac."
+    /// A Mac that was waiting on a code is dropped; the person signs in instead.
+    public static let connectedTitle = "Connected"
+    public static func connected(mac: String) -> String { "\(mac.isEmpty ? "Your Mac" : mac) is connected. Opening your sessions." }
+    /// How long the "connected" screen shows before the app opens.
+    public static let celebrationTime: TimeInterval = 1.4
 
     /// While a Mac is being opened, and only when it asked first.
     public static func opening(_ mac: String, needsApproval: Bool) -> String {

@@ -46,7 +46,7 @@ struct AccountSettings: View {
                     if let h = app.cloud.hosted, let l = h.legacySentence(accountKnown: true) { Footnote(l) }
                     Footnote(DeviceList.askFootnote(email: email))
                 } else if m.canSignIn {
-                    Footnote("Sign in to see this Mac from your browser and iPhone without a QR code.")
+                    Footnote("Sign in to see this Mac from your browser and iPhone by signing in.")
                     HStack {
                         Button("Sign in…") { m.openSignIn(from: .settings) }
                             .buttonStyle(PrimaryButtonStyle()).disabled(m.busy)
@@ -67,7 +67,7 @@ struct AccountSettings: View {
         .confirmationDialog("Sign out of your Squeak account?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await m.signOut() } }
         } message: {
-            Text("Browsers and iPhones signed in to \(m.email ?? "this account") will no longer see this Mac. Devices already paired keep working.")
+            Text("Browsers and iPhones signed in to \(m.email ?? "this account") will no longer see this Mac. Devices already added keep working.")
         }
     }
 

@@ -17,8 +17,6 @@ import UIKit
 final class AppModel {
     enum Phase: Equatable {
         case unpaired
-        /// Waiting for the Mac to approve; both screens show `code`.
-        case awaitingApproval(code: String, mac: String)
         case paired
     }
 
@@ -62,10 +60,6 @@ final class AppModel {
     /// When the app last came on screen: the answer on record then is from the visit before.
     private(set) var lookingSince: Date?
     private(set) var problem: String?
-    /// Why the last pairing did not happen, for the unpaired screen (`PairingScreen`).
-    private(set) var pairingFailure: PairingFailure?
-    /// When the current pairing asked the Mac, for the wait limit.
-    private(set) var pairingAskedAt: Date?
     /// The Mac's name from approval until the celebration has shown.
     private(set) var pairingCelebration: String?
     /// The Squeak account: sign-in, Your Macs, opening one.
@@ -75,7 +69,6 @@ final class AppModel {
     @ObservationIgnored private let macStore = MacRegistryStore(secrets: KeychainSecrets())
     @ObservationIgnored private var registrySavedAt = Date.distantPast
     func endPairingCelebration() { pairingCelebration = nil }
-    func clearPairingFailure() { pairingFailure = nil; problem = nil }
     /// What this phone sent since the app opened, per session. Local only:
     /// the channel carries no conversation history back, so the phone shows
     /// its own replies and the Mac's latest message, nothing it cannot know.
@@ -261,7 +254,7 @@ final class AppModel {
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         // The Mac list; a phone that still has the old single pairing gets it here as its first Mac (once).
         if !demo { try? FileManager.default.removeItem(at: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("squeak-history.json")) }
-        let held = demo ? MacRegistry() : macStore.load()
+        var held = demo ? MacRegistry() : macStore.load()
         let cacheName = held.active?.cacheKey
         perf.begin(.launchToContent)
         snapshotStore = demo ? nil : SnapshotStore(name: cacheName)
@@ -278,12 +271,15 @@ final class AppModel {
             phase = .paired
             return
         }
+        // A Mac that was still waiting on a pairing code (an old QR flow) never joined: forget it, the person signs in.
+        let waiting = held.entries.filter { !$0.approved }
+        for entry in waiting { held.remove(entry.macId) }
+        if !waiting.isEmpty { macStore.save(held) }
         registry = held
         if let entry = held.active {
             channel = Channel(pairing: entry.pairing, deviceId: entry.deviceId, local: LocalSupport.standard)
-            phase = entry.approved ? .paired : .awaitingApproval(
-                code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: entry.name)
-            if phase == .paired { loadSavedSnapshot(); preloadHistory() }
+            phase = .paired
+            loadSavedSnapshot(); preloadHistory()
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
@@ -361,33 +357,6 @@ final class AppModel {
 
     /* ---------- pairing ---------- */
 
-    func pair(with text: String) async {
-        do {
-            let pairing = try PairingPayload.parse(text)
-            let deviceId = UUID().uuidString.lowercased()
-            let channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
-            try await channel.requestPairing(name: UIDevice.current.name, signer: signer)
-            // The fallback for a Mac not on an account yet: one more Mac in the list, waiting for its approval.
-            resetLive()
-            var next = registry
-            next.upsert(MacEntry(pairing: pairing, deviceId: deviceId, approved: false))
-            setRegistry(next)
-            useStores(for: registry.active)
-            self.channel = channel
-            problem = nil
-            pairingFailure = nil
-            pairingAskedAt = Date()
-            phase = .awaitingApproval(code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
-            resume()
-        } catch is PairingPayload.Failure {
-            problem = "That isn't a Squeak pairing code. Open Squeak on your Mac, choose iPhone, then Pair an iPhone."
-            pairingFailure = .notACode
-        } catch {
-            problem = "Couldn't reach Squeak's server. Check the connection and scan again."
-            pairingFailure = .unreachable
-        }
-    }
-
     /// This phone's signing key, which a Squeak account request names (the Mac registers it under the request id).
     var devicePublicKey: Data { signer.publicKeyX963 }
 
@@ -406,7 +375,6 @@ final class AppModel {
         useStores(for: registry.active)
         channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
         problem = nil
-        pairingFailure = nil
         pairingCelebration = pairing.n
         phase = .paired
         loadSavedSnapshot()
@@ -433,16 +401,10 @@ final class AppModel {
         useStores(for: entry)
         channel = Channel(pairing: entry.pairing, deviceId: entry.deviceId, local: LocalSupport.standard)
         problem = nil
-        pairingFailure = nil
-        if entry.approved {
-            phase = .paired
-            loadSavedSnapshot()
-            preloadHistory()
-            if let channel { startLocal(channel) }
-        } else {
-            pairingAskedAt = Date()
-            phase = .awaitingApproval(code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: entry.name)
-        }
+        phase = .paired
+        loadSavedSnapshot()
+        preloadHistory()
+        if let channel { startLocal(channel) }
     }
 
     /// "Remove this iPhone from <Mac>": that Mac's pairing and caches go; the others stay. When it was the open one,
@@ -494,8 +456,6 @@ final class AppModel {
     /// Stops what the open Mac was feeding (loop, stream, direct path) and empties everything drawn from it in memory.
     /// Nothing on disk changes: caches belong to their Mac and are kept (or cleared by the caller).
     private func resetLive() {
-        pairingFailure = nil
-        pairingAskedAt = nil
         routeTask?.cancel()
         routeTask = nil
         if let channel { Task { await channel.stopLocal() } }
@@ -575,7 +535,7 @@ final class AppModel {
                 // downloaded once. The slow tick only keeps presence fresh.
                 await withTaskGroup(of: Void.self) { group in
                     group.addTask { for await event in states { await self?.handle(event) } }
-                    group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
+                    group.addTask { for await _ in results { } }
                     group.addTask {
                         while !Task.isCancelled {
                             try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
@@ -1102,10 +1062,6 @@ final class AppModel {
     /// A change arrived while a fetch was running; fetch once more after it.
     @ObservationIgnored private var tickAgain = false
 
-    private func tickIfAwaitingApproval() async {
-        if case .awaitingApproval = phase { await tick() }
-    }
-
     /// Whether the Mac is answering, for the header, the bar and Settings.
     func macLiveness(now: Date = Date()) -> MacLiveness {
         demo ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-silent") ? .silent(since: now.addingTimeInterval(-37 * 60)) : .answering)
@@ -1319,25 +1275,6 @@ final class AppModel {
     private func fetch() async {
         guard let channel else { return }
         do {
-            if case .awaitingApproval = phase {
-                if let answer = try await channel.pairingAnswer() {
-                    if answer.approved {
-                        if let open = registry.activeId {
-                            var next = registry
-                            next.update(open) { $0.approved = true }
-                            setRegistry(next)
-                        }
-                        if case let .awaitingApproval(_, mac) = phase { pairingCelebration = mac }
-                        phase = .paired
-                        startLocal(channel)
-                    } else {
-                        if let open = registry.activeId { removeMac(open) }
-                        problem = "Your Mac said no. Try again if that was a mistake."
-                        pairingFailure = .refused
-                    }
-                }
-                return
-            }
             // Tell the Mac someone is looking, so it publishes and polls faster. The write and the reads are
             // independent, so they go out together; the epoch check below still guards the snapshot.
             let epoch = snapshotEpoch
