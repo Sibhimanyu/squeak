@@ -166,7 +166,7 @@ describe("no raw relay error reaches the page", () => {
 describe("what a guest may do, said plainly", () => {
   it("a viewer's and a member's limits, and the waiting copy", () => {
     expect(limitsLine("viewer")).toMatch(/read what's shared, but not send/);
-    expect(limitsLine("member")).toMatch(/Starting your own threads needs Squeak for Mac/);
+    expect(limitsLine("member")).toMatch(/Starting threads needs Squeak for Mac/);
     const line = waitingLine("Site", "Sibhi", Date.now() - 120_000, Date.now() + 3600_000);
     expect(line).toContain("You can close this tab");
     expect(line).toContain("Sibhi has to open Squeak on their Mac");

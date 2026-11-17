@@ -99,7 +99,7 @@ public struct PondHomeLayout: Sendable, Equatable {
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
         emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil },
-        hiddenThreads: Set<String> = []
+        hiddenThreads: Set<String> = [], ownThreads: Bool = true
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -176,7 +176,7 @@ public struct PondHomeLayout: Sendable, Equatable {
             var row = PondChatRow(
                 id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
                 mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: people(t))
-            if t.mode == .own { row.poweredBy = PondPresets.poweredBy(nest: t.nestName ?? t.nest) }
+            if t.mode == .own { row.poweredBy = PondOwnThreads.poweredBy(nest: t.nestName ?? t.nest, ownThreads: ownThreads) }
             if let b = t.branch, !b.isEmpty, let i = branches[b] {
                 cards[i].chats.append(row)
             } else if let w = t.workspace?.lowercased(), !w.isEmpty, let i = names[w] {

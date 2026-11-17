@@ -82,7 +82,8 @@ describe("what the guest screens say", () => {
       /Aarav doesn't let you/,
     );
     expect(composerBlock("member", { starter: "m", locked: true }, me)).toBeNull();
-    expect(poweredBy({ mode: "own", nest: "Aarav-mac" })).toBe("Powered by Aarav-mac · Flotilla");
+    expect(poweredBy({ mode: "own", nest: "Aarav-mac" })).toBeNull(); // stashed: hidden by default
+    expect(poweredBy({ mode: "own", nest: "Aarav-mac" }, true)).toBe("Powered by Aarav-mac · Flotilla");
     expect(poweredBy({ mode: "shared", nest: "x" })).toBeNull();
   });
 

@@ -8,6 +8,9 @@ import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { FlotillaRoutes } from "./mount.js";
 import { FlotillaService, CLOUD_DOWN } from "./service.js";
 
+// The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
+process.env.SQUEAK_POND_OWN_THREADS = "on";
+
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 
 /** One shared in-memory cloud with hooks: per-member refusals (401), outages and slowness, to act out a real relay. */

@@ -13,6 +13,9 @@ import { openAt, randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
 import { FlotillaError } from "./types.js";
 
+// The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
+process.env.SQUEAK_POND_OWN_THREADS = "on";
+
 class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
   messages: MessageRow[] = [];

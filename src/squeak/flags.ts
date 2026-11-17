@@ -16,8 +16,9 @@ export type FlagStage = "stable" | "beta" | "off-switch";
  * How an environment value is read.
  * - `off-word`: on unless the trimmed, lower-cased value is exactly `off`.
  * - `off-word-extended`: on unless the trimmed value is `off`, `0`, `false` or `no` (any case).
+ * - `on-word`: off unless the trimmed value is `on`, `1`, `true` or `yes` (any case).
  */
-export type FlagParse = "off-word" | "off-word-extended";
+export type FlagParse = "off-word" | "off-word-extended" | "on-word";
 
 export interface FlagDefinition {
   name: string;
@@ -87,6 +88,15 @@ export const FLAGS = [
     stage: "off-switch",
     parse: "off-word",
   },
+  {
+    name: "pondOwnThreads",
+    env: "SQUEAK_POND_OWN_THREADS",
+    default: false,
+    description:
+      "Stashed: let a pond member run their own agent on their own Mac (git-backed own threads). Off: members start threads on the owner's Mac.",
+    stage: "beta",
+    parse: "on-word",
+  },
 ] as const satisfies readonly FlagDefinition[];
 
 export type FlagName = (typeof FLAGS)[number]["name"];
@@ -107,6 +117,7 @@ export const FLAGS_FILE_NAME = "flags.json";
 /** Parse a raw environment value with a flag's own rule. Unset or blank reads as the default (on). */
 export function parseFlagEnv(parse: FlagParse, raw: string | undefined): boolean {
   const value = (raw ?? "").trim();
+  if (parse === "on-word") return /^(?:on|1|true|yes)$/i.test(value);
   return parse === "off-word" ? value.toLowerCase() !== "off" : !/^(?:off|0|false|no)$/i.test(value);
 }
 

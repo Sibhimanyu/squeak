@@ -3,6 +3,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 
 import { NATIVE_HOST_DOWN, NativeHostError, tokenFromFile } from "../native/client.js";
+import { flag } from "../squeak/flags.js";
 import type { PondDirectory } from "../flotilla/directory.js";
 import type { ChatModel } from "./chat-models.js";
 import { shrinkWithSips, type Shrink } from "./icon-shrink.js";
@@ -578,7 +579,9 @@ export class NativePhone implements RemoteNative {
         at: typeof t.updatedAt === "number" ? new Date(t.updatedAt).toISOString() : new Date(0).toISOString(),
         by: clip(t.starterName, 100) ?? "A teammate",
         mode,
-        ...(mode === "own" ? { poweredBy: `Powered by ${nest ?? "their Mac"} · Flotilla` } : {}),
+        ...(mode === "own" && flag("pondOwnThreads")
+          ? { poweredBy: `Powered by ${nest ?? "their Mac"} · Flotilla` }
+          : {}),
         ...(t.locked === true ? { locked: true as const } : {}),
       });
     }

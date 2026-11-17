@@ -85,9 +85,11 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
     /// Native threads by session key: the pond's id, or nil for Other.
     public var threads: [String: String?]
     public var other: [String]
+    /// Whether a member may run their own agent on their own Mac (stashed: absent from an older host, false by default now).
+    public var pondOwnThreads: Bool?
 
-    public init(schema: Int = 1, ponds: [Pond] = [], order: Order = Order(), threads: [String: String?] = [:], other: [String] = []) {
-        self.schema = schema; self.ponds = ponds; self.order = order; self.threads = threads; self.other = other
+    public init(schema: Int = 1, ponds: [Pond] = [], order: Order = Order(), threads: [String: String?] = [:], other: [String] = [], pondOwnThreads: Bool? = nil) {
+        self.schema = schema; self.ponds = ponds; self.order = order; self.threads = threads; self.other = other; self.pondOwnThreads = pondOwnThreads
     }
 
     public init(from decoder: Decoder) throws {
@@ -97,8 +99,9 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         order = (try? c.decode(Order.self, forKey: .order)) ?? Order()
         threads = (try? c.decode([String: String?].self, forKey: .threads)) ?? [:]
         other = (try? c.decode([String].self, forKey: .other)) ?? []
+        pondOwnThreads = try? c.decode(Bool.self, forKey: .pondOwnThreads)
     }
-    enum CodingKeys: String, CodingKey { case schema, ponds, order, threads, other }
+    enum CodingKeys: String, CodingKey { case schema, ponds, order, threads, other, pondOwnThreads }
 
     public func pond(id: String) -> Pond? { ponds.first { $0.id == id } }
     public func pond(projectId: String) -> Pond? { ponds.first { $0.projectId == projectId } }

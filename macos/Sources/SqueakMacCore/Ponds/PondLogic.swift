@@ -378,7 +378,7 @@ public enum PondStartThread: Sendable, Equatable {
         public var enabled: Bool
     }
 
-    public static func places(for pond: PondSummary) -> [Place] {
+    public static func places(for pond: PondSummary, ownThreads: Bool = true) -> [Place] {
         guard pond.role.canMessage else { return [] }
         let remote = !(pond.gitRemote?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
         let owner = pond.ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -386,6 +386,7 @@ public enum PondStartThread: Sendable, Equatable {
         let ownerMac = mine ? "your Mac" : "\(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
         var out: [Place] = []
         if !mine { out.append(Place(kind: .shared, title: "Shared thread", detail: "Runs on \(ownerMac), any folder", enabled: true)) }
+        guard PondOwnThreads.offersMyMac(pond, ownThreads: ownThreads) else { return out }
         out.append(Place(kind: .own, title: "Own thread", detail: remote ? "Runs on your Mac" : (mine ? "Needs a Git remote" : noRemoteSharedLine(ownerName: pond.ownerName)), enabled: remote))
         return out
     }

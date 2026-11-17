@@ -6,6 +6,7 @@ import path from "node:path";
 import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
 import type { CloudStore, WatchSource } from "../cloud/store.js";
 import { logger } from "../utils/logger.js";
+import { flag } from "../squeak/flags.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import {
   generateMemberKey,
@@ -584,6 +585,10 @@ const SUMMARY_TTL_MS = 20_000;
  * sealed with the pond key, signed by the member who wrote it, and checked against the members the owner signed.
  * It knows nothing of the session host; `bridge.ts` joins the two.
  */
+/** Said when a member's own-Mac thread is asked for while the stashed mode is off (docs/ponds.md). */
+export const OWN_THREADS_OFF =
+  "Running a thread on your own Mac in someone else's pond is switched off. Use Runs on the owner's Mac.";
+
 export class FlotillaService extends EventEmitter {
   private readonly now: () => number;
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
@@ -2662,6 +2667,7 @@ export class FlotillaService extends EventEmitter {
   async assertCanStart(pondId: string): Promise<void> {
     const pond = this.activePond(pondId);
     if (pond.role === "owner" || pond.local) return;
+    if (!flag("pondOwnThreads")) throw new FlotillaError(OWN_THREADS_OFF, 403);
     if (!this.capsIn(pond, await this.members(pond), this.selfId(pond)).start)
       throw new FlotillaError(CAP_REFUSAL.start, 403);
   }
@@ -3342,6 +3348,8 @@ export class FlotillaService extends EventEmitter {
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read!.device || thread.private) continue;
       const mine = this.localThread(pond.id, id);
+      // Stashed: a member's own-Mac thread is not shown while SQUEAK_POND_OWN_THREADS is off.
+      if (thread.mode === "own" && !flag("pondOwnThreads") && members.get(thread.starter)?.role !== "owner") continue;
       // A member the owner took the right to start from has no threads in the pond: theirs keep running on their Mac
       // but are not shown or accepted here (docs/ponds.md, "Who can do what").
       const starter = members.get(thread.starter);
@@ -3361,6 +3369,7 @@ export class FlotillaService extends EventEmitter {
     // Your own private threads show to you only.
     for (const [id, local] of Object.entries(pond.threads)) {
       if (!local.private) continue;
+      if (local.mode === "own" && pond.role !== "owner" && !flag("pondOwnThreads")) continue;
       const me = this.meIn(pond);
       out.push({
         id,
@@ -3879,6 +3888,10 @@ export class FlotillaService extends EventEmitter {
   ): Promise<PondThread> {
     const pond = this.activePond(pondId);
     this.allow(pond, "start-thread", {}, VIEWERS_READ);
+    // Stashed: a member's own thread (their agent on their Mac) is never published unless SQUEAK_POND_OWN_THREADS is on.
+    if (input.mode === "own" && !input.requester && pond.role !== "owner" && !flag("pondOwnThreads")) {
+      throw new FlotillaError(OWN_THREADS_OFF, 403);
+    }
     if (pond.role !== "owner" && !this.capsIn(pond, await this.members(pond), this.identity.id).start) {
       throw new FlotillaError(CAP_REFUSAL.start, 403);
     }

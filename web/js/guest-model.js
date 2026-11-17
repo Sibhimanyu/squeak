@@ -76,7 +76,7 @@ export function endCopy(status, line, ownerName, pondName = "this pond") {
 /** What this person can and cannot do, said once under the pond's name (never "Nest" or "Flock" jargon). */
 export function limitsLine(role) {
   if (role === "viewer") return "You're a viewer: you can read what's shared, but not send messages.";
-  return "You can read and message shared threads from this browser. Starting your own threads needs Squeak for Mac.";
+  return "You can read and message shared threads from this browser. Starting threads needs Squeak for Mac.";
 }
 
 /** The waiting card's honest words: it survives closing the tab, and nothing tells you when it is decided. */
@@ -141,9 +141,12 @@ export function composerBlock(role, thread, me = null) {
   return null;
 }
 
-/** "Powered by <their Mac> · Flotilla" on a thread a member runs with their own agent; null on a shared thread. */
-export function poweredBy(thread) {
-  return thread?.mode === "own" ? `Powered by ${thread.nest || "their Mac"} · Flotilla` : null;
+/**
+ * "Powered by <their Mac> · Flotilla" on a thread a member runs with their own agent; null on a shared thread. The mode is
+ * stashed (docs/ponds.md, SQUEAK_POND_OWN_THREADS): a browser has no host to ask, so the label stays hidden unless told.
+ */
+export function poweredBy(thread, ownThreads = false) {
+  return ownThreads && thread?.mode === "own" ? `Powered by ${thread.nest || "their Mac"} · Flotilla` : null;
 }
 
 /** A line about the thread's starter when their Mac looks away, or null. */

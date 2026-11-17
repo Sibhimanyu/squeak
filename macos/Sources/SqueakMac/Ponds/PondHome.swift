@@ -84,7 +84,7 @@ struct PondHomeView: View {
             emptyBranches: PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds)
+            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
     }
 
     var body: some View {
@@ -598,7 +598,7 @@ struct PondFlockSection: View {
         PondHomeLayout.build(
             project: model.pondProject(key), detail: detail, me: person,
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds)
+            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
     }
 
     var body: some View {
@@ -665,12 +665,12 @@ struct PondFlockSection: View {
                     }
                     if m.role != .owner {
                         Divider()
-                        ForEach(PondPresets.all, id: \.key) { preset in
+                        ForEach(PondPresets.presets(ownThreads: ponds.ownThreads), id: \.key) { preset in
                             Button((PondPresets.current(m) == preset.key ? "\u{2713} " : "") + preset.title) {
                                 if let p = pond { Task { await ponds.setPreset(pond: p.id, member: m.id, preset: preset.key) } }
                             }
                         }
-                        ForEach(PondPresets.switches, id: \.key) { sw in
+                        ForEach(PondPresets.switches(ownThreads: ponds.ownThreads), id: \.key) { sw in
                             let on = PondPresets.value(m, sw.key)
                             Button((on ? "\u{2713} " : "") + sw.title) {
                                 if let p = pond { Task { await ponds.setCap(pond: p.id, member: m.id, cap: sw.key, on: !on) } }

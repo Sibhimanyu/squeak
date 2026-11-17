@@ -19,6 +19,9 @@ import { FakeHost, session } from "./journey-support.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
 
+// The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
+process.env.SQUEAK_POND_OWN_THREADS = "on";
+
 const require = createRequire(import.meta.url);
 const fn = new URL("../../cloud/catalyst-relay/functions/squeak_relay/", import.meta.url).pathname;
 const { createRelay } = require(`${fn}handler.js`);

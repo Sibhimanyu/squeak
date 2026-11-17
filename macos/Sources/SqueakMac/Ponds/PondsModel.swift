@@ -80,7 +80,11 @@ final class PondsModel {
     private(set) var cloud = true
     /// The pond directory (`GET /native/directory`): the one list every pond row, home and setting is drawn from. The last good
     /// read stays while the host is down. Nothing matches a pond by name; a pond's key is its directory id.
-    private(set) var directory: PondDirectory?
+    private(set) var directory: PondDirectory? {
+        didSet { if oldValue?.pondOwnThreads != directory?.pondOwnThreads { ponds = PondOwnThreads.adjusted(ponds, ownThreads: ownThreads) } }
+    }
+    /// Stashed own-Mac threads: the daemon's word (docs/ponds.md); every pond list is read through it.
+    var ownThreads: Bool { PondOwnThreads.enabled(directory?.pondOwnThreads) }
     /// An Invite that waits for the sign-in it started.
     @ObservationIgnored private var inviteAfterSignIn: String?
     private(set) var details: [String: PondDetail] = [:] {
@@ -254,7 +258,8 @@ final class PondsModel {
             listFailed = false
             cloud = listing.cloud
             if !syncedAccount { syncedAccount = true; syncAccount() }
-            if ponds != listing.ponds { ponds = listing.ponds }
+            let listed = PondOwnThreads.adjusted(listing.ponds, ownThreads: ownThreads)
+            if ponds != listed { ponds = listed }
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
             for p in list where p.state == .active || p.state == .local {
@@ -271,7 +276,7 @@ final class PondsModel {
 
     func refresh(pond id: String, byPerson: Bool = false) async {
         await load(id, byPerson: byPerson)
-        if let client, let list = try? await client.ponds(), list != ponds { ponds = list }
+        if let client, let fetched = try? await client.ponds() { let list = PondOwnThreads.adjusted(fetched, ownThreads: ownThreads); if list != ponds { ponds = list } }
     }
 
     private var openPondIds: Set<String> {

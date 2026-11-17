@@ -5,19 +5,27 @@ public enum PondPresets {
     public struct Preset: Sendable { public var key: String; public var title: String }
     public struct Switch: Sendable { public var key: String; public var title: String }
 
-    public static let all: [Preset] = [
-        Preset(key: "viewer", title: "Viewer: reads only"),
-        Preset(key: "member", title: "Member: messages shared threads"),
-        Preset(key: "collaborator", title: "Collaborator: also runs their own agent"),
-    ]
+    /// The presets, worded for the mode: with own threads stashed (the default), a Collaborator starts threads on the owner's Mac.
+    public static func presets(ownThreads: Bool) -> [Preset] {
+        [
+            Preset(key: "viewer", title: "Viewer: reads only"),
+            Preset(key: "member", title: "Member: messages shared threads"),
+            Preset(key: "collaborator", title: ownThreads ? "Collaborator: also runs their own agent" : "Collaborator: can start threads on the owner\u{2019}s Mac"),
+        ]
+    }
 
-    public static let switches: [Switch] = [
-        Switch(key: "see", title: "Can see threads"),
-        Switch(key: "diffs", title: "Can see changes"),
-        Switch(key: "message", title: "Can message"),
-        Switch(key: "answer", title: "Can answer questions"),
-        Switch(key: "start", title: "Can start their own threads"),
-    ]
+    public static func switches(ownThreads: Bool) -> [Switch] {
+        [
+            Switch(key: "see", title: "Can see threads"),
+            Switch(key: "diffs", title: "Can see changes"),
+            Switch(key: "message", title: "Can message"),
+            Switch(key: "answer", title: "Can answer questions"),
+            Switch(key: "start", title: ownThreads ? "Can start their own threads" : "Can start threads on the owner\u{2019}s Mac"),
+        ]
+    }
+
+    public static let all: [Preset] = presets(ownThreads: true)
+    public static let switches: [Switch] = switches(ownThreads: true)
 
     /// The preset a member matches, or "custom".
     public static func current(_ m: FlockMember) -> String {

@@ -243,7 +243,7 @@ export function macCard({ pondName, onDismiss }) {
   return h(
     "aside",
     { class: "g-maccard", "aria-label": "Squeak for Mac" },
-    h("p", null, `Run your own agents in ${pondName}: get Squeak for Mac`),
+    h("p", null, `Start threads in ${pondName}: get Squeak for Mac`),
     h(
       "div",
       { class: "wl-actions" },

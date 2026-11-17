@@ -1,3 +1,4 @@
+import { flag } from "../squeak/flags.js";
 import { CAP_PRESETS } from "./permissions.js";
 import type http from "node:http";
 
@@ -113,7 +114,10 @@ export class FlotillaRoutes {
       const here = new Set((this.deps.projects?.() ?? []).map((p) => p.id));
       const ponds = (await service.list()).map((p) => ({
         ...p,
-        canStartHere: Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
+        // With own-Mac threads stashed, a pond someone else owns starts only on the owner's Mac (docs/ponds.md).
+        canStartHere:
+          (p.role === "owner" || p.local === true || flag("pondOwnThreads")) &&
+          Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
       }));
       ctx.json(200, { ponds, cloud: service.hasCloud() });
       return true;

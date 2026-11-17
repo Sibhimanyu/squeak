@@ -19,7 +19,7 @@ There is no "convert to a pond" step. The host keeps a **local pond** for every 
 - A pond is any folder. Opening one shows its home: the flock and every thread.
 - Access is granted per pond. Members see every thread unless its starter marks it private.
 - Two kinds of collaboration:
-  1. **Own thread**: a member runs their own agent on their own Nest. Needs a pond with a Git remote; code moves only through Git.
+  1. **Own thread** (**Stashed: off by default, `SQUEAK_POND_OWN_THREADS=on` to try**; the daemon says it as `pondOwnThreads` in `GET /native/directory`, and members start on the owner's Mac instead): a member runs their own agent on their own Nest. Needs a pond with a Git remote; code moves only through Git.
   2. **Shared thread**: members chat in a thread running on its starter's Nest. Only messages travel, so any folder works.
 - On someone else's thread a member can watch, see the diff, message, steer and answer. **Approving actions and stopping a
   thread belong to its starter**, and only on the starter's own Mac; neither exists as a command on the wire.
@@ -27,8 +27,8 @@ There is no "convert to a pond" step. The host keeps a **local pond** for every 
 
 ## Who can do what (live, 2026-11-14)
 
-Two modes, both on at once: **shared thread** (the starter's agent on the starter's Mac; members read, see changes, message
-and answer) and **own thread** (a member starts a thread with their own agent on their own Mac, git-backed ponds only;
+Two modes: **shared thread** (the starter's agent on the starter's Mac; members read, see changes, message
+and answer) and **own thread** (**Stashed: off by default, `SQUEAK_POND_OWN_THREADS=on` to try.** Off: a member's Mac never publishes its own thread, readers drop one already published, the Mac and phone offer only "Runs on <owner>'s Mac" and no "Powered by" mark; Collaborator then means "can start threads on the owner's Mac". A member starts a thread with their own agent on their own Mac, git-backed ponds only;
 the pond shows it with the mark "Powered by <their Mac> · Flotilla", everyone reads it live, anyone may message it,
 approvals and Stop stay with its starter). The owner can restrict any of it at any time, with no rejoin.
 

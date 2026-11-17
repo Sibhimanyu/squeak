@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NativeHostError } from "../native/client.js";
 import { checkAnswers, describeRequest, NativePhone } from "./native-phone.js";
 
+// The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
+process.env.SQUEAK_POND_OWN_THREADS = "on";
+
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });

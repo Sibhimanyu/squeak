@@ -10,6 +10,9 @@ import { FlotillaBridge } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService, type FlotillaOptions } from "./service.js";
 
+// The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
+process.env.SQUEAK_POND_OWN_THREADS = "on";
+
 let rtdb: FakeRtdb;
 let url: string;
 const dirs: string[] = [];

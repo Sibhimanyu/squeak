@@ -94,6 +94,8 @@ export interface PondDirectory {
   /** Session key to the directory id of its pond; null = Other. */
   threads: Record<string, string | null>;
   other: string[];
+  /** Whether a member may run their own agent on their own Mac in a joined pond (stashed: absent/false = off). */
+  pondOwnThreads?: boolean;
 }
 
 export interface DirectoryInput {

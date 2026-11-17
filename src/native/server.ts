@@ -1,3 +1,4 @@
+import { flag } from "../squeak/flags.js";
 import { buildDirectory, mapOrder, type DirSession, type PondDirectory } from "../flotilla/directory.js";
 import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { AgentSettings } from "./agent-settings.js";
@@ -382,7 +383,7 @@ export class NativeServer {
               ? ("needs" as const)
               : ("other" as const),
       }));
-    return buildDirectory({
+    const built = buildDirectory({
       projects,
       workspaces,
       records,
@@ -390,6 +391,7 @@ export class NativeServer {
       order: { mode: order.mode === "manual" ? "manual" : "newest", ids: order.order },
       sessions,
     });
+    return { ...built, pondOwnThreads: flag("pondOwnThreads") };
   }
 
   /** What the sidebar keeps for a project: hidden, labels, and the Squeak icon's URL and time when it has one. */
