@@ -478,6 +478,29 @@ export class Room extends EventEmitter {
     }
   }
 
+  /**
+   * Once per install: every duck quiet for more than a day starts off duty. Before closing a duck existed every old chat
+   * stayed on duty, so a pond listed all of them; a duck working or waiting on the person is never put off duty.
+   */
+  retireStaleDucksOnce(): number {
+    if (!this.store.markOnce("ducks-duty-cleanup-v1", this.now())) return 0;
+    const cutoff = this.now() - 24 * 60 * 60_000;
+    let off = 0;
+    for (const p of this.store.listProjects()) {
+      this.sessionsOf(p.id); // makes a duck of any chat that has none yet
+      for (const d of this.store.listDucks(p.id)) {
+        if (d.duty !== "on") continue;
+        const s = d.currentSessionId ? this.store.getSession(d.currentSessionId) : null;
+        if (s && (s.status === "working" || /^(awaiting_|needs_)/.test(s.status))) continue;
+        const last = Date.parse(s?.updatedAt ?? d.createdAt);
+        if (Number.isFinite(last) && last > cutoff) continue;
+        this.store.updateDuck(d.id, { duty: "off" });
+        off += 1;
+      }
+    }
+    return off;
+  }
+
   private sessionsOf(projectId: string): SessionRow[] {
     const project = this.store.getProject(projectId);
     if (!project) return [];

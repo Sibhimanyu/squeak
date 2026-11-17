@@ -59,6 +59,12 @@ export async function runHost(supportDir: string): Promise<void> {
   } catch {
     /* only tidying old noise */
   }
+  try {
+    const off = room.retireStaleDucksOnce();
+    if (off) logger.info("ducks quiet for over a day put off duty (once)", { off });
+  } catch (error) {
+    logger.warn("stale duck cleanup skipped", { error: String(error) });
+  }
   new RoomSummariser({ host, store, room }).start();
   const jobs = new RoomJobs({
     store,

@@ -151,6 +151,32 @@ describe("duck migration", () => {
   });
 });
 
+describe("one-time stale duck cleanup", () => {
+  it("puts ducks quiet for over a day off duty once, keeps recent and working ones on", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ducks-stale-"));
+    const store = new NativeStore(":memory:");
+    store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
+    const mk = (title: string) =>
+      store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title });
+    const old = mk("Old");
+    const recent = mk("Recent");
+    const busy = mk("Busy");
+    const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+    store.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(ago(30), old.id);
+    store.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(ago(2), recent.id);
+    store.db.prepare("UPDATE sessions SET updated_at=?, status='working' WHERE id=?").run(ago(48), busy.id);
+    const room = new Room({ store });
+    expect(room.retireStaleDucksOnce()).toBe(1);
+    expect(store.duckBySession(old.id)!.duty).toBe("off");
+    expect(store.duckBySession(recent.id)!.duty).toBe("on");
+    expect(store.duckBySession(busy.id)!.duty).toBe("on");
+    // Once only: a duck brought back stays on.
+    store.updateDuck(store.duckBySession(old.id)!.id, { duty: "on" });
+    expect(new Room({ store }).retireStaleDucksOnce()).toBe(0);
+    expect(store.duckBySession(old.id)!.duty).toBe("on");
+  });
+});
+
 describe("identity-only ducks and routes", () => {
   it("POST makes a duck with no session; GET lists it with no place; it shows in the room threads", async () => {
     const h = await rig("folder");

@@ -1169,6 +1169,12 @@ export class NativeStore {
     return r ? (r.at as number) : null;
   }
 
+  /** True the first time `key` is marked (a one-time step), false after. */
+  markOnce(key: string, at: number): boolean {
+    this.db.exec("CREATE TABLE IF NOT EXISTS once_flags (key TEXT PRIMARY KEY, at INTEGER NOT NULL)");
+    return this.db.prepare("INSERT OR IGNORE INTO once_flags (key, at) VALUES (?,?)").run(key, at).changes === 1;
+  }
+
   markRoomBackfilled(projectId: string, at: number): boolean {
     // Created here, not as a migration: a pond whose room was filled once from its chats' timelines never is again.
     this.db.exec("CREATE TABLE IF NOT EXISTS room_backfill (project_id TEXT PRIMARY KEY, at INTEGER NOT NULL)");
