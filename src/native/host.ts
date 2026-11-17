@@ -392,6 +392,10 @@ export class SessionHost extends EventEmitter {
       targetBranch: ws ? (this.store.getTargetBranch(ws.id) ?? project?.defaultBranch ?? null) : null,
       port: ws?.port ?? null,
       shared: this.isShared(s.id),
+      duck: {
+        name: this.store.duckOf(s.id).name ?? (s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude")),
+        role: this.store.duckOf(s.id).role,
+      },
     });
   }
 

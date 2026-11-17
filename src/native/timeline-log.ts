@@ -106,6 +106,18 @@ export class TimelineLog {
     );
   }
 
+  /** A turn's subagent tool steps (Agent/Task: their labels start "Start "), as step events, oldest first. */
+  duckSteps(sessionId: string, turnId: string): Array<Extract<TimelineEvent, { type: "step.added" | "step.updated" }>> {
+    return this.read(
+      this.db
+        .prepare(
+          `SELECT seq, body FROM timeline_events WHERE session_id=? AND turn_id=? AND type IN ('step.added','step.updated')
+             AND body LIKE '%"kind":"tool"%' AND body LIKE '%"label":"Start %' ORDER BY seq LIMIT 400`,
+        )
+        .all(sessionId, turnId) as Row[],
+    ) as Array<Extract<TimelineEvent, { type: "step.added" | "step.updated" }>>;
+  }
+
   /** The newest progress-strip update after a seq (the strip is one step, id `progress`), if any. */
   latestProgress(
     sessionId: string,

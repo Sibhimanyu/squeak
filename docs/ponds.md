@@ -584,3 +584,24 @@ RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"
   starts: `handed`, then `running` while it runs, then `done` (or `failed`) with `outcomeText`, read from the chat's timeline.
 - Agents: `open_jobs` (suggested jobs fitting this thread) and `claim_job {jobId, eta?}` (sets `claim` to `asking`; starts
   nothing; one claim at a time, a newer chat replaces it only after a deny; 10 an hour a chat).
+
+### Ducks
+
+In the room a chat is a **duck**: a pond member with a name, a role and a duty (user-facing copy says duck; the code
+keeps session/thread). Squeak never chats. Host side: `room.ts` (`threadOf`, `setDuck`, `setDuty`), `store.ts`
+(`session_ducks`, created lazily like `room_jobs`, no numbered migration).
+
+- `RoomThread` adds `name` (the person's, else the chat title), `role?` (0..80 chars), `duty` (`"on"` default, `"off"`
+  = the person closed the duck's tab) and `lastActiveAt`. `RoomTurn.ducklings?` = `{count, done, items?:[{label,
+state}]}` from the turn's Agent/Task tool steps (labels "Start ..."), absent when none; a duckling starting or
+  ending sends a `turn` frame. A duckling counts as done when its tool step ends: an async one's launch result.
+- Routes (token-gated, strict bodies): `PATCH /native/sessions/<id>/duck {name?: 1..32 | null, role?: 0..80 | null}` ->
+  `{name, role?}`; `POST /native/sessions/<id>/duty {on: boolean}` -> `{duty}`. Unknown keys or bad lengths are 400.
+  SSE `event: thread` carries the `RoomThread` on a name, role or duty change.
+- Off duty: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to it refused.
+  A person's message to it (`POST .../messages`) or a Go/Allow on a job puts it back on duty; the person can always
+  open it.
+- Matching counts name and role words like title words (3 each). `job.suggestion.pitch` (and each candidate's) is the
+  reason in first person, said after "I": "worked on the control bar an hour ago", "am working on ... now", "have a
+  thread about ...". `reason` is unchanged.
+- The agent note adds "You are <name>, a duck in <pond>; your role: <role>" (a running agent gets it at its next start).
