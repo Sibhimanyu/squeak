@@ -13,6 +13,7 @@ import {
   pendingSends,
   workingRow,
 } from "./guest-model.js";
+import { loadAccountPonds, syncAccountPonds } from "./guest-account.js";
 import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
 import { fetchMe, redeemShortCode, watchPond } from "./guest-relay.js";
 import {
@@ -77,6 +78,8 @@ export function startGuest({
   let dirty = false;
   let last = 0;
   let timer = null;
+  /** The account's ponds asked for in this load: one ask a minute, a refused pond is not asked for again (guest-account.js). */
+  const accountSync = { lastAt: 0, refused: new Set() };
 
   const mount = (...nodes) => {
     root.replaceChildren(...nodes.filter(Boolean));
@@ -368,6 +371,13 @@ export function startGuest({
       paint();
       return;
     }
+    if (status === "dropped") {
+      // A device request that lapsed unanswered leaves nothing behind; the next load asks again.
+      stopLive();
+      ui.pond = null;
+      showCodeEntry();
+      return;
+    }
     if (status !== "active") {
       paint();
       return;
@@ -416,6 +426,12 @@ export function startGuest({
     if (!pond) return;
     switch (pond.status) {
       case "pending":
+        if (pond.record.deviceJoin) {
+          // A pond that came with the account: no code, words or approval, only a quiet wait for the owner's Mac.
+          ui.screen = "loading";
+          mount(banner(), page(h("p", { class: "g-lead" }, "Getting your ponds…")));
+          return;
+        }
         ui.screen = "waiting";
         mount(
           banner(),
@@ -645,6 +661,18 @@ export function startGuest({
       else if (parked) await unpark();
     }
     const saved = await GuestPond.load({ vault, fetch }).catch(() => null);
+    // Signed in, with no invite in hand: the ponds the account is already in come to this browser by themselves.
+    let fromAccount = [];
+    if (!ui.invite) {
+      const relayUrl = accountRelayBase(win.location);
+      fromAccount = await syncAccountPonds({
+        relayUrl,
+        token: () => (relayUrl ? accountTokenFor(relayUrl) : null),
+        vault,
+        fetch,
+        state: accountSync,
+      }).catch(() => loadAccountPonds({ vault, fetch }).catch(() => []));
+    }
     if (
       saved &&
       (saved.status === "active" || saved.status === "pending") &&
@@ -667,6 +695,10 @@ export function startGuest({
           },
         },
       );
+    }
+    if (!saved && !ui.invite && fromAccount.length > 0) {
+      ui.pond = fromAccount.find((p) => p.status === "active") ?? fromAccount[0];
+      return resume();
     }
     if (saved) {
       if (!ui.invite) {

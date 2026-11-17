@@ -125,6 +125,22 @@ boxKey, at}` (a request older than 10 min is gone); `channels/<macId>/devresults
   key); no pond token touches either. A device request wakes the Mac with the same change notice a PUT would; the Mac
   checks the keys and answers.
 
+## Account-wide pond membership (relay 1.7.0)
+
+Design and trust argument: docs/ponds.md, "Members are accounts". Three routes, no new secret, no new kind (`devreqs` already
+exists and is relay-owned: no pond token reads or writes it, and the relay key never PUTs it):
+
+- `POST /ponds/<pondId>/members/accounts` `{ ownerKey, name?, add: [userId], remove: [userId] }` (a Mac's own key that owns the
+  pond's channel, or the operator's key; at most 50 ids per list): writes/removes relay-owned rows `acctponds/<userId>` /
+  `<pondId>` = `{ v:1, ownerKey, name?, at }`. 204; 400 `ids` | `key`; 403 not the channel's Mac.
+- `GET /account/ponds` (a Mac's own key, or `x-squeak-account`; 401 for the operator's key, a pond token or nobody): `{ ponds:
+[{ pondId, ownerKey, name? }] }` for the caller's own account only (at most 100), `no-store`.
+- `POST /account/pond-devices` `{ pondId, publicKey, boxKey?, client: "mac"|"web"|"ios", nest? }` (same callers): 403 `pond` unless
+  the caller's account is in the pond's index, 403 `removed` for a device whose id has a revocation record, 429 `rate` past 10 a
+  minute per account (`ponddev-rate`). Writes `channels/<pondId>/devreqs/<deviceId>` (`deviceId` = base64url of the first 12 bytes
+  of SHA-256 of the key) = `{ v:1, reqId, userId, email, name, publicKey, boxKey, client, nest, at }`, announces it, and answers
+  `{ reqId, token, expiresAt }` (a join-scope token, 24 h, for that device id).
+
 ## Invite email (relay 1.6.0, Catalyst Mail)
 
 `POST /ponds/<pondId>/invites/email` (a Mac's own key, or the operator's relay key; the Mac must own the pond's channel):

@@ -66,8 +66,14 @@ import {
   readCommand,
   readHold,
   readJoinRequest,
+  readDeviceRequest,
   readMember,
   readMeta,
+  devicesOf,
+  keysOfMember,
+  memberOfDevice,
+  MAX_DEVICES_PER_MEMBER,
+  type MemberDevice,
   readPresence,
   readRipple,
   readThread,
@@ -85,6 +91,18 @@ import {
   type Role,
   type ThreadEvent,
 } from "./types.js";
+
+/** A P-256 public point as standard base64 (x963, 65 bytes, starts 0x04), or null: what a device request's keys must be. */
+function canonicalPoint(key: string): string | null {
+  const raw = Buffer.from(key, "base64");
+  if (raw.length !== 65 || raw[0] !== 0x04) return null;
+  try {
+    sealToMember(raw.toString("base64"), {});
+  } catch {
+    return null;
+  }
+  return raw.toString("base64");
+}
 
 /** What each command a member can send is, for `can`. There is no approve or stop to map. */
 const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
@@ -267,6 +285,13 @@ interface LocalPond {
   local?: boolean;
   /** A joiner on a Catalyst relay, until approved: the invite's join-only token (writes the join request). */
   joinToken?: string;
+  /**
+   * This Mac is a device of a member who joined elsewhere (docs/ponds.md, "Members are accounts"): there is no invite
+   * and no join request, only the relay's device request, and `joinToken` is the device's read token.
+   */
+  deviceJoin?: true;
+  /** The member id this Mac acts as in this pond when it is a later device of someone; absent = its own key's id. */
+  memberId?: string;
   /** A joiner on a Catalyst relay, once approved: the pond-scoped token the owner sent sealed to this key. */
   token?: HeldToken;
   /** An owner on a Catalyst relay: who holds a token, and until when, so it is renewed before it lapses. */
@@ -408,6 +433,16 @@ export interface MemberView {
   muted?: boolean;
   /** Presence heartbeat younger than 45 s. */
   online: boolean;
+  /** How many devices this person is signed in on in this pond (one row per person). Absent from an older host. */
+  devices?: number;
+  /** Only on your own row: the devices to list and remove ("Your devices in this pond"). `client` is "mac", "web" or "ios". */
+  ownDevices?: Array<{
+    id: string;
+    client: "mac" | "web" | "ios";
+    nestName: string | null;
+    addedAt: number;
+    current: boolean;
+  }>;
   /** Unix ms of the last heartbeat, when there is one. */
   lastSeenAt?: number;
   you: boolean;
@@ -443,6 +478,14 @@ interface DecisionState {
 const DECISION_KEEP_MS = 10 * 60_000;
 /** An owner's Mac re-reads its members' account names at most this often per pond (one relay call per 50 members). */
 const NAME_REFRESH_MS = 30 * 60_000;
+/** A Ripple a member writes to ask the owner's Mac to end one of their own devices: `removed my device <id>`. */
+const DEVICE_REMOVE_PREFIX = "removed my device ";
+/** A device request the relay wrote is honoured this long (the device's read token lives as long). */
+const DEVICE_REQUEST_MAX_MS = 24 * 60 * 60_000;
+/** An owner's Mac adds at most this many devices a minute to one pond: a stolen account token cannot spray keys. */
+const DEVICE_ADDS_PER_MINUTE = 5;
+/** A Mac asks the relay for its account's ponds at most this often (and at sign-in). */
+const ACCOUNT_SYNC_MS = 5 * 60_000;
 /** What a member without a verified Squeak account is called. */
 export const SIGNED_OUT_MEMBER = "Signed-out member";
 export const SIGN_IN_TO_JOIN = "Sign in to Squeak to join a pond. Your name comes from your account.";
@@ -552,6 +595,12 @@ export class FlotillaService extends EventEmitter {
   /** A join in flight: the relay's attestation sent beside the request (never kept past it). */
   private readonly joinAttests = new Map<string, string>();
   private readonly nameChecks = new Map<string, number>();
+  private readonly indexChecks = new Map<string, number>();
+  private readonly deviceAdds = new Map<string, number[]>();
+  /** Ponds whose device request the relay refused or could not take: not asked again until then. */
+  private readonly deviceSkips = new Map<string, number>();
+  private accountSyncAt = 0;
+  private accountSyncing = false;
   private readonly commandChains = new Map<string, Promise<void>>();
   private readonly deciding = new Map<string, Promise<void>>();
   private readonly decisions = new Map<string, DecisionState>();
@@ -668,6 +717,8 @@ export class FlotillaService extends EventEmitter {
       }
     };
     const raw = (store as CloudStore & { getRaw?: (path: string) => Promise<unknown | null> }).getRaw;
+    const rawList = (store as CloudStore & { listRaw?: (c: string) => Promise<Array<{ id: string; doc: unknown }>> })
+      .listRaw;
     return {
       get: (path) => run(() => store.get(path)),
       set: (path, doc, options) => run(() => store.set(path, doc, options)),
@@ -675,6 +726,7 @@ export class FlotillaService extends EventEmitter {
       delete: (path) => run(() => store.delete(path)),
       watch: (path, onChange, options) => store.watch(path, onChange, options),
       ...(typeof raw === "function" ? { getRaw: (path: string) => raw.call(store, path) } : {}),
+      ...(typeof rawList === "function" ? { listRaw: (c: string) => rawList.call(store, c) } : {}),
     } as CloudStore;
   }
 
@@ -770,6 +822,15 @@ export class FlotillaService extends EventEmitter {
     const pond = this.pondsFile.data.ponds[id];
     if (!pond) throw new FlotillaError("no such pond", 404);
     return pond;
+  }
+
+  /** The member id this Mac acts as in a pond: its own key's id, or the member it joined as a later device of. */
+  private selfId(pond: LocalPond): string {
+    return pond.memberId ?? this.identity.id;
+  }
+
+  private meIn(pond: LocalPond): Identity & { id: string } {
+    return { ...this.identity, id: this.selfId(pond) };
   }
 
   private activePond(id: string): LocalPond {
@@ -956,7 +1017,7 @@ export class FlotillaService extends EventEmitter {
   // permissions (permissions.ts: the one place a role, a grant or an authority is decided)
 
   private actorOf(pond: LocalPond): Actor {
-    return { kind: "human", memberId: this.identity.id, role: pond.role };
+    return { kind: "human", memberId: this.selfId(pond), role: pond.role };
   }
 
   /** Throws the refusal `can` gives (or `message` when the caller keeps an older sentence); 404 for "no such thread". */
@@ -975,7 +1036,7 @@ export class FlotillaService extends EventEmitter {
     const members = await this.members(pond);
     const out = new Map<string, MachineGrant>();
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/grants`)) {
-      const read = this.readSigned(pond, "grants", id, doc, (d) => members.get(d)?.publicKey ?? null);
+      const read = this.readSigned(pond, "grants", id, doc, (d) => keysOfMember(members.get(d)));
       const grant = read ? readGrant(read.value) : null;
       if (grant && grant.owner === id && read!.device === id && members.get(id)?.nest != null) out.set(id, grant);
     }
@@ -1016,7 +1077,8 @@ export class FlotillaService extends EventEmitter {
       await this.storeOf(pond).set(docPath, {
         box,
         sig: signText(id.privateKey, signedText(docPath, box)),
-        device: id.id,
+        // A later device of a member signs as that member (its key is in the member document's `devices`).
+        device: kind === "joins" ? id.id : this.selfId(pond),
         at: this.now(),
       });
       // The relay tells every watcher of the channel, this Mac included; that notice is not news.
@@ -1060,13 +1122,16 @@ export class FlotillaService extends EventEmitter {
     kind: string,
     docId: string,
     doc: ChannelDoc,
-    keyOf: (device: string) => string | null,
+    keyOf: (device: string) => string | string[] | null,
   ): { value: unknown; device: string } | null {
     try {
       const docPath = this.docPath(pond.id, kind, docId);
-      if (!doc.sig || !doc.device) return null;
-      const key = keyOf(doc.device);
-      if (!key || !verifyText(key, signedText(docPath, doc.box), doc.sig)) return null;
+      const sig = doc.sig;
+      if (!sig || !doc.device) return null;
+      const keys = keyOf(doc.device);
+      const text = signedText(docPath, doc.box);
+      // A member's signature is any of its devices' (docs/ponds.md, "Members are accounts"); `device` stays the member id.
+      if (!keys || ![keys].flat().some((k) => verifyText(k, text, sig))) return null;
       return { value: this.openDoc(pond, docPath, doc), device: doc.device };
     } catch {
       return null;
@@ -1303,7 +1368,7 @@ export class FlotillaService extends EventEmitter {
 
   /** What needs this person: a question anyone but a viewer may answer, or an approval on their own thread. */
   private needsCount(pond: LocalPond, threads: PondThread[]): number {
-    const me = this.identity.id;
+    const me = this.selfId(pond);
     return threads.filter((t) => {
       if (t.state !== "waiting") return false;
       if (t.starter === me) return true;
@@ -1332,7 +1397,7 @@ export class FlotillaService extends EventEmitter {
     }
     try {
       const members = await this.members(pond);
-      if (members.size === 0 || (pond.role !== "owner" && !members.has(this.identity.id))) {
+      if (members.size === 0 || (pond.role !== "owner" && !memberOfDevice(members, this.identity.id))) {
         throw new FlotillaError(ACCESS_ENDED, 403, { access: "ended" });
       }
       const threads = await this.threadsOf(pond, members);
@@ -1360,6 +1425,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   async list(): Promise<PondSummary[]> {
+    this.syncAccountPondsSoon();
     const ponds = Object.values(this.pondsFile.data.ponds).filter(
       // A declined, lapsed, withdrawn or removed pond stays listed until its person presses Remove, so the app can say so.
       (p) => p.status === "active" || p.status === "pending" || TERMINAL.includes(p.status),
@@ -1406,7 +1472,7 @@ export class FlotillaService extends EventEmitter {
    */
   private async onAccessEnded(pond: LocalPond): Promise<"ok" | "removed" | "waiting" | "offline"> {
     if (pond.role === "owner" || pond.status !== "active") return "ok";
-    const me = this.identity;
+    const me = this.meIn(pond);
     try {
       await this.syncKeys(pond);
     } catch (error) {
@@ -1415,7 +1481,8 @@ export class FlotillaService extends EventEmitter {
     }
     try {
       const read = await this.membersRead(pond);
-      const mine = read.members.get(me.id);
+      const mine = memberOfDevice(read.members, this.identity.id);
+      void me;
       if (mine) {
         if (pond.role !== mine.role) {
           pond.role = mine.role;
@@ -1952,7 +2019,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   /**
-   * Who the relay saw signed in when a join request came (\`joinids/<requestId>\`, plain JSON the relay wrote): context for
+   * Who the relay saw signed in when a join request came (`joinids/<requestId>`, plain JSON the relay wrote): context for
    * the owner's decision, never a grant. Only a Catalyst store has it; anything unreadable is simply absent.
    */
   private async verifiedIdentity(
@@ -2113,6 +2180,7 @@ export class FlotillaService extends EventEmitter {
     // without a key). Everything else here is independent, so the slow relay calls overlap.
     await this.sendKeyTo(pond, member);
     await this.writeMember(pond, member);
+    if (member.accountId) await this.indexAccounts(pond, [member.accountId], []).catch(() => undefined);
     const superseded = await supersededRead;
     consume("accepted");
     // The member is in and the invite used: the cleanup and a Ripple that cannot be written (a slow relay) must not
@@ -2185,25 +2253,35 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** A pond-scoped token for a member of a Catalyst pond, or undefined where there is no relay (Firebase). */
-  private async tokenFor(pond: LocalPond, member: MemberDoc): Promise<HeldToken | undefined> {
+  private async tokenFor(pond: LocalPond, member: MemberDoc, device?: MemberDevice): Promise<HeldToken | undefined> {
     const relay = this.options.relay;
     if (!relay || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return undefined;
-    const scope: TokenScope = member.nest !== null && member.client !== "web" ? "member" : "guest";
+    // A token belongs to one device (so one device can be ended); a member's other devices keep theirs.
+    const holder = device?.id ?? member.id;
+    const nest = device ? (device.nest ?? null) : member.nest;
+    const client = device ? device.client : member.client;
+    const scope: TokenScope = nest !== null && client !== "web" && client !== "ios" ? "member" : "guest";
     let issued;
     try {
-      issued = await relay.issue(pond.id, member.id, scope, TOKEN_TTL_SEC);
+      issued = await relay.issue(pond.id, holder, scope, TOKEN_TTL_SEC);
     } catch {
       throw new FlotillaError("The relay would not give that member access; try again.", 503);
     }
-    (pond.issued ??= {})[member.id] = { expiresAt: issued.expiresAt, scope };
+    (pond.issued ??= {})[holder] = { expiresAt: issued.expiresAt, scope };
     this.save();
     return { value: issued.token, expiresAt: issued.expiresAt };
   }
 
+  /** The pond key, sealed to every device of a member (device one by its member id, the others by their own). */
   private async sendKeyTo(pond: LocalPond, member: MemberDoc): Promise<void> {
-    const docPath = this.docPath(pond.id, "keys", member.id);
-    const token = await this.tokenFor(pond, member);
-    const box = sealToMember(member.publicKey, {
+    for (const device of devicesOf(member)) await this.sendKeyToDevice(pond, member, device);
+  }
+
+  private async sendKeyToDevice(pond: LocalPond, member: MemberDoc, device: MemberDevice): Promise<void> {
+    const docPath = this.docPath(pond.id, "keys", device.id);
+    const primary = device.id === member.id;
+    const token = await this.tokenFor(pond, member, primary ? undefined : device);
+    const box = sealToMember(device.boxKey, {
       version: pond.current,
       key: pond.keys[String(pond.current)],
       ...(token ? { token } : {}),
@@ -2217,16 +2295,18 @@ export class FlotillaService extends EventEmitter {
     });
   }
 
-  private async sendRemoval(pond: LocalPond, member: MemberDoc): Promise<void> {
-    const docPath = this.docPath(pond.id, "keys", member.id);
-    const box = sealToMember(member.publicKey, { removed: true });
-    const id = this.identity;
-    await this.storeOf(pond).set(docPath, {
-      box,
-      sig: signText(id.privateKey, signedText(docPath, box)),
-      device: id.id,
-      at: this.now(),
-    });
+  private async sendRemoval(pond: LocalPond, member: MemberDoc, only?: MemberDevice): Promise<void> {
+    for (const device of only ? [only] : devicesOf(member)) {
+      const docPath = this.docPath(pond.id, "keys", device.id);
+      const box = sealToMember(device.boxKey, { removed: true });
+      const id = this.identity;
+      await this.storeOf(pond).set(docPath, {
+        box,
+        sig: signText(id.privateKey, signedText(docPath, box)),
+        device: id.id,
+        at: this.now(),
+      });
+    }
   }
 
   /** Before a member's token lapses, the owner's Mac issues a new one and writes it into their keys document. */
@@ -2234,10 +2314,11 @@ export class FlotillaService extends EventEmitter {
     const due = Object.entries(pond.issued ?? {}).filter(([, t]) => t.expiresAt - this.now() < TOKEN_RENEW_MS);
     if (due.length === 0) return;
     const members = await this.members(pond);
-    for (const [memberId] of due) {
-      const member = members.get(memberId);
-      if (member && memberId !== this.identity.id) await this.sendKeyTo(pond, member);
-      else delete pond.issued![memberId];
+    for (const [holder] of due) {
+      const member = memberOfDevice(members, holder);
+      const device = member ? devicesOf(member).find((d) => d.id === holder) : undefined;
+      if (member && device && holder !== this.identity.id) await this.sendKeyToDevice(pond, member, device);
+      else delete pond.issued![holder];
     }
     this.save();
   }
@@ -2248,12 +2329,268 @@ export class FlotillaService extends EventEmitter {
   }
 
   /**
-   * A lost device: a member is one key on one Mac (`memberId` is the hash of that key), so the Mac's key is the member.
-   * The device id must name that key, so a stale or guessed id removes nobody. Then the pond key rotates.
+   * One device of a member, by the owner (a lost phone or Mac). The device id must name one of the member's devices, so a
+   * stale or guessed id removes nobody. A member's last device is the member: that is `removeMember`. Otherwise the device's
+   * token ends, it gets a "removed" note, the member document drops it, and the pond key rotates so it opens nothing new.
    */
   async removeDevice(pondId: string, memberId: string, deviceKeyId: string): Promise<void> {
-    if (deviceKeyId !== memberId) throw new FlotillaError("No such device.", 404);
-    await this.removeAndRotate(pondId, memberId, (gone) => `removed ${gone.name}'s Mac`);
+    const pond = this.activePond(pondId);
+    this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
+    const member = (await this.members(pond)).get(memberId);
+    const device = member ? devicesOf(member).find((d) => d.id === deviceKeyId) : undefined;
+    if (!member || !device) throw new FlotillaError("No such device.", 404);
+    if (devicesOf(member).length === 1) {
+      await this.removeAndRotate(pondId, memberId, (gone) => `removed ${gone.name}'s Mac`);
+      return;
+    }
+    await this.removeOneDevice(pondId, memberId, deviceKeyId);
+  }
+
+  private async removeOneDevice(pondId: string, memberId: string, deviceId: string): Promise<void> {
+    const key = `${pondId}/${memberId}/${deviceId}`;
+    const running = this.removing.get(key);
+    if (running) return running;
+    const run = this.removeOneDeviceOnce(pondId, memberId, deviceId).finally(() => this.removing.delete(key));
+    this.removing.set(key, run);
+    return run;
+  }
+
+  private async removeOneDeviceOnce(pondId: string, memberId: string, deviceId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
+    const members = await this.members(pond);
+    const member = members.get(memberId);
+    const device = member ? devicesOf(member).find((d) => d.id === deviceId) : undefined;
+    if (!member || !device) throw new FlotillaError("No such device.", 404);
+    await this.revokeToken(pond, device.id, "Squeak couldn't end that device's access. Try again.");
+    await this.sendRemoval(pond, member, device).catch(() => undefined);
+    await this.dropDeviceRequest(pond, device.id);
+    const left: MemberDoc =
+      device.id === member.id
+        ? { ...member, primaryRetired: true }
+        : { ...member, devices: (member.devices ?? []).filter((d) => d.id !== device.id) };
+    if (left.devices?.length === 0) delete left.devices;
+    await this.writeMember(pond, left);
+    members.set(left.id, left);
+    pond.rotationPending = true;
+    this.save();
+    await this.ripple(pondId, "removed a device", { id: member.id, name: member.name }).catch(() => undefined);
+    await this.rotate(pond, members);
+    delete pond.rotationPending;
+    this.save();
+  }
+
+  /** A member removes one of their own devices (any of them, this one included): the owner's Mac does it when it reads this. */
+  async removeOwnDevice(pondId: string, deviceId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role === "owner") throw new FlotillaError("An owner has one Mac here: delete the pond instead.", 409);
+    const members = await this.members(pond);
+    const me = memberOfDevice(members, this.identity.id);
+    if (!me || !devicesOf(me).some((d) => d.id === deviceId)) throw new FlotillaError("No such device.", 404);
+    if (devicesOf(me).length === 1)
+      throw new FlotillaError("That is your only device here: leave the pond instead.", 409);
+    await this.ripple(pondId, `${DEVICE_REMOVE_PREFIX}${deviceId}`);
+    if (deviceId === this.identity.id) this.forgetPond(pondId);
+  }
+
+  // Members are accounts (docs/ponds.md): the owner's side
+
+  /** Tells the relay which accounts are members of this pond (its per-account index); best effort, repeated by `reconcileAccountIndex`. */
+  private async indexAccounts(pond: LocalPond, add: string[], remove: string[]): Promise<void> {
+    const relay = this.options.relay;
+    if (!relay?.indexAccounts || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    for (let i = 0; i < Math.max(add.length, remove.length, 1); i += 50) {
+      await relay.indexAccounts(pond.id, {
+        ownerKey: pond.ownerKey,
+        name: pond.name,
+        add: add.slice(i, i + 50),
+        remove: remove.slice(i, i + 50),
+      });
+    }
+  }
+
+  /** Every 30 minutes (and on the first pass after start): the index says exactly the accounts that are members now. */
+  private async reconcileAccountIndex(pond: LocalPond): Promise<void> {
+    if (pond.local || !this.options.relay?.indexAccounts) return;
+    const at = this.now();
+    if (at - (this.indexChecks.get(pond.id) ?? 0) < NAME_REFRESH_MS) return;
+    this.indexChecks.set(pond.id, at);
+    const members = await this.members(pond);
+    const ids = [
+      ...new Set([...members.values()].filter((m) => m.role !== "owner" && m.accountId).map((m) => m.accountId!)),
+    ];
+    if (ids.length > 0) await this.indexAccounts(pond, ids, []);
+  }
+
+  /**
+   * An owner's Mac adds a device the relay says belongs to a member's account. The relay wrote the request (no client
+   * token can write that kind), so its `userId` is the verified account; it is added only when a member document of this
+   * pond carries that same `accountId`, exactly as an emailed invite's `joinids` is checked. The pond key reaches the
+   * device sealed to its own key before the member document lists it. A member with no `accountId` cannot attach devices.
+   */
+  private async adoptDeviceRequests(pond: LocalPond): Promise<void> {
+    const store = this.storeOf(pond) as CloudStore & {
+      listRaw?: (collection: string) => Promise<Array<{ id: string; doc: unknown }>>;
+    };
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst" || typeof store.listRaw !== "function")
+      return;
+    const rows = await store.listRaw(`channels/${pond.id}/devreqs`);
+    if (rows.length === 0) return;
+    const members = await this.members(pond);
+    const byAccount = new Map<string, MemberDoc>();
+    for (const m of members.values()) if (m.accountId && m.role !== "owner") byAccount.set(m.accountId, m);
+    const now = this.now();
+    const recent = (this.deviceAdds.get(pond.id) ?? []).filter((t) => now - t < 60_000);
+    this.deviceAdds.set(pond.id, recent);
+    for (const row of rows) {
+      const req = readDeviceRequest(row.doc);
+      if (!req || req.reqId !== row.id) {
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
+      const publicKey = canonicalPoint(req.publicKey);
+      const boxKey = canonicalPoint(req.boxKey);
+      const member = byAccount.get(req.userId);
+      if (
+        !publicKey ||
+        !boxKey ||
+        !member ||
+        memberIdOf(publicKey) !== req.reqId ||
+        now - req.at > DEVICE_REQUEST_MAX_MS
+      ) {
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
+      const have = devicesOf(member).find((d) => d.id === req.reqId);
+      if (have) {
+        // Asked again (it lost its state): the key is sent again, nothing else changes.
+        await this.sendKeyToDevice(pond, member, have).catch(() => undefined);
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
+      if (devicesOf(member).length >= MAX_DEVICES_PER_MEMBER) {
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
+      if (recent.length >= DEVICE_ADDS_PER_MINUTE) break;
+      const device: MemberDevice = {
+        id: req.reqId,
+        publicKey,
+        boxKey,
+        client: req.client,
+        nest: req.nest,
+        addedAt: now,
+      };
+      const next: MemberDoc = { ...member, devices: [...(member.devices ?? []), device] };
+      try {
+        await this.sendKeyToDevice(pond, next, device);
+        await this.writeMember(pond, next);
+      } catch (error) {
+        logger.warn("could not add a member's device", { pond: pond.id, error: String(error) });
+        continue;
+      }
+      recent.push(now);
+      members.set(next.id, next);
+      byAccount.set(req.userId, next);
+      await this.dropDeviceRequest(pond, row.id);
+      await this.ripple(pond.id, "added a device", { id: next.id, name: this.shownName(pond, next) }).catch(
+        () => undefined,
+      );
+      this.emit("device-added", pond.id, next.id);
+      this.emit("changed", pond.id);
+    }
+  }
+
+  // Members are accounts: this Mac as a later device
+
+  /** The account on this Mac changed (signed in): the next sync is not held back by the last one. */
+  accountChanged(): void {
+    this.accountSyncAt = 0;
+    this.deviceSkips.clear();
+  }
+
+  /** Runs `syncAccountPonds` in the background at most every few minutes; never throws. */
+  private syncAccountPondsSoon(): void {
+    if (this.now() - this.accountSyncAt < ACCOUNT_SYNC_MS) return;
+    void this.syncAccountPonds().catch(() => undefined);
+  }
+
+  /**
+   * A Mac signed in to an account that is a member of ponds it has not opened (it joined in a browser first) asks to be
+   * added to each: the relay lists them for this account only, and the owner's Mac adds this device. No invite, code or
+   * approval. A pond already here, in any state, is left alone, and a removed device is refused by the relay.
+   */
+  async syncAccountPonds(): Promise<number> {
+    const relay = this.options.relay;
+    if (!relay?.accountPonds || !relay.requestDevice || this.accountSyncing) return 0;
+    this.accountSyncing = true;
+    this.accountSyncAt = this.now();
+    let asked = 0;
+    try {
+      let list;
+      try {
+        list = await relay.accountPonds();
+      } catch {
+        return 0;
+      }
+      const me = this.identity;
+      for (const entry of list) {
+        const existing = this.pondsFile.data.ponds[entry.pondId];
+        const lapsed =
+          existing?.deviceJoin && existing.status === "pending" && (existing.inviteExpiresAt ?? 0) <= this.now();
+        if (existing && !lapsed) continue;
+        if ((this.deviceSkips.get(entry.pondId) ?? 0) > this.now()) continue;
+        if (!POND_ID.test(entry.pondId)) continue;
+        let issued;
+        try {
+          issued = await relay.requestDevice({
+            pondId: entry.pondId,
+            publicKey: me.publicKey,
+            boxKey: me.publicKey,
+            client: me.nest === null ? "web" : "mac",
+            nest: me.nest,
+          });
+        } catch {
+          // Refused (removed, rate limit) or unreachable: not again for a while.
+          this.deviceSkips.set(entry.pondId, this.now() + ACCOUNT_SYNC_MS * 3);
+          continue;
+        }
+        const at = this.now();
+        this.pondsFile.data.ponds[entry.pondId] = {
+          id: entry.pondId,
+          name: (entry.name ?? "A pond").slice(0, 200),
+          status: "pending",
+          role: "viewer",
+          ownerKey: entry.ownerKey,
+          location: { provider: "catalyst", relayUrl: relay.url },
+          joinToken: issued.token,
+          deviceJoin: true,
+          keys: {},
+          current: 0,
+          requestId: issued.reqId,
+          inviteExpiresAt: issued.expiresAt,
+          requestedAt: at,
+          threads: {},
+          invites: [],
+          nonces: {},
+        };
+        this.save();
+        asked += 1;
+        this.watch(entry.pondId);
+        this.wake(entry.pondId);
+        this.emit("changed", entry.pondId);
+      }
+    } finally {
+      this.accountSyncing = false;
+    }
+    return asked;
+  }
+
+  private async dropDeviceRequest(pond: LocalPond, deviceId: string): Promise<void> {
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    await this.storeOf(pond)
+      .delete(this.docPath(pond.id, "devreqs", deviceId))
+      .catch(() => undefined);
   }
 
   /** One removal per member at a time: a second press while the first runs joins it instead of rotating the key twice. */
@@ -2291,12 +2628,15 @@ export class FlotillaService extends EventEmitter {
     }
     const store = this.storeOf(pond);
     // Their token ends first: if the relay will not revoke it, the removal stops here and can be retried.
-    await this.revokeToken(pond, memberId, "Squeak couldn't end that member's access. Try again.");
+    await this.revokeMemberTokens(pond, gone, "Squeak couldn't end that member's access. Try again.");
     // Their keys document becomes a note sealed to their key, signed by this owner: "removed". A member whose token still
     // reads (Firebase has none) learns it from that; on Catalyst the revoked token says the same by refusing them.
     await this.sendRemoval(pond, gone).catch(() => undefined);
     await store.delete(this.docPath(pond.id, "members", memberId));
     await store.delete(this.docPath(pond.id, "presence", memberId));
+    // Their account no longer lists this pond, and no waiting device request of theirs may bring a device back.
+    if (gone.accountId) await this.indexAccounts(pond, [], [gone.accountId]).catch(() => undefined);
+    for (const d of devicesOf(gone)) await this.dropDeviceRequest(pond, d.id);
     // Whatever they still held (a question being answered) goes with them: a hold by a key that is no member reads as nothing.
     await this.dropHoldsOf(pond, memberId).catch(() => undefined);
     members.delete(memberId);
@@ -2322,7 +2662,7 @@ export class FlotillaService extends EventEmitter {
   async assertCanStart(pondId: string): Promise<void> {
     const pond = this.activePond(pondId);
     if (pond.role === "owner" || pond.local) return;
-    if (!this.capsIn(pond, await this.members(pond), this.identity.id).start)
+    if (!this.capsIn(pond, await this.members(pond), this.selfId(pond)).start)
       throw new FlotillaError(CAP_REFUSAL.start, 403);
   }
 
@@ -2442,7 +2782,7 @@ export class FlotillaService extends EventEmitter {
     if (pond.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
     await this.ripple(pondId, "left the pond");
     await this.storeOf(pond)
-      .delete(this.docPath(pond.id, "presence", this.identity.id))
+      .delete(this.docPath(pond.id, "presence", this.selfId(pond)))
       .catch(() => undefined);
     this.forgetPond(pondId);
   }
@@ -2538,11 +2878,16 @@ export class FlotillaService extends EventEmitter {
     // Every other member's old token ends first; if the relay refuses, nothing has changed and it can be retried.
     for (const member of members.values()) {
       if (member.id !== this.identity.id) {
-        await this.revokeToken(pond, member.id, "Squeak couldn't end a member's old access. Try again.");
+        await this.revokeMemberTokens(pond, member, "Squeak couldn't end a member's old access. Try again.");
       }
     }
     await this.rotate(pond, members);
     await this.ripple(pondId, "changed the pond key");
+  }
+
+  /** Every device's token of a member ends (a removal, or a changed key). */
+  private async revokeMemberTokens(pond: LocalPond, member: MemberDoc, failure: string): Promise<void> {
+    for (const d of devicesOf(member)) await this.revokeToken(pond, d.id, failure);
   }
 
   private async revokeToken(pond: LocalPond, memberId: string, failure: string): Promise<void> {
@@ -2609,14 +2954,19 @@ export class FlotillaService extends EventEmitter {
       }
     } catch (error) {
       if (!FlotillaService.isAccessEnded(error)) throw error;
+      // A device's own token refused (it ran out, or the owner ended it): nothing to show, the account's ponds ask again.
+      if (pond.deviceJoin) return this.dropDeviceJoin(pond);
       // The join token is refused: the owner withdrew the invite, or it ran out at 24 h.
       this.markEnded(pond, lapsed() ? "expired" : "revoked");
       return;
     }
-    const mine = read.members.get(me.id);
+    const mine = memberOfDevice(read.members, me.id);
     if (mine) {
       pond.status = "active";
       pond.role = mine.role;
+      // A later device of someone acts as that member from here on (the id the owner's documents name).
+      if (mine.id !== me.id) pond.memberId = mine.id;
+      delete pond.deviceJoin;
       delete pond.requestedAt;
       this.rememberOwnerName(pond, read.members);
       this.save();
@@ -2631,6 +2981,11 @@ export class FlotillaService extends EventEmitter {
       return;
     }
     this.rememberOwnerName(pond, read.members);
+    if (pond.deviceJoin) {
+      // No invite and no join request document: the device's read token runs out, and the next sync asks again.
+      if (lapsed()) this.dropDeviceJoin(pond);
+      return;
+    }
     if (lapsed()) {
       this.markEnded(pond, "expired");
       return;
@@ -2639,14 +2994,20 @@ export class FlotillaService extends EventEmitter {
       // The request is gone. Approval writes the member first and deletes the request after, so look again before
       // calling it a decline.
       const again = await this.membersRead(pond);
-      if (again.members.has(me.id)) return this.refreshPending(pond);
+      if (memberOfDevice(again.members, me.id)) return this.refreshPending(pond);
       this.markEnded(pond, "denied");
       this.emit("declined", pond.id);
     }
   }
 
+  /** A device's request that nobody answered (or whose token the relay refused) leaves nothing behind. */
+  private dropDeviceJoin(pond: LocalPond): void {
+    this.deviceSkips.set(pond.id, this.now() + ACCOUNT_SYNC_MS);
+    this.forgetPond(pond.id);
+  }
+
   private async refreshActive(pond: LocalPond): Promise<void> {
-    const me = this.identity;
+    const me = this.meIn(pond);
     try {
       await this.syncKeys(pond);
     } catch (error) {
@@ -2662,7 +3023,8 @@ export class FlotillaService extends EventEmitter {
         await this.onAccessEnded(pond);
         return;
       }
-      const mine = read.members.get(me.id);
+      const mine = memberOfDevice(read.members, this.identity.id);
+      void me;
       if (mine) {
         pond.role = mine.role;
         this.rememberOwnerName(pond, read.members);
@@ -2679,8 +3041,12 @@ export class FlotillaService extends EventEmitter {
       }
     }
     await this.republishThreads(pond);
+    // This Mac's account may be a member of ponds it has not opened yet (it joined in a browser first).
+    this.syncAccountPondsSoon();
     if (pond.role === "owner") {
       await this.autoApproveEmailJoins(pond).catch(() => undefined);
+      await this.adoptDeviceRequests(pond).catch(() => undefined);
+      await this.reconcileAccountIndex(pond).catch(() => undefined);
       await this.renewTokens(pond).catch(() => undefined);
       await this.reapLeavers(pond).catch(() => undefined);
       await this.refreshMemberNames(pond).catch(() => undefined);
@@ -2726,14 +3092,26 @@ export class FlotillaService extends EventEmitter {
     const since = pond.reapedAt ?? 0;
     let newest = since;
     const leavers = new Set<string>();
+    const dropDevices: Array<{ member: string; device: string }> = [];
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/ripples`)) {
-      const read = this.readSigned(pond, "ripples", id, doc, (d) => members.get(d)?.publicKey ?? null);
+      const read = this.readSigned(pond, "ripples", id, doc, (d) => keysOfMember(members.get(d)));
       const r = read ? readRipple(read.value) : null;
       if (!r || r.actor !== read!.device || r.at <= since) continue;
       newest = Math.max(newest, r.at);
       if (r.text === "left the pond" && r.actor !== this.identity.id && members.has(r.actor)) leavers.add(r.actor);
+      // A member ending one of their own devices: only a device that is theirs, whoever else claims it.
+      if (r.text.startsWith(DEVICE_REMOVE_PREFIX) && r.actor !== this.identity.id) {
+        const deviceId = r.text.slice(DEVICE_REMOVE_PREFIX.length);
+        const owner = members.get(r.actor);
+        if (owner && devicesOf(owner).some((d) => d.id === deviceId))
+          dropDevices.push({ member: r.actor, device: deviceId });
+      }
     }
     for (const id of leavers) await this.removeAndRotate(pond.id, id, () => "").catch(() => undefined);
+    for (const d of dropDevices) {
+      if (leavers.has(d.member)) continue;
+      await this.removeDevice(pond.id, d.member, d.device).catch(() => undefined);
+    }
     if (newest !== since) {
       pond.reapedAt = newest;
       this.save();
@@ -2826,6 +3204,8 @@ export class FlotillaService extends EventEmitter {
       this.watch(id);
       this.wake(id);
     }
+    // Ponds this Mac's account is a member of, joined elsewhere first (a browser), arrive here without an invite.
+    this.syncAccountPondsSoon();
     if (!this.beatTimer) {
       this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
       this.beatTimer.unref?.();
@@ -2955,10 +3335,10 @@ export class FlotillaService extends EventEmitter {
     const members = known ?? (await this.members(pond));
     const out: PondThread[] = [];
     // Someone the owner hid the pond's threads from reads none (their own threads' list below still shows to them).
-    const mineCaps = this.capsIn(pond, members, this.identity.id);
+    const mineCaps = this.capsIn(pond, members, this.selfId(pond));
     const hidden = !mineCaps.see;
     for (const { id, doc } of hidden ? [] : await this.storeOf(pond).list(`channels/${pond.id}/threads`)) {
-      const read = this.readSigned(pond, "threads", id, doc, (d) => members.get(d)?.publicKey ?? null);
+      const read = this.readSigned(pond, "threads", id, doc, (d) => keysOfMember(members.get(d)));
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read!.device || thread.private) continue;
       const mine = this.localThread(pond.id, id);
@@ -2981,7 +3361,7 @@ export class FlotillaService extends EventEmitter {
     // Your own private threads show to you only.
     for (const [id, local] of Object.entries(pond.threads)) {
       if (!local.private) continue;
-      const me = this.identity;
+      const me = this.meIn(pond);
       out.push({
         id,
         title: local.title,
@@ -3055,7 +3435,7 @@ export class FlotillaService extends EventEmitter {
 
   /** A pond that is not (or not yet) the person's to read: its state and the sentence for it, and nothing else. */
   private idleView(pond: LocalPond): PondView {
-    const me = this.identity;
+    const me = this.meIn(pond);
     return {
       pond: this.summary(pond, 0, 0, 0),
       cloud: this.hasCloud(),
@@ -3131,7 +3511,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   private async liveView(pond: LocalPond, options: { coordination?: boolean } = {}): Promise<PondView> {
-    const me = this.identity;
+    const me = this.meIn(pond);
     if (pond.local) {
       // Same page as a published pond: a flock of just you, no threads or Ripples in the cloud yet.
       return {
@@ -3160,7 +3540,7 @@ export class FlotillaService extends EventEmitter {
       };
     }
     const members = await this.members(pond);
-    if (members.size === 0 || (pond.role !== "owner" && !members.has(me.id))) {
+    if (members.size === 0 || (pond.role !== "owner" && !memberOfDevice(members, this.identity.id))) {
       throw new FlotillaError(ACCESS_ENDED, 403, { access: "ended" });
     }
     this.rememberOwnerName(pond, members);
@@ -3174,7 +3554,7 @@ export class FlotillaService extends EventEmitter {
         // Still pending; the next view or a retry of the removal tries again.
       }
     }
-    const memberKey = (d: string): string | null => members.get(d)?.publicKey ?? null;
+    const memberKey = (d: string): string[] => keysOfMember(members.get(d));
     const store = this.storeOf(pond);
     // Everything here is independent of everything else: one round trip's time, not ten.
     const [presenceRows, holds, rippleRows, threadsRead, joinRows, coordination] = await Promise.all([
@@ -3228,6 +3608,19 @@ export class FlotillaService extends EventEmitter {
         caps: effectiveCaps(m.role, m.caps),
         ...(m.caps?.muted ? { muted: true } : {}),
         online: online.has(m.id),
+        // A person once, however many devices they signed in on (docs/ponds.md, "Members are accounts").
+        devices: devicesOf(m).length,
+        ...(m.id === me.id
+          ? {
+              ownDevices: devicesOf(m).map((d) => ({
+                id: d.id,
+                client: d.client,
+                nestName: d.nest ?? null,
+                addedAt: d.addedAt,
+                current: d.id === this.identity.id,
+              })),
+            }
+          : {}),
         ...(m.id === me.id ? { lastSeenAt: now } : beat.has(m.id) ? { lastSeenAt: beat.get(m.id)! } : {}),
         you: m.id === me.id,
       })),
@@ -3328,14 +3721,14 @@ export class FlotillaService extends EventEmitter {
     }
     const at = this.now();
     const doc: PresenceDoc = {
-      memberId: this.identity.id,
+      memberId: this.selfId(pond),
       online,
       at,
       until: at + PRESENCE_TTL_MS,
       ...(input.viewing ? { viewing: input.viewing } : {}),
       ...(input.typing ? { typing: input.typing } : {}),
     };
-    await this.put(pond, "presence", this.identity.id, doc);
+    await this.put(pond, "presence", this.selfId(pond), doc);
     this.stats.presenceWrites += 1;
     this.lastPresenceWrite.set(pondId, {
       online,
@@ -3367,7 +3760,7 @@ export class FlotillaService extends EventEmitter {
     const ripple: Ripple = {
       id,
       at,
-      actor: this.identity.id,
+      actor: this.selfId(pond),
       text: text.slice(0, 500),
       ...(onBehalf ? { onBehalf: { id: onBehalf.id.slice(0, 64), name: onBehalf.name.slice(0, 100) } } : {}),
     };
@@ -3387,7 +3780,7 @@ export class FlotillaService extends EventEmitter {
   private async holdsOf(pond: LocalPond, members: Map<string, MemberDoc>): Promise<Hold[]> {
     const out: Hold[] = [];
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/holds`)) {
-      const read = this.readSigned(pond, "holds", id, doc, (d) => members.get(d)?.publicKey ?? null);
+      const read = this.readSigned(pond, "holds", id, doc, (d) => keysOfMember(members.get(d)));
       // A hold signed by a key that is no longer a member reads as nothing (readSigned finds no key for it).
       if (!read) continue;
       const hold = readHold(read.value);
@@ -3413,7 +3806,7 @@ export class FlotillaService extends EventEmitter {
   async hold(pondId: string, requestId: string): Promise<{ ok: true; heldBy: string } | { ok: false; heldBy: string }> {
     const pond = this.activePond(pondId);
     this.allow(pond, "answer-question", { thread: { starter: "", private: false } }, "Viewers can read but not send.");
-    const me = this.identity;
+    const me = this.meIn(pond);
     const members = await this.members(pond);
     if (!this.capsIn(pond, members, me.id).answer) throw new FlotillaError(CAP_REFUSAL.answer, 403);
     const existing = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
@@ -3442,7 +3835,7 @@ export class FlotillaService extends EventEmitter {
    */
   coordinationPort(pondId: string): CoordinationPort {
     const pond = this.activePond(pondId);
-    const me = this.identity;
+    const me = this.meIn(pond);
     const store = this.storeOf(pond);
     return {
       me: { id: me.id, name: me.name },
@@ -3455,7 +3848,7 @@ export class FlotillaService extends EventEmitter {
         const members = await this.members(pond);
         const out: SignedDoc[] = [];
         for (const { id, doc } of await store.list(`channels/${pond.id}/${kind}`)) {
-          const read = this.readSigned(pond, kind, id, doc, (d) => members.get(d)?.publicKey ?? null);
+          const read = this.readSigned(pond, kind, id, doc, (d) => keysOfMember(members.get(d)));
           const member = read ? members.get(read.device) : undefined;
           if (read && member) out.push({ id, value: read.value, device: read.device, role: member.role });
         }
@@ -3504,7 +3897,7 @@ export class FlotillaService extends EventEmitter {
         ? { requester: { memberId: input.requester.memberId, requestId: input.requester.requestId } }
         : {}),
       participants: [
-        { memberId: this.identity.id, name: this.nameIn(pond), lastAt: new Date(this.now()).toISOString() },
+        { memberId: this.selfId(pond), name: this.nameIn(pond), lastAt: new Date(this.now()).toISOString() },
       ],
       seq: 0,
       batches: [],
@@ -3533,7 +3926,7 @@ export class FlotillaService extends EventEmitter {
     permissionMode?: string,
   ): PondThread {
     const local = pond.threads[threadId]!;
-    const me = this.identity;
+    const me = this.meIn(pond);
     if (permissionMode) local.permissionMode = permissionMode;
     permissionMode ??= local.permissionMode;
     return {
@@ -3584,7 +3977,7 @@ export class FlotillaService extends EventEmitter {
     const local = pond.threads[threadId];
     if (!local) return;
     const list = (local.participants ??= [
-      { memberId: this.identity.id, name: this.identity.name, lastAt: new Date(at).toISOString() },
+      { memberId: this.selfId(pond), name: this.identity.name, lastAt: new Date(at).toISOString() },
     ]);
     const lastAt = new Date(at).toISOString();
     const known = list.find((p) => p.memberId === who.id);
@@ -3701,16 +4094,16 @@ export class FlotillaService extends EventEmitter {
     const members = await this.members(pond);
     const threadDoc = await this.storeOf(pond).get(this.docPath(pond.id, "threads", threadId));
     const threadRead = threadDoc
-      ? this.readSigned(pond, "threads", threadId, threadDoc, (d) => members.get(d)?.publicKey ?? null)
+      ? this.readSigned(pond, "threads", threadId, threadDoc, (d) => keysOfMember(members.get(d)))
       : null;
     const thread = threadRead ? readThread(threadRead.value) : null;
     if (!thread || thread.private) {
       const mine = pond.threads[threadId];
       if (!mine) throw new FlotillaError("no such thread", 404);
     }
-    const starter = thread?.starter ?? this.identity.id;
-    const starterKey = members.get(starter)?.publicKey;
-    if (!starterKey) throw new FlotillaError("no such thread", 404);
+    const starter = thread?.starter ?? this.selfId(pond);
+    const starterKey = keysOfMember(members.get(starter));
+    if (starterKey.length === 0) throw new FlotillaError("no such thread", 404);
     const events: ThreadEvent[] = [];
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/tevents`)) {
       if (!id.startsWith(`${threadId}-`)) continue;
@@ -3753,7 +4146,7 @@ export class FlotillaService extends EventEmitter {
   ): Promise<{ id: string; starterName: string }> {
     const pond = this.activePond(pondId);
     this.allow(pond, COMMAND_ACTION[input.kind], { thread: { starter: "", private: false } }, VIEWERS_READ);
-    const me = this.identity;
+    const me = this.meIn(pond);
     const threads = await this.threadsOf(pond);
     const thread = threads.find((t) => t.id === threadId);
     if (!thread || thread.private) throw new FlotillaError("That thread is no longer shared with the pond.", 404);
@@ -3847,9 +4240,9 @@ export class FlotillaService extends EventEmitter {
     const thread = threads.find((th) => th.id === threadId);
     // A thread that went private is gone for everyone but its starter, results included.
     if (!thread) return null;
-    const starterKey = members.get(thread.starter)?.publicKey;
+    const starterKey = keysOfMember(members.get(thread.starter));
     const raw = await this.storeOf(pond).get(this.docPath(pond.id, "tevents", doc));
-    if (!raw || !starterKey) return null;
+    if (!raw || starterKey.length === 0) return null;
     const read = this.readSigned(pond, "tevents", doc, raw, (d) => (d === thread.starter ? starterKey : null));
     const result = read ? readDiffResult(read.value) : null;
     if (!result || result.id !== requestId || result.threadId !== threadId) return null;
@@ -3969,7 +4362,8 @@ export class FlotillaService extends EventEmitter {
     const docPath = this.docPath(pond.id, "tcmds", id);
     const from = doc.device ? members.get(doc.device) : undefined;
     if (!from) return "not a member";
-    if (!doc.sig || !verifyText(from.publicKey, signedText(docPath, doc.box), doc.sig)) return "bad signature";
+    if (!doc.sig || !keysOfMember(from).some((k) => verifyText(k, signedText(docPath, doc.box), doc.sig!)))
+      return "bad signature";
     if (!doc.box.startsWith(`${pond.current}.`)) return "sealed with an old key";
     let value: unknown;
     try {
@@ -3990,7 +4384,7 @@ export class FlotillaService extends EventEmitter {
     // The only things a member can ask of a starter are COMMAND_ACTION's: approving and stopping are not among them.
     if (thread?.private) return "that thread is private";
     const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
-      thread: { starter: this.identity.id, private: false },
+      thread: { starter: this.selfId(pond), private: false },
     });
     if (!verdict.ok) return VIEWERS_READ;
     // The owner's live switches and the starter's own, read from the member list now: a client that skips its own
@@ -3998,7 +4392,7 @@ export class FlotillaService extends EventEmitter {
     const need = COMMAND_CAP[cmd.kind];
     if (need && from.role !== "owner" && !effectiveCaps(from.role, from.caps)[need]) return CAP_REFUSAL[need];
     if (thread && (cmd.kind === "message" || cmd.kind === "steer" || cmd.kind === "answer")) {
-      const w = threadWriteDecision(from.id, this.identity.id, thread.access);
+      const w = threadWriteDecision(from.id, this.selfId(pond), thread.access);
       if (!w.ok) return w.reason;
     }
     const now = this.now();

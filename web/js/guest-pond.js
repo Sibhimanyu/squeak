@@ -26,6 +26,7 @@ import {
 import {
   effectiveCaps,
   HOLD_MS,
+  keysOfMember,
   MAX_COMMAND_LIFE_MS,
   ONLINE_MS,
   PRESENCE_MS,
@@ -35,6 +36,8 @@ import {
   readPresence,
   readThread,
   readThreadEvent,
+  memberOfDevice,
+  trustedDevices,
 } from "./guest-docs.js";
 import { wrongEmailLine } from "./guest-model.js";
 import { RelayError, RelayStore } from "./guest-relay.js";
@@ -78,8 +81,10 @@ export function joinRefusal(code, masked = null) {
 }
 
 export class GuestPond {
-  constructor({ record, vault, fetch, now = Date.now }) {
+  constructor({ record, vault, fetch, now = Date.now, slot = RECORD }) {
     this.record = record;
+    /** The vault name this pond's record lives under: `guest`, or one per pond that came with the account (guest-account.js). */
+    this.slot = slot;
     this.vault = vault;
     this.now = now;
     this.store = new RelayStore({
@@ -186,17 +191,21 @@ export class GuestPond {
   get pondId() {
     return this.record.pondId;
   }
+  /** This browser's own key id: the member's id when this key is the member's first key, else a device of it. */
+  get keyId() {
+    return this.record.keyId ?? this.record.memberId;
+  }
   get me() {
     return { id: this.record.memberId, name: this.record.displayName, role: this.record.role };
   }
 
   async save() {
-    await this.vault.write(RECORD, this.record);
+    await this.vault.write(this.slot, this.record);
   }
 
   /** Leaves: the keys and the token are dropped from this browser. */
   async forget() {
-    await this.vault.write(RECORD, null);
+    await this.vault.write(this.slot, null);
   }
 
   /** Withdraws a waiting request (the owner stops seeing it), then forgets it. */
@@ -255,13 +264,22 @@ export class GuestPond {
     return openAt(key, docPath, doc.box.slice(dot + 1));
   }
 
-  /** `{ value, device }` if the box opens and the signature is by the key `keyOf` gives for the signer, else null. */
+  /** `{ value, device }` if the box opens and the signature is by a key `keyOf` gives for the signer (one, or a list: any), else null. */
   async readSigned(kind, docId, doc, keyOf) {
     try {
       const docPath = this.docPath(kind, docId);
       if (!doc.sig || !doc.device) return null;
-      const key = keyOf(doc.device);
-      if (!key || !(await verifyText(key, signedText(docPath, doc.box), doc.sig))) return null;
+      const given = keyOf(doc.device);
+      const keys = (Array.isArray(given) ? given : [given]).filter(Boolean);
+      const text = signedText(docPath, doc.box);
+      let ok = false;
+      for (const key of keys) {
+        if (await verifyText(key, text, doc.sig)) {
+          ok = true;
+          break;
+        }
+      }
+      if (!ok) return null;
       return { value: await this.openDoc(docPath, doc), device: doc.device };
     } catch {
       return null;
@@ -277,7 +295,9 @@ export class GuestPond {
     for (const { id, doc } of rows) {
       const read = await this.readSigned("members", id, doc, ownerOnly);
       const member = read ? readMember(read.value) : null;
-      if (member && member.id === id && (await memberIdOf(member.publicKey)) === id) found.set(id, member);
+      if (member && member.id === id && (await memberIdOf(member.publicKey)) === id) {
+        found.set(id, await trustedDevices(member));
+      }
     }
     return { members: found, raw: rows.length };
   }
@@ -318,14 +338,20 @@ export class GuestPond {
         }
         const owner = read.members.get(r.ownerId);
         if (owner && r.ownerName !== owner.name) r.ownerName = owner.name;
-        const mine = read.members.get(r.memberId);
+        const mine = memberOfDevice(read.members, this.keyId);
         if (mine) {
           r.status = "active";
+          // A later device of someone acts as that member (the id the owner's documents name).
+          r.memberId = mine.id;
+          delete r.deviceJoin;
           r.role = mine.role;
           if (mine.name) r.displayName = mine.name;
           await this.syncKeys(false);
           const meta = await this.meta();
           if (meta) r.pondName = meta.name;
+        } else if (r.deviceJoin) {
+          // No invite and no request document: the device's read token runs out, and the next sync asks again.
+          if (lapsed()) return this.drop();
         } else if (lapsed()) {
           this.end("expired");
         } else if (!(await this.store.get(this.docPath("joins", r.requestId)))) {
@@ -338,8 +364,9 @@ export class GuestPond {
         await this.syncKeys(true);
         if (r.status === "active") {
           const read = await this.membersRead();
-          const mine = read.members.get(r.memberId);
+          const mine = memberOfDevice(read.members, this.keyId);
           if (mine) {
+            r.memberId = mine.id;
             r.role = mine.role;
             if (mine.name) r.displayName = mine.name;
           } else if (read.members.size > 0 || read.raw === 0) this.end("removed");
@@ -348,6 +375,8 @@ export class GuestPond {
     } catch (error) {
       if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
         // The relay no longer opens this pond: a removed guest's token is revoked, an invite's has lapsed or was withdrawn.
+        // A device's own pending token running out is not an end: it leaves nothing behind and the next sync asks again.
+        if (r.status === "pending" && r.deviceJoin) return this.drop();
         if (r.status === "pending") this.end(lapsed() ? "expired" : "revoked");
         else this.end("removed", r.token && r.token.expiresAt <= this.now() ? "token" : null);
       } else {
@@ -356,6 +385,13 @@ export class GuestPond {
     }
     await this.save();
     return this.status;
+  }
+
+  /** A device request nobody answered: the record goes, and the account sync may ask again later. */
+  async drop() {
+    this.record.status = "dropped";
+    await this.forget();
+    return "dropped";
   }
 
   async meta() {
@@ -370,7 +406,7 @@ export class GuestPond {
   /** Picks up a rotated pond key and the scoped token: sealed to this member's key, signed by the owner. */
   async syncKeys(allowRemoval = true) {
     const r = this.record;
-    const docPath = this.docPath("keys", r.memberId);
+    const docPath = this.docPath("keys", this.keyId);
     const doc = await this.store.get(docPath);
     if (!doc?.sig || doc.device !== r.ownerId) return;
     if (!(await verifyText(r.ownerKey, signedText(docPath, doc.box), doc.sig))) return;
@@ -399,7 +435,7 @@ export class GuestPond {
 
   async threads(members) {
     const out = [];
-    const memberKey = (d) => members.get(d)?.publicKey ?? null;
+    const memberKey = (d) => keysOfMember(members.get(d));
     for (const { id, doc } of await this.store.list(`channels/${this.record.pondId}/threads`)) {
       const read = await this.readSigned("threads", id, doc, memberKey);
       const thread = read ? readThread(read.value) : null;
@@ -433,7 +469,7 @@ export class GuestPond {
     if (members.size === 0 || !members.has(r.memberId)) {
       throw new GuestError("Can't read the pond right now. I'll try again.", 503);
     }
-    const memberKey = (d) => members.get(d)?.publicKey ?? null;
+    const memberKey = (d) => keysOfMember(members.get(d));
     const now = this.now();
     const presence = [];
     for (const { id, doc } of await this.store.list(`channels/${r.pondId}/presence`)) {
@@ -484,7 +520,7 @@ export class GuestPond {
   async thread(threadId, members) {
     const doc = await this.store.get(this.docPath("threads", threadId));
     if (!doc) return null;
-    const read = await this.readSigned("threads", threadId, doc, (d) => members.get(d)?.publicKey ?? null);
+    const read = await this.readSigned("threads", threadId, doc, (d) => keysOfMember(members.get(d)));
     const thread = read ? readThread(read.value) : null;
     return thread && thread.id === threadId && thread.starter === read.device && !thread.private ? thread : null;
   }
@@ -493,8 +529,8 @@ export class GuestPond {
   async readEvents(threadId, after = 0) {
     const members = await this.members();
     const thread = await this.thread(threadId, members);
-    const starterKey = thread ? members.get(thread.starter)?.publicKey : null;
-    if (!thread || !starterKey) throw new GuestError("That thread is not shared with the pond.", 404);
+    const starterKey = thread ? keysOfMember(members.get(thread.starter)) : [];
+    if (!thread || starterKey.length === 0) throw new GuestError("That thread is not shared with the pond.", 404);
     const events = [];
     // A batch is named `<thread>-<firstSeq>`, so one whose successor starts at or before `after + 1` holds nothing new.
     const batches = (await this.store.list(`channels/${this.record.pondId}/tevents`))
@@ -561,7 +597,7 @@ export class GuestPond {
 
   async holds(members) {
     const out = [];
-    const memberKey = (d) => members.get(d)?.publicKey ?? null;
+    const memberKey = (d) => keysOfMember(members.get(d));
     for (const { id, doc } of await this.store.list(`channels/${this.record.pondId}/holds`)) {
       const read = await this.readSigned("holds", id, doc, memberKey);
       const hold = read ? readHold(read.value) : null;

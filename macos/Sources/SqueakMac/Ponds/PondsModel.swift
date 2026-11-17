@@ -243,6 +243,7 @@ final class PondsModel {
             available = true
             listFailed = false
             cloud = listing.cloud
+            if !syncedAccount { syncedAccount = true; syncAccount() }
             if ponds != listing.ponds { ponds = listing.ponds }
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
@@ -417,6 +418,8 @@ final class PondsModel {
         return true
     }
 
+    private var syncedAccount = false
+
     func isBusy(_ key: String) -> Bool { busy.contains(key) }
 
     func removeMember(pond: String, member: String) async {
@@ -459,6 +462,16 @@ final class PondsModel {
         let ok = await act("leave:\(pond)", pond: pond, success: nil) { try await self.client!.leave(pond: pond) }
         if ok { route = nil }
         return ok
+    }
+
+    func removeMyDevice(pond: String, deviceKeyId: String) async {
+        _ = await act("device:\(pond):\(deviceKeyId)", pond: pond, success: "Device removed.") { try await self.client!.removeMyDevice(pond: pond, deviceKeyId: deviceKeyId) }
+    }
+
+    /// Fire and forget: ponds joined in a browser appear. Failures are silent.
+    func syncAccount() {
+        guard let client else { return }
+        Task { if let n = try? await client.syncAccount(), n > 0 { await self.refresh() } }
     }
 
     func deletePond(pond: String) async -> Bool {

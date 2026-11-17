@@ -87,6 +87,19 @@ public struct PondsClient: Sendable {
         _ = try await host.call("POST", "\(Self.p(pond))/leave", body: .object(["pondId": .string(pond)]), timeout: 60)
     }
 
+    /// A member ends one of their own devices here (409 for the only one: leave the pond instead).
+    public func removeMyDevice(pond: String, deviceKeyId: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/devices/remove-mine", body: .object(["deviceKeyId": .string(deviceKeyId)]), timeout: 60)
+    }
+
+    /// Asks the account's ponds (those joined in a browser appear). Answers how many were asked; nil from an older host.
+    @discardableResult
+    public func syncAccount() async throws -> Int? {
+        struct R: Decodable { var asked: Int? }
+        do { return try decode(R.self, try await host.call("POST", "/native/ponds/sync-account", body: .object([:]), timeout: 60)).asked }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
     public func rename(pond: String, name: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/rename", body: .object(["name": .string(name)]), timeout: 30)
     }

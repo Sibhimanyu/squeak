@@ -4,6 +4,7 @@
  */
 
 import { readCapsPatch, type CapsPatch } from "./permissions.js";
+import { memberIdOf as memberIdOfKey } from "./crypto.js";
 import { readTimelineEvent, type TimelineEvent } from "../native/timeline.js";
 
 export type Role = "owner" | "member" | "viewer";
@@ -38,6 +39,57 @@ export interface MemberDoc {
   accountId?: string;
   /** What the owner lets this member do beyond their role's default (`effectiveCaps`); signed with the document. */
   caps?: CapsPatch;
+  /**
+   * The member's other devices (docs/ponds.md, "Members are accounts"): added by the owner's Mac for a device signed in to
+   * the same account as `accountId`. `publicKey` above is device number one. Absent on every older document.
+   */
+  devices?: MemberDevice[];
+  /** The primary key (`publicKey`) was removed on its own; the devices above carry on. Never set without `devices`. */
+  primaryRetired?: true;
+}
+
+/** One more device of a member: its own key, the same member (permissions, role and caps are the member's). */
+export interface MemberDevice {
+  /** `memberIdOf(publicKey)`: derived from the key, never claimed. */
+  id: string;
+  publicKey: string;
+  /** The key a pond key is sealed to; equals `publicKey` for every client today. */
+  boxKey: string;
+  client: "mac" | "web" | "ios";
+  nest?: string | null;
+  addedAt: number;
+}
+
+export const MAX_DEVICES_PER_MEMBER = 8;
+
+/** One device of a member as a flat list: the primary key first, then `devices`, minus a retired primary. */
+export function devicesOf(member: MemberDoc): MemberDevice[] {
+  const primary: MemberDevice[] = member.primaryRetired
+    ? []
+    : [
+        {
+          id: member.id,
+          publicKey: member.publicKey,
+          boxKey: member.publicKey,
+          client: member.client ?? "mac",
+          nest: member.nest,
+          addedAt: member.addedAt,
+        },
+      ];
+  return [...primary, ...(member.devices ?? [])];
+}
+
+/** The keys whose signature counts as this member (undefined member: none). */
+export function keysOfMember(member: MemberDoc | undefined | null): string[] {
+  return member ? devicesOf(member).map((d) => d.publicKey) : [];
+}
+
+/** The member a device key id belongs to: its own id, or one of its devices. */
+export function memberOfDevice(members: Map<string, MemberDoc>, deviceId: string): MemberDoc | undefined {
+  const direct = members.get(deviceId);
+  if (direct && !direct.primaryRetired) return direct;
+  for (const m of members.values()) if ((m.devices ?? []).some((d) => d.id === deviceId)) return m;
+  return undefined;
 }
 
 export interface JoinRequestDoc {
@@ -290,6 +342,63 @@ export function readMember(v: unknown): MemberDoc | null {
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
     ...(readCapsPatch(v.caps) ? { caps: readCapsPatch(v.caps)! } : {}),
+    ...(Array.isArray(v.devices) && v.devices.length > 0 ? { devices: readDevices(v.devices) } : {}),
+    ...(v.primaryRetired === true && Array.isArray(v.devices) && v.devices.length > 0
+      ? { primaryRetired: true as const }
+      : {}),
+  };
+}
+
+function readDevices(list: unknown[]): MemberDevice[] {
+  const out: MemberDevice[] = [];
+  const seen = new Set<string>();
+  for (const d of list.slice(0, MAX_DEVICES_PER_MEMBER)) {
+    if (!rec(d) || !s(d.id, 64) || !s(d.publicKey, 200) || !s(d.boxKey, 200) || !n(d.addedAt)) continue;
+    if (d.client !== "mac" && d.client !== "web" && d.client !== "ios") continue;
+    if (!(d.nest === undefined || d.nest === null || s(d.nest, 100))) continue;
+    // An id is derived from the key: a document that claims another is not trusted.
+    if (memberIdOfKey(d.publicKey) !== d.id || seen.has(d.id)) continue;
+    seen.add(d.id);
+    out.push({
+      id: d.id,
+      publicKey: d.publicKey,
+      boxKey: d.boxKey,
+      client: d.client,
+      ...(d.nest !== undefined ? { nest: d.nest } : {}),
+      addedAt: d.addedAt,
+    });
+  }
+  return out;
+}
+
+/** What the relay writes beside a pond when a device of a member's account asks to be added (relay-owned, plain JSON). */
+export interface DeviceRequestDoc {
+  reqId: string;
+  userId: string;
+  email: string;
+  name: string;
+  publicKey: string;
+  boxKey: string;
+  client: "mac" | "web" | "ios";
+  nest: string | null;
+  at: number;
+}
+
+export function readDeviceRequest(v: unknown): DeviceRequestDoc | null {
+  if (!rec(v) || v.v !== 1 || !s(v.reqId, 64) || !s(v.userId, 64) || !s(v.publicKey, 200) || !s(v.boxKey, 200))
+    return null;
+  if (!n(v.at) || (v.client !== "mac" && v.client !== "web" && v.client !== "ios")) return null;
+  if (!(v.nest === null || s(v.nest, 100))) return null;
+  return {
+    reqId: v.reqId,
+    userId: v.userId,
+    email: typeof v.email === "string" ? v.email.slice(0, 200) : "",
+    name: typeof v.name === "string" ? v.name.slice(0, 100) : "",
+    publicKey: v.publicKey,
+    boxKey: v.boxKey,
+    client: v.client,
+    nest: v.nest,
+    at: v.at,
   };
 }
 
