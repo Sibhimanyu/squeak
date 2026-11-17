@@ -32,8 +32,55 @@ export interface PondRelay {
   shortCreate?(pondId: string, details: Record<string, unknown>): Promise<{ code: string; expiresAt: number }>;
   /** Trades a short code for its details (`POST /ponds/short/redeem`, a signed-in Mac). Throws `RelayRefused` with the status. */
   shortRedeem?(code: string): Promise<Record<string, unknown>>;
+  /**
+   * `POST /ponds/<id>/invites/email`: the relay sends each address its invitation through Catalyst Mail (the join token
+   * behind each link is already bound to that address). Throws `RelayRefused` with the status (429 limit, 503 mail).
+   */
+  inviteEmail?(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }>;
   /** The display names these account ids signed in with (at most 50 per call), plus this Mac's own account. */
   names?(ids: string[]): Promise<AccountNames>;
+  /**
+   * An owner's Mac says which accounts are members of its pond (`POST /ponds/<id>/members/accounts`, the channel's own
+   * Mac only): the relay keeps a per-account index that only that account reads (docs/ponds.md, "Members are accounts").
+   */
+  indexAccounts?(pondId: string, change: AccountIndexChange): Promise<void>;
+  /** The ponds this Mac's own account is a member of (`GET /account/ponds`). Throws `RelayRefused` when not signed in. */
+  accountPonds?(): Promise<AccountPond[]>;
+  /**
+   * Asks to be added as another device of that membership (`POST /account/pond-devices`): the relay checks the account is
+   * in the pond's index, writes the relay-owned device request the owner's Mac reads, and answers a token that reads
+   * what the owner writes back for this device. Throws `RelayRefused` with the status (403 not a member or removed, 429).
+   */
+  requestDevice?(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }>;
+}
+
+export interface AccountIndexChange {
+  ownerKey: string;
+  name?: string;
+  add: string[];
+  remove: string[];
+}
+
+export interface AccountPond {
+  pondId: string;
+  ownerKey: string;
+  name?: string;
+}
+
+export interface DeviceRequestBody {
+  pondId: string;
+  publicKey: string;
+  boxKey: string;
+  client: "mac" | "web" | "ios";
+  nest: string | null;
+}
+
+export interface InviteMail {
+  emails: string[];
+  /** The link each address gets, keyed by the lower-cased address. */
+  inviteUrls: Record<string, string>;
+  pondName: string;
+  inviterName: string;
 }
 
 export interface AccountNames {
@@ -140,6 +187,21 @@ export class HttpPondRelay implements PondRelay {
     return body.details as Record<string, unknown>;
   }
 
+  async inviteEmail(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }> {
+    const response = await this.fetchImpl(`${this.url}/ponds/${encodeURIComponent(pondId)}/invites/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      body: JSON.stringify(mail),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as { sent?: unknown; failed?: unknown } | null;
+    const list = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    if (!body || !Array.isArray(body.sent)) throw new Error("catalyst invites/email: unexpected answer");
+    return { sent: list(body.sent), failed: list(body.failed) };
+  }
+
   async names(ids: string[]): Promise<AccountNames> {
     const body = (await (await this.post("/account/names", { ids })).json().catch(() => null)) as Record<
       string,
@@ -162,5 +224,46 @@ export class HttpPondRelay implements PondRelay {
       };
     }
     return out;
+  }
+
+  async indexAccounts(pondId: string, change: AccountIndexChange): Promise<void> {
+    await this.post(`/ponds/${encodeURIComponent(pondId)}/members/accounts`, change);
+  }
+
+  async accountPonds(): Promise<AccountPond[]> {
+    const response = await this.fetchImpl(`${this.url}/account/ponds`, {
+      method: "GET",
+      headers: { [this.keyHeader]: this.relayKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as { ponds?: unknown } | null;
+    if (!body || !Array.isArray(body.ponds)) throw new Error("catalyst account/ponds: unexpected answer");
+    return body.ponds.flatMap((row: unknown) => {
+      const r = row as { pondId?: unknown; ownerKey?: unknown; name?: unknown } | null;
+      return r && typeof r.pondId === "string" && typeof r.ownerKey === "string"
+        ? [
+            {
+              pondId: r.pondId,
+              ownerKey: r.ownerKey,
+              ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
+            },
+          ]
+        : [];
+    });
+  }
+
+  async requestDevice(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }> {
+    const response = await this.fetchImpl(`${this.url}/account/pond-devices`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body.reqId !== "string" || typeof body.token !== "string" || typeof body.expiresAt !== "number")
+      throw new Error("catalyst account/pond-devices: unexpected answer");
+    return { reqId: body.reqId, token: body.token, expiresAt: body.expiresAt };
   }
 }

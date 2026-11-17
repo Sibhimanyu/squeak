@@ -118,6 +118,13 @@ export class FlotillaRoutes {
       ctx.json(200, { ponds, cloud: service.hasCloud() });
       return true;
     }
+    if (a === "sync-account" && parts.length === 2 && method === "POST") {
+      // After a sign-in (or "check again"): ask for this account's ponds, with no invite (docs/ponds.md, "Members are accounts").
+      exact(await ctx.body(), []);
+      service.accountChanged();
+      ctx.json(200, { asked: await service.syncAccountPonds() });
+      return true;
+    }
     if (a === "local" && parts.length === 2 && method === "POST") {
       const body = await ctx.body();
       // A local pond is made for a project, never from a name: a folder or workspace name is not a pond.
@@ -257,6 +264,15 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
+    if (b === "devices" && c === "remove-mine" && parts.length === 4 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["deviceKeyId"]);
+      const deviceKeyId = str(body.deviceKeyId);
+      if (!deviceKeyId) throw new FlotillaError("the body is exactly { deviceKeyId }");
+      await service.removeOwnDevice(pondId, deviceKeyId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
     if (b === "invites" && parts.length === 3 && method === "POST") {
       const inviteBody = await ctx.body();
       const role = str(inviteBody.role) ?? "member";
@@ -272,6 +288,21 @@ export class FlotillaRoutes {
           ? await service.invite(pondId, role as Role, email, { short: true })
           : await service.invite(pondId, role as Role, email),
       );
+      return true;
+    }
+    if (b === "invites" && c === "email" && parts.length === 4 && method === "POST") {
+      // Invite by email: { emails: string[], role? }. Answers { sent, failed: [{ email, reason }] }.
+      const emailBody = await ctx.body();
+      if (Object.keys(emailBody).some((k) => k !== "emails" && k !== "role")) {
+        throw new FlotillaError("the body is exactly { emails, role? }");
+      }
+      const { emails } = emailBody;
+      if (!Array.isArray(emails) || emails.some((e) => typeof e !== "string")) {
+        throw new FlotillaError("emails is a list of email addresses");
+      }
+      const emailRole = str(emailBody.role) ?? "member";
+      if (emailRole !== "member" && emailRole !== "viewer") throw new FlotillaError("role is member or viewer");
+      ctx.json(200, await service.inviteByEmail(pondId, emails as string[], emailRole as Role));
       return true;
     }
     if (b === "invites" && c && parts.length === 4 && method === "DELETE") {

@@ -243,6 +243,7 @@ final class PondsModel {
             available = true
             listFailed = false
             cloud = listing.cloud
+            if !syncedAccount { syncedAccount = true; syncAccount() }
             if ponds != listing.ponds { ponds = listing.ponds }
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
@@ -342,6 +343,14 @@ final class PondsModel {
         catch { note = "That didn't go through"; return nil }
     }
 
+    /// Invite by email: the host makes one email-bound invite per address and Squeak's cloud sends the links.
+    func inviteByEmail(pond: String, emails: [String], role: PondRole) async -> PondEmailInviteResult? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.inviteByEmail(pond: pond, emails: emails, role: role) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
     /// Joining needs a Squeak account (the person's name is the account's), so a signed-out Mac says so first.
     func join(code: String, account: AccountModel) async -> PondJoinResult? {
         guard let client else { return nil }
@@ -409,6 +418,8 @@ final class PondsModel {
         return true
     }
 
+    private var syncedAccount = false
+
     func isBusy(_ key: String) -> Bool { busy.contains(key) }
 
     func removeMember(pond: String, member: String) async {
@@ -451,6 +462,16 @@ final class PondsModel {
         let ok = await act("leave:\(pond)", pond: pond, success: nil) { try await self.client!.leave(pond: pond) }
         if ok { route = nil }
         return ok
+    }
+
+    func removeMyDevice(pond: String, deviceKeyId: String) async {
+        _ = await act("device:\(pond):\(deviceKeyId)", pond: pond, success: "Device removed.") { try await self.client!.removeMyDevice(pond: pond, deviceKeyId: deviceKeyId) }
+    }
+
+    /// Fire and forget: ponds joined in a browser appear. Failures are silent.
+    func syncAccount() {
+        guard let client else { return }
+        Task { if let n = try? await client.syncAccount(), n > 0 { await self.refresh() } }
     }
 
     func deletePond(pond: String) async -> Bool {

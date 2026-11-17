@@ -22,8 +22,10 @@ export const GUEST_RECORD = "guest";
 export const GUEST_PENDING = "pending-invite";
 
 /** "owner", "guest" or "signin" (a native app's account sign-in, app-signin.js). */
-export async function chooseEntry({ hash = "", vault = new KeyStore(), storage } = {}) {
+export async function chooseEntry({ hash = "", vault = new KeyStore(), storage, pathname = "" } = {}) {
   const fragment = String(hash ?? "");
+  // Back from signing in on an emailed invite (`/join`): the guest page finishes the join from the parked invite.
+  if (pathname === "/join" && isHandoffFragment(fragment)) return "guest";
   if (parseSigninFragment(fragment)) return "signin";
   // Back from the hosted login with nothing in the address: finish a sign-in parked under 10 minutes ago first.
   if (fragment.length <= 1 && readParked(storage)) return "signin";
@@ -46,8 +48,14 @@ const STYLES = {
 };
 
 /** Styles, the root's class, then the chosen app's own module (which starts itself). */
-export async function startEntry({ doc = document, hash = globalThis.location?.hash, vault, storage } = {}) {
-  const which = await chooseEntry({ hash, vault, ...(storage ? { storage } : {}) });
+export async function startEntry({
+  doc = document,
+  hash = globalThis.location?.hash,
+  pathname = globalThis.location?.pathname,
+  vault,
+  storage,
+} = {}) {
+  const which = await chooseEntry({ hash, pathname, vault, ...(storage ? { storage } : {}) });
   for (const href of STYLES[which]) {
     const link = doc.createElement("link");
     link.rel = "stylesheet";

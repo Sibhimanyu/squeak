@@ -118,4 +118,37 @@ struct PondsClientTests {
         for await id in stream { got.append(id); if got.count == 2 { break } }
         #expect(got == ["p1", "p2"])
     }
+
+    @Test func deviceFieldsDecodeAndAreOptional() throws {
+        let m = try JSONDecoder().decode(FlockMember.self, from: Data(#"{"id":"m","name":"Me","you":true,"devices":3,"ownDevices":[{"id":"k1","client":"mac","nestName":"Studio","addedAt":1789000000000,"current":true},{"id":"k2","client":"web"},{"client":"ios"}]}"#.utf8))
+        #expect(m.devices == 3 && m.ownDevices?.map(\.id) == ["k1", "k2"] && m.ownDevices?[0].current == true && m.ownDevices?[0].addedAt != nil)
+        let old = try JSONDecoder().decode(FlockMember.self, from: Data(#"{"id":"m","name":"Me"}"#.utf8))
+        #expect(old.devices == nil && old.ownDevices == nil && PondDevices.countLine(old) == nil)
+        #expect(PondDevices.countLine(m) == "3 devices")
+        #expect(PondDevices.countLine(FlockMember(id: "x", name: "X")) == nil)
+    }
+
+    @Test func deviceLabelsAndRemovalRule() {
+        #expect(PondDevices.label(PondOwnDevice(id: "a", client: "mac", nestName: "Studio", current: true)) == "This Mac \u{00B7} Studio")
+        #expect(PondDevices.label(PondOwnDevice(id: "b", client: "mac")) == "Mac")
+        #expect(PondDevices.label(PondOwnDevice(id: "c", client: "web")) == "Browser")
+        #expect(PondDevices.label(PondOwnDevice(id: "d", client: "ios")) == "iPhone")
+        let now = Date()
+        #expect(PondDevices.added(PondOwnDevice(id: "e", client: "web", addedAt: now.addingTimeInterval(-3 * 86400)), now: now)?.hasPrefix("added ") == true)
+        #expect(PondDevices.added(PondOwnDevice(id: "e", client: "web"), now: now) == nil)
+        #expect(!PondDevices.canRemove([PondOwnDevice(id: "a", client: "mac")]))
+        #expect(PondDevices.canRemove([PondOwnDevice(id: "a", client: "mac"), PondOwnDevice(id: "b", client: "web")]))
+    }
+
+    @Test func removeMineAndSyncAccountSendTheContractsBodies() async throws {
+        let t = PondStub(body: #"{"ok":true,"asked":2}"#)
+        let c = client(t)
+        try await c.removeMyDevice(pond: "p1", deviceKeyId: "k2")
+        #expect(t.requests[0].url.path == "/native/ponds/p1/devices/remove-mine" && t.requests[0].method == "POST")
+        #expect(String(decoding: t.requests[0].body ?? Data(), as: UTF8.self).contains(#""deviceKeyId":"k2""#))
+        #expect(try await c.syncAccount() == 2)
+        #expect(t.requests[1].url.path == "/native/ponds/sync-account")
+        #expect(t.requests[0].headers["x-squeak-token"] == "tok")
+        #expect(try await client(PondStub(status: 404)).syncAccount() == nil)
+    }
 }

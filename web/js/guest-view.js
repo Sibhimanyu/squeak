@@ -16,9 +16,11 @@ import {
   groupThreads,
   hueOf,
   initial,
+  initialsOf,
   limitsLine,
   pondLine,
   waitingLine,
+  wrongEmailLine,
   QUEUE_HINT,
   stateMark,
   toolsLine,
@@ -99,7 +101,26 @@ const guestCard = (invited, children) => welcomeLayout({ invite: invited, points
 const OWNER_LETS = "The owner has to let you in. Nothing is shared with you until they do.";
 
 /** Signed in: who they will join as, and a way out if it is the wrong account. */
-export function signedInScreen({ line, role, error, busy, onJoin, onSignOut, pondName = null, ownerName = null }) {
+export function signedInScreen({
+  line,
+  role,
+  error,
+  busy,
+  onJoin,
+  onSignOut,
+  pondName = null,
+  ownerName = null,
+  wrongEmail = null,
+}) {
+  // An invite for another address: nothing to join with here, one way out (docs/ponds.md, "Invite by email").
+  if (wrongEmail) {
+    return guestCard(invite(pondName, ownerName), [
+      h("h1", null, "This invite is for someone else"),
+      h("p", { class: "wl-lead", role: "alert" }, wrongEmailLine(wrongEmail)),
+      h("div", { class: "wl-actions" }, wlButton("Sign out and switch account", onSignOut, { primary: true })),
+      wlError(error),
+    ]);
+  }
   return guestCard(invite(pondName, ownerName), [
     h("h1", null, line),
     h(
@@ -121,14 +142,29 @@ export function signedInScreen({ line, role, error, busy, onJoin, onSignOut, pon
 }
 
 /** Signed out: one way in, through Catalyst's hosted login. */
-export function signInScreen({ pondName, error, onSignIn, onCancel }) {
-  return guestCard(invite(pondName), [
+export function signInScreen({ pondName, ownerName = null, forEmail = null, error, onSignIn, onCancel }) {
+  return guestCard(invite(pondName, ownerName), [
+    ownerName
+      ? h(
+          "p",
+          { class: "g-inviter" },
+          h("span", { class: "g-initials", "aria-hidden": "true" }, initialsOf(ownerName)),
+          `${ownerName} invited you`,
+        )
+      : null,
     h("h1", null, `Join ${pondName}`),
-    h("p", { class: "wl-lead" }, "Sign in so the owner knows who is asking. You'll come straight back here."),
+    h("p", { class: "wl-lead" }, "Squeak lets a team watch, steer and talk to coding agents together."),
+    h(
+      "p",
+      { class: "wl-lead" },
+      forEmail
+        ? `Sign in with ${forEmail}. New to Squeak? You can make your account right here.`
+        : "Sign in so the owner knows who is asking. You'll come straight back here.",
+    ),
     h(
       "div",
       { class: "wl-actions" },
-      wlButton("Continue with Zoho, Google or email", onSignIn, { primary: true }),
+      wlButton("Sign in to join", onSignIn, { primary: true }),
       wlButton("Cancel", onCancel, { quiet: true }),
     ),
     wlError(error),
@@ -200,7 +236,28 @@ export function endScreen({ title, body, action }) {
 }
 
 /** The pond: its name, the Flock, and its shared threads. */
-export function pondScreen({ view, now, onOpen, onLeave }) {
+export const MAC_DOWNLOAD_URL = "https://sibhimanyu.github.io/squeak/";
+
+/** A one-time, dismissible invitation to the Mac app, for a person who joined in the browser. */
+export function macCard({ pondName, onDismiss }) {
+  return h(
+    "aside",
+    { class: "g-maccard", "aria-label": "Squeak for Mac" },
+    h("p", null, `Run your own agents in ${pondName}: get Squeak for Mac`),
+    h(
+      "div",
+      { class: "wl-actions" },
+      h(
+        "a",
+        { class: "g-btn primary", href: MAC_DOWNLOAD_URL, target: "_blank", rel: "noopener noreferrer" },
+        "Get Squeak for Mac",
+      ),
+      button("Not now", onDismiss, { quiet: true }),
+    ),
+  );
+}
+
+export function pondScreen({ view, now, onOpen, onLeave, macPrompt = null }) {
   const groups = groupThreads(view.threads);
   let leaving = false;
   const leave = button(
@@ -216,6 +273,7 @@ export function pondScreen({ view, now, onOpen, onLeave }) {
     { quiet: true },
   );
   return page(
+    macPrompt ? macCard({ pondName: view.pond.name, onDismiss: macPrompt.onDismiss }) : null,
     h("h1", null, view.pond.name),
     h("p", { class: "g-lead" }, pondLine(view)),
     h("p", { class: "g-quiet" }, limitsLine(view.me.role)),

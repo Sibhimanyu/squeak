@@ -125,6 +125,52 @@ boxKey, at}` (a request older than 10 min is gone); `channels/<macId>/devresults
   key); no pond token touches either. A device request wakes the Mac with the same change notice a PUT would; the Mac
   checks the keys and answers.
 
+## Account-wide pond membership (relay 1.7.0)
+
+Design and trust argument: docs/ponds.md, "Members are accounts". Three routes, no new secret, no new kind (`devreqs` already
+exists and is relay-owned: no pond token reads or writes it, and the relay key never PUTs it):
+
+- `POST /ponds/<pondId>/members/accounts` `{ ownerKey, name?, add: [userId], remove: [userId] }` (a Mac's own key that owns the
+  pond's channel, or the operator's key; at most 50 ids per list): writes/removes relay-owned rows `acctponds/<userId>` /
+  `<pondId>` = `{ v:1, ownerKey, name?, at }`. 204; 400 `ids` | `key`; 403 not the channel's Mac.
+- `GET /account/ponds` (a Mac's own key, or `x-squeak-account`; 401 for the operator's key, a pond token or nobody): `{ ponds:
+[{ pondId, ownerKey, name? }] }` for the caller's own account only (at most 100), `no-store`.
+- `POST /account/pond-devices` `{ pondId, publicKey, boxKey?, client: "mac"|"web"|"ios", nest? }` (same callers): 403 `pond` unless
+  the caller's account is in the pond's index, 403 `removed` for a device whose id has a revocation record, 429 `rate` past 10 a
+  minute per account (`ponddev-rate`). Writes `channels/<pondId>/devreqs/<deviceId>` (`deviceId` = base64url of the first 12 bytes
+  of SHA-256 of the key) = `{ v:1, reqId, userId, email, name, publicKey, boxKey, client, nest, at }`, announces it, and answers
+  `{ reqId, token, expiresAt }` (a join-scope token, 24 h, for that device id).
+
+## Invite email (relay 1.6.0, Catalyst Mail)
+
+`POST /ponds/<pondId>/invites/email` (a Mac's own key, or the operator's relay key; the Mac must own the pond's channel):
+strict body `{ emails: [1..10 addresses], inviteUrls: { <lower-cased address>: <link> }, pondName, inviterName }`, nothing
+else. Each address is checked with a simple strict pattern (max 254 characters); each link must be
+`https://squeak.onslate.in/join#<base64url code>` (the relay will not mail a link to anywhere else); names are one line,
+HTML-escaped in the body. One email per address, subject `<inviter> invited you to <pond> on Squeak`, plain words, no
+tracking. Catalyst Mail sends one body per message (`@zcatalyst/mail` 1.0.0, `sendMail({ from_email, to_email, subject,
+content, html_mode })`), so the email is HTML with the bare link also in the text; `mail.js` also builds the plain-text
+version for the day the API takes both. Limits in `invite-mail`: 10 emails per pond per hour, 20 per Mac per day (an
+operator-key call counts as "operator"). Answers `200 { sent, failed }` (partial failure lists the addresses),
+`400 { error: "body" | "links" | "ids" }`, `429 { error: "busy" }`, `503 { error: "mail", reason }` when nothing went out
+(sender not set up, quota): a fixed sentence, never the SDK's words. The sender is `SQUEAK_MAIL_FROM` (an env variable of the
+function and AppSail; `deploy-hosted.sh` and `deploy-appsail.sh` pass it through when it is set; unset = 503, no mail).
+A join refused for the wrong email is now `403 { error: "email", masked: "p***@e***.com" }`. `/account/handoff` also accepts
+a return to `https://squeak.onslate.in/join` (exactly).
+
+Catalyst Mail's free tier is **100 emails a month for the whole account**, then **$0.001 per email**.
+
+One-time console setup the owner must do before invite emails work (not done by any script; the path is from the Catalyst
+docs and the SDK README and was not clicked through here, so check the labels):
+
+1. In the Catalyst console, open the project, **Cloud Scale > Mail** (docs: "Catalyst Mail > Email configuration"), and enable
+   Mail for the project (in each environment that sends: Development now, Production later).
+2. Add a **sender address** (a Zoho Mail or domain address you control; a custom domain also needs the domain
+   verification the console shows: SPF and DKIM records) and verify it from the confirmation email Catalyst sends.
+3. Set `SQUEAK_MAIL_FROM` to that exact address (`SQUEAK_MAIL_FROM=... deploy-hosted.sh`, and for AppSail the same variable
+   to `deploy-appsail.sh`, or in the function's and AppSail's environment variables in the console), then redeploy the
+   relay. Until then the Mac's Send invites answers "Squeak couldn't send email right now".
+
 ## Squeak's hosted relay: per-Mac keys
 
 Squeak runs one relay for every user. `RELAY_KEY` stays with the operator and opens every channel; a Mac gets its own key

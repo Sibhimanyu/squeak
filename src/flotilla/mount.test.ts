@@ -134,6 +134,16 @@ describe("flotilla routes", () => {
     expect(invite.json.code).toMatch(/^squeak-pond:/);
     expect((await h.call("POST", `/native/ponds/${id}/invites`, { role: "boss" })).status).toBe(400);
     expect((await h.call("POST", "/native/ponds/join", { code: "squeak-pond:zz" })).status).toBe(400);
+    // Invite by email: a strict body; with no Catalyst relay here it is a plain 503, never a code or a crash.
+    const byEmail = (b: unknown) => h.call("POST", `/native/ponds/${id}/invites/email`, b);
+    expect((await byEmail({ emails: "a@b.co" })).status).toBe(400);
+    expect((await byEmail({ emails: ["a@b.co"], extra: 1 })).status).toBe(400);
+    expect((await byEmail({ emails: ["a@b.co"], role: "owner" })).status).toBe(400);
+    expect((await byEmail({ emails: ["nope"] })).status).toBe(400);
+    expect((await byEmail({ emails: ["a@b.co"] })).status).toBe(503);
+    expect((await h.call("POST", `/native/ponds/${id}/invites/email`, { emails: ["a@b.co"] }, "wrong")).status).toBe(
+      401,
+    );
     expect((await h.call("GET", "/native/ponds/nope")).status).toBe(404);
   });
 
