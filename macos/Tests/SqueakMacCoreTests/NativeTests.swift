@@ -539,4 +539,19 @@ struct NativeIncrementalReadTests {
         #expect(third.messages.count == 7)
         #expect(stub.requests.last!.url.absoluteString.contains("before=latest"))
     }
+
+    @Test func aCacheAtItsCapWithTooFewMessagesIsNotReadAgainEveryPoll() async throws {
+        let stub = Stub { _ in ok(#"{"messages":[]}"#) }
+        let a = nativeAdapter(stub)
+        let rows = (1...NativeRowCache.maxRows).map { seq in
+            row(seq, "agent", "assistant", #"{"type":"assistant","message":{"content":[{"type":"text","text":"a\#(seq)"}]}}"#)
+        }
+        a.rowCache.put("n1", rows: rows, exhausted: false)
+        // Fewer messages than the limit and not exhausted: it used to refetch up to 4000 rows on every poll.
+        for _ in 0..<3 {
+            _ = try await a.transcriptPage(for: session(), limit: 10_000, before: nil)
+        }
+        let urls = stub.requests.map { $0.url.absoluteString }
+        #expect(urls.count == 3 && urls.allSatisfy { $0.contains("after=") && !$0.contains("before=") })
+    }
 }

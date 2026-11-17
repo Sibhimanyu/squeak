@@ -213,12 +213,6 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     /// always starts at a person's message, so a turn (its steps between the two messages) is never split across pages.
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
         guard let id = Self.nativeId(session) else { return TranscriptPage(messages: [], nextBefore: nil) }
-        if before == nil, let held = try await caughtUpRows(id) {
-            let mapped = NativeTranscript.map(held.rows)
-            if let start = Self.pageStart(mapped.messages, limit: limit, exhausted: held.exhausted) {
-                return Self.page(mapped, from: start, exhausted: held.exhausted, cursor: nil)
-            }
-        }
         let chunk = 400
         var cursor: Int? = before.flatMap { Int($0) }
         var rows: [NativeMessage] = []
@@ -226,6 +220,22 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         var mapped = NativeTranscript.Mapped()
         var start: Int?
         var rounds = 0
+        if before == nil, let held = try await caughtUpRows(id) {
+            mapped = NativeTranscript.map(held.rows)
+            if let s = Self.pageStart(mapped.messages, limit: limit, exhausted: held.exhausted) {
+                return Self.page(mapped, from: s, exhausted: held.exhausted, cursor: nil)
+            }
+            // The held rows are too few for a page: read only what is older than them, never the whole tail again
+            // (a poll every 2 s decoding the same thousands of rows was most of the app's idle CPU). A cache already
+            // at its cap (a chat of many steps, few messages) is all there is to show: reading older rows would only
+            // be cut off again, and re-read on the next poll.
+            if held.rows.count >= NativeRowCache.maxRows {
+                return Self.page(mapped, from: max(0, mapped.messages.count - limit), exhausted: false, cursor: held.rows.first?.seq)
+            }
+            rows = held.rows
+            exhausted = held.exhausted
+            cursor = held.rows.first?.seq
+        }
         repeat {
             let got = try await call { try await host.messages(id: id, before: cursor, limit: chunk) }
             rounds += 1
