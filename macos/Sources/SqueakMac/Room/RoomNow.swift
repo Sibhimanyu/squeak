@@ -7,24 +7,36 @@ import SwiftUI
 
 struct RoomNowSection: View {
     let cards: [RoomNowCard]
+    var claims: [RoomJobs.ClaimCard] = []
     var key: String?
     let open: (String) -> Void
     let answer: (String, String) -> Void
+    var decide: (RoomJobs.ClaimCard, Bool) -> Void = { _, _ in }
     @State private var contentHeight: CGFloat = 0
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             HStack {
                 Text("Now").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+                if cards.isEmpty && claims.isEmpty {
+                    // Quiet: one compact line in the header row, not a card.
+                    Text("\u{00B7} Nothing running").font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                }
                 Spacer()
+                if cards.isEmpty && claims.isEmpty {
+                    Button("New thread") { if let key { PondHomeView.startThread(key: key, model: model) } else { NewChatController.shared.show() } }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
                 if !cards.isEmpty { Text(cards.count == 1 ? "1 thread" : "\(cards.count) threads").font(.system(size: 12)).foregroundStyle(Theme.subtle) }
             }
-            if cards.isEmpty {
-                QuietCard(key: key)
+            if cards.isEmpty && claims.isEmpty {
+                EmptyView()
             } else {
                 // Taller than a third of the window scrolls inside itself, so the feed and composer always keep their room.
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: Space.m) {
+                        ForEach(claims) { c in RoomClaimCard(claim: c, decide: decide) }
                         ForEach(cards.filter(\.fullWidth)) { c in NeedsYouCard(card: c, open: open, answer: answer) }
                         let rest = cards.filter { !$0.fullWidth }
                         if !rest.isEmpty {
@@ -83,22 +95,6 @@ struct RoomCardGrid: Layout {
             y += h + spacing
             i += cols
         }
-    }
-}
-
-private struct QuietCard: View {
-    let key: String?
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        HStack(spacing: Space.m) {
-            Lucide(.messageSquare, size: 16, color: Theme.muted)
-            Text("Nothing running. Start a thread or message the pond.").font(.system(size: 14)).foregroundStyle(Theme.muted)
-            Spacer(minLength: Space.m)
-            Button("New thread") { if let key { PondHomeView.startThread(key: key, model: model) } else { NewChatController.shared.show() } }.buttonStyle(SecondaryButtonStyle())
-        }
-        .padding(.horizontal, Space.l).frame(height: 64)
-        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.lineStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
-        .accessibilityElement(children: .contain)
     }
 }
 

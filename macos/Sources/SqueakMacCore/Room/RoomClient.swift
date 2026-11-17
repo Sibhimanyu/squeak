@@ -5,6 +5,8 @@ public enum RoomStreamEvent: Sendable, Equatable {
     case post(RoomPost)
     /// A turn started or changed (room v2): upsert by id.
     case turn(RoomTurn)
+    /// A job appeared or changed (room jobs): upsert by id.
+    case job(RoomJob)
     /// The stream (re)connected after a drop: read `since` what is held.
     case reconnected
 }
@@ -38,6 +40,30 @@ public struct RoomClient: Sendable {
         let body: NativeJSON = .object(["text": .string(text), "level": .string(level.rawValue)])
         let data = try await host.call("POST", Self.path(project), body: body, timeout: 20, maybeSent: true)
         do { return try JSONDecoder().decode(R.self, from: data).post } catch { throw NativeHostError.badResponse }
+    }
+
+    /// "Make this a job": `POST .../room/jobs { messageId }` answers 201 `{ job }`.
+    public func makeJob(project: String, messageId: String) async throws -> RoomJob {
+        let body: NativeJSON = .object(["messageId": .string(messageId)])
+        return try Self.job(try await host.call("POST", Self.path(project) + "/jobs", body: body, timeout: 20))
+    }
+
+    /// Go / New thread / Just a note / Allow / No: `POST .../room/jobs/<id>`. A 409 carries its own sentence.
+    public func act(project: String, jobId: String, action: RoomJobAction) async throws -> RoomJob {
+        let path = Self.path(project) + "/jobs/" + NativeHostClient.id(jobId)
+        return try Self.job(try await host.call("POST", path, body: action.body, timeout: 20))
+    }
+
+    /// The stream sends the bare job; a wrapped `{ job }` is read too.
+    static func streamedJob(_ data: Data) -> RoomJob? {
+        struct W: Decodable { var job: RoomJob }
+        if let j = try? JSONDecoder().decode(RoomJob.self, from: data) { return j }
+        return (try? JSONDecoder().decode(W.self, from: data))?.job
+    }
+
+    static func job(_ data: Data) throws -> RoomJob {
+        struct R: Decodable { var job: RoomJob }
+        do { return try JSONDecoder().decode(R.self, from: data).job } catch { throw NativeHostError.badResponse }
     }
 
     /// `GET .../room/stream`: `hello`, then a `post` per new post. Reconnects until iteration stops; a reconnect
@@ -76,6 +102,8 @@ public struct RoomClient: Sendable {
                                 if let data = frame.data.data(using: .utf8), let t = try? JSONDecoder().decode(RoomTurn.self, from: data) {
                                     continuation.yield(.turn(t))
                                 }
+                            case "job":
+                                if let data = frame.data.data(using: .utf8), let j = Self.streamedJob(data) { continuation.yield(.job(j)) }
                             default: break
                             }
                         }

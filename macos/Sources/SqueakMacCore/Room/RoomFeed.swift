@@ -32,6 +32,10 @@ public struct RoomFeed: Sendable, Equatable {
     public private(set) var turns: [RoomTurn] = []
     /// A host that serves turns says so once (even an empty list); until then the ripples fall back to posts.
     public private(set) var servesTurns = false
+    /// Room jobs, oldest first by creation (id breaks a tie); an update replaces in place, so a line never moves.
+    public private(set) var jobs: [RoomJob] = []
+    /// Actions in flight and refusals, by job id (a failed "Make this a job" is keyed `msg:<message id>`).
+    public private(set) var jobLocal: [String: RoomJobLocal] = [:]
     private var seen: Set<Int> = []
     private var localCounter = 0
 
@@ -48,6 +52,7 @@ public struct RoomFeed: Sendable, Equatable {
         loaded = true
         threads = page.threads
         if let t = page.turns { servesTurns = true; for turn in t { upsert(turn: turn) } }
+        if let j = page.jobs { for job in j { upsert(job: job) } }
         for p in page.posts.sorted(by: { $0.seq < $1.seq }) { appendReal(p) }
         latestSeq = max(latestSeq, page.latestSeq)
         if first, let pageSize { hasMoreBefore = page.posts.count >= pageSize }
@@ -87,6 +92,42 @@ public struct RoomFeed: Sendable, Equatable {
         let at = turns.lastIndex { ($0.startedAt, $0.id) <= (turn.startedAt, turn.id) }.map { $0 + 1 } ?? 0
         turns.insert(turn, at: at)
     }
+
+    // MARK: Jobs
+
+    /// A job from the stream, a page or an action's answer: new ones take their place by creation, known ones change in
+    /// place. An older copy never overwrites a newer one; any copy that lands ends the pending action and its refusal.
+    public mutating func upsert(job: RoomJob) {
+        if let i = jobs.firstIndex(where: { $0.id == job.id }) {
+            if job.updatedAt >= jobs[i].updatedAt { jobs[i] = job; jobLocal[job.id] = nil }
+            return
+        }
+        let at = jobs.lastIndex { ($0.createdAt, $0.id) <= (job.createdAt, job.id) }.map { $0 + 1 } ?? 0
+        jobs.insert(job, at: at)
+        jobLocal["msg:" + job.messageId] = nil
+        jobLocal[job.id] = nil
+    }
+
+    /// The person pressed something: the line shows it at once.
+    public mutating func beginJob(_ id: String, action: RoomJobAction, title: String? = nil) {
+        jobLocal[id] = RoomJobLocal(pending: action, pendingTitle: title, error: nil)
+    }
+
+    /// The host refused or could not be reached: the pending state goes and the sentence shows inline.
+    public mutating func failJob(_ id: String, message: String) {
+        jobLocal[id] = RoomJobLocal(pending: nil, pendingTitle: nil, error: message)
+    }
+
+    public mutating func clearJobLocal(_ id: String) { jobLocal[id] = nil }
+
+    /// The jobs' lines, keyed by the message they sit under.
+    public func jobLine(forMessage id: String) -> RoomJobLine? {
+        if let j = RoomJobs.job(for: id, in: jobs) { return RoomJobs.line(for: j, local: jobLocal[j.id]) }
+        if let e = jobLocal["msg:" + id]?.error { return RoomJobs.makeFailedLine(messageId: id, error: e) }
+        return nil
+    }
+
+    public var claims: [RoomJobs.ClaimCard] { RoomJobs.claims(jobs: jobs, local: jobLocal, threads: threads) }
 
     public mutating func setThreads(_ t: [RoomThread]) { threads = t }
 

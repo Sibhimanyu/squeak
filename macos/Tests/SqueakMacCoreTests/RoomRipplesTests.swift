@@ -91,7 +91,7 @@ struct RoomRipplesTests {
         let f = feed(turns: [turn("a", at: base)], posts: posts, threads: threads)
         func kinds(_ fl: RoomRippleFilter) -> [String] {
             RoomRipples.build(feed: f, filter: fl, now: now, calendar: cal).map {
-                switch $0 { case .day: "day"; case .threadTurns: "turns"; case .bubble: "bubble"; case .handoff: "handoff"; case .event: "event" }
+                switch $0 { case .day: "day"; case .threadTurns: "turns"; case .bubble: "bubble"; case .handoff: "handoff"; case .event: "event"; case .jobLine: "job" }
             }
         }
         #expect(kinds(.all) == ["day", "turns", "bubble", "handoff"])

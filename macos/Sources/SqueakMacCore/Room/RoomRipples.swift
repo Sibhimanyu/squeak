@@ -64,6 +64,8 @@ public enum RoomRipple: Sendable, Equatable, Identifiable {
     case handoff(RoomHandoff)
     /// Fallback from posts (a host without turns): a working/done/needs line of a thread.
     case event(RoomRow, title: String, agent: String?)
+    /// A person's message that is a job: the one quiet action line under it.
+    case jobLine(RoomJobLine)
 
     public var id: String {
         switch self {
@@ -72,6 +74,7 @@ public enum RoomRipple: Sendable, Equatable, Identifiable {
         case .bubble(let r, _): r.id
         case .handoff(let h): h.id
         case .event(let r, _, _): r.id
+        case .jobLine(let l): l.id
         }
     }
 }
@@ -81,7 +84,7 @@ public enum RoomRipples {
 
     /// Everything the Ripples draw, oldest first.
     public static func build(
-        feed: RoomFeed, filter: RoomRippleFilter, now: Date = Date(), calendar: Calendar = .current
+        feed: RoomFeed, filter: RoomRippleFilter, now: Date = Date(), calendar: Calendar = .current, owner: String? = nil
     ) -> [RoomRipple] {
         var items: [Item] = []
         let titles = Dictionary(feed.threads.map { ($0.sessionId, $0.title) }, uniquingKeysWith: { a, _ in a })
@@ -93,7 +96,7 @@ public enum RoomRipples {
             for t in feed.turns where t.outcome == nil || t.endedAt == nil { latest[t.sessionId] = t.id }
             for t in feed.turns {
                 let asking = askingNow.contains(t.sessionId) && latest[t.sessionId] == t.id
-                items.append(Item(at: t.startedAt, order: 1, kind: .turn(row(t, asking: asking, now: now))))
+                items.append(Item(at: t.startedAt, order: 1, kind: .turn(row(t, asking: asking, now: now, owner: owner))))
             }
         }
         for r in feed.rows {
@@ -104,6 +107,8 @@ public enum RoomRipples {
                 }
             } else if p.author.kind == .person, p.level == .room {
                 items.append(Item(at: p.at, order: 2, kind: .bubble(r)))
+                // The job line sorts straight after its message (its sort id is the message's plus a suffix).
+                if let line = feed.jobLine(forMessage: p.id) { items.append(Item(at: p.at, order: 2, kind: .jobLine(line), sortId: r.id + "\u{0}")) }
             } else if !feed.servesTurns, p.level == .room, p.kind != .message {
                 items.append(Item(at: p.at, order: 2, kind: .event(r, title: p.sessionId.flatMap { titles[$0] } ?? p.author.name, agent: nil)))
             }
@@ -116,16 +121,20 @@ public enum RoomRipples {
     // MARK: Internals
 
     private struct Item {
-        enum Kind { case turn(RoomTurnRow), bubble(RoomRow), handoff(RoomHandoff), event(RoomRow, title: String, agent: String?) }
+        enum Kind { case turn(RoomTurnRow), bubble(RoomRow), handoff(RoomHandoff), event(RoomRow, title: String, agent: String?), jobLine(RoomJobLine) }
         var at: Int64
         var order: Int
         var kind: Kind
+        var sortId: String?
+        init(at: Int64, order: Int, kind: Kind, sortId: String? = nil) { self.at = at; self.order = order; self.kind = kind; self.sortId = sortId }
         var id: String {
+            if let sortId { return sortId }
             switch kind {
-            case .turn(let r): r.id
-            case .bubble(let r): r.id
-            case .handoff(let h): h.id
-            case .event(let r, _, _): r.id
+            case .jobLine(let l): return l.id
+            case .turn(let r): return r.id
+            case .bubble(let r): return r.id
+            case .handoff(let h): return h.id
+            case .event(let r, _, _): return r.id
             }
         }
     }
@@ -135,11 +144,12 @@ public enum RoomRipples {
         case (.all, _): return true
         case (.needsYou, .turn(let r)): return r.asking || r.turn.answer != nil
         case (.needsYou, .event(let r, _, _)): return r.post.kind == .needs
+        case (.needsYou, .jobLine): return false
         case (.needsYou, _): return false
-        case (.people, .bubble): return true
+        case (.people, .bubble), (.people, .jobLine): return true
         case (.people, _): return false
         case (.agents, .turn), (.agents, .handoff), (.agents, .event): return true
-        case (.agents, .bubble): return false
+        case (.agents, .bubble), (.agents, .jobLine): return false
         }
     }
 
@@ -169,6 +179,7 @@ public enum RoomRipples {
             case .bubble(let r): openGroup = nil; out.append(.bubble(r, mine: r.post.author.kind == .person && isMine(r)))
             case .handoff(let h): openGroup = nil; out.append(.handoff(h))
             case .event(let r, let t, let a): openGroup = nil; out.append(.event(r, title: t, agent: a))
+            case .jobLine(let l): openGroup = nil; out.append(.jobLine(l))
             }
         }
         return out
@@ -177,17 +188,24 @@ public enum RoomRipples {
     /// A message typed here is "You"; the host names the owner's own posts by the name it was given or "You".
     private static func isMine(_ r: RoomRow) -> Bool { r.mine || r.pending || r.post.author.name == "You" || r.post.author.id == "me" || r.post.author.id == "owner" }
 
-    static func row(_ t: RoomTurn, asking: Bool, now: Date) -> RoomTurnRow {
-        RoomTurnRow(turn: t, prompt: promptLine(t), outcome: outcomeLine(t, asking: asking), meta: metaLine(t, asking: asking, now: now), asking: asking)
+    static func row(_ t: RoomTurn, asking: Bool, now: Date, owner: String? = nil) -> RoomTurnRow {
+        RoomTurnRow(turn: t, prompt: promptLine(t, owner: owner), outcome: outcomeLine(t, asking: asking), meta: metaLine(t, asking: asking, now: now), asking: asking)
     }
 
-    public static func promptLine(_ t: RoomTurn) -> RoomPromptLine? {
-        if let a = t.answer {
-            return .answered(who: t.author.me ? "You" : (t.author.name.isEmpty ? "Someone" : t.author.name), letter: a.letter, question: a.question)
-        }
+    /// The person's own words say "You", never their full name: the host's `me` flag, or a name that is the owner's.
+    public static func isOwner(_ a: RoomTurnAuthor, owner: String?) -> Bool {
+        if a.me { return true }
+        let n = a.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !n.isEmpty, let o = owner?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !o.isEmpty else { return false }
+        return n == o || n == "you"
+    }
+
+    public static func promptLine(_ t: RoomTurn, owner: String? = nil) -> RoomPromptLine? {
+        let who = isOwner(t.author, owner: owner) ? "You" : (t.author.name.isEmpty ? "Someone" : t.author.name)
+        if let a = t.answer { return .answered(who: who, letter: a.letter, question: a.question) }
         let p = t.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !p.isEmpty else { return nil }
-        return .said(name: t.author.name.isEmpty ? (t.author.me ? "You" : "Someone") : t.author.name, quote: p)
+        return .said(name: who, quote: p)
     }
 
     public static func outcomeLine(_ t: RoomTurn, asking: Bool) -> RoomOutcomeLine {

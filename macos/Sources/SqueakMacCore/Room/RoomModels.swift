@@ -234,17 +234,20 @@ public struct RoomPage: Sendable, Equatable, Decodable {
     public var threads: [RoomThread]
     /// Room v2: nil when the host does not serve turns (the feed then falls back to posts).
     public var turns: [RoomTurn]?
+    /// Room jobs: nil when the host does not serve them (the room then shows nothing new).
+    public var jobs: [RoomJob]?
 
-    public init(posts: [RoomPost] = [], latestSeq: Int = 0, threads: [RoomThread] = [], turns: [RoomTurn]? = nil) {
-        self.posts = posts; self.latestSeq = latestSeq; self.threads = threads; self.turns = turns
+    public init(posts: [RoomPost] = [], latestSeq: Int = 0, threads: [RoomThread] = [], turns: [RoomTurn]? = nil, jobs: [RoomJob]? = nil) {
+        self.posts = posts; self.latestSeq = latestSeq; self.threads = threads; self.turns = turns; self.jobs = jobs
     }
 
-    private enum CodingKeys: String, CodingKey { case posts, latestSeq, threads, turns }
+    private enum CodingKeys: String, CodingKey { case posts, latestSeq, threads, turns, jobs }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         posts = ((try? c.decode([Failable<RoomPost>].self, forKey: .posts)) ?? []).compactMap(\.value)
         threads = ((try? c.decode([Failable<RoomThread>].self, forKey: .threads)) ?? []).compactMap(\.value)
         latestSeq = (try? c.decode(Int.self, forKey: .latestSeq)) ?? posts.map(\.seq).max() ?? 0
         turns = (try? c.decode([Failable<RoomTurn>].self, forKey: .turns)).map { $0.compactMap(\.value) }
+        jobs = (try? c.decode([Failable<RoomJob>].self, forKey: .jobs)).map { $0.compactMap(\.value) }
     }
 }

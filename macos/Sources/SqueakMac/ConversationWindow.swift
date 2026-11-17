@@ -96,6 +96,22 @@ struct ConversationView: View {
             .overlay(alignment: .topLeading) { windowContent }
     }
 
+    @AppStorage("roomInspectorOpen") private var roomInspectorOpen = true
+
+    /// The pond room on screen, if any: its project id and the pond's directory key.
+    private var roomContext: (projectId: String, key: String)? {
+        if let route = PondsModel.shared.route {
+            guard case .home(let key) = route, RoomViewPref.shared.mode(for: key) == .room else { return nil }
+            if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
+            return PondsModel.shared.native(key: key).map { ($0.id, key) }
+        }
+        guard let s = model.selectedSession, let place = model.sidebarTree.place(of: s.key),
+            let project = model.nativeWorkspace(of: place.workspace)?.projectId, RoomSelection.shared.isOpen(project),
+            let key = PondsModel.shared.key(of: s)
+        else { return nil }
+        return (project, key)
+    }
+
     @ViewBuilder private var windowContent: some View {
         @Bindable var model = model
         @Bindable var git = model.git
@@ -105,8 +121,13 @@ struct ConversationView: View {
         let dockThreads = dock.threads
         let dockDucklings = dock.ducklings
         let rightWanted = layout.isZoneVisible(.right, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) && !layout.right.collapsed
-        let showsInspectorWanted = rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
-            && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
+        // While the pond room is shown, the right zone is the room's inspector (Flock, Invite, Today, Pond controls), at
+        // any window width the solver can fit, with its own open/closed choice.
+        let roomCtx = (model.settingsSection == nil && NewChatController.shared.page == nil && model.navFilter != .usage) ? roomContext : nil
+        let showsInspectorWanted = roomCtx != nil
+            ? roomInspectorOpen
+            : (rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
+                && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
             window: windowWidth,
@@ -119,9 +140,11 @@ struct ConversationView: View {
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
         let showingSettings = model.settingsSection != nil
+        let toggleRightPane: () -> Void = { if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
             && PondsModel.shared.route == nil
+        let paneOpen = chatOpen || roomCtx != nil
         HStack(spacing: 0) {
             // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
             // place (no horizontal travel); the slot itself still slides when the sidebar is toggled.
@@ -148,11 +171,11 @@ struct ConversationView: View {
             if showingSettings {
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                let placement = chatOpen ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
+                let placement = (chatOpen && roomCtx == nil) ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
-                            sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && chatOpen,
+                            sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && paneOpen,
                             
                             toggleSidebar: toggleSidebar, showingCompose: showingCompose
                         )
@@ -163,9 +186,10 @@ struct ConversationView: View {
                     // measured window, which could come up short and leave gaps); its minimum keeps overflow impossible.
                     .frame(minWidth: PaneWidths.centreMin, maxWidth: .infinity)
                     .clipped()
-                    if showsInspector, chatOpen {
+                    if showsInspector, paneOpen {
                         VStack(spacing: 0) {
-                            DockRightColumn(session: model.selectedSession, width: inspectorW)
+                            if let roomCtx { RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW) }
+                            else { DockRightColumn(session: model.selectedSession, width: inspectorW) }
                             if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW)
                                     .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
                             }
@@ -193,7 +217,7 @@ struct ConversationView: View {
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
         .animation(Motion.standard, value: showingSettings)
-        .animation(Motion.standard, value: showsInspector && chatOpen)
+        .animation(Motion.standard, value: showsInspector && paneOpen)
         .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
@@ -211,11 +235,11 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && chatOpen, showsRight: chatOpen, window: windowWidth, sidebarWidth: sidebarW,
-                    inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { dock.update { $0.toggleRight() } }
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen, window: windowWidth, sidebarWidth: sidebarW,
+                    inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)
-                .animation(Motion.standard, value: showsInspector && chatOpen)
+                .animation(Motion.standard, value: showsInspector && paneOpen)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -230,7 +254,7 @@ struct ConversationView: View {
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in dock.update { $0.toggleRight() } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in toggleRightPane() }
         // ⌥⌘C shows the Code panel, or closes it when it is the one showing; a diff opened anywhere shows it too.
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in dock.update { $0.toggle(.code) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in dock.update { $0.show(.code) } }
