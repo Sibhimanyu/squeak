@@ -198,79 +198,178 @@ struct PondFlowTests {
 
 @Suite("Pond drag: following the fingers, committing, the hint")
 struct PondDragTests {
-    private func run(_ steps: [(Double, Double)], current: PondPage = .dashboard, width: Double = 1000, end: Bool = true) -> [PondDrag.Update] {
-        var d = PondDrag(); var out: [PondDrag.Update] = []
-        out += d.feed(dx: 0, dy: 0, phase: .began, momentum: false, current: current, width: width).map { [$0] } ?? []
-        for s in steps { out += d.feed(dx: s.0, dy: s.1, phase: .changed, momentum: false, current: current, width: width).map { [$0] } ?? [] }
-        if end { out += d.feed(dx: 0, dy: 0, phase: .ended, momentum: false, current: current, width: width).map { [$0] } ?? [] }
+    /// Steps are (dx, dy, seconds since the last event); the gesture starts at t = 1.
+    private func run(_ steps: [(Double, Double, Double)], current: PondPage = .dashboard, width: Double = 1000, end: Bool = true, rest: Double = 0) -> [PondDrag.Update] {
+        var d = PondDrag(); var out: [PondDrag.Update] = []; var t = 1.0
+        out += d.feed(dx: 0, dy: 0, phase: .began, momentum: false, current: current, width: width, time: t).map { [$0] } ?? []
+        for s in steps {
+            t += s.2
+            out += d.feed(dx: s.0, dy: s.1, phase: .changed, momentum: false, current: current, width: width, time: t).map { [$0] } ?? []
+        }
+        if end { out += d.feed(dx: 0, dy: 0, phase: .ended, momentum: false, current: current, width: width, time: t + rest).map { [$0] } ?? [] }
         return out
     }
 
-    @Test func offsetIsHalfTheFingersAndCapped() {
-        #expect(PondDrag.offset(delta: -100, width: 1000, page: .dashboard) == -50)
-        #expect(PondDrag.offset(delta: -2000, width: 1000, page: .dashboard) == -400)
-        #expect(PondDrag.offset(delta: 100, width: 1000, page: .room) == 50)
+    @Test func tracksOneToOneAndRubberBandsPastTheEnds() {
+        #expect(PondDrag.position(origin: 0, delta: -100, width: 1000) == 0.1)
+        #expect(PondDrag.position(origin: 1, delta: 250, width: 1000) == 0.75)
+        // Past the Room: gives less than the fingers and never more than the share.
+        let past = PondDrag.position(origin: 1, delta: -100, width: 1000)
+        #expect(past > 1 && past < 1.1)
+        #expect(PondDrag.position(origin: 1, delta: -100000, width: 1000) < 1 + PondDrag.rubberShare)
+        #expect(PondDrag.position(origin: 0, delta: 100, width: 1000) < 0)
+        #expect(PondDrag.position(origin: 0, delta: 100, width: 1000) > -0.1)
     }
 
-    @Test func noPageMeansResistance() {
-        // Fingers right on the Dashboard: nothing there, a third of the following and a small cap.
-        #expect(PondDrag.offset(delta: 100, width: 1000, page: .dashboard) == 15)
-        #expect(PondDrag.offset(delta: 5000, width: 1000, page: .dashboard) == 60)
-        #expect(PondDrag.offset(delta: -5000, width: 1000, page: .room) == -60)
+    @Test func travelProgressAndPageEdges() {
+        #expect(PondDrag.travel(position: 0.15, page: .dashboard) == 0.15)
+        #expect(PondDrag.travel(position: -0.05, page: .dashboard) == 0)
+        #expect(abs(PondDrag.travel(position: 0.85, page: .room) - 0.15) < 1e-9)
+        #expect(abs(PondDrag.progress(position: 0.15, page: .dashboard) - 0.5) < 1e-9)
+        #expect(PondDrag.progress(position: 0.9, page: .dashboard) == 1)
+        #expect(PondDrag.x(of: .room, position: 0, width: 1000) == 1000)
+        #expect(PondDrag.x(of: .dashboard, position: 0.25, width: 1000) == -250)
+        #expect(PondDrag.x(of: .room, position: 0.25, width: 1000) == 750)
     }
 
-    @Test func progressAndLayout() {
-        #expect(PondDrag.progress(offset: -400, width: 1000, page: .dashboard) == 1)
-        #expect(PondDrag.progress(offset: -200, width: 1000, page: .dashboard) == 0.5)
-        #expect(PondDrag.progress(offset: 15, width: 1000, page: .dashboard) == 0)
-        let rest = PondDrag.layout(of: .room, current: .dashboard, offset: 0, width: 1000)
-        #expect(rest.x == 1000 && rest.opacity == 0)
-        let mid = PondDrag.layout(of: .room, current: .dashboard, offset: -200, width: 1000)
-        #expect(mid.x == 500 && mid.opacity == 0.5)
-        #expect(PondDrag.layout(of: .dashboard, current: .dashboard, offset: -200, width: 1000).opacity == 0.75)
-        #expect(PondDrag.layout(of: .dashboard, current: .room, offset: 200, width: 1000).x == -500)
-        #expect(PondDrag.layout(of: .dashboard, current: .room, offset: 0, width: 1000).x == -1000)
+    @Test func slowDragPastThirtyPercentCommitsOnEndNotBefore() {
+        // 4 x 80 pt, 0.2 s apart: no flick, 32% of 1000.
+        let out = run([(-80, 0, 0.2), (-80, 0, 0.2), (-80, 0, 0.2), (-80, 0, 0.2)], rest: 0.3)
+        #expect(out.last == .commit(.room, from: 0.32, velocity: 0))
+        #expect(!out.dropLast().contains { if case .commit = $0 { true } else { false } })
+        #expect(out.first == .track(0.08))
     }
 
-    @Test func pastThresholdCommitsOnEndNotBefore() {
-        let out = run([(-30, 0), (-30, 0), (-30, 0)])
-        #expect(out.last == .commit(.room))
-        #expect(!out.dropLast().contains(.commit(.room)))
-        #expect(out.first == .track(-15))
+    @Test func slowDragShortOfThirtyPercentSettles() {
+        let out = run([(-100, 0, 0.2), (-100, 0, 0.2)], rest: 0.3)
+        #expect(out.last == .settle(from: 0.2, velocity: 0))
     }
 
-    @Test func shortSwipeSettles() {
-        let out = run([(-30, 0), (-20, 0)])
-        #expect(out.last == .settle)
+    @Test func aFlickCommitsEvenWhenShort() {
+        // 90 pt in 60 ms = 1500 pt/s, only 9% of the width.
+        let out = run([(-30, 0, 0.02), (-30, 0, 0.02), (-30, 0, 0.02)])
+        guard case .commit(let page, let from, let v)? = out.last else { Issue.record("no commit"); return }
+        #expect(page == .room && abs(from - 0.09) < 1e-9 && v > 1000)
+    }
+
+    @Test func aFlickTheOtherWayDoesNotCommit() {
+        // Dragged right (toward nothing on the Dashboard) with a fast snap back left: no commit to the Room from a flick that
+        // ended behind the start.
+        let out = run([(60, 0, 0.02), (-30, 0, 0.02), (-30, 0, 0.02)])
+        #expect(!out.contains { if case .commit = $0 { true } else { false } })
+    }
+
+    @Test func fingersRestingBeforeLiftingIsNotAFlick() {
+        let out = run([(-30, 0, 0.02), (-30, 0, 0.02), (-30, 0, 0.02)], rest: 0.3)
+        #expect(out.last == .settle(from: 0.09, velocity: 0))
     }
 
     @Test func rightFingersGoToDashboardAndTargetShownIsNothing() {
-        #expect(run([(100, 0)], current: .room).last == .commit(.dashboard))
-        // Dashboard and fingers right: it tracks with resistance, then settles.
-        #expect(run([(100, 0)], current: .dashboard).last == .settle)
+        let room = run([(120, 0, 0.1), (120, 0, 0.1), (120, 0, 0.1)], current: .room, rest: 0.3)
+        guard case .commit(let page, _, _)? = room.last else { Issue.record("no commit"); return }
+        #expect(page == .dashboard)
+        // Dashboard and fingers right: it rubber-bands, then settles.
+        let dash = run([(300, 0, 0.1)], current: .dashboard, rest: 0.3)
+        #expect(dash.last.map { if case .settle = $0 { true } else { false } } == true)
+    }
+
+    @Test func aGrabbedFinishContinuesFromWhereItWas() {
+        var d = PondDrag()
+        _ = d.feed(dx: 0, dy: 0, phase: .began, momentum: false, current: .room, width: 1000, time: 1, origin: 0.7)
+        let u = d.feed(dx: 100, dy: 0, phase: .changed, momentum: false, current: .room, width: 1000, time: 1.1, origin: 0.7)
+        #expect(u == .track(0.6))
     }
 
     @Test func verticalScrollSettlesAndNeverCommits() {
-        let out = run([(-10, 0), (-5, 40), (-100, 10)])
-        #expect(out.contains(.settle))
-        #expect(!out.contains(.commit(.room)))
+        let out = run([(-10, 0, 0.02), (-5, 40, 0.02), (-100, 10, 0.02)])
+        #expect(out.contains { if case .settle = $0 { true } else { false } })
+        #expect(!out.contains { if case .commit = $0 { true } else { false } })
     }
 
     @Test func momentumIsIgnored() {
         var d = PondDrag()
         #expect(d.feed(dx: -300, dy: 0, phase: .changed, momentum: true, current: .dashboard, width: 1000) == nil)
     }
+}
 
-    @Test func hintNudgesFirstThreeVisitsOnly() {
-        #expect(PondSwipeHint(visits: 1).nudges(reduceMotion: false))
-        #expect(PondSwipeHint(visits: 3).nudges(reduceMotion: false))
-        #expect(!PondSwipeHint(visits: 4).nudges(reduceMotion: false))
-        #expect(!PondSwipeHint(visits: 1).nudges(reduceMotion: true))
+@Suite("Swipe feel: velocity, commit, finish, ring, haptic, hint")
+struct SwipeFeelTests {
+    @Test func velocityUsesTheLastEightyMilliseconds() {
+        let samples = [SwipeSample(t: 0, x: 0), SwipeSample(t: 0.5, x: -10), SwipeSample(t: 0.54, x: -40), SwipeSample(t: 0.58, x: -80)]
+        // Only the last two samples are inside 80 ms of 0.58 (0.5 is exactly 80 ms back): 70 pt in 80 ms.
+        let v = SwipeVelocity.estimate(samples)
+        #expect(v < -800 && v > -1000)
+        #expect(SwipeVelocity.estimate([SwipeSample(t: 0, x: 0)]) == 0)
+        #expect(SwipeVelocity.estimate([]) == 0)
+        // Rested before lifting.
+        #expect(SwipeVelocity.estimate(samples, now: 0.9) == 0)
     }
 
-    @Test func wordHidesAfterThreeSwipes() {
+    @Test func commitByDistanceOrFlick() {
+        #expect(SwipeCommit.commits(travelShare: 0.31, velocityToward: 0, travel: 310))
+        #expect(!SwipeCommit.commits(travelShare: 0.29, velocityToward: 0, travel: 290))
+        #expect(SwipeCommit.commits(travelShare: 0.08, velocityToward: 700, travel: 80))
+        #expect(!SwipeCommit.commits(travelShare: 0.08, velocityToward: 500, travel: 80))
+        #expect(!SwipeCommit.commits(travelShare: 0.08, velocityToward: -900, travel: 80))
+        #expect(!SwipeCommit.commits(travelShare: 0.01, velocityToward: 900, travel: 10))
+    }
+
+    @Test func finishDurationScalesWithRemainingDistance() {
+        let near = SwipeFinish.commitDuration(remainingShare: 0.1, width: 1000, velocity: 0)
+        let far = SwipeFinish.commitDuration(remainingShare: 0.9, width: 1000, velocity: 0)
+        #expect(near < far)
+        #expect(SwipeFinish.commitRange.contains(near) && SwipeFinish.commitRange.contains(far))
+        #expect(far <= 0.35 && near >= 0.18)
+        // A fast flick finishes sooner than the distance alone says.
+        #expect(SwipeFinish.commitDuration(remainingShare: 0.9, width: 1000, velocity: 4000) < far)
+        #expect(SwipeFinish.settleDuration(remainingShare: 0.5, width: 1000, velocity: 0) < SwipeFinish.commitDuration(remainingShare: 0.5, width: 1000, velocity: 0))
+        #expect(SwipeFinish.settleRange.contains(SwipeFinish.settleDuration(remainingShare: 1, width: 1000, velocity: 0)))
+    }
+
+    @Test func curveDecelerates() {
+        #expect(SwipeCurve.value(0) == 0 && SwipeCurve.value(1) == 1)
+        #expect(SwipeCurve.value(0.25) > 0.5)
+        #expect(SwipeCurve.value(0.5) < SwipeCurve.value(0.75))
+    }
+
+    @Test func ringFillsToTheCommitPoint() {
+        #expect(SwipeRing.trim(progress: 0.4) == 0.4)
+        #expect(SwipeRing.trim(progress: 1.7) == 1 && SwipeRing.trim(progress: -1) == 0)
+        #expect(!SwipeRing.flipped(progress: 0.99) && SwipeRing.flipped(progress: 1))
+    }
+
+    @Test func hapticFiresOncePerGesture() {
+        var h = SwipeHapticLatch()
+        let early = h.crosses(progress: 0.5), first = h.crosses(progress: 1), again = h.crosses(progress: 1)
+        let back = h.crosses(progress: 0.2), cross2 = h.crosses(progress: 1)
+        #expect(!early && first && !again && !back && !cross2)
+        h.reset()
+        let afterReset = h.crosses(progress: 1)
+        #expect(afterReset)
+    }
+
+    @Test func rippleSchedule() {
+        #expect(PondSwipeHint(visits: 1).ripples(reduceMotion: false, windowIsKey: true))
+        #expect(PondSwipeHint(visits: 3, swipes: 2).ripples(reduceMotion: false, windowIsKey: true))
+        #expect(!PondSwipeHint(visits: 4).ripples(reduceMotion: false, windowIsKey: true))
+        #expect(!PondSwipeHint(visits: 1, swipes: 3).ripples(reduceMotion: false, windowIsKey: true))
+        #expect(!PondSwipeHint(visits: 1).ripples(reduceMotion: true, windowIsKey: true))
+        #expect(!PondSwipeHint(visits: 1).ripples(reduceMotion: false, windowIsKey: false))
+        #expect(PondSwipeHint(visits: 1).rippleDelay == 6)
+    }
+
+    @Test func peekIsFirstVisitOnly() {
+        #expect(PondSwipeHint(visits: 1).peeks(reduceMotion: false))
+        #expect(!PondSwipeHint(visits: 2).peeks(reduceMotion: false))
+        #expect(!PondSwipeHint(visits: 1, swipes: 1).peeks(reduceMotion: false))
+        #expect(!PondSwipeHint(visits: 1).peeks(reduceMotion: true))
+        #expect(PondSwipeHint.peekPosition(page: .dashboard, width: 1000) == 0.028)
+        #expect(PondSwipeHint.peekPosition(page: .room, width: 1000) == 0.972)
+    }
+
+    @Test func wordHidesAfterThreeSwipesAndTheButtonQuietens() {
         #expect(PondSwipeHint(swipes: 2).showsWord)
         #expect(!PondSwipeHint(swipes: 3).showsWord)
-        #expect(PondSwipeHint.stretch(progress: 1) > PondSwipeHint.stretch(progress: 0.5))
+        #expect(PondSwipeHint(swipes: 0).restingOpacity > PondSwipeHint(swipes: 3).restingOpacity)
     }
 }

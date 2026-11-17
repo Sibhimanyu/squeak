@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -66,88 +67,215 @@ extension AppModel {
 
 // MARK: Two pages
 
+/// Where the two-page strip is: 0 the Dashboard, 1 the Room. Only this changes while the fingers move, and only the small
+/// views that read it (`PanPage`, `PanFade`, the hint) re-evaluate: the pages themselves are built once by `PondSpace` and
+/// never rebuilt per scroll tick.
+@MainActor @Observable
+final class PondPanState {
+    enum Mode { case rest, dragging, gliding }
+
+    private(set) var mode = Mode.rest
+    /// The strip's position while dragging or gliding.
+    private(set) var position = 0.0
+    /// The page the strip rests on while at rest (follows `RoomViewPref` through `reconcile`).
+    private(set) var restPage = PondPage.dashboard
+    private var glide: (from: Double, to: Double, start: CFTimeInterval, duration: Double)?
+    private var token = 0
+
+    /// The strip's position now, for drawing.
+    var drawn: Double { mode == .rest ? PondDrag.home(restPage) : position }
+
+    /// Where the strip is on screen right now, while a finish is in flight (the animation's own curve, so a grab continues
+    /// from the very spot, never from where the finish was going).
+    func presented(at now: CFTimeInterval = CACurrentMediaTime()) -> Double {
+        guard mode == .gliding, let g = glide else { return drawn }
+        let t = g.duration > 0 ? (now - g.start) / g.duration : 1
+        return g.from + (g.to - g.from) * SwipeCurve.value(t)
+    }
+
+    func mount(page: PondPage) { mode = .rest; restPage = page; glide = nil; token += 1 }
+
+    func track(_ p: Double) {
+        if mode != .dragging { mode = .dragging; glide = nil; token += 1 }
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { position = p }
+    }
+
+    /// Moves the strip to `page`'s rest over `duration` on the swipe curve, from where it is drawn now.
+    func finish(to page: PondPage, from: Double? = nil, duration: Double) {
+        let start = from ?? presented()
+        token += 1
+        let mine = token
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { mode = .gliding; position = start }
+        let target = PondDrag.home(page)
+        glide = (start, target, CACurrentMediaTime(), duration)
+        withAnimation(Motion.swipe(duration: duration)) { position = target } completion: { [weak self] in
+            guard let self, self.token == mine else { return }
+            self.mode = .rest; self.restPage = page; self.glide = nil
+        }
+        if Motion.reduceMotion { mode = .rest; restPage = page; glide = nil }
+    }
+
+    /// The page changed from outside the gesture (the switch, the header control, the way back from a tab).
+    func reconcile(page: PondPage, width: Double) {
+        guard mode != .dragging else { return }
+        if mode == .rest, restPage == page { return }
+        if mode == .gliding, glide?.to == PondDrag.home(page) { return }
+        let remaining = abs(PondDrag.home(page) - presented())
+        finish(to: page, duration: SwipeFinish.commitDuration(remainingShare: remaining, width: width, velocity: 0))
+    }
+
+    /// First visit: the page slides a little toward the other and eases back, showing the gesture.
+    func peek(page: PondPage, width: Double) async {
+        guard mode == .rest, restPage == page else { return }
+        let home = PondDrag.home(page), out = PondSwipeHint.peekPosition(page: page, width: width)
+        token += 1
+        let mine = token
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { mode = .gliding; position = home }
+        glide = (home, out, CACurrentMediaTime(), 0.3)
+        withAnimation(Motion.swipe(duration: 0.3)) { position = out }
+        try? await Task.sleep(for: .milliseconds(380))
+        guard token == mine, mode == .gliding else { return }
+        finish(to: page, duration: 0.4)
+    }
+}
+
+/// One state per pond, so the inspector (another part of the window) can follow the same gesture.
+@MainActor
+final class PondPanStore {
+    static let shared = PondPanStore()
+    private var states: [String: PondPanState] = [:]
+    func state(for key: String) -> PondPanState {
+        if let s = states[key] { return s }
+        let s = PondPanState(); s.mount(page: RoomViewPref.shared.mode(for: key)); states[key] = s
+        return s
+    }
+}
+
+/// Places one page on the strip. It alone reads the position, so a scroll tick re-runs this small body and not the page.
+/// A flat scrim, not the page's own opacity, gives the depth: the page that is leaving or arriving is a little dimmer.
+private struct PanPage: ViewModifier {
+    let state: PondPanState
+    let page: PondPage
+    let width: CGFloat
+
+    func body(content: Content) -> some View {
+        let x = PondDrag.x(of: page, position: state.drawn, width: Double(width))
+        content
+            .offset(x: x)
+            .overlay {
+                Theme.bg.opacity(0.28 * min(1, abs(x) / max(1, Double(width)))).allowsHitTesting(false)
+            }
+    }
+}
+
+/// An inspector section that is not on both pages fades out in step with the drag: the cross-fade amount is the progress.
+struct PanFade: ViewModifier {
+    let key: String
+    let fades: Bool
+
+    func body(content: Content) -> some View {
+        if fades {
+            let state = PondPanStore.shared.state(for: key)
+            let page = RoomViewPref.shared.mode(for: key)
+            content.opacity(1 - PondDrag.travel(position: state.drawn, page: page))
+        } else {
+            content
+        }
+    }
+}
+
 /// The pond's Dashboard and Room, side by side: the Dashboard on the left, the Room on the right. Both stay alive so each
-/// keeps its scroll position and the room keeps following its stream; the switch, or a two-finger swipe, slides one out and
-/// the other in with a cross-fade. Under Reduce Motion the swap is instant.
+/// keeps its scroll position and the room keeps following its stream; a two-finger swipe moves the strip one to one with
+/// the fingers and finishes from where it is, at the fingers' speed. Under Reduce Motion the swap is instant.
 struct PondSpace<Dashboard: View>: View {
     let key: String
     let projectId: String
     var leadingInset: CGFloat = 0
     @ViewBuilder let dashboard: () -> Dashboard
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// How far the current page has followed the fingers; 0 at rest.
-    @State private var drag = 0.0
-    @State private var nudge = 0.0
+    @Environment(\.controlActiveState) private var activeState
+    @State private var pan: PondPanState
     @State private var swipes = UserDefaults.standard.integer(forKey: PondHintStore.swipesKey)
+    @State private var visits = 0
+    @State private var width = 0.0
+    @State private var haptic = SwipeHapticLatch()
+
+    init(key: String, projectId: String, leadingInset: CGFloat = 0, @ViewBuilder dashboard: @escaping () -> Dashboard) {
+        self.key = key; self.projectId = projectId; self.leadingInset = leadingInset; self.dashboard = dashboard
+        _pan = State(initialValue: PondPanStore.shared.state(for: key))
+    }
 
     var body: some View {
         let page = RoomViewPref.shared.mode(for: key)
         GeometryReader { geo in
             let w = geo.size.width
-            let d = PondDrag.layout(of: .dashboard, current: page, offset: drag, width: w)
-            let r = PondDrag.layout(of: .room, current: page, offset: drag, width: w)
             ZStack {
                 dashboard()
                     .frame(width: w, height: geo.size.height)
-                    .offset(x: d.x).opacity(d.opacity)
+                    .modifier(PanPage(state: pan, page: .dashboard, width: w))
                     .allowsHitTesting(page == .dashboard).accessibilityHidden(page != .dashboard)
                 PondRoomView(projectId: projectId, key: key, leadingInset: leadingInset).id(key).screen("Pond room")
                     .frame(width: w, height: geo.size.height)
-                    .offset(x: r.x).opacity(r.opacity)
+                    .modifier(PanPage(state: pan, page: .room, width: w))
                     .allowsHitTesting(page == .room).accessibilityHidden(page != .room)
             }
             .frame(width: w, height: geo.size.height)
-            .animation(reduceMotion ? nil : Motion.emphasis, value: page)
             .overlay(alignment: page == .dashboard ? .trailing : .leading) {
                 PondSwipeHintView(
-                    page: page, showsWord: PondSwipeHint(swipes: swipes).showsWord, nudge: nudge,
-                    progress: PondDrag.progress(offset: drag, width: w, page: page)
+                    state: pan, page: page, hint: PondSwipeHint(visits: visits, swipes: swipes),
+                    ripples: PondSwipeHint(visits: visits, swipes: swipes).ripples(reduceMotion: reduceMotion, windowIsKey: activeState == .key)
                 ) { switchTo(page == .dashboard ? .room : .dashboard) }
             }
+            .onAppear { width = Double(w) }
+            .onChange(of: w) { _, new in width = Double(new) }
         }
         .clipped()
         .background(PondSwipeMonitor(
-            current: { RoomViewPref.shared.mode(for: key) }, trackingEnabled: !reduceMotion, update: { update($0) }))
+            current: { RoomViewPref.shared.mode(for: key) }, origin: { pan.presented() },
+            trackingEnabled: !reduceMotion, update: { update($0) }))
+        .onChange(of: page) { _, new in pan.reconcile(page: new, width: width) }
         .task { await runHint() }
     }
 
-    private func switchTo(_ page: PondPage) {
-        withAnimation(reduceMotion ? nil : Motion.emphasis) { RoomViewPref.shared.set(page, for: key) }
-    }
+    private func switchTo(_ page: PondPage) { RoomViewPref.shared.set(page, for: key) }
 
     private func update(_ u: PondDrag.Update) {
+        let page = RoomViewPref.shared.mode(for: key)
         switch u {
-        case .track(let o):
+        case .track(let p):
             guard !reduceMotion else { return }
-            var t = Transaction(); t.disablesAnimations = true
-            withTransaction(t) { drag = o }
-        case .settle:
-            withAnimation(reduceMotion ? nil : Motion.standard) { drag = 0 }
-        case .commit(let page):
+            pan.track(p)
+            if haptic.crosses(progress: PondDrag.progress(position: p, page: page)) {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+        case .settle(let from, let v):
+            haptic.reset()
+            let remaining = abs(from - PondDrag.home(page))
+            pan.finish(to: page, from: from, duration: SwipeFinish.settleDuration(remainingShare: remaining, width: width, velocity: v))
+        case .commit(let target, let from, let v):
+            haptic.reset()
             swipes += 1
             UserDefaults.standard.set(swipes, forKey: PondHintStore.swipesKey)
-            // From where the fingers left it: the page changes and the offset returns to rest in one animated step.
-            withAnimation(reduceMotion ? nil : Motion.emphasis) {
-                RoomViewPref.shared.set(page, for: key)
-                drag = 0
-            }
+            let remaining = abs(PondDrag.home(target) - from)
+            // The strip finishes from where the fingers left it; the page changes in the same step, so nothing restarts.
+            pan.finish(to: target, from: from, duration: SwipeFinish.commitDuration(remainingShare: remaining, width: width, velocity: v))
+            RoomViewPref.shared.set(target, for: key)
         }
     }
 
-    /// Counts this visit and, on the first few, nudges the chevron twice after a moment.
+    /// Counts this visit and, on the first, peeks once after a moment.
     private func runHint() async {
         let defaults = UserDefaults.standard
-        let visits = defaults.integer(forKey: PondHintStore.visitsKey) + 1
-        defaults.set(visits, forKey: PondHintStore.visitsKey)
-        guard PondSwipeHint(visits: visits).nudges(reduceMotion: reduceMotion) else { return }
-        try? await Task.sleep(for: .seconds(PondSwipeHint.nudgeDelay))
-        for _ in 0..<PondSwipeHint.nudgeRepeats {
-            if Task.isCancelled { return }
-            withAnimation(Motion.standard) { nudge = PondSwipeHint.nudgeDistance }
-            try? await Task.sleep(for: .milliseconds(200))
-            withAnimation(Motion.standard) { nudge = 0 }
-            try? await Task.sleep(for: .milliseconds(200))
-        }
+        let n = defaults.integer(forKey: PondHintStore.visitsKey) + 1
+        defaults.set(n, forKey: PondHintStore.visitsKey)
+        visits = n
+        guard PondSwipeHint(visits: n, swipes: swipes).peeks(reduceMotion: reduceMotion) else { return }
+        try? await Task.sleep(for: .seconds(PondSwipeHint.peekDelay))
+        if Task.isCancelled { return }
+        await pan.peek(page: RoomViewPref.shared.mode(for: key), width: width)
     }
 }
 
@@ -156,64 +284,128 @@ enum PondHintStore {
     static let swipesKey = "pondSwipeHintSwipes"
 }
 
-/// The quiet edge affordance: a chevron and the other page's name on a faint pill, at the right edge of the Dashboard and the
-/// left edge of the Room. Neutral colours only (§3), 40% until hovered, and it stretches toward a swipe in progress.
+/// The edge affordance: a 36 pt round button with an 18 pt chevron and, while it still teaches, the other page's name under
+/// it. Idle, a ripple (two soft rings, like a drop in a pond) leaves it every few seconds and the chevron drifts toward the
+/// swipe in step. While dragging, a thin ring fills toward the commit point and the chevron turns once it would commit.
+/// Neutral colours only (§3).
 struct PondSwipeHintView: View {
+    let state: PondPanState
     let page: PondPage
-    let showsWord: Bool
-    let nudge: Double
-    let progress: Double
+    let hint: PondSwipeHint
+    let ripples: Bool
     let action: () -> Void
     @State private var hover = false
+    @State private var rings = [0.0, 0.0]
+    @State private var drift = 0.0
 
     var body: some View {
         let toRoom = page == .dashboard
-        Button(action: action) {
-            HStack(spacing: 2) {
-                if !toRoom { Lucide(.chevronLeft, size: 12, color: Theme.muted) }
-                if showsWord { Text(toRoom ? "Room" : "Dashboard").font(Typo.meta).foregroundStyle(Theme.muted) }
-                if toRoom { Lucide(.chevronRight, size: 12, color: Theme.muted) }
+        VStack(spacing: 6) {
+            Button(action: action) {
+                ZStack {
+                    ForEach(0..<2, id: \.self) { i in
+                        Circle().stroke(Theme.muted.opacity(0.45 * (1 - rings[i])), lineWidth: 1.5)
+                            .scaleEffect(1 + 1.1 * rings[i])
+                    }
+                    Circle().fill(Theme.surfaceRaised.opacity(0.9))
+                    Circle().strokeBorder(Theme.line, lineWidth: 1)
+                    PanRing(state: state, page: page)
+                    PanChevron(state: state, page: page, toRoom: toRoom, drift: drift)
+                }
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
             }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(Capsule().fill(Theme.surfaceRaised.opacity(0.6)))
-            .scaleEffect(x: PondSwipeHint.stretch(progress: progress), y: 1, anchor: toRoom ? .trailing : .leading)
-            .offset(x: toRoom ? nudge : -nudge)
-            .padding(.horizontal, 6)
-            .opacity(hover || progress > 0 ? 1 : 0.4)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            if hint.showsWord {
+                Text(toRoom ? "Room" : "Dashboard").font(Typo.meta).foregroundStyle(Theme.muted)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .opacity(hover ? 1 : hint.restingOpacity)
         .onHover { hover = $0 }
         .animation(Motion.quick, value: hover)
         .help(toRoom ? "Show the Room" : "Show the Dashboard")
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(toRoom ? "Show the Room" : "Show the Dashboard")
         .id(page)
         .transition(.opacity)
+        .task(id: ripples) { await rippleLoop() }
+    }
+
+    /// Every few seconds while idle: two rings leave the button and fade, the chevron drifts 4 pt and back.
+    private func rippleLoop() async {
+        guard ripples else { rings = [0, 0]; drift = 0; return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(hint.rippleDelay))
+            if Task.isCancelled || state.mode != .rest { continue }
+            let dir = page == .dashboard ? 1.0 : -1.0
+            withAnimation(Motion.standard) { drift = PondSwipeHint.driftDistance * dir }
+            for i in 0..<2 {
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { rings[i] = 0 }
+                try? await Task.sleep(for: .milliseconds(i == 0 ? 0 : 260))
+                withAnimation(Motion.ripple()) { rings[i] = 1 }
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+            withAnimation(Motion.standard) { drift = 0 }
+            try? await Task.sleep(for: .milliseconds(1400))
+        }
+    }
+}
+
+/// The ring's stroke, trimmed by the drag's progress. Reads the position itself so only it re-evaluates per tick.
+private struct PanRing: View {
+    let state: PondPanState
+    let page: PondPage
+    var body: some View {
+        let progress = PondDrag.progress(position: state.drawn, page: page)
+        Circle().trim(from: 0, to: SwipeRing.trim(progress: progress))
+            .stroke(Theme.ink.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+    }
+}
+
+private struct PanChevron: View {
+    let state: PondPanState
+    let page: PondPage
+    let toRoom: Bool
+    let drift: Double
+    var body: some View {
+        let flipped = SwipeRing.flipped(progress: PondDrag.progress(position: state.drawn, page: page))
+        Lucide(toRoom ? .chevronRight : .chevronLeft, size: 18, color: flipped ? Theme.ink : Theme.muted)
+            .rotationEffect(.degrees(flipped ? 180 : 0))
+            .animation(Motion.quick, value: flipped)
+            .offset(x: drift)
     }
 }
 
 // MARK: Swipe
 
-/// Watches two-finger horizontal scrolls over the view it sits behind and reports a switch (`PondSwipe` decides). The
-/// event always carries on, so vertical scrolling is untouched; a horizontally scrollable view under the cursor keeps its
-/// own scrolling.
+/// Watches two-finger horizontal scrolls over the view it sits behind and reports what the strip should do (`PondDrag`
+/// decides). The event always carries on, so vertical scrolling is untouched; a horizontally scrollable view under the
+/// cursor keeps its own scrolling. Tracking is coalesced to one update per display frame.
 struct PondSwipeMonitor: NSViewRepresentable {
     let current: () -> PondPage
+    let origin: () -> Double
     let trackingEnabled: Bool
     let update: (PondDrag.Update) -> Void
 
     func makeNSView(context: Context) -> Watcher { Watcher() }
     func updateNSView(_ view: Watcher, context: Context) {
-        view.current = current; view.update = update; view.trackingEnabled = trackingEnabled
+        view.current = current; view.origin = origin; view.update = update; view.trackingEnabled = trackingEnabled
     }
     static func dismantleNSView(_ view: Watcher, coordinator: ()) { view.stop() }
 
     final class Watcher: NSView {
         var current: () -> PondPage = { .dashboard }
+        var origin: () -> Double = { 0 }
         var update: (PondDrag.Update) -> Void = { _ in }
         var trackingEnabled = true
         private var swipe = PondDrag()
         private var monitor: Any?
+        private var link: CADisplayLink?
+        private var pending: Double?
+        private var began = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -231,7 +423,25 @@ struct PondSwipeMonitor: NSViewRepresentable {
         func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            link?.invalidate(); link = nil; pending = nil
             swipe.reset()
+        }
+
+        /// One update per display frame: the newest position wins.
+        @objc private func frame(_ link: CADisplayLink) {
+            guard let p = pending else { link.isPaused = true; return }
+            pending = nil
+            update(.track(p))
+        }
+
+        private func schedule(_ position: Double) {
+            pending = position
+            if link == nil {
+                let l = displayLink(target: self, selector: #selector(frame(_:)))
+                l.add(to: .main, forMode: .common)
+                link = l
+            }
+            link?.isPaused = false
         }
 
         private func handle(_ event: NSEvent) {
@@ -240,15 +450,24 @@ struct PondSwipeMonitor: NSViewRepresentable {
             let phase = Self.phase(event)
             // The end of a gesture is always fed, so one that finished off the view does not leave the next half-counted.
             guard inside || phase == .ended || phase == .cancelled else { return }
-            if inside, scrollsSideways(under: event) { swipe.reset(); return }
+            if inside, scrollsSideways(under: event) { swipe.reset(); pending = nil; return }
             let sign: Double = event.isDirectionInvertedFromDevice ? 1 : -1
+            let first = phase == .began || (phase == .changed && !began)
+            if first { began = true }
             let result = swipe.feed(
                 dx: Double(event.scrollingDeltaX) * sign, dy: Double(event.scrollingDeltaY) * sign, phase: phase,
-                momentum: !event.momentumPhase.isEmpty, current: current(), width: Double(bounds.width))
+                momentum: !event.momentumPhase.isEmpty, current: current(), width: Double(bounds.width),
+                time: event.timestamp, origin: first ? origin() : nil)
+            if phase == .ended || phase == .cancelled { began = false }
             guard let result else { return }
             // Reduce Motion: no tracking, the swap alone.
-            if case .track = result, !trackingEnabled { return }
-            if case .settle = result, !trackingEnabled { return }
+            if !trackingEnabled {
+                if case .commit = result { update(result) }
+                return
+            }
+            if case .track(let p) = result { schedule(p); return }
+            // A finish supersedes any position still waiting for the next frame.
+            pending = nil
             update(result)
         }
 

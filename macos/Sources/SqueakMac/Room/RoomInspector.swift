@@ -33,10 +33,11 @@ struct RoomInspector: View {
             VStack(alignment: .leading, spacing: 28) {
                 ForEach(sections) { section in
                     view(for: section, page: page).transition(.opacity)
+                        .modifier(PanFade(key: key, fades: !PondInspectorSections.shared(canInvite: role.canInvite).contains(section)))
                 }
             }
             .padding(.horizontal, Space.xl).padding(.vertical, Space.xl)
-            .animation(reduceMotion ? nil : Motion.emphasis, value: page)
+            .animation(reduceMotion ? nil : Motion.standard, value: page)
         }
         .background(Theme.bg)
     }
