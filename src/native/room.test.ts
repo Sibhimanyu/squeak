@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleMcpMessage } from "./agent-tools.js";
 import { SessionHost } from "./host.js";
-import { attachSqueakPosts, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
+import { attachSqueakPosts, Room, ROOM_AGENT_POSTS_PER_HOUR, toRoomPost } from "./room.js";
 import { RoomSummariser, SUMMARY_QUIET_MS } from "./room-summary.js";
 import { NativeServer } from "./server.js";
 import { TimelineLog } from "./timeline-log.js";
@@ -95,6 +95,8 @@ describe("Room", () => {
     expect(room.post({ projectId: p.project.id, author: a, kind: "done", text: "x".repeat(500) })).toBeTruthy();
     expect(() => room.post({ projectId: "nope", author: a, kind: "done", text: "x" })).toThrow(/pond/);
     expect(room.personPost(p.project.id, "hi").authorName).toBe("Sam");
+    // The owner's own posts are marked as theirs, so the Mac puts them on the right (older rows had no id).
+    expect(toRoomPost(room.personPost(p.project.id, "mine")).author.id).toBe("owner");
   });
 
   it("limits an agent to 30 posts an hour, and a chat outside any pond cannot post", () => {

@@ -123,7 +123,12 @@ export function toRoomPost(r: RoomPostRow): RoomPost {
   return {
     seq: r.seq,
     id: r.id,
-    author: { kind: r.authorKind, ...(r.authorId ? { id: r.authorId } : {}), name: r.authorName },
+    // A person's post made on this Mac is the owner's (the room is this Mac's own); older rows were stored without an id.
+    author: {
+      kind: r.authorKind,
+      ...(r.authorId ? { id: r.authorId } : r.authorKind === "person" ? { id: "owner" } : {}),
+      name: r.authorName,
+    },
     ...(r.sessionId ? { sessionId: r.sessionId } : {}),
     kind: r.kind,
     level: r.level,
@@ -254,7 +259,7 @@ export class Room extends EventEmitter {
   personPost(projectId: string, text: unknown, level: RoomLevel = "room"): RoomPostRow {
     return this.post({
       projectId,
-      author: { kind: "person", name: this.ownerName() },
+      author: { kind: "person", id: "owner", name: this.ownerName() },
       kind: "message",
       level,
       text: text as string,
