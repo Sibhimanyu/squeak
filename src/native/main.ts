@@ -48,6 +48,11 @@ export async function runHost(supportDir: string): Promise<void> {
   });
   const room = new Room({ store, ownerName: () => flotilla?.service?.identity.name ?? null });
   attachSqueakPosts(host, store, room);
+  try {
+    store.dropOrphanRoomEnds();
+  } catch {
+    /* only tidying old noise */
+  }
   new RoomSummariser({ host, store, room }).start();
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();

@@ -243,9 +243,13 @@ export class Room extends EventEmitter {
     const made: Array<Omit<RoomPostRow, "seq">> = [];
     for (const s of this.sessionsOf(projectId)) {
       const name = agentName(s);
+      const started = new Set<string>();
       for (const e of this.log.turnEdges(s.id, new Date(cutoff).toISOString())) {
         if (e.type !== "turn.started" && e.type !== "turn.ended") continue;
         if (e.type === "turn.started" && e.auto) continue;
+        // A turn the agent ran by itself (a worker reporting in) has no Started line, so it gets no Finished line either.
+        if (e.type === "turn.ended" && !started.has(e.turnId)) continue;
+        if (e.type === "turn.started") started.add(e.turnId);
         const at = Date.parse(e.at);
         if (!Number.isFinite(at) || at < cutoff) continue;
         const start = e.type === "turn.started";
@@ -431,7 +435,8 @@ export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Ro
         const s = store.getSession(e.sessionId);
         if (!s) return;
         const own = agentDone.delete(e.sessionId);
-        if (!own)
+        // Only a turn that got a Started line gets an end line: the agent's own turns (workers reporting in) post nothing.
+        if (!own && store.roomPostById(startPostId(s.id, e.event.turnId)))
           post(s, "done", endedText(e.event.outcome), { id: endPostId(s.id, e.event.turnId), name: agentName(s) });
       }
     } catch (error) {

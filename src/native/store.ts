@@ -1120,6 +1120,16 @@ export class NativeStore {
   }
 
   /** True once; the first caller for a pond gets false and the pond is marked. */
+  /** Squeak's end lines whose turn has no Started line (the agent's own turns); removed once, they were only noise. */
+  dropOrphanRoomEnds(): number {
+    return this.db
+      .prepare(
+        `DELETE FROM room_posts WHERE author_kind='squeak' AND id LIKE 'sq:end:%'
+           AND NOT EXISTS (SELECT 1 FROM room_posts s WHERE s.id = 'sq:start:' || substr(room_posts.id, 8))`,
+      )
+      .run().changes;
+  }
+
   markRoomBackfilled(projectId: string, at: number): boolean {
     // Created here, not as a migration: a pond whose room was filled once from its chats' timelines never is again.
     this.db.exec("CREATE TABLE IF NOT EXISTS room_backfill (project_id TEXT PRIMARY KEY, at INTEGER NOT NULL)");

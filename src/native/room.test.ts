@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { handleMcpMessage } from "./agent-tools.js";
 import { SessionHost } from "./host.js";
-import { attachSqueakPosts, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
+import { attachSqueakPosts, endPostId, Room, ROOM_AGENT_POSTS_PER_HOUR } from "./room.js";
 import { RoomSummariser, SUMMARY_QUIET_MS } from "./room-summary.js";
 import { NativeServer } from "./server.js";
 import { TimelineLog } from "./timeline-log.js";
@@ -194,6 +194,27 @@ describe("Squeak's own posts", () => {
     ]);
     expect(rows[2]!.text.length).toBeLessThanOrEqual("Started: ".length + 120);
     expect(rows.every((x) => x.sessionId === r.s.id)).toBe(true);
+  });
+
+  it("an agent-run turn (no Started line) posts no end line, and old orphan end lines are dropped", () => {
+    const r = rig();
+    r.tl({ ...started("w1"), auto: true });
+    r.tl(ended("w1"));
+    r.tl(ended("w2"));
+    expect(r.posts()).toHaveLength(0);
+    r.tl(started("t1"));
+    r.tl(ended("t1"));
+    expect(r.posts().map((x) => x.text)).toEqual(["Started: add retry", "Finished"]);
+    r.room.post({
+      projectId: r.p.project.id,
+      author: { kind: "squeak", name: "Wire retry" },
+      sessionId: r.s.id,
+      kind: "done",
+      text: "Finished",
+      id: endPostId(r.s.id, "old"),
+    });
+    expect(r.store.dropOrphanRoomEnds()).toBe(1);
+    expect(r.posts().map((x) => x.text)).toEqual(["Started: add retry", "Finished"]);
   });
 
   it("skips Finished when the agent posted its own done in that turn", () => {
