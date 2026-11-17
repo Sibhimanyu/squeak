@@ -46,7 +46,7 @@ struct PondPanel: View {
             }
             .heresayPrivate().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            Text("Open a thread or a pond to see who is here.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+            Text("Open a duck or a pond to see who is here.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -96,7 +96,7 @@ struct PondPanel: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityHint("Opens the thread")
+                    .accessibilityHint("Opens the duck")
                 }
             }
         }

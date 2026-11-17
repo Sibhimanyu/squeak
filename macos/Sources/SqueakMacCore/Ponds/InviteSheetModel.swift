@@ -75,7 +75,7 @@ public struct InviteSheetState: Sendable, Equatable {
 
 public enum InviteSheetText {
     public static func headline(pond: String) -> String { "Invite to \(pond)" }
-    public static let subtitle = "People you invite see this pond\u{2019}s threads on their own Mac, iPhone or browser."
+    public static let subtitle = "People you invite see this pond\u{2019}s ducks on their own Mac, iPhone or browser."
     public static let approval = "You approve each person before they join."
     /// The short code's own rule, said where the person chooses and under the code.
     public static let shortNote = "The code works once, for 10 minutes."
@@ -96,8 +96,8 @@ public enum InviteSheetText {
     public static func roleTitle(_ r: PondRole) -> String { r.word }
     public static func roleBlurb(_ r: PondRole) -> String {
         switch r {
-        case .viewer: "Watches threads and reads replies. Can\u{2019}t send."
-        default: "Starts threads, sends messages and answers questions."
+        case .viewer: "Watches ducks and reads replies. Can\u{2019}t send."
+        default: "Starts ducks, sends messages and answers questions."
         }
     }
 

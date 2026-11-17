@@ -129,7 +129,7 @@ public enum PondRipples {
     ) -> [PondRipple] {
         var out: [PondRipple] = []
         for t in threads {
-            let title = t.title.isEmpty ? "A thread" : t.title
+            let title = t.title.isEmpty ? "A duck" : t.title
             if let at = t.startedAt {
                 out.append(PondRipple(id: "start:\(t.key.hostSessionId)", kind: .started, sentence: "\(title) started", at: at, threadKey: t.key))
             }

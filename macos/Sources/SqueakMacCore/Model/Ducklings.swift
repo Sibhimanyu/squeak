@@ -146,7 +146,7 @@ public enum DucklingWords {
     /// The dashboard's top figure: "3 ducklings running · 2 threads"; nil when none run.
     public static func dashboardFigure(running: Int, threads: Int) -> String? {
         guard running > 0 else { return nil }
-        return "\(count(running)) running · \(threads) \(threads == 1 ? "thread" : "threads")"
+        return "\(count(running)) running · \(threads) \(threads == 1 ? "duck" : "ducks")"
     }
 }
 

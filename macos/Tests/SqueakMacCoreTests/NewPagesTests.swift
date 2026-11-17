@@ -22,7 +22,7 @@ import Testing
         #expect(sidebar.page == .pond && !sidebar.needsPondFirst)
         let ok = NewPages.resolve(.newThreadShortcut, hasPond: true)
         #expect(ok.page == .thread(projectId: nil, workspaceId: nil) && !ok.needsPondFirst)
-        #expect(NewPages.makePondFirst == "Make a pond first: threads live in a pond.")
+        #expect(NewPages.makePondFirst == "Make a pond first: ducks live in a pond.")
     }
 
     @Test func pondFolderNameRules() {

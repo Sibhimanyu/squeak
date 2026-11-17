@@ -61,7 +61,7 @@ final class DockLayoutTests: XCTestCase {
         var l = DockLayout.standard
         l.move(.pond, to: .centre)
         XCTAssertEqual(l, DockLayout.standard)
-        XCTAssertEqual(DockPanel.thread.title, "Thread")
+        XCTAssertEqual(DockPanel.thread.title, "Duck")
         XCTAssertEqual(DockPanel.allCases.prefix(3), [.thread, .pond, .code])
         for w in DockWorkspaces.builtIns { XCTAssertEqual(w.saved.right.panels.first, .thread, w.name) }
     }

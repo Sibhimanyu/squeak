@@ -9,7 +9,7 @@ final class WindowMenuTests: XCTestCase {
 
     func testListsEveryPanelWithSidebarAndInspector() {
         let items = WindowMenu.items(layout: .standard, terminalShowing: false)
-        XCTAssertEqual(items.map(\.title), ["Sidebar", "Inspector", "Thread", "Pond", "Code", "Terminal"])
+        XCTAssertEqual(items.map(\.title), ["Sidebar", "Inspector", "Duck", "Pond", "Code", "Terminal"])
         XCTAssertEqual(items.first { $0.id == .panel(.code) }?.shortcut, .toggleCode)
         XCTAssertEqual(items.first { $0.id == .sidebar }?.checked, true)
     }

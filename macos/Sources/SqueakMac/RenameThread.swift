@@ -68,7 +68,7 @@ extension AppModel {
     /// The Chat menu's item: its words follow the open thread; nil when it cannot be archived now.
     var archiveMenuTitle: String? {
         guard let s = selectedSession, let item = ThreadArchive.menuItem(s) else { return nil }
-        return item == .archive ? "Archive Thread" : "Unarchive Thread"
+        return item == .archive ? "Archive Duck" : "Unarchive Duck"
     }
 
     var renamingThread: SessionKey? { inlineRename.editing }

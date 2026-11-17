@@ -47,7 +47,7 @@ struct PondLogicTests {
             [PondThreadFact(key: a, title: "One", state: .blocked, lastActivityAt: t0), PondThreadFact(key: b, title: "", state: .finished, lastActivityAt: nil)],
             agents: [a: "claude"], person: "Me")
         #expect(rows.map(\.state) == [.needsYou, .finished])
-        #expect(rows[1].title == "Untitled thread" && rows[0].agent == "claude" && rows[0].starterName == "Me" && rows[0].pondThread == nil)
+        #expect(rows[1].title == "Untitled duck" && rows[0].agent == "claude" && rows[0].starterName == "Me" && rows[0].pondThread == nil)
     }
 
     @Test func joinRequestDecodesWithAndWithoutVerifiedIdentity() throws {
@@ -160,7 +160,7 @@ struct PondHoldTests {
     }
 }
 
-@Suite("Thread events")
+@Suite("Duck events")
 struct ThreadEventTests {
     private func events(_ json: String) throws -> [ThreadEvent] { try JSONDecoder().decode(ThreadEventPage.self, from: Data(json.utf8)).events }
 

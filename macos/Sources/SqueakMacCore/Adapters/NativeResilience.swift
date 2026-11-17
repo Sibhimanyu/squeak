@@ -85,12 +85,12 @@ public enum NativeChatNotice {
     /// Over the auto-compact threshold with automatic compaction on, the chat is about to compact itself; otherwise it is just large.
     public static func largeText(for s: HostSession) -> String { s.largeCompacting == true ? compactingSoonText : largeText }
     public static let compactTitle = "Compact this chat"
-    public static let continueTitle = "Continue in a new thread"
+    public static let continueTitle = "Continue in a new duck"
     public static let retryText = "The last message didn't go through."
     public static let retryTitle = "Try again"
-    public static let draftTitle = "First message of the new thread"
+    public static let draftTitle = "First message of the new duck"
     public static let draftHelp = "A short summary of this chat. Edit it, then send."
-    public static let draftSend = "Start new thread"
+    public static let draftSend = "Start new duck"
     public static let draftFailed = "Couldn't write a summary. Write the first message yourself."
     /// The host's refusal when the agent already answered the message.
     public static let alreadyAnswered = "Claude already replied to that message."

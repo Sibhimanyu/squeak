@@ -13,7 +13,7 @@ struct PondWorkspacesView: View {
 
     static func countSuffix(_ n: Int?) -> String {
         guard let n, n > 0 else { return "" }
-        return " \u{00B7} \(n) \(n == 1 ? "thread" : "threads")"
+        return " \u{00B7} \(n) \(n == 1 ? "duck" : "ducks")"
     }
 
     @State private var expandedStreams: Set<String> = []
@@ -58,7 +58,7 @@ private struct PondWorkspaceCardView: View {
                 Spacer(minLength: 0)
                 Text(verbatim: "\(card.chats.count)")
                     .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                    .accessibilityLabel("\(card.chats.count) threads")
+                    .accessibilityLabel("\(card.chats.count) ducks")
                 if let m = card.mark, let shown = m.mark.asRollup(childrenVisible: !card.chats.isEmpty) { ChatMarkGlyph(mark: shown).help(m.words) }
             }
             .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, card.branch == nil ? 12 : 6)
@@ -89,16 +89,16 @@ private struct PondWorkspaceCardView: View {
                 HStack(spacing: Space.s) {
                     Text("The pond\u{2019}s own folder").font(Typo.footnote).foregroundStyle(Theme.muted)
                     Spacer(minLength: Space.s)
-                    Button("New thread") { model.openNewMainThread(projectId: m.projectId) }
+                    Button("New duck") { model.openNewMainThread(projectId: m.projectId) }
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 12)
             }
             if let w = card.empty {
                 HStack(spacing: Space.s) {
-                    Text("Ready for a new thread").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    Text("Ready for a new duck").font(Typo.footnote).foregroundStyle(Theme.muted)
                     Spacer(minLength: Space.s)
-                    Button("New thread") { model.openNewThread(projectId: w.projectId, workspaceId: w.id) }
+                    Button("New duck") { model.openNewThread(projectId: w.projectId, workspaceId: w.id) }
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 12)

@@ -70,7 +70,7 @@ import Testing
         s.state = .finished
         #expect(!NativeChatNotice.showsRetry(s))
         #expect(NativeChatNotice.largeText == "This chat is very large — replies will be slow and may fail.")
-        #expect(NativeChatNotice.continueTitle == "Continue in a new thread")
+        #expect(NativeChatNotice.continueTitle == "Continue in a new duck")
     }
 
     @Test func theHostsLargeAndRetryableReachTheSession() throws {

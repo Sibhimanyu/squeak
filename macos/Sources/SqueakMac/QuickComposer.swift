@@ -379,7 +379,7 @@ struct QuickComposerView: View {
             }
             .background(alignment: .bottom) { if !embedded { glow } }
             if state.newChat == nil { hints } else {
-                Text("↵ start thread · esc back").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                Text("↵ start duck · esc back").font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
         }
         .padding(.horizontal, embedded ? 0 : Self.margin)
@@ -556,7 +556,7 @@ struct QuickComposerView: View {
                 Button(destinationName(s)) { state.chooseTarget(s.key) }
             }
             Divider()
-            Button("New thread…") {
+            Button("New duck…") {
                 if embedded {
                     let workspace = target?.conductorWorkspaceId
                     close()

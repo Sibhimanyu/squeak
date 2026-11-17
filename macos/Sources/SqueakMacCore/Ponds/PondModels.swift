@@ -46,7 +46,7 @@ public enum PondRole: String, Sendable, Equatable, Codable {
     public var summary: String {
         switch self {
         case .owner: "Runs the pond and approves who joins"
-        case .member: "Starts threads, messages and answers"
+        case .member: "Starts ducks, messages and answers"
         case .viewer: "Watches only"
         }
     }

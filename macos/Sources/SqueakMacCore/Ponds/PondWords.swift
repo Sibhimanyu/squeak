@@ -19,7 +19,7 @@ public enum PondWords {
     public static let loadingPonds = "Loading ponds\u{2026}"
     public static let openPondFirst = "Open a pond to see its worktrees."
     public static let makePondFirst = "Make a pond first, then start work in it."
-    public static let noThreads = "No threads in this pond yet."
+    public static let noThreads = "No ducks in this pond yet."
     public static let settings = "Pond settings"
 
     /// The one quiet line on a pond only this Mac can see.

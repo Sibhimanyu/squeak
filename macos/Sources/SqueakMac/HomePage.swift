@@ -186,7 +186,7 @@ private struct DashboardWorkspaceCard: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(d.title), \(d.statusWord)")
-                    .help("Open this thread and watch the duckling")
+                    .help("Open this duck and watch the duckling")
                 }
             }
         }

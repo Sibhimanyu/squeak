@@ -22,7 +22,7 @@ import Testing
         let a = ThreadAccess(role: .member, starter: "s", me: "m", starterName: "Sibhi", caps: off)
         #expect(a.composer(working: false) == .watchOnly(line: "The owner has turned off messaging for you in this pond."))
         let locked = ThreadAccess(role: .member, starter: "s", me: "m", starterName: "Sibhi", locked: true)
-        #expect(locked.composer(working: false) == .watchOnly(line: "This thread is read-only: its starter locked it."))
+        #expect(locked.composer(working: false) == .watchOnly(line: "This duck is read-only: its starter locked it."))
         #expect(ThreadAccess(role: .member, starter: "s", me: "m", starterName: "S", locked: true, allow: ["m"]).restriction == nil)
         #expect(ThreadAccess(role: .member, starter: "s", me: "m", starterName: "S", locked: true, allow: ["m"], deny: ["m"]).restriction != nil)
         #expect(ThreadAccess(role: .owner, starter: "m", me: "m", starterName: "Me", caps: off, locked: true).restriction == nil)

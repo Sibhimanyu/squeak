@@ -101,7 +101,7 @@ public enum ShortcutFocus {
 
     /// File › New Thread and New Terminal: each keeps its own chord whatever has focus.
     public static func newMenu(in region: FocusRegion, terminalOpen: Bool) -> (thread: MenuItem, terminal: MenuItem) {
-        (MenuItem(title: "New Thread", chord: KeyChord("T", .command).display), MenuItem(title: "New Terminal", chord: newTerminalChord))
+        (MenuItem(title: "New Duck", chord: KeyChord("T", .command).display), MenuItem(title: "New Terminal", chord: newTerminalChord))
     }
 
     /// File › Close: names what ⌘W closes now.
@@ -116,7 +116,7 @@ public enum ShortcutFocus {
     }
 
     /// The tab strip's + hover label.
-    public static func newThreadHint(in region: FocusRegion, terminalOpen: Bool) -> String { "New thread  ⌘T" }
+    public static func newThreadHint(in region: FocusRegion, terminalOpen: Bool) -> String { "New duck  ⌘T" }
 
     /// The terminal's own + hover label.
     public static func newTerminalHint(in region: FocusRegion, terminalOpen: Bool) -> String {

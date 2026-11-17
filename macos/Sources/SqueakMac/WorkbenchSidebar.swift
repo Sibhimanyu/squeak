@@ -397,7 +397,7 @@ struct WorkbenchSidebar: View {
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New thread in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
+                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New duck in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == key,
                 needs: PondsModel.shared.badge(pondRecord),
                 rollup: pondRollup(workspaces),
@@ -434,7 +434,7 @@ struct WorkbenchSidebar: View {
                 Divider()
                 if let native {
                     if FolderPond.showsGitControls(native) {
-                        Button("New thread in Main") { model.openNewMainThread(projectId: native.id) }
+                        Button("New duck in Main") { model.openNewMainThread(projectId: native.id) }
                         Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                         Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
                         Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
@@ -465,13 +465,13 @@ struct WorkbenchSidebar: View {
                         conductor: false,
                         diff: diffStat(mainRow),
                         onAdd: { model.openNewMainThread(projectId: native.id) },
-                        addHelp: "New thread in Main",
+                        addHelp: "New duck in Main",
                         onKey: { key in rowKey(key, mainRow) }) {
                         if mainRow.chats.isEmpty { model.openNewMainThread(projectId: native.id) } else { openWorkspace(mainRow) }
                     }
                     .transition(Motion.fold)
                     .squeakContextMenu {
-                        Button("New thread in Main") { model.openNewMainThread(projectId: native.id) }
+                        Button("New duck in Main") { model.openNewMainThread(projectId: native.id) }
                         if !mainRow.chats.isEmpty {
                             Button(mainRow.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(mainRow) }
                         }
@@ -493,7 +493,7 @@ struct WorkbenchSidebar: View {
                         conductor: workspace.chats.contains { $0.showsConductorBadge },
                         diff: diffStat(workspace),
                         onAdd: nativeWorkspace.map { w in { model.openNewThread(projectId: w.projectId, workspaceId: w.id) } },
-                        addHelp: "New thread in \(workspace.displayTitle)",
+                        addHelp: "New duck in \(workspace.displayTitle)",
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
@@ -510,7 +510,7 @@ struct WorkbenchSidebar: View {
                         help: [workspace.displayTitle, workspace.branch].filter { !$0.isEmpty }.joined(separator: " · "),
                         lifecycle: WorkspaceLifecycle.mark(workspace.state),
                         onAdd: { model.openNewThread(projectId: workspace.projectId, workspaceId: workspace.id) },
-                        addHelp: "New thread in \(workspace.displayTitle)") {
+                        addHelp: "New duck in \(workspace.displayTitle)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
                     .transition(Motion.fold)
@@ -595,7 +595,7 @@ struct WorkbenchSidebar: View {
         }
         .buttonStyle(.plain).pointerHand()
         .padding(.horizontal, Space.s).padding(.bottom, 4)
-        .accessibilityLabel(count > 0 ? "Archived, \(count) threads" : "Archived, nothing yet")
+        .accessibilityLabel(count > 0 ? "Archived, \(count) ducks" : "Archived, nothing yet")
         .accessibilityAddTraits(open ? .isSelected : [])
     }
 
@@ -696,8 +696,8 @@ private struct FoldRow: View {
                 HoverIcon(folded ? .chevronRight : .chevronDown, size: 12, rowHovering: hovering).frame(width: 38, height: 38).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(folded ? "Show threads" : "Hide threads")
-            .accessibilityLabel(folded ? "Show \(title)'s threads" : "Hide \(title)'s threads")
+            .help(folded ? "Show ducks" : "Hide ducks")
+            .accessibilityLabel(folded ? "Show \(title)'s ducks" : "Hide \(title)'s ducks")
         }
     }
 

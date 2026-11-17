@@ -24,9 +24,9 @@ struct PondAccessTests {
 
     @Test func approveAndStopStayWithTheStarterAsDisabledControlsWithAReason() {
         let a = access(.member)
-        #expect(a.gate(.approve) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can approve on their thread", visible: true))
-        #expect(a.gate(.stop) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can stop on their thread", visible: true))
-        #expect(access(.member, starterName: "").gate(.stop).tooltip == "Only the starter can stop on their thread")
+        #expect(a.gate(.approve) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can approve on their duck", visible: true))
+        #expect(a.gate(.stop) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can stop on their duck", visible: true))
+        #expect(access(.member, starterName: "").gate(.stop).tooltip == "Only the starter can stop on their duck")
         let mine = access(.member, mine: true)
         #expect(mine.gate(.approve).enabled && mine.gate(.stop).enabled && mine.gate(.approve).tooltip == nil)
     }
@@ -41,7 +41,7 @@ struct PondAccessTests {
     }
 
     @Test func aChatThatRunsWithoutAskingTakesOnlyItsStarter() {
-        #expect(access(.member, asks: false).composer(working: false) == .closed(reason: "Only Aarav can message this thread while it runs without asking."))
+        #expect(access(.member, asks: false).composer(working: false) == .closed(reason: "Only Aarav can message this duck while it runs without asking."))
         #expect(!access(.member, asks: false).gate(.message).enabled)
         #expect(access(.member, mine: true, asks: false).composer(working: false) == .open(placeholder: "Message"))
         #expect(access(.member, asks: true).gate(.message).enabled && access(.member, asks: nil).gate(.message).enabled)
@@ -55,15 +55,15 @@ struct PondAccessTests {
     }
 
     @Test func aThreadThatIsNotMineSaysWhoseItIsAndWhereItRuns() {
-        #expect(ThreadOwnership.line(starterName: "Aarav", isMine: false) == "Aarav\u{2019}s thread \u{00B7} runs on their Mac")
-        #expect(ThreadOwnership.line(starterName: " ", isMine: false) == "A teammate\u{2019}s thread \u{00B7} runs on their Mac")
+        #expect(ThreadOwnership.line(starterName: "Aarav", isMine: false) == "Aarav\u{2019}s duck \u{00B7} runs on their Mac")
+        #expect(ThreadOwnership.line(starterName: " ", isMine: false) == "A teammate\u{2019}s duck \u{00B7} runs on their Mac")
         #expect(ThreadOwnership.line(starterName: "Aarav", isMine: true) == nil)
         #expect(ThreadOwnership.tabAvatar(starterId: "m1", starterName: "Aarav Patel", isMine: true) == nil)
         let tab = ThreadOwnership.tabAvatar(starterId: "m1", starterName: "Aarav Patel", isMine: false)
         #expect(tab?.initials == "AP")
-        #expect(ThreadOwnership.tabHelp(title: "Fix login", starterName: "Aarav", isMine: false) == "Fix login\nAarav\u{2019}s thread \u{00B7} runs on their Mac")
+        #expect(ThreadOwnership.tabHelp(title: "Fix login", starterName: "Aarav", isMine: false) == "Fix login\nAarav\u{2019}s duck \u{00B7} runs on their Mac")
         #expect(ThreadOwnership.tabHelp(title: "Fix login", starterName: "Aarav", isMine: true) == "Fix login")
-        #expect(ThreadOwnership.tabHelp(title: "", starterName: "", isMine: true) == "Thread")
+        #expect(ThreadOwnership.tabHelp(title: "", starterName: "", isMine: true) == "Duck")
     }
 }
 
@@ -129,12 +129,12 @@ struct GroupChatTests {
     }
 
     @Test func theNewThreadPlaceLineIsFixedAndNamesTheOwner() {
-        #expect(PondStartThread.noRemoteSharedLine(ownerName: "Sibhi") == "This pond has no Git remote, so new threads run on Sibhi\u{2019}s Mac")
-        #expect(PondStartThread.noRemoteSharedLine(ownerName: nil) == "This pond has no Git remote, so new threads run on the owner\u{2019}s Mac")
+        #expect(PondStartThread.noRemoteSharedLine(ownerName: "Sibhi") == "This pond has no Git remote, so new ducks run on Sibhi\u{2019}s Mac")
+        #expect(PondStartThread.noRemoteSharedLine(ownerName: nil) == "This pond has no Git remote, so new ducks run on the owner\u{2019}s Mac")
         let shared = PondSummary(id: "p", name: "Site", role: .member)
         var withOwner = shared
         withOwner.ownerName = "Sibhi"
-        #expect(PondStartThread.offer(for: withOwner) == .shareOnly(why: "This pond has no Git remote, so new threads run on Sibhi\u{2019}s Mac"))
+        #expect(PondStartThread.offer(for: withOwner) == .shareOnly(why: "This pond has no Git remote, so new ducks run on Sibhi\u{2019}s Mac"))
         // mine, or with a remote: the older words
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "Mine", role: .owner)) == .shareOnly(why: PondStartThread.noRemote))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "Site", role: .member, gitRemote: "git@x:o.git")) == .start)

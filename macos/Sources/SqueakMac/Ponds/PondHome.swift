@@ -54,7 +54,7 @@ struct PondRouteView: View {
             case .settings(let project): PondSettingsView(key: project).screen("Pond settings")
             case .archived: ArchivedPageView().screen("Archived")
             case .thread(let project, let pondId, let threadId):
-                PondThreadView(key: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
+                PondThreadView(key: project, pondId: pondId, threadId: threadId).id(threadId).screen("Duck")
             }
         }
     }
@@ -215,9 +215,9 @@ struct PondHomeView: View {
             let why: String? = pond.flatMap { p in
                 if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local, !PondStartThread.runsOnOwnerMac(p) { return w } else { return nil }
             }
-            Button { startThread() } label: { Label("Start a thread", systemImage: "plus") }
+            Button { startThread() } label: { Label("Start a duck", systemImage: "plus") }
                 .buttonStyle(PondPrimaryButtonStyle())
-                .disabled(why != nil).help(why ?? "Start a thread in this pond")
+                .disabled(why != nil).help(why ?? "Start a duck in this pond")
         }
     }
 
@@ -257,7 +257,7 @@ struct PondHomeView: View {
                     .background(scope == item ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("\(item.title), \(layout.count(in: item)) threads")
+                .accessibilityLabel("\(item.title), \(layout.count(in: item)) ducks")
                 .accessibilityAddTraits(scope == item ? .isSelected : [])
                 .help("Show \(item.title.lowercased())")
             }
@@ -268,19 +268,19 @@ struct PondHomeView: View {
         let filtered = layout.filtered(query: query, scope: scope)
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Streams & threads").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text("Streams & ducks").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if let native {
                     Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New stream", systemImage: "plus") }
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
             }
-            Text("Each stream is a separate working folder. Its threads work with the same files.")
+            Text("Each stream is a separate working folder. Its ducks work with the same files.")
                 .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField("Find a stream, thread or person", text: $query).textFieldStyle(.plain)
-                    .font(Typo.body).accessibilityLabel("Find a stream, thread or person")
+                TextField("Find a stream, duck or person", text: $query).textFieldStyle(.plain)
+                    .font(Typo.body).accessibilityLabel("Find a stream, duck or person")
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
@@ -289,7 +289,7 @@ struct PondHomeView: View {
             .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
             if scope != .all || !query.isEmpty {
                 HStack {
-                    Text("\(filtered.threadCount) of \(layout.threadCount) threads · \(scope.title)")
+                    Text("\(filtered.threadCount) of \(layout.threadCount) ducks · \(scope.title)")
                         .font(Typo.meta).foregroundStyle(Theme.muted)
                     Spacer()
                     Button("Reset") { scope = .all; query = "" }.buttonStyle(.borderless).font(Typo.meta)
@@ -299,13 +299,13 @@ struct PondHomeView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Image(systemName: layout.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass")
                         .font(.system(size: 24)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Text(layout.isEmpty ? "Room for your next idea" : "No matching threads")
+                    Text(layout.isEmpty ? "Room for your next idea" : "No matching ducks")
                         .font(Typo.heading).foregroundStyle(Theme.ink)
-                    Text(layout.isEmpty ? "Start a thread to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
+                    Text(layout.isEmpty ? "Start a duck to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     if layout.isEmpty {
                         if pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {
-                            Button("Start a thread") { startThread() }.buttonStyle(SecondaryButtonStyle())
+                            Button("Start a duck") { startThread() }.buttonStyle(SecondaryButtonStyle())
                         }
                     } else {
                         Button("Reset filters") { scope = .all; query = "" }.buttonStyle(SecondaryButtonStyle())
@@ -329,7 +329,7 @@ struct PondHomeView: View {
                 Button { withAnimation(Motion.standard) { archivedOpen.toggle() } } label: {
                     HStack(spacing: 8) {
                         Lucide(archivedOpen ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
-                        Text(verbatim: title.replacingOccurrences(of: "Archived", with: "Archived threads")).font(Typo.label).foregroundStyle(Theme.muted)
+                        Text(verbatim: title.replacingOccurrences(of: "Archived", with: "Archived ducks")).font(Typo.label).foregroundStyle(Theme.muted)
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
@@ -362,7 +362,7 @@ struct PondHomeView: View {
     private func shareMenu(_ p: PondSummary) -> some View {
         let shared = Set((detail?.threads ?? []).compactMap(\.sessionId))
         let candidates = localSessions.compactMap { s in model.hostId(s).map { (s, $0) } }.filter { !shared.contains($0.1) }
-        return SqueakMenu("Share a thread") {
+        return SqueakMenu("Share a duck") {
             ForEach(candidates, id: \.1) { s, id in
                 Button(model.workbenchTitle(s)) { Task { await ponds.share(pond: p.id, sessionId: id) } }
                 Button("\(model.workbenchTitle(s)) (private)") { Task { await ponds.share(pond: p.id, sessionId: id, isPrivate: true) } }
@@ -370,7 +370,7 @@ struct PondHomeView: View {
         }
         .menuStyle(.button).buttonStyle(SecondaryButtonStyle()).fixedSize()
         .disabled(candidates.isEmpty)
-        .help(candidates.isEmpty ? (localSessions.isEmpty ? "No chats on this Mac to share yet" : "Every thread on this Mac is already in the pond") : "Show one of this Mac\u{2019}s threads to the flock")
+        .help(candidates.isEmpty ? (localSessions.isEmpty ? "No chats on this Mac to share yet" : "Every duck on this Mac is already in the pond") : "Show one of this Mac\u{2019}s ducks to the flock")
     }
 
     private func startThread() { Self.startThread(key: key, model: model) }
@@ -432,7 +432,7 @@ struct PondHomeView: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 if feed.isEmpty {
                     Text("A quiet pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text("Shared threads, new members and pond activity will appear here.")
+                    Text("Shared ducks, new members and pond activity will appear here.")
                         .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(feed) { r in

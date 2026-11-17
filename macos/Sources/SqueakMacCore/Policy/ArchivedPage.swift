@@ -54,8 +54,8 @@ public struct ArchivedGroup: Identifiable, Sendable, Equatable {
 /// Decided here where CI can test it; the view only draws.
 public enum ArchivedPage {
     public static let otherPond = "Other"
-    public static let emptyWords = "Nothing archived yet. Archive a thread from its right-click menu (\u{21E7}\u{2318}A) and it waits here."
-    public static let noMatchWords = "No archived thread matches that."
+    public static let emptyWords = "Nothing archived yet. Archive a duck from its right-click menu (\u{21E7}\u{2318}A) and it waits here."
+    public static let noMatchWords = "No archived duck matches that."
 
     /// `pondOf` names the pond a session sits in (the host's pond directory, by `pondId`); the default is its repo name.
     public static func entries(
@@ -70,7 +70,7 @@ public enum ArchivedPage {
         }
         let others = shared.map {
             ArchivedEntry(
-                id: "shared:" + $0.threadId, title: $0.title.isEmpty ? "Untitled thread" : $0.title, pond: pondName($0.pondName),
+                id: "shared:" + $0.threadId, title: $0.title.isEmpty ? "Untitled duck" : $0.title, pond: pondName($0.pondName),
                 agent: $0.agent, archivedAt: $0.hiddenAt, target: .shared(pondId: $0.pondId, threadId: $0.threadId))
         }
         return mine + others

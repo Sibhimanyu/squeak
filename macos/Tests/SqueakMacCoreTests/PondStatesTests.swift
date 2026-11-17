@@ -103,7 +103,7 @@ import Testing
         #expect(PondRipples2.sentence(r("a", "Priya", "answered a question"), me: "m") == "Priya answered a question")
         #expect(PondRipples2.sentence(r("m", "Sibhi", "changed the pond key"), me: "m") == "You changed the pond key")
         #expect(PondRipples2.sentence(r("a", "Priya", "Priya joined"), me: "m") == "Priya joined")
-        #expect(PondRipples2.sentence(r("", "", "A thread was shared"), me: "m") == "A thread was shared")
+        #expect(PondRipples2.sentence(r("", "", "A duck was shared"), me: "m") == "A duck was shared")
     }
 
     @Test func sentMessagesShowTheirStateAndSettleWhenTheTranscriptHasThem() {
@@ -119,7 +119,7 @@ import Testing
 
     @Test func threadRulesExplainWhoMaySendAndApprove() {
         #expect(PondThreadStatus.composerBlock(role: .viewer, asks: true, isStarter: false, starterName: "Aarav") == "You\u{2019}re a viewer: you can read but not send.")
-        #expect(PondThreadStatus.composerBlock(role: .member, asks: false, isStarter: false, starterName: "Aarav") == "Only Aarav can message this thread while it runs without asking.")
+        #expect(PondThreadStatus.composerBlock(role: .member, asks: false, isStarter: false, starterName: "Aarav") == "Only Aarav can message this duck while it runs without asking.")
         #expect(PondThreadStatus.composerBlock(role: .member, asks: false, isStarter: true, starterName: "Aarav") == nil)
         #expect(PondThreadStatus.composerBlock(role: .member, asks: nil, isStarter: false, starterName: "Aarav") == nil)
         #expect(PondThreadStatus.ownershipLine(starterName: "Aarav", isStarter: false) == "Approve and Stop stay with Aarav.")

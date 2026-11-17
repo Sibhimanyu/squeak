@@ -84,5 +84,5 @@ public enum ThreadArchive {
 
     /// An archived chat opens read-only: "Unarchive" stands where the composer was.
     public static func composerReplaced(_ s: HostSession) -> Bool { s.archivedAt != nil }
-    public static let readOnlyNote = "This thread is archived."
+    public static let readOnlyNote = "This duck is archived."
 }

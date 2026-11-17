@@ -10,8 +10,8 @@ public enum ThreadTitle {
 
         public var words: String {
             switch self {
-            case .empty: "A thread's name can't be empty."
-            case .tooLong: "A thread's name is at most \(ThreadTitle.maxLength) characters."
+            case .empty: "A duck's name can't be empty."
+            case .tooLong: "A duck's name is at most \(ThreadTitle.maxLength) characters."
             }
         }
     }

@@ -156,7 +156,7 @@ struct PondFixtureTests {
     }
 }
 
-@Suite("Start a thread")
+@Suite("Start a duck")
 struct PondStartThreadTests {
     @Test func aPondWithAGitRemoteStartsAndOneWithoutOffersOnlySharing() {
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git")) == .start)

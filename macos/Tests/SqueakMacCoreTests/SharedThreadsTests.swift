@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SqueakMacCore
 
-@Suite("Threads other people started: the sidebar, the changes, starting on the owner's Mac")
+@Suite("Ducks other people started: the sidebar, the changes, starting on the owner's Mac")
 struct SharedThreadsTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func ago(_ s: TimeInterval) -> Date { now.addingTimeInterval(-s) }
@@ -63,7 +63,7 @@ struct SharedThreadsTests {
         let r = SharedThreadRows.rows(detail(threads: [thread("t", "Fix login")]), now: now)[0]
         #expect(r.avatar == PondAvatars.spec(memberId: "a", name: "Aarav Patel"))
         #expect(r.avatar.initials == "AP")
-        #expect(r.help == "Fix login\nAarav Patel\u{2019}s thread \u{00B7} runs on their Mac")
+        #expect(r.help == "Fix login\nAarav Patel\u{2019}s duck \u{00B7} runs on their Mac")
         #expect(r.id == "p1/t")
     }
 
@@ -117,7 +117,7 @@ struct SharedThreadsTests {
     @Test func theLinesAreFixedSentences() {
         #expect(PondStartRequest.placeLine(ownerName: "Sibhi") == "Runs on Sibhi\u{2019}s Mac")
         #expect(PondStartRequest.placeLine(ownerName: nil) == "Runs on the owner\u{2019}s Mac")
-        #expect(PondStartRequest.waitingLine(ownerName: "Sibhi") == "Waiting for Sibhi\u{2019}s Mac to start your thread.")
+        #expect(PondStartRequest.waitingLine(ownerName: "Sibhi") == "Waiting for Sibhi\u{2019}s Mac to start your duck.")
         #expect(PondStartRequest.isExpired(askedAt: ago(301), now: now) && !PondStartRequest.isExpired(askedAt: ago(60), now: now))
     }
 

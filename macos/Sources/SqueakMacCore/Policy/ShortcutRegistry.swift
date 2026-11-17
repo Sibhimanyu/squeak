@@ -123,7 +123,7 @@ public enum ShortcutRegistry {
         e(.expandTools, "Chat", "Expand or fold every step", KeyChord("O", .control)),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
         // ⇧⌘A is free (Finder's Applications is Finder's own); it archives the open thread, or shows it again if archived.
-        e(.archiveThread, "Chat", "Archive or unarchive this thread", KeyChord("A", [c, s])),
+        e(.archiveThread, "Chat", "Archive or unarchive this duck", KeyChord("A", [c, s])),
         e(.stop, "Chat", "Stop the turn", KeyChord(".", c)),
         e(.focusComposer, "Composer", "Focus the message field", KeyChord("L", c)),
         e(.send, "Composer", "Send (queue while the agent works)", KeyChord("↵")),

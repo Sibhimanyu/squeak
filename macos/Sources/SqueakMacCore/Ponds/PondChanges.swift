@@ -104,7 +104,7 @@ public enum PondStartRequest {
 
     /// While it waits: "Waiting for Sibhi's Mac to start your thread."
     public static func waitingLine(ownerName: String?) -> String {
-        "Waiting for \(owner(ownerName))\u{2019}s Mac to start your thread."
+        "Waiting for \(owner(ownerName))\u{2019}s Mac to start your duck."
     }
 
     /// When nothing came back in time.

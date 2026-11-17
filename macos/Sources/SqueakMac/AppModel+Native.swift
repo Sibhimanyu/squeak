@@ -570,7 +570,7 @@ extension AppModel {
 
     /// Opens the summary for editing: the host's cheap model writes it; if it cannot, the field opens empty with a sentence.
     func nativeBeginHandoff(_ s: HostSession) async {
-        if demoMode { native.note = "Demo data: no thread is started."; return }
+        if demoMode { native.note = "Demo data: no duck is started."; return }
         guard let c = nativeControls(for: s) else { return }
         native.handoff = NativeHandoffDraft(text: "", loading: true)
         let text = await c.handoffDraft(s)

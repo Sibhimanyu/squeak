@@ -13,7 +13,7 @@ struct RoomInspector: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editing: DuckEdit?
-    @State private var showOff = false
+    @State private var search = ""
     @State private var adding = false
     @State private var notice: String?
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
@@ -79,10 +79,12 @@ struct RoomInspector: View {
     private var allDucks: [PondDuck] { roster.ducks ?? room.feed.threads.map(PondDuck.init(thread:)) }
 
     private var ducksList: some View {
-        let r = RoomRoster.roster(allDucks, threads: room.feed.threads)
+        let all = RoomRoster.roster(allDucks, threads: room.feed.threads)
+        let rows = RoomRoster.visible(allDucks, threads: room.feed.threads, query: search)
+        let searching = !search.trimmingCharacters(in: .whitespaces).isEmpty
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(verbatim: RoomRoster.header(r.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
+                Text(verbatim: RoomRoster.header(all.available.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button { withAnimation(Motion.standard) { adding.toggle() } } label: {
@@ -92,24 +94,27 @@ struct RoomInspector: View {
                 }
                 .buttonStyle(.plain).accessibilityLabel("New duck")
             }
+            if all.count > 0 {
+                HStack(spacing: 6) {
+                    Lucide(.search, size: 11, color: Theme.subtle)
+                    TextField(RoomRoster.searchPrompt, text: $search).textFieldStyle(.plain).font(.system(size: 12))
+                        .accessibilityLabel(RoomRoster.searchPrompt)
+                }
+                .padding(.horizontal, 8).frame(height: 26)
+                .background(Theme.selected, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(.horizontal, 2)
+            }
             if adding {
                 NewDuckForm(roster: roster, room: room, close: { withAnimation(Motion.standard) { adding = false } })
             }
-            if r.count == 0 && !adding {
+            if all.count == 0 && !adding {
                 Text("No ducks yet. Start one and it joins the room.").font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
+            } else if searching && rows.isEmpty {
+                Text(verbatim: RoomRoster.noMatchLine(search)).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
+            } else if !searching && rows.isEmpty && !adding {
+                Text(RoomRoster.noneAvailableLine).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             }
-            ForEach(r.onDuty) { d in duckRow(d) }
-            if !r.offDuty.isEmpty {
-                Button { withAnimation(Motion.standard) { showOff.toggle() } } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(showOff ? 90 : 0))
-                        Text(verbatim: RoomRoster.offDutyLabel(r.offDuty.count)).font(.system(size: 11))
-                    }
-                    .foregroundStyle(Theme.subtle).padding(.horizontal, 6).padding(.top, 6).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityLabel(RoomRoster.offDutyLabel(r.offDuty.count)).accessibilityHint(showOff ? "Collapses the list" : "Expands the list")
-                if showOff { ForEach(r.offDuty) { d in duckRow(d) } }
-            }
+            ForEach(rows) { d in duckRow(d) }
             if let e = roster.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).padding(.horizontal, 6).padding(.top, 4) }
         }
         .task(id: room.feed.threads) {
@@ -137,7 +142,12 @@ struct RoomInspector: View {
             DuckRow(
                 duck: d, open: { open(d) },
                 edit: { editing = DuckEdit(duckId: d.id, field: $0, text: $0 == .name ? d.name : (d.role ?? "")) },
-                duty: { on in Task { await roster.perform(.duty(duck: d.id, on: on), host: model.nativeHost) } })
+                duty: { on in
+                    Task {
+                        await roster.perform(.duty(duck: d.id, on: on), host: model.nativeHost)
+                        if on, roster.error == nil { search = "" }
+                    }
+                })
             if notice == d.id { Text(verbatim: RoomRoster.noJobLine).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.leading, 51).padding(.bottom, 4) }
         }
     }
@@ -166,7 +176,7 @@ struct RoomInspector: View {
             .padding(.horizontal, 12).frame(height: 36)
             .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
             HStack(alignment: .top, spacing: 10) {
-                Text(verbatim: inviteLine ?? "Members can start threads and answer.").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Text(verbatim: inviteLine ?? "Members can start ducks and answer.").font(.system(size: 12)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button(inviting ? "Inviting\u{2026}" : "Invite", action: send).buttonStyle(SecondaryButtonStyle())
@@ -271,14 +281,14 @@ private struct DuckRow: View {
                 .padding(.top, 1)
             }
             Spacer(minLength: 0)
-            if hover {
+            if hover || !duck.onDuty {
                 HStack(spacing: 2) {
-                    if duck.hasJob { hoverButton("Open", action: open) }
-                    hoverButton(duck.onDuty ? "Close" : "Bring back") { duty(!duck.onDuty) }
+                    if duck.hasJob && duck.onDuty { hoverButton("Open", action: open) }
+                    hoverButton(duck.onDuty ? "Close" : RoomRoster.bringBackTitle) { duty(!duck.onDuty) }
                 }
             }
         }
-        .opacity(duck.onDuty ? 1 : 0.5)
+        .opacity(duck.onDuty ? 1 : 0.55)
         .padding(.horizontal, 6).padding(.vertical, 7)
         .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .contentShape(Rectangle())
@@ -288,7 +298,7 @@ private struct DuckRow: View {
             Button("Rename\u{2026}") { edit(.name) }
             Button("Set role\u{2026}") { edit(.role) }
             Divider()
-            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring on duty") { duty(true) } }
+            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring back") { duty(true) } }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.placeChip ?? ""). \(duck.presenceLine)")

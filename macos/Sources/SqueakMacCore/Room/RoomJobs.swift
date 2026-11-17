@@ -244,7 +244,7 @@ extension RoomJobs {
                 var l = base(.handing, mark: .working, lead: "Handing to")
                 l.targetTitle = local?.pendingTitle ?? job.suggestion?.title
                 return l
-            case .newThread: return base(.handing, mark: .working, lead: "Starting a new thread")
+            case .newThread: return base(.handing, mark: .working, lead: "Starting a new duck")
             case .allow, .deny: break  // a claim's answer shows on the claim card; the line keeps its words
             }
         }
@@ -258,13 +258,13 @@ extension RoomJobs {
                 l.candidates = job.candidates.filter { $0.sessionId != s.sessionId }
                 l.buttons = [
                     RoomJobButton(id: "go", title: "Go", role: .primary, action: .go(sessionId: s.sessionId)),
-                    RoomJobButton(id: "new", title: "New thread", role: .secondary, action: .newThread),
+                    RoomJobButton(id: "new", title: "New duck", role: .secondary, action: .newThread),
                     RoomJobButton(id: "note", title: "Just a note", role: .quiet, action: .dismiss),
                 ]
                 return l
             }
             var l = base(.newThread, lead: suggestionLead)
-            l.targetTitle = "new thread"
+            l.targetTitle = "new duck"
             l.candidates = job.candidates
             l.buttons = [
                 RoomJobButton(id: "start", title: "Start", role: .primary, action: .newThread),
@@ -279,7 +279,7 @@ extension RoomJobs {
         case .running:
             var l = base(.running, mark: .working, lead: "")
             let t = job.handedTo?.title ?? ""
-            l.targetTitle = t.isEmpty ? "A thread" : t
+            l.targetTitle = t.isEmpty ? "A duck" : t
             l.lead = "is on it"
             return l
         case .done:
@@ -333,7 +333,7 @@ extension RoomJobs {
         for j in jobs where j.status == .suggested {
             guard let c = j.claim, c.status == .asking else { continue }
             if let p = local[j.id]?.pending, p == .allow || p == .deny { continue }
-            let title = c.title.isEmpty ? (threads.first { $0.sessionId == c.sessionId }?.title ?? "A thread") : c.title
+            let title = c.title.isEmpty ? (threads.first { $0.sessionId == c.sessionId }?.title ?? "A duck") : c.title
             out.append(ClaimCard(
                 jobId: j.id, sessionId: c.sessionId, title: title, agent: threads.first { $0.sessionId == c.sessionId }?.agent,
                 jobText: j.text, when: when(eta: c.eta), at: c.at))

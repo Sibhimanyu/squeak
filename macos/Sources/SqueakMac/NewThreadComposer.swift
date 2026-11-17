@@ -275,7 +275,7 @@ struct NewThreadComposer: View {
                     Lucide(.triangleAlert, size: Metrics.icon, color: Theme.negative)
                     Text(e).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
-                ReportProblemButton(problem: e, place: "New thread")
+                ReportProblemButton(problem: e, place: "New duck")
                 if model.addons.conductorLink?.isLinkProblem(e) == true {
                     Button("Open Extensions settings") { model.openSettings(.addons) }.buttonStyle(SecondaryButtonStyle())
                 }
@@ -474,7 +474,7 @@ struct NewThreadComposer: View {
         let f = state.form
         let name = f.chosenModel.map { ChatPresets.shortName($0.label) } ?? "Choose a model"
         return SqueakMenu {
-            Text("Leads the thread").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Text("Leads the duck").font(.system(size: 11)).foregroundStyle(Theme.muted)
             ForEach(NewChatAgent.allCases, id: \.self) { agent in
                 Section(agent.displayName) {
                     ForEach(ChatPresets.models(f.models, agent)) { m in
@@ -487,8 +487,8 @@ struct NewThreadComposer: View {
             }
         } label: { chip("\(f.agent.displayName) · \(name)", mark: f.agent.mark) {} }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help("The model that leads the thread")
-        .accessibilityLabel("Agent and model: \(f.agent.displayName), \(name), leads the thread")
+        .help("The model that leads the duck")
+        .accessibilityLabel("Agent and model: \(f.agent.displayName), \(name), leads the duck")
     }
 
     /// The three shared presets (Claude threads only; Codex keeps the plain model picker), one tap away on the chip row.
@@ -586,7 +586,7 @@ struct NewThreadPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
-                Text("New thread").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text("New duck").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 NewThreadComposer(state: state, onEscape: { NewChatController.shared.hide() }, onStarted: { NewChatController.shared.hide() })
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -595,7 +595,7 @@ struct NewThreadPage: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .screen("New thread")
+        .screen("New duck")
     }
 }
 
@@ -613,7 +613,7 @@ struct QuickNewThreadView: View {
                         .background(Theme.surfaceRaised.opacity(0.6), in: Circle())
                 }
                 .buttonStyle(.plain).accessibilityLabel("Back to quick message")
-                Text("New thread").font(.system(size: 17, weight: .semibold))
+                Text("New duck").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Text("Quick message").font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
@@ -636,7 +636,7 @@ struct PopupNewThreadTop: View {
     var body: some View {
         HStack(spacing: 14) {
             PopupBackButton { PopupNav.shared.back() }
-            Text("New thread").font(.popup(15, .semibold)).foregroundStyle(Theme.ink)
+            Text("New duck").font(.popup(15, .semibold)).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
         }
         .padding(.top, 14).padding(.bottom, 10)

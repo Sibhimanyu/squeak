@@ -86,7 +86,7 @@ public enum PondThreadEntry: Equatable, Sendable {
                                hasMain: Bool = false) -> PondThreadEntry {
         let shared = PondSharing.isSharedWithMe(pond)
         switch PondStartThread.offer(for: pond) {
-        case .none: return .refuse(why: "Viewers can\u{2019}t start threads.")
+        case .none: return .refuse(why: "Viewers can\u{2019}t start ducks.")
         case .shareOnly(let why):
             // Someone else's pond that this Mac cannot start in: the thread runs on the owner's Mac (a signed request).
             guard shared else { return .refuse(why: why) }

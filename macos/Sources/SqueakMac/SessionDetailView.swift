@@ -16,7 +16,7 @@ struct DetailView: View {
             } else if let s = model.selectedSession, DockStore.shared.threads.isDocked(s.key.stringValue) {
                 let zone = DockStore.shared.threads.zone(of: s.key.stringValue)
                 VStack(spacing: Space.s) {
-                    Text("This thread is in the \(zone.title.lowercased()) panel.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text("This duck is in the \(zone.title.lowercased()) panel.").font(Typo.body).foregroundStyle(Theme.muted)
                     Button("Move it back here") { DockStore.shared.moveThread(s.key.stringValue, to: .centre) }
                         .buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.ink)
                 }

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SqueakMacCore
 
-@Suite("Own-Mac threads, stashed")
+@Suite("Own-Mac ducks, stashed")
 struct PondOwnThreadsTests {
     private func shared() -> PondSummary { PondSummary(id: "p", name: "Site", role: .member, gitRemote: "git@x:a/b.git", canStartHere: true) }
     private func mine() -> PondSummary { PondSummary(id: "q", name: "Mine", role: .owner, gitRemote: "git@x:a/b.git", canStartHere: true) }
@@ -39,7 +39,7 @@ struct PondOwnThreadsTests {
     @Test("off: the People wording no longer says members run agents on their own Mac")
     func presetWords() {
         let off = PondPresets.presets(ownThreads: false).map(\.title) + PondPresets.switches(ownThreads: false).map(\.title)
-        #expect(!off.contains { $0.localizedCaseInsensitiveContains("own agent") || $0.localizedCaseInsensitiveContains("their own threads") })
-        #expect(off.contains("Collaborator: can start threads on the owner\u{2019}s Mac"))
+        #expect(!off.contains { $0.localizedCaseInsensitiveContains("own agent") || $0.localizedCaseInsensitiveContains("their own ducks") })
+        #expect(off.contains("Collaborator: can start ducks on the owner\u{2019}s Mac"))
     }
 }

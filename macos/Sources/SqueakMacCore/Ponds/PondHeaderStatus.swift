@@ -87,7 +87,7 @@ public struct PondHeaderStatus: Sendable, Equatable {
     public var indicator: PondHeaderIndicator
 
     /// The short line shown in place of the long sentence when this Mac cannot start threads in the pond.
-    public static let shareOnlyLine = "Threads can only be shared into this pond"
+    public static let shareOnlyLine = "Ducks can only be shared into this pond"
 
     /// `access`: the line for an ordinary pond (role, people). `offer`: what the Start button may do here.
     /// `readShown`: `PondReadTracker.isShown` for this pond.

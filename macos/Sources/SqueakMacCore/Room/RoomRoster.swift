@@ -1,7 +1,7 @@
 import Foundation
 
 // The room inspector's Ducks section (DESIGN.md §8.10): the pond's ducks as host identities (`GET /native/projects/<id>/ducks`),
-// grouped on duty / off duty, with presence and place text, the New duck form's checks and the action -> request mapping.
+// Available by default with a search over all of them, with presence and place text, the New duck form's checks and the action -> request mapping.
 // Pure; the view only draws.
 
 /// A duck as the host lists it (`Duck` in docs/ponds.md, "Ducks"). Decoded leniently.
@@ -71,6 +71,8 @@ public struct DuckRoster: Sendable, Equatable {
     public var onDuty: [RosterDuck]
     public var offDuty: [RosterDuck]
     public var count: Int { onDuty.count + offDuty.count }
+    /// The default list: Available ducks only.
+    public var available: [RosterDuck] { onDuty }
 }
 
 public enum RoomRoster {
@@ -118,7 +120,30 @@ public enum RoomRoster {
         }
     }
 
-    /// The heading's count and label: "Ducks \u{00B7} 5".
+    /// What the Ducks section lists. No query: the Available ducks only (newest activity first). A query searches every duck the
+    /// host returned, Available and Off duty, by name or role (case and accent insensitive, every word must match); Available
+    /// ones come first, Off duty ones follow greyed (`onDuty == false`) so the row offers Bring back.
+    public static func visible(_ ducks: [PondDuck], threads: [RoomThread] = [], query: String, now: Date = Date()) -> [RosterDuck] {
+        let r = roster(ducks, threads: threads, now: now)
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.isEmpty { return r.available }
+        func hit(_ d: RosterDuck) -> Bool {
+            let hay = d.name + " " + (d.role ?? "")
+            return words.allSatisfy { hay.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        }
+        return (r.onDuty + r.offDuty).filter(hit)
+    }
+
+    /// "No duck called \u{201C}x\u{201D}", for a search that finds nothing.
+    public static func noMatchLine(_ query: String) -> String {
+        "No duck called \u{201C}\(query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}"
+    }
+    public static let searchPrompt = "Find a duck"
+    public static let bringBackTitle = "Bring back"
+    /// The default list with nothing Available while some ducks are off duty.
+    public static let noneAvailableLine = "No ducks available. Search to bring one back."
+
+    /// The heading's count and label: "Ducks \u{00B7} 5" (Available ducks).
     public static func header(_ n: Int) -> String { "Ducks \u{00B7} \(n)" }
     public static func offDutyLabel(_ n: Int) -> String { "Off duty \u{00B7} \(n)" }
 

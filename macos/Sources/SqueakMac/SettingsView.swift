@@ -58,7 +58,7 @@ private extension SettingsSection {
     var subtitle: String {
         switch self {
         case .account: "Sign in to see this Mac from your browser and iPhone, and whether it is connected."
-        case .models: "The starting points for new threads, shared with your iPhone and the web."
+        case .models: "The starting points for new ducks, shared with your iPhone and the web."
         case .messages: "What a message does when the agent is already working."
         case .general: "Make Squeak feel right on this Mac."
         case .service: "The local connection that follows your sessions, and details for when you need a hand."
@@ -80,7 +80,7 @@ private extension SettingsSection {
     var searchAliases: [String] {
         switch self {
         case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
-        case .models: ["model", "preset", "thinking", "effort", "plan first", "claude", "codex", "new thread"]
+        case .models: ["model", "preset", "thinking", "effort", "plan first", "claude", "codex", "new duck"]
         case .messages: ["send", "sending", "queue", "steer"]
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "quick message"]
         case .service: ["daemon", "diagnostics", "status", "hooks", "ready", "log"]
@@ -548,7 +548,7 @@ private struct ModelsSettings: View {
     @State private var expandedPresets: Set<ChatPreset> = []
 
     private var chatPresetSettings: some View {
-        SettingsCard(title: "New thread presets", subtitle: "Three starting points that mix Claude models by role. Pick one when you start a thread.", symbol: "sparkles") {
+        SettingsCard(title: "New duck presets", subtitle: "Three starting points that mix Claude models by role. Pick one when you start a duck.", symbol: "sparkles") {
             if chatModels.isEmpty {
                 SectionFootnote("The models this Mac can use load once the Squeak service is running.")
             } else {
@@ -556,7 +556,7 @@ private struct ModelsSettings: View {
                     presetEditor(preset)
                 }
             }
-            SectionFootnote("Shared with your iPhone and the web through Squeak. Codex threads keep the plain model picker.")
+            SectionFootnote("Shared with your iPhone and the web through Squeak. Codex ducks keep the plain model picker.")
         }
         .task {
             await model.syncChatPresets()

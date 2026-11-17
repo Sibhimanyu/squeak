@@ -356,7 +356,7 @@ private struct WorkbenchTabs: View {
                         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .accessibilityLabel("New thread").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New thread")
+                    .accessibilityLabel("New duck").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New duck")
                 }
                 .environment(\.tabMaxWidth, tabCap)
                 .padding(.horizontal, Space.l)

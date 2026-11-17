@@ -70,7 +70,7 @@ public enum NewEntry: Equatable, Sendable {
 
 public enum NewPages {
     /// The line above the New pond choices when a thread or stream was asked for with no pond to put it in.
-    public static let makePondFirst = "Make a pond first: threads live in a pond."
+    public static let makePondFirst = "Make a pond first: ducks live in a pond."
 
     /// What an entry opens, given whether any pond exists. Threads and streams need a pond, so without one they
     /// lead to New pond (`needsPondFirst` says to show the line above the choices).
@@ -146,8 +146,8 @@ public enum NewThreadTarget {
     }
 
     /// The calm empty state when the page is reached with nothing to start in.
-    public static let emptyTitle = "No stream to start a thread in"
-    public static let emptyDetail = "Threads run in a stream. Make one in a pond and it will be here."
+    public static let emptyTitle = "No stream to start a duck in"
+    public static let emptyDetail = "Ducks run in a stream. Make one in a pond and it will be here."
     public static let emptyButton = "Create a stream"
 }
 
@@ -439,7 +439,7 @@ public enum NewThreadRules {
         return hasPlace && hasModel && connected && !starting && !t.isEmpty && t.count <= NewChatForm.maxLength
     }
 
-    public static let startLabel = "Start thread"
+    public static let startLabel = "Start duck"
 
     /// Only a Claude thread can hand work to other models; Codex never shows the option.
     public static func offersSplit(agent: NewChatAgent) -> Bool { agent == .claude }

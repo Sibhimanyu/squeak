@@ -222,7 +222,7 @@ struct PondThreadView: View {
         HStack(spacing: Space.s) {
             CrumbLink(title: project, label: "Open \(project)\u{2019}s dashboard") { ponds.route = .home(project: key) }
             Lucide(.chevronRight, size: 12, color: Theme.subtle)
-            Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Thread").lineLimit(1).foregroundStyle(Theme.ink)
+            Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Duck").lineLimit(1).foregroundStyle(Theme.ink)
             PondStateMark(state: state)
             if let ownership = ThreadOwnership.line(starterName: starterName, isMine: access.isMine),
                let avatar = ThreadOwnership.tabAvatar(starterId: thread?.starter ?? "", starterName: starterName, isMine: false) {
@@ -264,13 +264,13 @@ struct PondThreadView: View {
                         }
                     }
                 } label: { Lucide(.users, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle()) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Who can message this thread")
-                    .accessibilityLabel("Who can message this thread")
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Who can message this duck")
+                    .accessibilityLabel("Who can message this duck")
             }
             let priv = access.gate(.togglePrivate)
             if priv.visible {
                 Toggle("Private", isOn: Binding(get: { thread?.isPrivate ?? false }, set: { v in Task { await ponds.setPrivate(pond: pondId, thread: threadId, isPrivate: v) } }))
-                    .toggleStyle(.switch).controlSize(.small).font(Typo.body).help("Only you see a private thread")
+                    .toggleStyle(.switch).controlSize(.small).font(Typo.body).help("Only you see a private duck")
             }
         }
         .font(.system(size: 15, weight: .medium))
@@ -289,7 +289,7 @@ struct PondThreadView: View {
                 } else {
                     ThreadDuckView(id: threadId, agent: thread?.agent, size: ThreadDuck.Size.tab)
                 }
-                Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Thread").font(.system(size: 14)).foregroundStyle(Theme.ink)
+                Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Duck").font(.system(size: 14)).foregroundStyle(Theme.ink)
                     .lineLimit(1).frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
             }
             .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
@@ -314,7 +314,7 @@ struct PondThreadView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(laid) { entry in entryView(entry).id(entry.id) }
-                    if rows.isEmpty, ponds.outbox[threadId]?.isEmpty ?? true { Text("Nothing in this thread yet.").font(Typo.body).foregroundStyle(Theme.subtle) }
+                    if rows.isEmpty, ponds.outbox[threadId]?.isEmpty ?? true { Text("Nothing in this duck yet.").font(Typo.body).foregroundStyle(Theme.subtle) }
                     ForEach(ponds.outbox[threadId] ?? []) { o in outgoing(o) }
                 }
                 .padding(.horizontal, Space.l).padding(.vertical, Space.m)

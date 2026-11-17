@@ -56,7 +56,7 @@ struct DucklingsTests {
         #expect(DucklingWords.barText(DucklingSet(running: 3)) == "3 ducklings working")
         #expect(DucklingWords.barText(nil) == nil && DucklingWords.barText(DucklingSet(running: 0)) == nil)
         #expect(DucklingWords.dashboardFigure(running: 0, threads: 0) == nil)
-        #expect(DucklingWords.dashboardFigure(running: 3, threads: 1) == "3 ducklings running · 1 thread")
+        #expect(DucklingWords.dashboardFigure(running: 3, threads: 1) == "3 ducklings running · 1 duck")
         let start = Date(timeIntervalSince1970: 0)
         let d = Duckling(id: "a", title: "Scan", model: "Sonnet 5.5", startedAt: start)
         #expect(d.chipText(now: start.addingTimeInterval(240)) == "Scan · Sonnet 5.5 · 4m")

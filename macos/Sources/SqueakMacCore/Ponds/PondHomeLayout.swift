@@ -174,7 +174,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         // A thread someone else started that this person hid is left out of their view (the starter's and the flock's are unchanged).
         for t in threads where !used.contains(t.id) && !hiddenThreads.contains(t.id) {
             var row = PondChatRow(
-                id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
+                id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled duck" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
                 mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: people(t))
             if t.mode == .own { row.poweredBy = PondOwnThreads.poweredBy(nest: t.nestName ?? t.nest, ownThreads: ownThreads) }
             if let b = t.branch, !b.isEmpty, let i = branches[b] {
@@ -208,7 +208,7 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .all: "All threads"
+        case .all: "All ducks"
         case .needsYou: "Needs you"
         case .working: "Working"
         case .shared: "Shared"

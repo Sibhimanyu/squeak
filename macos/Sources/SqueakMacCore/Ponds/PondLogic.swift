@@ -94,7 +94,7 @@ public enum PondHomeThreads {
     public static func fromPond(_ detail: PondDetail, localKey: (String) -> SessionKey?) -> [PondHomeThread] {
         detail.threads.map { t in
             PondHomeThread(
-                id: t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, starter: t.starter,
+                id: t.id, title: t.title.isEmpty ? "Untitled duck" : t.title, starter: t.starter,
                 starterName: t.starterName.isEmpty ? (detail.members.first { $0.id == t.starter }?.name ?? "") : t.starterName,
                 nest: t.nest, agent: t.agent, state: PondThreadState(raw: t.state), isPrivate: t.isPrivate, updatedAt: t.updatedAt,
                 local: t.starter == detail.meMember?.id ? t.sessionId.flatMap(localKey) : nil, pondThread: t.id)
@@ -105,7 +105,7 @@ public enum PondHomeThreads {
     public static func fromLocal(_ facts: [PondThreadFact], agents: [SessionKey: String], person: String) -> [PondHomeThread] {
         facts.map { f in
             PondHomeThread(
-                id: f.key.stringValue, title: f.title.isEmpty ? "Untitled thread" : f.title, starter: nil, starterName: person, nest: nil,
+                id: f.key.stringValue, title: f.title.isEmpty ? "Untitled duck" : f.title, starter: nil, starterName: person, nest: nil,
                 agent: agents[f.key], state: PondThreadState(f.state), isPrivate: false, updatedAt: f.lastActivityAt, local: f.key, pondThread: nil)
         }
     }
@@ -346,19 +346,19 @@ public enum PondStartThread: Sendable, Equatable {
     case shareOnly(why: String)
     case none
 
-    public static let noRemote = "This Mac doesn\u{2019}t have this pond\u{2019}s project and it has no Git remote, so threads can only be shared into it."
+    public static let noRemote = "This Mac doesn\u{2019}t have this pond\u{2019}s project and it has no Git remote, so ducks can only be shared into it."
 
     /// The fixed line on a shared pond with no Git remote (the new-thread place line): a member's new threads run on the
     /// owner's Mac. Not a notice: it is always said the same way and never moves.
     public static func noRemoteSharedLine(ownerName: String?) -> String {
         let owner = ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
-        return "This pond has no Git remote, so new threads run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
+        return "This pond has no Git remote, so new ducks run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
     }
 
     /// The same, for a pond with a Git remote whose project this Mac does not hold.
     public static func noProjectSharedLine(ownerName: String?) -> String {
         let owner = ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
-        return "This Mac doesn\u{2019}t have this pond\u{2019}s project, so new threads run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
+        return "This Mac doesn\u{2019}t have this pond\u{2019}s project, so new ducks run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
     }
 
     /// A pond shared with me that this Mac cannot start a thread in: Start still works, on the owner's Mac (a signed request).
@@ -385,9 +385,9 @@ public enum PondStartThread: Sendable, Equatable {
         let mine = pond.role == .owner
         let ownerMac = mine ? "your Mac" : "\(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
         var out: [Place] = []
-        if !mine { out.append(Place(kind: .shared, title: "Shared thread", detail: "Runs on \(ownerMac), any folder", enabled: true)) }
+        if !mine { out.append(Place(kind: .shared, title: "Shared duck", detail: "Runs on \(ownerMac), any folder", enabled: true)) }
         guard PondOwnThreads.offersMyMac(pond, ownThreads: ownThreads) else { return out }
-        out.append(Place(kind: .own, title: "Own thread", detail: remote ? "Runs on your Mac" : (mine ? "Needs a Git remote" : noRemoteSharedLine(ownerName: pond.ownerName)), enabled: remote))
+        out.append(Place(kind: .own, title: "Own duck", detail: remote ? "Runs on your Mac" : (mine ? "Needs a Git remote" : noRemoteSharedLine(ownerName: pond.ownerName)), enabled: remote))
         return out
     }
     public static func offer(for pond: PondSummary) -> PondStartThread {

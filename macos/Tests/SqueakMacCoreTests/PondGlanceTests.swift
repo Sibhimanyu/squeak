@@ -31,9 +31,9 @@ import Foundation
     @Test func peopleMostActiveFirstThenNeedsThenOnlineThenYouThenName() {
         let g = PondGlance.build(detail: Self.detail(), local: [], youName: "Sib", now: Self.now)
         #expect(g.people.map(\.name) == ["Aarav", "Bea", "Sib", "Cy"])
-        #expect(g.people[0].line == "2 threads working")
+        #expect(g.people[0].line == "2 ducks working")
         #expect(g.people[1].line == "Working on T 4")
-        #expect(g.people[2].line == "1 thread needs them")
+        #expect(g.people[2].line == "1 duck needs them")
         #expect(g.people[3].line == "Online")
         #expect(g.people.first { $0.name == "Sib" }?.you == true)
     }

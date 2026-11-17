@@ -303,7 +303,7 @@ public enum PondDevices {
 
 public enum PondActionWords {
     public static let rotateExplain = "Everyone in the pond keeps access. Anyone removed before this can\u{2019}t read new messages. Use it if a key or device may have leaked."
-    public static func leaveMessage(_ pond: String) -> String { "You will lose access to \(pond) and its threads. The owner can invite you again." }
+    public static func leaveMessage(_ pond: String) -> String { "You will lose access to \(pond) and its ducks. The owner can invite you again." }
     public static func deleteMessage(_ pond: String, others: Int) -> String {
         let who = others <= 0 ? "No one else" : (others == 1 ? "1 other person" : "\(others) other people")
         return "\(who) will lose access to \(pond) and everything shared in it. Your folder and files on this Mac stay. This can\u{2019}t be undone."
@@ -409,7 +409,7 @@ public enum PondThreadStatus {
     /// Why the composer is closed: a viewer, or a chat that runs without asking (only its starter may message it).
     public static func composerBlock(role: PondRole, asks: Bool?, isStarter: Bool, starterName: String) -> String? {
         if !role.canMessage { return viewerLine }
-        if asks == false, !isStarter { return "Only \(starterName.isEmpty ? "the starter" : starterName) can message this thread while it runs without asking." }
+        if asks == false, !isStarter { return "Only \(starterName.isEmpty ? "the starter" : starterName) can message this duck while it runs without asking." }
         return nil
     }
 
@@ -479,7 +479,7 @@ public enum PondNotes {
             // The host says what it waits on in `stateLine`; an approval ("Waiting for Sibhi to approve an edit") is the starter's alone.
             if let line = t.stateLine?.lowercased(), line.contains("approve") { return nil }
             let from = t.starterName.isEmpty ? "A teammate" : t.starterName
-            return PondNote(id: "pond-thread-\(t.id)-\(t.updatedAt.map { Int($0.timeIntervalSince1970) } ?? 0)", kind: .threadNeedsYou, title: "\(t.title.isEmpty ? "A thread" : t.title) needs you", body: "\(from)\u{2019}s thread in \(pond.name) has a question.", pondId: pond.id)
+            return PondNote(id: "pond-thread-\(t.id)-\(t.updatedAt.map { Int($0.timeIntervalSince1970) } ?? 0)", kind: .threadNeedsYou, title: "\(t.title.isEmpty ? "A duck" : t.title) needs you", body: "\(from)\u{2019}s duck in \(pond.name) has a question.", pondId: pond.id)
         }
     }
 }

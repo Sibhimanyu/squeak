@@ -21,12 +21,12 @@ struct ArchivedPageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text("Archived").font(Typo.title).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Text("Threads you put away. Squeak chats stay in Squeak; any other thread is hidden in Squeak only, and a thread someone else started is hidden from your view only.")
+                Text("Ducks you put away. Squeak chats stay in Squeak; any other duck is hidden in Squeak only, and a duck someone else started is hidden from your view only.")
                     .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    TextField("Find an archived thread or pond", text: $query).textFieldStyle(.plain)
-                        .font(Typo.body).accessibilityLabel("Find an archived thread or pond")
+                    TextField("Find an archived duck or pond", text: $query).textFieldStyle(.plain)
+                        .font(Typo.body).accessibilityLabel("Find an archived duck or pond")
                     if !query.isEmpty {
                         Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")

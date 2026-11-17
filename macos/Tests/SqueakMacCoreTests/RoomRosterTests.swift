@@ -21,6 +21,35 @@ import Testing
         #expect(RoomRoster.header(4) == "Ducks \u{00B7} 4" && RoomRoster.offDutyLabel(1) == "Off duty \u{00B7} 1")
     }
 
+    @Test func defaultListIsAvailableOnlyAndSearchCoversEveryDuck() {
+        let ducks = [
+            PondDuck(id: "a", name: "Ada", role: "Layout builder", lastActiveAt: ms(7200)),
+            PondDuck(id: "b", name: "Bo", role: "Tester", duty: .off, lastActiveAt: ms(10)),
+            PondDuck(id: "c", name: "Cy\u{00E9}", lastActiveAt: ms(60)),
+            PondDuck(id: "d", name: "Old Dan", role: "layout reviewer", duty: .off, lastActiveAt: 1),
+        ]
+        #expect(RoomRoster.visible(ducks, query: "", now: now).map(\.id) == ["c", "a"])
+        #expect(RoomRoster.visible(ducks, query: "   ", now: now).map(\.id) == ["c", "a"])
+        // by name, off-duty included, greyed (onDuty false)
+        let bo = RoomRoster.visible(ducks, query: "bo", now: now)
+        #expect(bo.map(\.id) == ["b"] && bo[0].onDuty == false)
+        // by role; Available first, then off duty; case-insensitive
+        #expect(RoomRoster.visible(ducks, query: "LAYOUT", now: now).map(\.id) == ["a", "d"])
+        #expect(RoomRoster.visible(ducks, query: "layout rev", now: now).map(\.id) == ["d"])
+        #expect(RoomRoster.visible(ducks, query: "cye", now: now).map(\.id) == ["c"])
+        #expect(RoomRoster.visible(ducks, query: "zzz", now: now).isEmpty)
+        #expect(RoomRoster.noMatchLine(" zzz ") == "No duck called \u{201C}zzz\u{201D}")
+    }
+
+    @Test func bringBackPutsTheDuckInTheDefaultList() {
+        var ducks = [PondDuck(id: "a", name: "Ada"), PondDuck(id: "b", name: "Bo", duty: .off)]
+        #expect(RoomRoster.visible(ducks, query: "", now: now).map(\.id) == ["a"])
+        ducks = RoomRoster.upserting(PondDuck(id: "b", name: "Bo", duty: .on), into: ducks)
+        #expect(Set(RoomRoster.visible(ducks, query: "", now: now).map(\.id)) == ["a", "b"])
+        #expect(DuckAction.duty(duck: "b", on: true).request.path == "/native/ducks/b/duty")
+        #expect(RoomRoster.header(RoomRoster.roster(ducks, now: now).available.count) == "Ducks \u{00B7} 2")
+    }
+
     @Test func tiesAreByNameThenId() {
         let r = RoomRoster.roster([PondDuck(id: "2", name: "zed"), PondDuck(id: "1", name: "Amy")], now: now)
         #expect(r.onDuty.map(\.name) == ["Amy", "zed"])

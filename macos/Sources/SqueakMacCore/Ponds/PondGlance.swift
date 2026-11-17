@@ -57,14 +57,14 @@ public struct PondGlance: Equatable, Sendable {
             guard state == .needsYou || state == .working else { continue }
             let key = t.sessionId.flatMap { localByHostId[$0] }
             let own = me.map { t.starter == $0 } ?? false
-            rows.append((NowRow(id: "pond:\(t.id)", title: t.title.isEmpty ? "A thread" : t.title,
+            rows.append((NowRow(id: "pond:\(t.id)", title: t.title.isEmpty ? "A duck" : t.title,
                                 owner: own ? "You" : (t.starterName.isEmpty ? "Someone" : t.starterName),
                                 state: state, localKey: key, threadId: t.id), t.updatedAt ?? .distantPast))
         }
         for f in localOnly {
             let state: PondThreadState = f.looping ? .needsYou : PondThreadState(f.state)
             guard state == .needsYou || state == .working else { continue }
-            rows.append((NowRow(id: "local:\(f.key.hostSessionId)", title: f.title.isEmpty ? "A thread" : f.title, owner: "You",
+            rows.append((NowRow(id: "local:\(f.key.hostSessionId)", title: f.title.isEmpty ? "A duck" : f.title, owner: "You",
                                 state: state, localKey: f.key, threadId: nil), f.lastActivityAt ?? .distantPast))
         }
         rows.sort {
@@ -122,8 +122,8 @@ public struct PondGlance: Equatable, Sendable {
 
     static func personLine(working: [String], needsYou: Int, online: Bool, lastSeen: Date?, now: Date) -> String {
         if working.count == 1 { return "Working on \(working[0])" }
-        if working.count > 1 { return "\(working.count) threads working" }
-        if needsYou > 0 { return needsYou == 1 ? "1 thread needs them" : "\(needsYou) threads need them" }
+        if working.count > 1 { return "\(working.count) ducks working" }
+        if needsYou > 0 { return needsYou == 1 ? "1 duck needs them" : "\(needsYou) ducks need them" }
         if online { return "Online" }
         if let lastSeen { return "Last seen \(PondMembers.ago(lastSeen, now: now))" }
         return "Away"

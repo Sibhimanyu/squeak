@@ -9,18 +9,18 @@ public enum PondPresets {
     public static func presets(ownThreads: Bool) -> [Preset] {
         [
             Preset(key: "viewer", title: "Viewer: reads only"),
-            Preset(key: "member", title: "Member: messages shared threads"),
-            Preset(key: "collaborator", title: ownThreads ? "Collaborator: also runs their own agent" : "Collaborator: can start threads on the owner\u{2019}s Mac"),
+            Preset(key: "member", title: "Member: messages shared ducks"),
+            Preset(key: "collaborator", title: ownThreads ? "Collaborator: also runs their own agent" : "Collaborator: can start ducks on the owner\u{2019}s Mac"),
         ]
     }
 
     public static func switches(ownThreads: Bool) -> [Switch] {
         [
-            Switch(key: "see", title: "Can see threads"),
+            Switch(key: "see", title: "Can see ducks"),
             Switch(key: "diffs", title: "Can see changes"),
             Switch(key: "message", title: "Can message"),
             Switch(key: "answer", title: "Can answer questions"),
-            Switch(key: "start", title: ownThreads ? "Can start their own threads" : "Can start threads on the owner\u{2019}s Mac"),
+            Switch(key: "start", title: ownThreads ? "Can start their own ducks" : "Can start ducks on the owner\u{2019}s Mac"),
         ]
     }
 

@@ -47,9 +47,9 @@ public struct ThreadAccess: Sendable, Equatable {
         self.role = role
         let mine = me != nil && starter == me
         if mine { restriction = nil }
-        else if let me, deny.contains(me) { restriction = "\(starterName.isEmpty ? "The starter" : starterName) doesn\u{2019}t let you message this thread." }
+        else if let me, deny.contains(me) { restriction = "\(starterName.isEmpty ? "The starter" : starterName) doesn\u{2019}t let you message this duck." }
         else if caps?.message == false { restriction = "The owner has turned off messaging for you in this pond." }
-        else if locked, me == nil || !allow.contains(me!) { restriction = "This thread is read-only: its starter locked it." }
+        else if locked, me == nil || !allow.contains(me!) { restriction = "This duck is read-only: its starter locked it." }
         else { restriction = nil }
         self.answerRestriction = mine ? nil : (caps?.answer == false ? "The owner has turned off answering questions for you in this pond." : restriction)
         self.isMine = me != nil && starter == me
@@ -66,7 +66,7 @@ public struct ThreadAccess: Sendable, Equatable {
         if !role.canMessage { return .watchOnly(line: Self.watchLine) }
         if let restriction { return .watchOnly(line: restriction) }
         if asks == false, !isMine {
-            return .closed(reason: "Only \(starter) can message this thread while it runs without asking.")
+            return .closed(reason: "Only \(starter) can message this duck while it runs without asking.")
         }
         return .open(placeholder: working ? "Message, \u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer" : "Message")
     }
@@ -83,13 +83,13 @@ public struct ThreadAccess: Sendable, Equatable {
                 if let why = answerRestriction { return Gate(enabled: false, tooltip: why, visible: true) }
                 if restriction != nil, !isMine, asks != false { return Gate(enabled: true, tooltip: nil, visible: true) }
             }
-            return Gate(enabled: ok, tooltip: ok ? nil : (restriction ?? (role.canMessage ? "Only \(starter) can message this thread while it runs without asking." : Self.watchLine)), visible: true)
+            return Gate(enabled: ok, tooltip: ok ? nil : (restriction ?? (role.canMessage ? "Only \(starter) can message this duck while it runs without asking." : Self.watchLine)), visible: true)
         case .viewChanges:
             return Gate(enabled: true, tooltip: nil, visible: true)
         case .approve:
-            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can approve on their thread", visible: true)
+            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can approve on their duck", visible: true)
         case .stop:
-            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can stop on their thread", visible: true)
+            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can stop on their duck", visible: true)
         case .togglePrivate:
             return Gate(enabled: isMine, tooltip: nil, visible: isMine)
         }
@@ -104,7 +104,7 @@ public enum ThreadOwnership {
     public static func line(starterName: String, isMine: Bool) -> String? {
         guard !isMine else { return nil }
         let name = starterName.trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? "A teammate\u{2019}s thread \u{00B7} runs on their Mac" : "\(name)\u{2019}s thread \u{00B7} runs on their Mac"
+        return name.isEmpty ? "A teammate\u{2019}s duck \u{00B7} runs on their Mac" : "\(name)\u{2019}s duck \u{00B7} runs on their Mac"
     }
 
     /// What a tab shows beside its title for a thread that is not mine: the starter's avatar. Nil for mine.
@@ -114,7 +114,7 @@ public enum ThreadOwnership {
 
     /// The tab's tooltip: its title, then the ownership line.
     public static func tabHelp(title: String, starterName: String, isMine: Bool) -> String {
-        [title.isEmpty ? "Thread" : title, line(starterName: starterName, isMine: isMine)].compactMap { $0 }.joined(separator: "\n")
+        [title.isEmpty ? "Duck" : title, line(starterName: starterName, isMine: isMine)].compactMap { $0 }.joined(separator: "\n")
     }
 }
 

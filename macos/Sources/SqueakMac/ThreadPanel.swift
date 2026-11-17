@@ -14,7 +14,7 @@ struct ThreadPanel: View {
             content(session).heresayPrivate().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack {
-                Text("Open a thread to see who is in it and what it is doing.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                Text("Open a duck to see who is in it and what it is doing.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -91,7 +91,7 @@ struct ThreadPanel: View {
                         onSend: { form in await model.answer(form, for: s.key) }, result: display.outcome,
                         answeredElsewhere: display.phase == .answeredElsewhere)
                 } else {
-                    Text(verbatim: s.loopingSentence ?? s.pendingQuestion ?? "Waiting on you. Answer it in the thread.").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    Text(verbatim: s.loopingSentence ?? s.pendingQuestion ?? "Waiting on you. Answer it in the duck.").font(Typo.footnote).foregroundStyle(Theme.muted)
                 }
                 if s.isLoopingNow {
                     Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: s.key.hostSessionId) } }
@@ -166,7 +166,7 @@ struct ThreadPanel: View {
                     Toggle(isOn: Binding(get: { t.isPrivate }, set: { v in Task { await PondsModel.shared.setPrivate(pond: d.pond.id, thread: t.id, isPrivate: v) } })) {
                         Text(verbatim: PondThreadStatus.visibility(isPrivate: t.isPrivate)).font(Typo.body).foregroundStyle(Theme.muted)
                     }
-                    .toggleStyle(.switch).controlSize(.small).help("Private: only you see this thread. Off: the pond sees it.")
+                    .toggleStyle(.switch).controlSize(.small).help("Private: only you see this duck. Off: the pond sees it.")
                 } else if thread == nil, native(s), let key, let pond = PondsModel.shared.pond(key: key), let id = model.hostId(s) {
                     SqueakMenu("Share with \(pond.name)") {
                         Button("Share with the pond") { Task { await PondsModel.shared.share(pond: pond.id, sessionId: id) } }

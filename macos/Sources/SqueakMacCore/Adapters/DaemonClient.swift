@@ -134,8 +134,8 @@ public struct DaemonClient: Sendable {
             if r.status == 401 || r.status == 403 { return .failed(reason: "Squeak rejected the access token") }
             let reply = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
             if reply?["ok"] as? Bool == true { return .done }
-            if r.status == 404 || r.status == 503 { return .failed(reason: "Update the Squeak service on this Mac to archive this thread.") }
-            return .refused(reason: (reply?["error"] as? String) ?? "Squeak couldn't archive that thread.")
+            if r.status == 404 || r.status == 503 { return .failed(reason: "Update the Squeak service on this Mac to archive this duck.") }
+            return .refused(reason: (reply?["error"] as? String) ?? "Squeak couldn't archive that duck.")
         } catch AdapterError.tokenMissing {
             return .failed(reason: "Squeak's access token was not found")
         } catch {

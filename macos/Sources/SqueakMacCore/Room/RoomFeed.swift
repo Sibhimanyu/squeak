@@ -255,7 +255,7 @@ public enum RoomPresentation {
     public static func recipient(_ post: RoomPost, threads: [RoomThread]) -> String? {
         guard let to = post.toSessionId, !to.isEmpty else { return nil }
         let title = threads.first { $0.sessionId == to }?.title
-        return "to \(title.flatMap { $0.isEmpty ? nil : $0 } ?? "a thread")"
+        return "to \(title.flatMap { $0.isEmpty ? nil : $0 } ?? "a duck")"
     }
 
     public static func authorName(_ a: RoomAuthor) -> String {

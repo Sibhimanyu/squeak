@@ -6,7 +6,7 @@ public enum DockPanel: String, Codable, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .thread: return "Thread"
+        case .thread: return "Duck"
         case .pond: return "Pond"
         case .code: return "Code"
         case .terminal: return "Terminal"

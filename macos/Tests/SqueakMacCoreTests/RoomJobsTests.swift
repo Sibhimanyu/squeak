@@ -43,13 +43,13 @@ struct RoomJobsTests {
         let sugg = RoomJobs.line(for: job(suggestion: greeting, candidates: [greeting, RoomJobTarget(sessionId: "s2", title: "Zoom")]))
         #expect(sugg.kind == .suggestion)
         #expect(sugg.lead == "Looks like a job \u{2192}")
-        #expect(sugg.buttons.map(\.title) == ["Go", "New thread", "Just a note"])
+        #expect(sugg.buttons.map(\.title) == ["Go", "New duck", "Just a note"])
         #expect(sugg.buttons.first?.role == .primary)
         #expect(sugg.buttons.first?.action == .go(sessionId: "s1"))
         #expect(sugg.candidates.map(\.sessionId) == ["s2"])
 
         let fresh = RoomJobs.line(for: job())
-        #expect(fresh.kind == .newThread && fresh.targetTitle == "new thread")
+        #expect(fresh.kind == .newThread && fresh.targetTitle == "new duck")
         #expect(fresh.buttons.map(\.title) == ["Start", "Just a note"])
 
         let handed = RoomJobs.line(for: job(status: .handed, handed: RoomJobHandedTo(sessionId: "s1", title: "Greeting Exchange")))

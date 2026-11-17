@@ -216,7 +216,7 @@ public enum SharedThreadRows {
             guard live || recent || t.id == keeping else { return nil }
             let starterName = t.starterName.isEmpty ? (detail.members.first { $0.id == t.starter }?.name ?? "") : t.starterName
             return SharedThreadRow(
-                pondId: detail.pond.id, threadId: t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent,
+                pondId: detail.pond.id, threadId: t.id, title: t.title.isEmpty ? "Untitled duck" : t.title, agent: t.agent,
                 starterId: t.starter, starterName: starterName, state: state, lastActivityAt: at,
                 avatar: PondAvatars.spec(memberId: t.starter, name: starterName), waitingOn: t.waitingOn)
         }

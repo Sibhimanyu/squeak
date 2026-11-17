@@ -15,7 +15,7 @@ struct InlineTitleEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("Thread name", text: $text)
+        TextField("Duck name", text: $text)
             .textFieldStyle(.plain).font(font).foregroundStyle(color).lineLimit(1)
             .focused($focused)
             .padding(.horizontal, 4).padding(.vertical, 1)
@@ -45,7 +45,7 @@ struct InlineTitleEditor: View {
             }
             .onSubmit { model.commitRename(session, typed: text) }
             .onExitCommand { model.cancelRename() }
-            .accessibilityLabel("Thread name")
+            .accessibilityLabel("Duck name")
     }
 }
 

@@ -31,10 +31,10 @@ import Testing
     }
 
     @Test func sharedPondThreadsYouHidSitInTheirPondByHideTime() {
-        let hide = SharedThreadHide(threadId: "x1", pondId: "p1", pondName: "squeak", title: "Their thread", hiddenAt: t(500))
+        let hide = SharedThreadHide(threadId: "x1", pondId: "p1", pondName: "squeak", title: "Their duck", hiddenAt: t(500))
         let groups = ArchivedPage.groups(sessions: [thread("a", "Mine", pond: "squeak", archived: t(100))], shared: [hide])
         #expect(groups.count == 1)
-        #expect(groups[0].entries.map(\.title) == ["Their thread", "Mine"])
+        #expect(groups[0].entries.map(\.title) == ["Their duck", "Mine"])
         #expect(groups[0].entries[0].target == .shared(pondId: "p1", threadId: "x1"))
         #expect(groups[0].entries[1].target == .session(SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "a")))
     }
