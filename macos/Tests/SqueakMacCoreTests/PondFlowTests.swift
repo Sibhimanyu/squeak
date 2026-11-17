@@ -195,3 +195,82 @@ struct PondFlowTests {
         #expect(!InspectorStash.hides(.code) && !InspectorStash.hides(.terminal))
     }
 }
+
+@Suite("Pond drag: following the fingers, committing, the hint")
+struct PondDragTests {
+    private func run(_ steps: [(Double, Double)], current: PondPage = .dashboard, width: Double = 1000, end: Bool = true) -> [PondDrag.Update] {
+        var d = PondDrag(); var out: [PondDrag.Update] = []
+        out += d.feed(dx: 0, dy: 0, phase: .began, momentum: false, current: current, width: width).map { [$0] } ?? []
+        for s in steps { out += d.feed(dx: s.0, dy: s.1, phase: .changed, momentum: false, current: current, width: width).map { [$0] } ?? [] }
+        if end { out += d.feed(dx: 0, dy: 0, phase: .ended, momentum: false, current: current, width: width).map { [$0] } ?? [] }
+        return out
+    }
+
+    @Test func offsetIsHalfTheFingersAndCapped() {
+        #expect(PondDrag.offset(delta: -100, width: 1000, page: .dashboard) == -50)
+        #expect(PondDrag.offset(delta: -2000, width: 1000, page: .dashboard) == -400)
+        #expect(PondDrag.offset(delta: 100, width: 1000, page: .room) == 50)
+    }
+
+    @Test func noPageMeansResistance() {
+        // Fingers right on the Dashboard: nothing there, a third of the following and a small cap.
+        #expect(PondDrag.offset(delta: 100, width: 1000, page: .dashboard) == 15)
+        #expect(PondDrag.offset(delta: 5000, width: 1000, page: .dashboard) == 60)
+        #expect(PondDrag.offset(delta: -5000, width: 1000, page: .room) == -60)
+    }
+
+    @Test func progressAndLayout() {
+        #expect(PondDrag.progress(offset: -400, width: 1000, page: .dashboard) == 1)
+        #expect(PondDrag.progress(offset: -200, width: 1000, page: .dashboard) == 0.5)
+        #expect(PondDrag.progress(offset: 15, width: 1000, page: .dashboard) == 0)
+        let rest = PondDrag.layout(of: .room, current: .dashboard, offset: 0, width: 1000)
+        #expect(rest.x == 1000 && rest.opacity == 0)
+        let mid = PondDrag.layout(of: .room, current: .dashboard, offset: -200, width: 1000)
+        #expect(mid.x == 500 && mid.opacity == 0.5)
+        #expect(PondDrag.layout(of: .dashboard, current: .dashboard, offset: -200, width: 1000).opacity == 0.75)
+        #expect(PondDrag.layout(of: .dashboard, current: .room, offset: 200, width: 1000).x == -500)
+        #expect(PondDrag.layout(of: .dashboard, current: .room, offset: 0, width: 1000).x == -1000)
+    }
+
+    @Test func pastThresholdCommitsOnEndNotBefore() {
+        let out = run([(-30, 0), (-30, 0), (-30, 0)])
+        #expect(out.last == .commit(.room))
+        #expect(!out.dropLast().contains(.commit(.room)))
+        #expect(out.first == .track(-15))
+    }
+
+    @Test func shortSwipeSettles() {
+        let out = run([(-30, 0), (-20, 0)])
+        #expect(out.last == .settle)
+    }
+
+    @Test func rightFingersGoToDashboardAndTargetShownIsNothing() {
+        #expect(run([(100, 0)], current: .room).last == .commit(.dashboard))
+        // Dashboard and fingers right: it tracks with resistance, then settles.
+        #expect(run([(100, 0)], current: .dashboard).last == .settle)
+    }
+
+    @Test func verticalScrollSettlesAndNeverCommits() {
+        let out = run([(-10, 0), (-5, 40), (-100, 10)])
+        #expect(out.contains(.settle))
+        #expect(!out.contains(.commit(.room)))
+    }
+
+    @Test func momentumIsIgnored() {
+        var d = PondDrag()
+        #expect(d.feed(dx: -300, dy: 0, phase: .changed, momentum: true, current: .dashboard, width: 1000) == nil)
+    }
+
+    @Test func hintNudgesFirstThreeVisitsOnly() {
+        #expect(PondSwipeHint(visits: 1).nudges(reduceMotion: false))
+        #expect(PondSwipeHint(visits: 3).nudges(reduceMotion: false))
+        #expect(!PondSwipeHint(visits: 4).nudges(reduceMotion: false))
+        #expect(!PondSwipeHint(visits: 1).nudges(reduceMotion: true))
+    }
+
+    @Test func wordHidesAfterThreeSwipes() {
+        #expect(PondSwipeHint(swipes: 2).showsWord)
+        #expect(!PondSwipeHint(swipes: 3).showsWord)
+        #expect(PondSwipeHint.stretch(progress: 1) > PondSwipeHint.stretch(progress: 0.5))
+    }
+}

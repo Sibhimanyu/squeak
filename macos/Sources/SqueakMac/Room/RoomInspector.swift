@@ -5,10 +5,13 @@ import SwiftUI
 // The room's right column (draft A): People, then Ducks with role and presence; below, Invite by email and Pond controls.
 // Only rows with a real setting behind them.
 
+/// The pond inspector: one column beside both pond pages, in place while the centre slides. Its sections follow the page
+/// (`PondInspectorSections`); the shared ones keep their identity and move, Ducks cross-fades.
 struct RoomInspector: View {
     let key: String
     let room: PondRoomModel
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editing: DuckEdit?
     @State private var showOff = false
     @State private var adding = false
@@ -24,16 +27,27 @@ struct RoomInspector: View {
     private var me: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
 
     var body: some View {
+        let page = RoomViewPref.shared.mode(for: key)
+        let sections = PondInspectorSections.sections(for: page, canInvite: role.canInvite)
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                ducksList
-                flock
-                if role.canInvite { invite }
-                controls
+                ForEach(sections) { section in
+                    view(for: section, page: page).transition(.opacity)
+                }
             }
             .padding(.horizontal, Space.xl).padding(.vertical, Space.xl)
+            .animation(reduceMotion ? nil : Motion.emphasis, value: page)
         }
         .background(Theme.bg)
+    }
+
+    @ViewBuilder private func view(for section: PondInspectorSection, page: PondPage) -> some View {
+        switch section {
+        case .ducks: ducksList
+        case .people: flock
+        case .invite: invite(page: page)
+        case .controls: controls
+        }
     }
 
     private func heading(_ t: String, trailing: String? = nil) -> some View {
@@ -51,41 +65,13 @@ struct RoomInspector: View {
             .accessibilityAddTraits(.isHeader)
     }
 
+    /// People: the pond's members with role, presence and, for those who may, role changes and removal (the Dashboard's Flock,
+    /// moved here).
     private var flock: some View {
-        let presence = detail?.presence ?? []
-        let members = detail.map { PondFlock.ordered($0.members, presence: presence) }
-            ?? [FlockMember(id: "me", name: me, role: .owner, nest: "This Mac", online: true, you: true)]
-        let waiting = PondInvites.rows(detail?.invites ?? [], now: Date()).filter(\.pending)
-        let offline = ponds.freshness(pond).isProblem
-        return VStack(alignment: .leading, spacing: 4) {
-            label("People", members.count)
-            ForEach(members) { m in
-                let online = PondFlock.isOnline(m, presence: presence) && !offline
-                HStack(spacing: 11) {
-                    PersonAvatar(name: m.name, size: 34)
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: m.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                            if m.you { Text("You").font(.system(size: 11)).foregroundStyle(Theme.subtle) }
-                        }
-                        Text(verbatim: m.you ? PondMembers.chip(m) : [PondMembers.chip(m), online ? "online" : nil].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                            .font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                }
-                .padding(.horizontal, 6).padding(.vertical, 7)
-                .accessibilityElement(children: .combine)
-            }
-            ForEach(waiting) { r in
-                HStack(spacing: 11) {
-                    PersonAvatar(name: r.title, size: 34)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(verbatim: r.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
-                        Text("Invited \u{00B7} waiting").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, 6).padding(.vertical, 7)
-                .accessibilityElement(children: .combine)
-            }
+        let count = detail?.members.count ?? 1
+        return VStack(alignment: .leading, spacing: 6) {
+            label("People", count)
+            PondFlockSection(key: key, dashboard: true, showsHeading: false)
         }
     }
 
@@ -161,15 +147,14 @@ struct RoomInspector: View {
         case .noJob: notice = notice == d.id ? nil : d.id
         case .open(let sessionId):
             notice = nil
-            guard model.allSessions.contains(where: { $0.key.hostSessionId == sessionId && $0.source == .squeak }) else { return }
-            model.openFromPond(.duck(sessionId), pond: key, page: .room)
+            guard model.openFromPond(.duck(sessionId), pond: key, page: .room) else { return }
             if !d.onDuty { Task { await roster.perform(.duty(duck: d.id, on: true), host: model.nativeHost) } }
         }
     }
 
     // MARK: Invite
 
-    private var invite: some View {
+    private func invite(page: PondPage) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             heading("Invite")
             HStack(spacing: 8) {
@@ -186,6 +171,7 @@ struct RoomInspector: View {
                 Button(inviting ? "Inviting\u{2026}" : "Invite", action: send).buttonStyle(SecondaryButtonStyle())
                     .disabled(inviting || !(pond.map { ponds.freshness($0).canWrite } ?? true))
             }
+            if page == .dashboard, let pond, !pond.local { PondInvitesSection(pond: pond) }
         }
     }
 

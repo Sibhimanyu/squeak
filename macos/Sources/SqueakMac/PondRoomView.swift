@@ -179,6 +179,7 @@ struct PondRoomView: View {
     @State private var atBottom = true
     @State private var unseen = 0
     @State private var ledger = RoomFadeLedger()
+    @State private var openNote: String?
 
     private var room: PondRoomModel { PondRoomStore.shared.model(for: projectId) }
 
@@ -187,6 +188,13 @@ struct PondRoomView: View {
         VStack(spacing: 0) {
             if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset) }
             content(room)
+        }
+        .overlay(alignment: .top) {
+            if let openNote {
+                Text(verbatim: openNote).font(.system(size: 12)).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 12).padding(.vertical, 6).background(Theme.surface, in: Capsule())
+                    .padding(.top, Metrics.header + 8).transition(.opacity).accessibilityAddTraits(.isStaticText)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
@@ -275,20 +283,26 @@ struct PondRoomView: View {
 
     // MARK: Actions
 
-    private func session(_ id: String) -> HostSession? {
-        model.allSessions.first { $0.key.hostSessionId == id && $0.source == .squeak }
-    }
+    private func session(_ id: String) -> HostSession? { model.pondDuckSession(id) }
 
     /// Opens the duck's tab; an off-duty duck goes back on duty. Closing the tab comes back to the room.
     private func openThread(_ sessionId: String) { openTarget(.duck(sessionId)) }
 
-    /// A duck's tab, or its tab with its ducklings' tabs (`PondClick` decides which).
+    /// A duck's tab, or its tab with its ducklings' tabs (`PondClick` decides which). When no chat is known for the duck
+    /// a small note says so instead of nothing happening.
     private func openTarget(_ target: PondOpenTarget) {
-        let sessionId = target.duck
-        guard session(sessionId) != nil else { return }
-        model.openFromPond(target, pond: key, page: .room)
-        if room.feed.threads.first(where: { $0.sessionId == sessionId })?.onDuty == false {
-            Task { await room.setDuty(sessionId: sessionId, on: true, host: model.nativeHost) }
+        let threads = room.feed.threads
+        let plan = PondOpenResolver.plan(target, known: model.allSessions.filter { $0.source == .squeak }.map(\.key.hostSessionId),
+                                         onDuty: { id in threads.first { $0.sessionId == id }?.onDuty })
+        guard plan.sessionId != nil, model.openFromPond(target, pond: key, page: .room) else {
+            let name = threads.first { $0.sessionId == target.duck }?.title
+            openNote = PondOpenResolver.failureNote(name: name)
+            Task { try? await Task.sleep(for: .seconds(4)); openNote = nil }
+            return
+        }
+        openNote = nil
+        if plan.putOnDuty, let id = plan.sessionId {
+            Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
         }
     }
 

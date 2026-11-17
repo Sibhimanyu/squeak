@@ -220,3 +220,32 @@ public struct DuckClient: Sendable {
         init(from decoder: Decoder) throws { duck = try? PondDuck(from: decoder) }
     }
 }
+
+/// The pond inspector's sections per page (Dashboard and Room share one column that stays put while the centre slides).
+/// A section's id is its identity: the ones both pages list keep it across a swipe and move to their new position, a
+/// page-only one (Ducks) cross-fades in or out.
+public enum PondInspectorSection: String, Sendable, Equatable, CaseIterable, Identifiable {
+    case ducks, people, invite, controls
+    public var id: String { rawValue }
+}
+
+public enum PondInspectorSections {
+    /// Top to bottom. Dashboard: People, Invite, Pond controls. Room: Ducks, People, Invite, Pond controls. Invite only for
+    /// a role that may invite.
+    public static func sections(for page: PondPage, canInvite: Bool) -> [PondInspectorSection] {
+        var s: [PondInspectorSection] = page == .room ? [.ducks] : []
+        s.append(.people)
+        if canInvite { s.append(.invite) }
+        s.append(.controls)
+        return s
+    }
+
+    /// The sections that keep their identity when the page changes.
+    public static func shared(canInvite: Bool) -> [PondInspectorSection] {
+        let d = sections(for: .dashboard, canInvite: canInvite), r = sections(for: .room, canInvite: canInvite)
+        return d.filter(r.contains)
+    }
+
+    /// The widest the Dashboard's own content gets: it shows streams, threads and work, centred.
+    public static let dashboardContentWidth = 740.0
+}

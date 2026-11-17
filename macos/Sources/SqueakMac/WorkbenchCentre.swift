@@ -38,7 +38,8 @@ struct WorkbenchCentre: View {
         let chat = (showingCompose || model.navFilter == .usage) ? nil : model.selectedSession
         // The workspace's open files (Files tab), which sit in the tab strip beside its chats.
         let files = chat?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
-        let place = chat.flatMap { model.sidebarTree.place(of: $0.key) }
+        // A chat the active list does not carry (an earlier duck opened from the pond) still has its place, so its tab shows.
+        let place = chat.flatMap { model.sidebarTree.place(of: $0.key) ?? model.pondPageTree.place(of: $0.key) }
         VStack(spacing: 0) {
             if let chat {
                 WorkbenchHeader(

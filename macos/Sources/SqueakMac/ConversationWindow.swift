@@ -99,11 +99,11 @@ struct ConversationView: View {
     /// The room inspector is open on arrival; hiding it is remembered for this app session only.
     @State private var roomInspectorOpen = true
 
-    /// The pond room on screen, if any: its project id and the pond's directory key (the pond page's Room view).
+    /// The pond page on screen (Dashboard or Room), if any: its project id and the pond's directory key.
     private var roomContext: (projectId: String, key: String)? {
         guard InspectorStash.roomEnabled else { return nil }
         if let route = PondsModel.shared.route {
-            guard case .home(let key) = route, RoomViewPref.shared.mode(for: key) == .room else { return nil }
+            guard case .home(let key) = route else { return nil }
             if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
             return PondsModel.shared.native(key: key).map { ($0.id, key) }
         }

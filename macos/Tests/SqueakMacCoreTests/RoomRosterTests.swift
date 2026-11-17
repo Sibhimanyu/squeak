@@ -91,3 +91,17 @@ import Testing
         #expect(RoomRoster.jobMessage(duckName: "Ada", text: " fix it ") == "@Ada fix it" && RoomRoster.jobMessage(duckName: "Ada", text: " ") == nil)
     }
 }
+
+@Suite struct PondInspectorSectionsTests {
+    @Test func sectionsPerPage() {
+        #expect(PondInspectorSections.sections(for: .dashboard, canInvite: true) == [.people, .invite, .controls])
+        #expect(PondInspectorSections.sections(for: .room, canInvite: true) == [.ducks, .people, .invite, .controls])
+        #expect(PondInspectorSections.sections(for: .room, canInvite: false) == [.ducks, .people, .controls])
+    }
+
+    @Test func sharedSectionsKeepIdentityAndDucksIsRoomOnly() {
+        #expect(PondInspectorSections.shared(canInvite: true) == [.people, .invite, .controls])
+        #expect(!PondInspectorSections.sections(for: .dashboard, canInvite: true).contains(.ducks))
+        #expect(PondInspectorSections.sections(for: .room, canInvite: true).first == .ducks)
+    }
+}

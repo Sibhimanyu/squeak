@@ -95,21 +95,12 @@ struct PondHomeView: View {
                     header
                     overview(layout, compact: geometry.size.width < 650)
                     if !joins.isEmpty { joinsGroup(joins) }
-                    let columns = geometry.size.width >= 900
-                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
-                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 28))
-                    columns {
-                        threads(layout).frame(maxWidth: .infinity, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 28) {
-                            PondFlockSection(key: key, dashboard: true)
-                            if let pond, role.canInvite, !pond.local { PondInvitesSection(pond: pond) }
-                            ripples
-                        }
-                        .frame(width: geometry.size.width >= 900 ? 260 : nil, alignment: .leading)
-                    }
+                    // The people, invites and pond controls live in the inspector beside this page (`PondInspector`).
+                    threads(layout).frame(maxWidth: .infinity, alignment: .leading)
+                    ripples
                 }
                 .padding(geometry.size.width < 600 ? 20 : 32)
-                .frame(maxWidth: 1200, alignment: .leading).frame(maxWidth: .infinity)
+                .frame(maxWidth: PondInspectorSections.dashboardContentWidth, alignment: .leading).frame(maxWidth: .infinity)
                 .background(ScrollMemory(id: "pond:\(key):dashboard"))
             }
         }
