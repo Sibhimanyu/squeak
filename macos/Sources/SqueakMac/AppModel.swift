@@ -1670,8 +1670,11 @@ final class AppModel {
 
     /// A native chat's status from its stream, in the sidebar at once (the catalog read it triggers lands later).
     func applyHostStatus(_ key: SessionKey, _ state: SessionState) {
-        guard let i = hostSessions.firstIndex(where: { $0.key == key }), hostSessions[i].state != state else { return }
-        hostSessions[i].state = state
+        guard let i = hostSessions.firstIndex(where: { $0.key == key }) else { return }
+        // A stream "idle" (also sent on every reconnect) must not turn a finished chat back into an idle one.
+        let next = HostStatusMerge.next(current: hostSessions[i].state, fromStream: state)
+        guard hostSessions[i].state != next else { return }
+        hostSessions[i].state = next
     }
 
     /// The state the chat shows: the host's, but working from the moment of a send newer than what the host last said.
