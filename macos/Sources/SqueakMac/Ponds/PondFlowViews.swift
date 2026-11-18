@@ -83,14 +83,59 @@ final class PondPanState {
     private(set) var restPage = PondPage.dashboard
     private var glide: (from: Double, to: Double, start: CFTimeInterval, duration: Double)?
     private var token = 0
+    /// The overlay that moves two bitmaps of the pages (`PondSnapshotStrip`). While `snapshotActive` it alone follows the
+    /// fingers and the finish; the live pages do not move until it is done.
+    weak var strip: PondSnapshotStrip?
+    private(set) var snapshotActive = false
+    /// Set for a moment while a page is captured: the pages lay out as if this one were at rest, the hint hidden.
+    private(set) var staging: PondPage?
 
-    /// The strip's position now, for drawing.
+    /// The strip's position now, for drawing (the hint reads it).
     var drawn: Double { mode == .rest ? PondDrag.home(restPage) : position }
+    /// Where the live pages sit: still while a snapshot glide moves the bitmaps, `drawn` otherwise.
+    var layoutPosition: Double {
+        if let staging { return PondDrag.home(staging) }
+        return snapshotActive ? PondDrag.home(restPage) : drawn
+    }
+
+    private func stage(_ page: PondPage?) {
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { staging = page }
+        strip?.sync()
+    }
+
+    /// Captures both pages and shows them on the strip; false (nothing changed) when anything fails, and the live pages
+    /// carry the gesture as before.
+    private func beginSnapshot() -> Bool {
+        guard !Motion.reduceMotion, let strip, !snapshotActive, strip.bounds.width > 1 else { return false }
+        let source = restPage, destination = PondSnapshotPlan.destination(of: source)
+        strip.isHidden = true  // never captured itself
+        stage(source)
+        let a = strip.capture()
+        stage(destination)
+        let b = strip.capture()
+        stage(nil)
+        let ok = PondSnapshotPlan.usable(
+            width: Double(strip.bounds.width), height: Double(strip.bounds.height),
+            capturedBoth: a?.cgImage != nil && b?.cgImage != nil,
+            identical: a != nil && b != nil && PondSnapshotStrip.identical(a!, b!))
+        guard ok, let ia = a?.cgImage, let ib = b?.cgImage else { return false }
+        strip.show(images: [source: ia, destination: ib], rest: source, position: PondDrag.home(source))
+        snapshotActive = true
+        return true
+    }
+
+    private func endSnapshot() {
+        guard snapshotActive else { return }
+        snapshotActive = false
+        strip?.dismiss()
+    }
 
     /// Where the strip is on screen right now, while a finish is in flight (the animation's own curve, so a grab continues
     /// from the very spot, never from where the finish was going).
     func presented(at now: CFTimeInterval = CACurrentMediaTime()) -> Double {
         guard mode == .gliding, let g = glide else { return drawn }
+        if snapshotActive, let p = strip?.presentedPosition() { return p }
         let t = g.duration > 0 ? (now - g.start) / g.duration : 1
         return g.from + (g.to - g.from) * SwipeCurve.value(t)
     }
@@ -98,7 +143,12 @@ final class PondPanState {
     func mount(page: PondPage) { mode = .rest; restPage = page; glide = nil; token += 1 }
 
     func track(_ p: Double) {
-        if mode != .dragging { mode = .dragging; glide = nil; token += 1 }
+        if mode != .dragging {
+            token += 1
+            if snapshotActive { strip?.freeze() } else if mode == .rest { _ = beginSnapshot() }
+            mode = .dragging; glide = nil
+        }
+        if snapshotActive { strip?.place(position: p) }
         var t = Transaction(); t.disablesAnimations = true
         withTransaction(t) { position = p }
     }
@@ -108,10 +158,23 @@ final class PondPanState {
         let start = from ?? presented()
         token += 1
         let mine = token
+        if !snapshotActive, mode == .rest { _ = beginSnapshot() }
         var t = Transaction(); t.disablesAnimations = true
         withTransaction(t) { mode = .gliding; position = start }
         let target = PondDrag.home(page)
         glide = (start, target, CACurrentMediaTime(), duration)
+        if snapshotActive, let strip, !Motion.reduceMotion {
+            strip.glide(from: start, to: target, duration: duration) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.token == mine else { return }
+                    self.mode = .rest; self.restPage = page; self.glide = nil
+                    self.endSnapshot()
+                }
+            }
+            withAnimation(Motion.swipe(duration: duration)) { position = target }
+            return
+        }
+        if snapshotActive { endSnapshot() }
         withAnimation(Motion.swipe(duration: duration)) { position = target } completion: { [weak self] in
             guard let self, self.token == mine else { return }
             self.mode = .rest; self.restPage = page; self.glide = nil
@@ -125,7 +188,15 @@ final class PondPanState {
         if mode == .rest, restPage == page { return }
         if mode == .gliding, glide?.to == PondDrag.home(page) { return }
         let remaining = abs(PondDrag.home(page) - presented())
-        finish(to: page, duration: SwipeFinish.commitDuration(remainingShare: remaining, width: width, velocity: 0))
+        let duration = SwipeFinish.commitDuration(remainingShare: remaining, width: width, velocity: 0)
+        // The snapshots are taken outside this view update, in the next turn; nothing has moved by then.
+        guard mode == .rest, strip != nil, !Motion.reduceMotion else { finish(to: page, duration: duration); return }
+        token += 1
+        let mine = token
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.token == mine, self.mode == .rest else { return }
+            self.finish(to: page, duration: duration)
+        }
     }
 
     /// First visit: the page slides a little toward the other and eases back, showing the gesture.
@@ -164,9 +235,10 @@ private struct PanPage: ViewModifier {
     let width: CGFloat
 
     func body(content: Content) -> some View {
-        let x = PondDrag.x(of: page, position: state.drawn, width: Double(width))
+        let x = PondDrag.x(of: page, position: state.layoutPosition, width: Double(width))
         content
             .offset(x: x)
+            .zIndex(PondSnapshotPlan.zPosition(of: page, rest: state.restPage))
             .overlay {
                 Theme.bg.opacity(0.28 * min(1, abs(x) / max(1, Double(width)))).allowsHitTesting(false)
             }
@@ -209,11 +281,13 @@ struct PondSpace<Dashboard: View>: View {
                     .allowsHitTesting(page == .room).accessibilityHidden(page != .room)
             }
             .frame(width: w, height: geo.size.height)
+            .overlay { PondSnapshotLayer(state: pan).allowsHitTesting(false) }
             .overlay(alignment: page == .dashboard ? .trailing : .leading) {
                 PondSwipeHintView(
                     state: pan, page: page, hint: PondSwipeHint(visits: visits, swipes: swipes),
                     ripples: PondSwipeHint(visits: visits, swipes: swipes).ripples(reduceMotion: reduceMotion, windowIsKey: activeState == .key)
                 ) { switchTo(page == .dashboard ? .room : .dashboard) }
+                .opacity(pan.staging == nil ? 1 : 0)
             }
             .onAppear { width = Double(w) }
             .onChange(of: w) { _, new in width = Double(new) }
