@@ -32,3 +32,19 @@ public enum TerminalWorkspace {
         return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue
     }
 }
+
+/// Where a terminal opened from a pond page runs: the pond's own folder. A git pond's is its project root (Main), a
+/// plain-folder pond's is the folder; the native project is the source for both, the directory's word the fallback.
+public enum PondTerminal {
+    public static let noFolder = "Can\u{2019}t open a terminal here \u{2014} this pond has no folder on this Mac"
+
+    public static func availability(
+        nativeRoot: String?, directoryFolder: String?, isDirectory: (String) -> Bool = TerminalWorkspace.isDirectoryOnDisk
+    ) -> TerminalWorkspace.Availability {
+        for candidate in [nativeRoot, directoryFolder] {
+            guard let c = candidate, !c.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            if case .available(let f) = TerminalWorkspace.availability(cwd: c, isDirectory: isDirectory) { return .available(folder: f) }
+        }
+        return .unavailable(reason: noFolder)
+    }
+}
