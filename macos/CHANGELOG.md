@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.30.1
+
+- Clicking a duck, in the pond's inspector or in the Room, opens its tab again (it said "Couldn't open").
+- The Dashboard ↔ Room slide is smooth and the same in both directions: the pages move as one picture while you swipe or toggle.
+- + in the pond's inspector opens a terminal there, in the pond's folder.
+- Reopening a long chat and the full-screen controls cost less, so the app stutters less.
+
 ## 2.30.0
 
 **Ponds are a group chat with your ducks.** Threads are now ducks: agent teammates with a name, a role and their own colour.
