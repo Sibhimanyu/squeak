@@ -203,7 +203,7 @@ struct InboxTab: View {
                 if !model.recentChats.isEmpty {
                     Section {
                         NavigationLink(value: HomeRoute.recent) {
-                            Label("Older threads", systemImage: "clock.arrow.circlepath").frame(minHeight: 44)
+                            Label("Older ducks", systemImage: "clock.arrow.circlepath").frame(minHeight: 44)
                         }.tapHaptic(.navigate)
                     }
                 }
@@ -286,7 +286,7 @@ struct SearchTab: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Search")
-            .searchable(text: $query, prompt: "Threads, streams, ponds")
+            .searchable(text: $query, prompt: "Ducks, streams, ponds")
             .onSubmit(of: .search) { remember() }
             .scrollDismissesKeyboard(.interactively)
             .navigationDestination(for: HomeRoute.self) { RouteView(route: $0, path: $nav.search) }
@@ -359,7 +359,7 @@ struct SearchTab: View {
                 }
             }
         }
-        if !found.active.isEmpty { Section("Threads") { threadRows(found.active, recent: false) } }
+        if !found.active.isEmpty { Section("Ducks") { threadRows(found.active, recent: false) } }
         if !found.older.isEmpty { Section("Earlier") { threadRows(found.older, recent: true) } }
     }
 

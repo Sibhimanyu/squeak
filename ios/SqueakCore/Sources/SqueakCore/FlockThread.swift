@@ -49,6 +49,6 @@ public struct FlockThreadDoc: Codable, Equatable, Sendable {
 
     /// What the footer under the composer says: nothing when this person may message, else the Mac's calm reason.
     public var readOnlyReason: String? {
-        access.canMessage ? nil : (access.reason ?? "You can read this thread but not message it.")
+        access.canMessage ? nil : (access.reason ?? "You can read this duck but not message it.")
     }
 }

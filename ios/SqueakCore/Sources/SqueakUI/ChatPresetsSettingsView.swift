@@ -50,7 +50,7 @@ struct ChatPresetsSettingsView: View {
                 Section { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
             }
             Section {} footer: {
-                Text("Shared with your Mac and the web through Squeak. They start Claude threads; Codex threads pick a model.")
+                Text("Shared with your Mac and the web through Squeak. They start Claude ducks; Codex ducks pick a model.")
             }
         }
         .scrollContentBackground(.hidden)

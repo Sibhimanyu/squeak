@@ -23,14 +23,14 @@ struct FlockThreadView: View {
                         header
                         if let doc {
                             if doc.entries.isEmpty {
-                                Text("Nothing in this thread yet.").font(.footnote).foregroundStyle(Theme.muted)
+                                Text("Nothing in this duck yet.").font(.footnote).foregroundStyle(Theme.muted)
                             }
                             ForEach(doc.entries) { entry in FlockRow(entry: entry).id(entry.id) }
                         } else if model.flockLoaded {
-                            Text("Your Mac hasn't sent this thread yet. Open the app on your Mac, then pull to refresh.")
+                            Text("Your Mac hasn't sent this duck yet. Open the app on your Mac, then pull to refresh.")
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         } else {
-                            HStack(spacing: 8) { ProgressView(); Text("Loading the thread").font(.footnote).foregroundStyle(Theme.muted) }
+                            HStack(spacing: 8) { ProgressView(); Text("Loading the duck").font(.footnote).foregroundStyle(Theme.muted) }
                         }
                     }
                     .padding(16)
@@ -61,7 +61,7 @@ struct FlockThreadView: View {
                 Text(reason).font(.footnote).foregroundStyle(Theme.muted)
             } else if doc != nil {
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Message \(doc?.by ?? thread.by)'s thread", text: $draft, axis: .vertical)
+                    TextField("Message \(doc?.by ?? thread.by)'s duck", text: $draft, axis: .vertical)
                         .lineLimit(1...5)
                         .padding(10)
                         .background(Theme.bg.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))

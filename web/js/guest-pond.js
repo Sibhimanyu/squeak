@@ -58,7 +58,7 @@ export class GuestError extends Error {
 /** What a person is told when a thread cannot be messaged (the Mac's sentences, word for word). */
 export const VIEWERS_READ = "Viewers can read but not send.";
 export const noMessageWithoutAsking = (starter) =>
-  `Only ${starter} can message this thread while it runs without asking.`;
+  `Only ${starter} can message this duck while it runs without asking.`;
 
 /** A relay failure as a sentence: a refusal (401/403) and anything else are never shown as `relay list failed: 401`. */
 export function plainRelayError(error) {
@@ -530,7 +530,7 @@ export class GuestPond {
     const members = await this.members();
     const thread = await this.thread(threadId, members);
     const starterKey = thread ? keysOfMember(members.get(thread.starter)) : [];
-    if (!thread || starterKey.length === 0) throw new GuestError("That thread is not shared with the pond.", 404);
+    if (!thread || starterKey.length === 0) throw new GuestError("That duck is not shared with the pond.", 404);
     const events = [];
     // A batch is named `<thread>-<firstSeq>`, so one whose successor starts at or before `after + 1` holds nothing new.
     const batches = (await this.store.list(`channels/${this.record.pondId}/tevents`))
@@ -575,7 +575,7 @@ export class GuestPond {
     if (!["message", "steer", "answer"].includes(input.kind)) throw new GuestError("A guest cannot do that.", 403);
     const members = await this.members();
     const thread = await this.thread(threadId, members);
-    if (!thread) throw new GuestError("That thread is no longer shared with the pond.", 404);
+    if (!thread) throw new GuestError("That duck is no longer shared with the pond.", 404);
     if (input.kind !== "answer" && thread.permissionMode === "bypassPermissions") {
       throw new GuestError(noMessageWithoutAsking(thread.starterName), 403);
     }

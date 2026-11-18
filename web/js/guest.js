@@ -497,7 +497,7 @@ export function startGuest({
     const thread = ui.view.threads.find((x) => x.id === t.id);
     if (!thread) {
       t.gone = true;
-      ui.note = "That thread is no longer shared with the pond.";
+      ui.note = "That duck is no longer shared with the pond.";
       paintPond();
       return;
     }

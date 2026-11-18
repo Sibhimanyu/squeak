@@ -166,7 +166,7 @@ describe("no raw relay error reaches the page", () => {
 describe("what a guest may do, said plainly", () => {
   it("a viewer's and a member's limits, and the waiting copy", () => {
     expect(limitsLine("viewer")).toMatch(/read what's shared, but not send/);
-    expect(limitsLine("member")).toMatch(/Starting threads needs Squeak for Mac/);
+    expect(limitsLine("member")).toMatch(/Starting ducks needs Squeak for Mac/);
     const line = waitingLine("Site", "Sibhi", Date.now() - 120_000, Date.now() + 3600_000);
     expect(line).toContain("You can close this tab");
     expect(line).toContain("Sibhi has to open Squeak on their Mac");
@@ -185,7 +185,7 @@ describe("what a guest may do, said plainly", () => {
     await admit(m, g2);
     await m.owner.updateThread(m.pondId, m.thread.id, { state: "idle", permissionMode: "bypassPermissions" });
     await expect(g2.sendCommand(m.thread.id, { kind: "message", text: "hi" })).rejects.toThrow(
-      "Only Sibhi can message this thread while it runs without asking.",
+      "Only Sibhi can message this duck while it runs without asking.",
     );
     await m.owner.setPresence(m.pondId, {});
     const view = await g2.view();
@@ -223,9 +223,9 @@ describe("the thread screen", () => {
       answered: new Set(),
       pending: [],
     });
-    screen.update(model("Only Sibhi can message this thread while it runs without asking."));
+    screen.update(model("Only Sibhi can message this duck while it runs without asking."));
     const notes = all(screen.node).filter((n) => n.attrs?.role === "alert" || n.className === "g-note");
-    expect(text(screen.node)).toContain("Only Sibhi can message this thread while it runs without asking.");
+    expect(text(screen.node)).toContain("Only Sibhi can message this duck while it runs without asking.");
     expect(text(screen.node)).toContain("Sibhi's Mac is offline");
     expect(notes.length).toBeGreaterThan(0);
     screen.update(model(null));

@@ -55,7 +55,7 @@ describe("what the guest screens say", () => {
     );
     expect(flockLine({ online: true, role: "viewer", nest: null }, ts)).toBe("Online · Viewer · On the web");
     expect(flockLine({ online: false, role: "owner", nest: "m" }, ts)).toBe("Away · Owner · m");
-    expect(pondLine({ members: [1, 2, 3], threads: [1] })).toBe("3 in the flock · 1 thread");
+    expect(pondLine({ members: [1, 2, 3], threads: [1] })).toBe("3 in the flock · 1 duck");
   });
 
   it("says who is answering only when it is someone else", () => {
@@ -68,7 +68,7 @@ describe("what the guest screens say", () => {
   it("blocks the composer for a viewer, and when the chat skips approvals", () => {
     expect(composerBlock("viewer", {})).toMatch(/read but not send/);
     expect(composerBlock("member", { permissionMode: "bypassPermissions", starterName: "Sibhi" })).toMatch(
-      /Only Sibhi can message this thread while it runs without asking/,
+      /Only Sibhi can message this duck while it runs without asking/,
     );
     expect(composerBlock("member", { permissionMode: "default" })).toBeNull();
   });
@@ -291,7 +291,7 @@ describe("the guest page, end to end over the fake relay", () => {
     notice();
     await until(() => !text(root).includes("Sibhi is answering"));
     press("Rewrite");
-    await says("Sent. Waiting for the thread's starter");
+    await says("Sent. Waiting for the duck's starter");
     const seen = [];
     await until(async () => {
       await owner.processCommands(pondId, async ({ cmd }) => void seen.push(cmd));

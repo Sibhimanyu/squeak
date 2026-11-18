@@ -1348,7 +1348,7 @@ function tellHeresay() {
   let main = false;
   if (ui.screen === "paired") {
     const pane = ui.pane === null ? null : isScreen(ui.pane) ? (getScreen(ui.pane)?.title ?? ui.pane) : ui.pane;
-    name = ui.selected ? "Thread" : pane === null ? "Sessions" : pane === "needs" ? "Needs you" : pane;
+    name = ui.selected ? "Duck" : pane === null ? "Sessions" : pane === "needs" ? "Needs you" : pane;
     main = !splashing();
   } else if (ui.screen === "unpaired") {
     const accounts = ui.accountState === "in" || ui.accountState === "out";

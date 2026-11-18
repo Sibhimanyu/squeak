@@ -86,7 +86,7 @@ struct ThreadListPage: View {
             if let target = newThread, model.home.workspaces != nil || model.snapshot?.nativeProjects?.isEmpty == false {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Haptics.play(.tap); starting = true } label: {
-                        Lucide(.squarePen, size: 20, label: "New thread in \(target.stream ?? target.pond)", color: Theme.muted)
+                        Lucide(.squarePen, size: 20, label: "New duck in \(target.stream ?? target.pond)", color: Theme.muted)
                     }
                 }
             }

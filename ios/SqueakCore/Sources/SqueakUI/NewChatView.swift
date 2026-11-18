@@ -354,7 +354,7 @@ private struct CustomizeSheet: View {
                             }
                             .pickerStyle(.segmented).frame(minHeight: 44)
                         }
-                    } header: { header("Model") } footer: { footer("This model leads the thread. More thinking is slower and uses more of your plan.") }
+                    } header: { header("Model") } footer: { footer("This model leads the duck. More thinking is slower and uses more of your plan.") }
                     .listRowBackground(Theme.surface)
                 }
 

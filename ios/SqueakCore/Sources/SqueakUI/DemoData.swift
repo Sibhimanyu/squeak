@@ -610,7 +610,7 @@ enum DemoData {
             id: demo.ponds?.first { $0.name.lowercased() == focus.lowercased() || $0.id == focus }?.id ?? "pond-squeak",
             invites: [.init(label: "Invite for Priya", expiresAt: now(-86_400))],
             waiting: [.init(name: "Priya")],
-            ripples: [.init(text: "Asha started a thread: Retry failed payments", at: now(-3_600), who: "Asha"),
+            ripples: [.init(text: "Asha started a duck: Retry failed payments", at: now(-3_600), who: "Asha"),
                       .init(text: "A stream was archived", at: now(-90_000), who: nil)])
     }
 

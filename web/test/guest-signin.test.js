@@ -367,7 +367,7 @@ describe("emailed-invite plumbing", () => {
     const { macCard, MAC_DOWNLOAD_URL } = await import("../js/guest-view.js");
     let dismissed = 0;
     const node = macCard({ pondName: "Site", onDismiss: () => dismissed++ });
-    expect(text(node)).toContain("Start threads in Site: get Squeak for Mac");
+    expect(text(node)).toContain("Start ducks in Site: get Squeak for Mac");
     const link = all(node).find((n) => n.tag === "a");
     expect(link.attrs?.href ?? link.href).toBe(MAC_DOWNLOAD_URL);
     click(all(node).find((n) => n.tag === "button"));

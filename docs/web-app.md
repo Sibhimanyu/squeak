@@ -194,7 +194,7 @@ member with no Nest (`client: "web"`) and sees its shared threads. They open `ht
   that runs `bypassPermissions`, gets the reason instead of a composer. A question is answered through a hold (30 s, renewed while
   typing); someone else's hold shows "<name> is answering" and disables answering. An approval is shown read-only ("Waiting for <starter>
   to approve"). There is no stop and no approve, and no code pane or file tree. A message stays on screen as "Sent. Waiting for the
-  thread's starter" until the thread's own `user` event arrives; an ambiguous send is never resent, it can be put back in the box.
+  duck's starter" until the duck's own `user` event arrives; an ambiguous send is never resent, it can be put back in the box.
 - **Tests** (`web/test/guest-*.test.js`, with the real relay handler over a fake store, `FlotillaService` as the owner and the engine's
   real crypto): vectors, browser/Node seal-sign-unseal agreement, join -> approve -> read -> message -> the Mac runs it, the fragment and
   secret never in a request, same-origin relative URLs, removal, the stream protocol, the screens driven end to end on a fake DOM, and the
@@ -247,7 +247,7 @@ data-key="pk_..." defer>` (publishable key, app `p_HrZpXXe8cbab`; sites: the Cat
 `squeak-mac.web.app`, now a redirect); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
 defaults. The policy (meta CSP and `firebase.json`) opens `https://heresay-sibhi.web.app` in `script-src` and `connect-src`, and
 `style-src` gains `'unsafe-inline'` because the widget draws in a shadow root with its own `<style>`. `js/heresay.js` is the page's
-only contact (every call is optional and swallows a throw): `setScreen` (Your Macs, Pair, Sessions, Needs you, Thread, Settings,
+only contact (every call is optional and swallows a throw): `setScreen` (Your Macs, Pair, Sessions, Needs you, Duck, Settings,
 Guest pond, Join), `identify` from `/me` (cleared before sign-out), `introduce` once the Your Macs list or the session list (or the
 pond) shows, `nudge` when an error shows, and `reportButton` ("Report this", opens the form as Broken with the failure sentence) in
 `wlError` and the screen-load and diff "Try again" states. Tests: `web/test/heresay.test.js`, `security.test.js`.

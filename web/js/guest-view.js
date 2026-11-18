@@ -89,13 +89,13 @@ function button(label, onClick, { primary = false, quiet = false, type = "button
 
 const GUEST_POINTS = [
   { icon: bellIcon, text: "See what the flock's agents need" },
-  { icon: chatsIcon, text: "Read and message shared threads" },
+  { icon: chatsIcon, text: "Read and message shared ducks" },
   { icon: shieldIcon, text: "The owner lets you in" },
 ];
 const invite = (pondName, ownerName) => ({
   eyebrow: "You're invited to",
   title: pondName || "a pond",
-  detail: ownerName ? `Shared by ${ownerName}` : "A pond is a few people's shared agent threads",
+  detail: ownerName ? `Shared by ${ownerName}` : "A pond is a few people's shared agent ducks",
 });
 const guestCard = (invited, children) => welcomeLayout({ invite: invited, points: GUEST_POINTS, children });
 const OWNER_LETS = "The owner has to let you in. Nothing is shared with you until they do.";
@@ -127,8 +127,8 @@ export function signedInScreen({
       "p",
       { class: "wl-lead" },
       role === "viewer"
-        ? "You'll be able to watch this pond's threads."
-        : "You'll be able to read this pond's shared threads and message them.",
+        ? "You'll be able to watch this pond's ducks."
+        : "You'll be able to read this pond's shared ducks and message them.",
     ),
     h(
       "div",
@@ -243,7 +243,7 @@ export function macCard({ pondName, onDismiss }) {
   return h(
     "aside",
     { class: "g-maccard", "aria-label": "Squeak for Mac" },
-    h("p", null, `Start threads in ${pondName}: get Squeak for Mac`),
+    h("p", null, `Start ducks in ${pondName}: get Squeak for Mac`),
     h(
       "div",
       { class: "wl-actions" },
@@ -301,7 +301,7 @@ export function pondScreen({ view, now, onOpen, onLeave, macPrompt = null }) {
       ),
     ),
     groups.length === 0
-      ? h("p", { class: "g-quiet" }, "No threads are shared with the pond yet.")
+      ? h("p", { class: "g-quiet" }, "No ducks are shared with the pond yet.")
       : groups.map((group) =>
           h(
             "section",
@@ -388,7 +388,7 @@ function questionCard(row, handlers) {
         : someone
           ? someone
           : sent
-            ? "Sent. Waiting for the thread's starter to pass it on."
+            ? "Sent. Waiting for the duck's starter to pass it on."
             : holder
               ? "You're answering."
               : "";
@@ -576,8 +576,8 @@ export function createThreadScreen(handlers) {
                 "p",
                 { class: "g-status" },
                 s.mode === "steer"
-                  ? "Steering. Waiting for the thread's starter."
-                  : "Sent. Waiting for the thread's starter.",
+                  ? "Steering. Waiting for the duck's starter."
+                  : "Sent. Waiting for the duck's starter.",
               ),
         }),
       );

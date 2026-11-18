@@ -458,7 +458,7 @@ function customize() {
           "div",
           { class: "nc-group" },
           h("h2", null, "Model"),
-          h("p", { class: "note" }, "This model leads the thread."),
+          h("p", { class: "note" }, "This model leads the duck."),
           select(
             "Model",
             list.map((m) => [m.id, modelOption(m)]),

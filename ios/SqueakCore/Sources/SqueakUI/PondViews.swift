@@ -54,7 +54,7 @@ struct PondsTab: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Ponds")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, prompt: "Search ponds, streams, threads")
+            .searchable(text: $query, prompt: "Search ponds, streams, ducks")
             .navigationDestination(for: HomeRoute.self) { RouteView(route: $0, path: $nav.ponds) }
             .refreshable { Haptics.play(.refresh); await model.refresh() }
             .toolbar { toolbar }
@@ -82,7 +82,7 @@ struct PondsTab: View {
                         PondRow(item: item)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) { hideButton(item) }
                             .contextMenu {
-                                Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New thread", systemImage: "square.and.pencil") }
+                                Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck", systemImage: "square.and.pencil") }
                                 hideButton(item)
                                 Button { Haptics.play(.navigate); nav.ponds.append(.pond(item.id)) } label: { Label("Open dashboard", systemImage: "rectangle.grid.2x2") }
                             }
@@ -116,7 +116,7 @@ struct PondsTab: View {
             if !model.recentChats.isEmpty, query.isEmpty {
                 Section {
                     NavigationLink(value: HomeRoute.recent) {
-                        Label("Older threads", systemImage: "clock.arrow.circlepath").frame(minHeight: 44)
+                        Label("Older ducks", systemImage: "clock.arrow.circlepath").frame(minHeight: 44)
                     }.tapHaptic(.navigate)
                 }
             }
@@ -148,7 +148,7 @@ struct PondsTab: View {
         if query.isEmpty && label == nil {
             VStack(spacing: 12) {
                 Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
-                Text("No ponds yet. Start a thread on your Mac and its project appears here.").foregroundStyle(Theme.muted)
+                Text("No ponds yet. Start a duck on your Mac and its project appears here.").foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity).padding(.vertical, 32)
@@ -178,7 +178,7 @@ struct PondsTab: View {
         if model.home.workspaces != nil || model.snapshot?.nativeProjects?.isEmpty == false {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Haptics.play(.tap); startingChat = true } label: { Image(systemName: "square.and.pencil") }
-                    .accessibilityLabel("New thread")
+                    .accessibilityLabel("New duck")
             }
         }
     }
@@ -222,7 +222,7 @@ struct PondRow: View {
         var parts: [String] = []
         if item.hidden { parts.append("Hidden") }
         if item.joined { parts.append("Joined") }
-        parts.append(newest ?? "No threads yet")
+        parts.append(newest ?? "No ducks yet")
         if item.shared, item.online > 0 { parts.append("\(item.online) online") }
         return parts.joined(separator: " · ")
     }
@@ -345,7 +345,7 @@ struct PondDashboard: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New thread in this pond", systemImage: "square.and.pencil") }
+                    Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck in this pond", systemImage: "square.and.pencil") }
                     Button { Haptics.play(.tap); model.setPondHidden(item.id, !item.hidden) } label: {
                         Label(item.hidden ? "Unhide pond" : "Hide pond", systemImage: item.hidden ? "eye" : "eye.slash")
                     }
@@ -409,7 +409,7 @@ struct PondDashboard: View {
         .buttonStyle(.press)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(scope.title), \(count)")
-        .accessibilityHint("Opens the threads")
+        .accessibilityHint("Opens the ducks")
     }
 }
 
@@ -449,7 +449,7 @@ struct StreamPage: View {
     var body: some View {
         if let item = model.pondItem(pondId),
            let stream = PondList.streams(item).live.first(where: { $0.id == streamId }) ?? PondList.archivedStreams(item).first(where: { $0.id == streamId }) {
-            ThreadListPage(title: stream.name, sessions: stream.sessions, emptyTitle: "No threads yet", emptyText: "Start one with the pencil.",
+            ThreadListPage(title: stream.name, sessions: stream.sessions, emptyTitle: "No ducks yet", emptyText: "Start one with the pencil.",
                            inPond: true, newThread: NewThreadTarget(pond: item.name, stream: stream.name, workspaceId: stream.id))
         } else {
             ContentUnavailableView("This stream isn't here", systemImage: "arrow.triangle.branch").background(Theme.bg.ignoresSafeArea())
@@ -528,7 +528,7 @@ struct ScopePage: View {
                 .overlay(alignment: .top) {
                     // The first time only: the rest of the pond's threads are on their way from the Mac.
                     if scope == .all, model.pondThreadsLoading {
-                        HStack(spacing: 8) { ProgressView(); Text("Loading all threads").font(.footnote).foregroundStyle(Theme.muted) }
+                        HStack(spacing: 8) { ProgressView(); Text("Loading all ducks").font(.footnote).foregroundStyle(Theme.muted) }
                             .padding(.vertical, 8).padding(.horizontal, 14)
                             .background(.regularMaterial, in: Capsule())
                             .padding(.top, 8)

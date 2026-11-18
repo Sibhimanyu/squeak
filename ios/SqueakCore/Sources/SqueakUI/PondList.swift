@@ -64,7 +64,7 @@ enum PondScope: String, Hashable, CaseIterable {
 
     var title: String {
         switch self {
-        case .all: "All threads"
+        case .all: "All ducks"
         case .needsYou: "Needs you"
         case .working: "Working"
         case .shared: "Shared"
@@ -78,7 +78,7 @@ enum PondOrderMode: Equatable, Sendable {
 }
 
 enum PondList {
-    static func threadCount(_ count: Int) -> String { count == 1 ? "1 thread" : "\(count) threads" }
+    static func threadCount(_ count: Int) -> String { count == 1 ? "1 duck" : "\(count) ducks" }
 
     static func date(_ iso: String?) -> Date? { iso.flatMap(Age.date) }
 

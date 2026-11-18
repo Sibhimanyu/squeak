@@ -64,7 +64,7 @@ struct ChatInfoSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("This thread") {
+                Section("This duck") {
                     row("Agent", Presentation.agentName(session.agent))
                     if let name = session.model { row("Model", [name, session.effort, session.fast == true ? "Fast" : nil].compactMap { $0 }.joined(separator: " · ")) }
                     row("Status", Presentation.status(session).text.isEmpty ? "Idle" : Presentation.status(session).text)
@@ -94,7 +94,7 @@ struct ChatInfoSheet: View {
                     .listRowBackground(Color.clear)
                 }
                 if !others.isEmpty {
-                    Section("Other threads in this pond") {
+                    Section("Other ducks in this pond") {
                         ForEach(others) { other in
                             Button { Haptics.play(.navigate); openThread(other.key) } label: {
                                 SessionRow(session: other, inProject: true)

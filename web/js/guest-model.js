@@ -76,7 +76,7 @@ export function endCopy(status, line, ownerName, pondName = "this pond") {
 /** What this person can and cannot do, said once under the pond's name (never "Nest" or "Flock" jargon). */
 export function limitsLine(role) {
   if (role === "viewer") return "You're a viewer: you can read what's shared, but not send messages.";
-  return "You can read and message shared threads from this browser. Starting threads needs Squeak for Mac.";
+  return "You can read and message shared ducks from this browser. Starting ducks needs Squeak for Mac.";
 }
 
 /** The waiting card's honest words: it survives closing the tab, and nothing tells you when it is decided. */
@@ -113,11 +113,11 @@ export function initialsOf(name) {
 /** The sentence for an invite signed in under the wrong account, naming the (masked) address it is for. */
 export const wrongEmailLine = (masked) => `This invite is for ${masked}. Sign in with that address.`;
 
-/** The pond's header line: "3 in the flock · 5 threads". */
+/** The pond's header line: "3 in the flock · 5 ducks". */
 export function pondLine(view) {
   const people = view.members.length;
   const n = view.threads.length;
-  return `${people} in the flock · ${n} ${n === 1 ? "thread" : "threads"}`;
+  return `${people} in the flock · ${n} ${n === 1 ? "duck" : "ducks"}`;
 }
 
 /** Who is answering a question, when it is someone else: the line to show, or null. */
@@ -130,12 +130,12 @@ export function answeringLine(holds, requestId, meId) {
 export function composerBlock(role, thread, me = null) {
   if (role === "viewer") return "Viewers can read but not send.";
   if (me && thread && thread.starter !== me.id) {
-    if (thread.deny?.includes(me.id)) return `${thread.starterName} doesn't let you message this thread.`;
+    if (thread.deny?.includes(me.id)) return `${thread.starterName} doesn't let you message this duck.`;
     if (me.caps?.message === false) return "The owner has turned off messaging for you in this pond.";
-    if (thread.locked && !thread.allow?.includes(me.id)) return "This thread is read-only: its starter locked it.";
+    if (thread.locked && !thread.allow?.includes(me.id)) return "This duck is read-only: its starter locked it.";
   }
   if (thread?.permissionMode === "bypassPermissions") {
-    return `Only ${thread.starterName} can message this thread while it runs without asking.`;
+    return `Only ${thread.starterName} can message this duck while it runs without asking.`;
   }
   if (thread && thread.starterOnline === false && thread.state !== "idle") return null;
   return null;

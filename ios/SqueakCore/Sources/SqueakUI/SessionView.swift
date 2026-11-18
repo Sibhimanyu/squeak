@@ -115,7 +115,7 @@ struct SessionView: View {
                     Button { Haptics.play(.tap); showingInfo = true } label: { Image(systemName: "info.circle") }
                         .tint(Theme.muted)
                         .accessibilityLabel("Info")
-                        .accessibilityHint("This thread, its changes, helpers and the other threads in its pond")
+                        .accessibilityHint("This duck, its changes, helpers and the other ducks in its pond")
                 }
             }
             // Rename: the Mac can rename a chat its app holds open.
