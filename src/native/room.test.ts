@@ -232,10 +232,79 @@ describe("room turns", () => {
     r.end("t3", 9);
     r.start("t4", "ok go ahead", 5);
     const turns = r.room.turns(r.p.project.id, 0);
-    expect(turns[1]!.answer).toEqual({ letter: "B", question: "Which approach should I take?" });
+    expect(turns[1]!.answer).toEqual({
+      letter: "B",
+      question: "Which approach should I take?",
+      option: "Retry on the server",
+    });
     // t3 follows t2, which offered nothing: not an answer. t4 is plain text.
     expect(turns[2]!.answer).toBeUndefined();
     expect(turns[3]!.answer).toBeUndefined();
+  });
+
+  describe("lettered and numbered picks", () => {
+    const OPTIONS = "Which approach should I take?\n\nA) Retry in the client (recommended)\nB) Retry on the server";
+    const pick = (prompt: string, reply = OPTIONS, early?: string) => {
+      const r = rig();
+      r.start("t1", "which way?", 30);
+      if (early) r.reply("t1", early, 29, "m-early");
+      r.reply("t1", reply, 28);
+      r.end("t1", 28);
+      r.start("t2", prompt, 10);
+      return r.room.turns(r.p.project.id, 0)[1]!.answer;
+    };
+
+    it.each([
+      "B",
+      "b",
+      "B.",
+      "B)",
+      "(b)",
+      "option B",
+      "Option b",
+      "go with B",
+      "B please",
+      "b, please",
+      "I'll take B",
+      "B!",
+    ])("reads %j as option B with its text", (prompt) => {
+      expect(pick(prompt)).toEqual({
+        letter: "B",
+        question: "Which approach should I take?",
+        option: "Retry on the server",
+      });
+    });
+
+    it("reads a number against a numbered list that asks", () => {
+      const reply = "Two ways to go. Which do you want?\n\n1. Retry in the client\n2) Retry on the server\n";
+      for (const p of ["2", "2.", "option 2", "go with 2", "2 please"]) {
+        expect(pick(p, reply)).toEqual({
+          letter: "2",
+          question: "Two ways to go. Which do you want?",
+          option: "Retry on the server",
+        });
+      }
+      expect(pick("1", reply)?.option).toBe("Retry in the client");
+    });
+
+    it("looks back at the turn's earlier text when the closing reply offers nothing", () => {
+      const early =
+        "Before I touch it:\n\nWhich approach should I take?\n\nA) Retry in the client\nB) Retry on the server";
+      expect(pick("A", "Waiting on you.", early)).toEqual({
+        letter: "A",
+        question: "Which approach should I take?",
+        option: "Retry in the client",
+      });
+    });
+
+    it("never guesses: no such option, no options, a summary list, a longer message", () => {
+      expect(pick("C")).toBeUndefined();
+      expect(pick("3", "Which one?\n\n1. One\n2. Two")).toBeUndefined();
+      expect(pick("B", "All done, nothing to choose.")).toBeUndefined();
+      expect(pick("1", "I did this:\n\n1. Ran the tests\n2. Fixed the import\n")).toBeUndefined();
+      expect(pick("B is better but also do C", OPTIONS)).toBeUndefined();
+      expect(pick("a lot", OPTIONS)).toBeUndefined();
+    });
   });
 
   it("a plain page holds the last 24 h and the newest 100 turns; before/since pages follow the posts window", () => {

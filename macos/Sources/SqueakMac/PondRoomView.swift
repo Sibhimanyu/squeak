@@ -113,12 +113,16 @@ final class PondRoomModel {
 
     /// Go, Not now, Start a new duck, Allow, No: shown at once, reconciled by the job the host answers with.
     func act(jobId: String, _ action: RoomJobAction, title: String? = nil, host: NativeHostClient) async {
+        let place = feed.placeToSend(jobId: jobId, action: action)
         feed.beginJob(jobId, action: action, title: title)
-        await perform(jobId, action, host: host)
+        await perform(jobId, action, place: place, host: host)
     }
 
-    private func perform(_ id: String, _ action: RoomJobAction, host: NativeHostClient) async {
-        do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action)) }
+    /// "Change" on a job's place: nothing is sent until Go, Allow or Start.
+    func choosePlace(jobId: String, _ place: RoomJobPlace) { feed.setJobPlace(jobId, place) }
+
+    private func perform(_ id: String, _ action: RoomJobAction, place: RoomJobPlace?, host: NativeHostClient) async {
+        do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action, place: place)) }
         catch { feed.failJob(id, message: RoomJobs.refusal(error)) }
     }
 
@@ -192,6 +196,9 @@ struct PondRoomView: View {
 
     var body: some View {
         let room = room
+        let streams = RoomPlaces.streams(model.git.workspaces, projectId: projectId)
+        let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.branch)
+            + (model.native.projects.first { $0.id == projectId }.map { [$0.defaultBranch] } ?? [])
         VStack(spacing: 0) {
             if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset) }
             content(room)
@@ -208,6 +215,7 @@ struct PondRoomView: View {
         // Files dropped anywhere in the room are attached to the next message.
         .dropDestination(for: URL.self) { urls, _ in room.tray.add(urls); return !urls.isEmpty }
         .task(id: projectId) { await room.run(host: model.nativeHost) }
+        .environment(\.roomPlaceContext, RoomPlaceContext(streams: streams, taken: taken, choose: { id, p in room.choosePlace(jobId: id, p) }))
     }
 
     @ViewBuilder private func content(_ room: PondRoomModel) -> some View {

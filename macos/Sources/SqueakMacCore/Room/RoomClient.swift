@@ -58,9 +58,9 @@ public struct RoomClient: Sendable {
     }
 
     /// Go / New thread / Just a note / Allow / No: `POST .../room/jobs/<id>`. A 409 carries its own sentence.
-    public func act(project: String, jobId: String, action: RoomJobAction) async throws -> RoomJob {
+    public func act(project: String, jobId: String, action: RoomJobAction, place: RoomJobPlace? = nil) async throws -> RoomJob {
         let path = Self.path(project) + "/jobs/" + NativeHostClient.id(jobId)
-        return try Self.job(try await host.call("POST", path, body: action.body, timeout: 20))
+        return try Self.job(try await host.call("POST", path, body: action.body(place: place), timeout: 20))
     }
 
     /// Rename a duck or set its role: `PATCH /native/sessions/<id>/duck { name?, role? }` (null clears). Answers the chosen pair.

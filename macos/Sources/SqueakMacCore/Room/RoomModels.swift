@@ -246,7 +246,16 @@ public struct RoomTurnAuthor: Sendable, Equatable, Decodable {
 public struct RoomTurnAnswer: Sendable, Equatable, Decodable {
     public var letter: String
     public var question: String
-    public init(letter: String, question: String) { self.letter = letter; self.question = question }
+    /// The chosen option's own text, when the host matched it ("A \u{2014} <option>"); nil from an older host.
+    public var option: String?
+    public init(letter: String, question: String, option: String? = nil) { self.letter = letter; self.question = question; self.option = option }
+    private enum CodingKeys: String, CodingKey { case letter, question, option }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        letter = try c.decode(String.self, forKey: .letter)
+        question = try c.decode(String.self, forKey: .question)
+        option = (try? c.decode(String.self, forKey: .option)).flatMap { $0.isEmpty ? nil : $0 }
+    }
 }
 
 /// One turn of a thread (room v2): its id is `<sessionId>:<turnId>` and the same id is updated in place.

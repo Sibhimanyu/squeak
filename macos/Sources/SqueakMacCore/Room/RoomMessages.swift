@@ -41,6 +41,8 @@ public struct RoomOffer: Sendable, Equatable {
     public var note: String?
     public var error: String?
     public var isClaim: Bool
+    /// Where the work happens, with Change; nil when the pond has no streams.
+    public var place: RoomPlaceChip? = nil
 }
 
 public enum RoomPart: Sendable, Equatable {
@@ -89,6 +91,7 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     public var note: String?
     /// The duck whose tab the line opens (a handoff opens the duck it went to); nil for a line about no duck.
     public var opens: String?
+    public var place: RoomPlaceChip? = nil
 }
 
 public enum RoomItem: Sendable, Equatable, Identifiable {
@@ -208,16 +211,16 @@ public enum RoomMessages {
             let at = max(job.createdAt, postAt)
             let local = feed.jobLocal[job.id]
             if let claim = job.claim, claim.status != .denied, job.status == .suggested || job.status == .handed || job.status == .running {
-                if let m = claimMessage(job, claim: claim, local: local, threads: threads, at: max(at, claim.at)) { add(m, order: 2) }
+                if let m = claimMessage(job, claim: claim, local: local, threads: threads, at: max(at, claim.at), place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])) { add(m, order: 2) }
                 if claim.status == .asking { continue }
             }
             switch job.status {
             case .suggested:
                 if let pend = local?.pending, pend == .dismiss { continue }
                 if let s = job.suggestion {
-                    add(offerMessage(job, target: s, local: local, threads: threads, at: at), order: 2)
+                    add(offerMessage(job, target: s, local: local, threads: threads, at: at, place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])), order: 2)
                 } else {
-                    entries.append(Entry(at: at, order: 2, content: .system(noDuckLine(job, local: local, at: at))))
+                    entries.append(Entry(at: at, order: 2, content: .system(noDuckLine(job, local: local, at: at, place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])))))
                 }
             case .failed:
                 let who = job.handedTo.flatMap { h in threads[h.sessionId]?.duckName ?? (h.title.isEmpty ? nil : h.title) } ?? "A duck"
@@ -242,6 +245,7 @@ public enum RoomMessages {
 
     static func promptText(_ t: RoomTurn, feed: RoomFeed) -> String? {
         if let a = t.answer {
+            if let o = a.option?.trimmingCharacters(in: .whitespacesAndNewlines), !o.isEmpty { return "\(a.letter.uppercased()) \u{2014} \(o)" }
             let opts = feed.askOptions[t.sessionId + "|" + a.question]
             if let text = opts?.first(where: { $0.letter.caseInsensitiveCompare(a.letter) == .orderedSame })?.text, !text.isEmpty {
                 return "\(a.letter.uppercased()) \u{2014} \(text)"
@@ -279,7 +283,7 @@ public enum RoomMessages {
         return t.count <= n ? t : String(t.prefix(n - 1)) + "\u{2026}"
     }
 
-    static func offerMessage(_ job: RoomJob, target s: RoomJobTarget, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64) -> RoomMessage {
+    static func offerMessage(_ job: RoomJob, target s: RoomJobTarget, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage {
         let a = RoomMessageAuthor.duck(threads[s.sessionId], sessionId: s.sessionId, fallbackName: s.title, agent: nil)
         let words = s.pitch.map { "I can take this \u{2014} I \($0)." } ?? "I can take this."
         var note: String?
@@ -297,10 +301,10 @@ public enum RoomMessages {
         let others = job.candidates.filter { $0.sessionId != s.sessionId }
         return RoomMessage(
             id: "job:\(job.id):offer", at: at, author: a,
-            parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: others, note: note, error: local?.error, isClaim: false))])
+            parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: others, note: note, error: local?.error, isClaim: false, place: place))])
     }
 
-    static func claimMessage(_ job: RoomJob, claim: RoomJobClaim, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64) -> RoomMessage? {
+    static func claimMessage(_ job: RoomJob, claim: RoomJobClaim, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage? {
         let a = RoomMessageAuthor.duck(threads[claim.sessionId], sessionId: claim.sessionId, fallbackName: claim.title, agent: nil)
         var words = "I\u{2019}d like to take \u{201C}\(shorten(job.text, 80))\u{201D} after this"
         if var e = claim.eta?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
@@ -317,17 +321,17 @@ public enum RoomMessages {
         else if let p = local?.pending, p == .allow || p == .deny { buttons = []; note = p == .allow ? "Allowed" : "Okay, not now" }
         return RoomMessage(
             id: "job:\(job.id):claim", at: at, author: a,
-            parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: [], note: note, error: local?.error, isClaim: true))])
+            parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: [], note: note, error: local?.error, isClaim: true, place: place))])
     }
 
-    static func noDuckLine(_ job: RoomJob, local: RoomJobLocal?, at: Int64) -> RoomSystemLine {
+    static func noDuckLine(_ job: RoomJob, local: RoomJobLocal?, at: Int64, place: RoomPlaceChip? = nil) -> RoomSystemLine {
         var buttons = [
             RoomJobButton(id: "start", title: "Start a new duck", role: .secondary, action: .newThread),
             RoomJobButton(id: "note", title: "Just a note", role: .quiet, action: .dismiss),
         ]
         var note: String?
         if local?.pending == .newThread { buttons = []; note = "Starting a new duck\u{2026}" }
-        return RoomSystemLine(id: "job:\(job.id):sys", at: at, text: "No duck fits this \u{2014}", jobId: job.id, buttons: buttons, error: local?.error, note: note)
+        return RoomSystemLine(id: "job:\(job.id):sys", at: at, text: "No duck fits this \u{2014}", jobId: job.id, buttons: buttons, error: local?.error, note: note, place: place)
     }
 
     private static func assemble(_ entries: [Entry], now: Date, calendar: Calendar) -> [RoomItem] {

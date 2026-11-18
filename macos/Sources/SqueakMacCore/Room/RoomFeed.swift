@@ -38,6 +38,8 @@ public struct RoomFeed: Sendable, Equatable {
     public private(set) var jobLocal: [String: RoomJobLocal] = [:]
     /// Every question seen waiting, by `<sessionId>|<question>`, so a later "A — <option text>" can say what A was.
     public private(set) var askOptions: [String: [RoomAskOption]] = [:]
+    /// A stream or branch the person picked for a job (not yet sent), by job id.
+    public private(set) var jobPlace: [String: RoomJobPlace] = [:]
     private var seen: Set<Int> = []
     private var localCounter = 0
 
@@ -101,13 +103,30 @@ public struct RoomFeed: Sendable, Equatable {
     /// place. An older copy never overwrites a newer one; any copy that lands ends the pending action and its refusal.
     public mutating func upsert(job: RoomJob) {
         if let i = jobs.firstIndex(where: { $0.id == job.id }) {
-            if job.updatedAt >= jobs[i].updatedAt { jobs[i] = job; jobLocal[job.id] = nil }
+            if job.updatedAt >= jobs[i].updatedAt {
+                jobs[i] = job; jobLocal[job.id] = nil
+                if job.status != .suggested { jobPlace[job.id] = nil }
+            }
             return
         }
         let at = jobs.lastIndex { ($0.createdAt, $0.id) <= (job.createdAt, job.id) }.map { $0 + 1 } ?? 0
         jobs.insert(job, at: at)
         jobLocal["msg:" + job.messageId] = nil
         jobLocal[job.id] = nil
+    }
+
+    /// "Change" on a job's place: kept until the job is handed over, sent with Go / Allow / a new duck.
+    public mutating func setJobPlace(_ id: String, _ place: RoomJobPlace?) {
+        jobPlace[id] = place
+        jobLocal[id]?.error = nil
+    }
+
+    /// What goes with an action: the person's pick, else the job's own place (the chip shows it, so it is what happens).
+    public func placeToSend(jobId: String, action: RoomJobAction) -> RoomJobPlace? {
+        switch action {
+        case .go, .newThread, .allow: return jobPlace[jobId] ?? jobs.first { $0.id == jobId }?.place
+        case .dismiss, .deny: return nil
+        }
     }
 
     /// The person pressed something: the line shows it at once.

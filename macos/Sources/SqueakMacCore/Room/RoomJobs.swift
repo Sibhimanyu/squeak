@@ -70,6 +70,35 @@ public struct RoomJobHandedTo: Sendable, Equatable, Decodable {
     }
 }
 
+/// Where a job's work happens: an existing stream of the pond, or a new one on a branch the host will make.
+public enum RoomJobPlace: Sendable, Equatable, Decodable {
+    case stream(workspaceId: String, branch: String)
+    case new(branch: String)
+
+    private enum CodingKeys: String, CodingKey { case kind, workspaceId, branch }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let branch = try c.decode(String.self, forKey: .branch)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "stream": self = .stream(workspaceId: try c.decode(String.self, forKey: .workspaceId), branch: branch)
+        case "new": self = .new(branch: branch)
+        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "kind")
+        }
+    }
+
+    public var branch: String {
+        switch self { case .stream(_, let b), .new(let b): b }
+    }
+
+    /// The strict body shape the host checks: `{kind, workspaceId, branch}` or `{kind, branch}`.
+    public var json: NativeJSON {
+        switch self {
+        case .stream(let w, let b): .object(["kind": .string("stream"), "workspaceId": .string(w), "branch": .string(b)])
+        case .new(let b): .object(["kind": .string("new"), "branch": .string(b)])
+        }
+    }
+}
+
 public struct RoomJob: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var messageId: String
@@ -77,6 +106,8 @@ public struct RoomJob: Sendable, Equatable, Decodable, Identifiable {
     public var status: RoomJobStatus
     public var suggestion: RoomJobTarget?
     public var candidates: [RoomJobTarget]
+    /// Chosen by the host; absent in a plain-folder pond (no streams) and from an older host.
+    public var place: RoomJobPlace?
     public var claim: RoomJobClaim?
     public var handedTo: RoomJobHandedTo?
     public var outcomeText: String?
@@ -86,15 +117,16 @@ public struct RoomJob: Sendable, Equatable, Decodable, Identifiable {
     public init(
         id: String, messageId: String, text: String = "", status: RoomJobStatus = .suggested, suggestion: RoomJobTarget? = nil,
         candidates: [RoomJobTarget] = [], claim: RoomJobClaim? = nil, handedTo: RoomJobHandedTo? = nil, outcomeText: String? = nil,
-        createdAt: Int64 = 0, updatedAt: Int64 = 0
+        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomJobPlace? = nil
     ) {
+        self.place = place
         self.id = id; self.messageId = messageId; self.text = text; self.status = status; self.suggestion = suggestion
         self.candidates = candidates; self.claim = claim; self.handedTo = handedTo; self.outcomeText = outcomeText
         self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, messageId, text, status, suggestion, candidates, claim, handedTo, outcomeText, createdAt, updatedAt
+        case id, messageId, text, status, suggestion, candidates, place, claim, handedTo, outcomeText, createdAt, updatedAt
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -108,6 +140,7 @@ public struct RoomJob: Sendable, Equatable, Decodable, Identifiable {
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         suggestion = try? c.decode(RoomJobTarget.self, forKey: .suggestion)
         candidates = ((try? c.decode([Failable<RoomJobTarget>].self, forKey: .candidates)) ?? []).compactMap(\.value)
+        place = try? c.decode(RoomJobPlace.self, forKey: .place)
         claim = try? c.decode(RoomJobClaim.self, forKey: .claim)
         handedTo = try? c.decode(RoomJobHandedTo.self, forKey: .handedTo)
         outcomeText = (try? c.decode(String.self, forKey: .outcomeText)).flatMap { $0.isEmpty ? nil : $0 }
@@ -133,17 +166,22 @@ public enum RoomJobAction: Sendable, Equatable {
     case allow
     case deny
 
-    public var body: NativeJSON {
+    public var body: NativeJSON { body(place: nil) }
+
+    /// The request body; `place` rides only on Go, a new duck and Allow (the host refuses it elsewhere).
+    public func body(place: RoomJobPlace?) -> NativeJSON {
+        var o: [String: NativeJSON]
         switch self {
         case .go(let id):
-            var o: [String: NativeJSON] = ["action": .string("go")]
+            o = ["action": .string("go")]
             if let id { o["sessionId"] = .string(id) }
-            return .object(o)
-        case .newThread: return .object(["action": .string("new")])
+        case .newThread: o = ["action": .string("new")]
         case .dismiss: return .object(["action": .string("dismiss")])
-        case .allow: return .object(["action": .string("allow")])
+        case .allow: o = ["action": .string("allow")]
         case .deny: return .object(["action": .string("deny")])
         }
+        if let place { o["place"] = place.json }
+        return .object(o)
     }
 }
 
@@ -346,5 +384,107 @@ extension RoomJobs {
         guard var e = eta?.trimmingCharacters(in: .whitespaces), !e.isEmpty else { return "after this turn" }
         if !e.hasPrefix("~") { e = "~" + e }
         return "after this turn, " + e
+    }
+}
+
+// MARK: - Place (where a job's work happens)
+
+/// The chip under an offer: "\u{2192} on <branch>" or "\u{2192} new stream <branch>", with what Change may pick.
+public struct RoomPlaceChip: Sendable, Equatable {
+    public var text: String
+    public var place: RoomJobPlace
+    /// The person picked it here (it differs from what the host chose).
+    public var changed: Bool
+    /// What "New stream\u{2026}" starts with.
+    public var prefill: String
+}
+
+/// One stream of the pond the person may pick.
+public struct RoomStreamChoice: Sendable, Equatable, Identifiable {
+    public var id: String { workspaceId }
+    public var workspaceId: String
+    public var branch: String
+    public var createdAt: Date?
+    public init(workspaceId: String, branch: String, createdAt: Date? = nil) {
+        self.workspaceId = workspaceId; self.branch = branch; self.createdAt = createdAt
+    }
+}
+
+public enum RoomPlaceMenuItem: Sendable, Equatable {
+    case stream(RoomStreamChoice, selected: Bool)
+    /// "New stream\u{2026}": opens an editable branch name, prefilled.
+    case newStream(prefill: String, selected: Bool)
+}
+
+public enum RoomPlaces {
+    /// The place that will be sent: the person's pick, else the host's. Nil hides the chip (a folder pond has no streams).
+    public static func effective(_ job: RoomJob, chosen: RoomJobPlace?) -> RoomJobPlace? { chosen ?? job.place }
+
+    public static func chipText(_ place: RoomJobPlace) -> String {
+        switch place {
+        case .stream(_, let b): "\u{2192} on \(b)"
+        case .new(let b): "\u{2192} new stream \(b)"
+        }
+    }
+
+    public static func chip(for job: RoomJob, chosen: RoomJobPlace?) -> RoomPlaceChip? {
+        guard let p = effective(job, chosen: chosen) else { return nil }
+        return RoomPlaceChip(text: chipText(p), place: p, changed: chosen != nil && chosen != job.place,
+            prefill: suggestedBranch(job: job, chosen: chosen))
+    }
+
+    /// The pond's open streams for the menu, newest first (a stream with no date after the dated ones, then by branch).
+    public static func streams(_ workspaces: [NativeWorkspace], projectId: String) -> [RoomStreamChoice] {
+        workspaces.filter { $0.projectId == projectId && $0.state != "archived" }
+            .map { RoomStreamChoice(workspaceId: $0.id, branch: $0.branch, createdAt: $0.createdAt) }
+            .sorted {
+                switch ($0.createdAt, $1.createdAt) {
+                case (let a?, let b?) where a != b: return a > b
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return $0.branch < $1.branch
+                }
+            }
+    }
+
+    /// The streams, then "New stream\u{2026}". There is no "Main": a pond with no streams has no place at all.
+    public static func menu(streams: [RoomStreamChoice], current: RoomJobPlace?, prefill: String) -> [RoomPlaceMenuItem] {
+        var items: [RoomPlaceMenuItem] = streams.map { s in
+            var on = false
+            if case .stream(let w, _)? = current, w == s.workspaceId { on = true }
+            return .stream(s, selected: on)
+        }
+        var onNew = false
+        if case .new? = current { onNew = true }
+        items.append(.newStream(prefill: prefill, selected: onNew))
+        return items
+    }
+
+    /// The new-stream field's starting text: a new branch already chosen, else the host's suggestion, else one from the job's words.
+    public static func suggestedBranch(job: RoomJob, chosen: RoomJobPlace?) -> String {
+        if case .new(let b)? = chosen { return b }
+        if case .new(let b)? = job.place { return b }
+        return slug(job.text)
+    }
+
+    /// "Fix the login redirect" -> "fix-the-login-redirect" (at most 5 words, 40 characters).
+    public static func slug(_ text: String) -> String {
+        let words = text.lowercased().split(whereSeparator: { !($0.isLetter || $0.isNumber) }).prefix(5)
+        return String(words.joined(separator: "-").prefix(40)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    /// A sentence when the name cannot be a new stream's branch (git's `check-ref-format` rules, plus a name a stream already has); nil when fine.
+    public static func branchProblem(_ raw: String, taken: [String]) -> String? {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Give the stream a name." }
+        if name.count > 200 { return "That name is too long." }
+        let bad = "That isn\u{2019}t a name git accepts."
+        if name == "@" || name.hasPrefix("/") || name.hasSuffix("/") || name.hasSuffix(".") || name.contains("//") || name.contains("..") || name.contains("@{") {
+            return bad
+        }
+        if name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f || " ~^:?*[\\".unicodeScalars.contains($0) }) { return bad }
+        for part in name.split(separator: "/") where part.hasPrefix(".") || part.hasSuffix(".lock") { return bad }
+        if taken.contains(name) { return "A stream is already on \(name)." }
+        return nil
     }
 }

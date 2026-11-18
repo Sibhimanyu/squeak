@@ -524,7 +524,7 @@ RoomThread = { sessionId, title, agent, state: "working"|"waiting"|"idle"|"error
 RoomTurn   = { id: "<sessionId>:<turnId>", sessionId, threadTitle, agent, startedAt, endedAt?,
                outcome?: "finished"|"stopped"|"error",  // absent while running
                prompt /* one line, <= 200 */, author: { kind: "person", name, me },
-               answer?: { letter, question },           // the prompt is a lettered pick of the previous turn's options
+               answer?: { letter, question, option? },  // the prompt picks one of the previous turn's options (A, option B, go with A, B please, 1, 2); option = its text
                outcomeText? /* first sentence of the closing reply, markdown stripped, <= 200 */,
                durationMs?, filesChanged?,
                intent?, progress?: { current, total } } // intent/progress only while running
