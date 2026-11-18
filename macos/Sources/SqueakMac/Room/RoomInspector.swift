@@ -175,7 +175,7 @@ struct RoomInspector: View {
     /// A duck's tab through the same path as a click in the room; the row and its hover Open both land here. A duck with no
     /// session, or whose chat the app cannot find, says so inline instead of doing nothing.
     private func open(_ d: RosterDuck) {
-        let known = model.allSessions.filter { $0.source == .squeak }.map(\.key.hostSessionId)
+        let known = model.allSessions.filter { $0.source == .squeak }.map { NativeAdapter.nativeId($0) ?? $0.key.hostSessionId }
         switch RoomRoster.opening(d, known: known) {
         case .noJob(let line): show(line, for: d)
         case .failed(let line): show(line, for: d)

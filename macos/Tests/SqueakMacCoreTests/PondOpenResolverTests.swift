@@ -74,3 +74,11 @@ struct DuckRosterClickTests {
         #expect(RoomRoster.opening(r, known: ["s-1"]) == .failed("Couldn\u{2019}t open Pip"))
     }
 }
+
+/// The room speaks the host's bare chat id; the app keys Squeak chats as "squeak-native:<id>" (the 2.30.0 "Couldn't open" bug).
+@Test func roomIdsMatchPrefixedAppKeys() {
+    let appKeys = ["squeak-native:a9fef7c6-9f11-42ac-a529-e374270661a8", "claude-terminal:x"]
+    let bare = appKeys.map { $0.hasPrefix(NativeAdapter.keyPrefix) ? String($0.dropFirst(NativeAdapter.keyPrefix.count)) : $0 }
+    #expect(PondOpenResolver.sessionId(for: "a9fef7c6-9f11-42ac-a529-e374270661a8", among: bare) == "a9fef7c6-9f11-42ac-a529-e374270661a8")
+    #expect(PondOpenResolver.sessionId(for: "a9fef7c6-9f11-42ac-a529-e374270661a8", among: appKeys) == nil)
+}

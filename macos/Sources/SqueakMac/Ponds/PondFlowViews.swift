@@ -41,9 +41,11 @@ extension AppModel {
 
     /// The chat a clicked duck id names (a turn id is read as its session), among the Squeak chats the host lists.
     func pondDuckSession(_ clicked: String) -> HostSession? {
+        // The room and the ducks list speak the host's own chat id; the app keys a Squeak chat as `keyPrefix + id`.
         let ducks = allSessions.filter { $0.source == .squeak }
-        guard let id = PondOpenResolver.sessionId(for: clicked, among: Set(ducks.map(\.key.hostSessionId))) else { return nil }
-        return ducks.first { $0.key.hostSessionId == id }
+        let byId = Dictionary(ducks.map { (NativeAdapter.nativeId($0) ?? $0.key.hostSessionId, $0) }, uniquingKeysWith: { a, _ in a })
+        guard let id = PondOpenResolver.sessionId(for: clicked, among: Set(byId.keys)) else { return nil }
+        return byId[id]
     }
 
     /// What a click in the room opens: a duck's tab, or a duck's tab with its ducklings' tabs. False when no chat is known

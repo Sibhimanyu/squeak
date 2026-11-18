@@ -309,7 +309,7 @@ struct PondRoomView: View {
     /// a small note says so instead of nothing happening.
     private func openTarget(_ target: PondOpenTarget) {
         let threads = room.feed.threads
-        let plan = PondOpenResolver.plan(target, known: model.allSessions.filter { $0.source == .squeak }.map(\.key.hostSessionId),
+        let plan = PondOpenResolver.plan(target, known: model.allSessions.filter { $0.source == .squeak }.map { NativeAdapter.nativeId($0) ?? $0.key.hostSessionId },
                                          onDuty: { id in threads.first { $0.sessionId == id }?.onDuty })
         guard plan.sessionId != nil, model.openFromPond(target, pond: key, page: .room) else {
             let name = threads.first { $0.sessionId == target.duck }?.title
