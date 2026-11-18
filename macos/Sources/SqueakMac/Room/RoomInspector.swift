@@ -15,6 +15,7 @@ struct RoomInspector: View {
     @State private var search = ""
     @State private var adding = false
     @State private var notice: String?
+    @State private var noticeLine = RoomRoster.noJobLine
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
@@ -167,19 +168,28 @@ struct RoomInspector: View {
                         if on, roster.error == nil { search = "" }
                     }
                 })
-            if notice == d.id { Text(verbatim: RoomRoster.noJobLine).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.leading, 51).padding(.bottom, 4) }
+            if notice == d.id { Text(verbatim: noticeLine).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.leading, 51).padding(.bottom, 4) }
         }
     }
 
-    /// A duck's tab through the same path as a click in the room; a duck with no session opens nothing.
+    /// A duck's tab through the same path as a click in the room; the row and its hover Open both land here. A duck with no
+    /// session, or whose chat the app cannot find, says so inline instead of doing nothing.
     private func open(_ d: RosterDuck) {
-        switch RoomRoster.click(d) {
-        case .noJob: notice = notice == d.id ? nil : d.id
+        let known = model.allSessions.filter { $0.source == .squeak }.map(\.key.hostSessionId)
+        switch RoomRoster.opening(d, known: known) {
+        case .noJob(let line): show(line, for: d)
+        case .failed(let line): show(line, for: d)
         case .open(let sessionId):
             notice = nil
-            guard model.openFromPond(.duck(sessionId), pond: key, page: .room) else { return }
+            guard model.openFromPond(.duck(sessionId), pond: key, page: .room) else { show(PondOpenResolver.failureNote(name: d.name), for: d); return }
             if !d.onDuty { Task { await roster.perform(.duty(duck: d.id, on: true), host: model.nativeHost) } }
         }
+    }
+
+    private func show(_ line: String, for d: RosterDuck) {
+        noticeLine = line
+        notice = d.id
+        Task { try? await Task.sleep(for: .seconds(4)); if notice == d.id { notice = nil } }
     }
 }
 
@@ -210,6 +220,31 @@ private struct DuckRow: View {
     @State private var hover = false
 
     var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            Button(action: open) { info.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.placeChip ?? ""). \(duck.presenceLine)")
+                .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
+            if hover || !duck.onDuty {
+                HStack(spacing: 2) {
+                    if duck.hasJob && duck.onDuty { hoverButton("Open", action: open) }
+                    hoverButton(duck.onDuty ? "Close" : RoomRoster.bringBackTitle) { duty(!duck.onDuty) }
+                }
+            }
+        }
+        .opacity(duck.onDuty ? 1 : 0.55)
+        .padding(.horizontal, 6).padding(.vertical, 7)
+        .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onHover { hover = $0 }
+        .contextMenu {
+            Button("Rename\u{2026}") { edit(.name) }
+            Button("Set role\u{2026}") { edit(.role) }
+            Divider()
+            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring back") { duty(true) } }
+        }
+    }
+
+    private var info: some View {
         HStack(alignment: .center, spacing: 11) {
             DuckAvatar(sessionId: duck.colourSeed, agent: duck.agent, size: 34, off: !duck.onDuty)
             VStack(alignment: .leading, spacing: 0) {
@@ -232,31 +267,7 @@ private struct DuckRow: View {
                 }
                 .padding(.top, 1)
             }
-            Spacer(minLength: 0)
-            if hover || !duck.onDuty {
-                HStack(spacing: 2) {
-                    if duck.hasJob && duck.onDuty { hoverButton("Open", action: open) }
-                    hoverButton(duck.onDuty ? "Close" : RoomRoster.bringBackTitle) { duty(!duck.onDuty) }
-                }
-            }
         }
-        .opacity(duck.onDuty ? 1 : 0.55)
-        .padding(.horizontal, 6).padding(.vertical, 7)
-        .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: open)
-        .onHover { hover = $0 }
-        .contextMenu {
-            Button("Rename\u{2026}") { edit(.name) }
-            Button("Set role\u{2026}") { edit(.role) }
-            Divider()
-            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring back") { duty(true) } }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(duck.name)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.placeChip ?? ""). \(duck.presenceLine)")
-        .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { open() }
     }
 
     private func hoverButton(_ title: String, action: @escaping () -> Void) -> some View {

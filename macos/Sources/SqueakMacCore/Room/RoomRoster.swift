@@ -158,6 +158,18 @@ public enum RoomRoster {
     public enum Click: Sendable, Equatable { case open(sessionId: String), noJob(String) }
     public static func click(_ d: RosterDuck) -> Click { d.sessionId.map { .open(sessionId: $0) } ?? .noJob(noJobLine) }
 
+    /// What a click does once the chats the app knows are looked at: the row click and the hover Open share this. A duck whose
+    /// chat is not among `known` says "Couldn't open <name>" rather than doing nothing.
+    public enum Opening: Sendable, Equatable { case open(sessionId: String), noJob(String), failed(String) }
+    public static func opening(_ d: RosterDuck, known: some Collection<String>) -> Opening {
+        switch click(d) {
+        case .noJob(let line): return .noJob(line)
+        case .open(let id):
+            guard let resolved = PondOpenResolver.sessionId(for: id, among: known) else { return .failed(PondOpenResolver.failureNote(name: d.name)) }
+            return .open(sessionId: resolved)
+        }
+    }
+
     /// "@Name text" as the room's composer would post it, for the Give it a job field. Nil for an empty job.
     public static func jobMessage(duckName: String, text: String) -> String? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)

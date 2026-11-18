@@ -50,3 +50,27 @@ struct PondOpenResolverTests {
         #expect(PondOpenResolver.failureNote(name: nil) == "Couldn\u{2019}t open that duck")
     }
 }
+
+@Suite("Duck roster click")
+struct DuckRosterClickTests {
+    private func row(_ json: String) throws -> RosterDuck {
+        let d = try JSONDecoder().decode(PondDuck.self, from: Data(json.utf8))
+        return RoomRoster.row(d)
+    }
+
+    @Test func duckWithCurrentSessionOpensIt() throws {
+        let r = try row(#"{"id":"d1","name":"Pip","currentSessionId":"s-1","place":{"kind":"stream","workspaceId":"w","branch":"b"},"duty":"on"}"#)
+        #expect(RoomRoster.click(r) == .open(sessionId: "s-1"))
+        #expect(RoomRoster.opening(r, known: ["s-1", "s-2"]) == .open(sessionId: "s-1"))
+    }
+
+    @Test func duckWithoutSessionIsNoJob() throws {
+        let r = try row(#"{"id":"d1","name":"Pip"}"#)
+        #expect(RoomRoster.opening(r, known: ["s-1"]) == .noJob(RoomRoster.noJobLine))
+    }
+
+    @Test func unknownChatFailsLoudly() throws {
+        let r = try row(#"{"id":"d1","name":"Pip","currentSessionId":"gone"}"#)
+        #expect(RoomRoster.opening(r, known: ["s-1"]) == .failed("Couldn\u{2019}t open Pip"))
+    }
+}
