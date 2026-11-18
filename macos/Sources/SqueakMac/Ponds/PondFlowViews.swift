@@ -392,6 +392,9 @@ struct PondSwipeMonitor: NSViewRepresentable {
         private var link: CADisplayLink?
         private var pending: Double?
         private var began = false
+        /// "A sideways scroll view is under the cursor" is asked once per gesture (`SwipeGestureGate`), not per event.
+        private var gate = SwipeGestureGate()
+        private var gestureSeen = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -410,7 +413,7 @@ struct PondSwipeMonitor: NSViewRepresentable {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
             link?.invalidate(); link = nil; pending = nil
-            swipe.reset()
+            swipe.reset(); gate.reset(); gestureSeen = false
         }
 
         /// One update per display frame: the newest position wins.
@@ -436,7 +439,14 @@ struct PondSwipeMonitor: NSViewRepresentable {
             let phase = Self.phase(event)
             // The end of a gesture is always fed, so one that finished off the view does not leave the next half-counted.
             guard inside || phase == .ended || phase == .cancelled else { return }
-            if inside, scrollsSideways(under: event) { swipe.reset(); pending = nil; return }
+            if inside {
+                let begins = phase == .began || (phase == .changed && !gestureSeen)
+                let standalone = phase == .none && event.momentumPhase.isEmpty
+                let blocked = gate.blocked(begins: begins, standalone: standalone) { scrollsSideways(under: event) }
+                if phase == .changed || phase == .began { gestureSeen = true }
+                if phase == .ended || phase == .cancelled { gestureSeen = false }
+                if blocked { swipe.reset(); pending = nil; return }
+            } else if phase == .ended || phase == .cancelled { gestureSeen = false }
             let sign: Double = event.isDirectionInvertedFromDevice ? 1 : -1
             let first = phase == .began || (phase == .changed && !began)
             if first { began = true }

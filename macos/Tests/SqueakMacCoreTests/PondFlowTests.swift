@@ -373,3 +373,32 @@ struct SwipeFeelTests {
         #expect(PondSwipeHint(swipes: 0).restingOpacity > PondSwipeHint(swipes: 3).restingOpacity)
     }
 }
+
+@Suite struct SwipeGestureGateTests {
+    @Test func decidesOncePerGesture() {
+        var gate = SwipeGestureGate()
+        var asked = 0
+        func ask(_ answer: Bool) -> () -> Bool { { asked += 1; return answer } }
+        do { let b = gate.blocked(begins: true, standalone: false, lookup: ask(true)); #expect(b) }
+        for _ in 0..<50 { let b = gate.blocked(begins: false, standalone: false, lookup: ask(false)); #expect(b) }
+        #expect(asked == 1)
+        // The next gesture decides again.
+        do { let b = gate.blocked(begins: true, standalone: false, lookup: ask(false)); #expect(!b) }
+        do { let b = gate.blocked(begins: false, standalone: false, lookup: ask(true)); #expect(!b) }
+        #expect(asked == 2)
+    }
+
+    @Test func aGestureJoinedMidwayDecidesOnItsFirstEvent() {
+        var gate = SwipeGestureGate()
+        do { let b = gate.blocked(begins: false, standalone: false, lookup: { false }); #expect(!b) }
+        do { let b = gate.blocked(begins: false, standalone: false, lookup: { true }); #expect(!b) }
+        #expect(gate.lookups == 1)
+    }
+
+    @Test func aPhaselessWheelIsAskedEachTime() {
+        var gate = SwipeGestureGate()
+        _ = gate.blocked(begins: false, standalone: true, lookup: { false })
+        _ = gate.blocked(begins: false, standalone: true, lookup: { false })
+        #expect(gate.lookups == 2 && gate.decided == nil)
+    }
+}

@@ -84,7 +84,7 @@ public struct MessageText: View {
 private enum ParseCache {
     final class Entry { let blocks: [MessageMarkup.Block]; init(_ b: [MessageMarkup.Block]) { blocks = b } }
     // NSCache is thread-safe and evicts under memory pressure.
-    nonisolated(unsafe) static let cache: NSCache<NSString, Entry> = { let c = NSCache<NSString, Entry>(); c.countLimit = 64; return c }()
+    nonisolated(unsafe) static let cache: NSCache<NSString, Entry> = { let c = NSCache<NSString, Entry>(); c.countLimit = 1024; return c }()
 
     static func blocks(_ markdown: String, letters: Bool = false) -> [MessageMarkup.Block] {
         let key = (letters ? "\u{1}" + markdown : markdown) as NSString

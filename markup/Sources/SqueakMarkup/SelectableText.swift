@@ -268,6 +268,26 @@ struct SelectableTextRepresentable: NSViewRepresentable {
 }
 
 /// Non-editable, selectable, transparent, sized to its text. ⌘C and the menu's Copy give the plain text with no wrap hints.
+/// Measured heights by the text's content and the width. A chat that is left and opened again (a tab opened from a pond, then
+/// closed) rebuilds every run's view; the lines were already laid out, so the layout is not done a second time.
+enum HeightCache {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSNumber> = { let c = NSCache<NSString, NSNumber>(); c.countLimit = 4096; return c }()
+    /// The characters and every run's size-bearing attributes (font, paragraph style, kern, attachment): what a height depends on.
+    static func key(for text: NSAttributedString) -> String {
+        var h = Hasher()
+        h.combine(text.string)
+        text.enumerateAttributes(in: NSRange(location: 0, length: text.length), options: []) { attrs, range, _ in
+            h.combine(range.length)
+            for k in [NSAttributedString.Key.font, .paragraphStyle, .kern, .attachment, .baselineOffset] {
+                if let v = attrs[k] as? NSObject { h.combine(v) }
+            }
+        }
+        return "\(text.length)|\(h.finalize())"
+    }
+    static func height(_ key: String, width: CGFloat) -> CGFloat? { cache.object(forKey: "\(key)|\(width)" as NSString).map { CGFloat($0.doubleValue) } }
+    static func store(_ h: CGFloat, _ key: String, width: CGFloat) { cache.setObject(NSNumber(value: Double(h)), forKey: "\(key)|\(width)" as NSString) }
+}
+
 final class SelectableTextView: NSTextView {
     var pathLinks: PathLinks?
     private var measured: (width: CGFloat, height: CGFloat)?
@@ -301,20 +321,29 @@ final class SelectableTextView: NSTextView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
 
     // A private layout stack for measuring, so a height never depends on what the view itself is doing.
-    private let measureStorage = NSTextStorage()
-    private let measureManager = NSLayoutManager()
-    private let measureContainer = NSTextContainer(size: NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude))
+    // Built on the first measure that misses `HeightCache`: a chat opened again measures nothing, so most views never pay for it.
+    private lazy var measureStorage = NSTextStorage()
+    private lazy var measureManager = NSLayoutManager()
+    private lazy var measureContainer = NSTextContainer(size: NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude))
+    private var pendingText: NSAttributedString?
 
     var currentText: NSAttributedString { textStorage ?? NSAttributedString() }
 
     func setText(_ text: NSAttributedString) {
         textStorage?.setAttributedString(text)
-        measureStorage.setAttributedString(text)
+        pendingText = text
         measured = nil
+        heightKey = nil
     }
+
+    private var heightKey: String?
 
     func height(forWidth width: CGFloat) -> CGFloat {
         if let m = measured, m.width == width { return m.height }
+        let key = heightKey ?? HeightCache.key(for: currentText)
+        heightKey = key
+        if let h = HeightCache.height(key, width: width) { measured = (width, h); return h }
+        if let text = pendingText { measureStorage.setAttributedString(text); pendingText = nil }
         if measureStorage.layoutManagers.isEmpty {
             measureContainer.lineFragmentPadding = 0
             measureStorage.addLayoutManager(measureManager)
@@ -324,6 +353,7 @@ final class SelectableTextView: NSTextView {
         _ = measureManager.glyphRange(for: measureContainer)
         let h = ceil(measureManager.usedRect(for: measureContainer).height)
         measured = (width, h)
+        HeightCache.store(h, key, width: width)
         return h
     }
 

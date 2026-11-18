@@ -268,3 +268,32 @@ public struct PondSwipeHint: Sendable, Equatable {
         return PondDrag.home(page) + (page == .dashboard ? 1 : -1) * peekDistance / width
     }
 }
+
+/// Whether a two-finger gesture belongs to a view under the cursor (a wide code block that scrolls sideways) is decided once,
+/// when the gesture begins, and kept until the next one begins, so the momentum tail and every `changed` event after the first
+/// cost nothing: finding the view under the cursor is a hit-test walk of the whole window, far too much for each scroll event.
+public struct SwipeGestureGate: Sendable, Equatable {
+    public private(set) var decided: Bool?
+    public private(set) var lookups = 0
+
+    public init() {}
+
+    /// `begins`: this event starts a gesture (phase began, or the first changed one). `standalone`: a precise wheel with no
+    /// phase and no momentum, which has no gesture to hold a decision, so it is asked each time.
+    public mutating func blocked(begins: Bool, standalone: Bool, lookup: () -> Bool) -> Bool {
+        if standalone { lookups += 1; return lookup() }
+        if begins || decided == nil {
+            decided = lookup()
+            lookups += 1
+        }
+        return decided ?? false
+    }
+
+    public mutating func reset() { decided = nil }
+}
+
+extension FullScreenReveal {
+    /// Whether a look at the pointer can change anything: while hidden, the pointer far below the top band does nothing, so
+    /// the poll skips measuring the sidebar row and the controls.
+    public func needsLook(fromTop: Double) -> Bool { revealed || fromTop <= Self.triggerBand }
+}

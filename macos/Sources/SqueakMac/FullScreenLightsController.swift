@@ -50,13 +50,19 @@ final class FullScreenLightsController {
     }
 
     private func tick() {
-        guard let w = window, w.styleMask.contains(.fullScreen) else { return }
-        // AppKit re-shows the buttons each time it reveals its titlebar; keep them off.
-        Self.hideSystemChrome(w, hidden: true)
-        guard NSApp.isActive, let screen = w.screen ?? NSScreen.main else { reveal.reset(); set(false, animated: true); return }
+        // Not full screen, or the window cannot be seen: nothing to poll (the timer stops at `exit`; this covers the gap).
+        guard let w = window, w.styleMask.contains(.fullScreen), w.occlusionState.contains(.visible) else { return }
+        guard NSApp.isActive, let screen = w.screen ?? NSScreen.main else {
+            if reveal.revealed { reveal.reset(); set(false, animated: true) }
+            return
+        }
         let p = NSEvent.mouseLocation
         let inScreen = screen.frame.contains(p) || p.y >= screen.frame.maxY   // the very top edge is outside `contains`
         let fromTop = screen.frame.maxY - p.y
+        // AppKit re-shows the buttons each time it reveals its titlebar, which it does only with the pointer at the top:
+        // keep them off there; away from the top (hidden, nothing to do) the poll is just this pointer read.
+        guard reveal.needsLook(fromTop: inScreen ? fromTop : .infinity) else { return }
+        Self.hideSystemChrome(w, hidden: true)
         let top = screen.frame.maxY
         var overControls = false
         if inScreen, let r = Self.screenRect(of: lightsView) {
@@ -82,11 +88,13 @@ final class FullScreenLightsController {
     /// The buttons, and the titlebar container that would draw a strip behind them. The container is found by the
     /// class name of the close button's ancestors (NSTitlebarContainerView), never by position.
     static func hideSystemChrome(_ w: NSWindow, hidden: Bool) {
-        for type in hiddenButtons { w.standardWindowButton(type)?.isHidden = hidden }
+        // Only writes what differs: setting the same value still dirties AppKit's titlebar and costs a layout pass.
+        for type in hiddenButtons { if let b = w.standardWindowButton(type), b.isHidden != hidden { b.isHidden = hidden } }
         var v = w.standardWindowButton(.closeButton)?.superview
         while let view = v {
             if String(describing: type(of: view)).contains("NSTitlebarContainerView") {
-                view.alphaValue = hidden ? 0 : 1
+                let alpha: CGFloat = hidden ? 0 : 1
+                if view.alphaValue != alpha { view.alphaValue = alpha }
                 break
             }
             v = view.superview
@@ -100,11 +108,11 @@ final class FullScreenLightsController {
         guard let rw = w.standardWindowButton(.closeButton)?.window else { return }
         guard TitlebarSurface.isFullScreenTitlebarWindow(className: String(describing: type(of: rw)), isContentWindow: rw === w) else { return }
         if hidden {
-            rw.isOpaque = false
-            rw.backgroundColor = .clear
-            rw.hasShadow = false
-            rw.alphaValue = 0
-        } else {
+            if rw.isOpaque { rw.isOpaque = false }
+            if rw.backgroundColor != .clear { rw.backgroundColor = .clear }
+            if rw.hasShadow { rw.hasShadow = false }
+            if rw.alphaValue != 0 { rw.alphaValue = 0 }
+        } else if rw.alphaValue != 1 {
             rw.alphaValue = 1
         }
     }

@@ -163,3 +163,15 @@ import Testing
         #expect(v7)
     }
 }
+
+@Suite struct FullScreenPollGateTests {
+    @Test func hiddenAndFarFromTheTopNeedsNoLook() {
+        var r = FullScreenReveal()
+        #expect(!r.needsLook(fromTop: 400))
+        #expect(r.needsLook(fromTop: 2))
+        r.update(now: Date(timeIntervalSince1970: 1), fromTop: 2, menuBarHeight: 24, overControls: false)
+        #expect(r.needsLook(fromTop: 400))   // revealed: it must still be able to hide
+        r.reset()
+        #expect(!r.needsLook(fromTop: 400))
+    }
+}
