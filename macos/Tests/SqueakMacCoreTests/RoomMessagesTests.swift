@@ -88,6 +88,13 @@ struct RoomMessagesTests {
         #expect(groups(RoomMessages.build(feed: g, now: now, calendar: cal)).contains { $0.author.kind == .person && $0.author.name == "Sibhi" })
     }
 
+    @Test func aHostMatchedOptionTextWinsOverWhatWasSeen() {
+        let g = feed(turns: [turn("s1:2", at: base, answer: RoomTurnAnswer(letter: "b", question: "Which?", option: "Keep it"))])
+        #expect(texts(groups(RoomMessages.build(feed: g, now: now, calendar: cal))[0].messages[0]) == ["B \u{2014} Keep it"])
+        let d = try? JSONDecoder().decode(RoomTurnAnswer.self, from: Data(#"{"letter":"A","question":"Q","option":"Fold it in"}"#.utf8))
+        #expect(d?.option == "Fold it in")
+    }
+
     @Test func aWaitingDucksNewestTurnIsTheAskCardInPlace() {
         let ask = RoomAsk(question: "Which way?", options: [RoomAskOption(letter: "A", text: "One", recommended: true), RoomAskOption(letter: "B", text: "Two")])
         var f = feed(turns: [turn("s1:1", at: base, text: "Earlier."), turn("s1:2", at: base + 20 * min, text: "Which way?")], threads: [thread("s1", name: "Marlow", state: .waiting, ask: ask)])

@@ -390,6 +390,7 @@ private struct OfferView: View {
                     }
                 }
             }
+            if let c = offer.place, offer.note == nil { RoomPlaceChipView(jobId: offer.jobId, chip: c) }
             if let e = offer.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true) }
         }
         .padding(.leading, 14).padding(.trailing, 12).padding(.vertical, 10)
@@ -426,6 +427,7 @@ private struct RoomSystemView: View {
                 Text(verbatim: line.text).font(.system(size: 12)).foregroundStyle(Theme.subtle)
                     .onTapGesture { open?() }.pointerHand(open != nil)
                 if let n = line.note { Text(verbatim: n).font(.system(size: 12)).foregroundStyle(Theme.muted) }
+                if let id = line.jobId, let c = line.place, line.note == nil { RoomPlaceChipView(jobId: id, chip: c) }
                 if let id = line.jobId {
                     ForEach(line.buttons) { b in Button(b.title) { act(id, b.action, nil) }.buttonStyle(SmallButtonStyle(role: b.role)) }
                 }

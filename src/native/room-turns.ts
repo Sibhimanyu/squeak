@@ -27,7 +27,8 @@ export interface RoomTurn {
   outcome?: "finished" | "stopped" | "error";
   prompt: string;
   author: { kind: "person"; name: string; me: boolean };
-  answer?: { letter: string; question: string };
+  /** The prompt picks one of the previous turn's options: `letter` is its letter (or number), `option` its text. */
+  answer?: { letter: string; question: string; option?: string };
   outcomeText?: string;
   durationMs?: number;
   filesChanged?: number;
@@ -65,7 +66,9 @@ export interface TurnBase {
   authorName?: string;
   /** The turn's closing reply (full text, capped), the agent's own words. */
   reply?: string;
-  answer?: { letter: string; question: string };
+  /** The turn's earlier assistant texts (newest last, the final one included): where a pick looks when the closing reply has no options. */
+  texts?: string[];
+  answer?: { letter: string; question: string; option?: string };
 }
 
 interface ChatTurns {
@@ -107,6 +110,91 @@ export function firstSentence(markdown: string): string {
 export function answerLetter(prompt: string): string | null {
   const m = /^\(?([A-Ha-h])[).:]?$/.exec(prompt.trim());
   return m ? m[1]!.toUpperCase() : null;
+}
+
+const PICK_VERB =
+  "(?:option|choice|go with|let'?s go with|i'?ll go with|i'?ll take|i'?d go with|take|pick|choose|i choose|i pick)";
+const PICK_TAIL = "(?:\\s*,?\\s*(?:please|pls|thanks|thank you))?";
+
+/**
+ * A prompt that is only a pick of one option: "A", "a.", "A)", "(b)", "option A", "go with A", "B please", or a number for
+ * a numbered list ("1", "2.", "option 2"). Anything with more words is a message, not a pick.
+ */
+export function answerChoice(prompt: string): { key: string; kind: "letter" | "number" } | null {
+  const bare = prompt.trim().toLowerCase();
+  const forms = [
+    new RegExp(`^\\(?([a-h])[).:]?${PICK_TAIL}[.!]?$`),
+    new RegExp(`^${PICK_VERB}\\s+(?:option\\s+)?\\(?([a-h])\\)?${PICK_TAIL}[.!]?$`),
+  ];
+  for (const f of forms) {
+    const m = f.exec(bare);
+    if (m) return { key: m[1]!.toUpperCase(), kind: "letter" };
+  }
+  const nums = [
+    new RegExp(`^\\(?(\\d{1,2})[).:]?${PICK_TAIL}[.!]?$`),
+    new RegExp(`^${PICK_VERB}\\s+(?:option\\s+|number\\s+)?\\(?(\\d{1,2})\\)?${PICK_TAIL}[.!]?$`),
+  ];
+  for (const f of nums) {
+    const m = f.exec(bare);
+    if (m) return { key: String(Number(m[1])), kind: "number" };
+  }
+  return null;
+}
+
+const NUMBERED_LINE = /^(?:[-*+]\s+)?(?:\*\*|__)?\(?(\d{1,2})[).:](?:\*\*|__)?\s+(.+)$/;
+
+/**
+ * The numbered options of a reply that asks something: consecutive `1) ...` / `2. ...` lines counting up from 1, in a
+ * message with a question mark in it. A numbered list of what was done ("1. Ran the tests") has no question and is not read.
+ */
+export function numberedAskOf(text: string | undefined): RoomAsk | null {
+  if (!text) return null;
+  const lines = text.replace(/```[\s\S]*?```/g, "").split("\n");
+  const question = [...lines].reverse().find((l) => /\?\s*(?:\*\*|__)?$/.test(l.trim()) && l.trim().length > 1);
+  if (!question) return null;
+  let best: RoomAsk["options"] = [];
+  let run: RoomAsk["options"] = [];
+  for (const raw of lines) {
+    const m = NUMBERED_LINE.exec(raw.trim());
+    if (m && Number(m[1]) === run.length + 1) {
+      run.push({ letter: String(Number(m[1])), text: oneLine(stripMarkdown(m[2]!), 70), recommended: false });
+    } else if (m && Number(m[1]) === 1) {
+      run = [{ letter: "1", text: oneLine(stripMarkdown(m[2]!), 70), recommended: false }];
+    } else if (raw.trim() && !/^\s{2,}\S/.test(raw) && !m) {
+      if (run.length >= 2 && run.length >= best.length) best = run;
+      run = [];
+    }
+  }
+  if (run.length >= 2 && run.length >= best.length) best = run;
+  if (best.length < 2) return null;
+  return { question: stripMarkdown(question.trim()) || "Needs your answer", options: best };
+}
+
+/** The option a pick names in one text: lettered options, or a numbered list that asks. Never a guess. */
+function optionIn(
+  text: string | undefined,
+  choice: { key: string; kind: "letter" | "number" },
+): { ask: RoomAsk; text: string } | null {
+  const ask = choice.kind === "letter" ? askOf(text) : numberedAskOf(text);
+  const hit = ask?.options.find((o) => o.letter === choice.key);
+  return ask && hit ? { ask, text: hit.text } : null;
+}
+
+/** What a prompt answers: the closing reply of the previous turn first, then its earlier assistant texts, newest first. */
+export function answerFor(
+  prompt: string,
+  before: Pick<TurnBase, "reply" | "texts"> | undefined,
+): TurnBase["answer"] | undefined {
+  const choice = answerChoice(prompt);
+  if (!choice || !before) return undefined;
+  const sources = [before.reply, ...[...(before.texts ?? [])].reverse()];
+  for (const src of sources) {
+    const hit = optionIn(src, choice);
+    if (hit) {
+      return { letter: choice.key, question: oneLine(hit.ask.question), ...(hit.text ? { option: hit.text } : {}) };
+    }
+  }
+  return undefined;
 }
 
 /** The options a reply offers, as the room carries them. */
@@ -168,11 +256,10 @@ export class TurnReader {
         prompt: oneLine(e.text) || "Message",
         ...(e.author ? { authorName: e.author.name } : {}),
       };
-      const letter = answerLetter(e.text);
-      if (letter) {
+      if (answerChoice(e.text)) {
         const before = [...c.turns].reverse().find((t) => t.endedAt !== undefined || t.reply !== undefined);
-        const ask = before ? askOf(before.reply) : null;
-        if (ask?.options.some((o) => o.letter === letter)) base.answer = { letter, question: oneLine(ask.question) };
+        const answer = answerFor(e.text, before);
+        if (answer) base.answer = answer;
       }
       c.turns.push(base);
       c.byId.set(e.turnId, base);
@@ -194,6 +281,7 @@ export class TurnReader {
       const named = e.replyMessageId ? list?.find((r) => r.id === e.replyMessageId) : undefined;
       const final = named ?? list?.[list.length - 1];
       if (final) t.reply = final.text;
+      if (list?.length) t.texts = list.map((r) => r.text);
       c.replies.delete(e.turnId);
     }
   }

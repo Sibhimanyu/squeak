@@ -129,4 +129,71 @@ struct RoomJobsTests {
         #expect(RoomJobAction.newThread.body == .object(["action": .string("new")]))
         #expect(RoomJobs.refusal(NativeHostError.http(409, "Already handed over.")) == "Already handed over.")
     }
+
+    // MARK: Place
+
+    private func placed(_ place: RoomJobPlace?, text: String = "Fix the resize handles") -> RoomJob {
+        RoomJob(id: "job:1", messageId: "p1", text: text, suggestion: greeting, place: place)
+    }
+    private func ws(_ id: String, _ branch: String, _ age: TimeInterval?, state: String = "ready", project: String = "p") -> NativeWorkspace {
+        var w = NativeWorkspace(id: id, projectId: project, name: id, path: "/" + id, branch: branch, state: state)
+        w.createdAt = age.map { Date(timeIntervalSince1970: 1_780_000_000 - $0) }
+        return w
+    }
+
+    @Test func theChipSaysWhereTheWorkGoes() {
+        let stream = RoomJobPlace.stream(workspaceId: "w1", branch: "feat/handles")
+        #expect(RoomPlaces.chip(for: placed(stream), chosen: nil)?.text == "\u{2192} on feat/handles")
+        #expect(RoomPlaces.chip(for: placed(.new(branch: "fix-handles")), chosen: nil)?.text == "\u{2192} new stream fix-handles")
+        #expect(RoomPlaces.chip(for: placed(nil), chosen: nil) == nil)  // a folder pond: no chip
+        let c = RoomPlaces.chip(for: placed(stream), chosen: .new(branch: "x"))
+        #expect(c?.text == "\u{2192} new stream x" && c?.changed == true)
+        #expect(RoomPlaces.chip(for: placed(stream), chosen: stream)?.changed == false)
+    }
+
+    @Test func theMenuListsStreamsNewestFirstThenANewStream() {
+        let list = RoomPlaces.streams([ws("a", "old", 900), ws("b", "new", 10), ws("c", "undated", nil), ws("d", "gone", 5, state: "archived"), ws("e", "other", 1, project: "q")], projectId: "p")
+        #expect(list.map(\.branch) == ["new", "old", "undated"])
+        let job = placed(.new(branch: "fix-handles"))
+        let items = RoomPlaces.menu(streams: list, current: .stream(workspaceId: "b", branch: "new"), prefill: RoomPlaces.suggestedBranch(job: job, chosen: nil))
+        #expect(items.count == 4)
+        #expect(items[0] == .stream(list[0], selected: true))
+        #expect(items[3] == .newStream(prefill: "fix-handles", selected: false))
+        #expect(RoomPlaces.suggestedBranch(job: placed(nil), chosen: nil) == "fix-the-resize-handles")
+    }
+
+    @Test func aNewStreamsNameIsCheckedLikeGit() {
+        let taken = ["main", "feat/x"]
+        #expect(RoomPlaces.branchProblem("fix-handles", taken: taken) == nil)
+        #expect(RoomPlaces.branchProblem("feat/new-thing", taken: taken) == nil)
+        for bad in ["", "  ", "a b", "a..b", "/a", "a/", "a.", "a//b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "@", "a@{b", ".hidden", "x/.y", "topic.lock", "a\u{7f}b"] {
+            #expect(RoomPlaces.branchProblem(bad, taken: taken) != nil, "\(bad)")
+        }
+        #expect(RoomPlaces.branchProblem("feat/x", taken: taken) == "A stream is already on feat/x.")
+    }
+
+    @Test func goAllowAndNewCarryThePlaceAndNothingElseDoes() {
+        let p = RoomJobPlace.stream(workspaceId: "w1", branch: "b")
+        #expect(RoomJobAction.go(sessionId: "s1").body(place: p) == .object(["action": .string("go"), "sessionId": .string("s1"), "place": .object(["kind": .string("stream"), "workspaceId": .string("w1"), "branch": .string("b")])]))
+        #expect(RoomJobAction.newThread.body(place: .new(branch: "n")) == .object(["action": .string("new"), "place": .object(["kind": .string("new"), "branch": .string("n")])]))
+        #expect(RoomJobAction.allow.body(place: p) != RoomJobAction.allow.body)
+        #expect(RoomJobAction.dismiss.body(place: p) == RoomJobAction.dismiss.body)
+        #expect(RoomJobAction.deny.body(place: p) == RoomJobAction.deny.body)
+        #expect(RoomJobAction.go(sessionId: "s1").body == .object(["action": .string("go"), "sessionId": .string("s1")]))
+    }
+
+    @Test func thePickedPlaceRidesOnGoAndShowsOnTheOffer() throws {
+        let json = #"{"id":"job:1","messageId":"p1","text":"t","status":"suggested","place":{"kind":"new","branch":"fix-handles"},"suggestion":{"sessionId":"s1","title":"A","reason":"r","state":"idle","pitch":"did x"}}"#
+        let j = try JSONDecoder().decode(RoomJob.self, from: Data(json.utf8))
+        #expect(j.place == .new(branch: "fix-handles"))
+        var f = RoomFeed()
+        f.upsert(job: j)
+        #expect(f.placeToSend(jobId: "job:1", action: .go(sessionId: "s1")) == .new(branch: "fix-handles"))
+        f.setJobPlace("job:1", .stream(workspaceId: "w2", branch: "main-ish"))
+        #expect(f.placeToSend(jobId: "job:1", action: .go(sessionId: "s1")) == .stream(workspaceId: "w2", branch: "main-ish"))
+        #expect(f.placeToSend(jobId: "job:1", action: .dismiss) == nil)
+        let offer = RoomMessages.offerMessage(j, target: j.suggestion!, local: nil, threads: [:], at: 1, place: RoomPlaces.chip(for: j, chosen: f.jobPlace["job:1"]))
+        guard case .offer(let o) = offer.parts[0] else { Issue.record("no offer"); return }
+        #expect(o.place?.text == "\u{2192} on main-ish" && o.place?.changed == true)
+    }
 }
