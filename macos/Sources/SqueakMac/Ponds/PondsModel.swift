@@ -185,6 +185,12 @@ final class PondsModel {
     func name(key: String) -> String { entry(key)?.name ?? ponds.first { $0.id == key }?.name ?? "" }
 
     /// The native project behind a key, by the directory's project id.
+    /// The folder a terminal from this pond's page opens in (project root = Main, or the plain folder); nil = none here.
+    static func pondTerminalFolder(_ key: String) -> String? {
+        let m = shared
+        return PondTerminal.availability(nativeRoot: m.native(key: key)?.rootPath, directoryFolder: m.entry(key)?.folder).folder
+    }
+
     func native(key: String) -> NativeProject? {
         (entry(key)?.projectId ?? key).flatMap { id in projects.first { $0.id == id } }
     }

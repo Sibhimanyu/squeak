@@ -334,6 +334,12 @@ extension Scene {
 /// (nil = the home zone: where the Terminal panel sits, else the bottom), selected.
 @MainActor enum NewTerminalAction {
     static func perform(_ model: AppModel, in zone: DockZone? = nil) {
+        // On a pond page the terminal belongs to the pond: its folder, in the pond inspector.
+        if zone == nil, case .home(let key)? = PondsModel.shared.route {
+            guard let folder = PondsModel.pondTerminalFolder(key) else { return }
+            open(folder: folder, in: .right)
+            return
+        }
         guard let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder else { return }
         open(folder: folder, in: zone)
     }

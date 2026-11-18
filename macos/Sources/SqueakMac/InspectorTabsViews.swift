@@ -35,10 +35,11 @@ struct InspectorPlusMenu<Glyph: View>: View {
     }
 
     /// Beside a pond page: terminals run in the pond's folder; Code and Files are tabs saved for that pond.
-    static func pond(_ item: InspectorPlusItem, key: String, folder: String?) {
+    static func pond(_ item: InspectorPlusItem, key: String, folder: String?, notice: ((String?) -> Void)? = nil) {
         switch item {
         case .newTerminal:
-            guard let folder else { return }
+            guard let folder else { notice?(PondTerminal.noFolder); return }
+            notice?(nil)
             NewTerminalAction.open(folder: folder, in: .right)
         case .files: open(.files, key: key)
         case .code: open(.code, key: key)
@@ -70,10 +71,9 @@ struct PondInspectorZone: View {
     @Environment(AppModel.self) private var model
     @Namespace private var indicator
 
-    private var folder: String? {
-        guard let f = PondsModel.shared.entry(key)?.folder, !f.isEmpty else { return nil }
-        return TerminalWorkspace.availability(cwd: f).folder
-    }
+    @State private var notice: String?
+
+    private var folder: String? { PondsModel.pondTerminalFolder(key) }
 
     var body: some View {
         let dock = DockStore.shared
@@ -100,7 +100,7 @@ struct PondInspectorZone: View {
                             }
                         }
                         InspectorPlusMenu(label: Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())) {
-                            InspectorActions.pond($0, key: key, folder: folder)
+                            InspectorActions.pond($0, key: key, folder: folder) { notice = $0 }
                         }
                     }
                     .padding(.horizontal, Space.s)
@@ -111,8 +111,15 @@ struct PondInspectorZone: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
             .background(WindowDragArea())
             .animation(Motion.standard, value: strip.selected)
+            if let notice {
+                Text(verbatim: notice).font(Typo.body).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+                    .accessibilityLabel(notice)
+            }
             content(strip.selected)
         }
+        .onChange(of: key) { notice = nil }
         .frame(width: width).frame(maxHeight: .infinity).clipped()
         .background(Theme.bg.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
