@@ -2,18 +2,17 @@
 
 ## 2.30.0
 
-- A reply is read the way WhatsApp reads it: once the thread is open, on screen and scrolled to the bottom for a second, or when you send. Ponds show bold only when something is unread, and the Next pill walks Needs you, then unread, newest first.
-- The sidebar no longer has an Archived entry.
-- Tabs show the new tide glyph: a twinkling cloud while working, a warning when a thread needs you, and the close button on hover. Tabs sit closer together and share one look in every strip.
-- Ducklings open as tabs in the centre strip after their thread, and in the right and bottom strips; agents now call their subagents ducklings.
-- Each pond takes its own colour, from its logo or the one you chose, as a faint wash on its selected row, header and tab underline.
-- The right side has Thread, Pond and Code tabs, and the Thread tab shows one quiet "N files changed" line that opens Code.
-- A plain closing question is a normal finish; only lettered options make a thread need you. Answer buttons now show whenever the composer is folded.
-- Approval cards lead with the decision and clip long commands to six lines with Show all.
-- Notifications use the agent's own line as the body and "thread, pond" as the title. New threads start on Skip approvals everywhere.
-- Drag and drop is steadier: tabs dock into zones, ponds reorder with a live gap, and drops from outside the app land.
-- Squeak is lighter on the CPU: the tide glyph is about four times cheaper to draw and an idle chat's transcript is no longer re-read every two seconds.
-- Auto-compact now starts at 90% of the model's window.
+**Ponds are a group chat with your ducks.** Threads are now ducks: agent teammates with a name, a role and their own colour.
+
+- Opening a pond shows its Dashboard; swipe with two fingers (or use the switch) to the Room, the pond's group chat. A duck's reply reads in its own words with a "files · time" chip, a question comes with A/B/C buttons, and a working duck shows what it is on.
+- Say what you need in the Room and a fitting duck offers to take it ("I can take this… Go"), showing where the work will run (an existing stream or a new one, which you can change). Nothing starts until you tap Go or Allow.
+- Ducks belong to the pond and move between streams per job, keeping a notebook of what they did. Close a duck's tab to put it off duty; find and bring back any duck from the Ducks list.
+- The inspector is always tabbed: Pond first (Needs you, Ducks, People, Invite), and + opens a terminal right there. Pond settings live in Settings › Ponds.
+- Attach pictures and files, paste images or dictate in the Room; attachments go with a job to its duck.
+- A reply is read the way WhatsApp reads it, and ponds show bold only when something is unread. Ducklings open as tabs; each pond takes its logo's colour as a faint wash.
+- The working glyph only ever appears animated, on something actually working. Idle rows show no icon.
+- A plain closing question is a normal finish; only lettered options make a duck need you. Approval cards lead with the decision.
+- Lighter on the CPU: the glyph is about four times cheaper and an idle chat is no longer re-read every two seconds. Auto-compact starts at 90% of the model's window.
 
 ## 2.29.2
 
