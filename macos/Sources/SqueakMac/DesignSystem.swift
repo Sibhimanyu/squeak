@@ -335,8 +335,6 @@ struct LoadingSkeleton: View {
     enum Shape { case messages, steps }
     var shape: Shape = .messages
     var word = "Loading…"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: shape == .messages ? 22 : 16) {
@@ -355,11 +353,6 @@ struct LoadingSkeleton: View {
         .frame(maxWidth: 820, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 14)
         .frame(maxWidth: .infinity, alignment: .center)
-        .opacity(reduceMotion ? 1 : (dim ? 0.55 : 1))
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(Motion.pulse) { dim = true }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(word)
     }

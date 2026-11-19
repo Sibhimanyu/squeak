@@ -240,7 +240,9 @@ private struct PanPage: ViewModifier {
             .offset(x: x)
             .zIndex(PondSnapshotPlan.zPosition(of: page, rest: state.restPage))
             .overlay {
-                Theme.bg.opacity(0.28 * min(1, abs(x) / max(1, Double(width)))).allowsHitTesting(false)
+                // Nothing at all over a page at rest: the view exists only while a live slide moves it.
+                let s = PondSnapshotPlan.liveScrim(x: x, width: Double(width), snapshotActive: state.snapshotActive, moving: state.mode != .rest)
+                if s > 0 { Theme.bg.opacity(s).allowsHitTesting(false) }
             }
     }
 }
@@ -284,8 +286,7 @@ struct PondSpace<Dashboard: View>: View {
             .overlay { PondSnapshotLayer(state: pan).allowsHitTesting(false) }
             .overlay(alignment: page == .dashboard ? .trailing : .leading) {
                 PondSwipeHintView(
-                    state: pan, page: page, hint: PondSwipeHint(visits: visits, swipes: swipes),
-                    ripples: PondSwipeHint(visits: visits, swipes: swipes).ripples(reduceMotion: reduceMotion, windowIsKey: activeState == .key)
+                    state: pan, page: page, hint: PondSwipeHint(visits: visits, swipes: swipes)
                 ) { switchTo(page == .dashboard ? .room : .dashboard) }
                 .opacity(pan.staging == nil ? 1 : 0)
             }
@@ -345,32 +346,24 @@ enum PondHintStore {
 }
 
 /// The edge affordance: a 36 pt round button with an 18 pt chevron and, while it still teaches, the other page's name under
-/// it. Idle, a ripple (two soft rings, like a drop in a pond) leaves it every few seconds and the chevron drifts toward the
-/// swipe in step. While dragging, a thin ring fills toward the commit point and the chevron turns once it would commit.
+/// it. Idle it is static (a repeating animation paces the whole window's frame rate). While dragging, a thin ring fills toward the commit point and the chevron turns once it would commit.
 /// Neutral colours only (§3).
 struct PondSwipeHintView: View {
     let state: PondPanState
     let page: PondPage
     let hint: PondSwipeHint
-    let ripples: Bool
     let action: () -> Void
     @State private var hover = false
-    @State private var rings = [0.0, 0.0]
-    @State private var drift = 0.0
 
     var body: some View {
         let toRoom = page == .dashboard
         VStack(spacing: 6) {
             Button(action: action) {
                 ZStack {
-                    ForEach(0..<2, id: \.self) { i in
-                        Circle().stroke(Theme.muted.opacity(0.45 * (1 - rings[i])), lineWidth: 1.5)
-                            .scaleEffect(1 + 1.1 * rings[i])
-                    }
                     Circle().fill(Theme.surfaceRaised.opacity(0.9))
                     Circle().strokeBorder(Theme.line, lineWidth: 1)
                     PanRing(state: state, page: page)
-                    PanChevron(state: state, page: page, toRoom: toRoom, drift: drift)
+                    PanChevron(state: state, page: page, toRoom: toRoom)
                 }
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())
@@ -389,27 +382,6 @@ struct PondSwipeHintView: View {
         .accessibilityLabel(toRoom ? "Show the Room" : "Show the Dashboard")
         .id(page)
         .transition(.opacity)
-        .task(id: ripples) { await rippleLoop() }
-    }
-
-    /// Every few seconds while idle: two rings leave the button and fade, the chevron drifts 4 pt and back.
-    private func rippleLoop() async {
-        guard ripples else { rings = [0, 0]; drift = 0; return }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(hint.rippleDelay))
-            if Task.isCancelled || state.mode != .rest { continue }
-            let dir = page == .dashboard ? 1.0 : -1.0
-            withAnimation(Motion.standard) { drift = PondSwipeHint.driftDistance * dir }
-            for i in 0..<2 {
-                var t = Transaction(); t.disablesAnimations = true
-                withTransaction(t) { rings[i] = 0 }
-                try? await Task.sleep(for: .milliseconds(i == 0 ? 0 : 260))
-                withAnimation(Motion.ripple()) { rings[i] = 1 }
-            }
-            try? await Task.sleep(for: .milliseconds(200))
-            withAnimation(Motion.standard) { drift = 0 }
-            try? await Task.sleep(for: .milliseconds(1400))
-        }
     }
 }
 
@@ -429,13 +401,11 @@ private struct PanChevron: View {
     let state: PondPanState
     let page: PondPage
     let toRoom: Bool
-    let drift: Double
     var body: some View {
         let flipped = SwipeRing.flipped(progress: PondDrag.progress(position: state.drawn, page: page))
         Lucide(toRoom ? .chevronRight : .chevronLeft, size: 18, color: flipped ? Theme.ink : Theme.muted)
             .rotationEffect(.degrees(flipped ? 180 : 0))
             .animation(Motion.quick, value: flipped)
-            .offset(x: drift)
     }
 }
 
@@ -492,7 +462,7 @@ struct PondSwipeMonitor: NSViewRepresentable {
 
         /// One update per display frame: the newest position wins.
         @objc private func frame(_ link: CADisplayLink) {
-            guard let p = pending else { link.isPaused = true; return }
+            guard let p = pending else { link.invalidate(); self.link = nil; return }
             pending = nil
             update(.track(p))
         }
@@ -576,17 +546,27 @@ enum PondScrollMemory {
 struct ScrollMemory: NSViewRepresentable {
     let id: String
     var fromBottom = false
+    /// Called once when the person scrolls near the top (older rows are wanted); the position is kept when they arrive.
+    var onNearTop: (() -> Void)?
 
     func makeNSView(context: Context) -> Anchor { Anchor() }
-    func updateNSView(_ view: Anchor, context: Context) { view.id = id; view.fromBottom = fromBottom }
+    func updateNSView(_ view: Anchor, context: Context) { view.id = id; view.fromBottom = fromBottom; view.onNearTop = onNearTop }
     static func dismantleNSView(_ view: Anchor, coordinator: ()) { view.detach() }
 
     final class Anchor: NSView {
         var id = ""
         var fromBottom = false
+        var onNearTop: (() -> Void)?
         private weak var scroll: NSScrollView?
         private var observer: NSObjectProtocol?
+        private var frameObserver: NSObjectProtocol?
         private var recording = false
+        /// Until the layout has settled, every change of the document's size puts the saved position back (no timers).
+        private var settling = false
+        private var armed = false
+        private var target: CGFloat?
+        /// The document's height when older rows were asked for; the next growth is the rows arriving at the top.
+        private var prependFrom: CGFloat?
 
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             if newWindow == nil { detach() }
@@ -596,12 +576,15 @@ struct ScrollMemory: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard window != nil else { return }
-            DispatchQueue.main.async { [weak self] in self?.attach() }
+            // At once, so the position is right before the first display; later only if the scroll view was not there yet.
+            attach()
+            if observer == nil { DispatchQueue.main.async { [weak self] in self?.attach() } }
         }
 
         func detach() {
             if let observer { NotificationCenter.default.removeObserver(observer) }
-            observer = nil; recording = false
+            if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
+            observer = nil; frameObserver = nil; recording = false; settling = false; armed = false; prependFrom = nil
         }
 
         private func attach() {
@@ -611,14 +594,21 @@ struct ScrollMemory: NSViewRepresentable {
             guard let scroll = v as? NSScrollView else { return }
             self.scroll = scroll
             scroll.contentView.postsBoundsChangedNotifications = true
-            // Nothing is recorded until the saved position has been put back (the layout settles over a few passes).
-            let target = PondScrollMemory.offset(id)
+            target = PondScrollMemory.offset(id)
             observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.record() }
             }
-            guard let target else { recording = true; return }
-            for delay in [0.0, 0.05, 0.15] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.restore(target) } }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.recording = true }
+            if let doc = scroll.documentView {
+                doc.postsFrameChangedNotifications = true
+                frameObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.documentResized() }
+                }
+            }
+            if let target { settling = true; restore(target) } else { recording = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                self.settling = false; self.recording = true; self.armed = true
+            }
         }
 
         private func metrics() -> (y: CGFloat, doc: CGFloat, visible: CGFloat)? {
@@ -626,18 +616,42 @@ struct ScrollMemory: NSViewRepresentable {
             return (scroll.contentView.bounds.origin.y, doc.frame.height, scroll.contentView.bounds.height)
         }
 
+        private func documentResized() {
+            guard let m = metrics() else { return }
+            if settling, let target { restore(target); return }
+            if let from = prependFrom, m.doc != from {
+                prependFrom = nil
+                let y = CGFloat(RoomScroll.afterPrepend(y: Double(m.y), oldDocument: Double(from), newDocument: Double(m.doc)))
+                scrollTo(y)
+            }
+        }
+
         private func record() {
-            guard recording, let m = metrics() else { return }
+            guard let m = metrics() else { return }
+            if armed, prependFrom == nil, let onNearTop, RoomScroll.nearTop(y: Double(m.y), document: Double(m.doc), visible: Double(m.visible)) {
+                prependFrom = m.doc
+                onNearTop()
+                // A request that brought nothing must not block the next one.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.prependFrom = nil }
+            }
+            guard recording else { return }
             let value = fromBottom ? max(0, m.doc - m.visible - m.y) : m.y
             PondScrollMemory.save(id, value)
         }
 
-        private func restore(_ target: CGFloat) {
-            guard let scroll, let m = metrics() else { return }
-            let y = fromBottom ? m.doc - m.visible - target : target
-            let clamped = min(max(0, y), max(0, m.doc - m.visible))
-            scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: clamped))
+        private func scrollTo(_ y: CGFloat) {
+            guard let scroll else { return }
+            scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
+        }
+
+        private func restore(_ target: CGFloat) {
+            guard let m = metrics() else { return }
+            if fromBottom {
+                scrollTo(CGFloat(RoomScroll.restored(fromBottom: Double(target), document: Double(m.doc), visible: Double(m.visible))))
+            } else {
+                scrollTo(min(max(0, target), max(0, m.doc - m.visible)))
+            }
         }
     }
 }

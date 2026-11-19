@@ -22,9 +22,7 @@ enum Motion {
     /// No animation: streaming text, timers, scroll-follow.
     static let none: Animation? = nil
 
-    /// Loops (duck and tab pulses, the update artwork). Callers skip them under Reduce Motion.
-    static var pulse: Animation { .easeInOut(duration: 0.9).repeatForever(autoreverses: true) }
-    static var drift: Animation { .easeInOut(duration: 3.0).repeatForever(autoreverses: true) }
+    /// No repeating animations: one slow loop paces the whole window's frame rate.
     static var pulseStep: Animation { .easeInOut(duration: 0.9) }
 
     /// The sidebar column sizer, in step with its AppKit twin (same duration and curve).
@@ -36,11 +34,6 @@ enum Motion {
     /// scales by the distance left (`SwipeFinish`). Nil under Reduce Motion: the swap is instant.
     static func swipe(duration: Double) -> Animation? {
         reduceMotion ? nil : .timingCurve(SwipeCurve.x1, SwipeCurve.y1, SwipeCurve.x2, SwipeCurve.y2, duration: duration)
-    }
-
-    /// One ripple ring of the swipe hint, expanding and fading. Only ever called while Reduce Motion is off.
-    static func ripple(duration: Double = 1.6) -> Animation {
-        .timingCurve(SwipeCurve.x1, SwipeCurve.y1, SwipeCurve.x2, SwipeCurve.y2, duration: duration)
     }
 
     /// Press-down is instant, release eases at `quick`. Use as `.animation(Motion.release(pressed), value: pressed)`.

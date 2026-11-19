@@ -15,8 +15,9 @@ BUILD_ONLY=0
 [ "${1:-}" = "--build-only" ] && BUILD_ONLY=1
 
 cd "$HERE"
-swift build --product SqueakMac
-BINDIR="$(swift build --show-bin-path)"
+CFG="${SQUEAK_DEV_CONFIG:-debug}"   # SQUEAK_DEV_CONFIG=release: optimised, as the shipped app
+swift build -c "$CFG" --product SqueakMac
+BINDIR="$(swift build -c "$CFG" --show-bin-path)"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
 
 CHANGED=0

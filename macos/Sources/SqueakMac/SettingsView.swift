@@ -164,7 +164,7 @@ struct SettingsSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Traffic-light clearance in a window; a short gap in full screen. Search leads, as the conversation sidebar's first item does.
-            Color.clear.frame(height: model.conversationFullScreen ? Space.m : 40).background(WindowDragArea())
+            Color.clear.frame(height: Space.m).background(WindowDragArea())
             SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
                 .onSubmit { if let first = filteredGroups.first?.sections.first { model.settingsSection = first } }
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)

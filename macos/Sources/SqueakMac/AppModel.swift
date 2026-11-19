@@ -135,6 +135,8 @@ final class AppModel {
     /// pins, filters, started chats). Reads of those values register it, so a view re-runs on a real change only;
     /// each value is computed once per bump (`DerivedSessions`), not once per read.
     private(set) var derivedRevision = 0
+    /// Rows, derived values and turn footers of the most recently shown chats, so a switch back reuses them.
+    @ObservationIgnored let chatCaches = ChatViewCacheStore()
     @ObservationIgnored let derived = DerivedSessions()
     func inputsChanged() {
         derived.invalidateAll()

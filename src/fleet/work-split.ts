@@ -66,17 +66,17 @@ export function splitBrief(split: WorkSplit | undefined): string | null {
   const lines: string[] = [];
   if (split.code || split.run) {
     lines.push(
-      "- You are the planner: plan, decide and review. Keep your own reading and editing small; ducklings do the bulk. Launch ducklings with run_in_background: true unless your very next step needs the result.",
+      "- You are the planner: plan, decide and review. Keep your own reading and editing small; subagents do the bulk. Launch subagents with run_in_background: true unless your very next step needs the result.",
     );
   }
   if (split.code) {
     lines.push(
-      `- Code: hand each change to a duckling (Agent tool, model "${split.code}") with a self-contained brief: the files, the change, how to check it. Ask for a report of 10 lines or fewer, not the diff.`,
+      `- Code: hand each change to a subagent (Agent tool, model "${split.code}") with a self-contained brief: the files, the change, how to check it. Ask for a report of 10 lines or fewer, not the diff.`,
     );
   }
   if (split.run) {
     lines.push(
-      `- Run: builds, tests and long commands go to a duckling (Agent tool, model "${split.run}"). It reports the command, the exit code and only the failures.`,
+      `- Run: builds, tests and long commands go to a subagent (Agent tool, model "${split.run}"). It reports the command, the exit code and only the failures.`,
     );
   }
   if (split.code || split.run) {
@@ -90,7 +90,7 @@ export function splitBrief(split: WorkSplit | undefined): string | null {
     );
   }
   if (lines.length === 0) return null;
-  return ["[How to work on this, set in Squeak to save usage]", ...lines].join("\n");
+  return ["[How to work on this chat]", ...lines].join("\n");
 }
 
 /** What the agent receives in place of `text`, or undefined when it receives `text` as it is. */

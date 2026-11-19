@@ -205,9 +205,33 @@ final class PondsModel {
         directory = PondDirectory(ponds: list.map { PondDirectory.Pond(id: $0.id, name: $0.name, projectId: $0.id, hidden: $0.hidden, labels: $0.labels, folder: $0.rootPath) })
     }
 
+    /// What the directory load has seen so far; the sidebar reads it to tell "loading" from "no ponds".
+    private(set) var directoryLoad = DirectoryLoad()
+    private var directoryRetry: Task<Void, Never>?
+
+    /// Reads the directory; until the first success it is asked again on a backoff (0.5, 1, 2, 4, then every 8 s).
+    /// One load at a time, and a failure never clears the last good directory.
     func refreshDirectory() async {
-        guard let client else { return }
-        if let d = try? await client.directory() { if d != directory { directory = d } }
+        guard let client, directoryLoad.begin() else { return }
+        do {
+            if let d = try await client.directory() {
+                directoryLoad.succeeded()
+                if d != directory { directory = d }
+            } else {
+                directoryLoad.unsupportedHost()
+            }
+        } catch {
+            directoryLoad.failed()
+            if directoryLoad.needsRetry, directoryRetry == nil {
+                let delay = directoryLoad.nextDelay
+                directoryRetry = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard !Task.isCancelled, let self else { return }
+                    self.directoryRetry = nil
+                    await self.refreshDirectory()
+                }
+            }
+        }
     }
 
     /// The pond key the open page is for.
@@ -345,7 +369,8 @@ final class PondsModel {
 
     /// The Invite button: no cloud says so; signed out signs in first and then continues; else the invite sheet.
     func startInvite(pondId: String, account: AccountModel) {
-        switch PondInviteStart.decide(cloud: cloud, linked: account.state?.linked == true) {
+        switch PondInviteStart.decide(cloud: cloud, linked: account.state?.linked == true,
+                                         hostedReady: AppModel.shared.cloud.hosted?.phase == .ready) {
         case .say(let sentence): note = sentence
         case .invite: note = nil; sheet = .invite(pondId: pondId)
         case .signIn:

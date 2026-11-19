@@ -342,7 +342,7 @@ final class QuickState {
 /// The quick message pill (DESIGN.md §8.5): one growing field on top; under it the "To" chip with
 /// the chat's state dot, the repo and agent, and the round duck-yellow Send. The shortcuts sit
 /// below the glass, and a warm light spills from under it: nearly still while you type, brighter and
-/// breathing while it sends. Still under Reduce Motion, gone under Reduce Transparency.
+/// a steady glow while it sends. Still under Reduce Motion, gone under Reduce Transparency.
 struct QuickComposerView: View {
     var close: () -> Void
     var resize: (CGFloat) -> Void = { _ in }
@@ -402,7 +402,7 @@ struct QuickComposerView: View {
         .onChange(of: state.sending) { _, sending in
             guard !reduceMotion else { return }
             if sending {
-                withAnimation(Motion.pulse) { breathing = true }
+                withAnimation(Motion.standard) { breathing = true }
             } else {
                 withAnimation(Motion.standard) { breathing = false }
             }

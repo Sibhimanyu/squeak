@@ -54,6 +54,8 @@ public enum ChatIndicator: Equatable, Sendable {
 /// answer only moves when the messages or the state do. `computeCount` lets a test prove it.
 public final class ChatRowsCache {
     public private(set) var computeCount = 0
+    /// Moves exactly when the rows are rebuilt: a cheap revision for anything derived from them.
+    public var generation: Int { computeCount }
     private var key: Key?
     private var cached: [ChatTimeline.Row] = []
 

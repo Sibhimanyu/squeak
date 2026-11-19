@@ -80,6 +80,9 @@ public struct AccountFlow: Equatable, Sendable {
     /// Where sign-in lives: the account's own page, else the hosted cloud's (a fresh install has no cloud of its own yet,
     /// so Settings › Account must still offer a button). Nil only when neither answered.
     public static func signInBase(account: AccountState?, hosted: HostedCloud?) -> String? {
-        account?.signInUrl ?? hosted?.signInUrl
+        // A Mac on Squeak's hosted cloud signs in there: the daemon's account URL can name an old relay that answers 401
+        // (a blank page). Only a Mac still on an older cloud (`legacy`) keeps the account's own page.
+        if let h = hosted, h.legacy == nil, let u = h.signInUrl { return u }
+        return account?.signInUrl ?? hosted?.signInUrl
     }
 }

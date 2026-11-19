@@ -979,18 +979,23 @@ export class FlotillaService extends EventEmitter {
 
   /** The records the directory is built from; a shared pond's members come from its page. */
   async directoryRecords(): Promise<DirRecord[]> {
-    const out: DirRecord[] = [];
-    for (const summary of await this.list()) {
-      let members: DirRecord["members"];
-      if (!summary.local && summary.memberCount > 1) {
+    const summaries = await this.list();
+    // Members of shared ponds are cloud reads: all at once, never one after another (each may take the whole budget).
+    const memberLists = await Promise.all(
+      summaries.map(async (summary): Promise<DirRecord["members"]> => {
+        if (summary.local || summary.memberCount <= 1) return undefined;
         try {
-          members = (await this.view(summary.id)).members.map((m) => ({ name: m.name, online: m.online }));
+          return (await this.view(summary.id)).members.map((m) => ({ name: m.name, online: m.online }));
         } catch {
           // Members unknown: the pond is still shared.
+          return undefined;
         }
-      }
+      }),
+    );
+    return summaries.map((summary, i) => {
+      const members = memberLists[i];
       const stored = this.pondsFile.data.ponds[summary.id];
-      out.push({
+      return {
         id: summary.id,
         name: summary.name,
         role: summary.role,
@@ -1000,9 +1005,8 @@ export class FlotillaService extends EventEmitter {
         ...(stored?.kind ? { kind: stored.kind } : {}),
         memberCount: summary.memberCount,
         ...(members ? { members } : {}),
-      });
-    }
-    return out;
+      };
+    });
   }
 
   projectRemoved(projectId: string): void {

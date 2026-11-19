@@ -46,13 +46,10 @@ public struct MessageText: View {
                 .frame(maxHeight: collapsed ? collapsedHeight : nil, alignment: .top)
                 .clipped()
                 .mask(alignment: .top) {
-                    if collapsed {
-                        VStack(spacing: 0) {
-                            Rectangle()
-                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 56)
-                        }
-                    } else {
+                    // One mask whose fade height animates to zero, so Show more / less eases instead of swapping subtrees.
+                    VStack(spacing: 0) {
                         Rectangle()
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: collapsed ? 56 : 0)
                     }
                 }
             if isLong {
@@ -672,6 +669,8 @@ private struct TableLayout: Layout {
         var widths: [CGFloat] = []
         var rowHeights: [CGFloat] = []
         var scrolls = false
+        /// Built for the current subviews and `available` (the cache is rebuilt when either changes).
+        var ready = false
     }
 
     private func bodyRowCount(_ subviews: Subviews) -> Int {
@@ -680,6 +679,11 @@ private struct TableLayout: Layout {
 
     func makeCache(subviews: Subviews) -> Plan { Plan() }
 
+    /// The plan, measured once per layout pass: `sizeThatFits` builds it and `placeSubviews` reuses it.
+    private func ensurePlan(_ subviews: Subviews, _ cache: inout Plan) {
+        if !cache.ready { cache = plan(subviews) }
+    }
+
     private func plan(_ subviews: Subviews) -> Plan {
         let body = bodyRowCount(subviews)
         let cells = Array(subviews.dropFirst(1 + body))
@@ -687,10 +691,10 @@ private struct TableLayout: Layout {
         var minimum = [CGFloat](repeating: 0, count: columns)
         for (k, cell) in cells.enumerated() {
             let c = k % columns
-            ideal[c] = max(ideal[c], cell.sizeThatFits(.unspecified).width)
+            let one = cell.sizeThatFits(.unspecified).width
+            ideal[c] = max(ideal[c], one)
             // Text breaks inside a word when given no room, so its own minimum says nothing: a
             // cell's longest word is estimated as its share of the characters instead.
-            let one = cell.sizeThatFits(.unspecified).width
             minimum[c] = max(minimum[c], padding + (one - padding) * cell[WordShare.self])
         }
         let chosen = TableMetrics.columns(ideal: ideal, minimum: minimum, available: available)
@@ -702,18 +706,18 @@ private struct TableLayout: Layout {
             }
             heights.append(h)
         }
-        return Plan(widths: chosen.widths, rowHeights: heights, scrolls: chosen.scrolls)
+        return Plan(widths: chosen.widths, rowHeights: heights, scrolls: chosen.scrolls, ready: true)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Plan) -> CGSize {
         guard columns > 0, subviews.count > columns else { return .zero }
-        cache = plan(subviews)
+        ensurePlan(subviews, &cache)
         return CGSize(width: cache.widths.reduce(0, +), height: cache.rowHeights.reduce(0, +) + CGFloat(max(cache.rowHeights.count - 1, 0)))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Plan) {
         guard columns > 0, subviews.count > columns else { return }
-        cache = plan(subviews)
+        ensurePlan(subviews, &cache)
         let body = bodyRowCount(subviews)
         let total = cache.widths.reduce(0, +)
         var y = bounds.minY

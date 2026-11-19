@@ -67,7 +67,9 @@ import Testing
         let base = AccountFlow.signInBase(account: fresh, hosted: hosted)
         #expect(base == "https://hosted.test/app/index.html")
         #expect(AccountFlow.signInBase(account: fresh, hosted: nil) == nil)
-        #expect(AccountFlow.signInBase(account: AccountState(linked: false, signInUrl: "https://own.test/app/index.html"), hosted: hosted) == "https://own.test/app/index.html")
+        #expect(AccountFlow.signInBase(account: AccountState(linked: false, signInUrl: "https://own.test/app/index.html"), hosted: hosted) == "https://hosted.test/app/index.html")
+        let legacy = HostedCloud(phase: .needsSignIn, legacy: .firebase, signInUrl: "https://hosted.test/app/index.html")
+        #expect(AccountFlow.signInBase(account: AccountState(linked: false, signInUrl: "https://own.test/app/index.html"), hosted: legacy) == "https://own.test/app/index.html")
         #expect(AccountFlow.wantsBothSteps(signInUrl: base, hosted: hosted))
         // Another relay's page, a held move, or a Mac already connecting keeps the old two passes.
         #expect(!AccountFlow.wantsBothSteps(signInUrl: "https://own.test/app/index.html", hosted: hosted))

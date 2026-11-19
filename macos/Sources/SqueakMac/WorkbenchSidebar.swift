@@ -74,7 +74,10 @@ struct WorkbenchSidebar: View {
             if scope != .all { PondFilterChip(label: scope.title) { pondScope = PondSharing.Scope.all.rawValue } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if !model.hasPonds {
+                    if model.pondsLoading {
+                        Text("Loading ponds\u{2026}").font(Typo.meta).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, Space.s).padding(.vertical, Space.s)
+                    } else if !model.hasPonds {
                         Button { model.openNewPond() } label: {
                             Text("No ponds yet. New pond (\u{2318}N) makes one.").font(Typo.meta).foregroundStyle(Theme.muted)
                                 .multilineTextAlignment(.leading).padding(.horizontal, Space.s).padding(.vertical, Space.s)
@@ -225,6 +228,7 @@ struct WorkbenchSidebar: View {
     private var topBar: some View {
         Color.clear.frame(height: Metrics.header).background(WindowDragArea())
     }
+
 
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
     @State private var macHovering = false

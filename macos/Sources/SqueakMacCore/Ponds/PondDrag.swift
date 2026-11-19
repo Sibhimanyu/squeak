@@ -135,6 +135,7 @@ public struct PondDrag: Sendable, Equatable {
     private var active = false
     private var spent = false
     private var moved = false
+    private var axis = SwipeAxis()
 
     public init() {}
 
@@ -173,7 +174,7 @@ public struct PondDrag: Sendable, Equatable {
     }
 
     public mutating func reset() {
-        x = 0; y = 0; active = false; spent = false; moved = false; samples = []
+        x = 0; y = 0; active = false; spent = false; moved = false; samples = []; axis = SwipeAxis()
         origin = 0; position = 0
     }
 
@@ -200,6 +201,12 @@ public struct PondDrag: Sendable, Equatable {
         }
         guard active, !spent else { return nil }
         x += dx; y += dy
+        // The axis is decided once, from the first points of travel: a vertical gesture costs nothing from here on.
+        switch axis.resolve(x: x, y: y) {
+        case .undecided: return nil
+        case .vertical: spent = true; return nil
+        case .horizontal: break
+        }
         samples.append(SwipeSample(t: time, x: x))
         if samples.count > 24 { samples.removeFirst(samples.count - 24) }
         if abs(y) > abs(x) * PondSwipe.dominance, abs(y) > 12 {
@@ -229,16 +236,29 @@ public struct PondDrag: Sendable, Equatable {
     }
 }
 
-/// The edge hint: a button with the other page's name, a ripple while idle, and the first-visit peek. Counts live in
+/// Which way a two-finger gesture goes, decided once after a small dead zone and kept until the gesture ends. A vertical one
+/// is never tracked, so ordinary scrolling costs the swipe nothing.
+public struct SwipeAxis: Sendable, Equatable {
+    public enum Result: Sendable, Equatable { case undecided, horizontal, vertical }
+    public static let deadZone = 4.0
+    public private(set) var decided: Result = .undecided
+
+    public init() {}
+
+    public mutating func resolve(x: Double, y: Double) -> Result {
+        guard decided == .undecided else { return decided }
+        guard max(abs(x), abs(y)) >= Self.deadZone else { return .undecided }
+        decided = abs(x) > abs(y) ? .horizontal : .vertical
+        return decided
+    }
+}
+
+/// The edge hint: a button with the other page's name, and the first-visit peek. Counts live in
 /// UserDefaults; this decides.
 public struct PondSwipeHint: Sendable, Equatable {
-    /// The ripple (and the peek) teach on the first few visits only.
+    /// The peek teaches on the first few visits only.
     public static let nudgeVisits = 3
     public static let wordSwipes = 3
-    /// Seconds between ripples while idle.
-    public static let rippleInterval = 6.0
-    /// Points the chevron drifts toward the swipe in step with a ripple.
-    public static let driftDistance = 4.0
     /// First visit only: the page slides this far toward the other one, 1.2 s after the pond opens, and eases back.
     public static let peekDistance = 28.0
     public static let peekDelay = 1.2
@@ -250,12 +270,6 @@ public struct PondSwipeHint: Sendable, Equatable {
 
     public init(visits: Int = 0, swipes: Int = 0) { self.visits = visits; self.swipes = swipes }
 
-    /// Whether a ripple plays now: the first three visits, before the third swipe, the window key, never under Reduce Motion.
-    public func ripples(reduceMotion: Bool, windowIsKey: Bool) -> Bool {
-        !reduceMotion && windowIsKey && visits <= Self.nudgeVisits && swipes < Self.wordSwipes
-    }
-    /// Seconds to wait before the next ripple (the first comes after the same interval).
-    public var rippleDelay: Double { Self.rippleInterval }
     /// The peek: the first visit only, before any swipe, never under Reduce Motion.
     public func peeks(reduceMotion: Bool) -> Bool { !reduceMotion && visits == 1 && swipes == 0 }
     /// The word goes once the person has swiped a few times; the quieter button stays.
@@ -291,7 +305,6 @@ public struct SwipeGestureGate: Sendable, Equatable {
 
     public mutating func reset() { decided = nil }
 }
-
 extension FullScreenReveal {
     /// Whether a look at the pointer can change anything: while hidden, the pointer far below the top band does nothing, so
     /// the poll skips measuring the sidebar row and the controls.

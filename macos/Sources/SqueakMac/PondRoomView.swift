@@ -184,6 +184,7 @@ struct PondRoomView: View {
     var key: String?
     /// Room for the sidebar toggle when the sidebar is closed.
     var leadingInset: CGFloat = 0
+    /// Room for the sidebar toggle when the sidebar is closed.
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -245,10 +246,9 @@ struct PondRoomView: View {
         let count = items.count + working.count + items.reduce(0) { n, i in if case .group(let g) = i { n + g.messages.count } else { n } }
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if room.feed.hasMoreBefore {
-                        Color.clear.frame(height: 1).onAppear { Task { await room.loadOlder(host: model.nativeHost) } }
-                    }
+                // Eager, not lazy: every row of the newest window is laid out at once, so the bottom anchor is exact from the
+                // first layout and the slide's picture of the Room shows real rows while the page is off screen.
+                VStack(alignment: .leading, spacing: 12) {
                     if items.isEmpty && working.isEmpty {
                         Text("Say something to the room, or start a duck. What the ducks do shows up here.")
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
@@ -272,9 +272,12 @@ struct PondRoomView: View {
                 }
                 .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.m)
                 .frame(maxWidth: 740 + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
-                .background(ScrollMemory(id: "pond:\(key ?? projectId):room", fromBottom: true))
+                .background(ScrollMemory(
+                    id: "pond:\(key ?? projectId):room", fromBottom: true,
+                    onNearTop: room.feed.hasMoreBefore ? { Task { await room.loadOlder(host: model.nativeHost) } } : nil))
             }
             .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
             .onAppear { ledger.freeze(items.map(\.id)) }
             .onChange(of: count) { old, new in
                 guard new > old else { return }

@@ -221,15 +221,71 @@ struct SelectableRun: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        let key = AttributedCache.key(blocks, ctx: ctx, pathLinks: pathLinks, muted: muted, scheme: scheme)
         SelectableTextRepresentable(
-            text: SelectableText.attributed(blocks, ctx: ctx, pathLinks: pathLinks, muted: muted),
-            pathLinks: pathLinks, scheme: scheme, open: { openURL($0) })
+            text: AttributedCache.string(key) { SelectableText.attributed(blocks, ctx: ctx, pathLinks: pathLinks, muted: muted) },
+            key: key, pathLinks: pathLinks, scheme: scheme, open: { openURL($0) })
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Built attributed strings by what they depend on, so scrolling a run back into view (or a body re-evaluating) never
+/// rebuilds one. The key holds the blocks, the style, the scale, muted, the colour scheme and what each path span
+/// currently resolves to (a finished path check changes the string); it holds nothing about width (the string has none).
+enum AttributedCache {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSAttributedString> = { let c = NSCache<NSString, NSAttributedString>(); c.countLimit = 2048; return c }()
+    nonisolated(unsafe) private static var builds = 0
+    /// How many strings were built, for tests.
+    static var buildCount: Int { builds }
+
+    static func key(_ blocks: [MessageMarkup.Block], ctx: RenderContext, pathLinks: PathLinks?, muted: Bool, scheme: ColorScheme) -> String {
+        var h = Hasher()
+        h.combine(blocks)
+        let s = ctx.style
+        h.combine(ctx.scale); h.combine(s.bodySize); h.combine(s.codeSize); h.combine(s.headingSizes); h.combine(s.lineSpacing)
+        h.combine(s.paragraphGap); h.combine(s.listGap); h.combine(s.headingGapAbove); h.combine(s.headingGapBelow)
+        h.combine(s.listItemGap); h.combine(s.listIndentEm); h.combine(s.solidBullets); h.combine(s.inlineCodeScale)
+        h.combine(s.breakPaths); h.combine(s.letteredOptions)
+        for c in [s.ink, s.muted, s.line, s.codeSurface] { h.combine("\(c)") }
+        h.combine(s.inlineCodeBorder.map { "\($0)" }); h.combine(s.pathTint.map { "\($0)" })
+        h.combine(muted); h.combine(scheme == .dark)
+        if let pathLinks {
+            h.combine(true)
+            for b in blocks { resolveSpans(b, pathLinks, &h) }
+        }
+        return "\(h.finalize())"
+    }
+
+    private static func resolveSpans(_ block: MessageMarkup.Block, _ links: PathLinks, _ h: inout Hasher) {
+        switch block {
+        case .paragraph(let i), .heading(_, let i), .listItem(_, _, let i): spans(i, links, &h)
+        default: break
+        }
+    }
+
+    private static func spans(_ inlines: [MessageMarkup.Inline], _ links: PathLinks, _ h: inout Hasher) {
+        for i in inlines {
+            switch i {
+            case .code(let s), .path(let s): h.combine(SelectableText.webURL(s) == nil ? links.resolve(s) : nil)
+            case .bold(let x), .italic(let x), .strike(let x), .link(let x, _): spans(x, links, &h)
+            default: break
+            }
+        }
+    }
+
+    static func string(_ key: String, build: () -> NSAttributedString) -> NSAttributedString {
+        if let hit = cache.object(forKey: key as NSString) { return hit }
+        builds += 1
+        let s = build()
+        cache.setObject(s, forKey: key as NSString)
+        return s
     }
 }
 
 struct SelectableTextRepresentable: NSViewRepresentable {
     let text: NSAttributedString
+    /// What `text` was built from; an unchanged key means an unchanged string.
+    let key: String
     let pathLinks: PathLinks?
     let scheme: ColorScheme
     let open: (URL) -> Void
@@ -246,7 +302,9 @@ struct SelectableTextRepresentable: NSViewRepresentable {
         context.coordinator.open = open
         v.pathLinks = pathLinks
         // Replace only what changed, so a selection survives a redraw (a streamed message re-renders often).
-        if !v.currentText.isEqual(to: text) {
+        // The key says it cheaply: no comparison of the whole string on each pass.
+        if v.contentKey != key {
+            v.contentKey = key
             let selected = v.selectedRange()
             v.setText(text)
             if NSMaxRange(selected) <= text.length { v.setSelectedRange(selected) }
@@ -254,7 +312,11 @@ struct SelectableTextRepresentable: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView v: SelectableTextView, context: Context) -> CGSize? {
-        let w = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 480
+        // An unspecified width measures at the last real one (a cache hit, the same height), so it never makes a
+        // second, different pass; 480 is only the first guess, before any real width has been seen.
+        let real = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+        if let real { v.lastRealWidth = real }
+        let w = real ?? v.lastRealWidth ?? 480
         return CGSize(width: w, height: v.height(forWidth: w))
     }
 
@@ -290,6 +352,8 @@ enum HeightCache {
 
 final class SelectableTextView: NSTextView {
     var pathLinks: PathLinks?
+    /// The key of the string now in the storage (see `AttributedCache`).
+    var contentKey: String?
     private var measured: (width: CGFloat, height: CGFloat)?
 
     init() {
@@ -313,6 +377,16 @@ final class SelectableTextView: NSTextView {
         linkTextAttributes = [:]  // keep our colours; the pointing hand still shows over a link
         isAutomaticLinkDetectionEnabled = false
         isAutomaticDataDetectionEnabled = false
+        usesFontPanel = false
+        usesRuler = false
+        usesFindBar = false
+        isAutomaticQuoteSubstitutionEnabled = false
+        isAutomaticDashSubstitutionEnabled = false
+        isAutomaticTextReplacementEnabled = false
+        isAutomaticSpellingCorrectionEnabled = false
+        isContinuousSpellCheckingEnabled = false
+        isGrammarCheckingEnabled = false
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         setAccessibilityRole(.staticText)
     }
 
@@ -337,6 +411,8 @@ final class SelectableTextView: NSTextView {
     }
 
     private var heightKey: String?
+    /// The last finite width SwiftUI proposed, for a proposal that names none.
+    var lastRealWidth: CGFloat?
 
     func height(forWidth width: CGFloat) -> CGFloat {
         if let m = measured, m.width == width { return m.height }

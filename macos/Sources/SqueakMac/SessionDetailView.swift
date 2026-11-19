@@ -114,9 +114,11 @@ struct SessionDetail: View {
     /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
     /// Computed once per change (`ChatRowsCache`), not once per read: the body asks for it many times.
     private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.displayMessages, state: liveState) }
-    @State private var rowsCache = ChatRowsCache()
+    private var rowsCache: ChatRowsCache { model.chatCaches.caches(for: session.key).rows }
+    /// Ids, turn ids and attached pictures of `rows`, rebuilt only when the rows are (`RowDerivedCache`).
+    private var derivedCache: RowDerivedCache { model.chatCaches.caches(for: session.key).derived }
     /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
-    @State private var rowCache = TranscriptRowCache()
+    private var rowCache: TranscriptRowCache { model.chatCaches.caches(for: session.key).rowCache }
     /// The dock's one line, the working row and Stop (`ChatDock`: one rule the replay tests read too).
     private var dock: ChatDock.Resolved {
         let info = isNative && model.native.key == session.key ? model.native.info : nil
@@ -161,9 +163,7 @@ struct SessionDetail: View {
     private func foldedTurns(in rows: [ChatTimeline.Row]) -> [Int: (id: String, steps: [ActivityStep])] {
         guard isNative else { return [:] }
         return TurnFolding.folds(
-            rows: rows.map { row in
-                if case .message(let m, _) = row { (m.turnId, m.role == .assistant) } else { (nil, false) }
-            }, newestTurn: newestTurnId, working: isWorking || model.native.pending.hasSteer, turnWork: model.turnWork, activity: model.activity)
+            rows: derivedCache.derived(rows: rows, generation: rowsCache.generation).foldRows, newestTurn: newestTurnId, working: isWorking || model.native.pending.hasSteer, turnWork: model.turnWork, activity: model.activity)
     }
     private var isNative: Bool { session.source == .squeak }
     /// A Squeak chat's transcript is drawn from the host's timeline (`NativeTurnsContent`); the transcript and activity reads
@@ -358,7 +358,7 @@ struct SessionDetail: View {
         }
     }
 
-    private var rowIDs: [String] { rows.map(\.id) }
+    private var rowIDs: [String] { derivedCache.derived(rows: rows, generation: rowsCache.generation).rowIDs }
 
     private var earlierKind: TranscriptWindow.EarlierKind {
         let ids = rowIDs
@@ -398,10 +398,9 @@ struct SessionDetail: View {
         let liveSteers = isWorking ? steers(ofTurn: newest, in: rows) : []
         let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, at: liveSteers.map(\.at))
         let liveBlock = runs.last.map { TurnFolding.block(steps: $0, working: true) } ?? turn
-        let attached = PictureLayout.attachedPaths(inTexts: rows.compactMap { if case .message(let m, _) = $0, m.role == .user { m.text } else { nil } })
-        ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
-            rowIDs: rows.map(\.id), start: windowStart,
-            turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
+        let derived = derivedCache.derived(rows: rows, generation: rowsCache.generation)
+        let attached = derived.attached
+        ForEach(indexedRows(rows, visible: TranscriptWindow.visible(rowIDs: derived.rowIDs, start: windowStart, turnIDs: derived.turnIDs))) { item in
             VStack(alignment: .leading, spacing: 0) {
                 if let f = folded[item.index] {
                     FoldedTurnView(steps: f.steps, steers: steers(ofTurn: f.id, in: rows), filesLine: f.id == newest ? turnFilesLine : nil).padding(.bottom, ChatSpacing.turnToMessage)
@@ -603,6 +602,7 @@ struct SessionDetail: View {
                         if newBelow { Text("New").font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink) }
                     }
                     .padding(.horizontal, newBelow ? 12 : 0)
+                    .animation(Motion.standard, value: newBelow)
                     .frame(minWidth: 28, minHeight: 28)
                     .background(Theme.surfaceRaised, in: Capsule())
                     .overlay(Capsule().stroke(Theme.line))
@@ -615,9 +615,9 @@ struct SessionDetail: View {
                 .transition(Motion.pop)
             }
         }
+        // Only the button's appearing and going is animated (by whether it shows), not the container or the follow state.
+        .animation(Motion.standard, value: TranscriptPin.jumpButtonVisible(atBottom: atBottom, rowCount: rows.count))
         .offset(y: -44)
-        .animation(Motion.standard, value: atBottom)
-        .animation(Motion.standard, value: newBelow)
     }
 
     // MARK: Bottom bar: summary line and the floating composer

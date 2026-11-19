@@ -21,7 +21,7 @@ struct PondRouteView: View {
     }
 
     private var sidebarClearance: CGFloat {
-        sidebarHidden ? PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
+        sidebarHidden ? PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
     }
 
     var body: some View {
@@ -103,6 +103,7 @@ struct PondHomeView: View {
                 .frame(maxWidth: PondInspectorSections.dashboardContentWidth, alignment: .leading).frame(maxWidth: .infinity)
                 .background(ScrollMemory(id: "pond:\(key):dashboard"))
             }
+            .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
         }
         .background(Theme.bg)
         .onAppear { ponds.note = nil }

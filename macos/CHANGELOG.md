@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.31.0
+
+**Smoother everywhere.** Full screen no longer stutters: Squeak now uses macOS's standard title bar instead of its own.
+
+- Full screen is as smooth as a normal window. The window buttons come from macOS, and in full screen they slide down with the menu bar.
+- No dim layer is left over a pond page after switching between Dashboard and Room, and no scroll bar rides along in the slide.
+- The Room opens at its newest message, already laid out: no blank page and no old messages popping in at the top.
+- Chats scroll more smoothly: formatted text is built once and reused, and reopening a recent chat reuses its rows.
+- Fewer jumps in chats: tables lay out once, "Show more" animates, and text is measured at its real width.
+- Removed animations that kept running in the background and slowed the whole window (the swipe hint's ripple, the loading pulse).
+- The ponds list keeps trying until it loads, and says "Loading ponds…" instead of "No ponds yet" while it does.
+- Invite goes straight to the invite form when this Mac is already signed in, and the sign-in sheet never sits blank.
+
 ## 2.30.1
 
 - Clicking a duck, in the pond's inspector or in the Room, opens its tab again (it said "Couldn't open").

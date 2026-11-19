@@ -80,7 +80,7 @@ public struct TideGlyph: View {
         let seed = fixedSeed ?? instanceSeed
         return Group {
             if GlyphPresentation.of(working: true, reduceMotion: reduceMotion) == .animatedGlyph {
-                TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, tuning.frameRate)), paused: scenePhase == .background)) { context in
+                TimelineView(.animation(minimumInterval: nil, paused: scenePhase == .background)) { context in
                     TideFrame(color: color, height: grid.size.height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning, scale: displayScale)
                 }
             } else {

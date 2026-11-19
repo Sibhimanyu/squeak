@@ -25,7 +25,7 @@ public enum TideMotion {
         /// Softness of the steps between levels, as a time scale in seconds (0 = pixels snap between the four levels).
         public var smoothness: Double = 0.8
         /// Timeline rate: 15, 30 or 60.
-        public var frameRate: Int = 30
+        public var frameRate: Int = 30 // kept for API compatibility; never throttles the glyph
         public init() {}
         public init(speed: Double = 0.5, paceDrift: Double = 0.5, choppinessLow: Double = 0.15, choppinessHigh: Double = 0.8, sparkle: Double = 1, vignette: Double = 1, smoothness: Double = 0.8, frameRate: Int = 30) {
             self.smoothness = smoothness; self.frameRate = frameRate

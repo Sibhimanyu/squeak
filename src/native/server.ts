@@ -325,9 +325,9 @@ export class NativeServer {
     try {
       await this.route(req, res);
       // Whatever a write changed shows in the next directory, not 750 ms later.
-      if ((req.method ?? "GET") !== "GET") this.directoryCache = null;
+      if ((req.method ?? "GET") !== "GET") this.invalidateDirectory();
     } catch (error) {
-      if ((req.method ?? "GET") !== "GET") this.directoryCache = null;
+      if ((req.method ?? "GET") !== "GET") this.invalidateDirectory();
       if (res.headersSent) {
         res.end();
         return;
@@ -356,18 +356,44 @@ export class NativeServer {
    * The pond directory (`flotilla/directory.ts`): the one list every surface draws. Native chats are placed here by
    * workspace; the daemon places the terminal and Claude/Codex sessions it alone sees, by folder.
    */
-  private directoryCache: { at: number; value: Promise<PondDirectory> } | null = null;
+  private directoryLast: { at: number; gen: number; value: PondDirectory } | null = null;
+  private directoryBuilding: { gen: number; promise: Promise<PondDirectory> } | null = null;
+  private directoryGen = 0;
 
-  /** One build serves every ask within 750 ms: the app, the phone and two windows polling together each rebuilt it. */
+  /** A write changed something: the next ask waits for a fresh build rather than serve the last one. */
+  invalidateDirectory(): void {
+    this.directoryGen += 1;
+  }
+
+  /**
+   * Stale-while-revalidate. The build reads the pond records, and a shared pond's members come from the cloud (up to
+   * the flotilla budget each), which took the route 0.9 s median and 8 s at worst. Warm, the last snapshot is served at
+   * once and an older-than-TTL one is rebuilt in the background; only the first ask, or one after a write, waits.
+   */
   directory(): Promise<PondDirectory> {
-    const now = Date.now();
-    if (this.directoryCache && now - this.directoryCache.at < DIRECTORY_TTL_MS) return this.directoryCache.value;
-    const value = this.buildDirectoryNow();
-    this.directoryCache = { at: now, value };
-    value.catch(() => {
-      if (this.directoryCache?.value === value) this.directoryCache = null;
+    const last = this.directoryLast;
+    if (last && last.gen === this.directoryGen) {
+      if (Date.now() - last.at >= DIRECTORY_TTL_MS) void this.rebuildDirectory().catch(() => undefined);
+      return Promise.resolve(last.value);
+    }
+    return this.rebuildDirectory();
+  }
+
+  private rebuildDirectory(): Promise<PondDirectory> {
+    const gen = this.directoryGen;
+    if (this.directoryBuilding && this.directoryBuilding.gen === gen) return this.directoryBuilding.promise;
+    const promise = this.buildDirectoryNow().then((value) => {
+      // A build that started before a write must not stand in for one after it.
+      if (!this.directoryLast || this.directoryLast.gen <= gen) this.directoryLast = { at: Date.now(), gen, value };
+      return value;
     });
-    return value;
+    const entry = { gen, promise };
+    this.directoryBuilding = entry;
+    const clear = () => {
+      if (this.directoryBuilding === entry) this.directoryBuilding = null;
+    };
+    promise.then(clear, clear);
+    return promise;
   }
 
   private async buildDirectoryNow(): Promise<PondDirectory> {

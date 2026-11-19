@@ -348,16 +348,6 @@ struct SwipeFeelTests {
         #expect(afterReset)
     }
 
-    @Test func rippleSchedule() {
-        #expect(PondSwipeHint(visits: 1).ripples(reduceMotion: false, windowIsKey: true))
-        #expect(PondSwipeHint(visits: 3, swipes: 2).ripples(reduceMotion: false, windowIsKey: true))
-        #expect(!PondSwipeHint(visits: 4).ripples(reduceMotion: false, windowIsKey: true))
-        #expect(!PondSwipeHint(visits: 1, swipes: 3).ripples(reduceMotion: false, windowIsKey: true))
-        #expect(!PondSwipeHint(visits: 1).ripples(reduceMotion: true, windowIsKey: true))
-        #expect(!PondSwipeHint(visits: 1).ripples(reduceMotion: false, windowIsKey: false))
-        #expect(PondSwipeHint(visits: 1).rippleDelay == 6)
-    }
-
     @Test func peekIsFirstVisitOnly() {
         #expect(PondSwipeHint(visits: 1).peeks(reduceMotion: false))
         #expect(!PondSwipeHint(visits: 2).peeks(reduceMotion: false))
@@ -400,5 +390,48 @@ struct SwipeFeelTests {
         _ = gate.blocked(begins: false, standalone: true, lookup: { false })
         _ = gate.blocked(begins: false, standalone: true, lookup: { false })
         #expect(gate.lookups == 2 && gate.decided == nil)
+    }
+
+    // MARK: Axis lock
+
+    private func feedAll(_ d: inout PondDrag, _ steps: [(Double, Double, PondSwipe.Phase, Bool)]) -> [PondDrag.Update] {
+        var out: [PondDrag.Update] = []; var t = 1.0
+        for (dx, dy, ph, mom) in steps {
+            t += 0.008
+            if let u = d.feed(dx: dx, dy: dy, phase: ph, momentum: mom, current: .dashboard, width: 1000, time: t) { out.append(u) }
+        }
+        return out
+    }
+
+    @Test func aVerticalGestureProducesNothingAtAll() {
+        var d = PondDrag()
+        var steps: [(Double, Double, PondSwipe.Phase, Bool)] = [(0, 0, .began, false)]
+        for i in 0..<40 { steps.append((i % 3 == 0 ? 3 : 0, 9, .changed, false)) }
+        steps.append((0, 0, .ended, false))
+        #expect(feedAll(&d, steps).isEmpty)
+    }
+
+    @Test func momentumAfterAVerticalGestureIsIgnored() {
+        var d = PondDrag()
+        let out = feedAll(&d, [(0, 0, .began, false), (1, 12, .changed, false), (0, 0, .ended, false),
+                               (30, 5, .none, true), (40, 2, .none, true)])
+        #expect(out.isEmpty)
+    }
+
+    @Test func aHorizontalGestureStillTracks() {
+        var d = PondDrag()
+        let out = feedAll(&d, [(0, 0, .began, false), (-10, 1, .changed, false), (-20, 1, .changed, false)])
+        #expect(out.count == 2 && out.allSatisfy { if case .track = $0 { true } else { false } })
+    }
+
+    @Test func aDiagonalStartResolvesOnce() {
+        var axis = SwipeAxis()
+        #expect(axis.resolve(x: 2, y: 2) == .undecided)
+        #expect(axis.resolve(x: 3, y: 5) == .vertical)
+        // Later travel never flips the decision.
+        #expect(axis.resolve(x: 400, y: 5) == .vertical)
+        var h = SwipeAxis()
+        #expect(h.resolve(x: 5, y: 3) == .horizontal)
+        #expect(h.resolve(x: 5, y: 900) == .horizontal)
     }
 }

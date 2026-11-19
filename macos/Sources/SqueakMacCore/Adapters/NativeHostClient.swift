@@ -1059,7 +1059,7 @@ public struct NativeHostClient: Sendable {
 
     /// `GET /native/directory`: the pond directory; nil when the host is older than the route (404).
     public func directory() async throws -> PondDirectory? {
-        do { return try await decode(PondDirectory.self, try await call("GET", "/native/directory")) }
+        do { return try await decode(PondDirectory.self, try await call("GET", "/native/directory", timeout: DirectoryLoad.timeout)) }
         catch NativeHostError.http(404, _) { return nil }
     }
 

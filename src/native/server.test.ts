@@ -208,7 +208,7 @@ describe("NativeServer", () => {
     const body = { cwd: "/tmp", agent: "claude", model: "opus-5-1m", permissionMode: "default", text: "do it" };
     const made = await call(h, "POST", "/native/sessions", { ...body, split: { code: "sonnet", planFirst: true } });
     expect(made.status).toBe(201);
-    expect(h.sent[0]).toContain("[How to work on this, set in Squeak to save usage]");
+    expect(h.sent[0]).toContain("[How to work on this chat]");
     expect(h.sent[0]).toContain('model "sonnet"');
     expect(h.sent[0]!.endsWith("\n\ndo it")).toBe(true);
     const msgs = (await call(h, "GET", `/native/sessions/${made.json.session.id}/messages?after=0`)).json.messages;
@@ -244,7 +244,7 @@ describe("NativeServer", () => {
       400,
     );
     await call(h, "POST", `/native/sessions/${id}/messages`, { text: "next" });
-    expect(h.sent[0]).toContain("[How to work on this, set in Squeak to save usage]");
+    expect(h.sent[0]).toContain("[How to work on this chat]");
     expect(h.sent[0]!.endsWith("\n\nnext")).toBe(true);
   });
 

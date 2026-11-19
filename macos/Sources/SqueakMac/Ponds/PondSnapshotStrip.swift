@@ -14,8 +14,11 @@ final class PondSnapshotStrip: NSView {
     private var framesLeft = 0
     private var dismissToken = 0
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    override init(frame: NSRect) { super.init(frame: frame) }
+
+    /// The backing layer and the two page layers exist only while a slide is showing; at rest the view has no layer at all.
+    private func build() {
+        guard pageLayers.isEmpty else { return }
         wantsLayer = true
         layer?.masksToBounds = true
         for page in PondPage.allCases {
@@ -70,6 +73,7 @@ final class PondSnapshotStrip: NSView {
     /// Puts the captures on the layers, the page at `rest` leaving and the other arriving on top, at `position`, and shows the strip.
     func show(images: [PondPage: CGImage], rest: PondPage, position: Double) {
         dismissToken += 1; link?.invalidate(); link = nil
+        build()
         let scale = window?.backingScaleFactor ?? 2
         var bg = CGColor(gray: 0, alpha: 1)
         effectiveAppearance.performAsCurrentDrawingAppearance { bg = NSColor(Theme.bg).cgColor }
@@ -158,8 +162,18 @@ final class PondSnapshotStrip: NSView {
         framesLeft -= 1
         guard framesLeft <= 0 else { return }
         l.invalidate(); link = nil
+        clear()
+    }
+
+    /// Nothing left over the live page: hidden, bitmaps dropped, scrims and backdrop cleared.
+    func clear() {
+        link?.invalidate(); link = nil
         isHidden = true
-        for page in PondPage.allCases { pageLayers[page]?.contents = nil }
+        for page in PondPage.allCases { pageLayers[page]?.removeAllAnimations(); scrims[page]?.removeAllAnimations() }
+        layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
+        pageLayers = [:]; scrims = [:]
+        layer?.backgroundColor = nil
+        wantsLayer = false
     }
 }
 
@@ -169,5 +183,5 @@ struct PondSnapshotLayer: NSViewRepresentable {
         let v = PondSnapshotStrip(); v.isHidden = true; state.strip = v; return v
     }
     func updateNSView(_ view: PondSnapshotStrip, context: Context) { state.strip = view }
-    static func dismantleNSView(_ view: PondSnapshotStrip, coordinator: ()) { view.isHidden = true }
+    static func dismantleNSView(_ view: PondSnapshotStrip, coordinator: ()) { view.clear() }
 }

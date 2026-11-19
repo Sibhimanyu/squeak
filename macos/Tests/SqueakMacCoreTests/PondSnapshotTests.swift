@@ -45,3 +45,16 @@ struct PondSnapshotTests {
         #expect(!PondSnapshotPlan.usable(width: 0, height: 600, capturedBoth: true, identical: false))
     }
 }
+
+@Suite("Pond live scrim")
+struct PondLiveScrimTests {
+    @Test func nothingOverAPageAtRestOrWhileTheStripCarriesTheGesture() {
+        #expect(PondSnapshotPlan.liveScrim(x: 0, width: 900, snapshotActive: false, moving: false) == 0)
+        #expect(PondSnapshotPlan.liveScrim(x: -900, width: 900, snapshotActive: false, moving: false) == 0)
+        #expect(PondSnapshotPlan.liveScrim(x: 450, width: 900, snapshotActive: true, moving: true) == 0)
+        #expect(PondSnapshotPlan.liveScrim(x: 0.4, width: 900, snapshotActive: false, moving: true) == 0)
+    }
+    @Test func liveSlideStillDims() {
+        #expect(abs(PondSnapshotPlan.liveScrim(x: 900, width: 900, snapshotActive: false, moving: true) - 0.28) < 1e-9)
+    }
+}

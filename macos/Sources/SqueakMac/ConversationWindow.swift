@@ -89,7 +89,7 @@ struct ConversationView: View {
         // which cannot change its container's size.
         Color.clear
             .frame(minWidth: minContentWidth, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
-            .ignoresSafeArea(.container, edges: .top)
+            // Below the standard title bar (DESIGN.md §8.10): nothing runs under it.
             .background(GeometryReader { geo in
                 Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
             })
@@ -150,7 +150,7 @@ struct ConversationView: View {
             if showingSettings || !sidebarHidden {
                 ZStack(alignment: .topLeading) {
                     if showingSettings {
-                        SettingsSidebar().ignoresSafeArea(.container, edges: .top)
+                        SettingsSidebar()
                             .transition(Motion.morph(entering: true))
                     } else {
                         WorkbenchSidebar(width: sidebarW)
@@ -168,7 +168,7 @@ struct ConversationView: View {
                 .transition(paneTransition(.leading)).zIndex(1)
             }
             if showingSettings {
-                SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
+                SettingsDetail().squeakWindowCanvas()
             } else {
                 let placement = (chatOpen && roomCtx == nil) ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
@@ -249,7 +249,7 @@ struct ConversationView: View {
         }
         // Extend the whole clipping/overlay coordinate space into the title bar. Extending only
         // the children let the parent clip their headers off in a normal (non-fullscreen) window.
-        .ignoresSafeArea(.container, edges: .top)
+        // Below the standard title bar (DESIGN.md §8.10): nothing runs under it.
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
@@ -322,13 +322,12 @@ private struct ConversationWindowReader: NSViewRepresentable {
             if let w {
                 ActivationPolicyController.makeOrdinary(w)
                 // Seamless chrome: the columns' own backgrounds run to the top edge, under the traffic lights.
-                w.titlebarAppearsTransparent = true
+                // macOS's standard title bar (DESIGN.md §8.10): an opaque strip holding only the system window buttons; the
+                // content starts below it. No custom chrome, no titlebar views touched, no custom full-screen controls.
                 w.titleVisibility = .hidden
-                w.titlebarSeparatorStyle = .none
-                w.styleMask.insert([.fullSizeContentView, .closable, .miniaturizable, .resizable])
+                w.styleMask.insert([.closable, .miniaturizable, .resizable])
                 w.collectionBehavior.remove(.fullScreenNone)
                 w.collectionBehavior.insert(.fullScreenPrimary)
-                Reader.clearTitlebarSurface(w)
                 // A window that opens already in full screen starts the bar-less chrome at once.
                 if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
                 // Opaque, warm near-black (§3.2): no material shows through.
@@ -342,7 +341,6 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 if let w { Self.restoreFullScreenOnce(w) }
             }
             observeFullScreen(w)
-            observeTitlebar(w)
         }
 
         private static var fullScreenRestored = false
@@ -452,7 +450,7 @@ private struct ConversationWindowReader: NSViewRepresentable {
         /// titlebar reveal is made to draw nothing (FullScreenLightsController) and Squeak's own controls slide into the
         /// sidebar's top row instead. Windowed keeps the system traffic lights.
         static func setChrome(_ w: NSWindow, fullScreen: Bool) {
-            if fullScreen { FullScreenLightsController.shared.enter(w) } else { FullScreenLightsController.shared.exit(w) }
+            // The standard title bar needs nothing here: macOS shows its own buttons in full screen with the menu bar.
         }
 
         /// Full screen hides the traffic lights: the sidebar's top bar and the pane toggles drop their clearance for

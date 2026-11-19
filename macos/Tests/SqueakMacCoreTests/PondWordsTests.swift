@@ -21,6 +21,9 @@ import Testing
         #expect(PondInviteStart.decide(cloud: false, linked: true) == .say(PondWords.noCloud))
         #expect(PondInviteStart.decide(cloud: false, linked: false) == .say(PondWords.noCloud))
         #expect(PondInviteStart.decide(cloud: true, linked: false) == .signIn)
+        // Signed in to Squeak's cloud with the Mac's own key: no web sign-in sheet, straight to the invite.
+        #expect(PondInviteStart.decide(cloud: true, linked: false, hostedReady: true) == .invite)
+        #expect(PondInviteStart.decide(cloud: false, linked: false, hostedReady: true) == .say(PondWords.noCloud))
         #expect(PondInviteStart.decide(cloud: true, linked: true) == .invite)
     }
 

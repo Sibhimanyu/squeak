@@ -115,7 +115,48 @@ struct SelectableTextTests {
         v.cacheDisplay(in: v.bounds, to: rep)
         #expect(rep.pixelsWide > 0)
     }
+
+    @Test func aLongReplyIsOneTextViewPerRunNotPerBlock() {
+        var md = ""
+        for n in 0..<12 { md += "Paragraph \(n) with **bold**.\n\n- item a\n- item b\n\n" }
+        md += "```\ncode\n```\n\nTail one.\n\nTail two."
+        let blocks = MessageMarkup.parse(md)
+        let g = SelectableText.groups(blocks)
+        #expect(blocks.count > 30)
+        #expect(g.map(\.flow) == [true, false, true])
+        #expect(g.flatMap { $0.range }.count == blocks.count)
+    }
+
+    @Test func theAttributedKeyFollowsWhatTheStringDependsOn() {
+        let b = MessageMarkup.parse("Hello `a.txt` **x**")
+        func key(_ ctx: RenderContext = Self.ctx, muted: Bool = false, scheme: ColorScheme = .light, links: PathLinks? = nil, blocks: [MessageMarkup.Block]? = nil) -> String {
+            AttributedCache.key(blocks ?? b, ctx: ctx, pathLinks: links, muted: muted, scheme: scheme)
+        }
+        #expect(key() == key())
+        #expect(key() != key(muted: true))
+        #expect(key() != key(scheme: .dark))
+        #expect(key() != key(RenderContext(style: MessageStyle.mac, scale: 1.2)))
+        #expect(key() != key(blocks: MessageMarkup.parse("Hello `a.txt` **y**")))
+        let found = Flag()
+        let links = PathLinks(resolve: { _ in found.on ? URL(string: "squeak-path://open?p=x") : nil }, menu: { _ in [] })
+        let before = key(links: links)
+        found.on = true
+        #expect(before != key(links: links))
+    }
+
+    @Test func aCachedStringIsBuiltOnce() {
+        let b = MessageMarkup.parse("Unique text \(UUID().uuidString)")
+        let k = AttributedCache.key(b, ctx: Self.ctx, pathLinks: nil, muted: false, scheme: .light)
+        let start = AttributedCache.buildCount
+        let ctx = Self.ctx
+        let a = AttributedCache.string(k) { SelectableText.attributed(b, ctx: ctx, pathLinks: nil, muted: false) }
+        let c = AttributedCache.string(k) { SelectableText.attributed(b, ctx: ctx, pathLinks: nil, muted: false) }
+        #expect(AttributedCache.buildCount == start + 1)
+        #expect(a === c)
+    }
 }
+
+private final class Flag: @unchecked Sendable { var on = false }
 
 private extension NSFont {
     var weightValue: CGFloat {

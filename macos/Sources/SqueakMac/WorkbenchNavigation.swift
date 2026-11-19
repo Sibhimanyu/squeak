@@ -21,7 +21,7 @@ struct WorkbenchNavigation: View {
             button(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack, action: goBack)
             button(.arrowRight, "Forward (⌘])", enabled: history.canGoForward, action: goForward)
         }
-        .offset(x: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding
+        .offset(x: PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding
                 + (sidebarHidden ? PaneToggle.size + 4 : 4),
                 y: (Metrics.header - PaneToggle.size) / 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

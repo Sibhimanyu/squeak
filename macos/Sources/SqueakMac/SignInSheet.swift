@@ -13,6 +13,10 @@ final class SignInSheet: NSObject, WKNavigationDelegate, WKUIDelegate {
     private weak var parent: NSWindow?
     private var onEnd: ((End) -> Void)?
     private var webView: WKWebView?
+    private var spinner: NSProgressIndicator?
+    private var message: NSTextField?
+    private var timeout: Task<Void, Never>?
+    private var loaded = false
 
     /// Shows the sheet over `parent`. `onEnd` runs once.
     func present(url: URL, over parent: NSWindow, onEnd: @escaping (End) -> Void) {
@@ -35,6 +39,21 @@ final class SignInSheet: NSObject, WKNavigationDelegate, WKUIDelegate {
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 640))
         content.addSubview(web); content.addSubview(bar)
+        // Never a blank sheet: a spinner until the page paints, then a plain sentence if it cannot.
+        let spin = NSProgressIndicator(); spin.style = .spinning; spin.isIndeterminate = true
+        spin.translatesAutoresizingMaskIntoConstraints = false; spin.startAnimation(nil)
+        let msg = NSTextField(wrappingLabelWithString: "Opening sign-in…")
+        msg.alignment = .center; msg.textColor = .secondaryLabelColor
+        msg.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(spin); content.addSubview(msg)
+        spinner = spin; message = msg
+        NSLayoutConstraint.activate([
+            spin.centerXAnchor.constraint(equalTo: web.centerXAnchor),
+            spin.centerYAnchor.constraint(equalTo: web.centerYAnchor, constant: -14),
+            msg.centerXAnchor.constraint(equalTo: web.centerXAnchor),
+            msg.topAnchor.constraint(equalTo: spin.bottomAnchor, constant: 10),
+            msg.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+        ])
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: content.topAnchor),
             web.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -48,13 +67,33 @@ final class SignInSheet: NSObject, WKNavigationDelegate, WKUIDelegate {
         w.contentView = content
         window = w
         parent.beginSheet(w, completionHandler: nil)
+        loaded = false
         web.load(URLRequest(url: url))
+        timeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, !self.loaded else { return }
+            self.showProblem("Sign-in is taking too long to open. Use your browser instead.")
+        }
+    }
+
+    /// Replaces the spinner with a sentence; "Use my browser instead" stays on the bar.
+    private func showProblem(_ sentence: String) {
+        spinner?.stopAnimation(nil); spinner?.isHidden = true
+        message?.stringValue = sentence; message?.isHidden = false
+        webView?.isHidden = true
+        webView?.stopLoading()
+    }
+
+    private func showPage() {
+        loaded = true; timeout?.cancel()
+        spinner?.stopAnimation(nil); spinner?.isHidden = true; message?.isHidden = true
     }
 
     /// Closes the sheet without calling `onEnd` (the caller already knows).
     func dismiss() { onEnd = nil; close() }
 
     private func close() {
+        timeout?.cancel(); timeout = nil
         webView?.navigationDelegate = nil; webView?.uiDelegate = nil
         webView?.stopLoading()
         if let w = window { parent?.endSheet(w); w.orderOut(nil) }
@@ -83,6 +122,20 @@ final class SignInSheet: NSObject, WKNavigationDelegate, WKUIDelegate {
         return .allow
     }
 
+    /// A page the server refused (401, 404, 5xx) paints as white: say so instead.
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        if response.isForMainFrame, let http = response.response as? HTTPURLResponse, http.statusCode >= 400 {
+            showProblem("Squeak's sign-in page didn't open (error \(http.statusCode)). Use your browser instead.")
+            return .cancel
+        }
+        return .allow
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { showPage() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        showProblem("The sign-in page stopped. Use your browser instead.")
+    }
+
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         // A popup (a provider's own window) loads in the sheet instead, so nothing opens outside Squeak.
@@ -96,6 +149,6 @@ final class SignInSheet: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func failIfReal(_ error: Error) {
         let c = (error as NSError).code
         if c == NSURLErrorCancelled || (error as NSError).domain == "WebKitErrorDomain" { return }   // our own .cancel
-        end(.failed)
+        showProblem("Couldn't reach the sign-in page. Check the connection, or use your browser instead.")
     }
 }

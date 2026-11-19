@@ -17,6 +17,14 @@ public enum PondSnapshotPlan {
         0.28 * min(1, abs(x) / max(1, width))
     }
 
+    /// The dimming SwiftUI draws over a live page: only while a live (non-snapshot) slide moves it. At rest, while the strip
+    /// carries a gesture (the live pages are still), and for a page within a point of home it is exactly 0, so nothing
+    /// ever sits over a page that is simply showing.
+    public static func liveScrim(x: Double, width: Double, snapshotActive: Bool, moving: Bool) -> Double {
+        guard moving, !snapshotActive, abs(x) >= 1 else { return 0 }
+        return scrim(x: x, width: width)
+    }
+
     /// Stacking order: the page that is not at rest is always the one drawn on top, so the page that arrives slides over
     /// the one that leaves in both directions, never the other way round.
     public static func zPosition(of page: PondPage, rest: PondPage) -> Double { page == rest ? 0 : 1 }

@@ -6,7 +6,7 @@ import Foundation
 /// interprets HTML, never builds URLs, and never fetches anything. Unclosed markers
 /// stay literal. The renderer decides how to show links (as text, never clickable).
 public enum MessageMarkup {
-    public indirect enum Inline: Equatable, Sendable {
+    public indirect enum Inline: Hashable, Sendable {
         case text(String)
         case bold([Inline])
         case italic([Inline])
@@ -20,7 +20,7 @@ public enum MessageMarkup {
         case path(String)
     }
 
-    public enum ListMarker: Equatable, Sendable {
+    public enum ListMarker: Hashable, Sendable {
         case bullet
         case number(Int)
         /// `A) text`: one lettered option, only when asked for (`parse(_:letteredOptions:)`).
@@ -29,9 +29,9 @@ public enum MessageMarkup {
         case task(done: Bool)
     }
 
-    public enum Alignment: Equatable, Sendable { case leading, center, trailing }
+    public enum Alignment: Hashable, Sendable { case leading, center, trailing }
 
-    public enum Block: Equatable, Sendable {
+    public enum Block: Hashable, Sendable {
         case paragraph([Inline])
         case heading(level: Int, [Inline])
         /// One list item. Nesting is the item's `depth` (0...4).

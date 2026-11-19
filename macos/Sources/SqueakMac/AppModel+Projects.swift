@@ -66,4 +66,7 @@ extension AppModel {
     var hasPonds: Bool {
         !(PondsModel.shared.directory?.ponds.isEmpty ?? true)
     }
+
+    /// The directory has not loaded yet (and the host is not known to lack it): not the same as "no ponds".
+    var pondsLoading: Bool { PondsModel.shared.directory == nil && PondsModel.shared.directoryLoad.isLoading }
 }

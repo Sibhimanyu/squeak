@@ -45,8 +45,10 @@ public enum PondInviteStart: Equatable, Sendable {
     case signIn
     case invite
 
-    public static func decide(cloud: Bool, linked: Bool) -> PondInviteStart {
+    /// `hostedReady`: this Mac is already signed in to Squeak's cloud with its own key (`cloud.hosted.state == "ready"`);
+    /// that is all an invite needs, so the web account (`linked`) is not asked for.
+    public static func decide(cloud: Bool, linked: Bool, hostedReady: Bool = false) -> PondInviteStart {
         if !cloud { return .say(PondWords.noCloud) }
-        return linked ? .invite : .signIn
+        return (linked || hostedReady) ? .invite : .signIn
     }
 }
