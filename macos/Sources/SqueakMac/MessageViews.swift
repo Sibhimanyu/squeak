@@ -99,7 +99,7 @@ struct MessageView: View {
                     .opacity(look == .taken && message.clientId != nil && !settled ? SentBubble.sendingOpacity : SentBubble.opacity(look))
                     .animation(Motion.standard, value: look)
                     .onAppear { if reduceMotion { settled = true } else { withAnimation(Motion.standard) { settled = true } } }
-                    .help(message.failureReason ?? "")
+                    .modifier(FailureHelp(reason: message.failureReason))
             } }
             HStack(spacing: 8) {
                 // Reserved, so hovering never moves the line.
@@ -307,7 +307,6 @@ struct UserBubbleLayout: Layout {
     }
 }
 
-
 /// A message steered into a running turn, drawn inline in the stream: a compact tinted card on the
 /// right, the words and the attachments as small chips. Waiting it is dimmed with muted text (and "Waiting for helper…"
 /// when a foreground helper holds it); the moment the agent takes it in the same card turns solid in place and the steps
@@ -364,5 +363,14 @@ struct SteerCard: View {
         .animation(reduceMotion ? nil : Motion.standard, value: state)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(waiting ? "Steering, waiting: \(text)" : "Steered into the turn: \(text)")
+    }
+}
+
+/// A tooltip only when there is something to say: an empty `.help("")` on every sent bubble still installs a tracking
+/// area that the scroll re-hit-tests each frame.
+private struct FailureHelp: ViewModifier {
+    let reason: String?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let reason, !reason.isEmpty { content.help(reason) } else { content }
     }
 }

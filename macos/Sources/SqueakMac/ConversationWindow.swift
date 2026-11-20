@@ -488,10 +488,12 @@ private struct ConversationWindowReader: NSViewRepresentable {
 /// The title leaves the toolbar: each column has its own heading. (⌘K lives on the sidebar's search field.)
 private struct WindowStyling: ViewModifier {
     func body(content: Content) -> some View {
+        // No toolbar-background override: a hidden (see-through) toolbar background put a transparent strip over the
+        // content in full screen and held the window to ~10 fps there (measured 2026-11-19). The system draws it.
         if #available(macOS 15, *) {
-            content.toolbar(removing: .title).toolbarBackground(.hidden, for: .windowToolbar)
+            content.toolbar(removing: .title)
         } else {
-            content.toolbarBackground(.hidden, for: .windowToolbar)
+            content
         }
     }
 }

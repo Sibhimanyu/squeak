@@ -306,7 +306,8 @@ struct SessionDetail: View {
                     if abs(size.width - viewportWidth) > 0.5 { viewportWidth = size.width }
                 }
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
-                .mask(topFade)
+                // An overlay, not a mask: a mask composites the whole scrolling content offscreen on every frame.
+                .overlay(alignment: .top) { topFade.allowsHitTesting(false).accessibilityHidden(true) }
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottomBar.overlay(alignment: .top) { jumpButton() }
@@ -514,10 +515,7 @@ struct SessionDetail: View {
     }
 
     private var topFade: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
-            Rectangle()
-        }
+        LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 24)
     }
 
     /// The reader reached the top: render older rows already loaded, else ask the host for the next page. Either way the

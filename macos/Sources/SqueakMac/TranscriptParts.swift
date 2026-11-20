@@ -227,7 +227,7 @@ struct ToolCallRow: View {
                 withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
                 .buttonStyle(.plain).pointerHand(expandable || ducklingRef != nil)
-                .onHover { hovering = $0 }
+                .modifier(HoverIf(enabled: expandable, hovering: $hovering))
                 .onChange(of: expand) { _, ask in
                     guard expandable else { return }
                     open = ask.open
@@ -539,5 +539,14 @@ struct StreamingRow<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             if !text.isEmpty { content(text).padding(.top, ChatSpacing.messageToMessage) }
         }
+    }
+}
+
+/// Hover tracking only where the highlight shows (an expandable row): a tracking area per step row is re-hit-tested on every scroll frame.
+private struct HoverIf: ViewModifier {
+    let enabled: Bool
+    @Binding var hovering: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.onHover { hovering = $0 } } else { content }
     }
 }
