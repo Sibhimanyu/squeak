@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.32.0
+
+**Steadier windows, remote ponds made clear.** Where you are is one thing now, so nothing resets as you move around.
+
+- A pond stays highlighted wherever you are in it: a chat, its home page or a new chat.
+- Clicking a pond takes you back to the chat you last had open there; the pond's name in the header opens its home page.
+- Each chat keeps its scroll position, and unsent text in pond threads, rooms and queued edits survives moving away.
+- Settings, pond pages and New chat open over the chat instead of replacing it, and Back/Forward includes them, Usage too.
+- Starting a new chat keeps the tabs in place with a "New chat" tab, which becomes the real chat as soon as you send.
+- "Next update" shows once, not twice. The jump-to-newest button and the @-mention picker no longer overlap anything.
+- Each workspace remembers its inspector tab and its open duckling, file and thread panels.
+- Fixed a crash when opening a chat in a pond someone shared with you.
+- In a pond someone shared with you, Squeak shows no code: no changes, files, terminals, branch or Create PR. It's marked Remote, and the composer says the chat runs on the owner's Mac.
+- Leave a pond someone shared with you from its menu in the sidebar or on its page.
+- Lighter: working glyphs share one 15 fps clock that pauses when the window is hidden, hidden chats stop polling, and the sidebar and tabs redraw far less.
+
 ## 2.31.0
 
 **Smoother everywhere.** Full screen no longer stutters: Squeak now uses macOS's standard title bar instead of its own.
