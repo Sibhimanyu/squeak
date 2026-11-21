@@ -165,6 +165,31 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS room_posts_project ON room_posts(project_id, seq);
   `,
+  // Ducks own their branch (docs/ponds.md): the branch on the session (denormalised from its workspace) and the duck's
+  // link to its working copy. The duck tables were created lazily until now; they are made here with the very same
+  // shape (a no-op where they exist) so the new columns can be added to them. Idempotent backfill: streams become
+  // branches (the stream's branch on its chats and on the duck sitting in it), Main chats stay branch-less (= main).
+  `
+  CREATE TABLE IF NOT EXISTS session_ducks (
+    session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on');
+  CREATE TABLE IF NOT EXISTS ducks (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, role TEXT, colour_seed TEXT NOT NULL,
+    notebook TEXT NOT NULL DEFAULT '', current_session_id TEXT, created_at TEXT NOT NULL,
+    duty TEXT NOT NULL DEFAULT 'on');
+  CREATE INDEX IF NOT EXISTS ducks_project ON ducks(project_id);
+  CREATE TABLE IF NOT EXISTS duck_sessions (
+    session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS duck_sessions_duck ON duck_sessions(duck_id);
+  ALTER TABLE sessions ADD COLUMN branch TEXT;
+  ALTER TABLE ducks ADD COLUMN workspace_id TEXT;
+  ALTER TABLE ducks ADD COLUMN branch TEXT;
+  UPDATE sessions SET branch = (SELECT w.branch FROM workspaces w WHERE w.id = sessions.workspace_id)
+    WHERE branch IS NULL AND workspace_id IS NOT NULL;
+  UPDATE ducks SET
+    workspace_id = (SELECT s.workspace_id FROM sessions s WHERE s.id = ducks.current_session_id),
+    branch = (SELECT s.branch FROM sessions s WHERE s.id = ducks.current_session_id)
+    WHERE current_session_id IS NOT NULL AND workspace_id IS NULL;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -186,6 +211,10 @@ export interface DuckRow {
   currentSessionId: string | null;
   createdAt: string;
   duty: "on" | "off";
+  /** The working copy (WorkspaceRow, an internal worktree) the duck works in; null = Main, or no session yet. */
+  workspaceId: string | null;
+  /** The duck's branch (denormalised from that working copy); null = Main, or no session yet. */
+  branch: string | null;
 }
 
 export interface RoomAttachmentRow {
@@ -323,8 +352,12 @@ function session(r: Row): SessionRow {
     prunedThrough: r.pruned_through as number,
     archivedAt: (r.archived_at as string | null) ?? null,
     titleAuto: r.title_auto === 1,
+    ...(r.branch ? { branch: r.branch as string } : {}),
+    ...(r.duck_id ? { duckId: r.duck_id as string } : {}),
   };
 }
+
+const SESSION_COLUMNS = "sessions.*, (SELECT duck_id FROM duck_sessions WHERE session_id = sessions.id) AS duck_id";
 
 function request(r: Row): RequestRow {
   return {
@@ -603,7 +636,7 @@ export class NativeStore {
    * is left alone. Returns how many it fixed.
    */
   adoptWorkspaces(): number {
-    return this.db
+    const changes = this.db
       .prepare(
         `UPDATE sessions SET workspace_id = (
            SELECT w.id FROM workspaces w WHERE w.path = sessions.cwd
@@ -612,6 +645,13 @@ export class NativeStore {
            AND EXISTS (SELECT 1 FROM workspaces w WHERE w.path = sessions.cwd)`,
       )
       .run().changes;
+    this.db
+      .prepare(
+        `UPDATE sessions SET branch = (SELECT w.branch FROM workspaces w WHERE w.id = sessions.workspace_id)
+         WHERE branch IS NULL AND workspace_id IS NOT NULL`,
+      )
+      .run();
+    return changes;
   }
   listWorkspaces(projectId: string): WorkspaceRow[] {
     return (
@@ -703,6 +743,11 @@ export class NativeStore {
     this.db
       .prepare("UPDATE workspaces SET branch_renamed=1, branch=COALESCE(?, branch) WHERE id=?")
       .run(branch ?? null, id);
+    if (branch) {
+      // The branch is denormalised onto the chats in this working copy and the ducks sitting in it.
+      this.db.prepare("UPDATE sessions SET branch=? WHERE workspace_id=?").run(branch, id);
+      this.db.prepare("UPDATE ducks SET branch=? WHERE workspace_id=?").run(branch, id);
+    }
   }
 
   // project settings
@@ -762,8 +807,8 @@ export class NativeStore {
     const workspaceId = input.workspaceId || this.workspaceByPath(input.cwd)?.id || null;
     this.db
       .prepare(
-        `INSERT INTO sessions (id,workspace_id,cwd,agent,title,model,effort,permission_mode,status,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,'idle',?,?)`,
+        `INSERT INTO sessions (id,workspace_id,cwd,agent,title,model,effort,permission_mode,status,created_at,updated_at,branch)
+         VALUES (?,?,?,?,?,?,?,?,'idle',?,?,?)`,
       )
       .run(
         id,
@@ -776,15 +821,18 @@ export class NativeStore {
         input.permissionMode,
         at,
         at,
+        (workspaceId ? this.getWorkspace(workspaceId)?.branch : null) ?? null,
       );
     return this.getSession(id)!;
   }
   getSession(id: string): SessionRow | null {
-    const r = this.db.prepare("SELECT * FROM sessions WHERE id=?").get(id) as Row | undefined;
+    const r = this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id=?`).get(id) as Row | undefined;
     return r ? session(r) : null;
   }
   listSessions(): SessionRow[] {
-    return (this.db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC, id").all() as Row[]).map(session);
+    return (this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY updated_at DESC, id`).all() as Row[]).map(
+      session,
+    );
   }
   /** Native ids of chats closed in Conductor and imported (marker table may not exist). */
   closedImportedIds(): Set<string> {
@@ -1390,10 +1438,11 @@ export class NativeStore {
   }): DuckRow {
     this.ducksTable();
     const id = randomUUID();
+    const at = input.currentSessionId ? this.getSession(input.currentSessionId) : null;
     this.db
       .prepare(
-        `INSERT INTO ducks (id, project_id, name, role, colour_seed, notebook, current_session_id, created_at, duty)
-         VALUES (?,?,?,?,?,'',?,?,?)`,
+        `INSERT INTO ducks (id, project_id, name, role, colour_seed, notebook, current_session_id, created_at, duty, workspace_id, branch)
+         VALUES (?,?,?,?,?,'',?,?,?,?,?)`,
       )
       .run(
         id,
@@ -1404,6 +1453,8 @@ export class NativeStore {
         input.currentSessionId ?? null,
         input.createdAt ?? nowIso(),
         input.duty ?? "on",
+        at?.workspaceId ?? null,
+        at?.branch ?? null,
       );
     return this.duckRow(id)!;
   }
@@ -1433,6 +1484,27 @@ export class NativeStore {
         patch.projectId !== undefined ? patch.projectId : cur.projectId,
         id,
       );
+    if (patch.currentSessionId) this.syncDuckLinks(id);
+  }
+
+  /** The duck's working copy and branch follow its current session's. */
+  syncDuckLinks(duckId: string): void {
+    this.db
+      .prepare(
+        `UPDATE ducks SET
+           workspace_id = (SELECT s.workspace_id FROM sessions s WHERE s.id = ducks.current_session_id),
+           branch = (SELECT s.branch FROM sessions s WHERE s.id = ducks.current_session_id)
+         WHERE id=? AND current_session_id IS NOT NULL`,
+      )
+      .run(duckId);
+  }
+
+  /** Ducks of a pond whose working copy is `workspaceId` (any duty), for placement and clean-up. */
+  ducksInWorkspace(workspaceId: string): DuckRow[] {
+    this.ducksTable();
+    return (
+      this.db.prepare("SELECT * FROM ducks WHERE workspace_id=? ORDER BY created_at, id").all(workspaceId) as Row[]
+    ).map(duckRow);
   }
 
   /** The duck takes `sessionId` as its current place (the older ones stay as its history). */
@@ -1442,7 +1514,10 @@ export class NativeStore {
       this.db
         .prepare("INSERT OR REPLACE INTO duck_sessions (session_id, duck_id, started_at) VALUES (?,?,?)")
         .run(sessionId, duckId, nowIso());
-      this.db.prepare("UPDATE ducks SET current_session_id=? WHERE id=?").run(sessionId, duckId);
+      const at = this.getSession(sessionId);
+      this.db
+        .prepare("UPDATE ducks SET current_session_id=?, workspace_id=?, branch=? WHERE id=?")
+        .run(sessionId, at?.workspaceId ?? null, at?.branch ?? null, duckId);
     })();
   }
 
@@ -1564,6 +1639,8 @@ function duckRow(r: Row): DuckRow {
     currentSessionId: (r.current_session_id as string | null) ?? null,
     createdAt: r.created_at as string,
     duty: r.duty === "off" ? "off" : "on",
+    workspaceId: (r.workspace_id as string | null) ?? null,
+    branch: (r.branch as string | null) ?? null,
   };
 }
 

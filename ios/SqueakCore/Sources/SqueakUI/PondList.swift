@@ -36,6 +36,8 @@ struct PondItem: Equatable, Identifiable {
     var orderKey: String { pond?.orderKey ?? id }
     var hidden: Bool { meta.hidden }
     var joined: Bool { pond?.isJoined == true }
+    /// Someone else's pond with no code in it: no changes, files, branches or pickers; you talk to their ducks.
+    var remote: Bool { pond?.isRemote == true }
     var shared: Bool { pond?.shared == true }
     /// The Mac's word when it sent one, else the chats folded by the same rule.
     var rollup: StatusRollup { meta.rollup ?? StatusRollup(sessions: sessions) }

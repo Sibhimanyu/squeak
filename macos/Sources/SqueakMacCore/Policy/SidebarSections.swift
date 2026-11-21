@@ -29,7 +29,7 @@ public struct SidebarSections: Equatable, Sendable {
                 for (id, chats) in kept {
                     var row = w
                     if chats.count != w.chats.count { row.chats = chats; row.foldedMark = nil }
-                    if !row.isMain, let main = mains.first(where: { $0.projectId == id }),
+                    if !row.isMain, !row.isDucks, let main = mains.first(where: { $0.projectId == id }),
                        chats.allSatisfy({ $0.conductorWorkspaceId == nil || $0.conductorWorkspaceId == "" }), chats.contains(where: main.contains) {
                         row.isMain = true
                         row.branch = main.branch ?? row.branch

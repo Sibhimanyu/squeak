@@ -60,7 +60,7 @@ struct PondThreadView: View {
     var body: some View {
         HStack(spacing: 0) {
             centre
-            if showChanges {
+            if showChanges, ponds.chrome(key: key).showsCode {
                 Rectangle().fill(Theme.line).frame(width: 1)
                 changesPane.frame(width: 360).transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -234,7 +234,7 @@ struct PondThreadView: View {
             let viewers = PondFlock.viewers(of: threadId, members: members, presence: detail?.presence ?? [], excluding: me)
             ForEach(viewers) { v in FlockAvatar(member: v, online: true, size: 22).help("\(v.name) is here") }
             let view = access.gate(.viewChanges)
-            if view.visible {
+            if view.visible, ponds.chrome(key: key).showsCode {
                 Button { showChanges.toggle() } label: {
                     Lucide(.layers, size: 14, color: showChanges ? Theme.ink : Theme.subtle).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -338,7 +338,9 @@ struct PondThreadView: View {
         let agent = SessionText.agentName(thread?.agent) ?? "Agent"
         let bubble = VStack(alignment: m.side == .trailing ? .trailing : .leading, spacing: 3) {
             if m.showsName { Text(verbatim: GroupChat.label(for: m, name: name(m.author))).font(Typo.meta).foregroundStyle(Theme.muted) }
+            // Bounded: the HStack below asks its children for their widest size, and an unbounded proposal reached the bubble's layout.
             MessageView(message: ChatMessage(id: "pond-\(id)", role: .user, text: m.text, at: m.at), agentName: agent, canOpenHost: false, agentWorking: false)
+                .frame(maxWidth: Metrics.workbenchColumn)
         }
         return HStack(alignment: .top, spacing: Space.s) {
             if m.side == .trailing { Spacer(minLength: 0) }
@@ -363,6 +365,7 @@ struct PondThreadView: View {
             VStack(alignment: .trailing, spacing: 3) {
                 if !name(by).isEmpty { Text(verbatim: by == me ? "You" : name(by)).font(Typo.meta).foregroundStyle(Theme.muted) }
                 MessageView(message: ChatMessage(id: "pond-\(id)", role: .user, text: text, at: at), agentName: agent, canOpenHost: false, agentWorking: false)
+                    .frame(maxWidth: Metrics.workbenchColumn)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         case .agent(let id, let text, let at):
@@ -444,6 +447,10 @@ struct PondThreadView: View {
                     .frame(height: 56)
                 if role.canMessage, working {
                     Text("\u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer").font(Typo.meta).foregroundStyle(Theme.subtle)
+                }
+                // A remote pond has no agent or model to pick: the duck runs on the owner's Mac.
+                if case .runsOnOwner(let line) = ponds.chrome(key: key).composer {
+                    Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)

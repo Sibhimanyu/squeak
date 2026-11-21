@@ -18,6 +18,7 @@ import { closeWithin } from "./agent-procs.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
+import { activeBranches, ducksOwnBranch, mainReadOnlyRoot } from "./placement.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import {
   deriveRule,
@@ -226,6 +227,7 @@ export function defaultRunnerFactory(
   contextFor?: (session: SessionRow) => string | null,
   compactWindowFor?: (session: SessionRow) => number | null,
   claudeAiConnectors?: () => boolean,
+  readOnlyRootFor?: (session: SessionRow) => string | null,
 ): RunnerFactory {
   const plugin = squeakPluginPath();
   return (session, hooks) =>
@@ -241,6 +243,7 @@ export function defaultRunnerFactory(
           contextNote: contextFor?.(session) ?? null,
           autoCompactWindow: compactWindowFor?.(session) ?? null,
           claudeAiConnectors: claudeAiConnectors?.() ?? false,
+          readOnlyRoot: readOnlyRootFor?.(session) ?? null,
           log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
@@ -253,6 +256,7 @@ export function defaultRunnerFactory(
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
+          readOnlyRoot: readOnlyRootFor?.(session) ?? null,
           client: new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex")) as never,
         });
 }
@@ -327,6 +331,7 @@ export class SessionHost extends EventEmitter {
         (s) => this.contextNote(s),
         (s) => cliCompactWindow(this.compactThreshold(s), s.model),
         options.claudeAiConnectors,
+        (s) => mainReadOnlyRoot(this.store, s),
       );
     this.summaryCall = options.summaryCall ?? defaultTitleCall();
     this.projectsDir = options.projectsDir;
@@ -383,8 +388,30 @@ export class SessionHost extends EventEmitter {
     const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
     // A chat in a plain-folder pond runs in the folder itself, with no stream.
     const folderPond = ws ? null : this.store.getProjectByRoot(s.cwd);
-    const project = ws ? this.store.getProject(ws.projectId) : folderPond?.kind === "folder" ? folderPond : null;
+    // Ducks own their branch: Main of a git pond is a place too, and the duck is told where it is and what is active.
+    const own = ducksOwnBranch();
+    const gitMain = own && !ws && folderPond?.kind === "git" && folderPond.rootPath === s.cwd ? folderPond : null;
+    const project = ws
+      ? this.store.getProject(ws.projectId)
+      : gitMain
+        ? gitMain
+        : folderPond?.kind === "folder"
+          ? folderPond
+          : null;
+    const placement =
+      own && project?.kind === "git" && (ws || gitMain)
+        ? {
+            mode: ws ? ("branch" as const) : ("main" as const),
+            branches: activeBranches(this.store, project.id).map((b) => ({
+              branch: b.branch,
+              title: b.title,
+              ducks: b.ducks.map((d) => d.name),
+              lastActiveAt: b.lastActiveAt,
+            })),
+          }
+        : null;
     return threadContextFor({
+      ...(placement ? { placement } : {}),
       agent: s.agent,
       pond: project?.name ?? null,
       folderName: ws?.name ?? null,

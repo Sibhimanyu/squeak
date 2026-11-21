@@ -1,5 +1,5 @@
 import { applyRepair, backupAndJournal, planRepair, type RepairAction, type RepairRecord } from "./repair.js";
-import type { DirRecord } from "./directory.js";
+import { joinedAccess, type DirRecord } from "./directory.js";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 
@@ -131,6 +131,9 @@ const CAP_REFUSAL: Record<Cap, string> = {
   answer: "The owner has turned off answering questions for you in this pond.",
   start: "The owner has turned off starting your own threads in this pond.",
 };
+
+/** Said when a member's Mac is asked for code in a remote pond (changes, diffs). */
+export const REMOTE_NO_CODE = "This is a remote pond: you talk to their agents, and code stays on their Mac.";
 
 /** What a Mac keeps about one thread it starts: the session behind it never leaves this file. */
 export interface LocalThread {
@@ -487,6 +490,8 @@ const DEVICE_REQUEST_MAX_MS = 24 * 60 * 60_000;
 const DEVICE_ADDS_PER_MINUTE = 5;
 /** A Mac asks the relay for its account's ponds at most this often (and at sign-in). */
 const ACCOUNT_SYNC_MS = 5 * 60_000;
+/** After this device leaves a pond, the account sync leaves it alone this long. */
+const LEFT_SKIP_MS = 24 * 60 * 60_000;
 /** What a member without a verified Squeak account is called. */
 export const SIGNED_OUT_MEMBER = "Signed-out member";
 export const SIGN_IN_TO_JOIN = "Sign in to Squeak to join a pond. Your name comes from your account.";
@@ -592,7 +597,7 @@ export const OWN_THREADS_OFF =
 export class FlotillaService extends EventEmitter {
   private readonly now: () => number;
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
-  private readonly pondsFile: SecretFile<{ ponds: Record<string, LocalPond> }>;
+  private readonly pondsFile: SecretFile<{ ponds: Record<string, LocalPond>; leftUntil?: Record<string, number> }>;
   private readonly watches = new Map<string, () => void>();
   private readonly running = new Set<string>();
   private readonly dirty = new Set<string>();
@@ -1003,6 +1008,7 @@ export class FlotillaService extends EventEmitter {
         projectId: summary.projectId ?? null,
         ...(summary.local ? { local: true } : {}),
         ...(stored?.kind ? { kind: stored.kind } : {}),
+        ...(stored?.gitRemote ? { gitRemote: stored.gitRemote } : {}),
         memberCount: summary.memberCount,
         ...(members ? { members } : {}),
       };
@@ -1017,6 +1023,12 @@ export class FlotillaService extends EventEmitter {
 
   projectIdOf(pondId: string): string | null {
     return this.pond(pondId).projectId ?? null;
+  }
+
+  /** What this Mac's person may do in the pond: the same answer the directory gives (`joinedAccess`). */
+  accessOf(pondId: string): "owner" | "remote" | "git" {
+    const pond = this.pond(pondId);
+    return pond.role === "owner" ? "owner" : joinedAccess(flag("pondOwnThreads"), pond.gitRemote);
   }
 
   gitRemoteOf(pondId: string): string | null {
@@ -2516,6 +2528,24 @@ export class FlotillaService extends EventEmitter {
   accountChanged(): void {
     this.accountSyncAt = 0;
     this.deviceSkips.clear();
+    if (this.pondsFile.data.leftUntil) {
+      delete this.pondsFile.data.leftUntil;
+      this.pondsFile.save();
+    }
+  }
+
+  /** Forgets leave skips that ran out, or whose pond the account no longer lists (the owner's Mac removed this member). */
+  private pruneLeft(listed: Set<string>): void {
+    const left = this.pondsFile.data.leftUntil;
+    if (!left) return;
+    let changed = false;
+    for (const [id, until] of Object.entries(left)) {
+      if (until > this.now() && listed.has(id)) continue;
+      delete left[id];
+      changed = true;
+    }
+    if (Object.keys(left).length === 0) delete this.pondsFile.data.leftUntil;
+    if (changed) this.pondsFile.save();
   }
 
   /** Runs `syncAccountPonds` in the background at most every few minutes; never throws. */
@@ -2543,12 +2573,14 @@ export class FlotillaService extends EventEmitter {
         return 0;
       }
       const me = this.identity;
+      this.pruneLeft(new Set(list.map((e) => e.pondId)));
       for (const entry of list) {
         const existing = this.pondsFile.data.ponds[entry.pondId];
         const lapsed =
           existing?.deviceJoin && existing.status === "pending" && (existing.inviteExpiresAt ?? 0) <= this.now();
         if (existing && !lapsed) continue;
         if ((this.deviceSkips.get(entry.pondId) ?? 0) > this.now()) continue;
+        if ((this.pondsFile.data.leftUntil?.[entry.pondId] ?? 0) > this.now()) continue;
         if (!POND_ID.test(entry.pondId)) continue;
         let issued;
         try {
@@ -2786,15 +2818,30 @@ export class FlotillaService extends EventEmitter {
     this.emit("changed", pondId);
   }
 
-  /** A member leaves: told to the owner (who then removes the key), and the pond is forgotten here. An owner deletes instead. */
+  /**
+   * A member leaves: told to the owner (who then removes the member, the key and every device's token), and the pond is
+   * forgotten here at once. Safe from any surface: a pond already gone is a plain 404, a pond still waiting or already
+   * ended is simply forgotten, an owner is refused with a sentence. For a day this Mac's account sync does not ask to
+   * be added back (the account index lists the pond until the owner's Mac has processed the leave).
+   */
   async leave(pondId: string): Promise<void> {
+    const stored = this.pond(pondId);
+    if (stored.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
+    if (stored.status === "pending") return this.cancelJoin(pondId);
+    if (stored.status !== "active") {
+      this.forgetPond(pondId);
+      return;
+    }
     const pond = this.activePond(pondId);
-    if (pond.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
     await this.ripple(pondId, "left the pond");
     await this.storeOf(pond)
       .delete(this.docPath(pond.id, "presence", this.selfId(pond)))
       .catch(() => undefined);
     this.forgetPond(pondId);
+    // Kept on disk: a restart inside the day must not ask to be added back.
+    this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
+    this.pondsFile.save();
+    this.emit("changed", pondId);
   }
 
   /** Owner: renames the pond for everyone (the meta document), and here. */
@@ -4197,6 +4244,8 @@ export class FlotillaService extends EventEmitter {
 
   /** A member's Mac asks this thread's starter for what changed (and, with a path, that file's patch). Nothing polls. */
   async requestDiff(pondId: string, threadId: string, path?: string): Promise<{ requestId: string }> {
+    // A remote pond shows no code: this Mac never asks for a diff there (the owner's caps are a separate switch).
+    if (this.accessOf(pondId) === "remote") throw new FlotillaError(REMOTE_NO_CODE, 403);
     const requestId = await this.sendCommand(pondId, threadId, {
       kind: "diff",
       ...(path ? { path: path.slice(0, 500) } : {}),

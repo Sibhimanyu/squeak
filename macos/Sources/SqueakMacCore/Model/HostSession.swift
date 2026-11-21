@@ -81,6 +81,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var turnOpen: Bool? = nil
     /// A Squeak chat: when the host last ended a turn. Lets the Mac end its optimistic "working" for a chat it is not streaming.
     public var lastTurnEndedAt: Date? = nil
+    /// The duck this chat belongs to (a daemon with `ducksOwnBranch`); nil from an older one.
+    public var duckId: String? = nil
 
     public var id: SessionKey { key }
 

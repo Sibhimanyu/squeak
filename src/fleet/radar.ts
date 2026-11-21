@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
+import { flag } from "../squeak/flags.js";
 import type { TelegramInlineKeyboard } from "../types.js";
 import { newestFirst } from "./active.js";
 import { DEFAULT_CONTEXT_PRESSURE_PERCENT, isActionable } from "./attention.js";
@@ -62,6 +63,16 @@ export function formatAge(fromIso: string, nowMs: number): string {
 }
 
 /** What people call where a session works: a Squeak stream's title, else its branch (never a detached HEAD). */
+/** Ducks own their branch (flag on): "Duck · branch" ("main" in the pond's own folder); null when not a duck's chat. */
+export function duckPlaceLabel(
+  session: Pick<FleetSession, "duckId" | "duckName" | "branch" | "onMain">,
+  ducksOwn: boolean = flag("ducksOwnBranch"),
+): string | null {
+  if (!ducksOwn || !session.duckId || !session.duckName) return null;
+  const where = session.onMain ? "main" : session.branch && session.branch !== "HEAD" ? session.branch : null;
+  return where ? `${session.duckName} · ${where}` : session.duckName;
+}
+
 export function streamName(session: Pick<FleetSession, "branch" | "workspaceTitle">): string | null {
   const title = session.workspaceTitle?.trim();
   if (title) return title;
@@ -77,6 +88,8 @@ export function streamName(session: Pick<FleetSession, "branch" | "workspaceTitl
  * "someone · HEAD" tells nobody anything, so fall back to the path.
  */
 export function sessionLabel(session: FleetSession, homeDir = os.homedir()): string {
+  const duck = duckPlaceLabel(session);
+  if (duck) return duck;
   const branch = streamName(session);
   if (session.repoName && branch) {
     return `${session.repoName} · ${branch}`;
@@ -526,6 +539,8 @@ const CARD_LABEL_MAX = 34;
  * the part that gets dropped when both will not fit.
  */
 export function cardLabel(session: FleetSession, homeDir = os.homedir()): string {
+  const duck = duckPlaceLabel(session);
+  if (duck) return duck.length <= CARD_LABEL_MAX ? duck : truncateStart(duck, CARD_LABEL_MAX);
   const branch = streamName(session);
   if (!branch) {
     return truncateStart(sessionLabel(session, homeDir), CARD_LABEL_MAX);

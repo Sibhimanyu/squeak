@@ -167,6 +167,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.largeCompacting = s.isLarge ? s.largeCompacting : nil
         h.autoCompactAt = s.autoCompactAt
         h.lastTurnEndedAt = s.lastTurnEndedAt
+        h.duckId = DaemonAdapter.nonEmpty(d?.duckId)
         h.hostDucklingsOnly = s.ducklingsOnly
         h.retryable = s.retryable && state == .error ? true : nil
         return h

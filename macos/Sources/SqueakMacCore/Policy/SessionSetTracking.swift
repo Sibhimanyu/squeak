@@ -50,7 +50,7 @@ public final class TabCapMemo {
         public var widthBucket: Int
         public init(titles: [String], width: Double, bucket: Double = 8) {
             self.titles = titles
-            widthBucket = Int((width / bucket).rounded(.down))
+            widthBucket = width.isFinite ? Int((width / bucket).rounded(.down)) : -1
         }
     }
     private var last: (key: Key, value: Double)?

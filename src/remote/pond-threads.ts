@@ -23,6 +23,10 @@ export interface PondThreadRow {
   title: string;
   state: string;
   at: string;
+  /** Ducks own their branch (flag on): the duck, and the branch it works on. A duck on main has `main` and no branch. */
+  duckId?: string;
+  branch?: string;
+  main?: true;
 }
 
 export interface PondThreadStream {
@@ -57,6 +61,12 @@ interface Item {
   cwd: string;
   workspaceTitle?: string;
   branch?: string;
+  duckId?: string;
+}
+
+/** Whether a chat's folder is the pond's own folder (Main). */
+export function onMainFolder(cwd: string | null | undefined, folder: string | undefined): boolean {
+  return Boolean(folder) && Boolean(cwd) && path.resolve(cwd!) === path.resolve(folder!);
 }
 
 function time(item: { at: string }): number {
@@ -76,6 +86,7 @@ export function buildPondThreads(
   titleOf: (session: FleetSession) => string,
   skip: (session: FleetSession) => boolean = () => false,
   hostThreads: PhoneHostThread[] = [],
+  ducksOwn = false,
 ): PondThreadsDoc {
   const items = new Map<string, Item>();
   for (const session of sessions) {
@@ -88,6 +99,7 @@ export function buildPondThreads(
       cwd: session.cwd ?? "",
       ...(session.workspaceTitle?.trim() ? { workspaceTitle: session.workspaceTitle.trim() } : {}),
       ...(session.branch ? { branch: session.branch } : {}),
+      ...(session.duckId ? { duckId: session.duckId } : {}),
     });
   }
   for (const host of hostThreads) {
@@ -115,7 +127,15 @@ export function buildPondThreads(
       group = { id, name, ...(isMain ? { main: true as const } : {}), threads: [] };
       groups.set(id, group);
     }
-    group.threads.push({ key: item.key, title: item.title, state: item.state, at: item.at });
+    group.threads.push({
+      key: item.key,
+      title: item.title,
+      state: item.state,
+      at: item.at,
+      ...(ducksOwn && item.duckId ? { duckId: item.duckId } : {}),
+      ...(ducksOwn && isMain ? { main: true as const } : {}),
+      ...(ducksOwn && !isMain && item.branch && item.branch !== "HEAD" ? { branch: item.branch } : {}),
+    });
   }
   // `shown` is newest first, so each group's threads are, and a group's first thread is its newest.
   const streams = [...groups.values()].sort((a, b) => {

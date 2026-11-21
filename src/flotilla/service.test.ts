@@ -152,6 +152,84 @@ describe("a guest leaves", () => {
   });
 });
 
+describe("a left pond is not asked for again, across a restart", () => {
+  it("holds for 24 hours on disk, and ends early when the account stops listing the pond", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    const B = c.mac("Aarav");
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await B.service.leave(pond.id);
+
+    let clock = 1_000_000;
+    const asked: string[] = [];
+    const relayFor = () =>
+      ({
+        accountPonds: async () => [{ pondId: pond.id, name: "Greenroom", ownerKey: "k" }],
+        requestDevice: async (r: { pondId: string }) => {
+          asked.push(r.pondId);
+          throw new Error("refused");
+        },
+      }) as never;
+    const restart = () => {
+      const store = c.store();
+      return new FlotillaService({
+        store,
+        supportDir: B.dir,
+        displayName: "Aarav",
+        nest: "Aarav's Mac",
+        storeFor: () => store,
+        relay: relayFor(),
+        now: () => clock,
+      });
+    };
+    // The leave was made with the real clock; a restarted service reads the stored time.
+    const stored = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")) as {
+      leftUntil: Record<string, number>;
+    };
+    expect(stored.leftUntil[pond.id]).toBeGreaterThan(Date.now());
+    clock = Date.now();
+
+    await restart().syncAccountPonds();
+    expect(asked).toEqual([]);
+    clock += 25 * 60 * 60_000;
+    await restart().syncAccountPonds();
+    expect(asked).toEqual([pond.id]);
+    expect(JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).leftUntil).toBeUndefined();
+  });
+
+  it("is dropped once the owner's removal is seen (the pond is no longer listed)", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    const B = c.mac("Aarav");
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await B.service.leave(pond.id);
+    const store = c.store();
+    const service = new FlotillaService({
+      store,
+      supportDir: B.dir,
+      displayName: "Aarav",
+      nest: "Aarav's Mac",
+      storeFor: () => store,
+      relay: {
+        accountPonds: async () => [],
+        requestDevice: async () => {
+          throw new Error("refused");
+        },
+      } as never,
+    });
+    await service.syncAccountPonds();
+    expect(JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).leftUntil).toBeUndefined();
+  });
+});
+
 describe("ensureLocalPond never makes a second pond for a project", () => {
   it("is idempotent across calls, a rename and a restart, and a different project gets its own", async () => {
     const c = cloud();

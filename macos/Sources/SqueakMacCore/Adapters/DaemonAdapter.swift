@@ -67,7 +67,7 @@ public struct DaemonAdapter: HostAdapter {
         // replyable: a finished chat is idle.
         let state = SessionState(daemon: d.state)
         let ask = state == .finished ? d.asks : nil
-        return HostSession(
+        var mapped = HostSession(
             key: SessionKey(provider: provider, workspaceId: workspace, hostSessionId: d.key),
             title: d.title ?? "",
             distinctTitle: nonEmpty(d.distinctTitle),
@@ -94,6 +94,8 @@ public struct DaemonAdapter: HostAdapter {
             archivedAt: d.archivedAt,
             pondId: nonEmpty(d.pondId)
         )
+        mapped.duckId = nonEmpty(d.duckId)
+        return mapped
     }
 
     /// What a history read addresses: the reply target, else the session's own fleet key. A session Squeak only

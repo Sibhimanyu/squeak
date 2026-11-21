@@ -83,4 +83,25 @@ describe("own threads off (the default)", () => {
     process.env.SQUEAK_POND_OWN_THREADS = "on";
     expect((await A.service.threads(pondId)).some((t) => t.id === own.id)).toBe(true);
   });
+
+  it("a remote pond shows no code: the member's Mac never asks for a diff, the owner's Mac still can", async () => {
+    const { A, B, pondId } = await pond();
+    expect(B.service.accessOf(pondId)).toBe("remote");
+    expect(A.service.accessOf(pondId)).toBe("owner");
+    await expect(B.service.requestDiff(pondId, "t1")).rejects.toMatchObject({ status: 403 });
+    await expect(B.service.requestDiff(pondId, "t1")).rejects.toThrow(/remote pond/);
+    // With the stashed flag on and a Git remote the pond is "git" and the request is no longer refused for being remote.
+    process.env.SQUEAK_POND_OWN_THREADS = "on";
+    expect(B.service.accessOf(pondId)).toBe("git");
+    await expect(B.service.requestDiff(pondId, "t1")).rejects.not.toThrow(/remote pond/);
+  });
+
+  it("leaving is safe from any surface: gone from the directory at once, twice is a plain 404, an owner is refused", async () => {
+    const { A, B, pondId } = await pond();
+    expect((await B.service.directoryRecords()).map((r) => r.id)).toContain(pondId);
+    await B.service.leave(pondId);
+    expect((await B.service.directoryRecords()).map((r) => r.id)).not.toContain(pondId);
+    await expect(B.service.leave(pondId)).rejects.toMatchObject({ status: 404 });
+    await expect(A.service.leave(pondId)).rejects.toMatchObject({ status: 409 });
+  });
 });

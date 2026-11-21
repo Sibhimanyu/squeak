@@ -13,7 +13,9 @@ struct ThreadTitle: View {
     private var pondId: String? { session.pond?.id.isEmpty == false ? session.pond?.id : nil }
 
     var body: some View {
-        let stream = Presentation.workspaceName(session)
+        // A remote pond has no streams or branches to show.
+        let stream = model.duckHeader(for: session).map { $0.chip ?? "" }
+            ?? (model.isRemotePond(session.pond?.id) ? "" : Presentation.workspaceName(session))
         let context = UsageFormat.contextIsLow(session.contextPercent) ? UsageFormat.context(session.contextPercent) : nil
         let place = stream.isEmpty ? pondName : "\(pondName) › \(stream)"
         let face = VStack(spacing: 1) {
@@ -68,15 +70,15 @@ struct ChatInfoSheet: View {
                     row("Agent", Presentation.agentName(session.agent))
                     if let name = session.model { row("Model", [name, session.effort, session.fast == true ? "Fast" : nil].compactMap { $0 }.joined(separator: " · ")) }
                     row("Status", Presentation.status(session).text.isEmpty ? "Idle" : Presentation.status(session).text)
-                    let branch = Presentation.workspaceName(session)
-                    if !branch.isEmpty { row("Branch", branch) }
+                    let branch = model.duckHeader(for: session).map { $0.chip ?? "" } ?? Presentation.workspaceName(session)
+                    if !branch.isEmpty, !model.isRemotePond(session.pond?.id) { row("Branch", branch) }
                     if session.contextPercent != nil { row("Context", UsageFormat.context(session.contextPercent) ?? "") }
                 }
                 .listRowBackground(Theme.surface)
-                if let git = session.git {
+                if let git = session.git, !model.isRemotePond(session.pond?.id) {
                     Section("Changes") {
                         row("Summary", git)
-                        if session.can(.diff) {
+                        if model.canDiff(session) {
                             Button { Haptics.play(.tap); showDiff() } label: {
                                 HStack { Text("View diff"); Spacer(); Lucide(.chevronRight, size: 12, color: Theme.subtle) }
                                     .frame(minHeight: 44).contentShape(Rectangle())

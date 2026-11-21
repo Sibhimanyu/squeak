@@ -733,6 +733,10 @@ public struct Channel: Sendable {
         case orderNewest
         /// A message into a pond member's thread (`PondThreads.FlockThread.id`), through the pond.
         case message(pondId: String, threadId: String, text: String)
+        /// Leave a pond someone else owns (`Pond.id` of a joined row); the Mac forgets it and tells the owner.
+        case leave(pondId: String)
+        /// Move a duck (`Session.duckId`) to a place, with an optional first message there (ducks own their branch).
+        case duckPlace(duckId: String, place: DuckPlace, message: String?)
     }
 
     /// The signed document for a `pond` command.
@@ -750,6 +754,13 @@ public struct Channel: Sendable {
             command = PondCommand(v: 1, kind: "pond", op: "order", ids: ids, nonce: nonceHex, expiresAt: expires)
         case .orderNewest:
             command = PondCommand(v: 1, kind: "pond", op: "order", mode: "newest", nonce: nonceHex, expiresAt: expires)
+        case .leave(let pondId):
+            command = PondCommand(v: 1, kind: "pond", op: "leave", pondId: pondId, nonce: nonceHex, expiresAt: expires)
+        case .duckPlace(let duckId, let place, let message):
+            let note = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !duckId.isEmpty, (note?.count ?? 0) <= PondCommand.maxText else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "duck-place", duckId: duckId, place: place,
+                                  message: (note?.isEmpty ?? true) ? nil : note, nonce: nonceHex, expiresAt: expires)
         case .message(let pondId, let threadId, let text):
             guard !text.isEmpty, text.count <= PondCommand.maxText else { throw ChannelCrypto.Failure.badBox }
             command = PondCommand(v: 1, kind: "pond", op: "message", pondId: pondId, threadId: threadId, text: text, nonce: nonceHex, expiresAt: expires)

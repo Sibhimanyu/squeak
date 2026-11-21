@@ -38,7 +38,10 @@ struct PondRouteView: View {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
                 if sidebarHidden { Color.clear.frame(width: sidebarClearance) }
                 Spacer(minLength: 0)
-                if case .home(let project) = route, PondsModel.shared.native(key: project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
+                if case .home(let project) = route {
+                    if PondsModel.shared.native(key: project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
+                    else if PondsModel.shared.chrome(key: project).showsLeave { PondHeaderMenu(key: project).padding(.trailing, Space.xl) }
+                }
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
@@ -80,8 +83,8 @@ struct PondHomeView: View {
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
             project: model.pondProject(key), detail: detail, me: person,
-            emptyBranches: PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
-            main: native.flatMap { MainPlace(project: $0) },
+            emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
+            main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
             hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
     }
@@ -211,14 +214,21 @@ struct PondHomeView: View {
         if let p = pond, !p.local, role.canMessage { shareMenu(p) }
     }
 
+    private var chrome: PondChrome { PondsModel.shared.chrome(key: key) }
+
     @ViewBuilder private var startAction: some View {
         if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }).map({ $0 != .none }) == true {
             let why: String? = pond.flatMap { p in
                 if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local, !PondStartThread.runsOnOwnerMac(p) { return w } else { return nil }
             }
-            Button { startThread() } label: { Label("Start a duck", systemImage: "plus") }
-                .buttonStyle(PondPrimaryButtonStyle())
-                .disabled(why != nil).help(why ?? "Start a duck in this pond")
+            switch chrome.start {
+            case .hidden: EmptyView()
+            case .own, .askOwner:
+                let label: String = { if case .askOwner(let l) = chrome.start { return l } else { return "Start a duck" } }()
+                Button { startThread() } label: { Label(label, systemImage: "plus") }
+                    .buttonStyle(PondPrimaryButtonStyle())
+                    .disabled(why != nil).help(why ?? (chrome.isRemote ? label : "Start a duck in this pond"))
+            }
         }
     }
 
@@ -269,19 +279,19 @@ struct PondHomeView: View {
         let filtered = layout.filtered(query: query, scope: scope)
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Streams & ducks").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text(model.ducksMode ? "Ducks" : "Streams & ducks").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
-                if let native {
+                if let native, !chrome.isRemote, !model.ducksMode {
                     Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New stream", systemImage: "plus") }
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
             }
-            Text("Each stream is a separate working folder. Its ducks work with the same files.")
+            Text(model.ducksMode ? "Each duck works on its own branch, or on main read-only. Ask one to branch off or work with another." : "Each stream is a separate working folder. Its ducks work with the same files.")
                 .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField("Find a stream, duck or person", text: $query).textFieldStyle(.plain)
-                    .font(Typo.body).accessibilityLabel("Find a stream, duck or person")
+                TextField(model.ducksMode ? "Find a duck or person" : "Find a stream, duck or person", text: $query).textFieldStyle(.plain)
+                    .font(Typo.body).accessibilityLabel(model.ducksMode ? "Find a duck or person" : "Find a stream, duck or person")
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
@@ -305,8 +315,8 @@ struct PondHomeView: View {
                     Text(layout.isEmpty ? "Start a duck to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     if layout.isEmpty {
-                        if pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {
-                            Button("Start a duck") { startThread() }.buttonStyle(SecondaryButtonStyle())
+                        if chrome.start != .hidden, pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {
+                            Button({ if case .askOwner(let l) = chrome.start { return l } else { return "Start a duck" } }()) { startThread() }.buttonStyle(SecondaryButtonStyle())
                         }
                     } else {
                         Button("Reset filters") { scope = .all; query = "" }.buttonStyle(SecondaryButtonStyle())
@@ -317,6 +327,7 @@ struct PondHomeView: View {
             } else {
                 PondWorkspacesView(layout: filtered, members: detail?.members ?? [], showsHeading: false, open: open)
             }
+            if model.ducksMode, !chrome.isRemote { DuckBranchesList(rows: model.duckRows(pond: key, fromPage: true)) }
             archivedThreads
         }
     }

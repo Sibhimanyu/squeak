@@ -75,6 +75,7 @@ describe("GET /native/directory", () => {
       expect(d.schema).toBe(1);
       // Stashed own-Mac threads: surfaces read the switch from here (docs/ponds.md).
       expect(d.pondOwnThreads).toBe(false);
+      expect(d.ducksOwnBranch).toBe(false);
       expect(d.ponds.map((p) => [p.name, p.kind])).toEqual(
         expect.arrayContaining([
           ["shop", "project"],

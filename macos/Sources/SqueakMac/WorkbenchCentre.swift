@@ -191,6 +191,12 @@ private struct WorkbenchHeader: View {
     private var branch: String? { session.branch.flatMap { $0.isEmpty ? nil : $0 } }
     /// The directory's pond for this chat (its name is the crumb); Other chats keep the fleet's folder name and no page.
     private var pondKey: String? { model.focus.pond ?? PondsModel.shared.key(of: session) }
+    /// Ducks mode (the daemon's flag): the header is the duck's, not the stream's.
+    private var ducks: Bool { model.ducksMode && session.source == .squeak && session.duckId != nil }
+    private var duckChrome: DuckHeaderChrome {
+        let row = model.duckRow(session)
+        return DuckHeaderChrome.of(branch: model.gitStatus(session)?.branch ?? row.branch, isMain: row.isMain, membership: model.focus.access)
+    }
     private var pondTitle: String { pondKey.map { PondsModel.shared.name(key: $0) } ?? project }
 
     var body: some View {
@@ -201,7 +207,12 @@ private struct WorkbenchHeader: View {
                 CrumbButton(title: pondTitle, label: PondWords.breadcrumb(pondTitle)) {
                     if let pondKey { WorkbenchNav.openProject(model, key: pondKey, resuming: false) }
                 }
-                if let crumb = streamTitle ?? branch ?? workspace {
+                if ducks {
+                    // Ducks mode: pond › duck title, then the branch chip (the duck's own, or main · read-only).
+                    Lucide(.chevronRight, size: 12, color: Theme.subtle)
+                    Text(verbatim: model.workbenchTitle(session)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    DuckBranchChip(chrome: duckChrome)
+                } else if let crumb = streamTitle ?? branch ?? workspace {
                     Lucide(.chevronRight, size: 12, color: Theme.subtle)
                     CrumbButton(title: crumb, label: "Show \(crumb)'s chats", truncate: true) {
                         if let place = model.sidebarTree.place(of: session.key) {
@@ -220,7 +231,7 @@ private struct WorkbenchHeader: View {
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
-            if session.source == .squeak { GitCluster(session: session, showsBranch: false) }
+            if session.source == .squeak, model.focus.access.showsCode, !ducks || duckChrome.showsCreatePR { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
             if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
@@ -260,7 +271,7 @@ private struct WorkbenchHeader: View {
     /// The branch this one merges into, quietly, as the target's header shows it.
     @ViewBuilder private var targetBranch: some View {
         // Main has no stream, so no branch it merges into.
-        if session.source == .squeak, let status = model.gitStatus(session), !status.main, !status.base.isEmpty {
+        if session.source == .squeak, !(ducks && !duckChrome.showsCreatePR), let status = model.gitStatus(session), !status.main, !status.base.isEmpty {
             let base = status.base
             Text(verbatim: "origin/\(base)").font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: 170, alignment: .trailing).help("The branch this merges into")
@@ -436,6 +447,9 @@ private struct WorkbenchTabs: View {
                     Button {
                         if case .newTerminal = DockPlusAction.of(zone: .centre, layout: dock.layout, terminals: dock.activeTerminals) {
                             NewTerminalAction.perform(model, in: .centre)
+                        } else if workspace.isDucks, let pid = model.focus.pond.flatMap({ PondsModel.shared.entry($0)?.projectId }) ?? chats.first.flatMap({ model.duckPondKey($0) }).flatMap({ PondsModel.shared.entry($0)?.projectId }) {
+                            // Ducks mode: a new duck in the pond; the daemon decides where it works.
+                            model.openNewMainThread(projectId: pid)
                         } else if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
                         } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {
@@ -510,7 +524,7 @@ private struct WorkbenchTabs: View {
     /// the pond's overview page, or stays on a file tab open in the stream.
     /// The pond's room state for a native duck: its project id and session id on the host.
     private func duckRef(_ s: HostSession) -> (project: String, id: String)? {
-        guard s.source == .squeak, let project = model.nativeWorkspace(of: workspace)?.projectId else { return nil }
+        guard s.source == .squeak, let project = model.nativeWorkspace(of: workspace)?.projectId ?? (workspace.isDucks ? model.duckPondKey(s).flatMap { PondsModel.shared.entry($0)?.projectId } : nil) else { return nil }
         return (project, s.key.hostSessionId)
     }
 
@@ -640,6 +654,8 @@ private struct WorkbenchTabs: View {
         .help(model.workbenchTitle(s))
         .squeakContextMenu {
             RenameThreadItem(session: s)
+            DuckMenuItems(session: s)
+            Divider()
             Button(duckRef(s) == nil ? "Close tab" : "Close tab (goes off duty)") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }

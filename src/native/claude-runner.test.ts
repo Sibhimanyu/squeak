@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { ClaudeRunner, Pushable, type ClaudeQuery, type ClaudeQueryFn } from "./claude-runner.js";
+import {
+  ClaudeRunner,
+  Pushable,
+  readOnlyDenial,
+  READ_ONLY_ROOT_REASON,
+  type ClaudeQuery,
+  type ClaudeQueryFn,
+} from "./claude-runner.js";
 import type { RequestKind, Resolution, RunnerHooks, SessionStatus } from "./types.js";
 
 /** A fake SDK `query`: records the options and the pushed prompts; the test plays the agent's side. */
@@ -885,5 +892,96 @@ describe("ClaudeRunner API wait", () => {
     await r.send("hi");
     await tick();
     expect(f.calls[0]!.settings).toEqual({ autoCompactWindow: 200_000 });
+  });
+});
+
+describe("a read-only root (Main of a git pond for a duck)", () => {
+  type Can = (n: string, i: Record<string, unknown>, c: Record<string, unknown>) => Promise<{ behavior: string }>;
+  const hookOf = (options: Record<string, unknown>) =>
+    (
+      options.hooks as {
+        PreToolUse: {
+          hooks: ((input: unknown) => Promise<{ hookSpecificOutput?: Record<string, unknown>; continue?: boolean }>)[];
+        }[];
+      }
+    ).PreToolUse[0]!.hooks[0]!;
+
+  it("readOnlyDenial refuses edit tools inside the root only", () => {
+    expect(readOnlyDenial(null, "/repo", "Edit", { file_path: "/repo/a.ts" })).toBeNull();
+    expect(readOnlyDenial("/repo", "/repo", "Edit", { file_path: "/repo/a.ts" })).toBe(READ_ONLY_ROOT_REASON);
+    expect(readOnlyDenial("/repo", "/repo", "Write", { file_path: "src/new.ts" })).toBe(READ_ONLY_ROOT_REASON);
+    expect(readOnlyDenial("/repo", "/repo", "NotebookEdit", { notebook_path: "/repo/n.ipynb" })).toBe(
+      READ_ONLY_ROOT_REASON,
+    );
+    expect(readOnlyDenial("/repo", "/repo", "MultiEdit", {})).toBe(READ_ONLY_ROOT_REASON);
+    expect(readOnlyDenial("/repo", "/repo", "Write", { file_path: "/repo/../elsewhere/a" })).toBeNull();
+    expect(readOnlyDenial("/repo", "/repo", "Write", { file_path: "/repo-other/a" })).toBeNull();
+    expect(readOnlyDenial("/repo", "/repo", "Read", { file_path: "/repo/a.ts" })).toBeNull();
+    expect(readOnlyDenial("/repo", "/repo", "Bash", { command: "ls" })).toBeNull();
+  });
+
+  it("refuses edits in every mode (hook and canUseTool) and never skips approvals for a shell command", async () => {
+    for (const mode of ["bypassPermissions", "acceptEdits", "default"]) {
+      const f = fakeQuery();
+      const asked: string[] = [];
+      const { h } = hooks((kind, payload) => {
+        asked.push((payload as { toolName: string }).toolName);
+        return { decision: "deny" };
+      });
+      const r = new ClaudeRunner({
+        cwd: "/repo",
+        model: "m",
+        permissionMode: mode,
+        hooks: h,
+        queryFn: f.queryFn,
+        executable: "/bin/claude",
+        readOnlyRoot: "/repo",
+      });
+      await r.send("go");
+      await tick();
+      const options = f.calls[0]!;
+      expect(options.permissionMode).toBe(mode === "default" ? "default" : "default");
+      const hook = hookOf(options);
+      const out = await hook({ tool_name: "Write", tool_input: { file_path: "/repo/x.ts" } });
+      expect(out.hookSpecificOutput).toMatchObject({
+        permissionDecision: "deny",
+        permissionDecisionReason: READ_ONLY_ROOT_REASON,
+      });
+      expect(
+        (await hook({ tool_name: "Write", tool_input: { file_path: "/tmp/x.ts" } })).hookSpecificOutput,
+      ).toBeUndefined();
+      expect((await hook({ tool_name: "Bash", tool_input: { command: "ls" } })).hookSpecificOutput).toBeUndefined();
+      const can = options.canUseTool as Can;
+      expect((await can("Edit", { file_path: "/repo/a.ts" }, {})).behavior).toBe("deny");
+      expect(asked).toEqual([]);
+      expect((await can("Bash", { command: "rm -rf x" }, {})).behavior).toBe("deny"); // asked, and the person said no
+      expect(asked).toEqual(["Bash"]);
+      await r.setPermissionMode("bypassPermissions");
+      expect(f.state.modes.at(-1)).toBe("default");
+    }
+  });
+
+  it("no read-only root: bypass stays bypass, edits are allowed and the hook only waits (flag off behaves as before)", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/repo",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+    });
+    await r.send("go");
+    await tick();
+    expect(f.calls[0]!.permissionMode).toBe("bypassPermissions");
+    expect(await hookOf(f.calls[0]!)({ tool_name: "Write", tool_input: { file_path: "/repo/x.ts" } })).toEqual({
+      continue: true,
+    });
+    const can = f.calls[0]!.canUseTool as Can;
+    expect((await can("Write", { file_path: "/repo/x.ts" }, {})).behavior).toBe("allow");
+    expect((await can("Bash", { command: "ls" }, {})).behavior).toBe("allow");
+    await r.setPermissionMode("acceptEdits");
+    expect(f.state.modes.at(-1)).toBe("acceptEdits");
   });
 });

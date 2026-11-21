@@ -101,7 +101,11 @@ final class PondsModel {
     /// The pond directory (`GET /native/directory`): the one list every pond row, home and setting is drawn from. The last good
     /// read stays while the host is down. Nothing matches a pond by name; a pond's key is its directory id.
     private(set) var directory: PondDirectory? {
-        didSet { if oldValue?.pondOwnThreads != directory?.pondOwnThreads { ponds = PondOwnThreads.adjusted(ponds, ownThreads: ownThreads) } }
+        didSet {
+            if oldValue?.pondOwnThreads != directory?.pondOwnThreads { ponds = PondOwnThreads.adjusted(ponds, ownThreads: ownThreads) }
+            // Ducks mode changes how the tree is built: every derived list and the focus read again.
+            if oldValue?.ducksMode != directory?.ducksMode { AppModel.shared.inputsChanged() }
+        }
     }
     /// Stashed own-Mac threads: the daemon's word (docs/ponds.md); every pond list is read through it.
     var ownThreads: Bool { PondOwnThreads.enabled(directory?.pondOwnThreads) }
@@ -201,6 +205,21 @@ final class PondsModel {
     }
 
     func detail(key: String) -> PondDetail? { pond(key: key).flatMap { details[$0.id] } }
+
+    /// How this person belongs to a pond: the directory's `access`, else own / joined (`PondDirectory.Pond.membership`).
+    func membership(of key: String) -> PondMembership {
+        (directory?.pond(id: key) ?? directory?.pond(pondId: key))?.membership ?? .owner
+    }
+
+    /// Which chrome a pond shows (`PondChrome`): its access, the owner's name, and what this member's caps allow.
+    func chrome(key: String) -> PondChrome {
+        let pond = pond(key: key)
+        let me = detail(key: key)?.me
+        let messaging = (pond?.role.canMessage ?? true) && me?.caps?.message != false
+        let why: String? = messaging ? nil : (pond?.role.canMessage == false ? ThreadAccess.watchLine : "The owner has turned off messaging for you in this pond.")
+        return PondChrome(access: membership(of: key), ownerName: pond.flatMap(PondSharing.sharerName), canStart: me?.caps?.start ?? true,
+                          canMessage: messaging, reason: why)
+    }
 
     /// What the pond is called: the directory's name.
     func name(key: String) -> String { entry(key)?.name ?? ponds.first { $0.id == key }?.name ?? "" }
@@ -530,6 +549,19 @@ final class PondsModel {
         return ok
     }
 
+    /// "Leave pond…": leaves the pond (`POST /ponds/<id>/leave`), drops it from the sidebar at once and opens the Dashboard.
+    /// Never for the person's own pond.
+    func leaveAndDrop(key: String) async -> Bool {
+        guard membership(of: key) != .owner else { return false }
+        let id = (directory?.pond(id: key) ?? directory?.pond(pondId: key))?.pondId ?? pond(key: key)?.id ?? key
+        guard await leave(pond: id) else { return false }
+        if var d = directory { d.ponds.removeAll { $0.id == key || $0.pondId == id }; directory = d }
+        ponds.removeAll { $0.id == id }
+        WorkbenchNav.goHome(AppModel.shared)
+        await refreshDirectory()
+        return true
+    }
+
     func removeMyDevice(pond: String, deviceKeyId: String) async {
         _ = await act("device:\(pond):\(deviceKeyId)", pond: pond, success: "Device removed.") { try await self.client!.removeMyDevice(pond: pond, deviceKeyId: deviceKeyId) }
     }
@@ -567,10 +599,10 @@ final class PondsModel {
     @discardableResult
     func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
                      effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false,
-                     main: Bool = false) async -> Bool {
+                     main: Bool = false, place: DuckPlace? = nil) async -> Bool {
         let ok = await attempt({
             _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
-                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main)
+                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main, place: place)
         })
         if ok { await refresh(pond: pond, byPerson: true) } else { HeresayBridge.trouble() }
         return ok

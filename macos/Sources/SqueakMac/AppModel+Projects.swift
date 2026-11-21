@@ -19,8 +19,25 @@ extension AppModel {
         _ = derivedRevision
         let now = Date()
         return derived.tree.value(bucket: TimeBucket.of(now)) {
-            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, isUnread: { isUnread($0) })
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, ducksMode: ducksMode, isUnread: { isUnread($0) })
         }
+    }
+
+    /// Flag `ducksOwnBranch` (the daemon's directory says): ducks, not streams, fill the sidebar and the tab strip. Off = today's UI.
+    var ducksMode: Bool { PondsModel.shared.directory?.ducksMode == true }
+
+    /// The pond's ducks as the sidebar and strip list them (newest first, one per duck), by directory key; ducks mode only.
+    func duckRows(pond key: String, fromPage: Bool = false) -> [DuckRow] {
+        let tree = fromPage ? pondPageTree : sidebarTree
+        let sections = SidebarSections.split(tree, directory: PondsModel.shared.directory ?? PondDirectory(), mains: mainPlaces)
+        let chats = sections.workspaces(of: key).flatMap(\.chats)
+        return DuckList.rows(chats, main: mainPlace(key: key))
+    }
+
+    /// A duck's place words, for the header and the focus: "main" on a pond's own folder, else its branch.
+    func duckRow(_ s: HostSession) -> DuckRow {
+        let main = PondsModel.shared.key(of: s).flatMap { mainPlace(key: $0) }
+        return DuckRow(session: s, isMain: main?.contains(s) ?? false)
     }
 
     /// Every git pond's Main place (its own folder and the branch it is on); a plain-folder pond has none.
@@ -37,7 +54,7 @@ extension AppModel {
         _ = derivedRevision
         let now = Date()
         return derived.fullTree.value(bucket: TimeBucket.of(now)) {
-            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, includeEarlier: true, isUnread: { isUnread($0) })
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, includeEarlier: true, ducksMode: ducksMode, isUnread: { isUnread($0) })
         }
     }
 
@@ -49,7 +66,10 @@ extension AppModel {
     /// A pond's streams and chats as the tree draws them, by directory key.
     func pondProject(_ key: String) -> SidebarProject {
         let sections = SidebarSections.split(pondPageTree, directory: PondsModel.shared.directory ?? PondDirectory(), mains: mainPlaces)
-        return SidebarProject(name: PondsModel.shared.name(key: key), workspaces: sections.workspaces(of: key))
+        var workspaces = sections.workspaces(of: key)
+        // Ducks mode: one row per duck (its newest chat), not one per chat.
+        if ducksMode { workspaces = workspaces.map { var w = $0; if w.isDucks { w.chats = DuckList.collapse(w.chats) }; return w } }
+        return SidebarProject(name: PondsModel.shared.name(key: key), workspaces: workspaces)
     }
 
     /// A pond's archived chats, newest archived first.

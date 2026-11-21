@@ -3235,6 +3235,13 @@ final class AppModel {
     var pondHiddenLocal: [String: Bool] = UserDefaults.standard.dictionary(forKey: "squeak.pondHiddenLocal") as? [String: Bool] ?? [:] {
         didSet { UserDefaults.standard.set(pondHiddenLocal, forKey: "squeak.pondHiddenLocal") }
     }
+    /// Ponds this phone just left: gone from the list at once, until the Mac's answer (back again if it refuses).
+    var pondsLeft: Set<String> = []
+    /// Why the last "Leave pond" did not go through.
+    var pondLeaveProblem: String?
+    /// Ducks being moved right now (by duck id), and why the last move did not go through.
+    var ducksMoving: Set<String> = []
+    var duckMoveProblem: String?
     /// The person's own pond order, set from this phone, until the Mac's phone view carries it.
     var pondOrderLocal: PondOrderMode?
     /// The pond whose dashboard is open (presence names it so the Mac sends its detail).

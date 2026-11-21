@@ -7,15 +7,43 @@ import SwiftUI
 struct PondHeaderMenu: View {
     let key: String
     @Environment(AppModel.self) private var model
+    @State private var leaving: String?
 
     var body: some View {
         Menu {
             Button("Pond settings\u{2026}") { model.openSettings(.pond(key)) }
+            // A pond someone else owns can be left; the person's own pond never shows it.
+            if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond\u{2026}") { leaving = key } }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("More for this pond").accessibilityLabel("More for this pond")
+        .leavePondDialog($leaving)
+    }
+}
+
+extension View {
+    /// "Leave pond…": a one-line confirmation, then the daemon's leave; on success the pond leaves the sidebar and the
+    /// Dashboard opens (`PondsModel.leaveAndDrop`).
+    func leavePondDialog(_ key: Binding<String?>) -> some View { modifier(LeavePondDialog(key: key)) }
+}
+
+private struct LeavePondDialog: ViewModifier {
+    @Binding var key: String?
+
+    func body(content: Content) -> some View {
+        let name = key.map { PondsModel.shared.name(key: $0) } ?? ""
+        content.confirmationDialog("Leave \(name)?", isPresented: Binding(get: { key != nil }, set: { if !$0 { key = nil } }), titleVisibility: .visible) {
+            Button("Leave", role: .destructive) {
+                guard let k = key else { return }
+                key = nil
+                Task { _ = await PondsModel.shared.leaveAndDrop(key: k) }
+            }
+            Button("Cancel", role: .cancel) { key = nil }
+        } message: {
+            Text(verbatim: PondActionWords.leaveMessage(name))
+        }
     }
 }
 

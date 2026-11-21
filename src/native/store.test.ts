@@ -77,7 +77,11 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE timeline_events;");
     old.db.exec("ALTER TABLE queue DROP COLUMN client_nonce;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 12}`);
+    // Ducks own their branch: its columns are the newest migration.
+    old.db.exec(
+      "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
+    );
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 13}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -114,7 +118,11 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE timeline_events;");
     old.db.exec("ALTER TABLE queue DROP COLUMN client_nonce;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 8}`);
+    // Ducks own their branch: its columns are the newest migration.
+    old.db.exec(
+      "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
+    );
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 9}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -209,5 +217,80 @@ describe("NativeStore", () => {
     expect(store.getSession(made.id)?.workspaceId).toBe(ws.id);
     expect(store.getSession(stranger.id)?.workspaceId ?? "").toBe("");
     expect(store.adoptWorkspaces()).toBe(0);
+  });
+
+  describe("ducks own their branch: migration and links", () => {
+    const rewind = (file: string, withoutDuckTables = false) => {
+      const old = new NativeStore(file);
+      const project = old.createProject({ name: "p", rootPath: "/p", defaultBranch: "main" });
+      const ws = old.createWorkspace({ projectId: project.id, name: "quiet", path: "/w/quiet", branch: "feat/quiet" });
+      const onBranch = old.createSession({
+        cwd: ws.path,
+        agent: "claude",
+        model: "m",
+        permissionMode: "default",
+        workspaceId: ws.id,
+      });
+      const inMain = old.createSession({ cwd: "/p", agent: "claude", model: "m", permissionMode: "default" });
+      const d1 = old.duckForSession(onBranch.id, project.id)!;
+      const d2 = old.duckForSession(inMain.id, project.id)!;
+      old.db.exec(
+        "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
+      );
+      if (withoutDuckTables) old.db.exec("DROP TABLE ducks; DROP TABLE duck_sessions; DROP TABLE session_ducks;");
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+      old.close();
+      return { ws, onBranch, inMain, d1, d2 };
+    };
+
+    it("streams become branches, chats ducks on that branch, Main chats ducks on main; idempotent", () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
+      const file = path.join(dir, "native.db");
+      const { ws, onBranch, inMain, d1, d2 } = rewind(file);
+      for (let pass = 0; pass < 2; pass++) {
+        const store = new NativeStore(file);
+        expect(store.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+        expect(store.getSession(onBranch.id)).toMatchObject({ branch: "feat/quiet", duckId: d1.id });
+        expect(store.getSession(inMain.id)!.branch).toBeUndefined();
+        expect(store.duckRow(d1.id)).toMatchObject({ workspaceId: ws.id, branch: "feat/quiet" });
+        expect(store.duckRow(d2.id)).toMatchObject({ workspaceId: null, branch: null });
+        expect(store.listSessions()).toHaveLength(2);
+        store.close();
+      }
+    });
+
+    it("makes the duck tables itself when an old database never had them", () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
+      const file = path.join(dir, "native.db");
+      const { onBranch } = rewind(file, true);
+      const store = new NativeStore(file);
+      expect(store.getSession(onBranch.id)).toMatchObject({ branch: "feat/quiet" });
+      expect(store.duckForSession(onBranch.id, "p")).toMatchObject({ branch: "feat/quiet" });
+      store.close();
+    });
+
+    it("a new chat carries its workspace's branch; the duck follows its current chat; a renamed branch follows everywhere", () => {
+      const store = new NativeStore(":memory:");
+      const project = store.createProject({ name: "p", rootPath: "/p", defaultBranch: "main" });
+      const ws = store.createWorkspace({ projectId: project.id, name: "a", path: "/w/a", branch: "bird" });
+      const s = store.createSession({
+        cwd: ws.path,
+        agent: "claude",
+        model: "m",
+        permissionMode: "default",
+        workspaceId: ws.id,
+      });
+      expect(s.branch).toBe("bird");
+      const duck = store.createDuck({ projectId: project.id, currentSessionId: s.id });
+      expect(duck).toMatchObject({ workspaceId: ws.id, branch: "bird" });
+      const main = store.createSession({ cwd: "/p", agent: "claude", model: "m", permissionMode: "default" });
+      store.attachSessionToDuck(duck.id, main.id);
+      expect(store.duckRow(duck.id)).toMatchObject({ workspaceId: null, branch: null });
+      store.attachSessionToDuck(duck.id, s.id);
+      store.markBranchRenamed(ws.id, "feat/login");
+      expect(store.getSession(s.id)!.branch).toBe("feat/login");
+      expect(store.duckRow(duck.id)!.branch).toBe("feat/login");
+      expect(store.ducksInWorkspace(ws.id).map((d) => d.id)).toEqual([duck.id]);
+    });
   });
 });

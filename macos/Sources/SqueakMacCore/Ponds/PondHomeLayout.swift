@@ -40,6 +40,8 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var ducklingsRunning: Int = 0
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
+    /// Ducks mode: the duck's branch ("main" on main), the row's small mono label; nil otherwise.
+    public var branch: String? = nil
     /// "Repeating a failing step: <label> ×N" for that row.
     public var loopSentence: String? = nil
     public var hostingLabel: String {
@@ -71,6 +73,8 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     public var empty: NativeWorkspace?
     /// The pond's own folder: its card reads "Main", comes first, and has no stream menu.
     public var isMain = false
+    /// Ducks mode: the pond's one list of ducks (no stream card: the page draws the rows without a card header).
+    public var isDucks = false
     /// Main with no threads yet: the card offers "New thread" in it (`MainPlace`).
     public var emptyMain: MainPlace?
     /// Newest chat; a branch with no threads sorts by when it was made.
@@ -139,12 +143,15 @@ public struct PondHomeLayout: Sendable, Equatable {
             let rows = ws.chats.map { s -> PondChatRow in
                 let thread = hostIdFor(s).flatMap { hosted[$0] }
                 if let thread { used.insert(thread.id) }
-                return PondChatRow(
+                var made = PondChatRow(
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
+                if ws.isDucks { made.branch = DuckRow(session: s, isMain: main?.contains(s) ?? false).label }
+                return made
             }
             var card = PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
+            card.isDucks = ws.isDucks
             if ws.isMain { card.isMain = true; card.title = ws.displayTitle; card.branch = nil }
             return card
         }

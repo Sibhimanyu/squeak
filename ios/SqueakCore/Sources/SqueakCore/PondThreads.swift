@@ -12,20 +12,28 @@ public struct PondThreads: Codable, Equatable, Sendable {
         public let at: String
         /// The initial of who started it, when the Mac says (absent today).
         public var who: String? = nil
+        /// Ducks own their branch (flag on): the thread's duck, the branch it works on, or `main` for the pond's own folder.
+        public var duckId: String? = nil
+        public var branch: String? = nil
+        public var main: Bool? = nil
 
         public var id: String { key }
         public var date: Date? { ISO8601DateFormatter.squeakParse(at) }
 
-        public init(key: String, title: String, state: String, at: String, who: String? = nil) {
+        public init(key: String, title: String, state: String, at: String, who: String? = nil,
+                    duckId: String? = nil, branch: String? = nil, main: Bool? = nil) {
             self.key = key; self.title = title; self.state = state; self.at = at; self.who = who
+            self.duckId = duckId; self.branch = branch; self.main = main
         }
 
         /// A bare session for a thread the phone's view does not carry (an older one): enough to draw its row and open
         /// it for history, nothing the Mac did not say. The phone's own copy wins when the view has the thread.
         public var asSession: PhoneSnapshot.Session {
-            PhoneSnapshot.Session(
+            var session = PhoneSnapshot.Session(
                 key: key, conductorSessionId: nil, label: title, agent: "claude", state: state, lastActivityAt: at,
                 detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil, title: title)
+            session.duckId = duckId; session.branch = branch; session.onMain = main
+            return session
         }
     }
 

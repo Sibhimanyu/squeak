@@ -37,6 +37,8 @@ export interface DirRecord {
   kind?: "joined";
   memberCount?: number;
   members?: Array<{ name: string; online: boolean }>;
+  /** The pond's Git remote (its meta); decides "git" over "remote" for a joined pond when own threads are on. */
+  gitRemote?: string;
 }
 
 export interface DirPrefs {
@@ -85,6 +87,20 @@ export interface DirPond {
   counts: { threads: number; needsYou: number; working: number };
   /** The project's main folder: how a terminal's cwd finds it. Not for display. */
   folder?: string;
+  /**
+   * What this person may do here, said by the daemon (surfaces decide nothing). "owner": a pond this Mac owns or
+   * follows a project of. "remote": someone else's pond, you talk to their agents on their Mac (no code: no changes,
+   * files, terminals, branches, Create PR, agent or model pickers). "git": your own agents on your own Mac, code
+   * moves through Git (only with `pondOwnThreads` on and a Git remote). Absent from an older daemon: treat as "owner".
+   */
+  access?: "owner" | "remote" | "git";
+}
+
+export type PondAccess = NonNullable<DirPond["access"]>;
+
+/** The level of a joined pond: "git" only with the stashed own-threads flag on and a Git remote, else "remote". */
+export function joinedAccess(ownThreads: boolean | undefined, gitRemote: string | null | undefined): PondAccess {
+  return ownThreads && gitRemote ? "git" : "remote";
 }
 
 export interface PondDirectory {
@@ -96,6 +112,8 @@ export interface PondDirectory {
   other: string[];
   /** Whether a member may run their own agent on their own Mac in a joined pond (stashed: absent/false = off). */
   pondOwnThreads?: boolean;
+  /** The `ducksOwnBranch` flag: ducks choose where they work (`POST /native/ducks/<id>/place`). Absent/false = off. */
+  ducksOwnBranch?: boolean;
 }
 
 export interface DirectoryInput {
@@ -106,6 +124,8 @@ export interface DirectoryInput {
   order: { mode: "recent" | "newest" | "manual"; ids: string[] };
   sessions: DirSession[];
   repos?: MainRepoFinder;
+  /** The `pondOwnThreads` flag (stashed, off): with it and a Git remote a joined pond is "git", else "remote". */
+  ownThreads?: boolean;
 }
 
 const STREAMS_MAX = 20;
@@ -223,6 +243,7 @@ export function buildDirectory(input: DirectoryInput): PondDirectory {
       projectId: project.id,
       ...(linked ? { pondId: linked.id } : {}),
       shared,
+      access: "owner",
       members: shared ? (linked?.members ?? []) : [],
       ...(prefs?.hidden ? { hidden: true } : {}),
       ...(prefs?.colour ? { colour: prefs.colour } : {}),
@@ -250,6 +271,7 @@ export function buildDirectory(input: DirectoryInput): PondDirectory {
       name: record.name,
       pondId: record.id,
       shared,
+      access: record.role === "owner" ? "owner" : joinedAccess(input.ownThreads, record.gitRemote),
       members: shared ? (record.members ?? []) : [],
       ...(prefs?.hidden ? { hidden: true } : {}),
       ...(prefs?.colour ? { colour: prefs.colour } : {}),

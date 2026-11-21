@@ -65,8 +65,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   pondHideCommand: { box: string; sig: string; device: string };
   pondOrderCommandId: string;
   pondOrderCommand: { box: string; sig: string; device: string };
+  pondLeaveCommandId: string;
+  pondLeaveCommand: { box: string; sig: string; device: string };
   pondNewestCommandId: string;
   pondNewestCommand: { box: string; sig: string; device: string };
+  pondDuckPlaceCommandId: string;
+  pondDuckPlaceCommand: { box: string; sig: string; device: string };
   nativeStartCommandId: string;
   nativeStartCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
@@ -195,9 +199,23 @@ function bridge(turn: string) {
               { id: "p-shop", name: "Shop", shared: false, members: [] },
               { id: "proj-shop", name: "Shop", shared: false, members: [], projectId: "proj-shop" },
               { id: "proj-docs", name: "Docs", shared: false, members: [], projectId: "proj-docs" },
+              {
+                id: "p-theirs",
+                pondId: "p-theirs",
+                kind: "joined",
+                name: "Theirs",
+                shared: true,
+                members: [],
+                access: "remote",
+              },
             ],
       setPondHidden: async (key: string, hidden: boolean) => void pondCalls.push(["hide", key, hidden]),
       setPondOrder: async (change: unknown) => void pondCalls.push(["order", change]),
+      leavePond: async (id: string) => void pondCalls.push(["leave", id]),
+      placeDuck: async (duckId: string, place: unknown, message?: string) => {
+        pondCalls.push(["place", duckId, place, message]);
+        return { sessionId: "n9" };
+      },
       currentRequest: async (sessionId: string) =>
         sessionId === "n1"
           ? { id: "r1", kind: "tool", payload: {} }
@@ -363,7 +381,19 @@ function bridge(turn: string) {
     // The chat the phone's commands name, as the Mac's own snapshot shows it.
     snapshot: () =>
       ({
-        sessions: [],
+        sessions: [
+          {
+            key: "squeak-native:dk1",
+            origin: "squeak",
+            sourceId: "dk1",
+            agent: "claude",
+            state: "finished",
+            projectId: "proj-shop",
+            duckId: "duck-1",
+            cwd: "/repo/shop/ws/cart",
+            branch: "cart",
+          } as FleetSession,
+        ],
         active: [
           { key: "squeak-native:n1", origin: "squeak", sourceId: "n1", agent: "claude", state: "awaiting_approval" },
           { key: "squeak-native:n2", origin: "squeak", sourceId: "n2", agent: "claude", state: "awaiting_input" },
@@ -550,11 +580,32 @@ describe("a reply made on the iPhone", () => {
     expect(order.result).toEqual({ id: fixture.pondOrderCommandId, status: "sent" });
     const newest = await remote.handleCommand(config, fixture.pondNewestCommandId, fixture.pondNewestCommand);
     expect(newest.result).toEqual({ id: fixture.pondNewestCommandId, status: "sent" });
+    const leave = await remote.handleCommand(config, fixture.pondLeaveCommandId, fixture.pondLeaveCommand);
+    expect(leave.result).toEqual({ id: fixture.pondLeaveCommandId, status: "sent" });
     expect(pondCalls).toEqual([
       ["hide", "p-shop", true],
       ["order", { ids: ["proj-docs", "proj-shop"] }],
       ["order", { mode: "newest" }],
+      ["leave", "p-theirs"],
     ]);
+  });
+
+  it("moves a duck when the phone signs a duck-place command, only with the flag on", async () => {
+    const { remote, config, pondCalls, refreshPonds } = bridge("turn-1");
+    await refreshPonds();
+    const off = await remote.handleCommand(config, fixture.pondDuckPlaceCommandId, fixture.pondDuckPlaceCommand);
+    expect(off.result).toMatchObject({ status: "refused" });
+    expect(pondCalls).toEqual([]);
+    process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
+    try {
+      const { remote: on, config: onConfig, pondCalls: calls, refreshPonds: refresh } = bridge("turn-1");
+      await refresh();
+      const moved = await on.handleCommand(onConfig, fixture.pondDuckPlaceCommandId, fixture.pondDuckPlaceCommand);
+      expect(moved.result).toEqual({ id: fixture.pondDuckPlaceCommandId, status: "sent" });
+      expect(calls).toEqual([["place", "duck-1", { kind: "new", branch: "try-two" }, "plan it"]]);
+    } finally {
+      delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+    }
   });
 
   it("keeps the last good pond directory when the host goes down, so chats do not drop to Other", async () => {
@@ -562,11 +613,11 @@ describe("a reply made on the iPhone", () => {
     const cache = () =>
       (remote as unknown as { pondsCache: { at: number; value: Array<{ id: string }> | null } }).pondsCache;
     await refreshPonds();
-    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs"]);
+    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs", "p-theirs"]);
     hostDown.value = true;
     cache().at = 0;
     await refreshPonds();
-    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs"]);
+    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs", "p-theirs"]);
   });
 
   it("answers and starts Squeak chats when the phone signs native requests", async () => {

@@ -161,12 +161,19 @@ final class AppModel {
     var focus: WorkbenchFocus {
         let loc = location
         let revision = loc.chatKey == nil ? 0 : derivedRevision
-        if let c = focusCache, c.location == loc, c.revision == revision { return c.focus }
-        let f = WorkbenchFocus.resolve(loc) { key in
+        if let c = focusCache, c.location == loc, c.revision == revision {
+            // The pond's access can change under a cached focus (the directory is read again): it is the one field read fresh.
+            guard let pond = c.focus.pond else { return c.focus }
+            var f = c.focus
+            f.access = PondsModel.shared.membership(of: pond)
+            return f
+        }
+        let f = WorkbenchFocus.resolve(loc, place: { key in
             let pond = self.session(key).flatMap { PondsModel.shared.key(of: $0) }
             let workspace = (self.sidebarTree.place(of: key) ?? self.pondPageTree.place(of: key))?.workspace.id
-            return ChatPlace(pond: pond, workspace: workspace)
-        }
+            let branch = self.ducksMode ? self.session(key).flatMap { self.duckRow($0).label } : nil
+            return ChatPlace(pond: pond, workspace: workspace, branch: branch)
+        }, access: { PondsModel.shared.membership(of: $0) })
         focusCache = (loc, revision, f)
         return f
     }
@@ -344,11 +351,13 @@ final class AppModel {
     /// its active chats, as before.
     func streamThreads(_ workspace: SidebarWorkspace) -> [HostSession] {
         let all = pondPageTree.projects.flatMap(\.workspaces).first { $0.id == workspace.id }?.chats ?? workspace.chats
-        guard streamTabs.hasStrip(workspace.id) else { return workspace.chats }
+        // Ducks mode: the pond's ducks, one tab each (a moved duck's newest chat stands for it).
+        func ducks(_ list: [HostSession]) -> [HostSession] { workspace.isDucks ? DuckList.collapse(list, pool: all + workspace.chats) : list }
+        guard streamTabs.hasStrip(workspace.id) else { return ducks(workspace.chats) }
         // The open chat stands in while the list does not carry it yet (a new thread).
         let standIn = selectedSession.map { [$0] } ?? []
         let byKey = Dictionary((all + workspace.chats + standIn).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
-        return streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil }
+        return ducks(streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil })
     }
 
     /// The one way into a thread from anywhere (Dashboard, sidebar, Needs you, pond page, search, notifications, the
@@ -415,6 +424,11 @@ final class AppModel {
         let next = streamTabs.close(.thread(key.stringValue), in: workspace)
         saveStreamTabs()
         return next.flatMap { $0.kind == .thread ? SessionKey(stringValue: $0.id) : nil }
+    }
+
+    /// A duck moved (ducks mode): its new chat takes the old tab's slot and selection; nothing closes and reopens.
+    func replaceStreamTab(_ old: StreamTab, with new: StreamTab, in workspace: String) {
+        if streamTabs.replace(old, with: new, in: workspace) { saveStreamTabs() }
     }
 
     func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {

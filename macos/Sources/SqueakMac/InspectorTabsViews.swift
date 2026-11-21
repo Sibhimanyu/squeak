@@ -82,9 +82,11 @@ struct PondInspectorZone: View {
             (folder: f, tabs: dock.activeFolder == f
                 ? dock.activeTerminals.terminals(in: .right).compactMap { id in TerminalHost.shared.registry.tabs(f).first { $0.id == id } } : [])
         }
+        // A remote pond has no code on this Mac: People and Recent only, no terminals, Files, Code or "+".
+        let peopleOnly = PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly
         let strip = InspectorStrip.make(
             context: .pond, record: record, terminals: shells?.tabs.map(\.id) ?? [],
-            selectedTerminal: dock.activeFolder == folder ? dock.activeTerminals.shown(in: .right) : nil)
+            selectedTerminal: dock.activeFolder == folder ? dock.activeTerminals.shown(in: .right) : nil, peopleOnly: peopleOnly)
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Color.clear.frame(width: Space.m + PaneToggle.size)
@@ -99,8 +101,10 @@ struct PondInspectorZone: View {
                                 tabView(tab, strip: strip)
                             }
                         }
-                        InspectorPlusMenu(label: Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())) {
-                            InspectorActions.pond($0, key: key, folder: folder) { notice = $0 }
+                        if !peopleOnly {
+                            InspectorPlusMenu(label: Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())) {
+                                InspectorActions.pond($0, key: key, folder: folder) { notice = $0 }
+                            }
                         }
                     }
                     .padding(.horizontal, Space.s)

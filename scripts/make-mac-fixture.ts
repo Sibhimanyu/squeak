@@ -264,6 +264,7 @@ const bridge = new RemoteBridge({
         members: [{ name: "Asha", online: true }],
         pondId: "p-shop",
         projectId: "p1",
+        folder: "/repo/farm",
         colour: "teal",
         labels: ["web"],
         streams: [
@@ -282,6 +283,15 @@ const bridge = new RemoteBridge({
         hidden: true,
         streams: [],
         archivedStreams: 0,
+      },
+      {
+        id: "p-theirs",
+        name: "Theirs",
+        shared: true,
+        members: [],
+        kind: "joined",
+        access: "remote",
+        pondId: "p-theirs",
       },
     ],
     pondOrder: async () => ({ mode: "manual" as const, ids: ["proj-docs", "p1"] }),
@@ -340,6 +350,58 @@ const z = { compress: true };
 // Pairing starts the bridge's poll; a fixture has nothing to poll.
 bridge.stop();
 
+// Ducks own their branch (flag on): the same Mac with three Squeak chats in the farm pond, two ducks on a branch and
+// one on main. Built last, with the flag on only for this view, so every box above is the flag-off one.
+const duckChat = (key: string, over: Partial<FleetSession>) =>
+  session({
+    key: `squeak-native:${key}`,
+    source: "squeak-native",
+    origin: "squeak",
+    sourceId: key,
+    agentSessionId: null,
+    conductorSessionId: null,
+    repoName: "farm",
+    projectId: "p1",
+    state: "finished",
+    ...over,
+  } as Partial<FleetSession>);
+const duckSessions = [
+  duckChat("dk1", {
+    cwd: "/repo/farm/ws/arm",
+    branch: "arm",
+    duckId: "duck-1",
+    title: "Arm",
+    lastActivityAt: "2026-09-25T02:58:00.000Z",
+  }),
+  duckChat("dk2", {
+    cwd: "/repo/farm/ws/arm",
+    branch: "arm",
+    duckId: "duck-2",
+    title: "Wire",
+    lastActivityAt: "2026-09-25T02:50:00.000Z",
+  }),
+  duckChat("dk3", {
+    cwd: "/repo/farm",
+    branch: "master",
+    duckId: "duck-3",
+    title: "Plan",
+    lastActivityAt: "2026-09-25T02:40:00.000Z",
+  }),
+];
+sessions.push(...duckSessions);
+process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
+const ducksView = bridge.phoneView();
+const ducksThreads = buildPondThreads(
+  { id: "p-shop", name: "Shop", shared: true, members: [], folder: "/repo/farm", streams: [] },
+  duckSessions,
+  () => true,
+  (s) => s.title ?? "Untitled",
+  () => false,
+  [],
+  true,
+);
+delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+
 fs.writeFileSync(
   out,
   JSON.stringify(
@@ -359,6 +421,8 @@ fs.writeFileSync(
       startedBox: seal(key, { id: "c6", status: "sent", sessionId: "new-1" }),
       refusedBox: seal(key, { id: "c2", status: "refused", reason: "That chat has moved on." }),
       pairAnswerBox: seal(key, { approved: true, mac: "Test Mac" }),
+      ducksSnapshotBox: seal(key, ducksView),
+      ducksPondThreadsBox: seal(key, { ...ducksThreads, seq: 1790305200005 }),
       // A film's phone copy is sent as chunks like this one, named by a media result.
       mediaResultBox: seal(key, {
         id: "c7",

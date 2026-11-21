@@ -72,7 +72,8 @@ struct FlockThreadView: View {
                     .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("Send")
                 }
-                Text("Goes through the pond to its starter's Mac.").font(.caption).foregroundStyle(Theme.muted)
+                Text(model.isRemotePond(pondId) ? "Runs on \(doc?.by ?? thread.by)'s Mac" : "Goes through the pond to its starter's Mac.")
+                    .font(.caption).foregroundStyle(Theme.muted)
             }
             if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
         }

@@ -34,6 +34,8 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var cwd: String?
     /// The pond the daemon placed this chat in (its directory id); nil = Other, or an older daemon.
     public var pondId: String?
+    /// The duck this chat belongs to (daemon with `ducksOwnBranch`); nil otherwise.
+    public var duckId: String?
     public var lastActivityAt: Date?
     public var contextPercent: Double?
     public var alive: Bool?
@@ -67,7 +69,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case archivedAt, archived
-        case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd, pondId
+        case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd, pondId, duckId
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
         case model, effort, fast, modelId, effortId, stalled, looping, conductorWaiting, ducklings
@@ -86,6 +88,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         branch = c.lenient(String.self, .branch)
         cwd = c.lenient(String.self, .cwd)
         pondId = c.lenient(String.self, .pondId)
+        duckId = c.lenient(String.self, .duckId)
         if let s = c.lenient(String.self, .lastActivityAt) {
             lastActivityAt = DaemonDate.parse(s)
         } else if let n = c.lenient(Double.self, .lastActivityAt) {

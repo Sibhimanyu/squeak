@@ -77,6 +77,7 @@ import {
   PHONE_NATIVE_CAP,
   type NativeProjectChoice,
   type PhoneNativeRequest,
+  type PhoneDuckPlace,
   type PhoneHostThread,
   type PhonePond,
   type PhonePondDetail,
@@ -103,7 +104,8 @@ import {
   reduceFlockEvents,
   type FlockReduction,
 } from "./flock-thread.js";
-import { buildPondThreads, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
+import { flag } from "../squeak/flags.js";
+import { buildPondThreads, onMainFolder, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
 import {
@@ -449,6 +451,7 @@ function hostThreadSession(thread: PhoneHostThread, pond: PhonePond): FleetSessi
     repoName: pond.name,
     ...(pond.projectId ? { projectId: pond.projectId } : {}),
     branch: thread.branch ?? null,
+    ...(thread.duckId ? { duckId: thread.duckId } : {}),
     title: thread.title || null,
     state: thread.state as FleetSession["state"],
     detail: null,
@@ -478,6 +481,8 @@ export interface PhoneViewPond {
   members: Array<{ name: string; online: boolean }>;
   /** "joined": someone else's pond (no project on this Mac); its id is the pond's own. Absent from an older Mac. */
   kind?: "project" | "joined";
+  /** What the person may do here, from the Mac's directory: "remote" shows no code UI. Absent from an older Mac. */
+  access?: "owner" | "remote" | "git";
   /** Only for a phone that names `ponds2`. */
   projectId?: string;
   hidden?: true;
@@ -496,6 +501,17 @@ export interface PhoneViewPond {
     needsYou?: number;
   }>;
   archivedStreams?: number;
+  /**
+   * Ducks own their branch (`ducksOwnBranch` on the Mac): the pond's active branches, newest activity first. `ducks`
+   * counts the ducks on it; `pr` is reserved for the branch's PR state (the Mac does not read it for a phone yet).
+   * `streams` stays for an older phone. Absent with the flag off.
+   */
+  branches?: Array<{
+    name: string;
+    ducks: number;
+    lastActivityAt?: string;
+    pr?: "open" | "merged" | "closed";
+  }>;
   /** Server-side rollup of this pond's chats (`status-rollup.ts`); absent from an older Mac. */
   activity?: RollupActivity;
   working?: number;
@@ -511,8 +527,12 @@ export interface PhoneViewPond {
 export interface PondCommand {
   v: 1;
   kind: "pond";
-  op: "hide" | "order";
+  op: "hide" | "order" | "leave" | "duck-place";
   pondId?: string;
+  /** `duck-place`: the duck (a `duckId` of a chat in the phone's view), where it goes, and an optional first message. */
+  duckId?: string;
+  place?: PhoneDuckPlace;
+  message?: string;
   hidden?: boolean;
   ids?: string[];
   mode?: "newest";
@@ -1854,6 +1874,7 @@ export class RemoteBridge {
       (session) => chatTitle(session) ?? sessionLabel(session),
       (session) => isUnclaimedHeadless(session),
       hostThreads,
+      flag("ducksOwnBranch"),
     );
     const known = new Set(this.deps.snapshot().sessions.map((candidate) => candidate.key));
     this.pondHostSessions = new Map(
@@ -2090,7 +2111,7 @@ export class RemoteBridge {
   }
 
   /** `ponds` for the phone: newest activity first (a pond's newest chat), capped, no keys or member ids. Absent when unknown. */
-  private phonePonds(sessions: FleetSession[]): { ponds?: PhoneViewPond[] } {
+  private phonePonds(sessions: FleetSession[]): { ponds?: PhoneViewPond[]; ducksOwnBranch?: true } {
     const ponds = this.pondsCache.value;
     if (!ponds || ponds.length === 0) return {};
     const newest = new Map<string, number>();
@@ -2119,7 +2140,29 @@ export class RemoteBridge {
     );
     const richer = this.phoneCaps.includes(PHONE_PONDS2_CAP);
     const iso = (ms: number | undefined): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
+    const ducksOwn = flag("ducksOwnBranch");
+    // Ducks own their branch: each pond's branches (not Main), with how many ducks work on one and its newest activity.
+    const branchesOf = (pond: PhonePond): NonNullable<PhoneViewPond["branches"]> => {
+      const found = new Map<string, { ducks: Set<string>; ms: number }>();
+      for (const session of byPond.get(pond.id) ?? []) {
+        if (!session.duckId || !session.branch || session.branch === "HEAD") continue;
+        if (onMainFolder(session.cwd, pond.folder)) continue;
+        const entry = found.get(session.branch) ?? { ducks: new Set<string>(), ms: 0 };
+        entry.ducks.add(session.duckId);
+        entry.ms = Math.max(entry.ms, Date.parse(session.lastActivityAt) || 0);
+        found.set(session.branch, entry);
+      }
+      return [...found.entries()]
+        .sort((a, b) => b[1].ms - a[1].ms || a[0].localeCompare(b[0]))
+        .slice(0, 20)
+        .map(([name, entry]) => ({
+          name,
+          ducks: entry.ducks.size,
+          ...(entry.ms ? { lastActivityAt: iso(entry.ms) as string } : {}),
+        }));
+    };
     return {
+      ...(ducksOwn ? { ducksOwnBranch: true as const } : {}),
       ponds: ordered
         .filter((pond, index) => index < PHONE_PONDS_MAX || newest.has(pond.id))
         .map((pond): PhoneViewPond => {
@@ -2129,6 +2172,7 @@ export class RemoteBridge {
             shared: pond.shared,
             members: pond.members,
             ...(pond.kind ? { kind: pond.kind } : {}),
+            ...(pond.access ? { access: pond.access } : {}),
           };
           if (!richer) return base;
           const last = iso(newest.get(pond.id));
@@ -2159,6 +2203,7 @@ export class RemoteBridge {
             ...(last ? { lastActivityAt: last } : {}),
             ...roll(rollupStatus(byPond.get(pond.id) ?? [])),
             ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
+            ...(ducksOwn && pond.kind !== "joined" ? { branches: branchesOf(pond) } : {}),
             ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
           };
         }),
@@ -3292,6 +3337,9 @@ export class RemoteBridge {
       "mode",
       "threadId",
       "text",
+      "duckId",
+      "place",
+      "message",
       "nonce",
       "expiresAt",
     ]);
@@ -3299,6 +3347,10 @@ export class RemoteBridge {
       return refuse("Not a request this Mac understands.");
     }
     if (command.op === "message") return this.handleFlockMessage(device, id, command, refuse);
+    if (command.op === "duck-place") return this.handleDuckPlace(device, id, command, refuse);
+    if (command.duckId !== undefined || command.place !== undefined || command.message !== undefined) {
+      return refuse("Not a request this Mac understands.");
+    }
     if (command.threadId !== undefined || command.text !== undefined) {
       return refuse("Not a request this Mac understands.");
     }
@@ -3340,6 +3392,18 @@ export class RemoteBridge {
           await native.setPondOrder({ ids: ids as string[] });
           this.log(device.name, "sent", "pond order: manual");
         }
+      } else if (command.op === "leave") {
+        // Leave someone else's pond: exactly { op, pondId }. A pond this Mac owns is deleted on the Mac, never from a phone.
+        if (command.ids !== undefined || command.mode !== undefined || command.hidden !== undefined)
+          return refuse("Not a request this Mac understands.");
+        if (typeof command.pondId !== "string") return refuse("Not a request this Mac understands.");
+        const pond = ponds.find((candidate) => candidate.id === command.pondId);
+        if (!pond) return refuse("That pond isn't on your phone any more.");
+        if (pond.kind !== "joined" || pond.access === "owner" || !pond.pondId)
+          return refuse("Only a pond someone else owns can be left from a phone.");
+        if (!native.leavePond) return refuse("This Mac can't leave a pond from a phone.");
+        await native.leavePond(pond.pondId);
+        this.log(device.name, "sent", `left pond ${pond.name.slice(0, 24)}`);
       } else {
         return refuse("Not a request this Mac understands.");
       }
@@ -3348,12 +3412,95 @@ export class RemoteBridge {
       return refuse(
         error instanceof NativeHostError && error.kind === "down"
           ? "Squeak's session host isn't running."
-          : "The Mac didn't take that change.",
+          : error instanceof NativeHostError && error.status === 409
+            ? error.message
+            : "The Mac didn't take that change.",
       );
     }
     // Read the ponds again now, so the phone sees the change at once.
     this.pondsCache.at = 0;
     await this.refreshPonds();
+    this.nudgePublish(0);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * Move a duck to a place (flag `ducksOwnBranch`): `{ op: "duck-place", duckId, place, message? }`, exactly those keys
+   * plus the envelope. `duckId` must be a duck of a chat in this Mac's own view, in a pond the person owns (never a
+   * remote one); the place is the strict host shape (`new` + optional branch, `join` + a duck of the view or a branch
+   * name, or `main`). It runs through the same `Placement` as the Mac's menu, in the session host.
+   */
+  private async handleDuckPlace(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+    refuse: (reason: string) => { write: boolean; result: Record<string, unknown> },
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const bad = () => refuse("Not a request this Mac understands.");
+    if (!flag("ducksOwnBranch")) return refuse("Ducks choosing their branch is off on this Mac.");
+    if (command.pondId !== undefined || command.hidden !== undefined || command.ids !== undefined) return bad();
+    if (command.mode !== undefined || command.threadId !== undefined || command.text !== undefined) return bad();
+    const { duckId, place, message } = command;
+    if (typeof duckId !== "string" || !duckId || duckId.length > 80) return bad();
+    if (message !== undefined && (typeof message !== "string" || message.length > 4_000)) return bad();
+    if (typeof place !== "object" || place === null || Array.isArray(place)) return bad();
+    const o = place as Record<string, unknown>;
+    const allowedKeys: Record<string, string[]> = {
+      new: ["kind", "branch"],
+      join: ["kind", "duckId", "branch"],
+      main: ["kind"],
+    };
+    const kind = o.kind;
+    if (kind !== "new" && kind !== "join" && kind !== "main") return bad();
+    if (Object.keys(o).some((key) => !allowedKeys[kind]!.includes(key))) return bad();
+    const text = (key: string): string | undefined | null => {
+      const value = o[key];
+      if (value === undefined) return undefined;
+      return typeof value === "string" && value.trim() && value.length <= 120 ? value.trim() : null;
+    };
+    const branch = text("branch");
+    const joinDuck = text("duckId");
+    if (branch === null || joinDuck === null) return bad();
+    if (kind === "join" && (Boolean(branch) === Boolean(joinDuck) || (branch ?? joinDuck) === undefined)) return bad();
+    const sessions = this.deps.snapshot().sessions;
+    const mine = sessions.find((candidate) => candidate.duckId === duckId);
+    if (!mine) return refuse("That duck isn't on this Mac any more.");
+    if (joinDuck && !sessions.some((candidate) => candidate.duckId === joinDuck)) {
+      return refuse("That duck isn't on this Mac any more.");
+    }
+    const pond = this.pondOf(mine);
+    if (!pond || pond.kind === "joined" || pond.access === "remote") {
+      return refuse("A duck can only be moved in a pond that runs on this Mac.");
+    }
+    const native = this.deps.native;
+    if (!native?.placeDuck) return refuse("This Mac can't move a duck from a phone.");
+    const request: PhoneDuckPlace =
+      kind === "main"
+        ? { kind }
+        : kind === "new"
+          ? { kind, ...(branch ? { branch } : {}) }
+          : { kind, ...(joinDuck ? { duckId: joinDuck } : { branch: branch as string }) };
+    try {
+      await native.placeDuck(
+        duckId,
+        request,
+        typeof message === "string" && message.trim() ? message.trim() : undefined,
+      );
+    } catch (error) {
+      logger.debug("could not move a duck", { error: error instanceof Error ? error.message : String(error) });
+      return refuse(
+        error instanceof NativeHostError && error.kind === "down"
+          ? "Squeak's session host isn't running."
+          : error instanceof NativeHostError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500
+            ? error.message
+            : "The Mac didn't move that duck.",
+      );
+    }
+    this.log(
+      device.name,
+      "sent",
+      `moved a duck to ${kind === "main" ? "main" : kind === "new" ? "a new branch" : "a branch"}`,
+    );
     this.nudgePublish(0);
     return { write: true, result: { id, status: "sent" } };
   }
@@ -5704,6 +5851,8 @@ export class RemoteBridge {
       ...(source ? { source } : {}),
       // The pond the chat's project is in; absent when none or the host cannot say. Older phones ignore it.
       ...this.pondRef(session),
+      // Ducks own their branch (flag on): the chat's duck and where it works (a branch, or `onMain`). Older phones ignore them.
+      ...this.duckRef(session),
       label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
       // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
       title: chatTitle(session),
@@ -5768,6 +5917,16 @@ export class RemoteBridge {
       ...(session.state === "error" && conductorSessionId
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
         : {}),
+    };
+  }
+
+  private duckRef(session: FleetSession): { duckId?: string; branch?: string; onMain?: true } {
+    if (!flag("ducksOwnBranch") || !session.duckId) return {};
+    const pond = this.pondOf(session);
+    if (pond && onMainFolder(session.cwd, pond.folder)) return { duckId: session.duckId, onMain: true };
+    return {
+      duckId: session.duckId,
+      ...(session.branch && session.branch !== "HEAD" ? { branch: session.branch } : {}),
     };
   }
 

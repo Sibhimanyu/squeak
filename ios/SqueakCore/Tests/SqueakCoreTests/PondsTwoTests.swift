@@ -61,6 +61,10 @@ final class PondsTwoTests: XCTestCase {
         XCTAssertEqual(shop.archivedStreams, 2)
         let docs = try XCTUnwrap(snap.ponds?.first { $0.id == "p-docs" })
         XCTAssertTrue(docs.isHidden)
+        let theirs = try XCTUnwrap(snap.ponds?.first { $0.id == "p-theirs" })
+        XCTAssertEqual(theirs.access, "remote")
+        XCTAssertTrue(theirs.isRemote)
+        XCTAssertFalse(shop.isRemote)
         XCTAssertEqual(snap.pondOrder, .init(mode: "manual", ids: ["proj-docs", "p1"]))
         XCTAssertEqual(snap.pondDetail?.id, "p-shop")
         XCTAssertEqual(snap.pondDetail?.waiting?.first?.name, "Ravi")
@@ -85,6 +89,9 @@ final class PondsTwoTests: XCTestCase {
         XCTAssertEqual(newest.0, ["v", "kind", "op", "mode", "nonce", "expiresAt"])
         XCTAssertEqual(newest.1.mode, "newest")
         XCTAssertEqual(hide.1.kind, "pond")
+        let leave = try keys(.leave(pondId: "j1"))
+        XCTAssertEqual(leave.0, ["v", "kind", "op", "pondId", "nonce", "expiresAt"])
+        XCTAssertEqual(leave.1.op, "leave")
         XCTAssertThrowsError(try c.pondDocument(.orderManual(ids: Array(repeating: "k", count: 201)), signer: signer))
     }
 

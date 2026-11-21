@@ -207,13 +207,16 @@ struct NativeNewChatView: View {
                     row("Pond", current?.name ?? "Choose a pond") {
                         ForEach(projects) { p in Button(p.name) { projectId = p.id; workspaceId = nil } }
                     }
+                    // Ducks own their branch: no picker. The duck starts where the Mac puts it and branches off by itself.
+                    if !model.ducksMode {
                     Picker("Where", selection: $place) {
                         Text("New stream").tag(NativeWhere.newWorkspace)
                         Text("Stream").tag(NativeWhere.workspace)
                         Text("Pond folder").tag(NativeWhere.folder)
                     }
                     .pickerStyle(.segmented)
-                    if place == .workspace {
+                    }
+                    if place == .workspace, !model.ducksMode {
                         if let workspaces = current?.workspaces, !workspaces.isEmpty {
                             row("Stream", workspaces.first { $0.id == workspaceId }.map { "\($0.displayTitle) · \($0.branch)" } ?? "Choose a stream") {
                                 ForEach(workspaces) { w in Button("\(w.displayTitle) · \(w.branch)") { workspaceId = w.id } }
@@ -272,6 +275,7 @@ struct NativeNewChatView: View {
                     projectId = (project.flatMap { name in projects.first { $0.name == name } } ?? startWorkspaceId.flatMap { id in projects.first { $0.workspaces.contains { $0.id == id } } } ?? projects.first)?.id ?? ""
                     if let start = startWorkspaceId, current?.workspaces.contains(where: { $0.id == start }) == true { place = .workspace; workspaceId = start }
                 }
+                if model.ducksMode { place = .folder; workspaceId = nil }
                 if modelId == nil { modelId = models.first(where: \.favorite)?.id ?? models.first?.id }
                 if effort == nil { effort = chosen?.defaultLevel ?? chosen?.levels.first }
             }

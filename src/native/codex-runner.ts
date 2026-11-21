@@ -87,6 +87,8 @@ export interface CodexRunnerOptions {
   mcp?: McpEndpoint | null;
   /** Squeak's note for this thread, passed as the app-server's `developerInstructions` at thread start/resume. */
   contextNote?: string | null;
+  /** Ducks own their branch: the chat's folder is read-only (a git pond's Main), so Codex runs in its read-only sandbox. */
+  readOnlyRoot?: string | null;
 }
 
 const APPROVALS: Record<string, RequestKind> = {
@@ -124,7 +126,7 @@ export class CodexRunner implements Runner {
       });
       await client.start();
     }
-    const policy = codexPolicyFor(this.mode);
+    const policy = this.policy();
     const config = this.options.mcp ? codexMcpConfig(this.options.mcp) : undefined;
     const note = this.options.contextNote ? { developerInstructions: this.options.contextNote } : {};
     if (this.options.resume) {
@@ -229,7 +231,7 @@ export class CodexRunner implements Runner {
   async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
     const threadId = await this.ensureStarted();
     await options?.after;
-    const policy = codexPolicyFor(this.mode);
+    const policy = this.policy();
     this.options.hooks.onStatus("working");
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.
     const { turnId } = await this.options.client.startTurn({
@@ -265,6 +267,11 @@ export class CodexRunner implements Runner {
 
   async setPermissionMode(mode: string): Promise<void> {
     this.mode = mode;
+  }
+
+  /** The chat's mode as a Codex policy; a read-only root is held at the read-only sandbox in every mode. */
+  private policy(): CodexPolicy {
+    return codexPolicyFor(this.options.readOnlyRoot ? "plan" : this.mode);
   }
 
   /** Codex keeps the model and effort sent with a turn as the thread's settings: the next turn carries them. */

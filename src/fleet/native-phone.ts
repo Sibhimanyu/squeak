@@ -108,6 +108,8 @@ export interface PhonePond {
   kind?: "project" | "joined";
   /** The pond record behind the row (invites, members); `GET /native/ponds/<pondId>`. Never sent. */
   pondId?: string;
+  /** "remote": someone else's pond, no code UI; "git": own agents, code through Git; "owner": yours. Old phones ignore it. */
+  access?: "owner" | "remote" | "git";
 }
 
 /** A stream (a workspace) of a pond's project, as the phone draws it. `createdAt` is never sent. */
@@ -148,7 +150,15 @@ export interface PhoneHostThread {
   cwd: string;
   workspaceTitle?: string;
   branch?: string;
+  /** The chat's duck, when ducks own their branch. */
+  duckId?: string;
 }
+
+/** Where a phone asks a duck to work (`place` of `POST /native/ducks/<id>/place`); the Mac checks every field. */
+export type PhoneDuckPlace =
+  | { kind: "new"; branch?: string }
+  | { kind: "join"; duckId?: string; branch?: string }
+  | { kind: "main" };
 
 /** Whether this person may message one thread right now (the member switches and the starter's own), and why not. */
 export interface PhoneFlockAccess {
@@ -186,6 +196,7 @@ export function phonePondsOf(directory: PondDirectory): PhonePond[] {
           .map((m) => ({ name: clip(m.name, MEMBER_NAME_MAX) ?? "", online: m.online }))
           .filter((m) => m.name),
         kind: row.kind,
+        ...(row.access ? { access: row.access } : {}),
         ...(row.pondId ? { pondId: row.pondId } : {}),
         ...(row.projectId ? { projectId: row.projectId } : {}),
         ...(row.folder ? { folder: row.folder } : {}),
@@ -273,6 +284,10 @@ export interface RemoteNative {
   setPondHidden?(key: string, hidden: boolean): Promise<void>;
   /** `PUT /native/pond-order`: manual with these keys, or back to newest first. */
   setPondOrder?(change: { mode: "newest" } | { ids: string[] }): Promise<void>;
+  /** Leave a pond someone else owns (`POST /native/ponds/<id>/leave`); the host forgets it and tells the owner. */
+  leavePond?(pondId: string): Promise<void>;
+  /** Ducks own their branch: move a duck to a place (`POST /native/ducks/<id>/place`); resolves with the new chat's id. */
+  placeDuck?(duckId: string, place: PhoneDuckPlace, message?: string): Promise<{ sessionId: string }>;
 }
 
 export type { NativeProjectFull };
@@ -535,6 +550,7 @@ export class NativePhone implements RemoteNative {
             cwd: t.cwd,
             ...(typeof t.workspaceTitle === "string" ? { workspaceTitle: t.workspaceTitle } : {}),
             ...(typeof t.branch === "string" ? { branch: t.branch } : {}),
+            ...(typeof t.duckId === "string" ? { duckId: t.duckId } : {}),
           },
         ];
       });
@@ -693,6 +709,18 @@ export class NativePhone implements RemoteNative {
 
   async setPondHidden(key: string, hidden: boolean): Promise<void> {
     await this.call("PATCH", `/native/projects/${encodeURIComponent(key)}/prefs`, { hidden });
+  }
+
+  async leavePond(pondId: string): Promise<void> {
+    await this.call("POST", `/native/ponds/${encodeURIComponent(pondId)}/leave`, { pondId });
+  }
+
+  async placeDuck(duckId: string, place: PhoneDuckPlace, message?: string): Promise<{ sessionId: string }> {
+    const body = await this.call("POST", `/native/ducks/${encodeURIComponent(duckId)}/place`, {
+      place,
+      ...(message ? { message } : {}),
+    });
+    return { sessionId: typeof body.sessionId === "string" ? body.sessionId : "" };
   }
 
   async setPondOrder(change: { mode: "newest" } | { ids: string[] }): Promise<void> {

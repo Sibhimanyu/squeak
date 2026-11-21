@@ -591,12 +591,15 @@ public struct NativeNewSession: Sendable, Equatable {
     public var main: Bool
     /// An existing stream: the host runs the chat in that stream's folder and stores the stream on the chat.
     public var workspaceId: String?
+    /// Ducks mode (`ducksOwnBranch`): where the duck works. Replaces `main`, `workspaceId` and `newWorkspace`; nil lets the daemon decide.
+    public var place: DuckPlace?
 
     public init(
         agent: String, model: String, permissionMode: String = "bypassPermissions", effort: String? = nil, cwd: String? = nil,
         projectId: String? = nil, newWorkspace: Bool = false, branch: String? = nil, text: String? = nil, split: WorkSplit? = nil,
-        main: Bool = false, workspaceId: String? = nil
+        main: Bool = false, workspaceId: String? = nil, place: DuckPlace? = nil
     ) {
+        self.place = place
         self.main = main; self.workspaceId = workspaceId
         self.agent = agent; self.model = model; self.permissionMode = permissionMode; self.effort = effort
         self.cwd = cwd; self.projectId = projectId; self.newWorkspace = newWorkspace; self.branch = branch
@@ -829,15 +832,29 @@ public struct NativeHostClient: Sendable {
         if let e = spec.effort { body["effort"] = .string(e) }
         if let c = spec.cwd { body["cwd"] = .string(c) }
         if let p = spec.projectId { body["projectId"] = .string(p) }
-        if spec.main { body["main"] = .bool(true) }
-        if let w = spec.workspaceId, !spec.main { body["workspaceId"] = .string(w) }
-        if spec.newWorkspace {
+        if let place = spec.place {
+            body["place"] = place.json
+        } else {
+            if spec.main { body["main"] = .bool(true) }
+            if let w = spec.workspaceId, !spec.main { body["workspaceId"] = .string(w) }
+        }
+        if spec.place == nil, spec.newWorkspace {
             if let b = Self.typed(spec.branch) { body["newWorkspace"] = .object(["branch": .string(b)]) }
             else { body["newWorkspace"] = .bool(true) }
         }
         if let sp = spec.split, !sp.isEmpty { body["split"] = sp.nativeJSON }
         if let t = spec.text, !t.isEmpty { body["text"] = .string(t) }
         return try await decode(One.self, try await call("POST", "/native/sessions", body: .object(body), timeout: 30)).session
+    }
+
+    /// Ducks mode: moves a duck (branch off, work with another duck or branch, back to main). The host starts a fresh chat for
+    /// the same duck in the new place and answers with its id. A host without the route says 404.
+    public func placeDuck(id duckId: String, place: DuckPlace, message: String? = nil) async throws -> String {
+        var body: [String: NativeJSON] = ["place": place.json]
+        if let m = message?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty { body["message"] = .string(m) }
+        let data = try await call("POST", "/native/ducks/\(Self.id(duckId))/place", body: .object(body), timeout: 30)
+        guard let sid = (try? JSONDecoder().decode(NativeJSON.self, from: data))?["sessionId"]?.string, !sid.isEmpty else { throw NativeHostError.badResponse }
+        return sid
     }
 
     /// Sends a message; true when the host queued it behind a running turn. A refused connection (`hostDown`: nothing

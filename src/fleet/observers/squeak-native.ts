@@ -58,9 +58,15 @@ export class SqueakNativeObserver {
     try {
       // An older native.db has no `title` column until the host migrates it.
       const hasTitle = (db.prepare("PRAGMA table_info(workspaces)").all() as Row[]).some((c) => c.name === "title");
+      // Ducks own their branch: the duck link exists once the host has migrated (an older native.db has none).
+      const hasDucks = Boolean(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'duck_sessions'").get(),
+      );
       const sessions = db
         .prepare(
           `SELECT s.*, w.name AS ws_name, ${hasTitle ? "w.title" : "NULL"} AS ws_title, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
+                  ${hasDucks ? "(SELECT duck_id FROM duck_sessions WHERE session_id = s.id)" : "NULL"} AS duck_id,
+                  ${hasDucks ? "(SELECT d.name FROM ducks d JOIN duck_sessions ds ON ds.duck_id = d.id WHERE ds.session_id = s.id)" : "NULL"} AS duck_name,
                   COALESCE(p.id, pm.id) AS project_id, COALESCE(p.name, pm.name) AS project_name, p.default_branch AS project_default_branch
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
@@ -111,7 +117,20 @@ export class SqueakNativeObserver {
       repoName: (row.project_name as string | null) ?? path.basename(cwd),
       ...(typeof row.project_id === "string" ? { projectId: row.project_id } : {}),
       ...(typeof row.ws_title === "string" && row.ws_title.trim() ? { workspaceTitle: row.ws_title.trim() } : {}),
-      branch: hasWorkspace ? (row.ws_branch as string) : readGitBranch(cwd),
+      // The session's own branch (migration 25) first; a Main chat has none and reads the folder's HEAD.
+      branch:
+        typeof row.branch === "string" && row.branch
+          ? row.branch
+          : hasWorkspace
+            ? (row.ws_branch as string)
+            : readGitBranch(cwd),
+      ...(typeof row.duck_id === "string" ? { duckId: row.duck_id } : {}),
+      ...(typeof row.duck_id === "string"
+        ? {
+            duckName: (typeof row.duck_name === "string" && row.duck_name.trim()) || title || "Duck",
+            ...(!hasWorkspace ? { onMain: true as const } : {}),
+          }
+        : {}),
       title: title || null,
       state,
       detail: request ? request.summary : null,

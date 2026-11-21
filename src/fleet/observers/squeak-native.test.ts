@@ -110,6 +110,29 @@ describe("SqueakNativeObserver", () => {
     expect(observer.observe()[0]!.retired).toBe(true);
   });
 
+  it("carries the chat's duck and branch (ducks own their branch); a Main chat has no branch of its own", () => {
+    const { store, observer, dir } = setup();
+    const project = store.createProject({ name: "squeak", rootPath: dir, defaultBranch: "main" });
+    const ws = store.createWorkspace({
+      projectId: project.id,
+      name: "oslo",
+      path: path.join(dir, "oslo"),
+      branch: "feat/oslo",
+    });
+    const s = store.createSession({
+      cwd: ws.path,
+      agent: "claude",
+      model: "m",
+      permissionMode: "default",
+      workspaceId: ws.id,
+    });
+    const duck = store.duckForSession(s.id, project.id)!;
+    expect(observer.observe()[0]).toMatchObject({ duckId: duck.id, branch: "feat/oslo" });
+    const main = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default" });
+    const row = observer.observe().find((o) => o.sourceId === main.id)!;
+    expect(row.duckId).toBeUndefined();
+  });
+
   it("retires an archived chat so its transcript is not rediscovered", () => {
     const { store, observer, dir } = setup();
     const s = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default" });

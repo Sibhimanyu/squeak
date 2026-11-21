@@ -21,6 +21,50 @@ export interface ThreadContextInput {
   shared?: boolean;
   /** This chat's duck: its name (the person's, else the chat title) and the role the person gave it. */
   duck?: { name: string; role?: string | null; notebook?: string | null };
+  /**
+   * Ducks own their branch (flag `ducksOwnBranch`): where this chat is and the pond's active branches, so the duck
+   * can place itself. Absent with the flag off, and in a plain-folder pond.
+   */
+  placement?: {
+    /** `main`: the pond's own folder, read-only; `branch`: a working copy that other ducks may share. */
+    mode: "main" | "branch";
+    branches: { branch: string; title: string; ducks: string[]; lastActiveAt: number }[];
+    now?: number;
+  };
+}
+
+function ago(ms: number): string {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+}
+
+/** The lines of the note that place a duck: where it is, what it may edit, the pond's branches, the tools. */
+export function placementLines(p: NonNullable<ThreadContextInput["placement"]>, branch?: string | null): string[] {
+  const now = p.now ?? Date.now();
+  const lines =
+    p.mode === "main"
+      ? [
+          "You are in Main, the pond's own folder, and Main is read-only for ducks: never create, edit or delete files in it (Squeak refuses the edit). Reading, searching, answering questions, planning and reviewing are fine here, and you can start at once. When you need to change files, call branch_off (optional name for the work, optional from) to get your own branch and working copy, or join_branch to share a branch another duck is already on. move_to_main brings you back here.",
+        ]
+      : [
+          `You work on branch ${branch ?? "(unnamed)"} in a working copy of its own. Other ducks on the same branch share this folder and may edit at the same time, so re-read a file before editing it and say in the room what you are changing. branch_off starts separate work on a new branch, join_branch moves you to another duck's branch, move_to_main to Main (read-only).`,
+        ];
+  if (p.branches.length > 0) {
+    lines.push(
+      `Active branches in this pond (join the one whose task matches yours with join_branch; otherwise branch_off for new work):\n${p.branches
+        .map(
+          (b) =>
+            `- ${b.branch}: ${b.title}${b.ducks.length ? `; ducks: ${b.ducks.join(", ")}` : "; no duck on it now"}; active ${ago(now - b.lastActiveAt)}`,
+        )
+        .join("\n")}`,
+    );
+  } else {
+    lines.push("There are no active branches in this pond yet.");
+  }
+  return lines;
 }
 
 /** The one paragraph of the ask format the note carries: question above lettered options. Reuses the constant. */
@@ -85,6 +129,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
     input.agent === "claude"
       ? "The `squeak` skill has the details."
       : "The Squeak guide appended below has the details.",
+    ...(input.placement ? placementLines(input.placement, input.branch) : []),
     ...DUCKLING_LINES,
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),

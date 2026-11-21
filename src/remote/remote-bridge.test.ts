@@ -6336,6 +6336,146 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
     f.bridge.stop();
   });
 
+  it("leaves a pond someone else owns through the host, never one this Mac owns, and sends each pond's access", async () => {
+    const withJoined = [
+      ...ponds,
+      { id: "j1", pondId: "j1", kind: "joined", name: "Theirs", shared: true, members: [], access: "remote" },
+    ];
+    const left: string[] = [];
+    calls.length = 0;
+    const f = fixture({
+      native: makeNative({ ponds: async () => withJoined, leavePond: async (id: string) => void left.push(id) }),
+      session: sessionIn,
+    });
+    await f.pair();
+    await presence(f, { caps: ["ponds2"] });
+    await f.bridge.tick();
+    expect(viewOf(f).ponds.find((p: { id: string }) => p.id === "j1").access).toBe("remote");
+    const leave = async (id: string, overrides: Record<string, unknown>) => {
+      await f.store.set(`${f.channel}/commands/${id}`, f.pondCommand({ hidden: undefined, ...overrides }));
+      await f.bridge.tick();
+      return f.result(id) as { status: string };
+    };
+    expect(await leave("a", { op: "leave", pondId: "proj-shop" })).toMatchObject({ status: "refused" });
+    expect(await leave("b", { op: "leave", pondId: "ghost" })).toMatchObject({ status: "refused" });
+    expect(await leave("c", { op: "leave", pondId: "j1", hidden: true })).toMatchObject({ status: "refused" });
+    expect(left).toEqual([]);
+    expect(await leave("d", { op: "leave", pondId: "j1" })).toMatchObject({ status: "sent" });
+    expect(left).toEqual(["j1"]);
+    f.bridge.stop();
+  });
+
+  describe("ducks own their branch", () => {
+    const duckSession = {
+      ...sessionIn,
+      duckId: "duck-1",
+      cwd: "/work/shop-cart",
+      branch: "cart",
+    } as Partial<FleetSession>;
+    const shop = ponds.map((p) => (p.id === "proj-shop" ? { ...p, kind: "project", folder: "/work/shop" } : p));
+    const placed: unknown[][] = [];
+    const ducksNative = () =>
+      makeNative({
+        ponds: async () => shop,
+        placeDuck: async (...args: unknown[]) => {
+          placed.push(args);
+          return { sessionId: "s2" };
+        },
+      });
+    const setupDucks = async () => {
+      placed.length = 0;
+      const f = fixture({ native: ducksNative(), session: duckSession });
+      await f.pair();
+      await presence(f, { caps: ["ponds2"] });
+      await f.bridge.tick();
+      return f;
+    };
+    afterEach(() => {
+      delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+    });
+
+    it("flag off: no ducksOwnBranch, branches, duckId; a duck-place is refused", async () => {
+      const f = await setupDucks();
+      const v = viewOf(f);
+      expect(v.ducksOwnBranch).toBeUndefined();
+      expect(v.ponds.find((p: { id: string }) => p.id === "proj-shop").branches).toBeUndefined();
+      expect(v.sessions[0].duckId).toBeUndefined();
+      const out = await run(f, "x", {
+        op: "duck-place",
+        duckId: "duck-1",
+        place: { kind: "main" },
+        hidden: undefined,
+        pondId: undefined,
+      });
+      expect(out.status).toBe("refused");
+      expect(placed).toEqual([]);
+      f.bridge.stop();
+    });
+
+    it("flag on: the view carries the flag, the pond's branches and the duck's branch", async () => {
+      process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
+      const f = await setupDucks();
+      const v = viewOf(f);
+      expect(v.ducksOwnBranch).toBe(true);
+      const shopRow = v.ponds.find((p: { id: string }) => p.id === "proj-shop");
+      expect(shopRow.branches).toEqual([expect.objectContaining({ name: "cart", ducks: 1 })]);
+      expect(shopRow.streams).toBeDefined();
+      expect(v.sessions[0]).toMatchObject({ duckId: "duck-1", branch: "cart" });
+      expect(v.sessions[0].onMain).toBeUndefined();
+      f.bridge.stop();
+    });
+
+    it("moves a duck through the host; refuses unknown ducks, bad shapes and extra keys", async () => {
+      process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
+      const f = await setupDucks();
+      const move = (id: string, over: Record<string, unknown>) =>
+        run(f, id, { op: "duck-place", hidden: undefined, pondId: undefined, duckId: "duck-1", ...over });
+      expect(await move("a", { place: { kind: "main" } })).toEqual({ id: "a", status: "sent" });
+      expect(await move("b", { place: { kind: "new", branch: "try-two" }, message: "plan it" })).toMatchObject({
+        status: "sent",
+      });
+      expect(await move("c", { place: { kind: "join", branch: "cart" } })).toMatchObject({ status: "sent" });
+      expect(placed).toEqual([
+        ["duck-1", { kind: "main" }, undefined],
+        ["duck-1", { kind: "new", branch: "try-two" }, "plan it"],
+        ["duck-1", { kind: "join", branch: "cart" }, undefined],
+      ]);
+      const before = placed.length;
+      for (const [i, over] of [
+        { duckId: "ghost", place: { kind: "main" } },
+        { place: { kind: "join", duckId: "ghost" } },
+        { place: { kind: "join" } },
+        { place: { kind: "join", branch: "a", duckId: "duck-1" } },
+        { place: { kind: "main", branch: "x" } },
+        { place: { kind: "elsewhere" } },
+        { place: "main" },
+        { place: { kind: "main" }, hidden: true },
+        { place: { kind: "main" }, message: 5 },
+      ].entries()) {
+        expect((await move(`bad${i}`, over)).status).toBe("refused");
+      }
+      expect(placed.length).toBe(before);
+      f.bridge.stop();
+    });
+
+    it("a duck on the pond's own folder is on main with no branch", async () => {
+      process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
+      placed.length = 0;
+      const f = fixture({
+        native: ducksNative(),
+        session: { ...duckSession, cwd: "/work/shop", branch: "master" } as Partial<FleetSession>,
+      });
+      await f.pair();
+      await presence(f, { caps: ["ponds2"] });
+      await f.bridge.tick();
+      const v = viewOf(f);
+      expect(v.sessions[0]).toMatchObject({ duckId: "duck-1", onMain: true });
+      expect(v.sessions[0].branch).toBeUndefined();
+      expect(v.ponds.find((p: { id: string }) => p.id === "proj-shop").branches).toEqual([]);
+      f.bridge.stop();
+    });
+  });
+
   it("refuses unknown ponds, bad shapes, long or duplicate lists, and extra fields", async () => {
     const f = await setup();
     const order = { op: "order", pondId: undefined, hidden: undefined };

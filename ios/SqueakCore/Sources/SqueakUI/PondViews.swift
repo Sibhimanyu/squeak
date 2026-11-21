@@ -82,7 +82,9 @@ struct PondsTab: View {
                         PondRow(item: item)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) { hideButton(item) }
                             .contextMenu {
-                                Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck", systemImage: "square.and.pencil") }
+                                if !item.remote {
+                                    Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck", systemImage: "square.and.pencil") }
+                                }
                                 hideButton(item)
                                 Button { Haptics.play(.navigate); nav.ponds.append(.pond(item.id)) } label: { Label("Open dashboard", systemImage: "rectangle.grid.2x2") }
                             }
@@ -221,7 +223,7 @@ struct PondRow: View {
         let newest = item.sessions.first.map(Presentation.displayTitle)
         var parts: [String] = []
         if item.hidden { parts.append("Hidden") }
-        if item.joined { parts.append("Joined") }
+        if item.remote { parts.append("Remote") } else if item.joined { parts.append("Joined") }
         parts.append(newest ?? "No ducks yet")
         if item.shared, item.online > 0 { parts.append("\(item.online) online") }
         return parts.joined(separator: " · ")
@@ -257,6 +259,8 @@ struct PondDashboard: View {
     let id: String
     @Binding var path: [HomeRoute]
     @State private var newThread: NewThreadTarget?
+    @State private var confirmLeave = false
+    @AppStorage("duckGroupedPonds") private var groupedPonds = ""
 
     var body: some View {
         if let item = model.pondItem(id) {
@@ -282,6 +286,17 @@ struct PondDashboard: View {
                     }
                 } header: { Text("Waiting to join") } footer: { Text("Approve people on your Mac.") }
             }
+            if model.ducksMode {
+                let rows = model.duckRows(item)
+                DuckSections(item: item, rows: rows, grouped: DuckGroupPrefs.contains(groupedPonds, pond: item.id), limit: 12)
+                if rows.count > 12 {
+                    Section {
+                        Button { Haptics.play(.navigate); path.append(.scope(item.id, .all)) } label: {
+                            Label("All \(rows.count) ducks", systemImage: "tray.full").frame(minHeight: 44)
+                        }
+                    }
+                }
+            } else if !item.remote {
             Section("Streams") {
                 if streams.live.isEmpty && streams.archived == 0 {
                     Text("No streams yet").foregroundStyle(Theme.muted).frame(minHeight: 44)
@@ -295,6 +310,7 @@ struct PondDashboard: View {
                             .frame(minHeight: 44)
                     }.tapHaptic(.navigate)
                 }
+            }
             }
             if let pond = item.pond, !pond.members.isEmpty || !(detail?.invites ?? []).isEmpty {
                 Section("Flock") {
@@ -345,15 +361,39 @@ struct PondDashboard: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck in this pond", systemImage: "square.and.pencil") }
+                    if !item.remote {
+                        Button { Haptics.play(.tap); newThread = NewThreadTarget(pond: item.name) } label: { Label("New duck in this pond", systemImage: "square.and.pencil") }
+                    }
+                    if model.ducksMode, !item.remote {
+                        Button { Haptics.play(.tap); groupedPonds = DuckGroupPrefs.toggled(groupedPonds, pond: item.id) } label: {
+                            Label(DuckGroupPrefs.contains(groupedPonds, pond: item.id) ? "Show newest first" : "Group by branch", systemImage: "arrow.triangle.branch")
+                        }
+                    }
                     Button { Haptics.play(.tap); model.setPondHidden(item.id, !item.hidden) } label: {
                         Label(item.hidden ? "Unhide pond" : "Hide pond", systemImage: item.hidden ? "eye" : "eye.slash")
                     }
-                } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("Add")
+                    if item.joined, item.pond?.access != "owner" {
+                        Button(role: .destructive) { Haptics.play(.tap); confirmLeave = true } label: { Label("Leave pond", systemImage: "rectangle.portrait.and.arrow.right") }
+                    }
+                } label: { Image(systemName: item.remote ? "ellipsis.circle" : "plus") }
+                    .accessibilityLabel(item.remote ? "Pond options" : "Add")
             }
         }
         .sheet(item: $newThread) { NewChatEntry(project: $0.pond, workspaceId: $0.workspaceId) }
+        .alert("Couldn't move the duck", isPresented: Binding(get: { model.duckMoveProblem != nil }, set: { if !$0 { model.duckMoveProblem = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.duckMoveProblem ?? "") }
+        .confirmationDialog("Leave \(item.name)?", isPresented: $confirmLeave, titleVisibility: .visible) {
+            Button("Leave pond", role: .destructive) {
+                Haptics.play(.tap)
+                model.leavePond(item.id)
+                if let at = path.lastIndex(of: .pond(item.id)) { path.removeSubrange(at...) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("You will no longer see its ducks. The owner can invite you again.") }
+        .alert("Couldn't leave the pond", isPresented: Binding(get: { model.pondLeaveProblem != nil }, set: { if !$0 { model.pondLeaveProblem = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.pondLeaveProblem ?? "") }
         .foregroundStyle(Theme.ink)
     }
 
@@ -361,6 +401,12 @@ struct PondDashboard: View {
         HStack(spacing: 14) {
             PondMark(item: item, size: 56)
             VStack(alignment: .leading, spacing: 3) {
+                if item.remote {
+                    Text("Remote").font(.caption.weight(.semibold)).foregroundStyle(Theme.info)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Theme.info.opacity(0.14), in: Capsule())
+                        .accessibilityLabel("Remote pond")
+                }
                 Text(accessLine(item)).font(.subheadline).foregroundStyle(Theme.muted)
                 Text(PondList.threadCount(model.pondThreads(item.id)?.total ?? item.sessions.count)).font(.footnote).foregroundStyle(Theme.subtle)
             }
@@ -463,10 +509,14 @@ struct PondAllThreadsPage: View {
     @Environment(AppModel.self) private var model
     let item: PondItem
     let all: PondThreads
+    @AppStorage("duckGroupedPonds") private var groupedPonds = ""
 
     var body: some View {
         let live = Set(model.home.sessions.map(\.key))
         List {
+            if model.ducksMode {
+                DuckSections(item: item, rows: model.duckRows(item), grouped: DuckGroupPrefs.contains(groupedPonds, pond: item.id))
+            } else {
             ForEach(all.streams) { stream in
                 Section {
                     ForEach(stream.threads) { thread in
@@ -475,6 +525,7 @@ struct PondAllThreadsPage: View {
                         }.tapHaptic(.navigate)
                     }
                 } header: { Text(stream.name) }
+            }
             }
             if let flock = all.flock, !flock.isEmpty {
                 Section {

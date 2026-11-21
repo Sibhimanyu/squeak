@@ -31,6 +31,7 @@ const legacy: Record<FlagName, (raw: string | undefined) => boolean> = {
   roomSummary: (raw) => raw?.trim().toLowerCase() !== "off",
   roomJobs: (raw) => raw?.trim().toLowerCase() !== "off",
   pondOwnThreads: (raw) => /^(?:on|1|true|yes)$/i.test((raw ?? "").trim()),
+  ducksOwnBranch: (raw) => /^(?:on|1|true|yes)$/i.test((raw ?? "").trim()),
 };
 
 describe("flag registry matches the old parsing", () => {

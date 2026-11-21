@@ -16,6 +16,7 @@ import {
   type ProjectPrefs,
 } from "./project-prefs.js";
 import { JobError, type RoomJobs } from "./room-jobs.js";
+import { ducksOwnBranch, Placement, PlacementError, type PlaceRequest } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
@@ -62,8 +63,10 @@ export interface AgentToolDeps {
     model: string;
     permissionMode: string;
     workspaceId: string | null;
-    title: string;
+    title: string | null;
     text: string;
+    effort?: string | null;
+    duckId?: string;
   }): Promise<SessionRow>;
   /** Persists and broadcasts a message in a chat (the host's message path). */
   post(sessionId: string, kind: string, payload: unknown): void;
@@ -84,6 +87,8 @@ export interface AgentToolDeps {
   room?: Room;
   /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
   jobs?: RoomJobs;
+  /** Placement for `branch_off`, `join_branch`, `move_to_main` (flag `ducksOwnBranch`). Absent: those tools say so. */
+  placement?: Placement;
   now?: () => number;
   /** git, injectable for tests. */
   git?: (cwd: string, args: string[]) => Promise<string>;
@@ -329,13 +334,43 @@ export const TOOLS: ToolDef[] = [
   },
 ];
 
+/**
+ * Ducks own their branch: a duck places itself. Listed (and answered) only while the flag is on. Each starts a fresh chat
+ * for the same duck in the new place (an agent's history is tied to its folder) and the old chat can end its turn.
+ */
+export const PLACEMENT_TOOLS: ToolDef[] = [
+  {
+    name: "branch_off",
+    description:
+      "Get your own branch and working copy to make changes (Main is read-only). name: a short name for the work (it becomes the branch name). from: a branch, or a duck's name, to branch off (default: your current branch, else the default branch). message: what to carry on with. A new chat for you starts there; end this turn after it.",
+    inputSchema: obj({ name: { type: "string" }, from: { type: "string" }, message: { type: "string" } }),
+    readOnly: false,
+  },
+  {
+    name: "join_branch",
+    description:
+      "Move to a branch another duck is on (or one that exists), sharing its working copy; ducks on one branch may edit at the same time. Give duck (a name or id) or branch, as the pond's list of active branches shows. A new chat for you starts there; end this turn after it.",
+    inputSchema: obj({ duck: { type: "string" }, branch: { type: "string" }, message: { type: "string" } }),
+    readOnly: false,
+  },
+  {
+    name: "move_to_main",
+    description:
+      "Move to Main, the pond's own folder, which is read-only for ducks in a git pond: for questions, plans and reviews. A new chat for you starts there; end this turn after it.",
+    inputSchema: obj({ message: { type: "string" } }),
+    readOnly: false,
+  },
+];
+
+const PLACEMENT_NAMES = new Set(PLACEMENT_TOOLS.map((t) => t.name));
+
 const READ_ONLY = new Set(TOOLS.filter((t) => t.readOnly).map((t) => t.name));
 
 /** Tools any chat may call without asking the person: they read, or only write into Squeak itself. */
 export function isSqueakTool(toolName: string): boolean {
   if (!toolName.startsWith(MCP_TOOL_PREFIX)) return false;
   const name = currentToolName(toolName.slice(MCP_TOOL_PREFIX.length));
-  return TOOLS.some((t) => t.name === name);
+  return TOOLS.some((t) => t.name === name) || PLACEMENT_NAMES.has(name);
 }
 export function isReadOnlySqueakTool(toolName: string): boolean {
   return toolName.startsWith(MCP_TOOL_PREFIX) && READ_ONLY.has(currentToolName(toolName.slice(MCP_TOOL_PREFIX.length)));
@@ -545,6 +580,10 @@ export class AgentTools {
         return this.openJobs(s);
       case "claim_job":
         return this.claimJob(s, args);
+      case "branch_off":
+      case "join_branch":
+      case "move_to_main":
+        return this.placeTool(s, name, args);
       case "script_output":
         return this.terminalOutput(s, str("script"), args.lines);
       case "pond_appearance":
@@ -962,6 +1001,55 @@ export class AgentTools {
     );
   }
 
+  private async placeTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
+    if (!ducksOwnBranch()) throw new ToolError("Branches are not managed by ducks in this Squeak yet.");
+    const { placement, store } = this.deps;
+    if (!placement) throw new ToolError("Placement is unavailable here.");
+    const text = (k: string): string | undefined =>
+      typeof args[k] === "string" && (args[k] as string).trim() ? (args[k] as string).trim() : undefined;
+    this.prune();
+    if (this.starts.filter((x) => x.from === s.id).length >= LIMITS.startsPerHour) {
+      throw new ToolError("This chat moved enough times this hour.");
+    }
+    let req: PlaceRequest;
+    if (name === "move_to_main") req = { kind: "main" };
+    else if (name === "branch_off") {
+      const from = text("from");
+      const here = s.branch ?? store.duckBySession(s.id)?.branch ?? undefined;
+      req = {
+        kind: "new",
+        ...(from || here ? { from: from ?? here! } : {}),
+        ...(text("name") ? { title: text("name")! } : {}),
+      };
+    } else {
+      const project = projectOfSession(store, s);
+      const wanted = text("duck");
+      const duck = wanted
+        ? (store.duckRow(wanted) ??
+          (project ? store.listDucks(project.id) : []).find((d) => d.name?.toLowerCase() === wanted.toLowerCase()))
+        : null;
+      if (wanted && !duck) throw new ToolError(`No duck called ${wanted} in this pond.`);
+      const branch = text("branch");
+      if (!duck && !branch) throw new ToolError("Give a duck or a branch to join.");
+      req = duck ? { kind: "join", duckId: duck.id } : { kind: "join", branch: branch! };
+    }
+    this.starts.push({ from: s.id, at: this.now() });
+    try {
+      const moved = await placement.move(s.id, req, (spec) => this.deps.create(spec), text("message"));
+      const where = moved.place.kind === "main" ? "Main (read-only)" : `branch ${moved.place.branch}`;
+      if (!moved.session) return `You are already in ${where}.`;
+      this.deps.post(s.id, "squeak/agent-started", {
+        text: `Moved to ${where}`,
+        chatId: moved.session.id,
+        agent: s.agent,
+      });
+      return `Moved to ${where}. Your work carries on in chat ${moved.session.id}; end this turn now.`;
+    } catch (error) {
+      if (error instanceof PlacementError) throw new ToolError(error.message);
+      throw error;
+    }
+  }
+
   private async startChat(s: SessionRow, args: Record<string, unknown>): Promise<string> {
     const message = typeof args.message === "string" ? args.message.trim() : "";
     if (!message) throw new ToolError("message is required.");
@@ -1028,7 +1116,7 @@ export async function handleMcpMessage(
       return ok({});
     case "tools/list":
       return ok({
-        tools: TOOLS.map((t) => ({
+        tools: [...TOOLS, ...(ducksOwnBranch() ? PLACEMENT_TOOLS : [])].map((t) => ({
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,

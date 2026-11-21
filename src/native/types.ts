@@ -117,6 +117,10 @@ export interface SessionRow {
   archivedAt: string | null;
   /** True when the title was made by Squeak, not typed by the person. */
   titleAuto?: boolean;
+  /** The git branch this chat works on (denormalised from its workspace); absent in Main or a plain folder. */
+  branch?: string;
+  /** The duck this chat belongs to (host-side only: the /state FleetSession is built in src/fleet); absent before it has one. */
+  duckId?: string;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
   /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */

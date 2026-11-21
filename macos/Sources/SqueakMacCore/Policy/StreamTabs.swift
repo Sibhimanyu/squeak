@@ -84,6 +84,22 @@ public struct StreamTabs: Codable, Equatable, Sendable {
         return strip.selected
     }
 
+    /// A duck moved (ducks mode): its tab now opens `new`, in the same slot (not a close then an open, so nothing
+    /// flickers); the selection follows when `old` was selected. A strip without `old` just opens `new`. Returns whether
+    /// anything changed.
+    @discardableResult
+    public mutating func replace(_ old: StreamTab, with new: StreamTab, in workspace: String) -> Bool {
+        guard old != new else { return false }
+        guard var strip = strips[workspace], let at = strip.tabs.firstIndex(of: old) else {
+            open(new, in: workspace)
+            return true
+        }
+        if strip.tabs.contains(new) { strip.tabs.remove(at: at) } else { strip.tabs[at] = new }
+        if strip.selected == old { strip.selected = new }
+        strips[workspace] = strip
+        return true
+    }
+
     /// Moves `source` to just before `target`.
     @discardableResult
     public mutating func move(_ source: StreamTab, before target: StreamTab, in workspace: String) -> Bool {

@@ -878,6 +878,9 @@ struct SessionDetail: View {
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)
+            } else if model.focus.access == .remote {
+                // A remote pond has no agent or model to pick: the duck runs on the owner's Mac.
+                Text(verbatim: PondsModel.shared.chrome(key: model.focus.pond ?? "").runsOnLine).font(Typo.meta).foregroundStyle(Theme.subtle)
             } else if isNative {
                 NativeModelMenu(session: session)
             }

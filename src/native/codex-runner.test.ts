@@ -115,6 +115,47 @@ describe("CodexRunner", () => {
     expect(log.ids).toEqual(["thread-1"]);
   });
 
+  it("a read-only root (Main of a git pond for a duck) holds Codex in the read-only sandbox in every mode; none leaves the mode alone", async () => {
+    for (const mode of ["default", "acceptEdits", "bypassPermissions"]) {
+      const client = new FakeClient();
+      const hooks = {
+        onAgentSessionId() {},
+        onMessage() {},
+        onDelta() {},
+        onStatus() {},
+        onRequest: async () => ({ decision: "allow" }),
+        onTurnEnd() {},
+        onExit() {},
+      };
+      const guarded = new CodexRunner({
+        cwd: "/w",
+        model: "m",
+        permissionMode: mode,
+        hooks: hooks as never,
+        client: client as unknown as CodexClient,
+        readOnlyRoot: "/w",
+      });
+      await guarded.send("go");
+      expect(client.startThread).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox: "read-only", approvalPolicy: "untrusted" }),
+      );
+      expect(client.calls.find((c) => c.method === "startTurn")!.arg).toMatchObject({
+        sandboxPolicy: { type: "readOnly" },
+      });
+      const open = new CodexRunner({
+        cwd: "/w",
+        model: "m",
+        permissionMode: mode,
+        hooks: hooks as never,
+        client: new FakeClient() as unknown as CodexClient,
+        readOnlyRoot: null,
+      });
+      const c2 = (open as unknown as { options: { client: FakeClient } }).options.client;
+      await open.send("go");
+      expect(c2.startThread).toHaveBeenCalledWith(expect.objectContaining({ sandbox: codexPolicyFor(mode).sandbox }));
+    }
+  });
+
   it("compacts the thread through the client's thread/compact/start", async () => {
     const { client, runner } = setup();
     const compactThread = vi.fn(async () => {});

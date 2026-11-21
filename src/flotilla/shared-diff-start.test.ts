@@ -80,6 +80,7 @@ beforeAll(async () => {
   url = await rtdb.start();
 });
 afterAll(async () => {
+  delete process.env.SQUEAK_POND_OWN_THREADS;
   await rtdb.stop();
   for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 });
@@ -134,7 +135,10 @@ describe("a member reads the changes of someone else's thread", () => {
   let pondId = "";
   let threadId = "";
   let privateId = "";
+  // A member's Mac asks for a diff only in a "git" pond: the stashed own-threads flag on, and a Git remote. In a remote
+  // pond it refuses before asking (own-threads-off.test.ts); the owner's Mac answers the same either way.
   beforeAll(async () => {
+    process.env.SQUEAK_POND_OWN_THREADS = "on";
     A = mac("Sibhi", {}, clock);
     B = mac("Aarav", {}, clock);
     V = mac("Vera", {}, clock);

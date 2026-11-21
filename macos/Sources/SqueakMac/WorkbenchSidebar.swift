@@ -21,6 +21,8 @@ struct WorkbenchSidebar: View {
     /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
     @AppStorage("sidebarPondLabel") private var pondLabel = ""
     @AppStorage("sidebarShowHiddenPonds") private var showHiddenPonds = false
+    /// Ducks mode: the ponds whose ducks are grouped by branch (JSON list of pond keys; `DuckGroupPrefs`).
+    @AppStorage("sidebarDucksByBranch") private var groupedPonds = "[]"
     /// All ponds, only mine, or only those shared with me (`PondSharing.Scope` raw value).
     @AppStorage("sidebarPondScope") private var pondScope = PondSharing.Scope.all.rawValue
     private var scope: PondSharing.Scope { PondSharing.Scope(rawValue: pondScope) ?? .all }
@@ -29,6 +31,8 @@ struct WorkbenchSidebar: View {
     /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
     /// The pond being dragged, and the slot (0...count) where a gap is open for it. Both clear on drop and on cancel.
     @State private var draggingPond: String?
+    /// The joined pond whose "Leave pond…" confirmation is open (its directory key).
+    @State private var leaveFor: String?
     @State private var dropSlot: Int?
     private var order: PondOrderStore { PondOrderStore.shared }
     private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
@@ -118,6 +122,7 @@ struct WorkbenchSidebar: View {
             if !model.demoMode { await PondsModel.shared.refreshDirectory() }
         }
         .pondSheets()
+        .leavePondDialog($leaveFor)
         .diskCleanupSheet()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
     }
@@ -367,7 +372,7 @@ struct WorkbenchSidebar: View {
                 w.projectId == native?.id && w.state != "archived" && !workspaces.contains { ws in ws.chats.contains { $0.cwd == w.path } }
             }
             let projectFolded = folded.contains(key)
-            let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(key: key) != nil ? 1 : 0)
+            let listed = model.ducksMode ? model.duckRows(pond: key).count : MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(key: key) != nil ? 1 : 0)
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
                 unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
@@ -375,12 +380,14 @@ struct WorkbenchSidebar: View {
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New duck in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
+                onAdd: model.ducksMode ? native.map { p in { model.openNewMainThread(projectId: p.id) } } : native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } },
+                addHelp: model.ducksMode ? "New duck in \(name)" : "New duck in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
                 inFocus: model.focus.pond == key,
                 needs: PondsModel.shared.badge(pondRecord),
                 rollup: pondRollup(workspaces),
                 onDisclose: { toggleFold(key) },
                 folded: projectFolded,
+                badge: PondsModel.shared.chrome(key: key).badge,
                 pondId: pondRecord?.id, projectId: entry?.projectId
             ) { openHome(key) }
             .padding(.top, 6 + (gapSlot == index ? 22 : 0))
@@ -411,7 +418,15 @@ struct WorkbenchSidebar: View {
                 Button("Move down") { stepPond(key, by: 1) }
                 Divider()
                 if let native {
-                    if FolderPond.showsGitControls(native) {
+                    if model.ducksMode {
+                        Button("New duck") { model.openNewMainThread(projectId: native.id) }.keyboardShortcut("n", modifiers: [.command, .shift])
+                        if PondsModel.shared.chrome(key: key).showsBranchAndPR {
+                            Button(DuckGroupPrefs.contains(groupedPonds, pond: key) ? "Ungroup ducks" : "Group by branch") {
+                                groupedPonds = DuckGroupPrefs.toggled(groupedPonds, pond: key)
+                            }
+                        }
+                        Divider()
+                    } else if FolderPond.showsGitControls(native) {
                         Button("New duck in Main") { model.openNewMainThread(projectId: native.id) }
                         Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                         Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
@@ -424,14 +439,20 @@ struct WorkbenchSidebar: View {
                     Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
                     Button("Pond settings…") { openSettings(key) }
                     Button("Clean up disk…") { DiskCleanupCenter.shared.open(pondId: native.id, pondName: name) }
+                    if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond…") { leaveFor = key } }
                 } else if entry != nil {
                     // A joined pond has no folder here: it can be labelled, hidden and opened, with its own id as the key.
                     Button("Labels…") { labelsFor = key }
                     Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
                     Button("Pond settings…") { openSettings(key) }
+                    if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond…") { leaveFor = key } }
                 }
             }
-            if !projectFolded {
+            if !projectFolded && model.ducksMode {
+                // Ducks mode: the pond's ducks directly, newest first, each with its branch; no stream rows.
+                duckRows(of: key)
+                sharedThreads(of: key)
+            } else if !projectFolded {
                 // Main, the pond's own folder, is listed only while it has a live thread; a Main chat has no stream (so no stream menu).
                 if let mainRow = MainSidebar.row(main: model.mainPlace(key: key), in: workspaces), let native {
                     FoldRow(title: mainRow.displayTitle, depth: 1,
@@ -521,6 +542,21 @@ struct WorkbenchSidebar: View {
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
             Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
+        }
+    }
+
+    /// Ducks mode: a pond's ducks, newest first (one row each, its branch as a small mono label), or grouped by branch.
+    @ViewBuilder private func duckRows(of key: String) -> some View {
+        let rows = model.duckRows(pond: key)
+        let showsBranch = PondsModel.shared.chrome(key: key).showsBranchAndPR
+        if showsBranch, DuckGroupPrefs.contains(groupedPonds, pond: key) {
+            ForEach(DuckList.groups(rows)) { g in
+                Text(verbatim: g.isMain ? DuckRow.mainLabel : (g.label.isEmpty ? "no branch" : g.label)).font(Typo.code).foregroundStyle(Theme.subtle)
+                    .lineLimit(1).truncationMode(.middle).padding(.leading, Space.s + 16).padding(.top, 6).frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(g.rows) { r in WorkbenchChatRow(session: r.session, indent: 1).transition(Motion.fold) }
+            }
+        } else {
+            ForEach(rows) { r in WorkbenchChatRow(session: r.session, indent: 1, branch: showsBranch ? r.label : nil).transition(Motion.fold) }
         }
     }
 
@@ -629,6 +665,8 @@ private struct FoldRow: View {
     var rollup: StatusRollup?
     var onDisclose: (() -> Void)?
     var folded = false
+    /// A small quiet label after a pond's name ("Remote": ducks on someone else's Mac).
+    var badge: String?
     /// The pond behind a project row: its icon sits on the pond's tint.
     var pondId: String?
     /// The pond's project: its icon sits on the tile.
@@ -724,6 +762,7 @@ private struct FoldRow: View {
                 Text(verbatim: title).font(.system(size: 14, weight: unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     .truncationMode(.tail)
+                if depth == 0, let badge { Text(verbatim: badge).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).fixedSize() }
                 // An open pond shows its chats, each with its own mark: the rollup would only repeat them.
                 if depth == 0, folded || count != nil { pondMark }
                 if conductor { ConductorMarker(size: 12) }
@@ -795,6 +834,8 @@ struct WorkbenchChatRow: View {
     var indent = 0
     /// A search hit's matched text, shown as the tooltip so the row stays one line.
     var snippet: String?
+    /// Ducks mode: the duck's branch as a small mono label ("main" for main).
+    var branch: String?
     @Environment(AppModel.self) private var model
     @State private var hovering = false
 
@@ -814,6 +855,10 @@ struct WorkbenchChatRow: View {
                 }
                 if session.showsConductorBadge { ConductorMarker() }
                 Spacer(minLength: 0)
+                if let branch {
+                    Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: 84, alignment: .trailing).help(branch)
+                }
                 if let n = model.ducklings(for: session)?.running, n > 0 {
                     HStack(spacing: 2) {
                         DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.tab)
@@ -836,9 +881,10 @@ struct WorkbenchChatRow: View {
         .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
             RenameThreadItem(session: session)
+            DuckMenuItems(session: session)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.rowAccessibility(session))
+        .accessibilityLabel(model.rowAccessibility(session) + (branch.map { ", \($0)" } ?? ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

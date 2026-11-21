@@ -72,6 +72,10 @@ export interface DuckView {
   /** The duck's current session; absent for a duck that has not worked yet. */
   currentSessionId?: string;
   place?: DuckPlace;
+  /** Members' own ducks (design only, `pondOwnThreads` stays off): which Mac runs this duck. Never set today. */
+  nest?: string;
+  /** Members' own ducks (design only): the member whose machine this duck runs on ("Powered by ..."). Never set today. */
+  poweredBy?: string;
   state: "working" | "waiting" | "idle" | "error";
   lastActiveAt: number;
   /** How many sessions it has had (the current one and its history). */
@@ -87,6 +91,10 @@ export interface RoomThread {
   colourSeed?: string;
   /** Where the duck works now; absent for Main or when it has no session. */
   place?: DuckPlace;
+  /** Members' own ducks (design only): which Mac runs this duck. Never set today. */
+  nest?: string;
+  /** Members' own ducks (design only): "Powered by <member>". Never set today. */
+  poweredBy?: string;
   /** The duck's current session; empty for a duck that has not worked yet. */
   sessionId: string;
   title: string;

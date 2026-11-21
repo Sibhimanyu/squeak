@@ -26,6 +26,7 @@ import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
+import { ducksOwnBranch, Placement, PlacementError, parsePlace, projectOfSession } from "./placement.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -151,6 +152,9 @@ export class NativeServer {
   private readonly git: GitActions;
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
+  /** Ducks own their branch (flag): place requests, moves, clean-up of unused working copies. */
+  readonly placement: Placement;
+  private placementTimer: NodeJS.Timeout | null = null;
   private readonly pickers: RepoPickers;
   readonly planner: Planner;
   private readonly prefs: ProjectPrefs | null;
@@ -198,6 +202,7 @@ export class NativeServer {
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
+    this.placement = new Placement({ store: options.store, workspaces, sources: this.sources });
     this.pickers = new RepoPickers({ store: options.store });
     this.planner = new Planner(options.store, async (spec) => {
       const project = options.store.getProject(spec.projectId);
@@ -224,6 +229,7 @@ export class NativeServer {
         post: (id, kind, payload) => host.post(id, kind, payload),
         room: this.room,
         jobs: this.jobs,
+        placement: this.placement,
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
@@ -235,12 +241,21 @@ export class NativeServer {
       this.server!.once("error", reject);
       this.server!.listen(this.options.port ?? DEFAULT_HOST_PORT, "127.0.0.1", resolve);
     });
-    if (this.options.routines !== false) this.planner.start();
+    if (this.options.routines !== false) {
+      this.planner.start();
+      // Working copies nobody uses leave on their own (flag on only; the old Archive path is untouched otherwise).
+      this.placementTimer = setInterval(() => {
+        if (ducksOwnBranch()) void this.placement.cleanup().catch(() => undefined);
+      }, 15 * 60_000);
+      this.placementTimer.unref();
+    }
     return (this.server.address() as { port: number }).port;
   }
 
   async stop(): Promise<void> {
     this.planner.stop();
+    if (this.placementTimer) clearInterval(this.placementTimer);
+    this.placementTimer = null;
     const server = this.server;
     this.server = null;
     if (!server) return;
@@ -427,8 +442,9 @@ export class NativeServer {
       prefs: (id) => this.prefs?.get(id),
       order: { mode: order.mode === "manual" ? "manual" : "newest", ids: order.order },
       sessions,
+      ownThreads: flag("pondOwnThreads"),
     });
-    return { ...built, pondOwnThreads: flag("pondOwnThreads") };
+    return { ...built, pondOwnThreads: flag("pondOwnThreads"), ducksOwnBranch: flag("ducksOwnBranch") };
   }
 
   /** What the sidebar keeps for a project: hidden, labels, and the Squeak icon's URL and time when it has one. */
@@ -572,6 +588,39 @@ export class NativeServer {
       if (typeof b.on !== "boolean") throw new HttpError(400, "on must be true or false");
       const duty = this.room.setDutyById(id, b.on);
       return this.json(res, 200, { duty, duck: this.room.duckView(store.duckRow(id)!) });
+    }
+    if (area === "ducks" && id && sub === "place" && parts.length === 4 && method === "POST") {
+      const duck = store.duckRow(id);
+      if (!duck) throw new HttpError(404, "no such duck");
+      if (!ducksOwnBranch()) throw new HttpError(400, "place needs ducksOwnBranch (SQUEAK_DUCKS_OWN_BRANCH) turned on");
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "place" && k !== "message");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (b.message !== undefined && typeof b.message !== "string") throw new HttpError(400, "message must be text");
+      let want;
+      try {
+        want = parsePlace(b.place);
+      } catch (error) {
+        if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+      const current = duck.currentSessionId ? store.getSession(duck.currentSessionId) : null;
+      if (!current) throw new HttpError(409, "this duck has no chat to move yet");
+      if (current.status === "working" || current.status === "stopping") {
+        throw new HttpError(409, "this duck is working: wait for it to finish");
+      }
+      try {
+        const moved = await this.placement.move(
+          current.id,
+          want,
+          (spec) => this.options.host.create(spec),
+          b.message as string | undefined,
+        );
+        return this.json(res, 200, { sessionId: (moved.session ?? current).id });
+      } catch (error) {
+        if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
     }
     if (area === "sessions" && id && sub === "duck" && parts.length === 4 && method === "PATCH") {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -1101,6 +1150,7 @@ export class NativeServer {
             updatedAt: s.updatedAt,
             cwd: s.cwd,
             ...(w ? { workspaceTitle: w.title, branch: w.branch } : {}),
+            ...(s.duckId ? { duckId: s.duckId } : {}),
           };
         }),
       });
@@ -1270,6 +1320,36 @@ export class NativeServer {
       agentPrefix = splitBrief(checked.split) ?? undefined;
     }
     if (b.main !== undefined && typeof b.main !== "boolean") throw new HttpError(400, "main must be true or false");
+    if (b.place !== undefined) {
+      // `place` replaces `main`, `newWorkspace` and `workspaceId` (which stay as aliases) when ducks own their branch.
+      if (!ducksOwnBranch()) throw new HttpError(400, "place needs ducksOwnBranch (SQUEAK_DUCKS_OWN_BRANCH) turned on");
+      if (b.main !== undefined || b.newWorkspace !== undefined || str(b.workspaceId) || cwd) {
+        throw new HttpError(400, "give place, or main, newWorkspace, workspaceId and cwd, not both");
+      }
+      let placed;
+      try {
+        const req = parsePlace(b.place);
+        const duck = req.kind === "join" && req.duckId ? this.options.store.duckRow(req.duckId) : null;
+        const pond = projectId ?? duck?.projectId;
+        if (!pond) throw new HttpError(400, "place needs a projectId");
+        placed = await this.placement.resolve(pond, req);
+      } catch (error) {
+        if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+      return this.withDuck(
+        await host.create({
+          cwd: placed.cwd,
+          agent,
+          model,
+          permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
+          effort: str(b.effort),
+          workspaceId: placed.workspaceId,
+          ...(str(b.text) ? { text: str(b.text)! } : {}),
+          ...(agentPrefix ? { agentPrefix } : {}),
+        }),
+      );
+    }
     if (b.main === true && (b.newWorkspace === true || str(b.workspaceId))) {
       throw new HttpError(400, "main is not a stream");
     }
@@ -1302,19 +1382,30 @@ export class NativeServer {
     } else if (!cwd && projectId && !workspaceId) {
       // A plain-folder pond has no streams: its chats run in the folder itself.
       const project = this.options.store.getProject(projectId);
-      if (project?.kind === "folder") cwd = project.rootPath;
+      // Ducks own their branch: no place named means Main (read-only), so a question or a plan starts at once.
+      if (project?.kind === "folder" || (project?.kind === "git" && ducksOwnBranch())) cwd = project.rootPath;
     }
     if (!cwd) throw new HttpError(400, "cwd, or projectId with newWorkspace, is required");
-    return await host.create({
-      cwd,
-      agent,
-      model,
-      permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
-      effort: str(b.effort),
-      workspaceId,
-      ...(str(b.text) ? { text: str(b.text)! } : {}),
-      ...(agentPrefix ? { agentPrefix } : {}),
-    });
+    return this.withDuck(
+      await host.create({
+        cwd,
+        agent,
+        model,
+        permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
+        effort: str(b.effort),
+        workspaceId,
+        ...(str(b.text) ? { text: str(b.text)! } : {}),
+        ...(agentPrefix ? { agentPrefix } : {}),
+      }),
+    );
+  }
+
+  /** Ducks own their branch: a new chat has its duck at once, so the pond's branch list counts it (the room would make it lazily). */
+  private withDuck(session: SessionRow): SessionRow {
+    if (!ducksOwnBranch()) return session;
+    const project = projectOfSession(this.options.store, session);
+    if (project) this.options.store.duckForSession(session.id, project.id);
+    return this.options.store.getSession(session.id) ?? session;
   }
 
   /** The model of the duck's newest chat, else of the pond's newest one that has a model. */

@@ -129,8 +129,10 @@ public struct InspectorStrip: Equatable, Sendable {
     /// is (Code when it holds none).
     public static func make(
         context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), terminals: [UUID] = [],
-        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil
+        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, peopleOnly: Bool = false
     ) -> InspectorStrip {
+        // A remote pond has no code on this Mac: the Pond tab (People, Recent) alone, whatever was saved.
+        if peopleOnly, case .pond = context { return InspectorStrip(tabs: [.pond], selected: .pond, pinned: .pond) }
         var tabs: [RightTab] = []
         switch context {
         case .pond:
@@ -167,8 +169,8 @@ public struct InspectorStrip: Equatable, Sendable {
 
     /// The "+" menu, same in both contexts. Files and Code are left out of a pond's menu while open (they would only
     /// re-select), but never in a stream, where they are panels of the zone.
-    public static func plusItems(context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord()) -> [InspectorPlusItem] {
-        InspectorPlusItem.allCases
+    public static func plusItems(context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), peopleOnly: Bool = false) -> [InspectorPlusItem] {
+        peopleOnly ? [] : InspectorPlusItem.allCases
     }
     public static let plusDefault = InspectorPlusItem.newTerminal
 }

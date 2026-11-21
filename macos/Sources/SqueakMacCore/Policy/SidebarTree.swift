@@ -18,6 +18,8 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     public var repo: String?
     /// The pond's own folder (`MainPlace`): chats that run in the root, not in a stream. Its row reads "Main".
     public var isMain = false
+    /// Ducks mode (`ducksOwnBranch`): the pond's one row holding every duck of the pond, not a stream. Never a stream or Main.
+    public var isDucks = false
     /// What people read, everywhere a stream is named: `StreamName.resolve`; Main reads "Main".
     public var displayTitle: String {
         isMain ? MainPlace.label(branch: branch) : StreamName.resolve(title: title, name: name, branch: branch, repo: repo)
@@ -63,6 +65,18 @@ public enum SidebarTreeBuilder {
         return "none"
     }
 
+    /// Ducks mode: a pond's streams and Main fold into one row that holds every chat, newest first; the pond's ducks
+    /// are read from it (`DuckList`). Tabs, the open chat's place and the saved strip all key on this one row.
+    static func collapseToDucks(_ workspaces: [SidebarWorkspace], pond: String) -> SidebarWorkspace? {
+        guard !workspaces.isEmpty else { return nil }
+        let chats = workspaces.flatMap(\.chats).sorted(by: HomeProjects.before)
+        var w = SidebarWorkspace(
+            id: "\(pond)/ducks", name: pond, title: nil, branch: nil, chats: chats, repo: pond,
+            foldedMark: FoldedMark.combine(workspaces.compactMap(\.foldedMark)))
+        w.isDucks = true
+        return w
+    }
+
     static func clean(_ s: String?) -> String? {
         guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
         return t
@@ -99,7 +113,7 @@ public enum SidebarTreeBuilder {
     /// `includeEarlier` keeps every chat (a pond's page lists all of its non-archived threads, not the 24 h active set).
     public static func build(
         _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, mains: [MainPlace] = [], includeEarlier: Bool = false,
-        isUnread: (HostSession) -> Bool = { _ in false }
+        ducksMode: Bool = false, isUnread: (HostSession) -> Bool = { _ in false }
     ) -> SidebarTree {
         let projects = HomeProjects.build(sessions, now: now, keeping: keeping.map { [$0] } ?? [], includeEarlier: includeEarlier).map { p -> SidebarProject in
             var buckets: [String: [HostSession]] = [:]
@@ -125,7 +139,7 @@ public enum SidebarTreeBuilder {
                 default: return a.name.lowercased() < b.name.lowercased()
                 }
             }
-            return SidebarProject(name: p.name, workspaces: workspaces)
+            return SidebarProject(name: p.name, workspaces: ducksMode ? [Self.collapseToDucks(workspaces, pond: p.name)].compactMap { $0 } : workspaces)
         }
         return SidebarTree(projects: projects)
     }

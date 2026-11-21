@@ -301,6 +301,8 @@ struct SessionRow: View {
     var recent = false
     /// Inside its project: the project is the screen's title, so the row says only the agent.
     var inProject = false
+    /// Ducks own their branch: where the duck works ("main" or its branch), as a small mono line. Nil: no line (flag off, or a remote pond).
+    var branchLabel: String? = nil
 
     /// "Starting" while this phone's own message is about to begin a turn: the same rule the chat uses
     /// (ChatTimeline.isStarting), so the two agree.
@@ -318,7 +320,7 @@ struct SessionRow: View {
         .padding(.vertical, inProject ? 8 : (recent ? 6 : 2))
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))")
+        .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))\(branchLabel.map { ", on \($0)" } ?? "")")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
         .renameMenu(session, model: model)
         .onAppear { model.prefetchNear(session) }
@@ -387,6 +389,9 @@ struct SessionRow: View {
                 } else { Spacer(minLength: 0) }
                 DucklingCount(session: session)
                 if starting || session.state == "working" { ChatActivityGlyph() }
+            }
+            if let branchLabel {
+                Text(branchLabel).font(.caption.monospaced()).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
             }
         }
     }

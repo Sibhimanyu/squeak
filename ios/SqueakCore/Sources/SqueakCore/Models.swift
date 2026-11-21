@@ -112,6 +112,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The pond (the project's shared space) the chat belongs to. Only from a Mac new enough to send it, and
         /// only when the session host could say; absent chats fall under their project name.
         public var pond: PondRef? = nil
+        /// Ducks own their branch (the Mac's `ducksOwnBranch` flag on): the chat's duck, the branch it works on, and
+        /// whether it works in the pond's own folder (Main). All absent with the flag off and from an older Mac.
+        public var duckId: String? = nil
+        public var branch: String? = nil
+        public var onMain: Bool? = nil
         /// What the chat runs, named by the Mac: "Opus 5.5 · 1M", its thinking level ("Medium", "Extra high")
         /// and whether fast mode is on. Absent from an older Mac and for a terminal agent.
         public var model: String? = nil
@@ -487,6 +492,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// The Mac's ponds, newest activity first (at most 30). Only from a Mac new enough to send it, and only while its
     /// session host answers: an older Mac, a host that is down or Ponds off all leave it absent.
     public var ponds: [Pond]? = nil
+    /// The Mac's `ducksOwnBranch` flag, only when on (`true`); absent = off, and the stream UI is exactly as before.
+    public var ducksOwnBranch: Bool? = nil
     /// The sidebar's pond order. Only for a phone whose presence caps name "ponds2", from a Mac new enough to send it.
     public var pondOrder: PondOrder? = nil
     /// The page of the one pond the phone's presence says is open. Same gating as `pondOrder`.
@@ -545,6 +552,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var projectId: String? = nil
         /// "project" or "joined" (someone else's pond, no local project). Absent from an older Mac.
         public var kind: String? = nil
+        /// What this person may do here, said by the Mac: "owner", "remote" (someone else's agents on their Mac: no code
+        /// UI) or "git" (own agents, code through Git). Absent from an older Mac: treated as "owner".
+        public var access: String? = nil
         public var hidden: Bool? = nil
         public var colour: String? = nil
         public var labels: [String]? = nil
@@ -553,6 +563,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Newest first, at most 20.
         public var streams: [Stream]? = nil
         public var archivedStreams: Int? = nil
+        /// With `ducksOwnBranch` on: the pond's active branches (not Main), newest first. `streams` stays for an older phone.
+        public var branches: [Branch]? = nil
         /// The Mac's status rollup of the pond's chats (`working`, `needs_you`, `error`, `idle`) and its counts; an older Mac sends none.
         public var activity: String? = nil
         public var working: Int? = nil
@@ -561,6 +573,18 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             public let name: String
             public let online: Bool
             public init(name: String, online: Bool) { self.name = name; self.online = online }
+        }
+        /// One active branch of a pond: how many ducks work on it, its newest activity and (when the Mac says) PR state.
+        public struct Branch: Codable, Equatable, Sendable, Identifiable {
+            public let name: String
+            public let ducks: Int
+            public var lastActivityAt: String? = nil
+            /// "open", "merged" or "closed"; absent when the Mac does not read it.
+            public var pr: String? = nil
+            public var id: String { name }
+            public init(name: String, ducks: Int, lastActivityAt: String? = nil, pr: String? = nil) {
+                self.name = name; self.ducks = ducks; self.lastActivityAt = lastActivityAt; self.pr = pr
+            }
         }
         public struct Stream: Codable, Equatable, Sendable, Identifiable {
             public let id: String
@@ -581,10 +605,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var orderKey: String { projectId ?? id }
         public var isHidden: Bool { hidden == true }
         public var isJoined: Bool { kind == "joined" }
+        /// A remote pond: you talk to the owner's agents, and no code (changes, files, branches, pickers) is shown.
+        public var isRemote: Bool { access == "remote" }
         public init(id: String, name: String, shared: Bool, members: [Member] = [],
                     projectId: String? = nil, hidden: Bool? = nil, colour: String? = nil, labels: [String]? = nil,
-                    lastActivityAt: String? = nil, streams: [Stream]? = nil, archivedStreams: Int? = nil, kind: String? = nil) {
-            self.id = id; self.name = name; self.shared = shared; self.members = members; self.kind = kind
+                    lastActivityAt: String? = nil, streams: [Stream]? = nil, archivedStreams: Int? = nil, kind: String? = nil,
+                    access: String? = nil) {
+            self.id = id; self.name = name; self.shared = shared; self.members = members; self.kind = kind; self.access = access
             self.projectId = projectId; self.hidden = hidden; self.colour = colour; self.labels = labels
             self.lastActivityAt = lastActivityAt; self.streams = streams; self.archivedStreams = archivedStreams
         }
@@ -1533,12 +1560,24 @@ public struct SetupCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// Where a duck works (`duck-place`'s `place`; the Mac's `Placement`). Unused fields are left out of the JSON, never null.
+public struct DuckPlace: Codable, Equatable, Sendable {
+    /// "new", "join" or "main".
+    public let kind: String
+    public var branch: String? = nil
+    public var duckId: String? = nil
+    public static let main = DuckPlace(kind: "main")
+    public static func new(branch: String? = nil) -> DuckPlace { DuckPlace(kind: "new", branch: branch) }
+    public static func join(duckId: String) -> DuckPlace { DuckPlace(kind: "join", duckId: duckId) }
+    public static func join(branch: String) -> DuckPlace { DuckPlace(kind: "join", branch: branch) }
+}
+
 /// Hide or show a pond, or set the pond order (a Mac that reads `ponds2`). Optional fields are left out of the JSON,
 /// never null: the Mac checks the shape strictly. `pondId` is `Pond.id`; `ids` are `Pond.orderKey`s.
 public struct PondCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
-    /// "hide", "order" or "message".
+    /// "hide", "order", "message", "leave" (a pond someone else owns; exactly `pondId`) or "duck-place".
     public let op: String
     public var pondId: String? = nil
     public var hidden: Bool? = nil
@@ -1548,6 +1587,10 @@ public struct PondCommand: Codable, Equatable, Sendable {
     /// "message": the member's thread and the text to send into it.
     public var threadId: String? = nil
     public var text: String? = nil
+    /// "duck-place": the duck (`Session.duckId`), where it goes, and an optional first message.
+    public var duckId: String? = nil
+    public var place: DuckPlace? = nil
+    public var message: String? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

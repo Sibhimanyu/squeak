@@ -53,6 +53,7 @@ private struct PondWorkspaceCardView: View {
     var body: some View {
         let shown = PondCardRows.visible(threads: card.chats, expanded: expanded)
         VStack(alignment: .leading, spacing: 0) {
+            if !card.isDucks {
             HStack(spacing: Space.s) {
                 Text(verbatim: card.displayTitle).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 0)
@@ -69,6 +70,7 @@ private struct PondWorkspaceCardView: View {
             }
             if !card.chats.isEmpty {
                 Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
+            }
             }
             ForEach(shown.rows) { r in PondChatRowView(row: r, members: members, open: open) }
             if shown.hiddenCount > 0 || (expanded && card.chats.count > PondCardRows.minimum) {
@@ -160,6 +162,10 @@ private struct PondChatRowView: View {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
+                        if let branch = row.branch {
+                            Text("·").foregroundStyle(Theme.muted)
+                            Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                        }
                     }
                     if let visibility = row.visibility {
                         Text(verbatim: visibility)
@@ -176,7 +182,7 @@ private struct PondChatRowView: View {
         }
         .buttonStyle(PondThreadRowStyle())
         .squeakContextMenu {
-            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s) }
+            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s); DuckMenuItems(session: s) }
             // Someone else's thread: archiving hides it from your view only, never from the person who started it.
             if row.local == nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
                 Button("Archive") { PondsModel.shared.hideShared(threadId: thread, pondId: pond.id, pondName: pond.name, title: row.title, agent: row.agent) }
@@ -233,5 +239,35 @@ private struct PondThreadRowSurface<Content: View>: View {
             .background(pressed ? Theme.selected : hovering ? Theme.surfaceRaised : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8))
             .onHover { hovering = $0 }
+    }
+}
+
+/// Ducks mode, the pond page's "Branches": each branch, how many ducks work on it and its pull request where git knows it.
+struct DuckBranchesList: View {
+    let rows: [DuckRow]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let branches = DuckList.branches(rows)
+        if !branches.isEmpty {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Branches").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                VStack(spacing: 0) {
+                    ForEach(branches) { b in
+                        HStack(spacing: 10) {
+                            Lucide(b.isMain ? .folder : .gitBranch, size: 13, color: Theme.muted)
+                            Text(verbatim: b.isMain ? DuckRow.mainLabel : b.label).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                            if b.isMain { Text("read-only").font(Typo.meta).foregroundStyle(Theme.subtle) }
+                            Spacer(minLength: 8)
+                            if let pr = duckBranchPRWord(b.lead, model: model), !b.isMain { Text(verbatim: "PR \(pr)").font(Typo.meta).foregroundStyle(Theme.muted) }
+                            Text(verbatim: "\(b.duckCount) \(b.duckCount == 1 ? "duck" : "ducks")").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 16).frame(height: 36)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            }
+        }
     }
 }

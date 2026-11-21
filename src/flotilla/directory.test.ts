@@ -10,6 +10,7 @@ import {
   type DirWorkspace,
 } from "./directory.js";
 import { owner } from "./fixtures/owner-shape.js";
+import { phonePondsOf } from "../fleet/native-phone.js";
 
 const names = (d: ReturnType<typeof buildDirectory>): string[] => d.ponds.map((p) => p.name);
 
@@ -164,6 +165,53 @@ describe("the pond directory", () => {
     expect(names(d)).not.toContain("Orphan");
     expect(names(d)).not.toContain("Removed");
     expect(d.ponds.find((p) => p.id === "j1")?.members).toEqual([{ name: "Asha", online: true }]);
+  });
+
+  it("says the access level: owner for projects, remote for a joined pond, git only with the flag and a Git remote", () => {
+    const input = (ownThreads?: boolean) => ({
+      projects: [{ id: "p", name: "Mine", rootPath: "/p" }],
+      workspaces: [],
+      records: [
+        { id: "j1", name: "NoGit", role: "member", status: "active" },
+        { id: "j2", name: "WithGit", role: "member", status: "active", gitRemote: "git@github.com:a/b.git" },
+        { id: "k1", name: "Kept", role: "owner", status: "active", kind: "joined" as const },
+      ],
+      prefs: () => undefined,
+      order: { mode: "newest" as const, ids: [] },
+      sessions: [],
+      ...(ownThreads === undefined ? {} : { ownThreads }),
+    });
+    const access = (d: ReturnType<typeof buildDirectory>) => Object.fromEntries(d.ponds.map((p) => [p.name, p.access]));
+    expect(access(buildDirectory(input()))).toEqual({
+      Mine: "owner",
+      NoGit: "remote",
+      WithGit: "remote",
+      Kept: "owner",
+    });
+    expect(access(buildDirectory(input(false)))).toMatchObject({ WithGit: "remote" });
+    expect(access(buildDirectory(input(true)))).toEqual({
+      Mine: "owner",
+      NoGit: "remote",
+      WithGit: "git",
+      Kept: "owner",
+    });
+  });
+
+  it("carries the access level to the phone's pond list", () => {
+    const d = buildDirectory({
+      projects: [{ id: "p", name: "Mine", rootPath: "/p" }],
+      workspaces: [],
+      records: [{ id: "j1", name: "Theirs", role: "member", status: "active" }],
+      prefs: () => undefined,
+      order: { mode: "newest", ids: [] },
+      sessions: [],
+    });
+    expect(phonePondsOf(d).map((p) => [p.name, p.access])).toEqual(
+      expect.arrayContaining([
+        ["Mine", "owner"],
+        ["Theirs", "remote"],
+      ]),
+    );
   });
 
   it("keeps a manual order, unplaced ponds on top newest first, unknown ids dropped, old pond ids mapped", () => {

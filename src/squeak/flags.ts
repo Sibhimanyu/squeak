@@ -97,6 +97,15 @@ export const FLAGS = [
     stage: "beta",
     parse: "on-word",
   },
+  {
+    name: "ducksOwnBranch",
+    env: "SQUEAK_DUCKS_OWN_BRANCH",
+    default: false,
+    description:
+      "Ducks own their branch: a duck picks or opens its own branch and working copy (agent tools branch_off, join_branch, move_to_main), and starts in Main, read-only in a git pond. Off: streams are the container, as before.",
+    stage: "beta",
+    parse: "on-word",
+  },
 ] as const satisfies readonly FlagDefinition[];
 
 export type FlagName = (typeof FLAGS)[number]["name"];

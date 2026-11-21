@@ -618,6 +618,38 @@ Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessio
 Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
 ```
 
+#### Ducks own their branch (flag `ducksOwnBranch`, `SQUEAK_DUCKS_OWN_BRANCH`, off)
+
+Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-branch.md`). Off, nothing below applies
+(the columns exist and fill; behaviour is as before).
+
+- **Model.** `sessions.branch` (from the workspace) and `ducks.workspace_id` / `ducks.branch` (the duck's working copy,
+  followed from its current session); a `WorkspaceRow` stays the internal worktree. `SessionRow` carries optional `branch`
+  and `duckId`. Migration 25 makes the duck tables, adds the columns and backfills (idempotent): streams become branches,
+  chats ducks on that branch, Main chats ducks on main (null branch).
+- **Place API.** `POST /native/sessions` takes `place: {kind:"new", branch?} | {kind:"join", duckId | branch} |
+{kind:"main"}` (strict; 400 with the flag off, or mixed with `main`/`newWorkspace`/`workspaceId`/`cwd`, which stay as
+  aliases). `join` reuses the working copy that has the branch (git cannot check one branch out twice) and reopens a
+  removed one on the kept branch; an unknown branch or duck is 404. With the flag on a bare `projectId` starts in Main.
+- **Main is read-only for ducks in a git pond** (folder ponds edit main). The thread context says so; Claude's PreToolUse
+  hook (every mode) and `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the root; "Skip approvals" and
+  "Accept edits" are held at Ask there, so a shell command still asks; Codex runs in its read-only sandbox.
+- **Agent-led placement.** The note lists the pond's active branches (branch, title, ducks, last activity). Tools
+  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)`, `move_to_main(message?)` start a fresh chat for
+  the same duck in the new place (an agent's history is tied to its folder). Listed only with the flag on.
+- **Clean-up.** A working copy with no live duck (on duty, chat not archived), no busy chat, a clean folder and a branch
+  pushed or merged is removed; the branch stays. After a move, and every 15 min while the host runs.
+- **Held back (no behaviour).** `nest` / `poweredBy` are optional on `DuckView` and `RoomThread` for members' own ducks.
+- **Phone, cards (phase 3).** With the flag on the phone view carries `ducksOwnBranch: true`, each project pond's
+  `branches` (`{name, ducks, lastActivityAt?, pr?}`, newest first, Main left out; `pr` reserved, not read yet; `streams`
+  stays for old phones), and each chat's `duckId`, `branch` or `onMain` (also on the pond-threads rows and the host's
+  `/threads`). The signed `pond` command `duck-place {duckId, place, message?}` runs `POST /native/ducks/<id>/place`
+  (flag on, a duck of the Mac's own view, a pond that is not remote; `place` is the strict host shape). The iPhone
+  (`SqueakCore/DuckMode.swift`) lists ducks newest first with a branch label, "Group by branch", no stream picker on a
+  new duck, the duck menu (Branch off, Work with…, Move to main) and a header of the branch or "main · read-only" (no
+  pull request on main); a remote pond keeps no code chrome. `cardLabel`/`sessionLabel` read "Duck · branch" ("main"
+  in the pond's own folder). Flag off, nothing of this is sent or drawn.
+
 - **Migration** (first start, idempotent): every non-archived session in a pond, and every session with an old
   `session_ducks` row, becomes one duck (its name, role and duty kept). A migrated duck's `colourSeed` is its first
   session id, so colours do not change; a new duck's is its own id. A chat that appears later gets its duck the first time

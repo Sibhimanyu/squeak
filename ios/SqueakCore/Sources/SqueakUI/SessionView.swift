@@ -132,13 +132,18 @@ struct SessionView: View {
                             model.hideHere(session)
                             dismiss()
                         }
+                        if model.duckMoves(for: session).any {
+                            Section("Duck") { DuckMenu(session: session) }
+                        }
                         if model.workspaceActions, session.can(.archive), session.workspaceId != nil {
                             let resting = !["working", "awaiting_approval", "awaiting_input"].contains(session.state)
                             Section("Workspace") {
-                                Button("Open a pull request", systemImage: "arrow.triangle.pull") {
-                                    Task { await model.askForPullRequest(session) }
+                                if model.duckHeader(for: session)?.showsPullRequest != false {
+                                    Button("Open a pull request", systemImage: "arrow.triangle.pull") {
+                                        Task { await model.askForPullRequest(session) }
+                                    }
+                                    .disabled(!resting)
                                 }
-                                .disabled(!resting)
                                 Button("Archive workspace", systemImage: "archivebox", role: .destructive) { model.archiveTarget = session }
                                     .disabled(!resting)
                             }
@@ -915,7 +920,7 @@ private struct ChatRows: View {
                     // A hairline closes the previous answer before what comes next.
                     if muted { Rectangle().fill(Theme.line).frame(height: 1).accessibilityHidden(true) }
                     // What the turn left on disk, a tap from its diff.
-                    if !muted, session.state != "working", let git = session.git, session.can(.diff) {
+                    if !muted, session.state != "working", let git = session.git, model.canDiff(session) {
                         Button { Haptics.play(.tap); showingDiff = true } label: {
                             HStack(spacing: 6) {
                                 Lucide(.gitBranch, size: 14, color: Theme.muted).accessibilityHidden(true)
@@ -943,7 +948,7 @@ private struct ChatRows: View {
                     }
                 case .worked(_, let steps, let messageId):
                     // Tappable only when the Mac says it answers for this message; else a plain count.
-                    if let messageId, model.workSteps == true, session.can(.diff) {
+                    if let messageId, model.workSteps == true, model.canDiff(session) {
                         OpenWork(session: session, messageId: messageId, count: steps)
                     } else {
                         WorkedNote(steps: steps)
@@ -2365,7 +2370,8 @@ private struct SetupLine: View {
 
     var body: some View {
         // It reads the chat itself, so a streamed step redraws this label and not the field being typed in.
-        if let session = model.session(key), let line = model.pendingSetupLine(session) ?? session.setupLine {
+        if let session = model.session(key), !model.isRemotePond(session.pond?.id),
+           let line = model.pendingSetupLine(session) ?? session.setupLine {
             picker(session, line)
         }
     }

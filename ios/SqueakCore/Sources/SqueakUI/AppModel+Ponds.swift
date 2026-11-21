@@ -6,7 +6,8 @@ import SqueakCore
 extension AppModel {
     /// Ponds and "Other" with hide/unhide applied.
     var pondBuilt: PondList.Built {
-        let built = homeLists.built
+        var built = homeLists.built
+        if !pondsLeft.isEmpty { built = PondList.Built(ponds: built.ponds.filter { !pondsLeft.contains($0.id) }, other: built.other) }
         let local = pondHiddenLocal
         guard !local.isEmpty else { return built }
         func apply(_ item: PondItem) -> PondItem {
@@ -26,6 +27,79 @@ extension AppModel {
     func setPondHidden(_ id: String, _ hidden: Bool) {
         pondHiddenLocal[id] = hidden
         sendPondHidden(id, hidden)
+    }
+
+    /// Whether this pond is someone else's, with no code in it (the Mac says so; an older Mac says nothing, so never).
+    func isRemotePond(_ id: String?) -> Bool {
+        guard let id else { return false }
+        return pondItem(id)?.pond?.isRemote == true
+    }
+
+    /// Whether a chat may show changes: its pond is not remote, and the Mac allows it.
+    /// Ducks own their branch: the Mac says so, and only then does the phone show ducks by branch.
+    var ducksMode: Bool { DuckPhone.enabled(snapshot) }
+
+    /// A pond's ducks as rows: the phone's own chats of the pond, plus the pond's whole list when the Mac sent it. A remote
+    /// pond shows no branch labels (no code there).
+    func duckRows(_ item: PondItem) -> [DuckPhone.Row] {
+        var sessions = item.sessions
+        let have = Set(sessions.map(\.key))
+        if let doc = pondThreads(item.id) { sessions += doc.threads.filter { !have.contains($0.key) }.map(\.asSession) }
+        return DuckPhone.rows(sessions, showsCode: !item.remote)
+    }
+
+    /// Moves a duck to a place (the duck's menu: Branch off, Work with…, Move to main). The Mac starts the duck's chat there;
+    /// the list follows on the next view. A refusal says why.
+    func moveDuck(_ session: PhoneSnapshot.Session, to place: DuckPlace, message: String? = nil) {
+        duckMoveProblem = nil
+        guard let duckId = session.duckId, !ducksMoving.contains(duckId) else { return }
+        guard !demo, let channel else { duckMoveProblem = "Not connected to your Mac."; return }
+        ducksMoving.insert(duckId)
+        Task {
+            let result = try? await channel.sendPond(.duckPlace(duckId: duckId, place: place, message: message), signer: signer)
+            ducksMoving.remove(duckId)
+            if result?.sent == true {
+                Haptics.play(.confirmed)
+                await refresh()
+            } else {
+                Haptics.play(.refused)
+                duckMoveProblem = result?.reason ?? "Your Mac didn't answer in time."
+            }
+        }
+    }
+
+    /// What a duck's menu offers (Branch off, Work with…, Move to main), from its pond's ducks. Nothing when the flag is off.
+    func duckMoves(for session: PhoneSnapshot.Session) -> DuckPhone.Moves {
+        guard ducksMode, let id = session.pond?.id, let item = pondItem(id) else { return .none }
+        return DuckPhone.moves(for: session, among: duckRows(item), remote: item.remote)
+    }
+
+    /// The header for a duck's chat (branch chip, read-only, PR), or nil with the flag off or for a chat with no duck.
+    func duckHeader(for session: PhoneSnapshot.Session) -> DuckPhone.Header? {
+        guard ducksMode, session.duckId != nil else { return nil }
+        return DuckPhone.header(session, remote: isRemotePond(session.pond?.id))
+    }
+
+    func canDiff(_ session: PhoneSnapshot.Session) -> Bool {
+        session.can(.diff) && !isRemotePond(session.pond?.id)
+    }
+
+    /// Leaves a pond someone else owns. It leaves the list at once; the Mac forgets it and tells the owner, and the
+    /// phone's other devices of this account follow when the owner's Mac has removed the account.
+    func leavePond(_ id: String) {
+        pondLeaveProblem = nil
+        guard !demo, let channel else { pondLeaveProblem = "Not connected to your Mac."; return }
+        pondsLeft.insert(id)
+        Task {
+            let result = try? await channel.sendPond(.leave(pondId: id), signer: signer)
+            if result?.sent == true {
+                await refresh()
+                pondsLeft.remove(id)
+            } else {
+                pondsLeft.remove(id)
+                pondLeaveProblem = result?.reason ?? "Your Mac didn't answer in time."
+            }
+        }
     }
 
     func setPondOrder(_ mode: PondOrderMode) {

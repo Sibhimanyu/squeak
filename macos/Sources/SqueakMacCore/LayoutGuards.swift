@@ -65,7 +65,18 @@ public final class TextHeightCache: @unchecked Sendable {
         public let id: String
         public let content: Int
         public let width: Int
-        public init(id: String, content: Int, width: CGFloat) { self.id = id; self.content = content; self.width = Int(width.rounded()) }
+        /// A width that is not finite (an unbounded proposal) is keyed as -1 instead of trapping in `Int(_:)`.
+        public init(id: String, content: Int, width: CGFloat) {
+            self.id = id; self.content = content
+            self.width = width.isFinite ? Int(width.rounded()) : -1
+        }
+    }
+
+    /// A layout's usable width from a proposal: nil, zero-or-less, infinite or NaN fall back to `fallback`. A layout
+    /// inside a scroll view or a `fixedSize` gets `.infinity`; measuring text at that width crashed shared threads.
+    public static func usableWidth(_ proposed: CGFloat?, fallback: CGFloat) -> CGFloat {
+        guard let w = proposed, w.isFinite, w > 0 else { return fallback }
+        return w
     }
 
     private let lock = NSLock()

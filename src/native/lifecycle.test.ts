@@ -51,7 +51,7 @@ function fakeGh(dir: string): string {
 d="$(dirname "$0")"
 echo "$@" >> "$d/calls.log"
 if [ "$1 $2" = "pr view" ]; then
-  [ -f "$d/slow" ] && exec sleep 3
+  [ -f "$d/slow" ] && exec sleep 600
   if [ -f "$d/notgithub" ]; then echo "none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use gh auth login" >&2; exit 1; fi
   if [ -f "$d/pr.json" ]; then cat "$d/pr.json"; exit 0; fi
   echo "no pull requests found for branch" >&2; exit 1
@@ -539,12 +539,12 @@ describe("git status", () => {
   });
 
   it("explains a gh that is too slow", async () => {
+    // No wall-clock bound: this gh would sleep ten minutes, so an answer at all proves the 300 ms limit cut it off
+    // (the old test compared elapsed time to 2.5 s, which a loaded machine overran).
     const hs = await start({ ghTimeoutMs: 300 });
     const ss = await newChat(hs);
     fs.writeFileSync(path.join(hs.ghDir, "slow"), "");
-    const t = Date.now();
     const slow = await call(hs, "GET", `/native/sessions/${ss.id}/git`);
-    expect(Date.now() - t).toBeLessThan(2500);
     expect(slow.status).toBe(200);
     expect(slow.body.prReason).toBe("unavailable");
     expect(slow.body.prMessage).toMatch(/too long/);

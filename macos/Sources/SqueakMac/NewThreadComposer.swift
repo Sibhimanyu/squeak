@@ -34,6 +34,15 @@ final class NewThreadState {
     }
     /// The busy-Main offer's answer so far ("Stay in Main" hides it until the page is opened again).
     var offer = NewChatIn.Offer()
+    /// Ducks mode (`ducksOwnBranch`): no "In:" picker; the daemon decides where the duck works unless "Work with…" names a duck or
+    /// branch (`duckPlace`). Off, none of this shows.
+    var ducksMode: Bool { conductorWorkspace == nil && !fixedPlace && AppModel.shared.ducksMode }
+    var duckPlace: DuckPlace?
+    /// The ducks and branches "Work with…" offers: the pond's, by its project.
+    var joinTargets: [DuckJoinTarget] {
+        guard let pid = pond?.projectId ?? main?.projectId else { return [] }
+        return DuckList.joinTargets(AppModel.shared.duckRows(pond: PondsModel.shared.key(forProject: pid)), excluding: nil)
+    }
     /// The chat holding Main right now, while the choice is Main.
     var busyMain: HostSession? { main.flatMap { AppModel.shared.busyMainChat($0) } }
     var showsBusyOffer: Bool { offer.shows(choice: choice, busy: busyMain) }
@@ -99,6 +108,7 @@ final class NewThreadState {
         noTarget = false
         images.clear()
         place = nil
+        duckPlace = nil
         conductorWorkspace = nil
         fixedPlace = conductorWorkspaceId != nil || (projectId != nil && workspaceId != nil)
         loading = true
@@ -192,8 +202,17 @@ final class NewThreadState {
                                                   workspaceId: place?.id, effort: form.effort,
                                                   permissionMode: NativeModes.permissionMode(form.mode),
                                                   split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
-                                                  isPrivate: pond.isPrivate, main: startsInMain)
+                                                  isPrivate: pond.isPrivate, main: ducksMode ? false : startsInMain, place: ducksMode ? duckPlace : nil)
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
+            } else if let main, ducksMode {
+                // Ducks mode: the daemon decides (main read-only, the duck branches itself) unless "Work with…" chose.
+                let spec = NativeNewSession(
+                    agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
+                    effort: form.effort, projectId: main.projectId, text: text,
+                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), place: duckPlace)
+                let (key, why) = await model.startNativeChat(spec)
+                started = key != nil
+                problem = why
             } else if let main, startsInMain || newStream {
                 // Main runs in the pond's own folder (no stream); "New stream" asks the host for one.
                 let spec = NativeNewSession(
@@ -288,7 +307,9 @@ struct NewThreadComposer: View {
     // MARK: Place
 
     @ViewBuilder private var placeLine: some View {
-        if let main = state.main, state.conductorWorkspace == nil, !state.fixedPlace {
+        if state.ducksMode, state.pond == nil, let main = state.main {
+            ducksLine(pond: main.pondName)
+        } else if let main = state.main, state.conductorWorkspace == nil, !state.fixedPlace {
             VStack(alignment: .leading, spacing: 8) {
                 inLine(main)
                 if state.showsBusyOffer, let busy = state.busyMain { busyOffer(busy) }
@@ -365,6 +386,47 @@ struct NewThreadComposer: View {
 
     /// A pond's Start a thread: "pond › stream", the stream picked from the pond's own (newest first, then New stream).
     @ViewBuilder private func pondPlaceLine(_ pond: PondThreadContext) -> some View {
+        if state.ducksMode, pond.ownerMac == nil { ducksLine(pond: pond.pondName) } else { streamPlaceLine(pond) }
+    }
+
+    /// Ducks mode: "pond › New duck", with an optional "Work with…" menu (a duck or branch of the pond). No "In:" picker.
+    private func ducksLine(pond name: String) -> some View {
+        let targets = state.joinTargets
+        let chosen = state.duckPlace
+        let label: String = {
+            switch chosen {
+            case .join(let id): return targets.first { $0.kind == .duck(id) }.map { "With \($0.title)" } ?? "With another duck"
+            case .joinBranch(let b): return "On \(b)"
+            default: return "New duck"
+            }
+        }()
+        return HStack(spacing: 8) {
+            Text(verbatim: name).foregroundStyle(Theme.muted).lineLimit(1)
+            Text("›").foregroundStyle(Theme.subtle)
+            if targets.isEmpty {
+                Text(verbatim: label).foregroundStyle(Theme.ink)
+            } else {
+                SqueakMenu {
+                    Button { state.duckPlace = nil; state.focus += 1 } label: { Label("New duck", systemImage: chosen == nil ? "checkmark" : "plus") }
+                    Divider()
+                    DuckWorkWithItems(targets: targets) { state.duckPlace = $0; state.focus += 1 }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(verbatim: label).foregroundStyle(Theme.ink).lineLimit(1)
+                        Lucide(.chevronDown, size: 12, color: Theme.muted)
+                    }
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel("\(label). Work with…")
+            }
+        }
+        .font(.system(size: 13))
+    }
+
+    @ViewBuilder private func streamPlaceLine(_ pond: PondThreadContext) -> some View {
         let label = state.place?.displayTitle ?? (pond.showsPicker ? "New stream" : "This folder")
         if let owner = pond.ownerMac {
             ownerPlaceLine(pond, owner: owner, label: label)

@@ -288,11 +288,11 @@ struct UserBubbleLayout: Layout {
     var content: Int
 
     private func bubbleWidth(_ proposal: ProposedViewSize) -> CGFloat {
-        (proposal.width ?? Metrics.workbenchColumn) * CGFloat(Tokens.Workbench.userBubbleMaxFraction)
+        TextHeightCache.usableWidth(proposal.width, fallback: Metrics.workbenchColumn) * CGFloat(Tokens.Workbench.userBubbleMaxFraction)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? Metrics.workbenchColumn
+        let width = TextHeightCache.usableWidth(proposal.width, fallback: Metrics.workbenchColumn)
         guard let bubble = subviews.first else { return CGSize(width: width, height: 0) }
         let w = bubbleWidth(proposal)
         let height = TextHeightCache.shared.height(for: .init(id: id, content: content, width: w)) {

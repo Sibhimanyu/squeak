@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { toClaudeCliModel } from "../adapters/claude-code.js";
@@ -10,6 +11,7 @@ import { ApiWaitTracker, STALL_DETAIL, stallMsFromEnv } from "./api-wait.js";
 import { ARTIFACT_TOOLS } from "./agent-settings.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
+import { isInside } from "./placement.js";
 import { READ_ONLY_TOOLS } from "./rules.js";
 import { ResumeFailedError, type RequestKind, type Runner, type RunnerHooks } from "./types.js";
 
@@ -120,6 +122,38 @@ export interface ClaudeRunnerOptions {
   autoCompactWindow?: number | null;
   /** The person allows their claude.ai account's connectors in Squeak chats (default off: the CLI is told not to load them). */
   claudeAiConnectors?: boolean;
+  /**
+   * Ducks own their branch: a folder this chat may not edit (a git pond's Main). Edit tools aimed inside it are refused
+   * in every mode, and "Skip approvals" and "Accept edits" are held at "Ask" so a shell command still asks.
+   */
+  readOnlyRoot?: string | null;
+}
+
+export const READ_ONLY_ROOT_REASON =
+  "Main is read-only for ducks. Call branch_off to get your own branch and working copy (or join_branch to share another duck's), then make the change there.";
+
+/** Tools that take a file path, and the input key it is under. */
+const EDIT_PATH_KEYS: Record<string, string> = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  Write: "file_path",
+  NotebookEdit: "notebook_path",
+};
+
+/** Why a tool call is refused in a read-only root, or null. A relative path is read against the chat's folder. */
+export function readOnlyDenial(
+  root: string | null | undefined,
+  cwd: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): string | null {
+  if (!root) return null;
+  const key = EDIT_PATH_KEYS[toolName];
+  if (!key) return null;
+  const raw = input[key];
+  if (typeof raw !== "string" || !raw) return READ_ONLY_ROOT_REASON;
+  const resolved = path.resolve(cwd, raw);
+  return isInside(root, resolved) ? READ_ONLY_ROOT_REASON : null;
 }
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
@@ -205,7 +239,7 @@ export class ClaudeRunner implements Runner {
     const executable = this.options.executable ?? requireAgentBinary("claude", { env: this.options.env });
     const options: Record<string, unknown> = {
       cwd: this.options.cwd,
-      permissionMode: this.mode,
+      permissionMode: this.effectiveMode(),
       // Launched able to switch to "Skip approvals" and back later; canUseTool reads the live mode.
       allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
@@ -220,8 +254,29 @@ export class ClaudeRunner implements Runner {
         PreToolUse: [
           {
             hooks: [
-              async () => {
+              async (input: unknown) => {
                 await this.gate;
+                // Read-only Main: a hook runs in every mode, "Skip approvals" included, so the refusal is certain.
+                const call = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+                const reason = readOnlyDenial(
+                  this.options.readOnlyRoot,
+                  this.options.cwd,
+                  typeof call.tool_name === "string" ? call.tool_name : "",
+                  (typeof call.tool_input === "object" && call.tool_input !== null ? call.tool_input : {}) as Record<
+                    string,
+                    unknown
+                  >,
+                );
+                if (reason) {
+                  return {
+                    continue: true,
+                    hookSpecificOutput: {
+                      hookEventName: "PreToolUse",
+                      permissionDecision: "deny",
+                      permissionDecisionReason: reason,
+                    },
+                  };
+                }
                 return { continue: true };
               },
             ],
@@ -621,13 +676,16 @@ export class ClaudeRunner implements Runner {
   ): Promise<Record<string, unknown>> {
     // Squeak's own tools act only inside Squeak, as this chat, with limits enforced by the host.
     if (isSqueakTool(toolName)) return { behavior: "allow", updatedInput: input };
+    const refused = readOnlyDenial(this.options.readOnlyRoot, this.options.cwd, toolName, input);
+    if (refused) return { behavior: "deny", message: refused };
     // Tools that only read never ask, in any mode.
     if (READ_ONLY_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     const kind = requestKindFor(toolName);
     // The chat's mode is read live on every call, so "Skip approvals" and back take effect at once.
     if (kind === "tool") {
-      if (this.mode === "bypassPermissions") return { behavior: "allow", updatedInput: input };
-      if (this.mode === "acceptEdits" && EDIT_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
+      const mode = this.effectiveMode();
+      if (mode === "bypassPermissions") return { behavior: "allow", updatedInput: input };
+      if (mode === "acceptEdits" && EDIT_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     }
     const payload = {
       toolName,
@@ -754,11 +812,18 @@ export class ClaudeRunner implements Runner {
     }
   }
 
+  /** The chat's mode, except that a read-only root never skips approvals or accepts edits unasked. */
+  private effectiveMode(): string {
+    return this.options.readOnlyRoot && (this.mode === "bypassPermissions" || this.mode === "acceptEdits")
+      ? "default"
+      : this.mode;
+  }
+
   async setPermissionMode(mode: string): Promise<void> {
     this.mode = mode;
     if (!this.query) return;
     try {
-      await this.query.setPermissionMode(mode);
+      await this.query.setPermissionMode(this.effectiveMode());
     } catch (error) {
       // The live check in canUseTool already follows the new mode; the CLI itself catches up on a restart.
       logger.warn("claude setPermissionMode refused; restarting at the next idle point", {

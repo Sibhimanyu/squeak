@@ -132,6 +132,12 @@ export interface ObservedSession {
   /** A native chat's stream title ("Detached HEAD Duck"), what people read instead of its folder slug; absent elsewhere. */
   workspaceTitle?: string;
   branch: string | null;
+  /** A native chat's duck (`ducks.id`), when ducks own their branch; absent elsewhere. */
+  duckId?: string;
+  /** That duck's name (its own, else its chat's title), for a card's "Duck · branch". */
+  duckName?: string;
+  /** The chat works in the pond's own folder (Main), not on a branch. Set with `duckId`. */
+  onMain?: true;
   title: string | null;
   state: FleetState;
   /** Human-readable "what is it doing / waiting on", shown on the card. */

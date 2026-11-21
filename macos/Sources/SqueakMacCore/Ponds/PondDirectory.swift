@@ -32,11 +32,15 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         public var archivedStreams: Int
         public var counts: Counts
         public var folder: String?
+        /// The daemon's word for how this person belongs (`owner`, `remote`, `git`); nil from a daemon that does not say.
+        public var access: PondMembership?
 
         public var isJoined: Bool { kind == "joined" }
+        /// `access`, else `owner` for an own pond and `remote` for a joined one.
+        public var membership: PondMembership { access ?? (isJoined ? .remote : .owner) }
 
         enum CodingKeys: String, CodingKey {
-            case id, kind, name, projectId, pondId, shared, members, hidden, colour, labels, lastActivityAt, streams, archivedStreams, counts, folder
+            case id, kind, name, projectId, pondId, shared, members, hidden, colour, labels, lastActivityAt, streams, archivedStreams, counts, folder, access
         }
 
         public init(from decoder: Decoder) throws {
@@ -56,13 +60,14 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
             archivedStreams = (try? c.decode(Int.self, forKey: .archivedStreams)) ?? 0
             counts = (try? c.decode(Counts.self, forKey: .counts)) ?? Counts()
             folder = try? c.decode(String.self, forKey: .folder)
+            access = (try? c.decode(String.self, forKey: .access)).flatMap(PondMembership.init(rawValue:))
         }
 
         public init(id: String, kind: String = "project", name: String, projectId: String? = nil, pondId: String? = nil, shared: Bool = false,
-                    hidden: Bool = false, labels: [String] = [], streams: [Stream] = [], folder: String? = nil, lastActivityAt: String? = nil) {
+                    hidden: Bool = false, labels: [String] = [], streams: [Stream] = [], folder: String? = nil, lastActivityAt: String? = nil, access: PondMembership? = nil) {
             self.id = id; self.kind = kind; self.name = name; self.projectId = projectId; self.pondId = pondId; self.shared = shared
             self.members = []; self.hidden = hidden; self.colour = nil; self.labels = labels; self.lastActivityAt = lastActivityAt
-            self.streams = streams; self.archivedStreams = 0; self.counts = Counts(); self.folder = folder
+            self.streams = streams; self.archivedStreams = 0; self.counts = Counts(); self.folder = folder; self.access = access
         }
     }
 
@@ -87,8 +92,12 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
     public var other: [String]
     /// Whether a member may run their own agent on their own Mac (stashed: absent from an older host, false by default now).
     public var pondOwnThreads: Bool?
+    /// Flag `ducksOwnBranch`: ducks, not streams, are the pond's units and each owns its branch. Absent = off (today's UI).
+    public var ducksOwnBranch: Bool?
+    public var ducksMode: Bool { ducksOwnBranch == true }
 
-    public init(schema: Int = 1, ponds: [Pond] = [], order: Order = Order(), threads: [String: String?] = [:], other: [String] = [], pondOwnThreads: Bool? = nil) {
+    public init(schema: Int = 1, ponds: [Pond] = [], order: Order = Order(), threads: [String: String?] = [:], other: [String] = [], pondOwnThreads: Bool? = nil, ducksOwnBranch: Bool? = nil) {
+        self.ducksOwnBranch = ducksOwnBranch
         self.schema = schema; self.ponds = ponds; self.order = order; self.threads = threads; self.other = other; self.pondOwnThreads = pondOwnThreads
     }
 
@@ -100,8 +109,9 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         threads = (try? c.decode([String: String?].self, forKey: .threads)) ?? [:]
         other = (try? c.decode([String].self, forKey: .other)) ?? []
         pondOwnThreads = try? c.decode(Bool.self, forKey: .pondOwnThreads)
+        ducksOwnBranch = try? c.decode(Bool.self, forKey: .ducksOwnBranch)
     }
-    enum CodingKeys: String, CodingKey { case schema, ponds, order, threads, other, pondOwnThreads }
+    enum CodingKeys: String, CodingKey { case schema, ponds, order, threads, other, pondOwnThreads, ducksOwnBranch }
 
     public func pond(id: String) -> Pond? { ponds.first { $0.id == id } }
     public func pond(projectId: String) -> Pond? { ponds.first { $0.projectId == projectId } }

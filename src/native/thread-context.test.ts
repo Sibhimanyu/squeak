@@ -250,3 +250,36 @@ describe("host sender lines", () => {
     expect(note).toContain("stream Detached HEAD Duck (folder name ushuaia)");
   });
 });
+
+describe("placement lines (ducks own their branch)", () => {
+  const branches = [
+    {
+      branch: "sibhi/login",
+      title: "Login",
+      ducks: ["Quiet Creek", "Staff Otter"],
+      lastActiveAt: Date.now() - 5 * 60_000,
+    },
+    { branch: "sibhi/billing", title: "Billing", ducks: [], lastActiveAt: Date.now() - 3 * 3600_000 },
+  ];
+
+  it("Main: read-only, the active branches with ducks and age, the three tools", () => {
+    const note = buildThreadContext({ ...input, agent: "claude", placement: { mode: "main", branches } });
+    expect(note).toContain("Main is read-only for ducks");
+    expect(note).toMatch(/- sibhi\/login: Login; ducks: Quiet Creek, Staff Otter; active 5 min ago/);
+    expect(note).toMatch(/- sibhi\/billing: Billing; no duck on it now; active 3 h ago/);
+    for (const tool of ["branch_off", "join_branch", "move_to_main"]) expect(note).toContain(tool);
+  });
+
+  it("a branch: shared working copy, concurrent edits; no branches yet says so", () => {
+    const note = buildThreadContext({ ...input, agent: "codex", placement: { mode: "branch", branches: [] } });
+    expect(note).toContain("work on branch sibhi/ushuaia");
+    expect(note).toContain("share this folder and may edit at the same time");
+    expect(note).toContain("no active branches");
+    expect(note).not.toContain("Main is read-only for ducks");
+  });
+
+  it("absent without the flag: the note is unchanged", () => {
+    const note = buildThreadContext({ ...input, agent: "claude" });
+    for (const word of ["branch_off", "join_branch", "move_to_main", "read-only"]) expect(note).not.toContain(word);
+  });
+});

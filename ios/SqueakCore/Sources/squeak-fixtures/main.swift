@@ -38,6 +38,8 @@ let (nativeStartId, nativeStartDocument) = try channel.nativeStartDocument(
 let (pondHideId, pondHideDocument) = try channel.pondDocument(.hide(pondId: "p-shop", hidden: true), signer: signer, now: madeAt)
 let (pondOrderId, pondOrderDocument) = try channel.pondDocument(.orderManual(ids: ["proj-docs", "proj-shop"]), signer: signer, now: madeAt)
 let (pondNewestId, pondNewestDocument) = try channel.pondDocument(.orderNewest, signer: signer, now: madeAt)
+let (pondLeaveId, pondLeaveDocument) = try channel.pondDocument(.leave(pondId: "p-theirs"), signer: signer, now: madeAt)
+let (duckPlaceId, duckPlaceDocument) = try channel.pondDocument(.duckPlace(duckId: "duck-1", place: .new(branch: "try-two"), message: "plan it"), signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
@@ -184,6 +186,10 @@ var fixture: [String: Any] = [
     "pondHideCommand": ["box": pondHideDocument.box, "sig": pondHideDocument.sig!, "device": pondHideDocument.device!],
     "pondOrderCommandId": pondOrderId,
     "pondOrderCommand": ["box": pondOrderDocument.box, "sig": pondOrderDocument.sig!, "device": pondOrderDocument.device!],
+    "pondLeaveCommandId": pondLeaveId,
+    "pondLeaveCommand": ["box": pondLeaveDocument.box, "sig": pondLeaveDocument.sig!, "device": pondLeaveDocument.device!],
+    "pondDuckPlaceCommandId": duckPlaceId,
+    "pondDuckPlaceCommand": ["box": duckPlaceDocument.box, "sig": duckPlaceDocument.sig!, "device": duckPlaceDocument.device!],
     "pondNewestCommandId": pondNewestId,
     "pondNewestCommand": ["box": pondNewestDocument.box, "sig": pondNewestDocument.sig!, "device": pondNewestDocument.device!],
     "nativeStartCommandId": nativeStartId,
