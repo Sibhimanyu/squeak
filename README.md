@@ -220,7 +220,7 @@ path. Local Mac development tests:
 (cd ios/SqueakCore && swift test)
 ```
 
-Read [`CLAUDE.md`](CLAUDE.md) for engineering context and [`DESIGN.md`](DESIGN.md)
+Read [`AGENTS.md`](AGENTS.md) (index into `docs/agents/`) for engineering context and [`DESIGN.md`](DESIGN.md)
 for the shared design system. Additional guides cover
 [the web client](docs/web-app.md), [questions and plans](docs/answering-questions.md)
 and [RasanAI workflow integration](docs/rasanai-plugin.md).

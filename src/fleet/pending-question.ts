@@ -5,7 +5,7 @@ import { asArray, asRecord, asString, summarize } from "./observers/tail.js";
  * until they answer. This is a *question*, not a permission approval: the
  * tool_use is written to the transcript before the prompt appears, so a
  * pending one is readable from a file. (A permission prompt is never written;
- * that stays hook-only — see CLAUDE.md, "Transcripts cannot record an
+ * that stays hook-only — see docs/agents/fleet.md, "Transcripts cannot record an
  * approval prompt".)
  */
 export const QUESTION_TOOLS: ReadonlySet<string> = new Set([

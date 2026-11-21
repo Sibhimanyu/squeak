@@ -211,7 +211,7 @@ export async function ensureBackstop(options: {
   fs.writeFileSync(plistPath, plist);
   if (loaded) {
     await launchctl(["bootout", `${domain}/${BACKSTOP_LABEL}`]);
-    // bootout is asynchronous; bootstrapping straight after it fails (CLAUDE.md).
+    // bootout is asynchronous; bootstrapping straight after it fails (docs/agents/runtime.md).
     await new Promise((resolve) => setTimeout(resolve, 1_500));
   }
   if (!(await launchctl(["bootstrap", domain, plistPath]))) {

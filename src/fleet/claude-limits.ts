@@ -12,7 +12,7 @@ export interface ClaudeLimitWindow {
  *
  * A manual Refresh asks Claude's usage endpoint with Claude Code's own
  * sign-in (`claude-usage-api.ts`, no model call). Passively, Claude Code never
- * writes these to disk (see CLAUDE.md): they also appear
+ * writes these to disk (see docs/agents/usage-and-cost.md): they also appear
  * as a `rate_limit_event` in the live stream-json output of a process that
  * spawned the CLI. Squeak spawns one for every plain-language question it
  * answers (`assistant.ts`), so it reads the event off that output — a
