@@ -14,6 +14,17 @@ public final class TranscriptScrollFollower: NSView {
     /// Told (async, never during a SwiftUI update) whenever following flips, and once after attaching.
     public var onFollowChange: (Bool) -> Void = { _ in }
 
+    /// Where chats were left (`ChatScrollMemory`), by chat.
+    public static var scrollMemory = ChatScrollMemory()
+    /// Set before the view attaches: the chat's key and its first and last row ids (kept current while it is open).
+    public var memoryKey: String?
+    public var firstRow: String?
+    public var lastRow: String?
+    /// Told once after attaching when the chat was put back mid-scroll; `true` when rows arrived while it was away.
+    public var onPlaced: (Bool) -> Void = { _ in }
+    /// The saved distance from the top still being put back while the layout settles.
+    private var pendingTop: Double?
+
     private weak var scrollView: NSScrollView?
     private var applying = false
     private var recheckScheduled = false
@@ -55,8 +66,59 @@ public final class TranscriptScrollFollower: NSView {
         nc.addObserver(self, selector: #selector(clipBoundsChanged), name: NSView.boundsDidChangeNotification, object: sv.contentView)
         nc.addObserver(self, selector: #selector(liveScrollStarted), name: NSScrollView.willStartLiveScrollNotification, object: sv)
         nc.addObserver(self, selector: #selector(liveScrollEnded), name: NSScrollView.didEndLiveScrollNotification, object: sv)
-        apply(model.handle(.opened))
-        report(force: true)
+        let resolution = memoryKey.map { ChatScrollMemory.resolve(Self.scrollMemory.snapshot(for: $0), firstRow: firstRow, lastRow: lastRow) } ?? .follow
+        switch resolution {
+        case .follow:
+            apply(model.handle(.opened))
+            report(force: true)
+        case .place(let top, let newBelow):
+            // Reopened where the reader was: not following, and the layout lands over a few passes, so it is put back on each.
+            model.handle(.userScrolled(distanceFromBottom: .greatestFiniteMagnitude))
+            pendingTop = top
+            placePending()
+            report(force: true)
+            DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.onPlaced(newBelow) } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in MainActor.assumeIsolated { self?.finishPlacing() } }
+        }
+    }
+
+    public override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil { saveMemory() }
+        super.viewWillMove(toSuperview: newSuperview)
+    }
+
+    /// Writes where the reader is into `scrollMemory`. While a saved place is still being put back, that place stays.
+    public func saveMemory() {
+        guard let key = memoryKey, let sv = scrollView, pendingTop == nil else { return }
+        let clip = sv.contentView
+        let top = Double(clip.bounds.origin.y - clip.documentRect.minY)
+        Self.scrollMemory.save(
+            .init(following: model.following, fromTop: max(0, top), firstRow: firstRow, lastRow: lastRow), for: key)
+    }
+
+    /// Puts the viewport the saved distance from the top; done once the content is tall enough to hold it.
+    private func placePending() {
+        guard let want = pendingTop, let sv = scrollView else { return }
+        let clip = sv.contentView
+        let doc = clip.documentRect
+        var origin = clip.bounds.origin
+        origin.y = doc.minY + CGFloat(want)
+        origin = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
+        if abs(origin.y - clip.bounds.origin.y) > 0.5 {
+            applying = true
+            clip.scroll(to: origin)
+            sv.reflectScrolledClipView(clip)
+            applying = false
+        }
+        if Double(doc.height - clip.bounds.height) >= want - 0.5 { finishPlacing() }
+    }
+
+    private func finishPlacing() {
+        guard pendingTop != nil, let sv = scrollView else { pendingTop = nil; return }
+        pendingTop = nil
+        // Back within reach of the end counts as being on it.
+        model.handle(.userScrolled(distanceFromBottom: distanceFromBottom(sv)))
+        report()
     }
 
     // MARK: From SwiftUI
@@ -64,8 +126,10 @@ public final class TranscriptScrollFollower: NSView {
     /// The jump button / a message just sent: bumping the token re-attaches. A first sighting of the token is not a jump.
     public func update(jumpToken: Int, holdPlace: Bool) {
         if let last = lastJumpToken, last != jumpToken {
+            pendingTop = nil
             apply(model.handle(.jumpTapped))
             report()
+            saveMemory()
         }
         lastJumpToken = jumpToken
         if holdPlace != holding {
@@ -104,8 +168,10 @@ public final class TranscriptScrollFollower: NSView {
     /// The reader moved the view: where they are now decides whether the end is followed.
     func noteUserScroll() {
         guard let sv = scrollView else { return }
+        pendingTop = nil
         model.handle(.userScrolled(distanceFromBottom: distanceFromBottom(sv)))
         report()
+        saveMemory()
     }
 
     @objc private func liveScrollStarted(_ note: Notification) { liveScrolling = true }
@@ -115,20 +181,23 @@ public final class TranscriptScrollFollower: NSView {
         guard let sv = scrollView else { return }
         apply(model.handle(.userScrollEnded(distanceFromBottom: distanceFromBottom(sv))))
         report()
+        saveMemory()
     }
 
     /// Content grew, shrank or moved. While the reader's own scroll is in flight nothing is moved under them.
     public func contentChanged() {
         guard let sv = scrollView, !applying, !liveScrolling else { return }
+        placePending()
         apply(model.handle(.contentChanged))
         // Layout can land a moment after the frame notification: look once more next turn (idempotent, one per frame).
-        guard !recheckScheduled, model.following || model.held != nil else { return }
+        guard !recheckScheduled, model.following || model.held != nil || pendingTop != nil else { return }
         recheckScheduled = true
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.recheckScheduled = false
                 guard self.scrollView != nil, !self.liveScrolling else { return }
+                self.placePending()
                 self.apply(self.model.handle(.contentChanged))
             }
         }

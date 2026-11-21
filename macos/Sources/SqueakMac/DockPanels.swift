@@ -46,7 +46,10 @@ struct CodePanelView: View {
     /// A tab that is its own strip tab (beside a pond page): the sub-tab row is not the person's to change.
     var fixedTab: InspectorTab?
     @Environment(AppModel.self) private var model
-    @AppStorage("inspectorTab") private var tabRaw = InspectorTab.changes.rawValue
+    @AppStorage(InspectorTabMemory.defaultsKey) private var memoryRaw = ""
+    @AppStorage(InspectorTabMemory.fallbackKey) private var globalTabRaw = InspectorTab.changes.rawValue
+    /// The sub-tab this workspace last used (the global default for one that never chose).
+    private var tabRaw: String { InspectorTabMemory.resolve(memoryRaw, workspace: model.focus.workspace, fallback: globalTabRaw) }
     @AppStorage("changesAsTree") private var asTree = false
     @State private var searching = false
     @State private var query = ""
@@ -73,7 +76,7 @@ struct CodePanelView: View {
     private var tabRow: some View {
         HStack(spacing: 2) {
             ForEach(InspectorTab.available(native: native)) { t in
-                Button { tabRaw = t.rawValue } label: {
+                Button { InspectorTabMemory.write(t.rawValue, workspace: model.focus.workspace) } label: {
                     HStack(spacing: 5) {
                         Text(t.title).font(.system(size: 14, weight: tab == t ? .medium : .regular))
                             .foregroundStyle(tab == t ? Theme.ink : Theme.muted)

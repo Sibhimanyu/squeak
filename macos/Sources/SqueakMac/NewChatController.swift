@@ -17,13 +17,6 @@ struct NativeSheetPreset: Equatable {
 @MainActor @Observable
 final class NewChatController {
     static let shared = NewChatController()
-    enum Page: Equatable {
-        case quickMessage, newPond, newBranch, newThread
-        /// The sidebar's top "Create" row is the New pond page.
-        static let create = Page.newPond
-        static let newChat = Page.newThread
-    }
-    var page: Page?
     let quickState = QuickState()
     let pond = NewPondState()
     let branch = NewBranchState()
@@ -31,10 +24,6 @@ final class NewChatController {
 
     func open(_ route: NewPage, text: String? = nil, error: String? = nil, pondThread: PondThreadContext? = nil) {
         let model = AppModel.shared
-        hide()
-        model.closeSettings()
-        if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = nil
         // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
         var (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
         // And a thread needs a stream (or a git pond's Main): with none, the create-stream page opens, never an unstartable one.
@@ -58,20 +47,25 @@ final class NewChatController {
         case .pond:
             pond.reset()
             pond.notice = needsPond ? NewPages.makePondFirst : nil
-            page = .newPond
+            enter(.newPond)
         case .branch(let projectId, let source):
             branch.prepare(model: model, projectId: projectId, preset: source)
             if let error { branch.error = error }
-            page = .newBranch
+            enter(.newBranch, projectId: projectId)
         case .thread(let projectId, let workspaceId):
             thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread,
                            contextPond: projectId == nil && workspaceId == nil && pondThread == nil)
-            page = .newThread
+            enter(.newThread, projectId: projectId, workspaceId: workspaceId)
         case .conductorThread(let workspaceId):
             thread.prepare(model: model, route: route, conductorWorkspaceId: workspaceId)
-            page = .newThread
+            enter(.newThread, workspaceId: workspaceId)
         }
         model.showConversationWindow()
+    }
+
+    /// Shows a creation page aimed at the pond (by its directory key) and workspace it targets.
+    private func enter(_ page: ComposePage, projectId: String? = nil, workspaceId: String? = nil) {
+        AppModel.shared.location = .compose(page, pond: projectId.map { PondsModel.shared.key(forProject: $0) }, workspace: workspaceId)
     }
 
     /// Opens New thread on a branch the host just made (or, with an error, on its pond).
@@ -89,25 +83,65 @@ final class NewChatController {
 
     func showQuickMessage() {
         let model = AppModel.shared
-        hide()
-        model.closeSettings()
-        quickState.prepare(model: model, explicit: model.selected)
+        quickState.prepare(model: model, explicit: model.focus.chat)
         quickState.focus += 1
-        page = .quickMessage
+        model.location = .compose(.quickMessage, pond: nil, workspace: nil)
         model.showConversationWindow()
     }
 
-    func hide() {
-        if page == .quickMessage {
-            quickState.stashDraft()
-            quickState.epoch += 1
-            quickState.context.clear()
-        }
-        page = nil
+    /// Closes the creation page on screen, if any.
+    func hide() { AppModel.shared.closeComposePage() }
+
+    /// The quick message page was left, by any way out: its draft is kept for the next time.
+    func quickMessageClosed() {
+        quickState.stashDraft()
+        quickState.epoch += 1
+        quickState.context.clear()
     }
 }
 
 extension AppModel {
+    typealias StripPlace = (project: SidebarProject, workspace: SidebarWorkspace)
+
+    /// The workspace a chat's tab belongs to: where the sidebar lists it, else the workspace of its folder (a chat just
+    /// started, which the list does not carry yet).
+    func stripPlace(of key: SessionKey) -> StripPlace? {
+        if let p = sidebarTree.place(of: key) ?? pondPageTree.place(of: key) { return p }
+        return session(key)?.cwd.flatMap { stripPlace(cwd: $0) }
+    }
+
+    /// The workspace whose chats run in `cwd`.
+    func stripPlace(cwd: String) -> StripPlace? {
+        guard !cwd.isEmpty else { return nil }
+        for tree in [sidebarTree, pondPageTree] {
+            for project in tree.projects {
+                if let w = project.workspaces.first(where: { $0.chats.contains { $0.cwd == cwd } }) { return (project, w) }
+            }
+        }
+        // A brand-new workspace has no chat listed yet: its own row stands in, so the strip shows at once.
+        if let w = git.workspaces.first(where: { $0.path == cwd }), let p = native.projects.first(where: { $0.id == w.projectId }) {
+            return StripPlaceFromRow.place(project: p, workspace: w)
+        }
+        if let p = native.projects.first(where: { MainPlace.samePath($0.rootPath, cwd) }), !p.isPlainFolder {
+            return StripPlaceFromRow.place(project: p, workspace: nil)
+        }
+        return nil
+    }
+
+    /// The workspace the centre's header and tab strip show for `location`: a chat's own, or the one a New thread page
+    /// targets (a named stream, a pond's Main, else the open chat's). Nil elsewhere, and nil for a pond's own thread.
+    func centreStripPlace(for location: WorkbenchLocation) -> StripPlace? {
+        switch location {
+        case .chat(let key): return stripPlace(of: key)
+        case .compose(.newThread, let pond, let workspace):
+            if let workspace, let path = git.workspaces.first(where: { $0.id == workspace })?.path { return stripPlace(cwd: path) }
+            if let pond, let root = native.projects.first(where: { PondsModel.shared.key(forProject: $0.id) == pond })?.rootPath { return stripPlace(cwd: root) }
+            guard pond == nil, workspace == nil, NewChatController.shared.thread.pond == nil else { return nil }
+            return lastChat.flatMap { stripPlace(of: $0) }
+        default: return nil
+        }
+    }
+
     /// The sidebar's top "Create".
     func openNewPond() { NewChatController.shared.open(NewPages.page(for: .sidebarCreate)) }
 
@@ -146,7 +180,7 @@ struct DesktopComposePage: View {
     let controller = NewChatController.shared
 
     var body: some View {
-        switch controller.page {
+        switch AppModel.shared.focus.composePage {
         case .newThread:
             NewThreadPage(state: controller.thread)
         case .newBranch:
@@ -239,17 +273,23 @@ extension AppModel {
         return result
     }
 
+    /// Opens the new chat once the list carries it: the list's key-set change calls `openListedWaiters`; the 15 s is a timeout only.
     func openWhenListed(sessionId: String) {
-        Task { [weak self] in
-            let end = Date().addingTimeInterval(15)
-            while Date() < end {
-                if let s = self?.sessions.first(where: { $0.key.hostSessionId == sessionId }) {
-                    self?.open(s.key)
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(300))
-            }
+        if let s = sessions.first(where: { $0.key.hostSessionId == sessionId }) { open(s.key); return }
+        awaitingList[sessionId]?.cancel()
+        awaitingList[sessionId] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled, let self, awaitingList.removeValue(forKey: sessionId) != nil else { return }
             AppLog.info("new chat not listed within 15s")
+        }
+    }
+
+    func openListedWaiters() {
+        for (id, timeout) in awaitingList {
+            guard let s = sessions.first(where: { $0.key.hostSessionId == id }) else { continue }
+            timeout.cancel()
+            awaitingList[id] = nil
+            open(s.key)
         }
     }
 }

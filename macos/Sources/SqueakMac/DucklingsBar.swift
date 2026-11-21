@@ -16,16 +16,28 @@ struct DucklingsBar: View {
 
     var body: some View {
         // Finished chips leave once the agent has their report (or 20 s on); the whole bar goes with the last one.
-        TimelineView(.periodic(from: .now, by: 5)) { context in
-            let text = DucklingWords.barText(set, now: context.date)
-            let chips = set.barItems(now: context.date)
+        // While one runs nothing expires, so the bar is plain (rebuilt only when the set changes) and only each chip's elapsed text ticks.
+        // Once none runs, finished chips expire by time: only then does a slow timeline wrap the bar.
+        Group {
+            if set.running == 0 {
+                TimelineView(.periodic(from: .now, by: 5)) { context in content(now: context.date) }
+            } else {
+                content(now: Date())
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private func content(now: Date) -> some View {
+        let text = DucklingWords.barText(set, now: now)
+        let chips = set.barItems(now: now)
             Group {
                 if let text {
                     HStack(spacing: Space.s) {
                         DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.sidebarRow).accessibilityHidden(true)
                         Text(verbatim: readyLine ?? text).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) { ForEach(chips) { chip($0, now: context.date).transition(.opacity) } }
+                            HStack(spacing: 6) { ForEach(chips) { chip($0).transition(.opacity) } }
                         }
                         if let onStop {
                             Button("Stop", action: onStop)
@@ -41,17 +53,15 @@ struct DucklingsBar: View {
             }
             .animation(Motion.standard, value: chips.map(\.id))
             .animation(Motion.standard, value: text == nil)
-        }
-        .accessibilityElement(children: .contain)
     }
 
-    private func chip(_ d: Duckling, now: Date) -> some View {
+    private func chip(_ d: Duckling) -> some View {
         let ref = DucklingRef(session: session.key, taskId: d.id)
         let open = DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .centre] == ref
         return Button { DockStore.shared.openDuckling(ref) } label: {
             HStack(spacing: 5) {
                 DucklingStatusMark(duckling: d)
-                Text(verbatim: d.chipText(now: now)).lineLimit(1)
+                ChipText(duckling: d)
             }
             .font(Typo.meta).foregroundStyle(d.status == .failed ? Theme.negative : Theme.muted)
             .padding(.horizontal, 8).frame(height: 24)
@@ -62,6 +72,18 @@ struct DucklingsBar: View {
         .buttonStyle(.plain)
         .help("Watch this duckling")
         .accessibilityLabel("\(d.title), \(d.statusWord)")
+    }
+}
+
+/// A chip's text; only a running chip's elapsed time ticks, in this leaf.
+private struct ChipText: View {
+    let duckling: Duckling
+    var body: some View {
+        if duckling.status == .running {
+            TimelineView(.periodic(from: .now, by: 5)) { Text(verbatim: duckling.chipText(now: $0.date)).lineLimit(1) }
+        } else {
+            Text(verbatim: duckling.chipText()).lineLimit(1)
+        }
     }
 }
 

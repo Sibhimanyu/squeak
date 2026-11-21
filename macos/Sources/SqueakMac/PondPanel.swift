@@ -105,7 +105,7 @@ struct PondPanel: View {
     private func open(_ r: PondGlance.NowRow, key: String) {
         if let k = r.localKey { model.select(k); return }
         if let id = r.threadId, let pond = PondsModel.shared.pond(key: key) {
-            PondsModel.shared.route = .thread(project: key, pondId: pond.id, threadId: id)
+            AppModel.shared.openPond(.thread(project: key, pondId: pond.id, threadId: id))
         }
     }
 
@@ -130,7 +130,7 @@ struct PondPanel: View {
             } else if detail == nil, let pond = PondsModel.shared.pond(key: key) {
                 Button("Invite") { PondsModel.shared.startInvite(pondId: pond.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
             }
-            Button("Open dashboard") { PondsModel.shared.route = .home(project: key) }.buttonStyle(SecondaryButtonStyle())
+            Button("Open dashboard") { AppModel.shared.openPondHome(key) }.buttonStyle(SecondaryButtonStyle())
             Spacer(minLength: 0)
         }
         .padding(Space.m)

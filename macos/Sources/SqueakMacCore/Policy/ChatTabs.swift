@@ -17,7 +17,7 @@ public enum ChatTabs {
     public static func canClose(shown: Int) -> Bool { shown >= 1 }
 
     /// Where closing the stream's only chat tab leads: to a file or review tab open in the same stream, else the
-    /// pond's overview page (the stream row is then not highlighted: `SidebarSelection`).
+    /// pond's overview page.
     public enum AfterLast: Equatable, Sendable { case showFile, pondPage }
     public static func afterClosingLast(fileTabOpen: Bool) -> AfterLast { fileTabOpen ? .showFile : .pondPage }
 

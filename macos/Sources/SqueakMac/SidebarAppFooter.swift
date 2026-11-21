@@ -213,10 +213,7 @@ struct SidebarAppFooter: View {
 
     @ViewBuilder private var spinningRefresh: some View {
         if phase == .checking && !reduceMotion {
-            TimelineView(.animation) { ctx in
-                Lucide(.refreshCw, size: 16, color: Theme.ink)
-                    .rotationEffect(.degrees(ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
-            }
+            SpinningIcon { Lucide(.refreshCw, size: 16, color: Theme.ink) }
         } else {
             Lucide(.refreshCw, size: 16, color: phase == .checking ? Theme.ink : Theme.muted)
         }
@@ -258,5 +255,16 @@ struct SidebarAppFooter: View {
             Lucide(name, size: 16, color: Theme.muted).frame(width: 26, height: 28).contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(label).help(label)
+    }
+}
+
+/// Spins its content on Core Animation (no per-frame SwiftUI work); only mounted while spinning.
+private struct SpinningIcon<Content: View>: View {
+    @ViewBuilder let content: Content
+    @State private var spin = false
+    var body: some View {
+        content
+            .rotationEffect(.degrees(spin ? 360 : 0))
+            .onAppear { withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { spin = true } }
     }
 }

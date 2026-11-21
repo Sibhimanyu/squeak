@@ -92,12 +92,12 @@ struct ChatPresetMenuTests {
 
 struct TranscriptBottomInsetTests {
     @Test func pillAddsNoBlankRow() {
-        // The pill sits inside the fade's height, so showing it never grows the padding.
+        // The pill is in the dock's own row, so showing it reserves nothing extra.
         #expect(TranscriptBottomInset.value(base: 16, pillShown: true) == TranscriptBottomInset.value(base: 16, pillShown: false))
         #expect(TranscriptBottomInset.value(base: 16, pillShown: false) == DockFade.height + 8)
     }
     @Test func neverLessThanBaseOrPill() {
         #expect(TranscriptBottomInset.value(base: 200, pillShown: true) == 200)
-        #expect(TranscriptBottomInset.value(base: 0, pillShown: true) >= TranscriptBottomInset.pillHeight + TranscriptBottomInset.pillGap)
+        #expect(TranscriptBottomInset.value(base: 0, pillShown: true) == DockFade.height + 8)
     }
 }

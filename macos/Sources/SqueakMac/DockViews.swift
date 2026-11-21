@@ -556,7 +556,7 @@ struct DockZoneBody: View {
             } else if let shell {
                 TerminalPanelView(session: session, shell: shell)
             } else if let key = DockStore.shared.threads.selected[zone], let t = model.allSessions.first(where: { $0.key.stringValue == key }) {
-                if model.selected == t.key {
+                if model.lastChat == t.key {
                     SessionDetail(session: t).id(t.key)
                 } else {
                     Button("Open “\(model.workbenchTitle(t))” here") { model.select(t.key) }.buttonStyle(.plain)

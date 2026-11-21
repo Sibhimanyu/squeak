@@ -45,7 +45,7 @@ struct PondRouteView: View {
             case .home(let project):
                 if let waiting = PondsModel.shared.pond(key: project), PondStates.isGreyedRow(waiting) {
                     ScrollView {
-                        JoinWaitingCard(pond: waiting) { PondsModel.shared.route = nil }
+                        JoinWaitingCard(pond: waiting) { AppModel.shared.closePondPage() }
                             .frame(maxWidth: 520).padding(Space.xl).frame(maxWidth: .infinity, alignment: .top)
                     }.screen("Pond")
                 } else {
@@ -390,7 +390,7 @@ struct PondHomeView: View {
             }
             return
         }
-        ponds.route = nil
+        AppModel.shared.closePondPage()
         if let native {
             if MainPlace(project: native) != nil {
                 // A git pond starts in Main, its own folder; the "In:" control above the message picks a stream instead.
@@ -421,7 +421,7 @@ struct PondHomeView: View {
         if let tab = r.local {
             model.openFromPond(tab, pond: key, page: .dashboard)
         } else if let p = pond, let id = r.pondThread {
-            ponds.route = .thread(project: key, pondId: p.id, threadId: id)
+            AppModel.shared.openPond(.thread(project: key, pondId: p.id, threadId: id))
         }
     }
 

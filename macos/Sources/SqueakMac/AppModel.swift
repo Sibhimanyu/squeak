@@ -82,7 +82,7 @@ final class AppModel {
 
     // MARK: Catalog and connection
     /// What the host's catalog last said, untouched: the optimistic overlay and the status observers read this.
-    private(set) var hostSessions: [HostSession] = [] { didSet { overlayCache.invalidate(); refreshClaudeActivity(); inputsChanged() } }
+    private(set) var hostSessions: [HostSession] = [] { didSet { overlayCache.invalidate(); refreshClaudeActivity(); inputsChanged(); sessionsListChanged() } }
     /// What Claude itself is doing in the open Squeak chat, read from its timeline (`ClaudeActivity`, one definition).
     /// Held as a small value so the lists below re-read only when it changes, not on every step of the turn.
     private(set) var openClaudeActivity: ClaudeActivity.Open? { didSet { if openClaudeActivity != oldValue { overlayCache.invalidate(); inputsChanged() } } }
@@ -97,6 +97,21 @@ final class AppModel {
         if next != openClaudeActivity { openClaudeActivity = next }
     }
     @ObservationIgnored private var overlayCache = OverlayCache()
+    /// The keys (and archived keys) of the host's list, and a revision that moves only when they do (a swap counts,
+    /// a state change does not): pruning, the directory read and the tab strip's chat-open check key on it.
+    @ObservationIgnored var sessionSet = RevisionTracker(SessionSetSignature())
+    var sessionKeysRevision = 0
+    /// Moves when the host's project list changes (its ids, names, icons).
+    var nativeProjectsRevision = 0
+    /// Moves when a project or a native chat appears or goes: the pond directory says where each one sits.
+    @ObservationIgnored var directorySignature = RevisionTracker<[String]>([])
+    var directoryRevision = 0
+    /// Chats just started whose tab opens as soon as the list carries them (`openWhenListed`), each with its 15 s timeout.
+    @ObservationIgnored var awaitingList: [String: Task<Void, Never>] = [:]
+    /// The long-lived loops the app owns (`startLoops`), not any view: the live-steps one restarts when the first read lands.
+    @ObservationIgnored var loopTasks: [Task<Void, Never>] = []
+    @ObservationIgnored var liveStepsTask: Task<Void, Never>?
+    @ObservationIgnored private var indexCache: (source: [HostSession], index: [SessionKey: HostSession])?
     /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
     /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
     /// Cached: recomputed only when `hostSessions` or `optimistic` changes (the reads below register both for observation).
@@ -113,7 +128,7 @@ final class AppModel {
     var archivedSessions: [HostSession] { ThreadArchive.archived(allSessions) }
     @ObservationIgnored private var listedCache: (source: [HostSession], listed: [HostSession])?
     private(set) var health: AdapterHealth?
-    private(set) var hasLoaded = false
+    private(set) var hasLoaded = false { didSet { if hasLoaded && !oldValue { restartLiveStepsLoop() } } }
     private(set) var tokenPresent = true
     private(set) var firstConnectionSeen = false
     private(set) var adapterHealths: [String: AdapterHealth] = [:]
@@ -130,7 +145,37 @@ final class AppModel {
     let updater = AppUpdater()
 
     // MARK: Selection and conversation
-    private(set) var selected: SessionKey? { didSet { if selected != oldValue { DockStore.shared.pruneSideDucklings(keeping: selected); inputsChanged() } } }
+    /// The chat whose transcript, draft and polling are loaded. Not navigation: it follows `location` (a chat sets it, the
+    /// Dashboard and Usage clear it) and is kept while a pond page, a creation page or Settings covers the chat, so
+    /// closing the page returns to a chat that is still loaded. What is open is `focus`, never this.
+    private(set) var lastChat: SessionKey? { didSet { if lastChat != oldValue { DockStore.shared.pruneSideDucklings(keeping: lastChat); inputsChanged() } } }
+    /// What the centre shows: the one navigation state. Everything else (`focus`, `settingsSection`, `navFilter == .usage`,
+    /// `PondsModel.route`) is derived from it.
+    var location: WorkbenchLocation = .home { didSet { if location != oldValue { locationChanged(from: oldValue) } } }
+    /// Where closing Settings or a creation page returns: the last place that was not one of those.
+    @ObservationIgnored private(set) var returnLocation: WorkbenchLocation = .home
+    @ObservationIgnored private var focusCache: (location: WorkbenchLocation, revision: Int, focus: WorkbenchFocus)?
+    /// What the person is looking at, derived from `location` and where the chat sits in the sidebar tree: the one input
+    /// every surface (sidebar highlight, crumb, tab strip, right panel) reads. Recomputed only when the location changes,
+    /// or, for a chat, when the tree does.
+    var focus: WorkbenchFocus {
+        let loc = location
+        let revision = loc.chatKey == nil ? 0 : derivedRevision
+        if let c = focusCache, c.location == loc, c.revision == revision { return c.focus }
+        let f = WorkbenchFocus.resolve(loc) { key in
+            let pond = self.session(key).flatMap { PondsModel.shared.key(of: $0) }
+            let workspace = (self.sidebarTree.place(of: key) ?? self.pondPageTree.place(of: key))?.workspace.id
+            return ChatPlace(pond: pond, workspace: workspace)
+        }
+        focusCache = (loc, revision, f)
+        return f
+    }
+    /// Back and forward (⌘[ ⌘]) over locations, pond pages included.
+    private(set) var navHistory = NavHistory<WorkbenchLocation>()
+    /// The last chat per pond and per workspace: opening a pond returns there.
+    @ObservationIgnored private(set) var placeMemory = PlaceMemory.load()
+    @ObservationIgnored private var historyRecordPending = false
+
     /// Bumped whenever an input of the derived values below changes (sessions, optimistic work, selection, read log,
     /// pins, filters, started chats). Reads of those values register it, so a view re-runs on a real change only;
     /// each value is computed once per bump (`DerivedSessions`), not once per read.
@@ -151,25 +196,52 @@ final class AppModel {
     /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
     var dashboardFilter: DashboardFilter?
     private(set) var messages: [ChatMessage] {
-        get { chatStore.messages }
-        set { publishIfChanged(chatStore, \.messages, newValue) }
+        get { messagesGate.current(shown: chatStore.messages) }
+        set {
+            if let v = messagesGate.offer(newValue, open: windowVisible) { if publishIfChanged(chatStore, \.messages, v) { messagesGeneration &+= 1 } }
+            else { messagesGeneration &+= 1 }
+        }
     }
     /// Chats read as working from the moment Send was pressed, until the host's own word about our turn (OptimisticWork.swift).
     private(set) var optimistic: [SessionKey: OptimisticWork] = [:] { didSet { overlayCache.invalidate(); inputsChanged() } }
     /// The open chat's transcript without the steers still waiting to be taken in: those are cards in the queue stack.
-    var displayMessages: [ChatMessage] { native.key == selected ? native.pending.visible(messages) : messages }
+    var displayMessages: [ChatMessage] {
+        let key = DisplayKey(generation: messagesGeneration, chat: lastChat, native: native.key == lastChat, pending: native.pending)
+        if let c = displayCache, c.key == key { return c.value }
+        let value = key.native ? native.pending.visible(messages) : messages
+        displayCache = (key, value)
+        return value
+    }
+    private struct DisplayKey: Equatable { var generation: Int; var chat: SessionKey?; var native: Bool; var pending: NativePendingStack }
+    @ObservationIgnored private var displayCache: (key: DisplayKey, value: [ChatMessage])?
+    /// Moves on every real change of the open chat's transcript (held ones too): the cache key of `displayMessages`.
+    @ObservationIgnored private var messagesGeneration = 0
+    /// While the window is hidden the open chat's publishes are held and the latest goes out once when it shows again
+    /// (`HiddenHold`): readers that are not views still see every value through the getters.
+    @ObservationIgnored private var messagesGate = HiddenHold<[ChatMessage]>()
+    @ObservationIgnored private var pagingGate = HiddenHold<EarlierPaging>()
+    @ObservationIgnored private var turnWorkGate = HiddenHold<[String: [ActivityStep]]>()
+    @ObservationIgnored private var activityGate = HiddenHold<[ActivityStep]>()
+
+    /// The window shows again: the held transcript, paging and steps are published, once each.
+    func flushHeldChatPublishes() {
+        if let v = messagesGate.release() { if publishIfChanged(chatStore, \.messages, v) { messagesGeneration &+= 1 } }
+        if let v = pagingGate.release() { _ = publishIfChanged(chatStore, \.paging, v) }
+        if let v = turnWorkGate.release() { _ = publishIfChanged(chatStore, \.turnWork, v) }
+        if let v = activityGate.release() { _ = publishIfChanged(chatStore, \.activity, v) }
+    }
     /// How far back the open chat has been read, for the row at the top of the conversation.
     private(set) var paging: EarlierPaging {
-        get { chatStore.paging }
-        set { publishIfChanged(chatStore, \.paging, newValue) }
+        get { pagingGate.current(shown: chatStore.paging) }
+        set { if let v = pagingGate.offer(newValue, open: windowVisible) { _ = publishIfChanged(chatStore, \.paging, v) } }
     }
     private(set) var turnWork: [String: [ActivityStep]] {
-        get { chatStore.turnWork }
-        set { publishIfChanged(chatStore, \.turnWork, newValue) }
+        get { turnWorkGate.current(shown: chatStore.turnWork) }
+        set { if let v = turnWorkGate.offer(newValue, open: windowVisible) { _ = publishIfChanged(chatStore, \.turnWork, v) } }
     }
     private(set) var activity: [ActivityStep] {
-        get { chatStore.activity }
-        set { publishIfChanged(chatStore, \.activity, newValue) }
+        get { activityGate.current(shown: chatStore.activity) }
+        set { if let v = activityGate.offer(newValue, open: windowVisible) { _ = publishIfChanged(chatStore, \.activity, v) } }
     }
     /// The open Conductor chat's model, stuck state, workspace and background work, from the daemon (ChatActions.swift).
     var chatExtras: ChatExtras? {
@@ -218,8 +290,8 @@ final class AppModel {
     /// The chat whose first transcript / activity read has answered, so a screen says "loading" and never "nothing yet" before.
     private var transcriptReadKey: SessionKey?
     private var activityReadKey: SessionKey?
-    var transcriptPhase: ScreenLoad { ScreenLoad.phase(hasContent: !messages.isEmpty, firstReadDone: selected == nil || transcriptReadKey == selected) }
-    var activityPhase: ScreenLoad { ScreenLoad.phase(hasContent: !activity.isEmpty, firstReadDone: selected == nil || activityReadKey == selected) }
+    var transcriptPhase: ScreenLoad { ScreenLoad.phase(hasContent: !messages.isEmpty, firstReadDone: lastChat == nil || transcriptReadKey == lastChat) }
+    var activityPhase: ScreenLoad { ScreenLoad.phase(hasContent: !activity.isEmpty, firstReadDone: lastChat == nil || activityReadKey == lastChat) }
 
     // MARK: Updates the user has not seen, and the menu's reply excerpts
     /// Event ids and times per chat (no text), kept until content that includes the event is displayed.
@@ -243,12 +315,18 @@ final class AppModel {
     // MARK: Browsing
     var query = ""
     var filter: SessionFilter = .all { didSet { inputsChanged() } }
-    var navFilter: NavFilter? = .home {
-        // Usage is a screen of its own, so no chat stays open behind it; picking a chat leaves it.
-        didSet {
-            if navFilter == .usage, selected != nil { select(nil) }
-            if navFilter != oldValue { projectFilter = nil; inputsChanged() }
+    var navFilter: NavFilter? {
+        get { location == .usage ? .usage : listFilter }
+        set {
+            if newValue == .usage { location = .usage; return }
+            listFilter = newValue
+            if location == .usage { location = .home }
         }
+    }
+    /// The sidebar's list filter. Usage is a place, not a filter: it lives in `location`; `navFilter` reads `.usage` only to
+    /// keep older views compiling (new code reads `focus.page`).
+    private(set) var listFilter: NavFilter? = .home {
+        didSet { if listFilter != oldValue { projectFilter = nil; inputsChanged() } }
     }
     /// The project Home is drilled into (`HomeProject.name`); nil shows every project. See AppModel+Projects.swift.
     var projectFilter: String?
@@ -277,7 +355,6 @@ final class AppModel {
     /// menu-bar panel, a new thread's result): its stream opens with a tab for it, added once and selected; no other
     /// tab is touched.
     func openInStream(_ key: SessionKey) {
-        PondsModel.shared.route = nil
         select(key)
     }
 
@@ -298,7 +375,7 @@ final class AppModel {
     }
 
     private func registerTab(_ key: SessionKey) {
-        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key) else { return }
+        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key) ?? stripPlace(of: key) else { return }
         let closed = WorkbenchPrefs.shared.closed
         let seed = place.workspace.chats.map { StreamTab.thread($0.key.stringValue) }
             .filter { !closed.isClosed($0.id, in: place.workspace.id) }
@@ -369,7 +446,7 @@ final class AppModel {
         UpdateAlert.badgeShown(available: updater.availableVersion, ready: updater.readyVersion, switchOn: updateAlertsEnabled)
     }
     var launchOfferPending = false
-    var windowVisible = false
+    var windowVisible = false { didSet { if windowVisible && !oldValue { flushHeldChatPublishes() } } }
     var onboardingDone: Bool { didSet { defaults.set(onboardingDone, forKey: "onboardingDone") } }
     private(set) var lastUsed: SessionKey?
     var cacheNotice: String?
@@ -459,7 +536,7 @@ final class AppModel {
         Notifier.shared.onOpenPond = { [weak self] id in
             guard let self, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) else { return }
             self.showConversationWindow()
-            PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond))
+            openPondHome(PondsModel.shared.key(forPond: pond))
         }
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         Notifier.shared.onApproveDevice = { [weak self] id in Task { await self?.channels.approve(id) } }
@@ -467,6 +544,8 @@ final class AppModel {
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
         native.onTimelineChanged = { [weak self] in self?.refreshClaudeActivity() }
+        native.onProjectsChanged = { [weak self] in self?.nativeProjectsChanged() }
+        startLoops()
         // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
         updater.onNeedsAttention = { [weak self] in self?.showUpdateWhereThePersonIs() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
@@ -535,7 +614,7 @@ final class AppModel {
             startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()
             hasLoaded = true
-            if let selected, openURL == nil { openURL = await broker.openInHostURL(for: selected) }
+            if let lastChat, openURL == nil { openURL = await broker.openInHostURL(for: lastChat) }
             await refreshNeedsYouText()
             await refreshAsks()
         case .messagesChanged(let key):
@@ -548,7 +627,7 @@ final class AppModel {
                let last = all.last, last.role == .assistant, (last.at ?? .distantPast) > sent {
                 noteOptimistic(key) { $0.observeReply(host: s.state) }
             }
-            if key == selected, !usesTimeline(key) {
+            if key == lastChat, !usesTimeline(key) {
                 transcriptReadKey = key
                 _ = publishIfChanged(self, \.messages, all)
                 _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
@@ -575,7 +654,7 @@ final class AppModel {
             }
         case .notify(let n):
             guard !captureMode else { return }
-            let displayed = n.key == selected && conversationOnScreen
+            let displayed = n.key == lastChat && conversationOnScreen
             // Unread whether or not a banner is shown: the menu's dot is about the update, not the banner.
             if !displayed, let id = n.id { noteUnread(n.key, id: id, at: n.at ?? Date()) }
             guard notificationsEnabled else { return }
@@ -702,7 +781,7 @@ final class AppModel {
     }
 
     func isUnread(_ s: HostSession) -> Bool {
-        if s.key == selected, viewingSelected { return false }
+        if s.key == lastChat, viewingSelected { return false }
         return seenLog.isUnread(s)
     }
 
@@ -710,18 +789,20 @@ final class AppModel {
     /// the bottom for `ReadGate.dwell`. Only then is its reply read (`ReadGate`).
     private var viewingSelected: Bool {
         if captureMode { return true }
+        // A chat under a page (Settings, a pond's home) is loaded, but nobody is looking at it.
+        guard location.chatKey == lastChat else { return false }
         return viewingBottom && conversationOnScreen && (conversationWindow?.isKeyWindow ?? false)
     }
 
     /// The thread view says whether the newest end is in view. Arriving starts the dwell; leaving ends it at once.
     func noteBottom(_ key: SessionKey, atBottom: Bool) {
-        guard key == selected else { return }
+        guard key == lastChat else { return }
         dwellTask?.cancel()
         guard atBottom else { if viewingBottom { viewingBottom = false }; return }
         guard !viewingBottom else { return }
         dwellTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(ReadGate.dwell))
-            guard !Task.isCancelled, let self, self.selected == key else { return }
+            guard !Task.isCancelled, let self, self.lastChat == key else { return }
             self.viewingBottom = true
             self.markOpenChatSeen()
         }
@@ -744,7 +825,7 @@ final class AppModel {
 
     /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
     private func markOpenChatSeen() {
-        guard !captureMode, !demoMode, let key = selected, viewingSelected, let s = session(key) else { return }
+        guard !captureMode, !demoMode, let key = lastChat, viewingSelected, let s = session(key) else { return }
         let before = seenLog
         seenLog.markOpened(s)
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
@@ -752,7 +833,7 @@ final class AppModel {
 
     private func markSelectedDisplayed() {
         markOpenChatSeen()
-        guard let key = selected, let loaded = selectedLoadedAt, unread.hasUnread(key), conversationOnScreen else { return }
+        guard let key = lastChat, let loaded = selectedLoadedAt, unread.hasUnread(key), conversationOnScreen else { return }
         unread.markRead(key, through: loaded)
         saveUnread()
     }
@@ -851,7 +932,7 @@ final class AppModel {
                 case .provider(let p): if s.key.provider != p { return false }
                 case .repo(let r): if s.repoName != r { return false }
                 }
-                switch navFilter ?? .all {
+                switch listFilter ?? .all {
                 case .all, .home: return true
                 case .needsYou: return SessionGrouping.kind(of: s, now: now) == .needsYou
                 case .working: return SessionGrouping.kind(of: s, now: now) == .working
@@ -1038,14 +1119,22 @@ final class AppModel {
 
     func session(_ key: SessionKey?) -> HostSession? {
         guard let key else { return nil }
-        return startedChats.resolve(key, listed: allSessions, now: Date())
+        let all = allSessions
+        let index: [SessionKey: HostSession]
+        if let c = indexCache, c.source == all { index = c.index }
+        else {
+            index = Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+            indexCache = (all, index)
+        }
+        if let s = index[key] { return s }
+        return startedChats.resolve(key, listed: [], now: Date())
     }
 
     /// Chats just started and not yet in the list: the detail opens on them instead of reading "no longer lists".
     private(set) var startedChats = StartedChats() { didSet { inputsChanged() } }
     func rememberStarted(_ s: HostSession) { startedChats.add(s, at: Date()) }
 
-    var selectedSession: HostSession? { session(selected) }
+    var selectedSession: HostSession? { session(lastChat) }
     var attentionCount: Int { _ = derivedRevision; return derived.attention.value { sessions.filter { ($0.state == .blocked && $0.alive != false) || $0.isLoopingNow }.count } }
 
     func canSend(_ s: HostSession) -> Bool {
@@ -1064,6 +1153,98 @@ final class AppModel {
 
     var sendableSessions: [HostSession] { ordered.flattened.filter(canSend) }
 
+    // MARK: Location
+
+    private func locationChanged(from old: WorkbenchLocation) {
+        if old.composePage == .quickMessage, location.composePage != .quickMessage { NewChatController.shared.quickMessageClosed() }
+        if let key = location.chatKey { rememberPlace(of: key) }
+        if let section = location.settingsSection { lastSettingsSection = section }
+        if !location.isSettings, location.composePage == nil { returnLocation = location }
+        // The loaded chat follows: a chat loads, the Dashboard and Usage clear it, any other page leaves it under itself.
+        switch location {
+        case .chat(let key): loadChat(key)
+        case .home, .usage: loadChat(nil)
+        default: break
+        }
+        scheduleHistoryRecord()
+    }
+
+    /// A pond's page (home, a thread, settings, Archived). Opening a pond's home on its own forgets where a pond opened
+    /// from a thread should return to; `PondOrigin.goBack` is the way back that keeps it.
+    func openPond(_ route: PondRoute) {
+        let old = location
+        location = route.location
+        if case .pondHome = location, location != old, !PondOrigin.shared.returning { PondOrigin.shared.clear() }
+    }
+
+    func openPondHome(_ key: String) { openPond(.home(project: key)) }
+
+    /// Leaves a pond page for the open chat (or the Dashboard).
+    func closePondPage() { if location.isPondRoute { location = .resting(chat: lastChat) } }
+
+    /// Leaves a creation page for where it was opened from.
+    func closeComposePage() { if location.composePage != nil { location = restingPlace() } }
+
+    /// Where Settings or a creation page returns to; a chat that is gone falls back to the Dashboard.
+    private func restingPlace() -> WorkbenchLocation {
+        if case .chat(let key) = returnLocation, session(key) == nil { return .home }
+        return returnLocation
+    }
+
+    /// Notes the chat against its pond and workspace (found as the header finds them) and keeps the memory to chats that exist.
+    private func rememberPlace(of key: SessionKey) {
+        let pond = session(key).flatMap { PondsModel.shared.key(of: $0) }
+        let workspace = (sidebarTree.place(of: key) ?? pondPageTree.place(of: key))?.workspace.id
+        var memory = placeMemory
+        memory.remember(.chat(key), pond: pond, workspace: workspace)
+        if !allSessions.isEmpty { memory.prune(existing: Set(allSessions.map(\.key))) }
+        guard memory != placeMemory else { return }
+        placeMemory = memory
+        memory.save()
+    }
+
+    /// The remembered chat of a pond, when it still exists.
+    func resumableChat(pond key: String) -> SessionKey? {
+        placeMemory.lastChat(pond: key).flatMap { session($0) != nil ? $0 : nil }
+    }
+
+    /// Visits are recorded once per turn of the run loop, so a page that is cleared on the way to another is not a stop.
+    func recordLocation() { scheduleHistoryRecord() }
+
+    private func scheduleHistoryRecord() {
+        guard !historyRecordPending else { return }
+        historyRecordPending = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.historyRecordPending = false
+            if self.location.isRecorded { self.navHistory.visit(self.location) }
+        }
+    }
+
+    func goBack() { if case .some(.some(let place)) = navHistory.back() { openLocation(place) } }
+    func goForward() { if case .some(.some(let place)) = navHistory.forward() { openLocation(place) } }
+
+    /// Takes the centre to a location (Back and Forward); a chat that is gone falls back to the Dashboard.
+    func openLocation(_ place: WorkbenchLocation) {
+        switch place {
+        case .home: WorkbenchNav.goHome(self)
+        case .chat(let key):
+            if session(key) != nil { select(key) } else { WorkbenchNav.goHome(self) }
+        case .pondHome, .pondThread, .pondSettings, .archived, .usage:
+            location = place
+        case .compose(let page, let pond, let workspace):
+            let project = pond.map { PondsModel.shared.entry($0)?.projectId ?? $0 }
+            switch page {
+            case .newPond: NewChatController.shared.showCreate()
+            case .newBranch: if let project { openNewBranch(projectId: project) } else { WorkbenchNav.goHome(self) }
+            case .newThread:
+                if let project, workspace == nil { openNewMainThread(projectId: project) } else { openNewThread(projectId: project, workspaceId: workspace) }
+            case .quickMessage: WorkbenchNav.goHome(self)
+            }
+        case .settings(let section): openSettings(section)
+        }
+    }
+
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
@@ -1071,14 +1252,18 @@ final class AppModel {
     }
 
     private func selectUnmeasured(_ key: SessionKey?) {
-        if let key { lastWorkspaceSession = key; registerTab(key) }
-        if key != nil { NewChatController.shared.hide() }
-        if key != nil, navFilter == .usage { navFilter = .all }
-        // Opening a chat from anywhere (a notification, ⌘1…9) leaves Settings.
-        if key != nil { closeSettings() }
-        guard key != selected else { return }
-        if let old = selected { saveDraftNow(draft, for: old) }
-        selected = key
+        guard let key else { location = .home; return }
+        lastWorkspaceSession = key
+        registerTab(key)
+        location = .chat(key)
+    }
+
+    /// Loads `key`'s transcript state (and drops the previous chat's): run when the location puts a chat on screen or
+    /// clears it, never when a page only covers the chat.
+    private func loadChat(_ key: SessionKey?) {
+        guard key != lastChat else { return }
+        if let old = lastChat { saveDraftNow(draft, for: old) }
+        lastChat = key
         dwellTask?.cancel()
         viewingBottom = false
         markOpenChatSeen()
@@ -1110,9 +1295,9 @@ final class AppModel {
             _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
             let started = Date()
             await broker.refreshTranscript()
-            if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }
+            if self.lastChat == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }
             // Only a transcript read while the source answers counts as what the window shows.
-            if self.selected == key, self.transcriptIsLive {
+            if self.lastChat == key, self.transcriptIsLive {
                 self.selectedLoadedAt = started
                 self.markSelectedDisplayed()
             }
@@ -1122,7 +1307,7 @@ final class AppModel {
     /// Reads the next older page of the open chat. The broker puts it in front of what is loaded and says so
     /// through `messagesChanged`; one read at a time, a failure stays on the row for a retry.
     func loadEarlier() {
-        guard let key = selected, !demoMode, paging.canLoad else { return }
+        guard let key = lastChat, !demoMode, paging.canLoad else { return }
         if usesTimeline(key) { loadEarlierTurns(key); return }
         Task { [broker] in await broker.loadEarlier(for: key) }
     }
@@ -1137,7 +1322,7 @@ final class AppModel {
     /// is empty, failed or older than the screen never removes a row (`ActivityFeedMerge`). `incoming` nil = no new read.
     private func mergedActivity(incoming: [ActivityStep]?) -> [ActivityStep] {
         let working = selectedSession.map { effectiveState($0) == .working } ?? false
-        let live = native.key == selected ? native.liveStep : nil
+        let live = native.key == lastChat ? native.liveStep : nil
         let r = activityFeed.apply(incoming: incoming, live: live, working: working, turn: openTurnId)
         return r.steps
     }
@@ -1155,9 +1340,9 @@ final class AppModel {
     }
 
     func refreshActivity() async {
-        guard let key = selected, !demoMode, pollGate.presence != .hidden, !usesTimeline(key) else { return }
+        guard let key = lastChat, !demoMode, pollGate.presence != .hidden, !usesTimeline(key) else { return }
         let read = try? await broker.activity(for: key)
-        guard key == selected else { return }
+        guard key == lastChat else { return }
         activityReadKey = key
         // A failed read says nothing; an empty or older one never shrinks the feed.
         let shown = mergedActivity(incoming: read)
@@ -1599,7 +1784,7 @@ final class AppModel {
     func flushDraftsForQuit() {
         draftTask?.cancel()
         let quick = QuickComposerController.shared.state.quitWrite()
-        let chat: (key: SessionKey, text: String)? = selected.map { ($0, draft) }
+        let chat: (key: SessionKey, text: String)? = lastChat.map { ($0, draft) }
         DraftFlush.waitFor(timeout: 1) { [broker] in
             if let chat { await broker.setDraft(chat.text, for: chat.key) }
             await quick?()
@@ -1608,7 +1793,7 @@ final class AppModel {
 
     func setDraft(_ text: String) {
         draft = text
-        guard let key = selected else { return }
+        guard let key = lastChat else { return }
         draftTask?.cancel()
         draftTask = Task { [broker] in
             try? await Task.sleep(for: .milliseconds(600))
@@ -1635,7 +1820,7 @@ final class AppModel {
         defaults.set(key.stringValue, forKey: "lastUsed")
         readOnSend(key)
         let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
-        if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
+        if key == lastChat, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
         // The chat reads working the instant Send is pressed, before any word from the host.
         let target = session(key)
@@ -1707,7 +1892,7 @@ final class AppModel {
         switch result {
         case .refused, .notSent:
             // With a card in the queue, its Retry and Edit hold the words.
-            if card == nil, clearsDraft, key == selected, draft.isEmpty { setDraft(text) }
+            if card == nil, clearsDraft, key == lastChat, draft.isEmpty { setDraft(text) }
         default: break
         }
         return result
@@ -1758,7 +1943,7 @@ final class AppModel {
 
     /// Sends a failed bubble's words again (the failed bubble goes; the draft the failure restored is cleared).
     func retryFailed(_ message: ChatMessage) {
-        guard let key = selected else { return }
+        guard let key = lastChat else { return }
         Task { [weak self] in
             guard let self else { return }
             if usesTimeline(key) { timelineDiscard(key, id: message.id) } else { await broker.discardFailed(id: message.id, in: key) }
@@ -1798,7 +1983,7 @@ final class AppModel {
 
     /// Puts a refused or unsent message back in the composer. Never sends.
     func reuse(_ message: ChatMessage) {
-        guard selected != nil else { return }
+        guard lastChat != nil else { return }
         setDraft(message.text)
     }
 
@@ -1895,7 +2080,7 @@ final class AppModel {
     /// sidebar card in the conversation window, opening that window when nothing of Squeak is open.
     func showUpdateWhereThePersonIs() {
         let visible = conversationWindow?.isVisible == true
-        let settingsOpen = visible && settingsSection != nil
+        let settingsOpen = visible && location.isSettings
         // Settings is a mode of the one window, so when it shows it is also what was last in front.
         switch UpdateDestination.decide(settingsOpen: settingsOpen, settingsWasLastKey: settingsOpen,
                                         conversationOpen: visible, panelOpen: dismissMenuBar != nil) {
@@ -1904,7 +2089,7 @@ final class AppModel {
         case .conversationCard:
             showConversationWindow()
         case .openConversation:
-            if settingsSection != nil { closeSettings() }
+            closeSettings()
             showConversationWindow()
         }
         updater.highlightUpdateCard()
@@ -1920,9 +2105,9 @@ final class AppModel {
         if let openURL { NSWorkspace.shared.open(openURL) }
     }
 
-    /// Settings is a mode of the main window: the page on screen, or nil while it shows sessions.
-    /// Leaving and coming back keeps the sidebar filter and the open chat, which Settings never touches.
-    var settingsSection: SettingsSection?
+    /// The Settings page on screen, or nil. Settings is a layer over the workbench; the page is part of `location`, so
+    /// leaving and coming back keeps the sidebar filter and the open chat, which Settings never touches.
+    var settingsSection: SettingsSection? { location.settingsSection }
     /// Settings › Ponds: the pond (directory key) whose page shows; nil = the first of the list.
     var settingsPond: String?
     /// One-time destination requested by the phone-call setup checklist.
@@ -1942,8 +2127,7 @@ final class AppModel {
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {
         Signposts.interval(Signposts.Name.settingsOpen) {
-            NewChatController.shared.hide()
-            settingsSection = section ?? lastSettingsSection
+            location = .settings(section ?? lastSettingsSection)
             showConversationWindow()
         }
     }
@@ -1956,8 +2140,7 @@ final class AppModel {
 
     /// Switches the page without opening a window (captures, which host the window themselves).
     func openSettingsInPlace(_ section: SettingsSection) {
-        NewChatController.shared.hide()
-        settingsSection = section
+        location = .settings(section)
     }
 
     /// Shows the permission explainer in the conversation window (a menu-bar tip's destination).
@@ -1967,9 +2150,9 @@ final class AppModel {
         showConversationWindow()
     }
 
+    /// Leaves Settings for where it was opened from.
     func closeSettings() {
-        if let s = settingsSection { lastSettingsSection = s }
-        settingsSection = nil
+        if location.isSettings { location = restingPlace() }
     }
 
     // MARK: Launch at login
@@ -2009,15 +2192,15 @@ final class AppModel {
     /// The open chat's draft is saved with it (drafts live in the cache, not in the marker).
     func saveUpdateRestore(restartAttempt: Bool = false) {
         guard !demoMode, !captureMode else { return }
-        if let selected { saveDraftNow(draft, for: selected) }
+        if let lastChat { saveDraftNow(draft, for: lastChat) }
         let window: UpdateRestoreMarker.Window
-        if settingsSection != nil { window = .settings }
+        if location.isSettings { window = .settings }
         else if NSApp.windows.contains(where: { ActivationPolicyController.isAppWindow($0) && $0.title == "Squeak" }) { window = .conversation }
         else if OnboardingController.shared.isShowing { window = .welcome }
         else { window = .none }
         let marker = UpdateRestoreMarker(
-            fromVersion: Self.appVersion, window: window, session: selected?.stringValue,
-            settingsSection: settingsSection?.rawValue,
+            fromVersion: Self.appVersion, window: window, session: lastChat?.stringValue,
+            settingsSection: settingsSection?.rawValue, location: location.isRecorded ? location : nil,
             restartAttempt: restartAttempt ? true : nil, restartTarget: restartAttempt ? updater.flow.knownVersion : nil)
         defaults.set(marker.encoded(), forKey: UpdateRestoreMarker.defaultsKey)
     }
@@ -2040,16 +2223,27 @@ final class AppModel {
         guard case .updated = change else { return }
         updateNote = "Updated to \(current)"
         guard let marker = marker?.usable(currentVersion: current), marker.window != .none else { return }
-        if let raw = marker.session, let key = SessionKey(stringValue: raw) { select(key) }
+        let place = marker.restoredLocation
+        if let place, !place.isSettings, place.composePage == nil { restoreLocation(place) }
+        else if marker.window == .settings, let raw = marker.session, let key = SessionKey(stringValue: raw) { select(key) }
         // The window action is wired by the menu-bar label a moment after launch.
         for _ in 0..<20 where openConversationWindow == nil { try? await Task.sleep(for: .milliseconds(100)) }
         switch marker.window {
         case .conversation: showConversationWindow()
-        case .settings: openSettings(marker.settingsSection.flatMap(SettingsSection.init(rawValue:)))
+        case .settings: openSettings(place?.settingsSection)
         case .welcome: if !onboardingDone { OnboardingController.shared.show() }
         case .none: break
         }
         AppLog.info("updates: restored \(marker.window.rawValue) after update from \(marker.fromVersion)")
+    }
+
+    /// Puts a saved location back (a chat, a pond page, Usage); pages that need their own state to exist are not restored.
+    private func restoreLocation(_ place: WorkbenchLocation) {
+        switch place {
+        case .chat(let key): select(key)
+        case .home: break
+        default: location = place
+        }
     }
 
     static var appVersion: String {
@@ -2154,7 +2348,7 @@ extension AppModel {
     /// Puts the open timeline where the screens read it: messages, each turn's steps and the current turn's, paging.
     /// Every one is written only when it changed, so a refresh with nothing new redraws nothing.
     func showTimeline(_ key: SessionKey, markRead: Bool = true) {
-        guard key == selected, native.key == key else { return }
+        guard key == lastChat, native.key == key else { return }
         let shown = TimelinePresentation(
             native.timeline, details: native.details, now: Date(), olderLoading: native.olderLoading, olderError: native.olderError,
             ready: native.timelineReady)

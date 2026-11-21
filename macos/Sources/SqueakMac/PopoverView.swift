@@ -27,7 +27,6 @@ struct PopoverView: View {
             .id(nav.screen.id)
             .background(escapeToClose)
             .background(newChatShortcut)
-            .task(id: model.hasLoaded) { await model.pollLiveSteps() }
             .task { await model.readUsage() }
             .task {
                 while !Task.isCancelled {

@@ -34,7 +34,7 @@ extension AppModel {
 
     /// Opens the Usage screen in the conversation window. Only navigation: nothing is fetched or sent.
     func openUsage() {
-        navFilter = .usage
+        location = .usage
         showConversationWindow()
     }
 }

@@ -33,6 +33,7 @@ struct PondThreadView: View {
     @State private var patch: PondChanges.Patch?
     @State private var changesLine: String?
 
+    private var draftKey: String { ContainerDrafts.pond(pondId, thread: threadId) }
     private var ponds: PondsModel { .shared }
     private var detail: PondDetail? { ponds.details[pondId] }
     private var thread: PondThread? { detail?.threads.first { $0.id == threadId } }
@@ -220,7 +221,7 @@ struct PondThreadView: View {
     /// starter keeps (Stop) is here too, disabled, with the reason.
     private var header: some View {
         HStack(spacing: Space.s) {
-            CrumbLink(title: project, label: "Open \(project)\u{2019}s dashboard") { ponds.route = .home(project: key) }
+            CrumbLink(title: project, label: "Open \(project)\u{2019}s dashboard") { model.openPondHome(key) }
             Lucide(.chevronRight, size: 12, color: Theme.subtle)
             Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Duck").lineLimit(1).foregroundStyle(Theme.ink)
             PondStateMark(state: state)
@@ -452,6 +453,9 @@ struct PondThreadView: View {
         .padding(.horizontal, Space.l).padding(.bottom, Space.l).padding(.top, Space.s)
         .frame(maxWidth: Metrics.workbenchColumn).frame(maxWidth: .infinity)
         .onChange(of: draft.isEmpty) { _, empty in typing(!empty) }
+        .onAppear { if draft.isEmpty { draft = ContainerDrafts.shared.draft(for: draftKey) } }
+        .onChange(of: draftKey) { _, key in draft = ContainerDrafts.shared.draft(for: key) }
+        .onChange(of: draft) { _, text in ContainerDrafts.shared.set(text, for: draftKey) }
     }
 
     private func send(_ key: ComposerKeyAction) {
@@ -461,6 +465,7 @@ struct PondThreadView: View {
         Task {
             // The message moves under the transcript at once, with its state; a refusal says why right there.
             draft = ""
+            ContainerDrafts.shared.clear(draftKey)
             _ = await ponds.send(pond: pondId, thread: threadId, text: text, mode: mode)
             await readEvents()
             sending = false

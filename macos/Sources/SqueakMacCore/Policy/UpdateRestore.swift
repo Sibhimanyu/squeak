@@ -12,13 +12,15 @@ public struct UpdateRestoreMarker: Codable, Equatable, Sendable {
     public var session: String?
     /// `SettingsSection.rawValue`, when `window == .settings`.
     public var settingsSection: String?
+    /// Where the centre was (a chat, a pond page, a Settings page, Usage); absent in markers older than this field.
+    public var location: WorkbenchLocation?
     public var savedAt: Date
     /// Set when the quit was "Restart to update" (not a plain quit with an update waiting), with the version
     /// it was to install: a launch on the same version soon after means the install did not happen.
     public var restartTarget: String?
     public var restartAttempt: Bool?
 
-    public init(fromVersion: String, window: Window, session: String? = nil, settingsSection: String? = nil, savedAt: Date = Date(),
+    public init(fromVersion: String, window: Window, session: String? = nil, settingsSection: String? = nil, location: WorkbenchLocation? = nil, savedAt: Date = Date(),
                 restartAttempt: Bool? = nil, restartTarget: String? = nil) {
         self.restartAttempt = restartAttempt
         self.restartTarget = restartTarget
@@ -26,7 +28,15 @@ public struct UpdateRestoreMarker: Codable, Equatable, Sendable {
         self.window = window
         self.session = session
         self.settingsSection = settingsSection
+        self.location = location
         self.savedAt = savedAt
+    }
+
+    /// What to reopen: the saved location, else (an older marker) the settings page, else the open chat.
+    public var restoredLocation: WorkbenchLocation? {
+        if let location { return location }
+        if window == .settings { return .settings(settingsSection.flatMap(SettingsSection.init(rawValue:)) ?? .general) }
+        return session.flatMap(SessionKey.init(stringValue:)).map { .chat($0) }
     }
 
     public static let defaultsKey = "updateRestoreMarker"

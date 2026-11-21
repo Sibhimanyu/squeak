@@ -8,6 +8,9 @@ import SwiftUI
 // Chats belong to the workspace tab strip, never this sidebar.
 // Every list is newest first and the tree is `SidebarTreeBuilder`'s (SqueakMacCore): this file only draws.
 
+/// What the project list and its icons are read again for: cheap revisions, never a rebuilt list of names.
+private struct ProjectListID: Equatable { var sessions: Int; var projects: Int; var addons: Set<String> }
+
 struct WorkbenchSidebar: View {
     /// The pane's drawn width (the window owns it: remembered, clamped, dragged).
     var width: CGFloat = Metrics.workbenchSidebar
@@ -57,7 +60,7 @@ struct WorkbenchSidebar: View {
             topBar
             macRow
             VStack(alignment: .leading, spacing: 0) {
-                SidebarNavRow(icon: .layoutDashboard, title: "Dashboard", selected: model.navFilter == .home && model.selected == nil && NewChatController.shared.page == nil && model.settingsSection == nil && PondsModel.shared.route == nil) { goHome() }
+                SidebarNavRow(icon: .layoutDashboard, title: "Dashboard", selected: model.focus.page == .home) { goHome() }
                 createRow
                 SidebarNavRow(icon: .search, title: "Search", selected: false) { NotificationCenter.default.post(name: .squeakOpenPalette, object: nil) }
             }
@@ -98,27 +101,20 @@ struct WorkbenchSidebar: View {
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground(edge: false))
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea().allowsHitTesting(false) }
-        .task(id: model.hasLoaded) { await model.pollLiveSteps() }
-        .task(id: tree.projects.map(\.name) + model.enabledAddons.sorted()) {
+        // The polling loops (live steps, projects, workspaces, ponds) belong to the app (`AppModel.startLoops`), not this view.
+        .task(id: ProjectListID(sessions: model.sessionKeysRevision, projects: model.nativeProjectsRevision, addons: model.enabledAddons)) {
             await model.refreshNativeProjects()
             PondIcons.shared.setRepositoryIcons(await model.projectIcons())
         }
-        .task(id: model.demoMode) {
-            // A new pond icon (set_pond_icon, Change icon…) shows within a couple of seconds: the project list carries its version.
-            await model.pollNativeProjects()
-        }
-        .task(id: model.native.projects.map { "\($0.id)@\($0.iconUpdatedAt ?? $0.iconUrl ?? "")" }) {
+        .task(id: model.nativeProjectsRevision) {
             if !model.demoMode { await PondIcons.shared.sync(model.native.projects, host: model.nativeHost) }
         }
-        .task { await model.pollNativeWorkspaces() }
-        .task(id: model.demoMode) { if !model.demoMode { await PondOrderStore.shared.load(host: model.nativeHost) } }
-        .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
         .onChange(of: model.native.projects, initial: true) { _, projects in
             PondsModel.shared.projects = projects
             if model.demoMode { PondsModel.shared.useDemoDirectory(projects) }
         }
         // The directory is read again whenever a project or a native chat appears or goes: it says where each one sits.
-        .task(id: model.native.projects.map(\.id) + model.allSessions.filter { $0.key.hostSessionId.hasPrefix("squeak-native:") }.map(\.key.hostSessionId)) {
+        .task(id: model.directoryRevision) {
             if !model.demoMode { await PondsModel.shared.refreshDirectory() }
         }
         .pondSheets()
@@ -126,13 +122,8 @@ struct WorkbenchSidebar: View {
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
     }
 
-    /// A pond's home, by its directory key.
-    private func openHome(_ key: String) {
-        NewChatController.shared.hide()
-        model.closeSettings()
-        if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .home(project: key)
-    }
+    /// A pond, by its directory key: the chat last open in it, else its home.
+    private func openHome(_ key: String) { WorkbenchNav.openProject(model, key: key) }
 
     /// A pond's settings page in the centre.
     private func openSettings(_ key: String) {
@@ -214,14 +205,6 @@ struct WorkbenchSidebar: View {
 
     // MARK: Home, new branch, row keys
 
-    /// A page covers the open chat: a pond's home or settings, Create, Usage, Settings.
-    private var pageShowing: Bool {
-        switch PondsModel.shared.route {
-        case .home, .settings, .archived: true
-        default: NewChatController.shared.page != nil || model.settingsSection != nil || model.navFilter == .usage
-        }
-    }
-
     private func goHome() { WorkbenchNav.goHome(model) }
 
     // Navigation lives in the window overlay so hiding this pane preserves its history.
@@ -281,7 +264,7 @@ struct WorkbenchSidebar: View {
             Button("Restart") { model.daemon.repair(); model.recheck() }
             Divider()
         case .usage:
-            Button("Usage") { NewChatController.shared.hide(); model.closeSettings(); model.navFilter = .usage }
+            Button("Usage") { model.location = .usage }
         case .divider: Divider()
         case .settings: Button("Settings…") { model.openSettings() }
         }
@@ -294,7 +277,7 @@ struct WorkbenchSidebar: View {
 
     /// Create: a page in the centre (start work, add a project, join a pond), selected like the Dashboard.
     private var createRow: some View {
-        SidebarNavRow(icon: .plus, title: "Create", selected: NewChatController.shared.page == .create && model.settingsSection == nil) {
+        SidebarNavRow(icon: .plus, title: "Create", selected: model.focus.page == .compose(.newPond)) {
             model.openNewPond()
         }
         .help(PondWords.createTooltip)
@@ -309,7 +292,7 @@ struct WorkbenchSidebar: View {
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no
     /// polling for rows nobody looks at.
     private func diffStat(_ workspace: SidebarWorkspace) -> (added: Int, removed: Int)? {
-        guard let chat = workspace.chats.first(where: { $0.key == model.selected }) ?? workspace.chats.first,
+        guard let chat = workspace.chats.first(where: { $0.key == model.focus.chat }) ?? workspace.chats.first,
               let c = model.changesStore(for: chat.key.hostSessionId).changes, !c.files.isEmpty else { return nil }
         return (c.added, c.removed)
     }
@@ -328,18 +311,12 @@ struct WorkbenchSidebar: View {
     }
 
     private func openWorkspace(_ workspace: SidebarWorkspace) {
-        PondsModel.shared.route = nil
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
-        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }),
-           !WorkbenchPrefs.shared.closed.isClosed(selected.stringValue, in: workspace.id) {
-            NewChatController.shared.hide()
-            model.closeSettings()
-            model.navFilter = .all
+        if let open = model.focus.chat, workspace.chats.contains(where: { $0.key == open }),
+           !WorkbenchPrefs.shared.closed.isClosed(open.stringValue, in: workspace.id) {
+            model.select(open)
         } else if let chat = workspace.chats.first {
             // A stream whose tabs were all closed opens its newest chat, its tab back on the strip.
-            NewChatController.shared.hide()
-            model.closeSettings()
-            model.navFilter = .all
             WorkbenchPrefs.shared.forgetClosed(chat.key, in: workspace.id)
             model.select(chat.key)
         }
@@ -348,7 +325,7 @@ struct WorkbenchSidebar: View {
     /// Joins waiting on an owner (greyed) and ones the owner declined; opening one shows its waiting card.
     @ViewBuilder private var waitingPonds: some View {
         ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds).filter { PondsModel.shared.directory?.pond(pondId: $0.id) == nil }) { pond in
-            Button { PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond)) } label: {
+            Button { model.openPondHome(PondsModel.shared.key(forPond: pond)) } label: {
                 HStack(spacing: Space.s) {
                     PondTile(name: pond.name, pondId: pond.id, size: 20)
                     Text(verbatim: PondJoinWaiting.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
@@ -399,7 +376,7 @@ struct WorkbenchSidebar: View {
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
                 onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New duck in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
-                homeSelected: PondsModel.shared.homeProject == key,
+                inFocus: model.focus.pond == key,
                 needs: PondsModel.shared.badge(pondRecord),
                 rollup: pondRollup(workspaces),
                 onDisclose: { toggleFold(key) },
@@ -459,7 +436,7 @@ struct WorkbenchSidebar: View {
                 if let mainRow = MainSidebar.row(main: model.mainPlace(key: key), in: workspaces), let native {
                     FoldRow(title: mainRow.displayTitle, depth: 1,
                         help: "Main: the pond\u{2019}s own folder, \(model.mainPlace(key: key)?.rootPath ?? "")",
-                        selected: SidebarSelection.streamSelected(containsOpenChat: mainRow.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
+                        selected: model.focus.workspace == mainRow.id,
                         running: mainRow.chats.contains { SessionGrouping.kind(of: model.withHostBackground($0), now: Date()) == .working || model.withHostBackground($0).isActive },
                         unread: mainRow.chats.contains { model.isUnread($0) },
                         streamState: .of(chats: mainRow.chats.map { model.withHostBackground($0) }, mark: { model.mark(for: $0) }),
@@ -484,7 +461,7 @@ struct WorkbenchSidebar: View {
                     // The row is the stream, named as everywhere else (`StreamName`); chat titles live on the chat tabs.
                     FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
-                        selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
+                        selected: model.focus.workspace == workspace.id,
                         running: workspace.chats.contains { SessionGrouping.kind(of: model.withHostBackground($0), now: Date()) == .working || model.withHostBackground($0).isActive },
                         unread: workspace.chats.contains { model.isUnread($0) },
                         streamState: .of(chats: workspace.chats.map { model.withHostBackground($0) }, mark: { model.mark(for: $0) }),
@@ -551,7 +528,7 @@ struct WorkbenchSidebar: View {
     /// starter's small avatar, newest first. A row opens the thread in the workbench (`PondThreadView`).
     @ViewBuilder private func sharedThreads(of pond: String) -> some View {
         if let detail = PondsModel.shared.detail(key: pond) {
-            let openId: String? = { if case .thread(_, let id, let thread)? = PondsModel.shared.route, id == detail.pond.id { return thread } else { return nil } }()
+            let openId: String? = { if case .pondThread(_, let id, let thread) = model.location, id == detail.pond.id { return thread } else { return nil } }()
             ForEach(SharedThreadRows.rows(detail, keeping: openId, hidden: PondsModel.shared.hides.hiddenIds)) { row in
                 SharedThreadRowView(row: row, project: pond, selected: openId == row.threadId).transition(Motion.fold)
             }
@@ -584,8 +561,8 @@ struct WorkbenchSidebar: View {
     /// is archived. It opens the Archived page (every archived thread across all ponds).
     private var archivedPageEntry: some View {
         let count = ArchivedPage.count(sessions: model.allSessions, shared: PondsModel.shared.hides.all)
-        let open = PondsModel.shared.route == .archived
-        return Button { PondsModel.shared.route = .archived } label: {
+        let open = model.focus.page == .archived
+        return Button { model.openPond(.archived) } label: {
             HStack(spacing: 8) {
                 Lucide(.inbox, size: 14, color: Theme.subtle).frame(width: 18)
                 Text(verbatim: ThreadArchive.pageEntryTitle(count: count)).font(Typo.body).foregroundStyle(Theme.muted)
@@ -646,7 +623,7 @@ private struct FoldRow: View {
     /// A hidden pond shown on request.
     var dimmed = false
     /// Ponds: this project's home is open; what in it waits on you; the chevron that folds the threads; whether folded.
-    var homeSelected = false
+    var inFocus = false
     var needs = 0
     /// A pond row's status rollup (working / needs you / error), drawn in the count's slot; nil = the count as before.
     var rollup: StatusRollup?
@@ -756,11 +733,11 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
-            .background(homeSelected ? PondColour.wash(pondId, .pondHeader) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .sidebarRowWash(selected: selected || inFocus, hovering: hovering)
+            .background(inFocus ? PondColour.wash(pondId, .pondHeader) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
-                if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
+                if inFocus { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
             }
             .contentShape(Rectangle())
     }
@@ -821,7 +798,7 @@ struct WorkbenchChatRow: View {
     @Environment(AppModel.self) private var model
     @State private var hovering = false
 
-    private var selected: Bool { model.selected == session.key && model.navFilter != .usage }
+    private var selected: Bool { model.focus.chat == session.key }
 
     var body: some View {
         let mark = model.mark(for: session)
@@ -876,7 +853,7 @@ struct SharedThreadRowView: View {
 
     var body: some View {
         let loud = row.mark?.kind == .waiting
-        Button { PondsModel.shared.route = .thread(project: project, pondId: row.pondId, threadId: row.threadId) } label: {
+        Button { AppModel.shared.openPond(.thread(project: project, pondId: row.pondId, threadId: row.threadId)) } label: {
             HStack(spacing: 6) {
                 ThreadDuckView(id: "pond-\(row.id)", agent: row.agent, size: ThreadDuck.Size.sidebarRow)
                 Text(verbatim: row.title).font(loud ? Typo.label : Typo.body)

@@ -89,7 +89,7 @@ extension CaptureRunner {
         win.makeKeyAndOrderFront(nil)
         let compose = NewChatController.shared
         compose.thread.prepare(model: model)
-        compose.page = .newThread
+        model.location = .compose(.newThread, pond: nil, workspace: nil)
         try? await Task.sleep(for: .milliseconds(1400))
         compose.thread.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat.png")
@@ -97,7 +97,7 @@ extension CaptureRunner {
         try? await Task.sleep(for: .milliseconds(600))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat-small.png")
         compose.quickState.prepare(model: model, explicit: SessionKey(provider: "conductor", hostSessionId: "demo-3"))
-        compose.page = .quickMessage
+        model.location = .compose(.quickMessage, pond: nil, workspace: nil)
         try? await Task.sleep(for: .milliseconds(600))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-quickmessage.png")
         win.orderOut(nil)
@@ -358,7 +358,7 @@ extension CaptureRunner {
             snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-\(name).png")
         }
         // The Usage screen: its sidebar item selected, the fuller view in the detail column.
-        model.navFilter = .usage
+        model.location = .usage
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-usage.png")
         win.orderOut(nil)

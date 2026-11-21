@@ -110,8 +110,7 @@ final class NewPondState {
                 }
                 await ponds.refresh()
                 if r.isPending { waitingPondId = r.pondId } else {
-                    NewChatController.shared.hide()
-                    ponds.route = .home(project: ponds.ponds.first { $0.id == r.pondId }.map { ponds.key(forPond: $0) } ?? "")
+                    AppModel.shared.openPondHome(ponds.ponds.first { $0.id == r.pondId }.map { ponds.key(forPond: $0) } ?? "")
                 }
             }
         }
@@ -119,8 +118,7 @@ final class NewPondState {
 
     private func finish(_ model: AppModel, _ project: NativeProject?, _ problem: String?) {
         guard let project else { error = problem ?? "Squeak couldn\u{2019}t make that pond."; return }
-        NewChatController.shared.hide()
-        PondsModel.shared.route = .home(project: PondsModel.shared.key(forProject: project.id))
+        AppModel.shared.openPondHome(PondsModel.shared.key(forProject: project.id))
     }
 }
 
@@ -142,7 +140,7 @@ struct NewPondPage: View {
             .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
                 // Approved while the page is open: it is a normal pond now.
                 if status == "active" || status == "local", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
-                    NewChatController.shared.hide(); state.reset(); PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: p))
+                    state.reset(); AppModel.shared.openPondHome(PondsModel.shared.key(forPond: p))
                 }
             }
         }

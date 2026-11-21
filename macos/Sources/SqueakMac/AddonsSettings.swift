@@ -104,12 +104,12 @@ private struct ExtensionRow: View {
         else if item.kind == .calls, item.callsConfigured {
             Task { await model.runExtensionAction(item.id, name: item.name, adding: true) { await model.channels.setVoiceEnabled(true); await model.refreshExtensions() } }
         }
-        else if let section = item.section { model.settingsSection = section }
+        else if let section = item.section { model.openSettingsInPlace(section) }
     }
 
     private func remove() {
         // An older daemon has no switch for calls: the page holds its settings.
-        if item.kind == .calls, !item.callsConfigured, let section = item.section { model.settingsSection = section } else { confirmingRemove = true }
+        if item.kind == .calls, !item.callsConfigured, let section = item.section { model.openSettingsInPlace(section) } else { confirmingRemove = true }
     }
 
     private var removeTitle: String { "Remove \(item.name)?" }
@@ -151,7 +151,7 @@ struct ExtensionPageView: View {
                     }
                 } else {
                     Text("This extension isn't added. Add it in Settings › Extensions.").font(Typo.body).foregroundStyle(Theme.muted)
-                    Button("Open Extensions") { model.settingsSection = .addons }.buttonStyle(SecondaryButtonStyle())
+                    Button("Open Extensions") { model.openSettingsInPlace(.addons) }.buttonStyle(SecondaryButtonStyle())
                 }
             }
             .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, Space.l)

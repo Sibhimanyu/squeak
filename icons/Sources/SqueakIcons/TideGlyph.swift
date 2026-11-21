@@ -64,9 +64,6 @@ public struct TideGlyph: View {
     /// One random seed per view, captured once: two glyphs side by side never match.
     @State private var instanceSeed = UInt64.random(in: .min ... .max)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Paused only in `.background`: macOS reports `.inactive` whenever the app is not frontmost, and a status glyph
-    /// must keep moving while the person works in another app.
-    @Environment(\.scenePhase) private var scenePhase
 
     /// `fade` multiplies every pixel by a soft elliptical vignette (default on) so the glyph never reads as a box. To draw
     /// it past its layout slot, give it a bigger grid and a smaller frame (`.frame(width: slot, alignment:)`): SwiftUI
@@ -80,15 +77,23 @@ public struct TideGlyph: View {
         let seed = fixedSeed ?? instanceSeed
         return Group {
             if GlyphPresentation.of(working: true, reduceMotion: reduceMotion) == .animatedGlyph {
-                TimelineView(.animation(minimumInterval: nil, paused: scenePhase == .background)) { context in
-                    TideFrame(color: color, height: grid.size.height, grid: grid, time: TideMotion.clock(context.date), seed: seed, fade: fade, tuning: tuning, scale: displayScale)
-                }
+                TideLive(color: color, grid: grid, seed: seed, fade: fade, tuning: tuning, scale: displayScale)
             } else {
                 Lucide(.loaderCircle, size: min(grid.size.height + 2, 14), color: color)
                     .frame(width: grid.size.width, height: grid.size.height)
             }
         }
         .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+/// A moving glyph: subscribes to the one shared `TideClock` while on screen and draws its time.
+private struct TideLive: View {
+    let color: Color, grid: TideGlyph.Grid, seed: UInt64, fade: Bool, tuning: TideMotion.Tuning, scale: CGFloat
+    var body: some View {
+        TideFrame(color: color, height: grid.size.height, grid: grid, time: TideClock.shared.time, seed: seed, fade: fade, tuning: tuning, scale: scale)
+            .onAppear { TideClock.shared.subscribe() }
+            .onDisappear { TideClock.shared.unsubscribe() }
     }
 }
 

@@ -11,7 +11,7 @@ struct DetailView: View {
 
     var body: some View {
         Group {
-            if model.navFilter == .usage {
+            if model.focus.page == .usage {
                 UsageDetailView()
             } else if let s = model.selectedSession, DockStore.shared.threads.isDocked(s.key.stringValue) {
                 let zone = DockStore.shared.threads.zone(of: s.key.stringValue)
@@ -23,7 +23,7 @@ struct DetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
-            } else if let key = model.selected {
+            } else if let key = model.lastChat {
                 pick(StartedChats.staleNote(for: key))
             } else if !model.isConnected && model.health != nil {
                 VStack(spacing: Space.m) {
@@ -79,6 +79,7 @@ struct SessionDetail: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.workbenchVisible) private var workbenchVisible
     @State private var focusToken = 0
     private var images: ImageTray { model.imageTray(for: session.key) }
     /// Mirror of the follow model (`TranscriptFollow`, driven by `TranscriptScrollFollower`): the newest end is followed.
@@ -140,7 +141,9 @@ struct SessionDetail: View {
         let name = isNative ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model
         return name.flatMap { $0.isEmpty ? nil : $0 }
     }
-    private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
+    /// What the turn's steps derive (listed steps, tracker, block, clock start): once per change of the steps, not per body pass.
+    private var activityCache: ActivityDerivedCache { model.chatCaches.caches(for: session.key).activity }
+    private var turn: TurnBlock { activityCache.block(model.activity, working: isWorking) }
     /// Where the running turn's steps sit: at the end, while it works. A finished turn's fold sits before its first agent
     /// message (`foldedTurns`).
     private func turnInsertIndex(in rows: [ChatTimeline.Row]) -> Int? {
@@ -191,6 +194,8 @@ struct SessionDetail: View {
     }
     private var firstMessageID: String? { model.displayMessages.first?.id }
     private var isWorking: Bool { dock.isWorking }
+    /// Whether this chat is on screen: not under a page (`\.workbenchVisible`) and the window not hidden.
+    private var active: Bool { workbenchVisible && model.windowVisible }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,14 +211,19 @@ struct SessionDetail: View {
         .task(id: session.key.stringValue) {
             model.chatExtras = nil
             model.chatNote = nil
+        }
+        // Paused while the chat is covered by a page or the window is hidden; resumes (and reads at once) on show.
+        .task(id: "extras-\(session.key.stringValue)-\(active)") {
+            guard active else { return }
             while !Task.isCancelled {
                 await model.refreshChatExtras(session)
                 try? await Task.sleep(for: .seconds(3))
             }
         }
-        // A Squeak-run chat: its host record, open request, queue, and the live stream, only while it is on screen.
-        .task(id: "native-\(session.key.stringValue)-\(model.windowVisible)") {
-            guard isNative, model.windowVisible else { return }
+        // A Squeak-run chat: its host record, open request, queue, and the live stream, while the chat is open. Hiding and
+        // showing the window never restarts it (no re-read, no reconnect gap): the id carries the chat and nothing else.
+        .task(id: "native-\(session.key.stringValue)") {
+            guard isNative else { return }
             await model.runNativeChat(session)
         }
         // A Squeak chat's turns and what each changed (Edit, Fork, Restore, "N files changed"); read again when a turn ends.
@@ -240,8 +250,8 @@ struct SessionDetail: View {
             }
         }
         // The turn's steps: read once on opening (a finished turn folds to "Worked · N steps"), and every 2 s while it works.
-        .task(id: "\(session.key.stringValue)-\(isWorking)") {
-            if model.usesTimeline(session.key) { return }
+        .task(id: "\(session.key.stringValue)-\(isWorking)-\(active)") {
+            if model.usesTimeline(session.key) || !active { return }
             await model.refreshActivity()
             guard isWorking else { return }
             while !Task.isCancelled {
@@ -299,7 +309,11 @@ struct SessionDetail: View {
                     // Short chats sit on the composer: the content is at least as tall as the scroll view, whose measured height already excludes the dock inset.
                     .frame(maxWidth: .infinity, minHeight: TranscriptMinHeight.value(viewport: viewportHeight), alignment: .bottom)
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
-                    .background(TranscriptFollowDriver(jumpToken: jumpToken, holdPlace: keepAnchor != nil, onFollowChange: { followChanged($0) }))
+                    .background(TranscriptFollowDriver(
+                        jumpToken: jumpToken, holdPlace: keepAnchor != nil, memoryKey: session.key.stringValue,
+                        firstRow: memoryRows.first, lastRow: memoryRows.last,
+                        onPlaced: { newBelow in if newBelow { self.newBelow = true } },
+                        onFollowChange: { followChanged($0) }))
                 }
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
                     setHeight(&viewportHeight, size.height)
@@ -359,6 +373,16 @@ struct SessionDetail: View {
         }
     }
 
+    /// The chat's first and last row (turn) ids: what `ChatScrollMemory` saves a place against.
+    private var memoryRows: (first: String?, last: String?) {
+        if usesTimelineView {
+            let turns = model.timeline(for: session.key).turns
+            return (turns.first?.id, turns.last?.id)
+        }
+        let ids = rowIDs
+        return (ids.first, ids.last)
+    }
+
     private var rowIDs: [String] { derivedCache.derived(rows: rows, generation: rowsCache.generation).rowIDs }
 
     private var earlierKind: TranscriptWindow.EarlierKind {
@@ -397,7 +421,7 @@ struct SessionDetail: View {
         let newest = newestTurnId
         // The running turn's steps, split around the steers sent into it: before a steer's card above it, after it below.
         let liveSteers = isWorking ? steers(ofTurn: newest, in: rows) : []
-        let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, at: liveSteers.map(\.at))
+        let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: activityCache.listed(model.activity), at: liveSteers.map(\.at))
         let liveBlock = runs.last.map { TurnFolding.block(steps: $0, working: true) } ?? turn
         let derived = derivedCache.derived(rows: rows, generation: rowsCache.generation)
         let attached = derived.attached
@@ -482,14 +506,14 @@ struct SessionDetail: View {
     /// The agent's progress tracker (Squeak's set_progress), newest update of the turn; gone once cleared.
     private var tracker: ProgressTracker? {
         guard isNative, case .progress(let steps, let current, let percent, let status)? =
-            model.activity.last(where: { $0.kind == "progress" })?.detail, !steps.isEmpty else { return nil }
+            activityCache.progressDetail(model.activity), !steps.isEmpty else { return nil }
         return ProgressTracker(steps: steps, current: current, percent: percent, status: status)
     }
 
     /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
     private var liveRow: some View {
         WorkbenchLiveRow(
-            steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.displayMessages, steps: model.activity),
+            steps: activityCache.listed(model.activity), since: activityCache.turnStart(messages: model.displayMessages, activity: model.activity),
             label: dock.line,
             onStop: canStop ? { stop() } : nil)
     }
@@ -588,6 +612,8 @@ struct SessionDetail: View {
 
     /// Back to the newest message in one click (or ⌘↓): a round button while the end of the chat is out of view, a
     /// "New" pill when something arrived meanwhile.
+    private static let jumpGap: CGFloat = 16
+
     private func jumpButton() -> some View {
         ZStack {
             if TranscriptPin.jumpButtonVisible(atBottom: atBottom, rowCount: rows.count) {
@@ -615,7 +641,8 @@ struct SessionDetail: View {
         }
         // Only the button's appearing and going is animated (by whether it shows), not the container or the follow state.
         .animation(Motion.standard, value: TranscriptPin.jumpButtonVisible(atBottom: atBottom, rowCount: rows.count))
-        .offset(y: -44)
+        // Sits its own height plus a gap above the bar's real top edge (the overlay's top), whatever the bar holds.
+        .alignmentGuide(.top) { $0[.bottom] + Self.jumpGap }
     }
 
     // MARK: Bottom bar: summary line and the floating composer
@@ -726,13 +753,6 @@ struct SessionDetail: View {
         .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
-        // The Next update / Next request pill floats over the transcript's bottom edge, right-aligned just above the
-        // dock, reserving no row of its own: the transcript's bottom padding already clears it (TranscriptBottomInset).
-        .overlay(alignment: .topTrailing) {
-            NextAttentionPill()
-                .padding(.trailing, Metrics.readingInset)
-                .offset(y: -(TranscriptBottomInset.pillHeight + TranscriptBottomInset.pillGap))
-        }
         .frame(maxWidth: .infinity)
         .squeakWindowCanvas()
     }

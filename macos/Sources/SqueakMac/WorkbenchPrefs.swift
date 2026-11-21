@@ -71,21 +71,17 @@ enum WorkbenchNav {
         model.dashboardFilter = filter
     }
 
-    /// A pond's home: every project is one.
-    static func openProject(_ model: AppModel, key: String) {
+    /// A pond: with `resuming`, the chat last open in it when that still exists, else its home (every project is one);
+    /// without, its home, as the breadcrumb and a closed last tab ask.
+    static func openProject(_ model: AppModel, key: String, resuming: Bool = true) {
         Signposts.interval(Signposts.Name.pondOpen) {
-            NewChatController.shared.hide()
-            model.closeSettings()
-            if model.navFilter == .usage { model.navFilter = .all }
-            PondsModel.shared.route = .home(project: key)
+            if resuming, let chat = model.resumableChat(pond: key) { model.select(chat) }
+            else { model.location = .pondHome(pond: key) }
         }
     }
 
     private static func showDashboard(_ model: AppModel) {
         Signposts.interval(Signposts.Name.dashboardOpen) {
-            PondsModel.shared.route = nil
-            NewChatController.shared.hide()
-            model.closeSettings()
             model.select(nil)
             model.navFilter = .home
         }
@@ -93,17 +89,17 @@ enum WorkbenchNav {
 
     static func stepWorkspace(_ model: AppModel, by delta: Int) {
         let tree = model.sidebarTree
-        guard let ws = WorkspaceNavigation.step(from: model.selected, by: delta, in: tree, pins: WorkbenchPrefs.shared.pins.ids),
+        guard let ws = WorkspaceNavigation.step(from: model.focus.chat, by: delta, in: tree, pins: WorkbenchPrefs.shared.pins.ids),
               let chat = ws.chats.first else { return }
         model.select(chat.key)
     }
 
     static func attention(_ model: AppModel) -> AttentionJump? {
-        AttentionJump.make(after: model.selected, in: model.sidebarTree, pins: WorkbenchPrefs.shared.pins.ids, mark: { model.mark(for: $0) })
+        AttentionJump.make(after: model.focus.chat, in: model.sidebarTree, pins: WorkbenchPrefs.shared.pins.ids, mark: { model.mark(for: $0) })
     }
 
     static func reopenTab(_ model: AppModel) {
-        guard let selected = model.selected, let place = model.sidebarTree.place(of: selected),
+        guard let selected = model.focus.chat, let place = model.sidebarTree.place(of: selected),
               let key = WorkbenchPrefs.shared.reopenTab(in: place.workspace.id, available: place.workspace.chats.map(\.key)) else { return }
         model.select(key)
     }

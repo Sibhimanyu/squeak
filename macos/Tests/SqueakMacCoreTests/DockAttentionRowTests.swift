@@ -37,4 +37,18 @@ import Testing
         let idle = DockAttentionRow.layout(showsLiveRow: false, hasAttentionJump: true)
         #expect(working.showsRow && idle.showsRow && working.showsPill && idle.showsPill)
     }
+
+    @Test func pillHasOneOwnerAndJumpNeverSharesItsSlot() {
+        for live in [false, true] {
+            for jump in [false, true] {
+                for button in [false, true] {
+                    let l = DockAttentionRow.layout(showsLiveRow: live, hasAttentionJump: jump, showsJumpButton: button)
+                    #expect(l.pillCount <= 1)
+                    #expect(l.pillSlot == .trailing)
+                    #expect(l.jumpSlot != l.pillSlot)
+                    #expect(l.showsJump == button)
+                }
+            }
+        }
+    }
 }

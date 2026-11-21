@@ -80,7 +80,7 @@ private struct ArchivedRow: View {
         switch entry.target {
         case .session(let key): model.select(key)
         case .shared(let pondId, let threadId):
-            PondsModel.shared.route = .thread(project: entry.pond == ArchivedPage.otherPond ? "" : entry.pond, pondId: pondId, threadId: threadId)
+            AppModel.shared.openPond(.thread(project: entry.pond == ArchivedPage.otherPond ? "" : entry.pond, pondId: pondId, threadId: threadId))
         }
     }
 

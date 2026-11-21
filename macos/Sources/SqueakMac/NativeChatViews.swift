@@ -20,6 +20,9 @@ struct NativeQueueStack: View {
     @FocusState private var editorFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// An edit in progress is kept by chat and message, so leaving the chat (or the app) does not lose it.
+    private func draftKey(_ id: String) -> String { ContainerDrafts.native(session.key.stringValue, item: id) }
+
     var body: some View {
         let all = model.native.key == session.key ? model.native.pending.stackCards : []
         let cards = transcriptHoldsQueue ? [] : all.filter { !($0.kind == .queued && inTranscript.contains($0.id)) }
@@ -125,6 +128,7 @@ struct NativeQueueStack: View {
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
         .onAppear { editorFocused = true }
+        .onChange(of: draft) { _, text in if editingId == card.id { ContainerDrafts.shared.set(text, for: draftKey(card.id)) } }
     }
 
     private func edit(_ card: NativePendingStack.Card) {
@@ -133,11 +137,12 @@ struct NativeQueueStack: View {
         Task {
             let held = await model.nativeHoldQueued(session, card.id)
             busyId = nil
-            if held { draft = card.text; editingId = card.id }
+            if held { draft = ContainerDrafts.shared.draft(for: draftKey(card.id), fallback: card.text); editingId = card.id }
         }
     }
 
     private func cancel(_ card: NativePendingStack.Card) {
+        ContainerDrafts.shared.clear(draftKey(card.id))
         editingId = nil
         Task { _ = await model.nativeReleaseQueued(session, card.id, text: nil) }
     }
@@ -145,6 +150,7 @@ struct NativeQueueStack: View {
     private func save(_ card: NativePendingStack.Card, steer: Bool) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        ContainerDrafts.shared.clear(draftKey(card.id))
         editingId = nil
         Task {
             if await model.nativeReleaseQueued(session, card.id, text: text), steer { await model.nativeSteerQueued(session, card.id) }
@@ -235,6 +241,7 @@ struct NativeQueuedSheet: View {
     @State private var draft = ""
     @FocusState private var focused: Bool
 
+    private var draftKey: String { ContainerDrafts.native(session.key.stringValue, item: queuedId) }
     private var parts: (words: String, paths: [String]) { ImageAttachments.split(text) }
 
     var body: some View {
@@ -249,6 +256,7 @@ struct NativeQueuedSheet: View {
                 TextEditor(text: $draft)
                     .font(Typo.body).foregroundStyle(Theme.ink).scrollContentBackground(.hidden)
                     .focused($focused)
+                    .onChange(of: draft) { _, text in ContainerDrafts.shared.set(text, for: draftKey) }
                     .frame(minHeight: 90, maxHeight: 220)
                     .padding(8)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
@@ -299,11 +307,13 @@ struct NativeQueuedSheet: View {
     }
 
     private func close() {
+        ContainerDrafts.shared.clear(draftKey)
         if held { held = false; Task { _ = await model.nativeReleaseQueued(session, queuedId, text: nil) } }
         open = false
     }
 
     private func remove() {
+        ContainerDrafts.shared.clear(draftKey)
         held = false
         run { _ = await model.nativeDeleteQueued(session, queuedId) }
     }
@@ -314,13 +324,14 @@ struct NativeQueuedSheet: View {
         Task {
             let ok = await model.nativeHoldQueued(session, queuedId)
             busy = false
-            if ok { held = true; draft = parts.words; editing = true; focused = true }
+            if ok { held = true; draft = ContainerDrafts.shared.draft(for: draftKey, fallback: parts.words); editing = true; focused = true }
         }
     }
 
     private func save(steer: Bool) {
         let t = ImageAttachments.compose(draft, refs: parts.paths)
         guard !t.isEmpty else { return }
+        ContainerDrafts.shared.clear(draftKey)
         held = false
         run {
             if await model.nativeReleaseQueued(session, queuedId, text: t), steer { await model.nativeSteerQueued(session, queuedId) }

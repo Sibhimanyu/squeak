@@ -157,6 +157,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         ActivationPolicyController.shared.start()
         let model = AppModel.shared
+        DockStore.shared.workspaceOf = { key in
+            AppModel.shared.allSessions.first { $0.key == key }.map(SidebarTreeBuilder.workspaceKey)
+        }
         // Read before `model.start()`, whose update restore consumes the marker.
         let updateMarker = UpdateRestoreMarker.decode(UserDefaults.standard.data(forKey: UpdateRestoreMarker.defaultsKey))?
             .usable(currentVersion: AppModel.appVersion)
@@ -335,7 +338,7 @@ extension Scene {
 @MainActor enum NewTerminalAction {
     static func perform(_ model: AppModel, in zone: DockZone? = nil) {
         // On a pond page the terminal belongs to the pond: its folder, in the pond inspector.
-        if zone == nil, case .home(let key)? = PondsModel.shared.route {
+        if zone == nil, case .pondHome(let key) = model.location {
             guard let folder = PondsModel.pondTerminalFolder(key) else { return }
             open(folder: folder, in: .right)
             return

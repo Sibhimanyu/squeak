@@ -28,6 +28,26 @@ enum PondRoute: Equatable {
     case settings(project: String)
     /// Every archived thread across all ponds (the sidebar's Archived entry).
     case archived
+
+    /// The route a location shows, if it is a pond page.
+    init?(_ location: WorkbenchLocation) {
+        switch location {
+        case .pondHome(let p): self = .home(project: p)
+        case .pondThread(let p, let id, let t): self = .thread(project: p, pondId: id, threadId: t)
+        case .pondSettings(let p): self = .settings(project: p)
+        case .archived: self = .archived
+        case .home, .chat, .compose, .settings, .usage: return nil
+        }
+    }
+
+    var location: WorkbenchLocation {
+        switch self {
+        case .home(let p): .pondHome(pond: p)
+        case .thread(let p, let id, let t): .pondThread(pond: p, pondId: id, threadId: t)
+        case .settings(let p): .pondSettings(pond: p)
+        case .archived: .archived
+        }
+    }
 }
 
 @MainActor @Observable
@@ -122,10 +142,11 @@ final class PondsModel {
     var allJoins: [(pond: PondSummary, join: JoinRequest)] {
         ponds.flatMap { p in (details[p.id].map { $0.myRole.canApproveJoins ? $0.joins : [] } ?? []).map { (p, $0) } }
     }
+    /// Bridge for `PondThreadView.swift`, which sets it (reads and every other writer go through `AppModel.location`,
+    /// `AppModel.openPond` and `closePondPage`). Delete once that file calls `AppModel.openPondHome`.
     var route: PondRoute? {
-        // A pond opened on its own (the sidebar, a picker, a crumb) has nothing waiting to come back to; the way back is
-        // `PondOrigin.goBack`, which keeps it.
-        didSet { if case .home = route, route != oldValue, !PondOrigin.shared.returning { PondOrigin.shared.clear() } }
+        get { PondRoute(AppModel.shared.location) }
+        set { if let newValue { AppModel.shared.openPond(newValue) } else { AppModel.shared.closePondPage() } }
     }
     var sheet: PondSheet?
     /// A refusal or failure in the host's own words, quiet, under the home header.
@@ -234,13 +255,8 @@ final class PondsModel {
         }
     }
 
-    /// The pond key the open page is for.
-    var homeProject: String? {
-        switch route {
-        case .home(let p), .thread(let p, _, _), .settings(let p): p
-        case .archived, nil: nil
-        }
-    }
+    /// The pond key the open page is for (`WorkbenchFocus.pond`): its home, a thread, a creation page aimed at it, or a chat in it.
+    var homeProject: String? { AppModel.shared.focus.pond }
 
     // MARK: Loop
 
@@ -315,7 +331,7 @@ final class PondsModel {
 
     private var openPondIds: Set<String> {
         if case .thread(_, let id, _)? = route { return [id] }
-        if let p = homeProject, let id = pond(key: p)?.id { return [id] }
+        if AppModel.shared.location.isPondRoute, let p = AppModel.shared.location.pondKey, let id = pond(key: p)?.id { return [id] }
         return []
     }
 

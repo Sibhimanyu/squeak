@@ -25,7 +25,7 @@ final class PondOrigin {
     func goBack(to origin: PondOriginStack.Origin) {
         RoomViewPref.shared.set(origin.page, for: origin.pond)
         returning = true
-        PondsModel.shared.route = .home(project: origin.pond)
+        AppModel.shared.openPondHome(origin.pond)
         returning = false
     }
     /// True while `goBack` sets the route.

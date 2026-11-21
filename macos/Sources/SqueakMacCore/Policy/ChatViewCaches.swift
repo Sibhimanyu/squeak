@@ -36,6 +36,7 @@ public final class ChatViewCaches {
     public let rows = ChatRowsCache()
     public let derived = RowDerivedCache()
     public let rowCache = TranscriptRowCache()
+    public let activity = ActivityDerivedCache()
     public init() {}
 }
 

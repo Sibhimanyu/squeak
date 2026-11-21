@@ -288,14 +288,6 @@ import Testing
         #expect(QuickPlace.defaultWorkspace(recentCwds: ["/zzz"], workspaces: all)?.id == "b")
         #expect(QuickPlace.defaultWorkspace(recentCwds: [], workspaces: []) == nil)
     }
-
-    @Test func historyRecordsTheNewPondPage() {
-        var h = NavHistory<WorkbenchPlace>()
-        h.visit(nil); h.visit(.create); h.visit(nil)
-        #expect(h.back() == .some(.create))
-        #expect(h.back() == .some(nil))
-        #expect(h.forward() == .some(.create))
-    }
 }
 
 @Suite struct NewPondShortcutTests {

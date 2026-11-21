@@ -298,7 +298,7 @@ struct JoinPondForm: View {
                 Text(verbatim: "You\u{2019}re in \(pond).").font(Typo.body).foregroundStyle(Theme.ink)
                 HStack {
                     Spacer()
-                    Button("Open") { ponds.route = .home(project: ponds.ponds.first { $0.id == id }.map { ponds.key(forPond: $0) } ?? id); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    Button("Open") { AppModel.shared.openPondHome(ponds.ponds.first { $0.id == id }.map { ponds.key(forPond: $0) } ?? id); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
             }
         }

@@ -67,7 +67,8 @@ final class NativeChatModel {
     var flow: NativeQuestionFlow?
     /// The chat's allow rules ("Allow for this session"); nil when the host has no rules route, so the inspector hides the section.
     /// The host's projects, for the sidebar's "+" (a project row gets it only when the host runs chats there).
-    var projects: [NativeProject] = []
+    var projects: [NativeProject] = [] { didSet { if projects != oldValue { onProjectsChanged?() } } }
+    @ObservationIgnored var onProjectsChanged: (() -> Void)?
     /// The project a workspace is being made in (its "+" shows a spinner).
     var makingWorkspaceIn: String?
     var rules: [NativeRule]?
@@ -289,7 +290,7 @@ extension AppModel {
             } else {
                 if live.liveStep != native.liveStep {
                     native.liveStep = live.liveStep
-                    if selected == key, !demoMode { showLiveStep() }
+                    if lastChat == key, !demoMode { showLiveStep() }
                 }
                 if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             }
@@ -759,9 +760,8 @@ extension AppModel {
             await broker.adopt(stand, adapterId: nativeAdapter.id)
             await broker.echo(spec.text ?? "", to: key)
             await broker.refresh()
-            // The catalog event may land a moment after; the host's own row stands in meanwhile.
-            let end = Date().addingTimeInterval(1)
-            while Date() < end, !sessions.contains(where: { $0.key == key }) { try? await Task.sleep(for: .milliseconds(200)) }
+            // Open it now: the host's own row stands in (`startedChats`) until the catalog lists it, and its tab joins
+            // the strip at once, so the strip never shows the old set without it.
             open(key)
             return (key, nil)
         } catch let e as NativeHostError {

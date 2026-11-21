@@ -166,7 +166,7 @@ struct SettingsSidebar: View {
             // Traffic-light clearance in a window; a short gap in full screen. Search leads, as the conversation sidebar's first item does.
             Color.clear.frame(height: Space.m).background(WindowDragArea())
             SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
-                .onSubmit { if let first = filteredGroups.first?.sections.first { model.settingsSection = first } }
+                .onSubmit { if let first = filteredGroups.first?.sections.first { model.openSettingsInPlace(first) } }
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -205,7 +205,7 @@ struct SettingsSidebar: View {
     }
 
     private func row(_ section: SettingsSection) -> some View {
-        SidebarNavRow(title: section.title, selected: model.settingsSection == section, action: { model.settingsSection = section }) {
+        SidebarNavRow(title: section.title, selected: model.settingsSection == section, action: { model.openSettingsInPlace(section) }) {
             switch section {
             case .telegram: ServiceMark(service: .telegram, size: 20)
             case .cliq: ServiceMark(service: .cliq, size: 20)
@@ -229,7 +229,7 @@ struct SettingsSidebar: View {
         default: return
         }
         self.focusedSection = next
-        model.settingsSection = next
+        model.openSettingsInPlace(next)
     }
 }
 
@@ -432,8 +432,8 @@ struct NotificationsSettings: View {
                     if model.channels.notify?.shown.isEmpty ?? true {
                         SettingsCard(title: "Take updates with you", subtitle: "Connect a channel to choose which moments reach you away from this Mac.", symbol: "paperplane") {
                             HStack {
-                                Button("Set up Telegram") { model.settingsSection = .telegram }.buttonStyle(SecondaryButtonStyle())
-                                Button("Set up Zoho Cliq") { model.settingsSection = .cliq }.buttonStyle(SecondaryButtonStyle())
+                                Button("Set up Telegram") { model.openSettingsInPlace(.telegram) }.buttonStyle(SecondaryButtonStyle())
+                                Button("Set up Zoho Cliq") { model.openSettingsInPlace(.cliq) }.buttonStyle(SecondaryButtonStyle())
                             }
                         }
                     }

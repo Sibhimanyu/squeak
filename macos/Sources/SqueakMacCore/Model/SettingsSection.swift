@@ -1,8 +1,7 @@
 import Foundation
 
-/// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
-/// page on screen, or nil while the window shows sessions.
-public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
+/// The pages of Settings, which lives inside the main window. `WorkbenchLocation.settings` carries the page on screen.
+public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable, Codable {
     case account, ponds, notifications, privacy, models, messages, general, awake, service, iphone, connections, addons, telegram, cliq, voice, conductor, rasanai, about
 
     public var id: String { rawValue }

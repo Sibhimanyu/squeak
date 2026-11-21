@@ -29,7 +29,7 @@ struct InspectorPlusMenu<Glyph: View>: View {
         switch item {
         case .newTerminal: NewTerminalAction.perform(model, in: .right)
         case .files, .code:
-            UserDefaults.standard.set(item == .files ? InspectorTab.files.rawValue : InspectorTab.changes.rawValue, forKey: "inspectorTab")
+            InspectorTabMemory.write(item == .files ? InspectorTab.files.rawValue : InspectorTab.changes.rawValue, workspace: model.focus.workspace)
             if dock.layout.zone(of: .code) == .right { dock.selectPanel(.code, in: .right) } else { dock.update { $0.move(.code, to: .right) } }
         }
     }

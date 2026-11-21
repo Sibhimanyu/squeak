@@ -132,7 +132,7 @@ struct PondSettingsView: View {
 
     private var topBar: some View {
         HStack(spacing: Space.m) {
-            Button { ponds.route = .home(project: key) } label: {
+            Button { AppModel.shared.openPondHome(key) } label: {
                 HStack(spacing: 4) {
                     Lucide(.arrowLeft, size: 14, color: Theme.muted)
                     Text(verbatim: project).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
@@ -436,7 +436,7 @@ struct PondSettingsView: View {
                 let cleaned = try await model.nativeHost.removeProject(projectId: native.id, cleaningStreams: removeCleaning)
                 if let cleaned { AppLog.info("pond removed; \(DiskCleanupLogic.resultLine(cleaned))") }
                 await model.refreshNativeProjects()
-                ponds.route = nil
+                AppModel.shared.closePondPage()
                 WorkbenchNav.goHome(model)
             } catch let e as NativeHostError { removeCleaning = false; removeProblem = e.reason } catch { removeCleaning = false; removeProblem = "Squeak couldn't remove it" }
         }

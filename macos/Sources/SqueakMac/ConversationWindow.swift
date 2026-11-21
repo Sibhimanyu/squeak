@@ -20,7 +20,7 @@ struct ConversationView: View {
     }
     /// Where the Pond, Code and Terminal panels sit (DockLayout); the old inspector/terminal keys are read once, to migrate.
     private var dock: DockStore { DockStore.shared }
-    @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
+    private var inspectorTabRaw: String { get { InspectorTabMemory.read(workspace: model.focus.workspace) } nonmutating set { InspectorTabMemory.write(newValue, workspace: model.focus.workspace) } }
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
     /// "not dragged yet": it takes its share of the window (30%).
     private var sidebarWidthSaved: Double { DockStore.shared.layout.sidebarWidth ?? PaneWidths.sidebarDefault }
@@ -78,8 +78,8 @@ struct ConversationView: View {
     /// The window's narrowest content: sidebar min + centre min (+ right min while the right zone is shown).
     private var minContentWidth: CGFloat {
         let right = InspectorStash.rightVisible(dock.layout, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
-            && model.settingsSection == nil && model.selectedSession != nil
-        return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.settingsSection != nil || !sidebarHidden, rightShown: right))
+            && !model.focus.isSettings && model.selectedSession != nil
+        return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.focus.isSettings || !sidebarHidden, rightShown: right))
     }
 
     var body: some View {
@@ -102,12 +102,9 @@ struct ConversationView: View {
     /// The pond page on screen (Dashboard or Room), if any: its project id and the pond's directory key.
     private var roomContext: (projectId: String, key: String)? {
         guard InspectorStash.roomEnabled else { return nil }
-        if let route = PondsModel.shared.route {
-            guard case .home(let key) = route else { return nil }
-            if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
-            return PondsModel.shared.native(key: key).map { ($0.id, key) }
-        }
-        return nil
+        guard case .pondHome(let key) = model.location else { return nil }
+        if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
+        return PondsModel.shared.native(key: key).map { ($0.id, key) }
     }
 
     @ViewBuilder private var windowContent: some View {
@@ -122,11 +119,12 @@ struct ConversationView: View {
         let rightWanted = rightAvailable && !layout.right.collapsed
         // While the pond room is shown, the right zone is the room's inspector (Flock, Invite, Today, Pond controls), at
         // any window width the solver can fit, with its own open/closed choice.
-        let roomCtx = (model.settingsSection == nil && NewChatController.shared.page == nil && model.navFilter != .usage) ? roomContext : nil
-        let showsInspectorWanted = roomCtx != nil
-            ? roomInspectorOpen
-            : (rightWanted && model.settingsSection == nil && NewChatController.shared.page == nil
-                && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil)
+        let focus = model.focus
+        let roomCtx = roomContext
+        let showingSettings = focus.isSettings
+        // The right zone belongs to the page: a chat's dock column, or a pond home's room inspector.
+        let chatOpen = focus.page == .chat && model.selectedSession != nil
+        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : (rightWanted && chatOpen)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
             window: windowWidth,
@@ -138,11 +136,7 @@ struct ConversationView: View {
         let showsInspector = showsInspectorWanted && solved.rightShown
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
-        let showingSettings = model.settingsSection != nil
         let toggleRightPane: () -> Void = { guard rightAvailable || roomCtx != nil else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
-        let showingCompose = !showingSettings && NewChatController.shared.page != nil
-        let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
-            && PondsModel.shared.route == nil
         let paneOpen = chatOpen || roomCtx != nil
         HStack(spacing: 0) {
             // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
@@ -167,16 +161,16 @@ struct ConversationView: View {
                 .background(SidebarBackground(edge: false))
                 .transition(paneTransition(.leading)).zIndex(1)
             }
-            if showingSettings {
-                SettingsDetail().squeakWindowCanvas()
-            } else {
+            // The workbench stays mounted under Settings (its chat keeps its scroll, focus and state); Settings is a layer
+            // above it, present only while shown.
+            ZStack(alignment: .topLeading) {
                 let placement = (chatOpen && roomCtx == nil) ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
                             sidebarHidden: sidebarHidden, inspectorOpen: showsInspector && paneOpen,
                             
-                            toggleSidebar: toggleSidebar, showingCompose: showingCompose
+                            toggleSidebar: toggleSidebar
                         )
                         .squeakWindowCanvas()
                         if placement == .underCentre { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight) }
@@ -211,7 +205,10 @@ struct ConversationView: View {
                 .overlay(alignment: .bottom) {
                     if chatOpen, dock.dragging != nil, !layout.isZoneVisible(.bottom, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) { DockEdgeStrip(zone: .bottom) }
                 }
+                .workbenchLayer(hidden: showingSettings)
+                if showingSettings { SettingsDetail().squeakWindowCanvas() }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
@@ -225,8 +222,8 @@ struct ConversationView: View {
             DockDragMonitor.install()
             // The Pond panel never docks in the centre: dropping it there opens the pond dashboard.
             dock.openPondDashboard = { [model] in
-                let key = model.selectedSession.flatMap { PondsModel.shared.key(of: $0) } ?? PondsModel.shared.homeProject
-                if let key { PondsModel.shared.route = .home(project: key) }
+                let key = model.focus.pond ?? model.selectedSession.flatMap { PondsModel.shared.key(of: $0) }
+                if let key { model.openPondHome(key) }
             }
         }
         .onDisappear { KeyFocus.shared.setTerminalOpen(false) }

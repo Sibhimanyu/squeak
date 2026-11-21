@@ -8,14 +8,11 @@ public enum HeightGuard {
 }
 
 /// The transcript's bottom padding. The dock is a measured `.safeAreaInset`, so the scroll view already ends above it;
-/// the padding only has to clear what floats over the transcript's bottom edge right now: the dock fade, or the Next
-/// update pill (its height and gap above the dock) when one shows, plus a small gap. Nothing is a fixed worst case.
+/// the padding only has to clear the dock fade floating over the transcript's bottom edge, plus a small gap. The Next
+/// update pill lives in the dock's own row, so it reserves nothing here.
 public enum TranscriptBottomInset {
-    public static let pillHeight: CGFloat = 32
-    public static let pillGap: CGFloat = 8
     public static func value(base: CGFloat, pillShown: Bool) -> CGFloat {
-        let floating = max(DockFade.height, pillShown ? pillHeight + pillGap : 0)
-        return max(base, floating + 8)
+        max(base, DockFade.height + 8)
     }
 }
 

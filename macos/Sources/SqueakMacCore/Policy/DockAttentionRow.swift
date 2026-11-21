@@ -12,9 +12,18 @@ public enum DockAttentionRow {
         /// The next-attention pill is drawn at the right. Never more than one pill exists.
         public var showsPill: Bool
         public var pillCount: Int { showsPill ? 1 : 0 }
+        /// The jump-to-newest button is drawn (floating above the bar, never inside the dock row).
+        public var showsJump: Bool
+        /// The slot each floating thing claims. The pill owns the row's trailing end; the jump button is centred above
+        /// the bar, so the two can never overlap.
+        public var pillSlot: Slot { .trailing }
+        public var jumpSlot: Slot { .center }
     }
 
-    public static func layout(showsLiveRow: Bool, hasAttentionJump: Bool) -> Layout {
-        Layout(showsRow: showsLiveRow || hasAttentionJump, showsLive: showsLiveRow, showsPill: hasAttentionJump)
+    public enum Slot: Equatable, Sendable { case leading, center, trailing }
+
+    public static func layout(showsLiveRow: Bool, hasAttentionJump: Bool, showsJumpButton: Bool = false) -> Layout {
+        Layout(showsRow: showsLiveRow || hasAttentionJump, showsLive: showsLiveRow, showsPill: hasAttentionJump,
+               showsJump: showsJumpButton)
     }
 }

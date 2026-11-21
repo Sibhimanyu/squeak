@@ -27,6 +27,7 @@ struct RoomComposer: View {
         return names.filter { $0 != me }
     }
 
+    private var draftKey: String { ContainerDrafts.room(room.projectId) }
     private var mention: RoomMention.Active? { RoomMention.active(in: draft) }
     private var candidates: [RoomMention.Candidate] {
         mention.map { RoomMention.candidates(query: $0.query, threads: room.feed.threads, people: people) } ?? []
@@ -54,9 +55,16 @@ struct RoomComposer: View {
         .padding(.horizontal, 14).padding(.bottom, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
-        .overlay(alignment: .bottomLeading) {
-            if mention != nil, !candidates.isEmpty { picker(candidates).offset(y: -(contentHeight + 56)).padding(.leading, 12) }
+        .overlay(alignment: .topLeading) {
+            // Anchored to the composer's own top edge (its measured top, whatever the attachment tray or dictation bar
+            // hold): the picker's bottom sits a small gap above it, so it can never overlap them.
+            if mention != nil, !candidates.isEmpty {
+                picker(candidates).alignmentGuide(.top) { $0[.bottom] + 6 }.padding(.leading, 12)
+            }
         }
+        .onAppear { if draft.isEmpty { draft = ContainerDrafts.shared.draft(for: draftKey) } }
+        .onChange(of: draftKey) { _, key in draft = ContainerDrafts.shared.draft(for: key) }
+        .onChange(of: draft) { _, text in ContainerDrafts.shared.set(text, for: draftKey) }
         .onChange(of: mention?.query) { highlighted = 0 }
         .onAppear {
             // Dictation is the chat composer's: the words land in the field for review, nothing is sent.
@@ -166,6 +174,7 @@ struct RoomComposer: View {
         let items = tray.items
         if let problem = send(to, text, items) { tray.fail(problem); return }
         draft = ""
+        ContainerDrafts.shared.clear(draftKey)
         tray.clear()
     }
 }

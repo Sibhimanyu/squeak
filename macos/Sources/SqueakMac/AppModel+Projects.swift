@@ -19,7 +19,7 @@ extension AppModel {
         _ = derivedRevision
         let now = Date()
         return derived.tree.value(bucket: TimeBucket.of(now)) {
-            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: selected, mains: mainPlaces, isUnread: { isUnread($0) })
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, isUnread: { isUnread($0) })
         }
     }
 
@@ -37,7 +37,7 @@ extension AppModel {
         _ = derivedRevision
         let now = Date()
         return derived.fullTree.value(bucket: TimeBucket.of(now)) {
-            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: selected, mains: mainPlaces, includeEarlier: true, isUnread: { isUnread($0) })
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: lastChat, mains: mainPlaces, includeEarlier: true, isUnread: { isUnread($0) })
         }
     }
 

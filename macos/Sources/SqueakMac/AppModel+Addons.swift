@@ -14,7 +14,7 @@ extension AppModel {
     func hostName(of key: SessionKey) -> String? { enabledApps.first { $0.providers.contains(key.provider) }?.hostName }
 
     /// The open chat's host app, for "Open in …"; nil when its host is not an add-on.
-    var openHostName: String? { selected.flatMap(hostName(of:)) }
+    var openHostName: String? { lastChat.flatMap(hostName(of:)) }
 
     /// The enabled add-ons' project artwork, read off the main thread.
     func projectIcons() async -> [String: Data] {
