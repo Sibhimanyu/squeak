@@ -17,10 +17,10 @@ public struct TideClockPolicy: Sendable, Equatable {
     public mutating func unsubscribe() { subscribers = max(0, subscribers - 1) }
     public var shouldRun: Bool { subscribers > 0 && !occluded && !hidden }
     /// The shared frame rate: a pixel glyph needs no more.
-    public static let interval: TimeInterval = 1.0 / 30.0
+    public static let interval: TimeInterval = 1.0 / 15.0
 }
 
-/// One clock for every working glyph (was one display-rate `TimelineView` each). A single 30 fps timer ticks while at least one
+/// One clock for every working glyph (was one display-rate `TimelineView` each). A single 15 fps timer ticks while at least one
 /// glyph is subscribed and the app has a visible window; a glyph that disappears unsubscribes, and static states never subscribe.
 @MainActor @Observable
 public final class TideClock {

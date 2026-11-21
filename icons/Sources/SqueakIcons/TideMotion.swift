@@ -12,7 +12,7 @@ public enum TideMotion {
     /// Live-tunable parameters; the defaults are the shipped look.
     public struct Tuning: Sendable, Equatable {
         /// Overall speed multiplier (drift, twinkle and sparkle).
-        public var speed: Double = 0.5
+        public var speed: Double = 0.65
         /// How far the pace wanders (1 = shipped 0.5x...1.3x; 0 = constant pace).
         public var paceDrift: Double = 0.5
         /// Unused since the random-glyph redesign; kept so tuning sources and the preview tools still compile.
@@ -27,7 +27,7 @@ public enum TideMotion {
         /// Timeline rate: 15, 30 or 60.
         public var frameRate: Int = 30 // kept for API compatibility; never throttles the glyph
         public init() {}
-        public init(speed: Double = 0.5, paceDrift: Double = 0.5, choppinessLow: Double = 0.15, choppinessHigh: Double = 0.8, sparkle: Double = 1, vignette: Double = 1, smoothness: Double = 0.8, frameRate: Int = 30) {
+        public init(speed: Double = 0.65, paceDrift: Double = 0.5, choppinessLow: Double = 0.15, choppinessHigh: Double = 0.8, sparkle: Double = 1, vignette: Double = 1, smoothness: Double = 0.8, frameRate: Int = 30) {
             self.smoothness = smoothness; self.frameRate = frameRate
             self.speed = speed; self.paceDrift = paceDrift; self.choppinessLow = choppinessLow; self.choppinessHigh = choppinessHigh
             self.sparkle = sparkle; self.vignette = vignette
@@ -41,13 +41,13 @@ public enum TideMotion {
 
     /// The clock every view reads: seconds of *shown* motion, shared by all glyphs and a pure function of the frames it has seen,
     /// never of how many views read it or how often. A read advances it by the wall time since the last advance, but by at most
-    /// `maxStep` (about a frame and a half at 30 fps), so a stall (a busy main thread, a paused or occluded view, sleep, a clock
-    /// change) resumes where the water left off and no single frame ever moves more than 1.5x a normal one. Reads within
+    /// `maxStep` (about 1.2 frames at 15 fps), so a stall (a busy main thread, a paused or occluded view, sleep, a clock
+    /// change) resumes where the water left off and no single frame ever moves more than 1.2x a normal one. Reads within
     /// `frameSlop` of the last advance (the other glyphs of the same frame, a body that runs again) return the same time and
     /// never advance it; a read from the past never moves it back. Combined with the bounded pace below, the flow's rate stays
     /// within 0.7x-1.1x of nominal.
     public final class Clock: @unchecked Sendable {
-        public static let maxStep = 0.05
+        public static let maxStep = 0.08
         public static let frameSlop = 0.004
         private let lock = NSLock()
         private var last: Date?

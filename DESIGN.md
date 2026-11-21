@@ -194,7 +194,7 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 
 | State                       | Mark (Lucide where it is an icon)         | Dark                                              | Light      | Motion                     | Telegram glyph | Duck mood         |
 | --------------------------- | ----------------------------------------- | ------------------------------------------------- | ---------- | -------------------------- | -------------- | ----------------- |
-| Working                     | `TideGlyph` (SqueakIcons, §8.1) | `working` | `working` | random twinkling pixels, 30 fps | 🟢             | `working`         |
+| Working                     | `TideGlyph` (SqueakIcons, §8.1) | `working` | `working` | random twinkling pixels, 15 fps | 🟢             | `working`         |
 | Waiting on background tasks | the same glyph, quiet variant | `muted` | `muted` | same frames, a 3 s cycle   | 🟢             | `working`         |
 | Waiting for your approval   | triangle-alert (`StatusMark`) | `warning` | `warning` | none in lists; duck wobble | 🔴             | `needs_you`       |
 | Plan ready for your review  | triangle-alert (`StatusMark`) | `warning` | `warning` | none in lists; duck wobble | 🔴             | `needs_you`       |
