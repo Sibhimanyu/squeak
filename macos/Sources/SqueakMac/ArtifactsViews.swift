@@ -16,23 +16,30 @@ final class ArtifactsModel {
     private var projectId = ""
     private var task: Task<Void, Never>?
 
-    /// Reads now and again every few seconds (the host answers from a cache), so a duck's new `show` appears at once.
+    /// Reads now, then again whenever the host pushes a change (a duck's `show`, or a folder scan that found one).
     func follow(_ id: String, host: NativeHostClient) {
         if id != projectId { items = []; loaded = false; failed = false }
         projectId = id
         task?.cancel()
         task = Task { [weak self] in
-            while !Task.isCancelled {
-                do {
-                    let rows = try await host.artifacts(projectId: id)
-                    guard let self, self.projectId == id else { return }
-                    if rows != self.items { self.items = rows }
-                    self.loaded = true; self.failed = false
-                } catch {
-                    self?.failed = true; self?.loaded = true
-                }
-                try? await Task.sleep(for: .seconds(4))
+            await self?.read(id, host)
+            // `connected` reads again on every (re)connect, so nothing is missed while the stream was down.
+            for await event in host.artifactEvents(projectId: id) {
+                guard !Task.isCancelled else { return }
+                _ = event
+                await self?.read(id, host)
             }
+        }
+    }
+
+    private func read(_ id: String, _ host: NativeHostClient) async {
+        do {
+            let rows = try await host.artifacts(projectId: id)
+            guard projectId == id else { return }
+            if rows != items { items = rows }
+            loaded = true; failed = false
+        } catch {
+            failed = true; loaded = true
         }
     }
 

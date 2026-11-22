@@ -159,6 +159,22 @@ export function sortParticipants(list: ThreadParticipant[]): ThreadParticipant[]
   return [...list].sort((a, b) => (Date.parse(b.lastAt) || 0) - (Date.parse(a.lastAt) || 0));
 }
 
+/** What a Ripple is about, so a surface can filter without reading its words. Absent on older Ripples and unsorted ones. */
+export const RIPPLE_KINDS = [
+  "finished",
+  "failed",
+  "needs_you",
+  "joined",
+  "question",
+  "left",
+  "invite",
+  "archived",
+  "created",
+  "private",
+  "other",
+] as const;
+export type RippleKind = (typeof RIPPLE_KINDS)[number];
+
 export interface Ripple {
   id: string;
   at: number;
@@ -168,6 +184,8 @@ export interface Ripple {
   text: string;
   /** Written by this Mac on another member's behalf (their answer, their joining): who it is about. */
   onBehalf?: { id: string; name: string };
+  /** Optional: Ripples written before kinds existed have none. An unknown kind reads as absent. */
+  kind?: RippleKind;
 }
 
 export interface Hold {
@@ -570,7 +588,15 @@ export function readRipple(v: unknown): Ripple | null {
   if (!rec(v) || !s(v.id, 80) || !n(v.at) || !s(v.actor, 64) || !s(v.text, 500)) return null;
   const who = v.onBehalf;
   const onBehalf = rec(who) && s(who.id, 64) && s(who.name, 100) ? { id: who.id, name: who.name } : null;
-  return { id: v.id, at: v.at, actor: v.actor, text: v.text, ...(onBehalf ? { onBehalf } : {}) };
+  const kind = (RIPPLE_KINDS as readonly unknown[]).includes(v.kind) ? (v.kind as RippleKind) : null;
+  return {
+    id: v.id,
+    at: v.at,
+    actor: v.actor,
+    text: v.text,
+    ...(onBehalf ? { onBehalf } : {}),
+    ...(kind ? { kind } : {}),
+  };
 }
 
 export function readHold(v: unknown): Hold | null {

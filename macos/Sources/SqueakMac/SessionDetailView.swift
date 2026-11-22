@@ -215,6 +215,8 @@ struct SessionDetail: View {
         // Paused while the chat is covered by a page or the window is hidden; resumes (and reads at once) on show.
         .task(id: "extras-\(session.key.stringValue)-\(active)") {
             guard active else { return }
+            // A Squeak chat has no daemon extras: its model and status ride the host's stream (no poll at all).
+            guard ChatPolling.pollsExtras(isNative: isNative, hasConductorId: session.conductorSessionId != nil) else { return }
             while !Task.isCancelled {
                 await model.refreshChatExtras(session)
                 try? await Task.sleep(for: .seconds(3))
@@ -253,7 +255,7 @@ struct SessionDetail: View {
         .task(id: "\(session.key.stringValue)-\(isWorking)-\(active)") {
             if model.usesTimeline(session.key) || !active { return }
             await model.refreshActivity()
-            guard isWorking else { return }
+            guard ChatPolling.pollsActivity(usesTimeline: false, active: active, working: isWorking) else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 await model.refreshActivity()

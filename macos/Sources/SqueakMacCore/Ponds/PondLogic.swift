@@ -177,7 +177,7 @@ public enum PondRippleFeed {
     public static func build(_ entries: [RippleEntry], me: String? = nil, cap: Int = PondRipples.cap) -> [PondRipple] {
         entries.compactMap { e -> PondRipple? in
             guard let at = e.at, !e.text.isEmpty else { return nil }
-            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: sentence(of: e, me: me), at: at, threadKey: nil)
+            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: sentence(of: e, me: me), at: at, threadKey: nil, wireKind: e.kind)
         }
         .sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }
         .prefix(max(0, cap)).map { $0 }

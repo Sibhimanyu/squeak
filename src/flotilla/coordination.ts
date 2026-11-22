@@ -16,7 +16,7 @@ import {
   type TaskDoc,
   type TaskView,
 } from "./tasks.js";
-import type { Role } from "./types.js";
+import type { RippleKind, Role } from "./types.js";
 
 /** A document the service opened and checked: sealed with the pond key, signed by a current member. */
 export interface SignedDoc {
@@ -37,7 +37,7 @@ export interface CoordinationPort {
   put(kind: string, docId: string, value: unknown): Promise<void>;
   remove(kind: string, docId: string): Promise<void>;
   list(kind: string): Promise<SignedDoc[]>;
-  ripple(text: string): Promise<void>;
+  ripple(text: string, kind?: RippleKind): Promise<void>;
 }
 
 export type Port = (pondId: string) => CoordinationPort;
@@ -240,7 +240,10 @@ export class PondCoordination {
       await p.put("tasks", taskId, { ...found.task, status, updatedAt: p.now() });
       if (win?.by === p.me.id) await this.setClaimState(p, win, "done", status === "dropped");
     }
-    await p.ripple(`${status === "done" ? "finished" : "dropped"} the task "${found.task.title}"`);
+    await p.ripple(
+      `${status === "done" ? "finished" : "dropped"} the task "${found.task.title}"`,
+      status === "done" ? "finished" : "other",
+    );
     return { ok: true };
   }
 

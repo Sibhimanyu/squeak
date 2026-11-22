@@ -100,6 +100,7 @@ import {
   type PresenceDoc,
   isRole,
   type Ripple,
+  type RippleKind,
   type Role,
   type ThreadEvent,
 } from "./types.js";
@@ -1293,7 +1294,7 @@ export class FlotillaService extends EventEmitter {
       this.save();
       this.watch(pond.id);
       // Published already; the ripple is only the pond's first line of history, so a miss is logged, not fatal.
-      await this.ripple(pond.id, "made the pond").catch((error) =>
+      await this.ripple(pond.id, "made the pond", undefined, "created").catch((error) =>
         logger.warn("pond published but its first ripple failed", { pond: pond.id, error: String(error) }),
       );
     })().finally(() => this.publishing.delete(pondId));
@@ -1327,7 +1328,7 @@ export class FlotillaService extends EventEmitter {
       nest: me.nest,
       addedAt: this.now(),
     });
-    await this.ripple(id, "made the pond");
+    await this.ripple(id, "made the pond", undefined, "created");
     return this.summary(pond, 1, 0, 0);
   }
 
@@ -2226,7 +2227,7 @@ export class FlotillaService extends EventEmitter {
       store.delete(this.docPath(pond.id, "joins", requestId)).catch(() => undefined),
       this.dropJoinIdentity(pond, requestId),
       this.dropSuperseded(pond, superseded),
-      this.ripple(pondId, "joined", { id: member.id, name: member.name }).catch(() => undefined),
+      this.ripple(pondId, "joined", { id: member.id, name: member.name }, "joined").catch(() => undefined),
     ]);
   }
 
@@ -2267,9 +2268,12 @@ export class FlotillaService extends EventEmitter {
       await this.dropJoinIdentity(pond, r.id);
       waiting = r.name;
     }
-    await this.ripple(pondId, waiting ? `withdrew the invite ${waiting} was waiting on` : "withdrew an invite").catch(
-      () => undefined,
-    );
+    await this.ripple(
+      pondId,
+      waiting ? `withdrew the invite ${waiting} was waiting on` : "withdrew an invite",
+      undefined,
+      "invite",
+    ).catch(() => undefined);
     return { id: inviteId, state: "revoked" };
   }
 
@@ -2710,7 +2714,7 @@ export class FlotillaService extends EventEmitter {
     // Said as soon as they are out: the rotation below is many relay calls, and a failure there must not leave the
     // removal unrecorded.
     const sentence = say(gone);
-    if (sentence) await this.ripple(pondId, sentence).catch(() => undefined);
+    if (sentence) await this.ripple(pondId, sentence, undefined, "left").catch(() => undefined);
     await this.rotate(pond, members);
     delete pond.rotationPending;
     this.save();
@@ -2857,7 +2861,7 @@ export class FlotillaService extends EventEmitter {
       return;
     }
     const pond = this.activePond(pondId);
-    await this.ripple(pondId, "left the pond");
+    await this.ripple(pondId, "left the pond", undefined, "left");
     await this.storeOf(pond)
       .delete(this.docPath(pond.id, "presence", this.selfId(pond)))
       .catch(() => undefined);
@@ -3840,7 +3844,12 @@ export class FlotillaService extends EventEmitter {
     }
   }
 
-  async ripple(pondId: string, text: string, onBehalf?: { id: string; name: string }): Promise<string> {
+  async ripple(
+    pondId: string,
+    text: string,
+    onBehalf?: { id: string; name: string },
+    kind?: RippleKind,
+  ): Promise<string> {
     const pond = this.activePond(pondId);
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(3)}`;
@@ -3850,6 +3859,7 @@ export class FlotillaService extends EventEmitter {
       actor: this.selfId(pond),
       text: text.slice(0, 500),
       ...(onBehalf ? { onBehalf: { id: onBehalf.id.slice(0, 64), name: onBehalf.name.slice(0, 100) } } : {}),
+      ...(kind ? { kind } : {}),
     };
     await this.put(pond, "ripples", id, ripple);
     // Keep the feed short: forget the oldest beyond a hundred.
@@ -3941,7 +3951,7 @@ export class FlotillaService extends EventEmitter {
         }
         return out;
       },
-      ripple: async (text) => void (await this.ripple(pondId, text).catch(() => undefined)),
+      ripple: async (text, kind) => void (await this.ripple(pondId, text, undefined, kind).catch(() => undefined)),
     };
   }
 

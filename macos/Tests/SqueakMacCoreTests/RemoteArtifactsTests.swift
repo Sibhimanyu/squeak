@@ -100,3 +100,28 @@ private final class Progress: @unchecked Sendable {
     var values: [Double?] { lock.withLock { all } }
     func add(_ p: Double?) { lock.withLock { all.append(p) } }
 }
+
+@Suite("Artifacts stream")
+struct ArtifactsStreamTests {
+    @Test func helloAndPushedChangesBecomeEvents() async throws {
+        let lines: @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error> = { req in
+            #expect(req.url.path == "/native/projects/p1/artifacts/stream")
+            #expect(req.headers["x-squeak-token"] == "tok")
+            return AsyncThrowingStream { c in
+                for l in ["event: hello", "data: {}", "", "event: artifacts", "data: {}", "", ": ping", ""] { c.yield(l) }
+                c.finish()
+            }
+        }
+        let host = NativeHostClient(baseURL: URL(string: "http://127.0.0.1:8479")!, transport: RemoteStubTransport(), tokenProvider: { "tok" }, lineSource: lines)
+        var seen: [ArtifactStreamEvent] = []
+        for await e in host.artifactEvents(projectId: "p1", sleep: { _ in throw CancellationError() }) {
+            seen.append(e)
+            if seen.count == 2 { break }
+        }
+        #expect(seen == [.connected, .changed])
+    }
+}
+
+private struct RemoteStubTransport: HTTPTransport {
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse { HTTPResponse(status: 200, body: Data("{}".utf8)) }
+}

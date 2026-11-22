@@ -140,7 +140,7 @@ describe("Artifacts service", () => {
     store.recordShownArtifact({ projectId: project.id, path: path.join(root, "gone.html"), sessionId: "s", at: 2 });
     let t = 1000;
     let scans = 0;
-    const svc = new Artifacts({ store, now: () => t, scan: (f) => (scans++, scanArtifactFolder(f)) });
+    const svc = new Artifacts({ store, now: () => t, watch: false, scan: (f) => (scans++, scanArtifactFolder(f)) });
     const first = svc.list(project.id).artifacts;
     expect(first.map((a) => [a.name, a.source]).sort()).toEqual([
       ["page.html", "shown"],
@@ -152,6 +152,65 @@ describe("Artifacts service", () => {
     fs.unlinkSync(path.join(root, "pic.png"));
     expect(svc.list(project.id).artifacts.map((a) => a.name)).toEqual(["page.html"]);
     expect(scans).toBe(2);
+  });
+});
+
+const waitFor = async (ok: () => boolean, ms = 4000): Promise<void> => {
+  const end = Date.now() + ms;
+  while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+};
+
+describe("Artifacts watching", () => {
+  it("scans on change only, emits changed, ignores build dirs, and drops idle ponds", async () => {
+    const store = new NativeStore(":memory:");
+    const root = tmp("art-watch-");
+    fs.mkdirSync(path.join(root, "node_modules"));
+    const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind: "folder" });
+    let t = 1000;
+    let scans = 0;
+    const svc = new Artifacts({
+      store,
+      now: () => t,
+      debounceMs: 60,
+      idleMs: 5000,
+      scan: (f) => (scans++, scanArtifactFolder(f)),
+    });
+    const changes: string[] = [];
+    svc.on("changed", (id: string) => changes.push(id));
+    expect(svc.list(project.id).artifacts).toEqual([]);
+    expect(svc.watchedPonds()).toEqual([project.id]);
+    // Let any late event for the folders made above settle, then count from here.
+    await new Promise((r) => setTimeout(r, 500));
+    const base = scans;
+    // Long past the old 30 s cache: still no rescan, because nothing changed.
+    t += 120_000;
+    svc.list(project.id);
+    expect(scans).toBe(base);
+    // A file in a build dir is ignored.
+    fs.writeFileSync(path.join(root, "node_modules", "x.png"), "x");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(scans).toBe(base);
+    expect(changes).toEqual([]);
+    // A design file appears: one rescan, one event, listed.
+    fs.writeFileSync(path.join(root, "pic.png"), "x");
+    await waitFor(() => changes.length > 0);
+    expect(changes).toEqual([project.id]);
+    expect(scans).toBe(base + 1);
+    expect(svc.list(project.id).artifacts.map((a) => a.name)).toEqual(["pic.png"]);
+    expect(scans).toBe(base + 1);
+    // Idle for more than the window: the watcher goes.
+    t += 6000;
+    svc.sweep();
+    expect(svc.watchedPonds()).toEqual([]);
+    svc.close();
+  });
+
+  it("changed() reaches listeners (a show)", () => {
+    const svc = new Artifacts({ store: new NativeStore(":memory:"), watch: false });
+    const seen: string[] = [];
+    svc.on("changed", (id: string) => seen.push(id));
+    svc.changed("p1");
+    expect(seen).toEqual(["p1"]);
   });
 });
 
@@ -196,6 +255,37 @@ describe("show records and the route", () => {
     const body = (await ok.json()) as any;
     expect(body.artifacts).toHaveLength(1);
     expect(body.artifacts[0]).toMatchObject({ name: "out.html", kind: "page", source: "shown" });
+
+    // The stream: token-gated, says hello, then pushes `artifacts` when a duck shows another file.
+    expect((await fetch(`${url}/stream`)).status).toBe(401);
+    const ac = new AbortController();
+    const stream = await fetch(`${url}/stream`, { headers: { "x-squeak-token": token }, signal: ac.signal });
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    const reader = stream.body!.getReader();
+    let text = "";
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          text += new TextDecoder().decode(value);
+        }
+      } catch {
+        /* aborted */
+      }
+    })();
+    await waitFor(() => text.includes("event: hello"));
+    fs.writeFileSync(path.join(root, "second.html"), "<h1>y</h1>");
+    await handleMcpMessage((srv as any).tools, s.id, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "show", arguments: { path: "second.html" } },
+    });
+    await waitFor(() => text.includes("event: artifacts"));
+    expect(text).toContain("event: artifacts");
+    ac.abort();
+    await pump;
     expect(
       (await fetch(`http://127.0.0.1:${port}/native/projects/nope/artifacts`, { headers: { "x-squeak-token": token } }))
         .status,

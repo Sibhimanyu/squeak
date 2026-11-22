@@ -266,7 +266,7 @@ struct ArtifactViewerPage: View {
     /// the largest thumbnail Quick Look has and "Open with...".
     private func illustrator(_ thumb: NSImage?) -> some View {
         VStack(spacing: Space.m) {
-            // With Illustrator installed the file renders as soon as it opens (one per file, cached): never show the
+            // With Illustrator open the file renders as soon as it opens (one per file, cached): never show the
             // placeholder page Illustrator embeds ("saved without PDF content"), only the file icon while it works.
             if illustratorURL == nil, let thumb {
                 Image(nsImage: thumb).resizable().scaledToFit().frame(maxWidth: 720, maxHeight: 420)
@@ -297,7 +297,13 @@ struct ArtifactViewerPage: View {
             }
         }
         .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: path) { if let app = illustratorURL, rendering == .idle { renderWithIllustrator(app) } }
+        // Renders by itself only when Illustrator is already open; otherwise the button asks first (a launch is slow).
+        .task(id: path) {
+            if let app = illustratorURL,
+               IllustratorAuto.shouldRender(appRunning: IllustratorRender.isRunning(app), idle: rendering == .idle) {
+                renderWithIllustrator(app)
+            }
+        }
     }
 
     private func renderWithIllustrator(_ app: URL) {

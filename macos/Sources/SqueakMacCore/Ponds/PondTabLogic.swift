@@ -40,11 +40,15 @@ public enum PondOnDuty {
 public enum PondRecent {
     static let remoteWords = ["joined", "finished", "needs you", "waiting on you", "asked you", "has a question", "question for you"]
 
+    static let actionableKinds: Set<RippleWireKind> = [.finished, .failed, .needsYou, .joined, .question]
+
     public static func isActionable(_ r: PondRipple) -> Bool {
         switch r.kind {
         case .finished, .failed, .needsYou: return true
         case .started, .prOpened, .prMerged, .filesChanged: return false
         case .remote:
+            // The host's kind decides when it sent one; the words are only for a Ripple written before kinds existed.
+            if let k = r.wireKind { return actionableKinds.contains(k) }
             let t = r.sentence.lowercased()
             return remoteWords.contains { t.contains($0) }
         }

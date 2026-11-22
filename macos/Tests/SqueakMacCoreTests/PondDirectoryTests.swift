@@ -18,6 +18,18 @@ import Testing
 
     private func decode() throws -> PondDirectory { try JSONDecoder().decode(PondDirectory.self, from: Data(json.utf8)) }
 
+    @Test func dutyCountsDecodeWhenSentAndAreNilFromAnOlderDaemon() throws {
+        let d = try decode()
+        #expect(d.ponds[0].dutyCounts == nil)
+        let sent = #"{"schema":1,"ponds":[{"id":"p1","name":"s","dutyCounts":{"onDuty":2,"working":1,"needsYou":1,"offDuty":1,"total":3}}]}"#
+        let e = try JSONDecoder().decode(PondDirectory.self, from: Data(sent.utf8))
+        let c = e.ponds[0].dutyCounts
+        #expect(c == PondCounts(onDuty: 2, working: 1, needsYou: 1, offDuty: 1, total: 3))
+        let roster = PondCounts(onDuty: 9, working: 0, needsYou: 0, offDuty: 0, total: 9)
+        #expect(PondRowCount.dutyCounts(sent: c, roster: roster) == c)
+        #expect(PondRowCount.dutyCounts(sent: nil, roster: roster) == roster)
+    }
+
     @Test func decodesTheHostsShape() throws {
         let d = try decode()
         #expect(d.ponds.map(\.id) == ["p1", "j1"])

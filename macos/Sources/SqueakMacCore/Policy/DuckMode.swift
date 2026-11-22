@@ -172,6 +172,9 @@ public enum PondRowCount {
     /// Ducks mode: the pond's on-duty ducks, the pond dashboard's "On duty" tile (the daemon's `counts`). The sidebar tree
     /// holds only the last day's chats, so it cannot count a pond's ducks; it is the fallback until the roster arrives.
     /// Flag off: the chats in the tree, or the listed rows when more.
+    /// The directory's numbers when the daemon sent them, else the roster's (an older daemon).
+    public static func dutyCounts(sent: PondCounts?, roster: PondCounts?) -> PondCounts? { sent ?? roster }
+
     public static func of(ducksMode: Bool, counts: PondCounts?, treeChats: Int, listed: Int) -> Int {
         if ducksMode, let counts { return counts.onDuty }
         return max(treeChats, listed)

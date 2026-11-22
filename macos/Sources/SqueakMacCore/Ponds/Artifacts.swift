@@ -82,6 +82,54 @@ extension NativeHostClient {
     }
 }
 
+/// What the artifacts stream says.
+public enum ArtifactStreamEvent: Sendable, Equatable {
+    /// The list changed (a duck showed a file, or a folder scan found a difference): read it again.
+    case changed
+    /// The stream (re)connected: read it once, in case something happened while it was down.
+    case connected
+}
+
+extension NativeHostClient {
+    /// `GET .../artifacts/stream`: `connected` on every (re)connect, `changed` per push. Reconnects until iteration
+    /// stops. A host without the route (404) ends the stream, and the caller keeps the list it read.
+    public func artifactEvents(
+        projectId: String, minBackoff: Duration = .seconds(1), maxBackoff: Duration = .seconds(10),
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) -> AsyncStream<ArtifactStreamEvent> {
+        let host = self
+        return AsyncStream { continuation in
+            let task = Task {
+                var backoff = minBackoff
+                while !Task.isCancelled {
+                    guard let token = host.tokenProvider() else { try? await sleep(maxBackoff); continue }
+                    let request = HTTPRequest(url: host.url("/native/projects/\(Self.id(projectId))/artifacts/stream"), headers: ["x-squeak-token": token], timeout: 90)
+                    var parser = SSEParser()
+                    var absent = false
+                    do {
+                        for try await line in host.lineSource(request) {
+                            guard let frame = parser.feed(line) else { continue }
+                            backoff = minBackoff
+                            switch frame.event {
+                            case "hello": continuation.yield(.connected)
+                            case "artifacts": continuation.yield(.changed)
+                            default: break
+                            }
+                        }
+                    } catch where PondsClient.isAbsent(error) {
+                        absent = true
+                    } catch {}
+                    if Task.isCancelled || absent { break }
+                    try? await sleep(backoff)
+                    backoff = min(maxBackoff, backoff * 2)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
 /// One duck's artifacts, newest first.
 public struct ArtifactGroup: Equatable, Sendable, Identifiable {
     public var id: String

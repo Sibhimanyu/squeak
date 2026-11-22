@@ -50,4 +50,19 @@ import Testing
                    r(.started, "Fix login started"), r(.remote, "Aarav asked you a question")]
         #expect(PondRecent.actionable(all).map(\.sentence) == ["Aarav joined", "Fix login finished", "Fix login needs you", "Aarav asked you a question"])
     }
+
+    @Test func recentUsesTheHostsKindWhenPresentAndTheWordsWhenNot() throws {
+        func r(_ text: String, _ kind: RippleWireKind?) -> PondRipple { PondRipple(id: text, kind: .remote, sentence: text, at: t0, threadKey: nil, wireKind: kind) }
+        let all = [r("withdrew an invite", .invite), r("finished the task X", .finished), r("Aarav joined", .joined),
+                   // The kind wins over the words: "joined" in a left line is not a joining.
+                   r("left; Sam joined the call", .left), r("Aarav asked you a question", nil), r("made the pond", .created)]
+        #expect(PondRecent.actionable(all).map(\.sentence) == ["finished the task X", "Aarav joined", "Aarav asked you a question"])
+    }
+
+    @Test func aRippleKindDecodesAndAnOldOrUnknownOneIsNil() throws {
+        let json = #"[{"id":"a","at":1,"text":"joined","kind":"needs_you"},{"id":"b","at":1,"text":"x"},{"id":"c","at":1,"text":"y","kind":"from-the-future"}]"#
+        let rows = try JSONDecoder().decode([RippleEntry].self, from: Data(json.utf8))
+        #expect(rows.map(\.kind) == [.needsYou, nil, nil])
+        #expect(PondRippleFeed.build(rows).first { $0.id == "pond:a" }?.wireKind == .needsYou)
+    }
 }

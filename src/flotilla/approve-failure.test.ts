@@ -78,6 +78,8 @@ describe("approving, removing and naming", () => {
     await expect(A.decideJoin(pondId, request.requestId, { approve: true })).rejects.toMatchObject({ status: 404 });
     const view = await A.view(pondId);
     expect(view.ripples.filter((r) => r.text === "joined" && r.actorName === "Bea")).toHaveLength(1);
+    expect(view.ripples.find((r) => r.text === "joined")?.kind).toBe("joined");
+    expect(view.ripples.find((r) => r.text === "made the pond")?.kind).toBe("created");
   });
 
   it("removing a member writes 'was removed' even when the key rotation then fails", async () => {

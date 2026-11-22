@@ -361,6 +361,13 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     }
 }
 
+/// What a Ripple is about, as the host writes it (`kind`). Optional on the wire: an older Ripple has none, and a kind
+/// this build does not know reads as none, so a newer host never breaks an older Mac.
+public enum RippleWireKind: String, Sendable, Equatable {
+    case finished, failed, joined, question, left, invite, archived, created, `private`, other
+    case needsYou = "needs_you"
+}
+
 /// One line of a pond's Ripples.
 public struct RippleEntry: Sendable, Equatable, Identifiable, Decodable {
     public var id: String
@@ -369,8 +376,10 @@ public struct RippleEntry: Sendable, Equatable, Identifiable, Decodable {
     /// The actor's name from the flock (the host derives it); empty once they left. The raw `actor` is a member id and is never drawn.
     public var actorName: String
     public var text: String
+    /// What it is about; nil on a Ripple written before kinds existed.
+    public var kind: RippleWireKind?
 
-    enum CodingKeys: String, CodingKey { case id, at, actor, actorName, text }
+    enum CodingKeys: String, CodingKey { case id, at, actor, actorName, text, kind }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -379,9 +388,10 @@ public struct RippleEntry: Sendable, Equatable, Identifiable, Decodable {
         actor = c.lenient(String.self, .actor) ?? ""
         actorName = c.lenient(String.self, .actorName) ?? ""
         text = c.lenient(String.self, .text) ?? ""
+        kind = c.lenient(String.self, .kind).flatMap(RippleWireKind.init(rawValue:))
     }
 
-    public init(id: String, at: Date?, actor: String = "", actorName: String = "", text: String) { self.id = id; self.at = at; self.actor = actor; self.actorName = actorName; self.text = text }
+    public init(id: String, at: Date?, actor: String = "", actorName: String = "", text: String, kind: RippleWireKind? = nil) { self.id = id; self.at = at; self.actor = actor; self.actorName = actorName; self.text = text; self.kind = kind }
 }
 
 /// Someone answering a question: others see "Aarav is answering" until `until`.

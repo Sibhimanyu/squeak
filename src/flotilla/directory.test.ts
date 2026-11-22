@@ -275,3 +275,31 @@ describe("the owner's live shape", () => {
     expect(d.ponds.find((p) => p.name === "heresay")?.pondId).toBeUndefined();
   });
 });
+
+describe("the directory's duck numbers", () => {
+  const input = {
+    projects: [{ id: "p1", name: "One", rootPath: "/r/one" }],
+    workspaces: [],
+    records: [],
+    prefs: () => undefined,
+    order: { mode: "newest" as const, ids: [] },
+    sessions: [],
+  };
+  it("carries the roster's numbers per project, a waiting duck counted once and off-duty ducks apart", () => {
+    const d = buildDirectory({
+      ...input,
+      ducks: () => [
+        { duty: "on", working: true, needsYou: false },
+        { duty: "on", working: true, needsYou: true },
+        { duty: "off", working: true, needsYou: false },
+      ],
+    });
+    expect(d.ponds[0]!.dutyCounts).toEqual({ onDuty: 2, working: 1, needsYou: 1, offDuty: 1, total: 3 });
+    expect(d.ponds[0]!.counts).toEqual({ threads: 0, needsYou: 0, working: 0 });
+  });
+  it("sends none without a duck source, and keeps them through the fleet overlay", () => {
+    expect(buildDirectory(input).ponds[0]!.dutyCounts).toBeUndefined();
+    const d = buildDirectory({ ...input, ducks: () => [] });
+    expect(withFleetSessions(d, []).ponds[0]!.dutyCounts?.total).toBe(0);
+  });
+});

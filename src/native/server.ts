@@ -233,6 +233,7 @@ export class NativeServer {
         room: this.room,
         jobs: this.jobs,
         placement: this.placement,
+        artifactShown: (projectId) => this.artifacts.changed(projectId),
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
@@ -257,6 +258,7 @@ export class NativeServer {
 
   async stop(): Promise<void> {
     this.planner.stop();
+    this.artifacts.close();
     if (this.placementTimer) clearInterval(this.placementTimer);
     this.placementTimer = null;
     const server = this.server;
@@ -446,6 +448,10 @@ export class NativeServer {
       order: { mode: order.mode === "manual" ? "manual" : "newest", ids: order.order },
       sessions,
       ownThreads: flag("pondOwnThreads"),
+      ducks: (id) =>
+        this.room
+          .listDucks(id)
+          .map((d) => ({ duty: d.duty, working: d.state === "working", needsYou: d.state === "waiting" })),
     });
     return { ...built, pondOwnThreads: flag("pondOwnThreads"), ducksOwnBranch: flag("ducksOwnBranch") };
   }
@@ -1159,6 +1165,17 @@ export class NativeServer {
         }),
       });
     }
+    if (
+      area === "projects" &&
+      id &&
+      sub === "artifacts" &&
+      parts[4] === "stream" &&
+      parts.length === 5 &&
+      method === "GET"
+    ) {
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      return this.artifactsStream(req, res, id);
+    }
     if (area === "projects" && id && sub === "artifacts" && parts.length === 4 && method === "GET") {
       // What this pond's ducks made for the person to look at: files they showed, plus design files found in its folders.
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
@@ -1526,6 +1543,26 @@ export class NativeServer {
       workspaceId: null,
       title: title || jobTitle(text),
       text: text + (attach?.(project.rootPath) ?? ""),
+    });
+  }
+
+  /** `event: hello`, then `event: artifacts` whenever a duck shows a file or the pond's folders change; a ping every 25 s. */
+  private artifactsStream(req: http.IncomingMessage, res: http.ServerResponse, projectId: string): void {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    const onChanged = (id: string): void => {
+      if (id === projectId) res.write(`event: artifacts\ndata: {}\n\n`);
+    };
+    this.artifacts.on("changed", onChanged);
+    this.artifacts.touch(projectId);
+    res.write(`event: hello\ndata: {}\n\n`);
+    const beat = setInterval(() => {
+      this.artifacts.touch(projectId);
+      res.write(": ping\n\n");
+    }, this.options.heartbeatMs ?? 25_000);
+    beat.unref();
+    req.on("close", () => {
+      clearInterval(beat);
+      this.artifacts.off("changed", onChanged);
     });
   }
 

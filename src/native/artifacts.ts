@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -44,7 +45,14 @@ export interface ArtifactFolder {
 
 export const ARTIFACT_SCAN_MAX_FILES = 200;
 export const ARTIFACT_SCAN_MAX_DEPTH = 6;
+/** Without a working watcher the folder scan is cached this long. */
 export const ARTIFACT_CACHE_MS = 30_000;
+/** A pond whose artifacts nobody asked for in this long stops being watched. */
+export const ARTIFACT_IDLE_MS = 10 * 60_000;
+/** Quiet time after a file event before the folder is scanned again. */
+export const ARTIFACT_DEBOUNCE_MS = 1_000;
+/** Ponds watched at once, at most. */
+export const ARTIFACT_MAX_WATCHED = 12;
 
 /** Directories never walked when looking for design files. */
 export const ARTIFACT_SKIP_DIRS = new Set([
@@ -274,6 +282,12 @@ export interface ArtifactsDeps {
   now?: () => number;
   /** Injectable scan for tests. */
   scan?: (folder: ArtifactFolder) => ArtifactItem[];
+  /** Quiet time after a file event before rescanning (tests shorten it). */
+  debounceMs?: number;
+  /** A pond idle this long loses its watchers (tests shorten it). */
+  idleMs?: number;
+  /** Set false to never watch (the 30 s cache is then the only freshness). */
+  watch?: boolean;
 }
 
 function fileExists(p: string): boolean {
@@ -289,38 +303,198 @@ interface CacheEntry {
   found: ArtifactItem[];
   /** Fingerprint of folder roots + their mtimes so a change refreshes before 30 s. */
   stamp: string;
+  /** True while file watchers cover every folder: the cache then lives until a watcher event dirties it. */
+  watched: boolean;
+  dirty: boolean;
 }
 
-/** Lists a pond's artifacts: shown (checked live, so a new `show` appears at once) plus a bounded folder scan, cached ~30 s. */
-export class Artifacts {
+interface Watch {
+  roots: string;
+  watchers: fs.FSWatcher[];
+  timer: NodeJS.Timeout | null;
+}
+
+/** True when a changed path (relative to a watched root) sits in a dot or build folder, or is a dot file. */
+export function ignoredArtifactEvent(relative: string): boolean {
+  return relative.split(/[\\/]/).some((seg) => seg.startsWith(".") || ARTIFACT_SKIP_DIRS.has(seg));
+}
+
+function signature(items: ArtifactItem[]): string {
+  return items
+    .map((a) => `${a.path}:${a.modifiedAt}:${a.size}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * Lists a pond's artifacts: shown (checked live, so a new `show` appears at once) plus a bounded folder scan.
+ * A pond asked about in the last 10 minutes has its folders watched (recursive fs.watch, debounced); a change rescans
+ * and, when the result differs, emits `changed` with the project id. Idle ponds lose their watchers. If watching is not
+ * possible the scan falls back to a 30 s cache.
+ */
+export class Artifacts extends EventEmitter {
   private readonly now: () => number;
   private readonly scan: (folder: ArtifactFolder) => ArtifactItem[];
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly lastAsked = new Map<string, number>();
+  private readonly watches = new Map<string, Watch>();
+  private sweeper: NodeJS.Timeout | null = null;
+  private readonly debounceMs: number;
+  private readonly idleMs: number;
 
   constructor(private readonly deps: ArtifactsDeps) {
+    super();
     this.now = deps.now ?? Date.now;
     this.scan = deps.scan ?? ((f) => scanArtifactFolder(f));
+    this.debounceMs = deps.debounceMs ?? ARTIFACT_DEBOUNCE_MS;
+    this.idleMs = deps.idleMs ?? ARTIFACT_IDLE_MS;
+  }
+
+  /** Someone looks at this pond's artifacts now: start (or keep) watching its folders. */
+  touch(projectId: string): void {
+    this.lastAsked.set(projectId, this.now());
+    if (this.deps.watch === false) return;
+    const project = this.deps.store.getProject(projectId);
+    if (!project) return;
+    this.ensureWatch(projectId, this.folders(projectId, project.rootPath));
+  }
+
+  /** A duck showed a file (or anything else changed the list): tell every listener. */
+  changed(projectId: string): void {
+    this.emit("changed", projectId);
+  }
+
+  /** Ponds currently watched (tests). */
+  watchedPonds(): string[] {
+    return [...this.watches.keys()];
+  }
+
+  /** Drops every watcher and timer. */
+  close(): void {
+    for (const id of [...this.watches.keys()]) this.unwatch(id);
+    if (this.sweeper) clearInterval(this.sweeper);
+    this.sweeper = null;
+  }
+
+  /** Closes watchers of ponds nobody asked about for the idle window. */
+  sweep(): void {
+    const now = this.now();
+    for (const id of [...this.watches.keys()]) {
+      if (now - (this.lastAsked.get(id) ?? 0) > this.idleMs) {
+        this.unwatch(id);
+        this.cache.delete(id);
+        this.lastAsked.delete(id);
+      }
+    }
   }
 
   list(projectId: string): { artifacts: ArtifactItem[] } {
     const project = this.deps.store.getProject(projectId);
     if (!project) return { artifacts: [] };
     const folders = this.folders(projectId, project.rootPath);
-    const stamp = this.stamp(folders);
-    const cached = this.cache.get(projectId);
-    const now = this.now();
-    let found: ArtifactItem[];
-    if (cached && cached.stamp === stamp && now - cached.at < ARTIFACT_CACHE_MS) {
-      found = cached.found;
-    } else {
-      found = folders.flatMap((f) => this.scan(f));
-      this.cache.set(projectId, { at: now, found, stamp });
-    }
+    this.lastAsked.set(projectId, this.now());
+    if (this.deps.watch !== false) this.ensureWatch(projectId, folders);
+    const found = this.foundFor(projectId, folders);
     const duckNames = new Map(this.deps.store.listDucks(projectId).map((d) => [d.id, d.name ?? undefined] as const));
     const shown = shownArtifactsLive(this.deps.store.listShownArtifacts(projectId), (id) =>
       id ? duckNames.get(id) : undefined,
     );
     return { artifacts: mergeArtifacts(shown, found).filter((a) => fileExists(a.path)) };
+  }
+
+  private foundFor(projectId: string, folders: ArtifactFolder[]): ArtifactItem[] {
+    const stamp = this.stamp(folders);
+    const cached = this.cache.get(projectId);
+    const now = this.now();
+    const watched = this.watches.get(projectId)?.watchers.length === folders.length && folders.length > 0;
+    if (
+      cached &&
+      cached.stamp === stamp &&
+      !cached.dirty &&
+      (cached.watched && watched ? true : now - cached.at < ARTIFACT_CACHE_MS)
+    ) {
+      return cached.found;
+    }
+    const found = folders.flatMap((f) => this.scan(f));
+    this.cache.set(projectId, { at: now, found, stamp, watched, dirty: false });
+    return found;
+  }
+
+  private ensureWatch(projectId: string, folders: ArtifactFolder[]): void {
+    const roots = folders.map((f) => path.resolve(f.root)).join("|");
+    const had = this.watches.get(projectId);
+    if (had && had.roots === roots) return;
+    if (had) this.unwatch(projectId);
+    if (!folders.length) return;
+    if (this.watches.size >= ARTIFACT_MAX_WATCHED) this.evictOldest();
+    const watch: Watch = { roots, watchers: [], timer: null };
+    for (const f of folders) {
+      const root = path.resolve(f.root);
+      try {
+        const w = fs.watch(root, { recursive: true, persistent: false }, (_event, name) => {
+          if (name && ignoredArtifactEvent(String(name))) return;
+          this.onFileEvent(projectId);
+        });
+        w.on("error", () => this.unwatch(projectId));
+        watch.watchers.push(w);
+      } catch {
+        // No recursive watching here: the cache's 30 s expiry covers this pond.
+        for (const w of watch.watchers) w.close();
+        return;
+      }
+    }
+    this.watches.set(projectId, watch);
+    if (!this.sweeper) {
+      this.sweeper = setInterval(() => this.sweep(), Math.max(1_000, Math.min(60_000, this.idleMs / 2)));
+      this.sweeper.unref();
+    }
+  }
+
+  private evictOldest(): void {
+    let oldest: string | null = null;
+    for (const id of this.watches.keys()) {
+      if (oldest === null || (this.lastAsked.get(id) ?? 0) < (this.lastAsked.get(oldest) ?? 0)) oldest = id;
+    }
+    if (oldest) this.unwatch(oldest);
+  }
+
+  private unwatch(projectId: string): void {
+    const w = this.watches.get(projectId);
+    if (!w) return;
+    if (w.timer) clearTimeout(w.timer);
+    for (const x of w.watchers) x.close();
+    this.watches.delete(projectId);
+    const c = this.cache.get(projectId);
+    if (c) c.watched = false;
+    if (!this.watches.size && this.sweeper) {
+      clearInterval(this.sweeper);
+      this.sweeper = null;
+    }
+  }
+
+  private onFileEvent(projectId: string): void {
+    const w = this.watches.get(projectId);
+    if (!w) return;
+    const c = this.cache.get(projectId);
+    if (c) c.dirty = true;
+    if (w.timer) clearTimeout(w.timer);
+    w.timer = setTimeout(() => {
+      w.timer = null;
+      const project = this.deps.store.getProject(projectId);
+      if (!project) return;
+      const before = this.cache.get(projectId)?.found ?? [];
+      const folders = this.folders(projectId, project.rootPath);
+      const fresh = folders.flatMap((f) => this.scan(f));
+      this.cache.set(projectId, {
+        at: this.now(),
+        found: fresh,
+        stamp: this.stamp(folders),
+        watched: true,
+        dirty: false,
+      });
+      if (signature(fresh) !== signature(before)) this.changed(projectId);
+    }, this.debounceMs);
+    w.timer.unref();
   }
 
   /**

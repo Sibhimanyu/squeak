@@ -26,6 +26,13 @@ enum IllustratorRender {
         return nil
     }
 
+    /// Whether this Illustrator is already open. Rendering through a closed one launches it (a slow, loud start), so a
+    /// preview only renders by itself when it is.
+    static func isRunning(_ app: URL) -> Bool {
+        let target = app.standardizedFileURL
+        return NSWorkspace.shared.runningApplications.contains { $0.bundleURL?.standardizedFileURL == target }
+    }
+
     static func cacheFolder(for file: URL) -> URL {
         let m = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date(timeIntervalSince1970: 0)
         return ArtifactRenderCache.folder(support: support, path: file.path, modified: m)

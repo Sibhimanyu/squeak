@@ -378,7 +378,7 @@ export class FlotillaBridge {
       if (!local || local.private) continue;
       const title = local.title || "Untitled";
       await this.service.setThreadPrivate(t.pondId, t.threadId, true, t.state).catch(() => undefined);
-      await this.service.ripple(t.pondId, `archived ${title}`).catch(() => undefined);
+      await this.service.ripple(t.pondId, `archived ${title}`, undefined, "archived").catch(() => undefined);
     }
   }
 

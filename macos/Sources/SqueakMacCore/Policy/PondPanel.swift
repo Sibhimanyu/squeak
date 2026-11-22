@@ -117,6 +117,8 @@ public struct PondRipple: Equatable, Sendable, Identifiable {
     public var sentence: String
     public var at: Date
     public var threadKey: SessionKey?
+    /// For a `.remote` line: what the host says it is about. Nil from an older host (the words are read instead).
+    public var wireKind: RippleWireKind? = nil
 }
 
 public enum PondRipples {

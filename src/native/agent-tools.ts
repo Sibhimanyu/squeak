@@ -68,6 +68,8 @@ export interface AgentToolDeps {
     effort?: string | null;
     duckId?: string;
   }): Promise<SessionRow>;
+  /** A duck showed a file in this pond: the Artifacts tab should look again. */
+  artifactShown?(projectId: string): void;
   /** Persists and broadcasts a message in a chat (the host's message path). */
   post(sessionId: string, kind: string, payload: unknown): void;
   /** The workspace's run script and setup output (the host's own; no interactive terminal). */
@@ -552,6 +554,7 @@ export class AgentTools {
               branch: s.branch ?? duck?.branch ?? null,
               at: this.now(),
             });
+            this.deps.artifactShown?.(pond.id);
           } catch {
             /* best effort */
           }

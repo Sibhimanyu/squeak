@@ -135,3 +135,11 @@ import Testing
         #expect(ArtifactSwitcher.stepped(0, by: -1, count: 3) == 0 && ArtifactSwitcher.stepped(2, by: 1, count: 3) == 2 && ArtifactSwitcher.stepped(1, by: 1, count: 3) == 2)
     }
 }
+
+@Suite struct IllustratorAutoTests {
+    @Test func rendersByItselfOnlyWhenIllustratorIsOpenAndNothingIsRunning() {
+        #expect(IllustratorAuto.shouldRender(appRunning: true, idle: true))
+        #expect(!IllustratorAuto.shouldRender(appRunning: false, idle: true))
+        #expect(!IllustratorAuto.shouldRender(appRunning: true, idle: false))
+    }
+}

@@ -1,3 +1,4 @@
+import { pondCounts, type DuckFlags, type PondCounts } from "../fleet/pond-counts.js";
 import { placeInRows, type MainRepoFinder } from "../remote/pond-match.js";
 
 export { pondByFolder } from "../remote/pond-match.js";
@@ -85,6 +86,11 @@ export interface DirPond {
   streams: DirStream[];
   archivedStreams?: number;
   counts: { threads: number; needsYou: number; working: number };
+  /**
+   * The pond's duck numbers (on duty, working, needs you, off duty, total), the same ones as `GET .../ducks` so the
+   * sidebar needs no roster per pond. Project ponds only; absent from an older daemon (surfaces then ask the roster).
+   */
+  dutyCounts?: PondCounts;
   /** The project's main folder: how a terminal's cwd finds it. Not for display. */
   folder?: string;
   /**
@@ -126,6 +132,8 @@ export interface DirectoryInput {
   repos?: MainRepoFinder;
   /** The `pondOwnThreads` flag (stashed, off): with it and a Git remote a joined pond is "git", else "remote". */
   ownThreads?: boolean;
+  /** The ducks of a project's pond as flags; with it each project row carries `dutyCounts`. */
+  ducks?: (projectId: string) => readonly DuckFlags[];
 }
 
 const STREAMS_MAX = 20;
@@ -255,6 +263,7 @@ export function buildDirectory(input: DirectoryInput): PondDirectory {
       })),
       ...(archived > 0 ? { archivedStreams: archived } : {}),
       counts: { threads: 0, needsYou: 0, working: 0 },
+      ...(input.ducks ? { dutyCounts: pondCounts(input.ducks(project.id)) } : {}),
       ...(project.rootPath ? { folder: project.rootPath } : {}),
     });
   }

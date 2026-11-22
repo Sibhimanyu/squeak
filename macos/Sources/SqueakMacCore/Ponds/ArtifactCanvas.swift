@@ -23,6 +23,11 @@ public enum IllustratorStub {
     public static let explanation = "This file was saved without PDF content, so it has no preview inside."
 }
 
+/// When a stub `.ai` renders without being asked: only if Illustrator is already running (a closed one would launch).
+public enum IllustratorAuto {
+    public static func shouldRender(appRunning: Bool, idle: Bool) -> Bool { appRunning && idle }
+}
+
 /// Where Illustrator's renders of a stub `.ai` are cached: one folder per file and modification time.
 public enum ArtifactRenderCache {
     /// 16 hex characters from the path and mtime (a changed file gets a new folder; the old one is just stale).
