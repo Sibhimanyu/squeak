@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.33.0
+
+**Ducks own their branch, and pond tiles that say what's happening.**
+
+- Ducks mode: ducks sit under their pond with their branch, the header shows the duck's branch and Create PR for it, and "main · read-only" in the pond's own folder. Branch off, Work with… and Move to main are in a duck's menu.
+- The pond dashboard counts On duty, Working, Needs you and Off duty (with the total). Shared is a filter beside the search.
+- The sidebar shows each pond's on-duty ducks.
+- Leaving a pond never leaves you on an empty pond page, and Back no longer leads to a pond you left.
+- A pond's Room no longer opens blank after leaving it mid-slide.
+- Pond tiles are all one height.
+
 ## 2.32.0
 
 **Steadier windows, remote ponds made clear.** Where you are is one thing now, so nothing resets as you move around.
