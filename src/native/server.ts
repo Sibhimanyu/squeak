@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
+import { Artifacts } from "./artifacts.js";
 import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpoint } from "./agent-tools.js";
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
@@ -163,10 +164,12 @@ export class NativeServer {
   private readonly history: VersionHistory;
   readonly room: Room;
   readonly jobs: RoomJobs;
+  private readonly artifacts: Artifacts;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
+    this.artifacts = new Artifacts({ store: options.store });
     this.room =
       options.room ??
       new Room({
@@ -1155,6 +1158,11 @@ export class NativeServer {
           };
         }),
       });
+    }
+    if (area === "projects" && id && sub === "artifacts" && parts.length === 4 && method === "GET") {
+      // What this pond's ducks made for the person to look at: files they showed, plus design files found in its folders.
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      return this.json(res, 200, this.artifacts.list(id));
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       // Archiving a gone stream happens in the background: the list never waits on a slow `git` start.

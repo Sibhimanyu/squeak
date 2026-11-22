@@ -47,8 +47,8 @@ public struct PondGlance: Equatable, Sendable {
     ) -> PondGlance {
         let me = detail?.meMember?.id
         let listed = Set((detail?.threads ?? []).compactMap(\.sessionId))
-        let localOnly = local.filter { !listed.contains($0.key.hostSessionId) }
-        let localByHostId = Dictionary(local.map { ($0.key.hostSessionId, $0.key) }, uniquingKeysWith: { a, _ in a })
+        let localOnly = local.filter { !listed.contains(PondOpenResolver.hostId(of: $0.key)) }
+        let localByHostId = Dictionary(local.map { (PondOpenResolver.hostId(of: $0.key), $0.key) }, uniquingKeysWith: { a, _ in a })
 
         // Now: needing someone first, then working; newest first inside each.
         var rows: [(row: NowRow, at: Date)] = []

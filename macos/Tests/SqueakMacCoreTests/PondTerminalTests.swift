@@ -25,7 +25,7 @@ import Testing
     @Test func podStripShowsTerminalTabsSelected() {
         let a = UUID(), b = UUID()
         let s = InspectorStrip.make(context: .pond, record: InspectorTabsRecord(open: [.files]), terminals: [a, b], selectedTerminal: b)
-        #expect(s.tabs == [.pond, .files, .terminal(a), .terminal(b)])
+        #expect(s.tabs == [.pond, .artifacts, .files, .terminal(a), .terminal(b)])
         #expect(s.selected == .terminal(b))
         #expect(s.isClosable(.terminal(a)) && s.isPinned(.pond))
     }

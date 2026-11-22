@@ -5,7 +5,8 @@ import Testing
 @Suite struct InspectorTabsTests {
     @Test func pondStripAlwaysStartsWithPinnedPond() {
         let s = InspectorStrip.make(context: .pond)
-        #expect(s.tabs == [.pond])
+        #expect(s.tabs == [.pond, .artifacts])  // Artifacts always beside Pond
+        #expect(s.isPinned(.artifacts) && !s.isClosable(.artifacts))
         #expect(s.selected == .pond)
         #expect(s.isPinned(.pond) && !s.isClosable(.pond) && !s.isDraggable(.pond))
         #expect(RightTab.pond.title == "Pond" && RightTab.pond.symbol == "person.2")
@@ -17,7 +18,7 @@ import Testing
         r.open(.files); r.open(.code); r.open(.terminal)
         #expect(r.open == [.files, .code])
         let s = InspectorStrip.make(context: .pond, record: r, terminals: [t1, t2], selectedTerminal: t2)
-        #expect(s.tabs == [.pond, .files, .code, .terminal(t1), .terminal(t2)])
+        #expect(s.tabs == [.pond, .artifacts, .files, .code, .terminal(t1), .terminal(t2)])
         #expect(s.selected == .terminal(t2))
         #expect(s.isClosable(.files) && s.isClosable(.terminal(t1)))
     }
@@ -90,5 +91,28 @@ import Testing
         #expect(InspectorKeys.newTab(focusedZone: .right) == .newTerminal)
         #expect(InspectorKeys.newTab(focusedZone: .bottom) == .newThread)
         #expect(InspectorKeys.newTab(focusedZone: nil) == .newThread)
+    }
+}
+
+@Suite struct InspectorArtifactsTabTests {
+    @Test func artifactsIsAlwaysInThePondStrip() {
+        var r = InspectorTabsRecord()
+        r.open(.files); r.open(.artifacts)
+        #expect(r.open == [.files, .artifacts] && r.selected == .artifacts)
+        let s = InspectorStrip.make(context: .pond, record: r)
+        #expect(s.tabs == [.pond, .artifacts, .files] && s.selected == .artifacts)
+        #expect(!s.isClosable(.artifacts))
+        #expect(RightTab.artifacts.title == "Artifacts" && RightTab.artifacts.kind == .artifacts)
+        r.close(.artifacts)
+        #expect(r.selected == .files)
+    }
+
+    @Test func remotePondAndOldSavesStayPeopleOnlyOrClean() throws {
+        var r = InspectorTabsRecord(); r.open(.artifacts)
+        #expect(InspectorStrip.make(context: .pond, record: r, peopleOnly: true).tabs == [.pond])
+        let old = try JSONDecoder().decode(InspectorTabsRecord.self, from: Data(#"{"open":["files","bogus"],"selected":"artifacts"}"#.utf8))
+        #expect(old.open == [.files] && old.selected == .artifacts)
+        // Artifacts is always in the strip, so a saved Artifacts selection is kept.
+        #expect(InspectorStrip.make(context: .pond, record: old).selected == .artifacts)
     }
 }

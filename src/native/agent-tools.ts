@@ -538,8 +538,26 @@ export class AgentTools {
         }
         const { real, relative, size } = this.fileToShow(s, file);
         this.shown.push({ from: s.id, at: this.now() });
+        const shownPath = path.join(s.cwd, relative);
+        const pond = this.pondOf(s);
+        if (pond) {
+          // The Artifacts tab lists what ducks showed; a failed note must never fail the show itself.
+          try {
+            const duck = this.deps.store.duckBySession(s.id);
+            this.deps.store.recordShownArtifact({
+              projectId: pond.id,
+              path: shownPath,
+              duckId: duck?.id ?? s.duckId ?? null,
+              sessionId: s.id,
+              branch: s.branch ?? duck?.branch ?? null,
+              at: this.now(),
+            });
+          } catch {
+            /* best effort */
+          }
+        }
         this.deps.post(s.id, "squeak/show", {
-          path: path.join(s.cwd, relative),
+          path: shownPath,
           relative,
           name: path.basename(real),
           title: str("title")?.trim().slice(0, 200) || null,

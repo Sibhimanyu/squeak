@@ -16,6 +16,14 @@ public enum PondOpenResolver {
         return nil
     }
 
+    /// The id the host and the pond speak for a chat. A Squeak chat's app key carries `squeak-native:` before the host's own id
+    /// (`PondThread.sessionId`, the duck roster's `currentSessionId`); comparing the two raw never matched, so a duck the pond
+    /// listed opened the pond's thread page instead of its chat tab.
+    public static func hostId(of key: SessionKey) -> String {
+        let id = key.hostSessionId
+        return id.hasPrefix(NativeAdapter.keyPrefix) ? String(id.dropFirst(NativeAdapter.keyPrefix.count)) : id
+    }
+
     /// What opening a target does.
     public struct Plan: Sendable, Equatable {
         /// The duck's host session id, or nil when no chat is known for it (the view says "Couldn't open <name>").

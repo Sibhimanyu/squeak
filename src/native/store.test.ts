@@ -81,7 +81,8 @@ describe("NativeStore", () => {
     old.db.exec(
       "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
     );
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 13}`);
+    old.db.exec("DROP TABLE shown_artifacts;"); // the Artifacts migration is newest
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 14}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -122,7 +123,8 @@ describe("NativeStore", () => {
     old.db.exec(
       "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
     );
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 9}`);
+    old.db.exec("DROP TABLE shown_artifacts;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 10}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -238,7 +240,8 @@ describe("NativeStore", () => {
         "ALTER TABLE sessions DROP COLUMN branch; ALTER TABLE ducks DROP COLUMN workspace_id; ALTER TABLE ducks DROP COLUMN branch;",
       );
       if (withoutDuckTables) old.db.exec("DROP TABLE ducks; DROP TABLE duck_sessions; DROP TABLE session_ducks;");
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+      old.db.exec("DROP TABLE shown_artifacts;");
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 2}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };

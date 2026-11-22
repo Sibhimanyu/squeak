@@ -82,6 +82,11 @@ public enum LucideName: String, CaseIterable, Sendable {
     case square = "square"
     case gitPullRequest = "git-pull-request"
     case files = "files"
+    case globe = "globe"
+    case image = "image"
+    case file = "file"
+    case penTool = "pen-tool"
+    case palette = "palette"
 }
 
 extension LucideName {
@@ -463,6 +468,33 @@ extension LucideName {
             .path("M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"),
             .path("M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"),
             .path("M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"),
+        ]
+        case .globe: return [
+            .circle(cx: 12, cy: 12, r: 10),
+            .path("M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"),
+            .path("M2 12h20"),
+        ]
+        case .image: return [
+            .rect(x: 3, y: 3, width: 18, height: 18, rx: 2, ry: 2),
+            .circle(cx: 9, cy: 9, r: 2),
+            .path("m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"),
+        ]
+        case .file: return [
+            .path("M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"),
+            .path("M14 2v5a1 1 0 0 0 1 1h5"),
+        ]
+        case .penTool: return [
+            .path("m18 13-.654-4.736a4 4 0 00-2.756-3.266l-9.163-2.9a2 2 0 00-2.017.493l-.82.819a2 2 0 00-.492 2.017l2.9 9.163a4 4 0 003.266 2.756L13 18"),
+            .path("M18.648 12.352a1.205 1.205 0 011.704 0l1.296 1.296a1.205 1.205 0 010 1.704l-6.296 6.296a1.205 1.205 0 01-1.704 0l-1.296-1.296a1.205 1.205 0 010-1.704z"),
+            .path("m3 3 6.586 6.586"),
+            .circle(cx: 11, cy: 11, r: 2),
+        ]
+        case .palette: return [
+            .path("M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"),
+            .circle(cx: 13.5, cy: 6.5, r: 0.5),
+            .circle(cx: 17.5, cy: 10.5, r: 0.5),
+            .circle(cx: 6.5, cy: 12.5, r: 0.5),
+            .circle(cx: 8.5, cy: 7.5, r: 0.5),
         ]
         }
     }

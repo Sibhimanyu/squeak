@@ -56,7 +56,7 @@ final class PondChromeTests: XCTestCase {
         let s = InspectorStrip.make(context: .pond, record: rec, terminals: [UUID()], peopleOnly: true)
         XCTAssertEqual(s.tabs, [.pond]); XCTAssertEqual(s.selected, .pond)
         XCTAssertTrue(InspectorStrip.plusItems(context: .pond, peopleOnly: true).isEmpty)
-        XCTAssertEqual(InspectorStrip.make(context: .pond, record: rec).tabs, [.pond, .code, .files])
+        XCTAssertEqual(InspectorStrip.make(context: .pond, record: rec).tabs, [.pond, .artifacts, .code, .files])
     }
 
     func testTabCapMemoSurvivesInfiniteWidth() {

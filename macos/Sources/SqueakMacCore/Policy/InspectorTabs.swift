@@ -7,7 +7,7 @@ import Foundation
 /// The kinds of right-zone tab that are remembered per pond. A terminal's identity is session state (a live shell), so
 /// only its being the shown tab is saved.
 public enum InspectorTabKind: String, Codable, CaseIterable, Sendable {
-    case pond, code, files, terminal
+    case pond, code, files, artifacts, terminal
 }
 
 /// One tab in the right zone's strip.
@@ -16,6 +16,8 @@ public enum RightTab: Hashable, Sendable {
     case pond
     case code
     case files
+    /// What the pond's ducks made to look at (shown files and design files); opened from the "+".
+    case artifacts
     case terminal(UUID)
     /// A dockable panel the stream's zone already holds (Code, Thread, ...).
     case panel(DockPanel)
@@ -25,6 +27,7 @@ public enum RightTab: Hashable, Sendable {
         case .pond: return .pond
         case .code, .panel: return .code
         case .files: return .files
+        case .artifacts: return .artifacts
         case .terminal: return .terminal
         }
     }
@@ -34,6 +37,7 @@ public enum RightTab: Hashable, Sendable {
         case .pond: return "Pond"
         case .code: return "Code"
         case .files: return "Files"
+        case .artifacts: return "Artifacts"
         case .terminal: return "Terminal"
         case .panel(let p): return p.title
         }
@@ -45,6 +49,7 @@ public enum RightTab: Hashable, Sendable {
         case .pond: return "person.2"
         case .code: return DockPanel.code.symbol
         case .files: return "folder"
+        case .artifacts: return "photo.on.rectangle"
         case .terminal: return "terminal"
         case .panel(let p): return p.symbol
         }
@@ -53,7 +58,7 @@ public enum RightTab: Hashable, Sendable {
 
 /// What is open beside one pond, saved in the dock layout: the Code and Files tabs in order, and the selected kind.
 public struct InspectorTabsRecord: Codable, Equatable, Sendable {
-    /// Code and Files only (the Pond tab is always there beside a pond; terminals are live shells).
+    /// Code, Files and Artifacts only (the Pond tab is always there beside a pond; terminals are live shells).
     public var open: [InspectorTabKind]
     public var selected: InspectorTabKind
 
@@ -73,12 +78,12 @@ public struct InspectorTabsRecord: Codable, Equatable, Sendable {
 
     private static func cleaned(_ kinds: [InspectorTabKind]) -> [InspectorTabKind] {
         var seen = Set<InspectorTabKind>()
-        return kinds.filter { ($0 == .code || $0 == .files) && seen.insert($0).inserted }
+        return kinds.filter { ($0 == .code || $0 == .files || $0 == .artifacts) && seen.insert($0).inserted }
     }
 
     /// Opens (or re-selects) Code or Files.
     public mutating func open(_ kind: InspectorTabKind) {
-        guard kind == .code || kind == .files else { selected = kind; return }
+        guard kind == .code || kind == .files || kind == .artifacts else { selected = kind; return }
         if !open.contains(kind) { open.append(kind) }
         selected = kind
     }
@@ -99,13 +104,14 @@ public enum InspectorContext: Equatable, Sendable {
 
 /// What the "+" offers; the first is what a plain click does.
 public enum InspectorPlusItem: String, CaseIterable, Sendable {
-    case newTerminal, files, code
+    case newTerminal, files, code, artifacts
 
     public var title: String {
         switch self {
         case .newTerminal: return "New terminal"
         case .files: return "Files"
         case .code: return "Code"
+        case .artifacts: return "Artifacts"
         }
     }
 
@@ -114,6 +120,7 @@ public enum InspectorPlusItem: String, CaseIterable, Sendable {
         case .newTerminal: return "terminal"
         case .files: return "folder"
         case .code: return DockPanel.code.symbol
+        case .artifacts: return "photo.on.rectangle"
         }
     }
 }
@@ -136,8 +143,16 @@ public struct InspectorStrip: Equatable, Sendable {
         var tabs: [RightTab] = []
         switch context {
         case .pond:
+            // Artifacts always sits beside Pond (top right), never behind the "+" menu.
             tabs.append(.pond)
-            for k in record.open { tabs.append(k == .files ? .files : .code) }
+            tabs.append(.artifacts)
+            for k in record.open {
+                switch k {
+                case .files: tabs.append(.files)
+                case .artifacts: break
+                default: tabs.append(.code)
+                }
+            }
         case .stream(let panels):
             let shown = panels.filter { $0 != .terminal }
             tabs = (shown.isEmpty ? [.code] : shown).map { .panel($0) }
@@ -152,6 +167,7 @@ public struct InspectorStrip: Equatable, Sendable {
             case .pond: selected = .pond
             case .code: selected = tabs.contains(.code) ? .code : .pond
             case .files: selected = tabs.contains(.files) ? .files : .pond
+            case .artifacts: selected = tabs.contains(.artifacts) ? .artifacts : .pond
             case .terminal:
                 if let t = selectedTerminal, terminals.contains(t) { selected = .terminal(t) } else if let f = terminals.first { selected = .terminal(f) }
             }
@@ -163,14 +179,14 @@ public struct InspectorStrip: Equatable, Sendable {
     }
 
     /// Pinned: no close button, and it cannot be dragged out of the strip.
-    public func isPinned(_ tab: RightTab) -> Bool { tab == pinned }
+    public func isPinned(_ tab: RightTab) -> Bool { tab == pinned || tab == .artifacts }
     public func isClosable(_ tab: RightTab) -> Bool { !isPinned(tab) }
     public func isDraggable(_ tab: RightTab) -> Bool { !isPinned(tab) }
 
     /// The "+" menu, same in both contexts. Files and Code are left out of a pond's menu while open (they would only
     /// re-select), but never in a stream, where they are panels of the zone.
     public static func plusItems(context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), peopleOnly: Bool = false) -> [InspectorPlusItem] {
-        peopleOnly ? [] : InspectorPlusItem.allCases
+        peopleOnly ? [] : InspectorPlusItem.allCases.filter { $0 != .artifacts }  // Artifacts is always in the strip
     }
     public static let plusDefault = InspectorPlusItem.newTerminal
 }

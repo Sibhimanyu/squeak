@@ -364,6 +364,8 @@ final class AppModel {
     /// menu-bar panel, a new thread's result): its stream opens with a tab for it, added once and selected; no other
     /// tab is touched.
     func openInStream(_ key: SessionKey) {
+        // Ducks mode: a duck's tab is its current chat, so a click on any of its chats opens that one.
+        if ducksMode, let s = session(key) { select(DuckOpen.target(s, ducksMode: true, pool: allSessions).key); return }
         select(key)
     }
 

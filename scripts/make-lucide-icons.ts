@@ -94,6 +94,12 @@ export const CURATED = [
   "square",
   "git-pull-request",
   "files",
+  // Artifacts tab: one icon per kind
+  "globe",
+  "image",
+  "file",
+  "pen-tool",
+  "palette",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));

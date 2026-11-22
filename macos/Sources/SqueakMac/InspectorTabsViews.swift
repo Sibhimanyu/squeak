@@ -28,6 +28,7 @@ struct InspectorPlusMenu<Glyph: View>: View {
         let dock = DockStore.shared
         switch item {
         case .newTerminal: NewTerminalAction.perform(model, in: .right)
+        case .artifacts: break  // pond pages only: a duck's stream has no Artifacts strip
         case .files, .code:
             InspectorTabMemory.write(item == .files ? InspectorTab.files.rawValue : InspectorTab.changes.rawValue, workspace: model.focus.workspace)
             if dock.layout.zone(of: .code) == .right { dock.selectPanel(.code, in: .right) } else { dock.update { $0.move(.code, to: .right) } }
@@ -43,6 +44,7 @@ struct InspectorPlusMenu<Glyph: View>: View {
             NewTerminalAction.open(folder: folder, in: .right)
         case .files: open(.files, key: key)
         case .code: open(.code, key: key)
+        case .artifacts: open(.artifacts, key: key)
         }
     }
 
@@ -164,6 +166,8 @@ struct PondInspectorZone: View {
             CodePanelView(session: model.selectedSession, fixedTab: .changes)
         case .files:
             CodePanelView(session: model.selectedSession, fixedTab: .files)
+        case .artifacts:
+            ArtifactsTab(projectId: projectId)
         case .terminal(let id):
             TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
         }

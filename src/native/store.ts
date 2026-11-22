@@ -190,6 +190,19 @@ export const MIGRATIONS: string[] = [
     branch = (SELECT s.branch FROM sessions s WHERE s.id = ducks.current_session_id)
     WHERE current_session_id IS NOT NULL AND workspace_id IS NULL;
   `,
+  // Artifacts: every `show` tool call (path, duck, session, branch, when) so the Artifacts tab can list what ducks opened.
+  `
+  CREATE TABLE shown_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    duck_id TEXT,
+    session_id TEXT NOT NULL,
+    branch TEXT,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX shown_artifacts_project ON shown_artifacts(project_id, at DESC);
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -198,6 +211,16 @@ export const ROOM_KEEP_POSTS = 2000;
 export type RoomAuthorKind = "person" | "agent" | "squeak";
 export type RoomPostKind = "working" | "done" | "needs" | "message" | "handoff";
 export type RoomLevel = "room" | "agents";
+
+/** One `show` tool call kept for the Artifacts tab (`GET /native/projects/<id>/artifacts`). */
+export interface ShownArtifactRow {
+  projectId: string;
+  path: string;
+  duckId: string | null;
+  sessionId: string;
+  branch: string | null;
+  at: number;
+}
 
 export interface DuckRow {
   id: string;
@@ -1576,6 +1599,38 @@ export class NativeStore {
           .all() as Row[]
       ).map((r) => r.session_id as string),
     );
+  }
+
+  /** A `show` tool call: one row the Artifacts tab lists as source "shown". */
+  recordShownArtifact(input: {
+    projectId: string;
+    path: string;
+    duckId?: string | null;
+    sessionId: string;
+    branch?: string | null;
+    at: number;
+  }): void {
+    this.db
+      .prepare("INSERT INTO shown_artifacts (project_id, path, duck_id, session_id, branch, at) VALUES (?,?,?,?,?,?)")
+      .run(input.projectId, input.path, input.duckId ?? null, input.sessionId, input.branch ?? null, input.at);
+  }
+
+  /** Every shown file for a pond, newest first. */
+  listShownArtifacts(projectId: string): ShownArtifactRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT project_id, path, duck_id, session_id, branch, at FROM shown_artifacts WHERE project_id=? ORDER BY at DESC, id DESC",
+        )
+        .all(projectId) as Row[]
+    ).map((r) => ({
+      projectId: r.project_id as string,
+      path: r.path as string,
+      duckId: (r.duck_id as string | null) ?? null,
+      sessionId: r.session_id as string,
+      branch: (r.branch as string | null) ?? null,
+      at: r.at as number,
+    }));
   }
 
   /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
