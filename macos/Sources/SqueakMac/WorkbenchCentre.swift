@@ -23,11 +23,19 @@ struct WorkbenchCentre: View {
     /// A pond's home or a thread from it is a layer over the workbench (Ponds/PondHome.swift): the workbench, with its
     /// chat, scroll and focus, stays mounted underneath, so coming back to the chat finds it as it was.
     var body: some View {
-        let pondPage = PondRoute(model.location)
+        let pondPage = PondRoute(model.baseLocation)
+        let artifact = model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
         ZStack {
-            workbench.workbenchLayer(hidden: pondPage != nil)
+            workbench.workbenchLayer(hidden: pondPage != nil || artifact != nil)
             if let route = pondPage {
                 PondRouteView(route: route, sidebarHidden: sidebarHidden).heresayPrivate()
+                    .workbenchLayer(hidden: artifact != nil)
+            }
+            // An artifact opened full size: a layer over the chat or the pond page, closed by its back control.
+            if let artifact {
+                ArtifactViewerPage(pond: artifact.pond, path: artifact.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen)
+                    .id(artifact.path)
+                    .transition(.opacity)
             }
         }
     }
@@ -349,7 +357,7 @@ private struct WorkbenchTabs: View {
     }
 
     /// What the strip shows for where the centre is (`StripPlan`): a New thread page is a selected placeholder.
-    private var plan: StripPlan { StripPlan.plan(location: model.location, previous: model.lastChat?.stringValue, threads: chats.map { $0.key.stringValue }) }
+    private var plan: StripPlan { StripPlan.plan(location: model.baseLocation, previous: model.lastChat?.stringValue, threads: chats.map { $0.key.stringValue }) }
     /// A New thread page is on screen: the placeholder is the selected tab, so nothing else reads as selected.
     private var composing: Bool { plan.selected == .placeholder && model.location.composePage == .newThread }
 

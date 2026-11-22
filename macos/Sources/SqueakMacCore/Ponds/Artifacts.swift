@@ -6,7 +6,7 @@ import Foundation
 
 /// What a file is, for its icon, its preview and the app that opens it.
 public enum ArtifactKind: String, Sendable, CaseIterable {
-    case page, doc, image, pdf, psd, ai, svg, other
+    case page, doc, slides, image, pdf, psd, ai, svg, video, audio, other
 
     /// The host's word, or `other` for one this build does not know.
     public init(wire: String?) { self = wire.flatMap(ArtifactKind.init(rawValue:)) ?? .other }
@@ -20,7 +20,10 @@ public enum ArtifactKind: String, Sendable, CaseIterable {
         case "ai": self = .ai
         case "svg": self = .svg
         case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "tif", "tiff": self = .image
-        case "txt", "rtf", "doc", "docx": self = .doc
+        case "pptx", "ppt", "key": self = .slides
+        case "txt", "rtf", "doc", "docx", "pages", "xlsx", "numbers", "csv": self = .doc
+        case "mp4", "mov", "m4v": self = .video
+        case "m4a", "mp3", "wav", "aac": self = .audio
         default: self = .other
         }
     }
@@ -118,7 +121,7 @@ public enum Artifacts {
         return parts.joined(separator: " \u{00B7} ")
     }
 
-    /// The app a design file belongs in, for the "Open in ..." label; nil = just "Open".
+    /// The app a design file belongs in, for the "Open in ..." label when the system names no app; nil = just "Open".
     public static func openAppName(_ kind: ArtifactKind) -> String? {
         switch kind {
         case .psd: "Photoshop"
@@ -128,39 +131,107 @@ public enum Artifacts {
     }
 
     public static func openLabel(_ kind: ArtifactKind) -> String { openAppName(kind).map { "Open in \($0)" } ?? "Open" }
+
+    /// The viewer's "open" button: named after the app the system opens the file with ("Keynote", "Photoshop"); with
+    /// none known it asks which app ("Open with...").
+    public static func openLabel(kind: ArtifactKind, systemApp: String?) -> String {
+        if let app = systemApp?.trimmingCharacters(in: .whitespaces), !app.isEmpty { return "Open in \(app)" }
+        return "Open with\u{2026}"
+    }
+
+    /// The viewer header's line under the name: "Pip · feature/x · Slides · 12 slides · 1.4 MB".
+    public static func viewerMeta(_ item: ArtifactItem, extras: [String] = []) -> String {
+        var parts: [String] = []
+        if let d = item.duckName, !d.isEmpty { parts.append(d) }
+        if let b = item.branch, !b.isEmpty { parts.append(b) }
+        parts.append(kindTitle(item.kind))
+        parts += extras.filter { !$0.isEmpty }
+        if item.size > 0 { parts.append(sizeText(item.size)) }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// "1.4 MB" style size for the viewer header.
+    public static func sizeText(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// The word for a kind in the viewer header.
+    public static func kindTitle(_ kind: ArtifactKind) -> String {
+        switch kind {
+        case .page: "Page"
+        case .doc: "Document"
+        case .slides: "Slides"
+        case .image: "Image"
+        case .pdf: "PDF"
+        case .psd: "Photoshop file"
+        case .ai: "Illustrator file"
+        case .svg: "SVG"
+        case .video: "Video"
+        case .audio: "Audio"
+        case .other: "File"
+        }
+    }
 }
 
-/// How an artifact is shown in the tab.
-public enum ArtifactPreview: Equatable, Sendable {
-    /// An HTML page, drawn as a page.
-    case web
-    /// Markdown, drawn as a page by the file tab's Markdown preview.
-    case markdown
-    /// A picture (PNG, JPEG, GIF, WebP, SVG): the file tab's image viewer.
-    case image
-    /// A PDF, or an Illustrator file saved with PDF compatibility (it is a PDF inside).
-    case pdf
-    /// Quick Look draws it: a Photoshop file (macOS flattens it), a document, anything else.
-    case quickLook
+/// Counts the slides of a PowerPoint file from the names inside its zip (`ppt/slides/slide1.xml` ...).
+public enum SlideCount {
+    public static func pptx(entries: [String]) -> Int? {
+        let n = entries.filter { name in
+            guard name.hasPrefix("ppt/slides/slide"), name.hasSuffix(".xml") else { return false }
+            let digits = name.dropFirst("ppt/slides/slide".count).dropLast(".xml".count)
+            return !digits.isEmpty && digits.allSatisfy(\.isNumber)
+        }.count
+        return n > 0 ? n : nil
+    }
+}
 
-    public static func choose(kind: ArtifactKind, path: String) -> ArtifactPreview {
-        switch kind {
-        case .page:
-            let ext = (path as NSString).pathExtension.lowercased()
-            return ext == "html" || ext == "htm" ? .web : .markdown
-        case .image, .svg: return .image
-        case .pdf, .ai: return .pdf
-        case .psd, .doc, .other: return .quickLook
+/// Which viewer draws an artifact, from its file's extension alone (pure; the view does the loading).
+public enum ArtifactPreview: Equatable, Sendable {
+    /// An HTML page or slide deck: a web view with read access to its folder.
+    case web
+    /// Markdown, drawn by the markdown page renderer.
+    case markdown
+    /// A PDF: PDFKit with a page sidebar.
+    case pdf
+    /// Illustrator: PDFKit when the file carries a PDF, else a large thumbnail and "Open in Illustrator".
+    case illustrator
+    /// A picture ImageIO reads: PNG, JPEG, GIF, WebP, TIFF, HEIC, and a flattened Photoshop file.
+    case image
+    /// SVG, drawn by a web view and zoomable.
+    case svg
+    /// Quick Look draws it with its own page and slide navigation: Office, iWork, RTF, spreadsheets.
+    case quickLook
+    /// AVKit: video and audio.
+    case media
+    /// Nothing above knows it: Quick Look first, then the file's icon with Open and Reveal.
+    case other
+
+    public static func kind(for path: String) -> ArtifactPreview {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "html", "htm": .web
+        case "md", "markdown", "mdx": .markdown
+        case "pdf": .pdf
+        case "ai": .illustrator
+        case "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "psd": .image
+        case "svg": .svg
+        case "pptx", "ppt", "key", "docx", "doc", "xlsx", "xls", "pages", "numbers", "rtf", "csv", "txt": .quickLook
+        case "mp4", "mov", "m4v", "m4a", "mp3", "wav", "aac": .media
+        default: .other
         }
     }
 
-    /// Where a preview that could not be drawn ends up: an Illustrator file with no PDF inside shows its icon and
-    /// "Open in Illustrator"; any other falls to Quick Look, then its icon.
-    public static func fallback(after preview: ArtifactPreview, kind: ArtifactKind) -> ArtifactPreview? {
-        switch (preview, kind) {
-        case (.pdf, .ai): nil
-        case (.pdf, _), (.image, _): .quickLook
-        default: nil
+    /// Where a viewer that could not draw the file ends up: a picture or PDF falls to Quick Look; Illustrator, Quick
+    /// Look and the rest have nowhere further (the icon with Open and Reveal).
+    public static func fallback(after preview: ArtifactPreview) -> ArtifactPreview? {
+        switch preview {
+        case .pdf, .image, .svg, .media, .web, .markdown: .quickLook
+        case .illustrator, .quickLook, .other: nil
         }
+    }
+
+    /// Zoom steps shared by the image and SVG viewers: fit, then 25% to 800%.
+    public static let zoomRange: ClosedRange<Double> = 0.1...8
+    public static func zoomed(_ z: Double, in zoomIn: Bool) -> Double {
+        min(max(zoomIn ? z * 1.25 : z / 1.25, zoomRange.lowerBound), zoomRange.upperBound)
     }
 }

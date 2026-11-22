@@ -36,7 +36,7 @@ enum PondRoute: Equatable {
         case .pondThread(let p, let id, let t): self = .thread(project: p, pondId: id, threadId: t)
         case .pondSettings(let p): self = .settings(project: p)
         case .archived: self = .archived
-        case .home, .chat, .compose, .settings, .usage: return nil
+        case .home, .chat, .compose, .settings, .usage, .artifact: return nil
         }
     }
 
@@ -150,7 +150,7 @@ final class PondsModel {
     /// Bridge for `PondThreadView.swift`, which sets it (reads and every other writer go through `AppModel.location`,
     /// `AppModel.openPond` and `closePondPage`). Delete once that file calls `AppModel.openPondHome`.
     var route: PondRoute? {
-        get { PondRoute(AppModel.shared.location) }
+        get { PondRoute(AppModel.shared.baseLocation) }
         set { if let newValue { AppModel.shared.openPond(newValue) } else { AppModel.shared.closePondPage() } }
     }
     var sheet: PondSheet?

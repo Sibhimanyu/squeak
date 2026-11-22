@@ -45,14 +45,14 @@ import Testing
         #expect(s.pinned == .panel(.code))
         #expect(!s.isClosable(.panel(.code)) && s.isClosable(.panel(.pond)))
         #expect(s.selected == .panel(.pond))
-        #expect(InspectorStrip.make(context: .stream(panels: [])).tabs == [.panel(.code)])
+        #expect(InspectorStrip.make(context: .stream(panels: [])).tabs == [.panel(.code), .artifacts])
         #expect(InspectorStrip.make(context: .stream(panels: [.terminal, .code])).pinned == .panel(.code))
     }
 
     @Test func streamShowsAShellWhenOneIsSelected() {
         let id = UUID()
         let s = InspectorStrip.make(context: .stream(panels: [.code]), terminals: [id], selectedTerminal: id)
-        #expect(s.tabs == [.panel(.code), .terminal(id)] && s.selected == .terminal(id))
+        #expect(s.tabs == [.panel(.code), .artifacts, .terminal(id)] && s.selected == .terminal(id))
     }
 
     @Test func plusMenuAndDefault() {
@@ -114,5 +114,25 @@ import Testing
         #expect(old.open == [.files] && old.selected == .artifacts)
         // Artifacts is always in the strip, so a saved Artifacts selection is kept.
         #expect(InspectorStrip.make(context: .pond, record: old).selected == .artifacts)
+    }
+}
+
+@Suite struct StreamArtifactsTabTests {
+    @Test func artifactsFollowsTheFirstPanelPinned() {
+        let s = InspectorStrip.make(context: .stream(panels: [.code, .pond]))
+        #expect(s.tabs == [.panel(.code), .artifacts, .panel(.pond)] && s.pinned == .panel(.code))
+        #expect(s.isPinned(.artifacts) && !s.isClosable(.artifacts) && !s.isDraggable(.artifacts))
+        #expect(s.isClosable(.panel(.pond)))
+        // The first panel is a pond panel when it leads the zone: Artifacts still comes second.
+        #expect(InspectorStrip.make(context: .stream(panels: [.pond, .code])).tabs == [.panel(.pond), .artifacts, .panel(.code)])
+    }
+
+    @Test func artifactsCanBeTheShownTabButAShellWinsAndPeopleOnlyHasNone() {
+        let id = UUID()
+        #expect(InspectorStrip.make(context: .stream(panels: [.code]), artifactsSelected: true).selected == .artifacts)
+        #expect(InspectorStrip.make(context: .stream(panels: [.code]), terminals: [id], selectedTerminal: id, artifactsSelected: true).selected == .terminal(id))
+        #expect(InspectorStrip.make(context: .stream(panels: [.code])).selected == .panel(.code))
+        let remote = InspectorStrip.make(context: .stream(panels: [.code]), artifactsSelected: true, peopleOnly: true)
+        #expect(remote.tabs == [.panel(.code)] && remote.selected == .panel(.code))
     }
 }

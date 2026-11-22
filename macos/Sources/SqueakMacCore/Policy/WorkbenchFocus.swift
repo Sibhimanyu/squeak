@@ -52,7 +52,7 @@ public struct WorkbenchFocus: Equatable, Sendable {
     private static func resolveLocation(_ location: WorkbenchLocation, place: (SessionKey) -> ChatPlace?) -> WorkbenchFocus {
         switch location {
         case .home: return .home
-        case .pondHome(let p), .pondThread(let p, _, _), .pondSettings(let p): return WorkbenchFocus(page: .pond, pond: p)
+        case .pondHome(let p), .pondThread(let p, _, _), .pondSettings(let p), .artifact(let p, _): return WorkbenchFocus(page: .pond, pond: p)
         case .archived: return WorkbenchFocus(page: .archived)
         case .chat(let key):
             let at = place(key)

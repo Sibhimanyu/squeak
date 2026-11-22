@@ -175,4 +175,20 @@ final class WorkbenchLocationTests: XCTestCase {
         XCTAssertTrue(d.hasPond(key: "p"))
         XCTAssertFalse(d.hasPond(key: "gone"))
     }
+
+    func testArtifactLocationIsRecordedPrunedAndBelongsToItsPond() {
+        let a = WorkbenchLocation.artifact(pond: "p", path: "/r/deck.pptx")
+        XCTAssertEqual(a.artifactPath, "/r/deck.pptx")
+        XCTAssertTrue(a.isArtifact && a.isRecorded && !a.isPondRoute && !a.isSettings)
+        XCTAssertEqual(a.pondKey, "p")
+        XCTAssertEqual(a.prune(livePonds: ["p"]), a)
+        XCTAssertEqual(a.prune(livePonds: ["q"]), .home)
+        XCTAssertNil(WorkbenchLocation.home.artifactPath)
+        var h = NavHistory<WorkbenchLocation>()
+        h.visit(.pondHome(pond: "p"))
+        h.visit(a)
+        XCTAssertEqual(h.back(), .some(.pondHome(pond: "p")))
+        XCTAssertEqual(h.forward(), .some(a))
+        XCTAssertEqual(WorkbenchFocus.resolve(a, place: { _ in nil }).pond, "p")
+    }
 }

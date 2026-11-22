@@ -338,7 +338,7 @@ extension Scene {
 @MainActor enum NewTerminalAction {
     static func perform(_ model: AppModel, in zone: DockZone? = nil) {
         // On a pond page the terminal belongs to the pond: its folder, in the pond inspector.
-        if zone == nil, case .pondHome(let key) = model.location {
+        if zone == nil, case .pondHome(let key) = model.baseLocation {
             guard let folder = PondsModel.pondTerminalFolder(key) else { return }
             open(folder: folder, in: .right)
             return

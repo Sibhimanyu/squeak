@@ -57,6 +57,9 @@ final class PondChromeTests: XCTestCase {
         XCTAssertEqual(s.tabs, [.pond]); XCTAssertEqual(s.selected, .pond)
         XCTAssertTrue(InspectorStrip.plusItems(context: .pond, peopleOnly: true).isEmpty)
         XCTAssertEqual(InspectorStrip.make(context: .pond, record: rec).tabs, [.pond, .artifacts, .code, .files])
+        // Beside a chat, a remote pond keeps its panels with no Artifacts; an owner's has the pinned tab.
+        XCTAssertEqual(InspectorStrip.make(context: .stream(panels: [.code]), peopleOnly: true).tabs, [.panel(.code)])
+        XCTAssertEqual(InspectorStrip.make(context: .stream(panels: [.code])).tabs, [.panel(.code), .artifacts])
     }
 
     func testTabCapMemoSurvivesInfiniteWidth() {

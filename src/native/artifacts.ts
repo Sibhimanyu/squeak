@@ -8,7 +8,18 @@ import type { NativeStore, ShownArtifactRow } from "./store.js";
  * Served on `GET /native/projects/<id>/artifacts`. Pure helpers are exported for tests.
  */
 
-export type ArtifactKind = "page" | "doc" | "image" | "pdf" | "psd" | "ai" | "svg" | "other";
+export type ArtifactKind =
+  | "page"
+  | "doc"
+  | "slides"
+  | "image"
+  | "pdf"
+  | "psd"
+  | "ai"
+  | "svg"
+  | "video"
+  | "audio"
+  | "other";
 export type ArtifactSource = "shown" | "found";
 
 export interface ArtifactItem {
@@ -53,10 +64,37 @@ export const ARTIFACT_SKIP_DIRS = new Set([
 ]);
 
 /** Extensions that count as design / preview artifacts when found on disk (not source code). */
-const FOUND_EXTENSIONS = new Set([".psd", ".ai", ".pdf", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const FOUND_EXTENSIONS = new Set([
+  ".psd",
+  ".ai",
+  ".pdf",
+  ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".pptx",
+  ".ppt",
+  ".key",
+  ".docx",
+  ".doc",
+  ".pages",
+  ".rtf",
+  ".xlsx",
+  ".numbers",
+  ".csv",
+  ".mp4",
+  ".mov",
+  ".m4a",
+  ".mp3",
+]);
 
 const PAGE_EXTENSIONS = new Set([".html", ".htm", ".md", ".markdown", ".mdx"]);
-const DOC_EXTENSIONS = new Set([".txt", ".rtf", ".doc", ".docx"]);
+const DOC_EXTENSIONS = new Set([".txt", ".rtf", ".doc", ".docx", ".pages", ".xlsx", ".numbers", ".csv"]);
+const SLIDES_EXTENSIONS = new Set([".pptx", ".ppt", ".key"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v"]);
+const AUDIO_EXTENSIONS = new Set([".m4a", ".mp3", ".wav", ".aac"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tif", ".tiff"]);
 
 export function artifactKindFromPath(filePath: string): ArtifactKind {
@@ -67,7 +105,10 @@ export function artifactKindFromPath(filePath: string): ArtifactKind {
   if (ext === ".ai") return "ai";
   if (ext === ".svg") return "svg";
   if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  if (SLIDES_EXTENSIONS.has(ext)) return "slides";
   if (DOC_EXTENSIONS.has(ext)) return "doc";
+  if (VIDEO_EXTENSIONS.has(ext)) return "video";
+  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
   return "other";
 }
 

@@ -23,6 +23,9 @@ public enum WorkbenchLocation: Equatable, Hashable, Codable, Sendable {
     case settings(SettingsSection)
     /// The Usage screen.
     case usage
+    /// An artifact opened full size in the centre, over whatever page or chat it was opened from (`path` is the file's
+    /// absolute path, `pond` the pond's directory key).
+    case artifact(pond: String, path: String)
 
     public var chatKey: SessionKey? { if case .chat(let k) = self { return k } else { return nil } }
 
@@ -32,14 +35,14 @@ public enum WorkbenchLocation: Equatable, Hashable, Codable, Sendable {
     public var isPondRoute: Bool {
         switch self {
         case .pondHome, .pondThread, .pondSettings, .archived: true
-        case .home, .chat, .compose, .settings, .usage: false
+        case .home, .chat, .compose, .settings, .usage, .artifact: false
         }
     }
 
     /// The pond a pond page belongs to.
     public var pondKey: String? {
         switch self {
-        case .pondHome(let p), .pondThread(let p, _, _), .pondSettings(let p): p
+        case .pondHome(let p), .pondThread(let p, _, _), .pondSettings(let p), .artifact(let p, _): p
         case .compose(_, let p, _): p
         case .home, .archived, .chat, .settings, .usage: nil
         }
@@ -61,6 +64,11 @@ public enum WorkbenchLocation: Equatable, Hashable, Codable, Sendable {
     public var isSettings: Bool { settingsSection != nil }
 
     public var isUsage: Bool { self == .usage }
+
+    /// The artifact open in the centre, if any.
+    public var artifactPath: String? { if case .artifact(_, let p) = self { return p } else { return nil } }
+
+    public var isArtifact: Bool { artifactPath != nil }
 
     /// Back and forward remember every place but the quick message, which is a passing prompt.
     public var isRecorded: Bool {

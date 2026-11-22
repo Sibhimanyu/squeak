@@ -439,8 +439,15 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         let shownFile = dock.files.selected[zone]
         let shownTerminal = dock.activeTerminals.shown(in: zone)
         let shells = dockTerminalTabs(in: zone, session: session)
+        let pin = StreamArtifactsPin.shared
+        let artifactsProject = zone == .right ? StreamArtifactsPin.projectId(for: session) : nil
+        let firstPanel = state.panels.first(where: { $0 != .terminal && !InspectorStash.hides($0) })
+        // Beside a chat the pond's Artifacts tab sits right after the first panel, pinned (policy in `InspectorStrip`).
+        let showsArtifacts = artifactsProject != nil && InspectorStrip.make(
+            context: .stream(panels: state.panels), peopleOnly: StreamArtifactsPin.peopleOnly(for: session)).tabs.contains(.artifacts)
+        let artifactsShown = showsArtifacts && pin.shown
         let duckRefs = session.map { s in dock.ducklings.ducklings(in: zone).filter { $0.session == s.key } } ?? []
-        let titles: [String] = state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.map(\.title)
+        let titles: [String] = state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.map(\.title) + (showsArtifacts ? [RightTab.artifacts.title] : [])
             + duckRefs.map { ref in session.flatMap { model.ducklings(for: $0)?.items.first { $0.id == ref.taskId }?.title } ?? "Duckling" }
             + dock.threads.threads(in: zone).compactMap { k in model.allSessions.first { $0.key.stringValue == k }.map { model.workbenchTitle($0) } }
             + placed.map(\.name) + (shells?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? [])
@@ -450,31 +457,44 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }, id: \.self) { p in
-                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator,
+                        DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && !artifactsShown && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator,
                                      pinned: zone == .right && p == state.panels.first(where: { $0 != .terminal && !InspectorStash.hides($0) })) {
+                            pin.shown = false
                             dock.selectPanel(p, in: zone)
+                        }
+                        if showsArtifacts, p == firstPanel {
+                            StripTab(selected: artifactsShown && !state.collapsed, height: height, indicator: indicator, closeLabel: "Close Artifacts", showsClose: false,
+                                     titleWidth: TabTitleMeasure.width(RightTab.artifacts.title), close: {}) {
+                                Image(systemName: RightTab.artifacts.symbol).font(.system(size: 13)).foregroundStyle(artifactsShown ? Theme.ink : Theme.muted)
+                            } title: {
+                                Text(verbatim: RightTab.artifacts.title).font(Typo.body).foregroundStyle(artifactsShown ? Theme.ink : Theme.muted).lineLimit(1)
+                            }
+                            .onTapGesture { pin.shown = true; if state.collapsed { dock.update { $0.setCollapsed(false, for: zone) } } }
+                            .accessibilityLabel(RightTab.artifacts.title).accessibilityAddTraits(.isButton)
+                            .accessibilityAddTraits(artifactsShown ? .isSelected : [])
                         }
                     }
                     if let session {
                         ForEach(dock.ducklings.ducklings(in: zone).filter { $0.session == session.key }, id: \.self) { ref in
-                            DockDucklingTab(session: session, ref: ref, zone: zone, selected: dock.ducklings.selected[zone] == ref && !state.collapsed, height: height, indicator: indicator)
+                            DockDucklingTab(session: session, ref: ref, zone: zone, selected: dock.ducklings.selected[zone] == ref && !state.collapsed && !artifactsShown, height: height, indicator: indicator)
                         }
                     }
                     ForEach(dock.threads.threads(in: zone), id: \.self) { key in
                         if let t = model.allSessions.first(where: { $0.key.stringValue == key }) {
-                            DockThreadTab(session: t, zone: zone, selected: dock.threads.selected[zone] == key && !state.collapsed, height: height, indicator: indicator)
+                            DockThreadTab(session: t, zone: zone, selected: dock.threads.selected[zone] == key && !state.collapsed && !artifactsShown, height: height, indicator: indicator)
                         }
                     }
                     if let fileModel {
                         ForEach(placed) { f in
-                            DockFileTab(files: fileModel, file: f, zone: zone, selected: shownFile == f.path && !state.collapsed, height: height, indicator: indicator) {
+                            DockFileTab(files: fileModel, file: f, zone: zone, selected: shownFile == f.path && !state.collapsed && !artifactsShown, height: height, indicator: indicator) {
+                                pin.shown = false
                                 dock.selectFile(f.path)
                             }
                         }
                     }
                     if let shells {
                         ForEach(shells.tabs) { t in
-                            DockTerminalTab(tab: t, folder: shells.folder, zone: zone, selected: shownTerminal == t.id && !state.collapsed, height: height, indicator: indicator)
+                            DockTerminalTab(tab: t, folder: shells.folder, zone: zone, selected: shownTerminal == t.id && !state.collapsed && !artifactsShown, height: height, indicator: indicator)
                         }
                     }
                     DockPlusButton(zone: zone)
@@ -499,6 +519,11 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         .animation(Motion.standard, value: state.selected)
         .animation(Motion.standard, value: shownFile)
         .animation(Motion.standard, value: shownTerminal)
+        .animation(Motion.standard, value: artifactsShown)
+        // Any other tab becoming the shown one (a new shell, a thread, a duckling) takes the selection from Artifacts.
+        .onChange(of: shownTerminal) { _, new in if new != nil { pin.shown = false } }
+        .onChange(of: dock.threads.selected[zone]) { _, new in if new != nil { pin.shown = false } }
+        .onChange(of: dock.ducklings.selected[zone]) { _, new in if new != nil { pin.shown = false } }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
         .contextMenu { WindowPanelMenuItems(includeReset: true) }
     }
@@ -549,8 +574,11 @@ struct DockZoneBody: View {
         let fileModel = session?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         let file = DockStore.shared.files.selected[zone].flatMap { path in fileModel?.open.first { $0.path == path } }
         let shell = DockStore.shared.activeTerminals.shown(in: zone)
+        let artifactsProject = zone == .right && StreamArtifactsPin.shared.shown ? StreamArtifactsPin.projectId(for: session) : nil
         Group {
-            if let ref = DockStore.shared.ducklings.selected[zone], let session, ref.session == session.key {
+            if let artifactsProject, !StreamArtifactsPin.peopleOnly(for: session) {
+                ArtifactsTab(projectId: artifactsProject)
+            } else if let ref = DockStore.shared.ducklings.selected[zone], let session, ref.session == session.key {
                 DucklingPanel(session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId)
                     .id(ref.taskId)
             } else if let shell {
@@ -776,5 +804,24 @@ struct MiddleClick: NSViewRepresentable {
                 return event
             }
         }
+    }
+}
+
+/// Whether the right zone beside a chat shows its pond's Artifacts tab (pinned right after the first panel). One flag
+/// for the window: the tab is the shown one until another tab is picked.
+@MainActor @Observable final class StreamArtifactsPin {
+    static let shared = StreamArtifactsPin()
+    var shown = false
+
+    /// The project whose artifacts the chat's pond lists; nil for a chat that is in no pond.
+    static func projectId(for session: HostSession?) -> String? {
+        guard let session, let key = PondsModel.shared.key(of: session) else { return nil }
+        return PondsModel.shared.entry(key)?.projectId
+    }
+
+    /// A remote pond has no files on this Mac: it keeps its people-only chrome, with no Artifacts tab.
+    static func peopleOnly(for session: HostSession?) -> Bool {
+        guard let session, let key = PondsModel.shared.key(of: session) else { return false }
+        return PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly
     }
 }

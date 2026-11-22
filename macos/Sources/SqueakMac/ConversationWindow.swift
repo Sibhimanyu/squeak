@@ -102,7 +102,7 @@ struct ConversationView: View {
     /// The pond page on screen (Dashboard or Room), if any: its project id and the pond's directory key.
     private var roomContext: (projectId: String, key: String)? {
         guard InspectorStash.roomEnabled else { return nil }
-        guard case .pondHome(let key) = model.location else { return nil }
+        guard case .pondHome(let key) = model.baseLocation else { return nil }
         if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
         return PondsModel.shared.native(key: key).map { ($0.id, key) }
     }

@@ -133,10 +133,10 @@ public struct InspectorStrip: Equatable, Sendable {
 
     /// The strip for a context. `terminals` are the shells placed in the right zone; `selectedTerminal` is the shown one.
     /// The strip is never empty: beside a pond the Pond tab is always first; in a stream the first panel the zone holds
-    /// is (Code when it holds none).
+    /// is (Code when it holds none), with the pinned Artifacts tab right after it.
     public static func make(
         context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), terminals: [UUID] = [],
-        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, peopleOnly: Bool = false
+        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, artifactsSelected: Bool = false, peopleOnly: Bool = false
     ) -> InspectorStrip {
         // A remote pond has no code on this Mac: the Pond tab (People, Recent) alone, whatever was saved.
         if peopleOnly, case .pond = context { return InspectorStrip(tabs: [.pond], selected: .pond, pinned: .pond) }
@@ -156,6 +156,9 @@ public struct InspectorStrip: Equatable, Sendable {
         case .stream(let panels):
             let shown = panels.filter { $0 != .terminal }
             tabs = (shown.isEmpty ? [.code] : shown).map { .panel($0) }
+            // Artifacts sits right after the first panel, pinned, as it does beside a pond page (a remote pond keeps its
+            // people-only chrome and gets none).
+            if !peopleOnly { tabs.insert(.artifacts, at: 1) }
         }
         tabs += terminals.map { .terminal($0) }
         let pinned = tabs[0]
@@ -173,6 +176,7 @@ public struct InspectorStrip: Equatable, Sendable {
             }
         case .stream:
             if let t = selectedTerminal, terminals.contains(t) { selected = .terminal(t) }
+            else if artifactsSelected, tabs.contains(.artifacts) { selected = .artifacts }
             else if let p = selectedPanel, tabs.contains(.panel(p)) { selected = .panel(p) }
         }
         return InspectorStrip(tabs: tabs, selected: selected, pinned: pinned)

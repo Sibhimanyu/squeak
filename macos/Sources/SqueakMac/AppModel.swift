@@ -154,12 +154,17 @@ final class AppModel {
     var location: WorkbenchLocation = .home { didSet { if location != oldValue { locationChanged(from: oldValue) } } }
     /// Where closing Settings or a creation page returns: the last place that was not one of those.
     @ObservationIgnored private(set) var returnLocation: WorkbenchLocation = .home
+    /// The place an open artifact sits over: the last location that was not an artifact. The page or chat underneath
+    /// stays mounted and keeps driving `focus`, the right zone and the sidebar while the viewer covers the centre.
+    private(set) var artifactBase: WorkbenchLocation = .home
+    /// `location`, or the place under it while an artifact viewer covers the centre.
+    var baseLocation: WorkbenchLocation { location.isArtifact ? artifactBase : location }
     @ObservationIgnored private var focusCache: (location: WorkbenchLocation, revision: Int, focus: WorkbenchFocus)?
     /// What the person is looking at, derived from `location` and where the chat sits in the sidebar tree: the one input
     /// every surface (sidebar highlight, crumb, tab strip, right panel) reads. Recomputed only when the location changes,
     /// or, for a chat, when the tree does.
     var focus: WorkbenchFocus {
-        let loc = location
+        let loc = baseLocation
         let revision = loc.chatKey == nil ? 0 : derivedRevision
         if let c = focusCache, c.location == loc, c.revision == revision {
             // The pond's access can change under a cached focus (the directory is read again): it is the one field read fresh.
@@ -1173,9 +1178,10 @@ final class AppModel {
 
     private func locationChanged(from old: WorkbenchLocation) {
         if old.composePage == .quickMessage, location.composePage != .quickMessage { NewChatController.shared.quickMessageClosed() }
+        if !location.isArtifact { artifactBase = location }
         if let key = location.chatKey { rememberPlace(of: key) }
         if let section = location.settingsSection { lastSettingsSection = section }
-        if !location.isSettings, location.composePage == nil { returnLocation = location }
+        if !location.isSettings, location.composePage == nil, !location.isArtifact { returnLocation = location }
         // The loaded chat follows: a chat loads, the Dashboard and Usage clear it, any other page leaves it under itself.
         switch location {
         case .chat(let key): loadChat(key)
@@ -1197,6 +1203,12 @@ final class AppModel {
 
     /// Leaves a pond page for the open chat (or the Dashboard).
     func closePondPage() { if location.isPondRoute { location = .resting(chat: lastChat) } }
+
+    /// Opens an artifact full size in the centre, over the current page or chat (Back returns to it).
+    func openArtifact(pond: String, path: String) { location = .artifact(pond: pond, path: path) }
+
+    /// Closes the artifact viewer, back to the page or chat under it.
+    func closeArtifact() { if location.isArtifact { location = artifactBase } }
 
     /// Leaves a creation page for where it was opened from.
     func closeComposePage() { if location.composePage != nil { location = restingPlace() } }
@@ -1260,7 +1272,7 @@ final class AppModel {
         case .home: WorkbenchNav.goHome(self)
         case .chat(let key):
             if session(key) != nil { select(key) } else { WorkbenchNav.goHome(self) }
-        case .pondHome, .pondThread, .pondSettings, .archived, .usage:
+        case .pondHome, .pondThread, .pondSettings, .archived, .usage, .artifact:
             location = place
         case .compose(let page, let pond, let workspace):
             let project = pond.map { PondsModel.shared.entry($0)?.projectId ?? $0 }

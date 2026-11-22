@@ -28,5 +28,7 @@ import Testing
         #expect(s.tabs == [.pond, .artifacts, .files, .terminal(a), .terminal(b)])
         #expect(s.selected == .terminal(b))
         #expect(s.isClosable(.terminal(a)) && s.isPinned(.pond))
+        let c = InspectorStrip.make(context: .stream(panels: [.code]), terminals: [a], selectedTerminal: a)
+        #expect(c.tabs == [.panel(.code), .artifacts, .terminal(a)] && c.selected == .terminal(a) && c.isPinned(.artifacts))
     }
 }

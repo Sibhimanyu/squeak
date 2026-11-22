@@ -31,6 +31,31 @@ describe("artifact kinds and scan", () => {
     expect(artifactKindFromPath("a.ts")).toBe("other");
   });
 
+  it("classifies slides, documents and media", () => {
+    for (const e of ["pptx", "ppt", "key"]) expect(artifactKindFromPath(`a.${e}`)).toBe("slides");
+    for (const e of ["docx", "doc", "pages", "rtf", "xlsx", "numbers", "csv"])
+      expect(artifactKindFromPath(`a.${e}`)).toBe("doc");
+    for (const e of ["mp4", "MOV"]) expect(artifactKindFromPath(`a.${e}`)).toBe("video");
+    for (const e of ["m4a", "mp3"]) expect(artifactKindFromPath(`a.${e}`)).toBe("audio");
+  });
+
+  it("finds slides, documents and media in a scan, within the same caps", () => {
+    const root = tmp("art-scan-media-");
+    for (const f of ["deck.key", "d/talk.pptx", "r.docx", "m.mp4", "s.mp3", "notes.ts"]) {
+      fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+      fs.writeFileSync(path.join(root, f), "x");
+    }
+    const found = scanArtifactFolder({ root });
+    expect(found.map((a) => `${a.name}:${a.kind}`).sort()).toEqual([
+      "deck.key:slides",
+      "m.mp4:video",
+      "r.docx:doc",
+      "s.mp3:audio",
+      "talk.pptx:slides",
+    ]);
+    expect(scanArtifactFolder({ root }, { maxFiles: 2 })).toHaveLength(2);
+  });
+
   it("finds design files, skips build dirs, dot dirs, source, depth and the count cap", () => {
     const root = tmp("art-scan-");
     for (const f of [

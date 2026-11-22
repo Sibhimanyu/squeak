@@ -48,17 +48,45 @@ private final class Replier: HTTPTransport, @unchecked Sendable {
         #expect(Artifacts.meta(item("/a/y.png", at: 100_000), now: now) == "now")
     }
 
-    @Test func previewChoicePerKind() {
-        #expect(ArtifactPreview.choose(kind: .page, path: "/a/p.html") == .web)
-        #expect(ArtifactPreview.choose(kind: .page, path: "/a/p.md") == .markdown)
-        #expect(ArtifactPreview.choose(kind: .svg, path: "/a/p.svg") == .image)
-        #expect(ArtifactPreview.choose(kind: .pdf, path: "/a/p.pdf") == .pdf)
-        #expect(ArtifactPreview.choose(kind: .ai, path: "/a/p.ai") == .pdf)
-        #expect(ArtifactPreview.choose(kind: .psd, path: "/a/p.psd") == .quickLook)
-        #expect(ArtifactPreview.fallback(after: .pdf, kind: .ai) == nil)
-        #expect(ArtifactPreview.fallback(after: .pdf, kind: .pdf) == .quickLook)
-        #expect(Artifacts.openLabel(.psd) == "Open in Photoshop" && Artifacts.openLabel(.ai) == "Open in Illustrator")
-        #expect(Artifacts.openLabel(.pdf) == "Open")
+    @Test func previewChoicePerFormat() {
+        let cases: [(String, ArtifactPreview)] = [
+            ("/a/p.html", .web), ("/a/p.HTM", .web), ("/a/p.md", .markdown), ("/a/p.pdf", .pdf), ("/a/p.ai", .illustrator),
+            ("/a/p.psd", .image), ("/a/p.tiff", .image), ("/a/p.heic", .image), ("/a/p.png", .image), ("/a/p.jpg", .image),
+            ("/a/p.gif", .image), ("/a/p.webp", .image), ("/a/p.svg", .svg),
+            ("/a/p.pptx", .quickLook), ("/a/p.ppt", .quickLook), ("/a/p.key", .quickLook), ("/a/p.docx", .quickLook),
+            ("/a/p.doc", .quickLook), ("/a/p.xlsx", .quickLook), ("/a/p.pages", .quickLook), ("/a/p.numbers", .quickLook),
+            ("/a/p.rtf", .quickLook), ("/a/p.mp4", .media), ("/a/p.mov", .media), ("/a/p.m4a", .media), ("/a/p.mp3", .media),
+            ("/a/p.swift", .other), ("/a/noext", .other),
+        ]
+        for (path, preview) in cases { #expect(ArtifactPreview.kind(for: path) == preview, "\(path)") }
+        #expect(ArtifactPreview.fallback(after: .pdf) == .quickLook && ArtifactPreview.fallback(after: .illustrator) == nil)
+        #expect(ArtifactPreview.fallback(after: .quickLook) == nil && ArtifactPreview.fallback(after: .other) == nil)
+    }
+
+    @Test func newKindsAndOpenLabels() {
+        let cases: [(String, ArtifactKind)] = [
+            ("a.pptx", .slides), ("a.key", .slides), ("a.ppt", .slides), ("a.docx", .doc), ("a.pages", .doc), ("a.xlsx", .doc),
+            ("a.numbers", .doc), ("a.csv", .doc), ("a.mp4", .video), ("a.mov", .video), ("a.m4a", .audio), ("a.mp3", .audio),
+        ]
+        for (path, kind) in cases { #expect(ArtifactKind(path: path) == kind, "\(path)") }
+        #expect(ArtifactKind(wire: "slides") == .slides && ArtifactKind(wire: "video") == .video && ArtifactKind(wire: "hologram") == .other)
+        #expect(Artifacts.openLabel(kind: .slides, systemApp: "Keynote") == "Open in Keynote")
+        #expect(Artifacts.openLabel(kind: .ai, systemApp: nil) == "Open with\u{2026}")
+        #expect(Artifacts.openLabel(kind: .pdf, systemApp: " ") == "Open with\u{2026}")
+        let i = ArtifactItem(path: "/a/d.pptx", duckName: "Pip", branch: "feature/x", size: 2_000_000)
+        #expect(Artifacts.viewerMeta(i, extras: ["12 slides"]) == "Pip \u{00B7} feature/x \u{00B7} Slides \u{00B7} 12 slides \u{00B7} " + Artifacts.sizeText(2_000_000))
+        #expect(Artifacts.viewerMeta(ArtifactItem(path: "/a/x.png", size: 0)) == "Image")
+        #expect(Artifacts.openLabel(.psd) == "Open in Photoshop" && Artifacts.openLabel(.pdf) == "Open")
+    }
+
+    @Test func slideCountFromZipEntries() {
+        #expect(SlideCount.pptx(entries: ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml", "ppt/slides/_rels/slide1.xml.rels", "ppt/slideLayouts/slideLayout1.xml"]) == 2)
+        #expect(SlideCount.pptx(entries: ["ppt/presentation.xml"]) == nil)
+    }
+
+    @Test func zoomStaysInRange() {
+        #expect(ArtifactPreview.zoomed(1, in: true) == 1.25)
+        #expect(ArtifactPreview.zoomed(8, in: true) == 8 && ArtifactPreview.zoomed(0.1, in: false) == 0.1)
     }
 
     @Test func hostRouteDecodesAndSkipsBadRows() async throws {
