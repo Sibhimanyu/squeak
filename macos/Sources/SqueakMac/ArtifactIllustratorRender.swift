@@ -35,12 +35,17 @@ enum IllustratorRender {
     static func cached(for file: URL) -> [CanvasBoard]? {
         let folder = cacheFolder(for: file)
         guard let data = try? Data(contentsOf: folder.appending(path: "names.json")), let names = ArtifactRenderCache.names(from: data), !names.isEmpty else { return nil }
+        let singlePdf = folder.appending(path: "art.pdf")
+        if let doc = PDFDocument(url: singlePdf) {
+            let boards = CanvasBoard.boards(of: doc, names: names)
+            if boards.count == names.count { return boards }
+        }
         var boards: [CanvasBoard] = []
         for (i, name) in names.enumerated() {
             guard let doc = PDFDocument(url: folder.appending(path: "\(i)/art.pdf")), let b = CanvasBoard.boards(of: doc, names: [name]).first else { return nil }
             boards.append(b)
         }
-        return boards
+        return boards.count == names.count ? boards : nil
     }
 
     /// Runs Illustrator (launched hidden, not activated, when it is not running) and returns the rendered artboards.
@@ -49,9 +54,7 @@ enum IllustratorRender {
         let out = cacheFolder(for: file)
         try? FileManager.default.removeItem(at: out)
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let script = out.deletingLastPathComponent().appending(path: "\(out.lastPathComponent).jsx")
-        try ArtifactRenderCache.script(file: file.path, out: out.path).write(to: script, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: script) }
+        let script = ArtifactRenderCache.script(file: file.path, out: out.path)
 
         let running = NSWorkspace.shared.runningApplications.contains { $0.bundleURL == app }
         if !running {
@@ -63,16 +66,31 @@ enum IllustratorRender {
         let result = try await Task.detached(priority: .userInitiated) { try runScript(app: app, script: script) }.value
         guard cached(for: file) != nil, let boards = cached(for: file) else {
             try? FileManager.default.removeItem(at: out)
+            if let parsed = ArtifactRenderCache.parseResult(result) {
+                switch parsed {
+                case .error(let msg):
+                    throw Failure(message: msg)
+                case .ok(let n) where n == 0:
+                    throw Failure(message: "Illustrator document contains no artboards.")
+                default:
+                    break
+                }
+            }
             throw Failure(message: result.isEmpty ? "Illustrator did not produce any artboards." : result)
         }
         return boards
     }
 
-    private static func runScript(app: URL, script: URL) throws -> String {
+    private static func runScript(app: URL, script: String) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         func esc(_ s: String) -> String { s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        p.arguments = ["-e", "tell application \"\(esc(app.path))\" to do javascript (POSIX file \"\(esc(script.path))\")"]
+        p.arguments = [
+            "-e", "on run argv",
+            "-e", "tell application \"\(esc(app.path))\" to do javascript (item 1 of argv)",
+            "-e", "end run",
+            script
+        ]
         let err = Pipe(), outPipe = Pipe()
         p.standardError = err
         p.standardOutput = outPipe
@@ -82,14 +100,16 @@ enum IllustratorRender {
             if Date() > deadline { p.terminate(); throw Failure(message: "Illustrator took longer than five minutes. Try again, or open the file in Illustrator.") }
             Thread.sleep(forTimeInterval: 0.25)
         }
-        let text = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdoutText = String(decoding: outPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        let stderrText = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         if p.terminationStatus != 0 {
-            let lower = text.lowercased()
+            let combined = stderrText.isEmpty ? stdoutText : stderrText
+            let lower = combined.lowercased()
             if lower.contains("-1743") || lower.contains("not allowed") {
                 throw Failure(message: "macOS blocked Squeak from controlling Illustrator. Allow it in System Settings, Privacy & Security, Automation.")
             }
-            throw Failure(message: text.isEmpty ? "Illustrator could not render this file." : text)
+            throw Failure(message: combined.isEmpty ? "Illustrator could not render this file." : combined)
         }
-        return text
+        return stdoutText.isEmpty ? stderrText : stdoutText
     }
 }

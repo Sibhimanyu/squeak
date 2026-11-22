@@ -35,8 +35,9 @@ public enum ArtifactRenderCache {
         support.appending(path: "artifact-render").appending(path: key(path: path, modified: modified))
     }
 
-    /// The ExtendScript run inside Illustrator: open the file, save each artboard as its own PDF into `<out>/<i>/art.pdf`,
+    /// The ExtendScript run inside Illustrator: open the file, save each artboard as its own PDF into `<out>/art.pdf`,
     /// write the artboard names to `<out>/names.json`, close without saving. Paths are JSON-escaped string literals.
+    /// Returns "ok:<n>" on success or "error: <message> line <line>" on failure.
     public static func script(file: String, out: String) -> String {
         func lit(_ s: String) -> String {
             let enc = JSONEncoder()
@@ -45,39 +46,71 @@ public enum ArtifactRenderCache {
             return t
         }
         return """
-            var src = new File(\(lit(file)));
-            var out = new Folder(\(lit(out)));
-            out.create();
+            var res;
             var previous = app.userInteractionLevel;
-            app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
-            var doc = app.open(src);
-            var names = [];
             try {
-              var n = doc.artboards.length;
-              for (var i = 0; i < n; i++) {
-                doc.artboards.setActiveArtboardIndex(i);
-                names.push(doc.artboards[i].name);
-                var dir = new Folder(out.fsName + "/" + i);
-                dir.create();
+              app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS;
+              var src = new File(\(lit(file)));
+              var out = new Folder(\(lit(out)));
+              out.create();
+              var doc = app.open(src);
+              try {
+                var names = [];
+                var n = doc.artboards.length;
+                for (var i = 0; i < n; i++) {
+                  names.push(doc.artboards[i].name);
+                }
                 var o = new PDFSaveOptions();
-                o.saveMultipleArtboards = true;
-                o.artboardRange = String(i + 1);
                 o.preserveEditability = false;
                 o.viewAfterSaving = false;
-                doc.saveAs(new File(dir.fsName + "/art.pdf"), o);
+                o.saveMultipleArtboards = true;
+                o.artboardRange = n > 1 ? ("1-" + n) : "1";
+                doc.saveAs(new File(out.fsName + "/art.pdf"), o);
+
+                var meta = new File(out.fsName + "/names.json");
+                meta.encoding = "UTF-8";
+                meta.open("w");
+                var json = "[";
+                for (var k = 0; k < names.length; k++) {
+                  json += (k ? "," : "") + "\\"" + String(names[k]).replace(/(["\\\\])/g, "\\\\$1") + "\\"";
+                }
+                meta.write(json + "]");
+                meta.close();
+                res = "ok:" + n;
+              } finally {
+                doc.close(SaveOptions.DONOTSAVECHANGES);
               }
-              var meta = new File(out.fsName + "/names.json");
-              meta.open("w");
-              var json = "[";
-              for (var k = 0; k < names.length; k++) { json += (k ? "," : "") + "\\"" + String(names[k]).replace(/(["\\\\])/g, "\\\\$1") + "\\""; }
-              meta.write(json + "]");
-              meta.close();
+            } catch (e) {
+              res = "error: " + (e.message || String(e)) + (e.line ? (" line " + e.line) : "");
             } finally {
-              doc.close(SaveOptions.DONOTSAVECHANGES);
               app.userInteractionLevel = previous;
             }
-            "ok";
+            res;
             """
+    }
+
+    /// Result of parsing the ExtendScript output string.
+    public enum ScriptResult: Equatable, Sendable {
+        case ok(artboards: Int)
+        case error(String)
+    }
+
+    /// Parses the result string from ExtendScript ("ok:<n>" or "error: <message>").
+    public static func parseResult(_ text: String) -> ScriptResult? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        if trimmed.hasPrefix("ok:") {
+            let countStr = trimmed.dropFirst(3)
+            return .ok(artboards: Int(countStr) ?? 0)
+        }
+        if trimmed == "ok" {
+            return .ok(artboards: 1)
+        }
+        if trimmed.hasPrefix("error:") {
+            let msg = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+            return .error(msg.isEmpty ? "Unknown Illustrator error." : String(msg))
+        }
+        return .error(trimmed)
     }
 
     /// Names written by the script (`names.json`); nil when the file is not a JSON array of strings.

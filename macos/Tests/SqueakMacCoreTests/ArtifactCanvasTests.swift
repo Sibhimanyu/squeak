@@ -25,9 +25,25 @@ import Testing
     @Test func scriptEscapesPathsAndNamesParse() {
         let s = ArtifactRenderCache.script(file: "/x/it's \"a\".ai", out: "/o")
         #expect(s.contains("new File(\"/x/it's \\\"a\\\".ai\")"))
+        #expect(s.contains("new Folder(\"/o\")"))
         #expect(s.contains("DONOTSAVECHANGES"))
+        #expect(s.contains("try {"))
+        #expect(s.contains("} catch (e) {"))
+        #expect(s.contains("names.json"))
         #expect(ArtifactRenderCache.names(from: Data("[\"A\",\"B\"]".utf8)) == ["A", "B"])
         #expect(ArtifactRenderCache.names(from: Data("nope".utf8)) == nil)
+    }
+
+    @Test func parseScriptResultDistinguishesOkAndError() {
+        #expect(ArtifactRenderCache.parseResult("ok:3") == .ok(artboards: 3))
+        #expect(ArtifactRenderCache.parseResult("ok:0") == .ok(artboards: 0))
+        #expect(ArtifactRenderCache.parseResult("ok:42\n") == .ok(artboards: 42))
+        #expect(ArtifactRenderCache.parseResult("ok") == .ok(artboards: 1))
+        #expect(ArtifactRenderCache.parseResult("error: File not found line 7") == .error("File not found line 7"))
+        #expect(ArtifactRenderCache.parseResult("error: ") == .error("Unknown Illustrator error."))
+        #expect(ArtifactRenderCache.parseResult("Adobe Illustrator got an error: missing (1252)") == .error("Adobe Illustrator got an error: missing (1252)"))
+        #expect(ArtifactRenderCache.parseResult("") == nil)
+        #expect(ArtifactRenderCache.parseResult("  \n\t ") == nil)
     }
 
     @Test func zoomClampsAndStepsThroughStops() {
