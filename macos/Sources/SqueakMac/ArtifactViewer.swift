@@ -8,8 +8,8 @@ import SqueakMacCore
 import SwiftUI
 import WebKit
 
-// The artifact viewer: an artifact opened full size in the centre (`WorkbenchLocation.artifact`), a layer over the chat
-// or the pond page with a back control. One viewer, chosen by `ArtifactPreview.kind(for:)`; heavy files load off the main
+// The artifact viewer: an artifact opened full size in the centre (`WorkbenchLocation.artifact`), the body of an artifact
+// tab in its chat's strip (or, for a pond with no chat, a layer over the page with a back control). One viewer, chosen by `ArtifactPreview.kind(for:)`; heavy files load off the main
 // thread, and a file that is gone says so. The Artifacts tab keeps the list.
 
 /// What is read off the disk for a viewer.
@@ -31,8 +31,11 @@ private struct PDFBox: @unchecked Sendable { let document: PDFDocument }
 struct ArtifactViewerPage: View {
     let pond: String
     let path: String
-    let sidebarHidden: Bool
-    let inspectorOpen: Bool
+    var sidebarHidden = false
+    var inspectorOpen = false
+    /// The body of an artifact tab: the chat's own header and strip are above, so there is no header or back control,
+    /// only the compact toolbar row.
+    var embedded = false
     @Environment(AppModel.self) private var model
     @State private var content: ViewerContent?
     @State private var slides: Int?
@@ -51,7 +54,10 @@ struct ArtifactViewerPage: View {
     private var filePath: String { remote ? (fetched?.path ?? "") : path }
     private var url: URL { URL(fileURLWithPath: filePath) }
 
-    private var item: ArtifactItem {
+    private var item: ArtifactItem { Self.item(pond: pond, path: path, remote: remote, fetched: fetched) }
+
+    /// The list's row for an artifact (its duck, branch and kind), else what the file itself says.
+    static func item(pond: String, path: String, remote: Bool, fetched: RemoteArtifactFile? = nil) -> ArtifactItem {
         if remote {
             if let hit = RemoteArtifactsStore.shared.model(for: pond).items.first(where: { $0.path == path }) { return hit }
             if let f = fetched { return ArtifactItem(path: path, name: f.name, kind: f.kind, size: f.size) }
@@ -64,12 +70,15 @@ struct ArtifactViewerPage: View {
             path: path, modifiedAt: (attrs?[.modificationDate] as? Date) ?? Date(), size: (attrs?[.size] as? NSNumber)?.int64Value ?? 0)
     }
 
+    /// Whether a pond's artifacts live on another Mac.
+    static func isRemote(pond: String) -> Bool { PondsModel.shared.chrome(key: pond).inspectorPeopleRecentOnly }
+
     private var isMissing: Bool { if case .missing = content { true } else { false } }
 
     var body: some View {
         let item = item
         VStack(spacing: 0) {
-            header(item)
+            if !embedded { header(item) }
             toolbar(item)
             Rectangle().fill(Theme.line).frame(height: 1)
             viewer(item)
@@ -113,11 +122,16 @@ struct ArtifactViewerPage: View {
 
     // MARK: Header and toolbar
 
-    private func header(_ item: ArtifactItem) -> some View {
+    private var metaExtras: [String] {
         var extras: [String] = []
         if remote { extras.append(RemoteArtifacts.fromLine(ownerMac)) }
         if let slides { extras.append(slides == 1 ? "1 slide" : "\(slides) slides") }
         if case .image(_, let px) = content, px.width > 0 { extras.append("\(Int(px.width)) \u{00D7} \(Int(px.height))") }
+        return extras
+    }
+
+    private func header(_ item: ArtifactItem) -> some View {
+        let extras = metaExtras
         return HStack(spacing: Space.s) {
             if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve - Space.l) }
             Button { model.closeArtifact() } label: {
@@ -145,6 +159,10 @@ struct ArtifactViewerPage: View {
                 .buttonStyle(SecondaryButtonStyle()).disabled(isMissing || (remote && fetched == nil))
             if !remote || fetched != nil { ArtifactCopyPath(path: filePath) }
             Spacer(minLength: 0)
+            if embedded {
+                Text(verbatim: Artifacts.viewerMeta(item, extras: metaExtras)).font(Typo.meta).foregroundStyle(Theme.subtle)
+                    .lineLimit(1).truncationMode(.tail)
+            }
         }
         .padding(.horizontal, Space.l).frame(height: 40)
     }

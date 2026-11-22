@@ -108,6 +108,23 @@ public enum Artifacts {
 
     public static let mainTitle = "Main"
 
+    /// The search over a list: every word of `query` must appear (case-insensitive) in the name, path, duck, branch or
+    /// kind (its id or its title, so "photoshop" finds a .psd). An empty query keeps everything.
+    public static func filter(_ items: [ArtifactItem], query: String) -> [ArtifactItem] {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return items }
+        return items.filter { item in
+            let hay = [item.name, item.path, item.duckName ?? "", item.branch ?? "", item.kind.rawValue, kindTitle(item.kind)]
+                .joined(separator: "\n").lowercased()
+            return words.allSatisfy { hay.contains($0) }
+        }
+    }
+
+    /// The line under the search field when nothing matches.
+    public static func noMatch(_ query: String) -> String {
+        "No artifacts match \u{201C}\(query.trimmingCharacters(in: .whitespaces))\u{201D}."
+    }
+
     static func newestFirst(_ a: ArtifactItem, _ b: ArtifactItem) -> Bool {
         a.modifiedAt != b.modifiedAt ? a.modifiedAt > b.modifiedAt : a.path < b.path
     }

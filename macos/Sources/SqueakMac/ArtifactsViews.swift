@@ -52,26 +52,60 @@ final class ArtifactsStore {
     }
 }
 
+/// The Artifacts tab's search field (the pond dashboard's field, DESIGN.md): filters as you type; Esc clears.
+private struct ArtifactSearchBar: View {
+    @Binding var query: String
+    var focused: FocusState<Bool>.Binding
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField("Find an artifact", text: $query).textFieldStyle(.plain).font(Typo.body)
+                .focused(focused).accessibilityLabel("Find an artifact")
+                .onKeyPress(.escape) { if query.isEmpty { return .ignored } else { query = ""; return .handled } }
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
+            }
+            // Command-F focuses the field while this tab is on screen.
+            Button("") { focused.wrappedValue = true }.keyboardShortcut("f", modifiers: .command)
+                .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, Space.s).padding(.top, Space.s)
+    }
+}
+
 struct ArtifactsTab: View {
     let projectId: String
     @Environment(AppModel.self) private var model
 
     private var feed: ArtifactsModel { ArtifactsStore.shared.model(for: projectId) }
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     private func open(_ item: ArtifactItem) {
         model.openArtifact(pond: PondsModel.shared.key(forProject: projectId), path: item.path)
     }
 
     var body: some View {
-        list
+        VStack(spacing: 0) {
+            if !feed.items.isEmpty { ArtifactSearchBar(query: $query, focused: $searchFocused) }
+            list
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: projectId) { feed.follow(projectId, host: model.nativeHost) }
         .onDisappear { feed.stop() }
     }
 
     @ViewBuilder private var list: some View {
-        let groups = Artifacts.grouped(feed.items)
-        if groups.isEmpty {
+        let groups = Artifacts.grouped(Artifacts.filter(feed.items, query: query))
+        if groups.isEmpty, !feed.items.isEmpty {
+            Text(Artifacts.noMatch(query)).font(Typo.body).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
+            Spacer(minLength: 0)
+        } else if groups.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(feed.loaded ? "Nothing to look at yet." : "Looking for artifacts…").font(Typo.heading).foregroundStyle(Theme.ink)
                 if feed.loaded {
@@ -232,6 +266,8 @@ struct RemoteArtifactsTab: View {
     @Environment(AppModel.self) private var model
 
     private var feed: RemoteArtifactsModel { RemoteArtifactsStore.shared.model(for: key) }
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
     private var pondId: String? { PondsModel.shared.pond(key: key)?.id }
     private var ownerMac: String { PondsModel.shared.chrome(key: key).ownerMac }
 
@@ -249,6 +285,7 @@ struct RemoteArtifactsTab: View {
                     .buttonStyle(QuietButtonStyle()).disabled(feed.phase == .loading)
             }
             .padding(.horizontal, Space.m).padding(.top, Space.s)
+            if !feed.items.isEmpty { ArtifactSearchBar(query: $query, focused: $searchFocused) }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -257,8 +294,12 @@ struct RemoteArtifactsTab: View {
     }
 
     @ViewBuilder private var content: some View {
-        let groups = Artifacts.grouped(feed.items)
-        if groups.isEmpty {
+        let groups = Artifacts.grouped(Artifacts.filter(feed.items, query: query))
+        if groups.isEmpty, !feed.items.isEmpty {
+            Text(Artifacts.noMatch(query)).font(Typo.body).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
+            Spacer(minLength: 0)
+        } else if groups.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(headline).font(Typo.heading).foregroundStyle(Theme.ink)
                 if let detail { Text(detail).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }

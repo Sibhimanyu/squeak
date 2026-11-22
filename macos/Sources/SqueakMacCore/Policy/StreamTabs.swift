@@ -2,12 +2,24 @@ import Foundation
 
 /// One tab in a stream's strip: a thread (its `SessionKey.stringValue`) or a file (its path in the stream's folder).
 public struct StreamTab: Codable, Hashable, Sendable {
-    public enum Kind: String, Codable, Sendable { case thread, file }
+    public enum Kind: String, Codable, Sendable { case thread, file, artifact }
     public var kind: Kind
     public var id: String
     public init(_ kind: Kind, _ id: String) { self.kind = kind; self.id = id }
     public static func thread(_ id: String) -> StreamTab { StreamTab(.thread, id) }
     public static func file(_ id: String) -> StreamTab { StreamTab(.file, id) }
+    /// An artifact opened as a tab; `id` is `ArtifactTabID.make`.
+    public static func artifact(pond: String, path: String) -> StreamTab { StreamTab(.artifact, ArtifactTabID.make(pond: pond, path: path)) }
+}
+
+/// An artifact tab's id: its pond (directory key) and the file (an absolute path, or a remote pond's wire id).
+public enum ArtifactTabID {
+    private static let separator: Character = "\u{1F}"
+    public static func make(pond: String, path: String) -> String { "\(pond)\(separator)\(path)" }
+    public static func parse(_ id: String) -> (pond: String, path: String)? {
+        guard let at = id.firstIndex(of: separator) else { return nil }
+        return (String(id[..<at]), String(id[id.index(after: at)...]))
+    }
 }
 
 /// The browser-window model of a stream's tab strip: per workspace, the ordered tabs and the selected one. It is
@@ -31,10 +43,16 @@ public struct StreamTabs: Codable, Equatable, Sendable {
         tabs(workspace).compactMap { $0.kind == .file ? $0.id : nil }
     }
 
+    /// The saved artifact tabs of a stream, in the order they were opened (drawn after its threads and files).
+    public func artifactTabs(_ workspace: String) -> [(pond: String, path: String)] {
+        tabs(workspace).compactMap { $0.kind == .artifact ? ArtifactTabID.parse($0.id) : nil }
+    }
+
     /// The strip as it is drawn: saved order, threads where `hasThread` says they resolve, files where `isOpen` says
-    /// they are open; a file open but not saved yet goes last. Threads that are not saved are the caller's.
+    /// they are open; a file open but not saved yet goes last. Threads that are not saved are the caller's. Artifact
+    /// tabs are not here: they are kept (`artifactTabs`) and drawn last.
     public func strip(_ workspace: String, hasThread: (String) -> Bool, isOpen: (String) -> Bool, openFiles: [String]) -> [StreamTab] {
-        var out = tabs(workspace).filter { $0.kind == .thread ? hasThread($0.id) : isOpen($0.id) }
+        var out = tabs(workspace).filter { $0.kind == .artifact ? false : $0.kind == .thread ? hasThread($0.id) : isOpen($0.id) }
         let seen = Set(out.filter { $0.kind == .file }.map(\.id))
         out += openFiles.filter { !seen.contains($0) }.map(StreamTab.file)
         return out

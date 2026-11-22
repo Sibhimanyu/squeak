@@ -23,16 +23,19 @@ struct WorkbenchCentre: View {
     /// A pond's home or a thread from it is a layer over the workbench (Ponds/PondHome.swift): the workbench, with its
     /// chat, scroll and focus, stays mounted underneath, so coming back to the chat finds it as it was.
     var body: some View {
-        let pondPage = PondRoute(model.baseLocation)
         let artifact = model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
+        // An artifact opens as a tab of its pond's chat strip; only a pond with no chat shows it as a layer.
+        let held = artifact.flatMap { model.artifactContext(pond: $0.pond) } != nil
+        let layer = artifact != nil && !held
+        let pondPage = held ? nil : PondRoute(model.baseLocation)
         ZStack {
-            workbench.workbenchLayer(hidden: pondPage != nil || artifact != nil)
+            workbench.workbenchLayer(hidden: pondPage != nil || layer)
             if let route = pondPage {
                 PondRouteView(route: route, sidebarHidden: sidebarHidden).heresayPrivate()
-                    .workbenchLayer(hidden: artifact != nil)
+                    .workbenchLayer(hidden: layer)
             }
-            // An artifact opened full size: a layer over the chat or the pond page, closed by its back control.
-            if let artifact {
+            // An artifact of a pond with no chat: a layer over the pond page, closed by its back control.
+            if let artifact, layer {
                 ArtifactViewerPage(pond: artifact.pond, path: artifact.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen)
                     .id(artifact.path)
                     .transition(.opacity)
@@ -45,7 +48,9 @@ struct WorkbenchCentre: View {
         let showingCompose = focus.composePage != nil
         let usage = focus.page == .usage
         // The chat the body keeps mounted under a creation page; the shell below follows the page.
-        let bodyChat = usage ? nil : model.selectedSession
+        let artifact = model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
+        let artifactChat = artifact.flatMap { model.artifactContext(pond: $0.pond) }
+        let bodyChat = usage ? nil : (artifactChat ?? model.selectedSession)
         let chat = showingCompose ? nil : bodyChat
         // The shell (header and tab strip) is one structure over chat and New thread: only the body below switches.
         // A New thread page inside a workspace keeps the workspace's header and strip (the page is a placeholder tab).
@@ -64,7 +69,7 @@ struct WorkbenchCentre: View {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
                     sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
-                if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
+                if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files, artifact: artifactChat != nil ? artifact : nil) }
             } else {
                 HStack {
                     // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
@@ -75,7 +80,7 @@ struct WorkbenchCentre: View {
             }
             ZStack {
                 // The chat layer: kept mounted under a creation page (not when there is no chat to keep).
-                if !showingCompose || bodyChat != nil { chatBody(chat: bodyChat, files: bodyFiles).workbenchLayer(hidden: showingCompose) }
+                if !showingCompose || bodyChat != nil { chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil).workbenchLayer(hidden: showingCompose) }
                 if showingCompose { DesktopComposePage() }
             }
         }
@@ -102,8 +107,10 @@ struct WorkbenchCentre: View {
 
 extension WorkbenchCentre {
     /// What the centre shows for a chat (or the Dashboard, Usage and the empty states when there is none).
-    @ViewBuilder fileprivate func chatBody(chat: HostSession?, files: FilesModel?) -> some View {
-        if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
+    @ViewBuilder fileprivate func chatBody(chat: HostSession?, files: FilesModel?, artifact: (pond: String, path: String)? = nil) -> some View {
+        if let artifact {
+            ArtifactViewerPage(pond: artifact.pond, path: artifact.path, embedded: true).id(artifact.path)
+        } else if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
             DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
                 .id(ref.taskId)
         } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
@@ -328,6 +335,8 @@ private struct OpenInMenu: View {
 private struct WorkbenchTabs: View {
     let workspace: SidebarWorkspace
     let files: FilesModel?
+    /// The artifact tab on screen, when the centre shows one of this strip's.
+    var artifact: (pond: String, path: String)?
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.workbenchVisible) private var visible
@@ -360,6 +369,8 @@ private struct WorkbenchTabs: View {
     private var plan: StripPlan { StripPlan.plan(location: model.baseLocation, previous: model.lastChat?.stringValue, threads: chats.map { $0.key.stringValue }) }
     /// A New thread page is on screen: the placeholder is the selected tab, so nothing else reads as selected.
     private var composing: Bool { plan.selected == .placeholder && model.location.composePage == .newThread }
+    /// The artifact tabs saved for this stream, after its chats and files.
+    private var artifactTabs: [(pond: String, path: String)] { model.streamTabs.artifactTabs(workspace.id) }
 
     /// The plan's tabs the saved strip lacks: the open chat before the list carries it, and the placeholder; each sits
     /// after the chat the transcript follows.
@@ -408,6 +419,7 @@ private struct WorkbenchTabs: View {
         var titles = chats.map { model.workbenchTitle($0) }
         titles += (files?.open ?? []).filter { dock.files.zone(of: $0.path) == .centre }.map(\.name)
         titles += dock.ducklings.ducklings(in: .centre).map { r in model.session(r.session).flatMap { model.ducklings(for: $0)?.items.first { $0.id == r.taskId }?.title } ?? "Duckling" }
+        titles += artifactTabs.map { ArtifactViewerPage.item(pond: $0.pond, path: $0.path, remote: ArtifactViewerPage.isRemote(pond: $0.pond)).name }
         titles += dock.layout.centre.panels.filter { $0 != .terminal }.map(\.title)
         titles += dockTerminalTabs(in: .centre, session: chats.first)?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? []
         // Measuring is the cost: once per (titles, width bucket), not once per body.
@@ -431,19 +443,28 @@ private struct WorkbenchTabs: View {
                             }
                         case .file(let f):
                             if let files, dock.files.zone(of: f.path) == .centre {
-                                DockFileTab(files: files, file: f, zone: .centre, selected: !composing && files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
+                                DockFileTab(files: files, file: f, zone: .centre, selected: !composing && artifact == nil && files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
                                             height: Metrics.tabStrip, indicator: tabIndicator) {
                                     dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                                     dock.update { $0.selectChats() }
+                                    model.leaveArtifact()
                                     files.activePath = f.path
                                 }
                             }
                         }
                     }
+                    ForEach(artifactTabs, id: \.path) { a in
+                        ArtifactStripTab(pond: a.pond, path: a.path, selected: artifact?.pond == a.pond && artifact?.path == a.path,
+                                         height: Metrics.tabStrip, indicator: tabIndicator,
+                                         open: { model.openArtifact(pond: a.pond, path: a.path) },
+                                         close: { model.closeArtifactTab(pond: a.pond, path: a.path, in: workspace) })
+                            .transition(.opacity)
+                    }
                     ForEach(dock.layout.centre.panels.filter { $0 != .terminal }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: .centre, selected: !composing && dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
                             files?.showChat()
                             dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
+                            model.leaveArtifact()
                             dock.update { $0.select(p) }
                         }
                     }
@@ -503,6 +524,7 @@ private struct WorkbenchTabs: View {
             for p in old where !new.contains(p) { model.fileTabClosed(p, in: workspace) }
         }
         .modifier(CentreFileDockSync(files: files))
+        .modifier(ArtifactLeaveSync(files: files))
         .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
         .task(id: "\(model.lastChat?.stringValue ?? "") \(model.sessionKeysRevision) \(workspace.id)") {
             ensureOpenChatTab()
@@ -510,7 +532,8 @@ private struct WorkbenchTabs: View {
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             guard visible else { return }
             let box = note.object as? CloseTabAction.Box
-            if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
+            if let artifact { model.closeArtifactTab(pond: artifact.pond, path: artifact.path, in: workspace); box?.handled = true }
+            else if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
             else if let files, let path = files.activePath { files.close(path); box?.handled = true }
             else if let s = chats.first(where: { $0.key == model.lastChat }), ChatTabs.canClose(shown: chats.count) { closeTab(s); box?.handled = true }
         }
@@ -605,7 +628,7 @@ private struct WorkbenchTabs: View {
 
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = !composing && model.focus.chat == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
+        let selected = !composing && artifact == nil && model.focus.chat == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
         let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
@@ -706,5 +729,49 @@ private struct TerminalDockSync: ViewModifier {
         content.onChange(of: SyncInput(folder: folder, ids: ids), initial: true) { _, input in
             if let folder = input.folder { DockStore.shared.syncTerminals(folder: folder, live: input.ids) }
         }
+    }
+}
+
+
+/// An artifact open as a tab of the chat strip: its file-type icon and name, closable.
+private struct ArtifactStripTab: View {
+    let pond: String
+    let path: String
+    let selected: Bool
+    let height: CGFloat
+    let indicator: Namespace.ID
+    let open: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        let item = ArtifactViewerPage.item(pond: pond, path: path, remote: ArtifactViewerPage.isRemote(pond: pond))
+        StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(item.name)",
+                 titleWidth: TabTitleMeasure.width(item.name, semibold: false), close: close,
+                 icon: { Lucide(item.kind.lucide, size: 13, color: selected ? Theme.ink : Theme.muted) },
+                 title: {
+                     Text(verbatim: item.name).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted)
+                         .lineLimit(1).truncationMode(.middle)
+                 })
+            .contentShape(Rectangle())
+            .onTapGesture(perform: open)
+            .accessibilityElement(children: .combine).accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityLabel(item.name).help(item.name)
+    }
+}
+
+
+/// Any other tab becoming the shown one (a file, a panel, a shell, a duckling) takes the centre from an open artifact.
+private struct ArtifactLeaveSync: ViewModifier {
+    let files: FilesModel?
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        let dock = DockStore.shared
+        content
+            .onChange(of: files?.activePath) { _, path in if path != nil { model.leaveArtifact() } }
+            .onChange(of: files?.review.isOpen) { _, open in if open == true { model.leaveArtifact() } }
+            .onChange(of: dock.layout.centre.selected) { _, p in if p != nil { model.leaveArtifact() } }
+            .onChange(of: dock.ducklings.selected[.centre]) { _, d in if d != nil { model.leaveArtifact() } }
+            .onChange(of: dock.activeTerminals.shown(in: .centre)) { _, t in if t != nil { model.leaveArtifact() } }
     }
 }

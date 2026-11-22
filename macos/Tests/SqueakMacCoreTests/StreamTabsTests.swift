@@ -135,4 +135,23 @@ final class StreamTabsFileTests: XCTestCase {
         XCTAssertEqual(t.tabs("w"), [.thread("a"), .thread("b"), .thread("c")])
         XCTAssertEqual(t.selected("w"), .thread("a"))
     }
+
+    func testArtifactTabsAreKeptApartFromThreadsAndFiles() {
+        var t = StreamTabs()
+        t.open(.thread("a"), in: "w")
+        t.open(.artifact(pond: "p", path: "/r/x y.psd"), in: "w")
+        t.open(.artifact(pond: "p", path: "/r/x y.psd"), in: "w")
+        t.open(.file("f.txt"), in: "w")
+        XCTAssertEqual(t.artifactTabs("w").count, 1)
+        XCTAssertEqual(t.artifactTabs("w").first?.pond, "p")
+        XCTAssertEqual(t.artifactTabs("w").first?.path, "/r/x y.psd")
+        let strip = t.strip("w", hasThread: { _ in true }, isOpen: { _ in true }, openFiles: [])
+        XCTAssertEqual(strip, [.thread("a"), .file("f.txt")])
+        // Pruning threads or files leaves artifact tabs alone; closing one removes only it.
+        t.prune(exists: { $0.kind != .thread })
+        XCTAssertEqual(t.artifactTabs("w").count, 1)
+        t.close(.artifact(pond: "p", path: "/r/x y.psd"), in: "w")
+        XCTAssertTrue(t.artifactTabs("w").isEmpty)
+        XCTAssertEqual(ArtifactTabID.parse(ArtifactTabID.make(pond: "p", path: "a|b"))?.path, "a|b")
+    }
 }

@@ -1204,8 +1204,44 @@ final class AppModel {
     /// Leaves a pond page for the open chat (or the Dashboard).
     func closePondPage() { if location.isPondRoute { location = .resting(chat: lastChat) } }
 
-    /// Opens an artifact full size in the centre, over the current page or chat (Back returns to it).
-    func openArtifact(pond: String, path: String) { location = .artifact(pond: pond, path: path) }
+    /// The chat whose header and tab strip carry `pond`'s artifact tabs: the open chat when it is in that pond, else the
+    /// pond's remembered chat. Nil when the pond has no chat to hold a strip (the viewer is then a layer).
+    func artifactContext(pond: String) -> HostSession? {
+        if let s = selectedSession, PondsModel.shared.key(of: s) == pond, stripPlace(of: s.key) != nil { return s }
+        return resumableChat(pond: pond).flatMap { session($0) }.flatMap { stripPlace(of: $0.key) != nil ? $0 : nil }
+    }
+
+    /// Opens an artifact (or focuses it, when already open) as a tab in its pond's chat strip, after the chats. The
+    /// location is the artifact, so Back and Forward step through it like any other place. A pond with no chat to hold a
+    /// strip gets the viewer as a layer over the current page.
+    func openArtifact(pond: String, path: String) {
+        if let ctx = artifactContext(pond: pond), let place = stripPlace(of: ctx.key) {
+            let workspace = place.workspace
+            let closed = WorkbenchPrefs.shared.closed
+            let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+            streamTabs.open(.artifact(pond: pond, path: path), in: workspace.id, seed: seed)
+            saveStreamTabs()
+            if lastChat != ctx.key { select(ctx.key) }
+            // Nothing else is the shown tab, so clicking any of them is a change the strip can see.
+            for f in filesModels.values { f.showChat() }
+            DockStore.shared.deselectTerminals(.centre); DockStore.shared.deselectDucklings(.centre)
+            DockStore.shared.update { $0.selectChats() }
+        }
+        location = .artifact(pond: pond, path: path)
+    }
+
+    /// Closes an artifact tab; when it was the one on screen, the chat comes back.
+    func closeArtifactTab(pond: String, path: String, in workspace: SidebarWorkspace) {
+        streamTabs.close(.artifact(pond: pond, path: path), in: workspace.id)
+        saveStreamTabs()
+        if location == .artifact(pond: pond, path: path) { leaveArtifact() }
+    }
+
+    /// Leaves the artifact on screen for the chat whose strip holds it (else the page under the layer).
+    func leaveArtifact() {
+        guard case .artifact(let pond, _) = location else { return }
+        if let ctx = artifactContext(pond: pond) { select(ctx.key) } else { location = artifactBase }
+    }
 
     /// Closes the artifact viewer, back to the page or chat under it.
     func closeArtifact() { if location.isArtifact { location = artifactBase } }

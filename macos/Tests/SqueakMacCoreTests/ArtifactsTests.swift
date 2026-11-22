@@ -98,4 +98,22 @@ private final class Replier: HTTPTransport, @unchecked Sendable {
         #expect(rows[0].modifiedAt == Date(timeIntervalSince1970: 1_700_000_000))
         #expect(rows[1].kind == .other && !rows[1].shown && rows[1].name == "b.psd")
     }
+
+    @Test func searchFiltersByNamePathDuckBranchAndKind() {
+        let a = ArtifactItem(path: "/r/poster/Hero.psd", duckName: "Pip", branch: "feature/Hero")
+        let b = ArtifactItem(path: "/r/docs/plan.html", duckName: "Quill", branch: "main")
+        let c = ArtifactItem(path: "/r/out/deck.pptx")
+        let all = [a, b, c]
+        #expect(Artifacts.filter(all, query: "") == all)
+        #expect(Artifacts.filter(all, query: "   ") == all)
+        #expect(Artifacts.filter(all, query: "HERO") == [a])
+        #expect(Artifacts.filter(all, query: "docs/") == [b])
+        #expect(Artifacts.filter(all, query: "quill") == [b])
+        #expect(Artifacts.filter(all, query: "feature") == [a])
+        #expect(Artifacts.filter(all, query: "slides") == [c])
+        #expect(Artifacts.filter(all, query: "photoshop") == [a])
+        #expect(Artifacts.filter(all, query: "pip psd") == [a])
+        #expect(Artifacts.filter(all, query: "pip html").isEmpty)
+        #expect(Artifacts.noMatch(" zzz ") == "No artifacts match \u{201C}zzz\u{201D}.")
+    }
 }
