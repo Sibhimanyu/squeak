@@ -21,6 +21,8 @@ enum Theme {
 
     // Neutrals (§3.2, §11).
     static let bg = adaptive(Tokens.Dark.bg, Tokens.Light.bg)
+    /// The artifact canvas's pasteboard behind the white artboards: the window `bg` in dark, the pressed grey in light.
+    static let pasteboard = adaptive(Tokens.Dark.bg, Tokens.Light.selectedStrong)
     static let sidebar = adaptive(Tokens.Dark.sidebar, Tokens.Light.sidebar)
     static let surface = adaptive(Tokens.Dark.surface, Tokens.Light.surface)
     /// Light is white, so anything raised also carries a `line` border.

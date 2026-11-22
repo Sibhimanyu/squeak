@@ -17,11 +17,14 @@ private enum ViewerContent {
     case missing
     case web(URL)
     case markdown(String, URL)
+    /// A PDF with several pages: PDFKit, paged, with its thumbnail sidebar.
     case pdf(PDFBox)
-    case image(NSImage, pixels: CGSize)
+    /// One-page artwork (an `.ai`, a one-page PDF, SVG, a picture): the pasteboard canvas. `pixels` is a picture's size.
+    case canvas([CanvasBoard], pixels: CGSize?)
     case quickLook(URL)
     case media(URL, audio: Bool)
-    /// Illustrator with no PDF inside: its large thumbnail (when Quick Look has one) and the way to open it.
+    /// Illustrator with no usable PDF inside (saved without PDF content): its large thumbnail (when Quick Look has one),
+    /// the explicit render button and the way to open it.
     case illustrator(NSImage?)
 }
 
@@ -41,10 +44,14 @@ struct ArtifactViewerPage: View {
     @State private var slides: Int?
     @State private var systemApp: String?
     @State private var illustratorURL: URL?
+    /// The controls of whichever viewer is showing, for the one toolbar row (nil for pages, media, Quick Look).
+    @State private var controller: (any ViewerControlling)?
+    @State private var rendering: Rendering = .idle
     /// A remote pond's file once the owner's Mac has sent it: the cached copy on this Mac. Until then there is nothing to open.
     @State private var fetched: RemoteArtifactFile?
     @State private var fetching: Fetch?
 
+    private enum Rendering: Equatable { case idle, running, failed(String) }
     private enum Fetch: Equatable { case downloading(Double?), failed(String) }
 
     /// A remote pond's artifact: `path` is the owner's wire id, not a path.
@@ -86,18 +93,28 @@ struct ArtifactViewerPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
         .task(id: path) {
-            content = nil; slides = nil; fetched = nil; fetching = nil
+            content = nil; slides = nil; fetched = nil; fetching = nil; controller = nil; rendering = .idle
             if remote {
                 guard await download() else { return }
             }
             let local = filePath
             let found = await ArtifactLoader.load(path: local)
-            content = found
+            adopt(found)
             if case .quickLook = found { slides = await ArtifactLoader.slideCount(path: local) }
         }
         .task(id: filePath) {
             systemApp = ArtifactLoader.defaultAppName(for: url)
-            illustratorURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.adobe.illustrator")
+            illustratorURL = IllustratorRender.app(for: url)
+        }
+    }
+
+    /// Shows what was read, with the controls of the viewer that draws it.
+    private func adopt(_ found: ViewerContent) {
+        content = found
+        switch found {
+        case .canvas(let boards, _): controller = CanvasController(boards: boards)
+        case .pdf(let box): controller = PDFController(document: box.document)
+        default: controller = nil
         }
     }
 
@@ -126,7 +143,7 @@ struct ArtifactViewerPage: View {
         var extras: [String] = []
         if remote { extras.append(RemoteArtifacts.fromLine(ownerMac)) }
         if let slides { extras.append(slides == 1 ? "1 slide" : "\(slides) slides") }
-        if case .image(_, let px) = content, px.width > 0 { extras.append("\(Int(px.width)) \u{00D7} \(Int(px.height))") }
+        if case .canvas(_, let px?) = content, px.width > 0 { extras.append("\(Int(px.width)) \u{00D7} \(Int(px.height))") }
         return extras
     }
 
@@ -151,20 +168,38 @@ struct ArtifactViewerPage: View {
         .background(WindowDragArea())
     }
 
+    /// One compact line for every kind: switcher and meta at the left, zoom and the actions at the right.
     private func toolbar(_ item: ArtifactItem) -> some View {
-        HStack(spacing: Space.s) {
-            Button(Artifacts.openLabel(kind: item.kind, systemApp: systemApp)) { openDefault() }
-                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing || (remote && fetched == nil))
-            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing || (remote && fetched == nil))
-            if !remote || fetched != nil { ArtifactCopyPath(path: filePath) }
-            Spacer(minLength: 0)
+        let unavailable = isMissing || (remote && fetched == nil)
+        return HStack(spacing: Space.s) {
+            if let c = controller, let sw = c.switcher, ArtifactSwitcher.shown(count: sw.count) {
+                ToolIcon(.chevronLeft, help: "Previous") { c.step(-1) }.disabled(sw.index == 0)
+                Text(verbatim: ArtifactSwitcher.text(index: sw.index, count: sw.count)).font(Typo.meta).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+                ToolIcon(.chevronRight, help: "Next") { c.step(1) }.disabled(sw.index >= sw.count - 1)
+            }
             if embedded {
                 Text(verbatim: Artifacts.viewerMeta(item, extras: metaExtras)).font(Typo.meta).foregroundStyle(Theme.subtle)
                     .lineLimit(1).truncationMode(.tail)
             }
+            Spacer(minLength: 0)
+            if let c = controller, let z = c.zoomLevel {
+                ToolIcon(.minus, help: "Zoom out (\u{2318}-)") { c.zoomStep(in: false) }
+                Text(verbatim: CanvasZoom.percentText(z)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    .frame(minWidth: 38)
+                ToolIcon(.plus, help: "Zoom in (\u{2318}+)") { c.zoomStep(in: true) }
+                Button("Fit") { c.fit() }.buttonStyle(CompactToolStyle()).help("Fit everything (\u{2318}0)")
+                Rectangle().fill(Theme.line).frame(width: 1, height: 14).padding(.horizontal, 2)
+            }
+            Button { openDefault() } label: {
+                HStack(spacing: 4) { Lucide(.externalLink, size: 13, color: Theme.ink); Text("Open") }
+            }
+            .buttonStyle(CompactToolStyle()).disabled(unavailable)
+            .help(Artifacts.openLabel(kind: item.kind, systemApp: systemApp)).accessibilityLabel(Artifacts.openLabel(kind: item.kind, systemApp: systemApp))
+            ToolIcon(.folder, help: "Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.disabled(unavailable)
+            if !remote || fetched != nil { ArtifactCopyPath(path: filePath) }
         }
-        .padding(.horizontal, Space.l).frame(height: 40)
+        .padding(.horizontal, Space.m).frame(height: 36)
     }
 
     private func openDefault() {
@@ -182,8 +217,10 @@ struct ArtifactViewerPage: View {
                 message(title: "This file was moved or deleted", detail: filePath)
             case .web(let u): ArtifactWebPage(url: u)
             case .markdown(let text, let u): MarkdownFilePreview(text: text, fileURL: u, root: u.deletingLastPathComponent())
-            case .pdf(let box): ArtifactPDFViewer(document: box.document)
-            case .image(let image, _): ImageCanvas(image: image, name: item.name)
+            case .pdf:
+                if let c = controller as? PDFController { ArtifactPDFViewer(controller: c) }
+            case .canvas:
+                if let c = controller as? CanvasController { ArtifactCanvasViewer(controller: c) }
             case .quickLook(let u): QuickLookPreview(url: u)
             case .media(let u, let audio): ArtifactMediaPlayer(url: u, audio: audio)
             case .illustrator(let thumb): illustrator(thumb)
@@ -207,7 +244,7 @@ struct ArtifactViewerPage: View {
             VStack(spacing: Space.s) {
                 Text("Couldn\u{2019}t get this file").font(Typo.heading).foregroundStyle(Theme.ink)
                 Text(verbatim: why).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                Button("Try again") { Task { if await download() { content = await ArtifactLoader.load(path: filePath) } } }
+                Button("Try again") { Task { if await download() { adopt(await ArtifactLoader.load(path: filePath)) } } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,26 +262,82 @@ struct ArtifactViewerPage: View {
         .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// An Illustrator file without PDF compatibility: the biggest thumbnail Quick Look has, and the way to open it.
+    /// An Illustrator file saved without PDF content: say so, offer an explicit render with the installed Illustrator, or
+    /// the largest thumbnail Quick Look has and "Open with...".
     private func illustrator(_ thumb: NSImage?) -> some View {
         VStack(spacing: Space.m) {
             if let thumb {
-                Image(nsImage: thumb).resizable().scaledToFit().frame(maxWidth: 720, maxHeight: 520)
+                Image(nsImage: thumb).resizable().scaledToFit().frame(maxWidth: 720, maxHeight: 420)
                     .overlay(Rectangle().strokeBorder(Theme.line))
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable().frame(width: 96, height: 96)
             }
-            Text("This Illustrator file has no PDF inside, so Squeak shows only its thumbnail.").font(Typo.body).foregroundStyle(Theme.muted)
-            Button(illustratorURL != nil ? "Open in Illustrator" : "Open with\u{2026}") {
-                if let app = illustratorURL {
-                    NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
-                } else {
-                    ArtifactLoader.openWith(url)
+            Text(verbatim: IllustratorStub.explanation).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            switch rendering {
+            case .running:
+                HStack(spacing: Space.s) {
+                    ProgressView().controlSize(.small)
+                    Text("Illustrator is rendering the artboards. This can take a minute.").font(Typo.body).foregroundStyle(Theme.muted)
                 }
+            case .failed(let why):
+                Text(verbatim: why).font(Typo.body).foregroundStyle(Theme.negative).multilineTextAlignment(.center).textSelection(.enabled)
+                    .frame(maxWidth: 520)
+            case .idle: EmptyView()
             }
-            .buttonStyle(SecondaryButtonStyle())
+            HStack(spacing: Space.s) {
+                if let app = illustratorURL, rendering != .running {
+                    Button(rendering == .idle ? "Render preview with Illustrator" : "Try again") { renderWithIllustrator(app) }
+                        .buttonStyle(PrimaryButtonStyle())
+                }
+                Button("Open with\u{2026}") { ArtifactLoader.openWith(url) }.buttonStyle(SecondaryButtonStyle())
+            }
         }
         .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func renderWithIllustrator(_ app: URL) {
+        let file = url
+        rendering = .running
+        Task {
+            do {
+                let boards = try await IllustratorRender.render(file: file, with: app)
+                guard file == url else { return }
+                adopt(.canvas(boards, pixels: nil))
+                rendering = .idle
+            } catch let e as IllustratorRender.Failure {
+                rendering = .failed(e.message)
+            } catch {
+                rendering = .failed("Illustrator could not render this file.")
+            }
+        }
+    }
+}
+
+/// Compact tool button (DESIGN.md small control): 24 pt high, `surface-raised` with a `line` edge, `meta` type.
+private struct CompactToolStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Theme.ink)
+            .padding(.horizontal, 7)
+            .frame(minWidth: 24, minHeight: 24)
+            .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+            .opacity(isEnabled ? 1 : 0.5)
+            .pressFeedback(configuration.isPressed)
+    }
+}
+
+/// An icon-only compact button with a tooltip and VoiceOver label.
+private struct ToolIcon: View {
+    let name: LucideName
+    let help: String
+    let action: () -> Void
+    init(_ name: LucideName, help: String, action: @escaping () -> Void) { self.name = name; self.help = help; self.action = action }
+    var body: some View {
+        Button(action: action) { Lucide(name, size: 13, color: Theme.ink) }
+            .buttonStyle(CompactToolStyle()).help(help).accessibilityLabel(help)
     }
 }
 
@@ -252,13 +345,15 @@ private struct ArtifactCopyPath: View {
     let path: String
     @State private var copied = false
     var body: some View {
-        Button(copied ? "Copied" : "Copy path") {
+        Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
             copied = true
             Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+        } label: {
+            HStack(spacing: 4) { Lucide(copied ? .check : .copy, size: 13, color: Theme.ink); Text(copied ? "Copied" : "Copy") }
         }
-        .buttonStyle(SecondaryButtonStyle()).accessibilityLabel("Copy path \(path)")
+        .buttonStyle(CompactToolStyle()).help("Copy the file\u{2019}s path").accessibilityLabel("Copy path \(path)")
     }
 }
 
@@ -279,12 +374,19 @@ private enum ArtifactLoader {
             case .markdown:
                 if let text = try? String(contentsOf: url, encoding: .utf8) { return .markdown(text, url) }
             case .pdf:
-                if let doc = PDFDocument(url: url), doc.pageCount > 0 { return .pdf(PDFBox(document: doc)) }
+                if let doc = PDFDocument(url: url), doc.pageCount > 0 {
+                    return doc.pageCount == 1 ? .canvas(CanvasBoard.boards(of: doc), pixels: nil) : .pdf(PDFBox(document: doc))
+                }
             case .illustrator:
-                if let doc = PDFDocument(url: url), doc.pageCount > 0 { return .pdf(PDFBox(document: doc)) }
+                if let doc = PDFDocument(url: url), doc.pageCount > 0, !IllustratorStub.isStub(pageText: doc.page(at: 0)?.string) {
+                    return .canvas(CanvasBoard.boards(of: doc), pixels: nil)
+                }
+                if let cached = IllustratorRender.cached(for: url) { return .canvas(cached, pixels: nil) }
                 return .illustrator(thumbnail(url))
             case .image, .svg:
-                if let (image, px) = image(url) { return .image(image, pixels: px) }
+                if let (image, px) = image(url) {
+                    return .canvas([CanvasBoard.board(image: image, pixels: px, name: url.lastPathComponent)], pixels: px == .zero ? nil : px)
+                }
             case .quickLook, .other: return .quickLook(url)
             case .media:
                 let audio = ["m4a", "mp3", "wav", "aac"].contains(url.pathExtension.lowercased())
@@ -376,12 +478,16 @@ private enum ArtifactLoader {
 
 // MARK: PDF
 
-/// PDFKit with continuous scroll, a page-thumbnail sidebar, "Page n of m" and zoom in, out and fit.
+/// PDFKit with continuous scroll and a page-thumbnail sidebar; its page switcher and zoom live in the shared toolbar row.
 @MainActor @Observable
-private final class PDFController {
-    let view = PDFView()
+private final class PDFController: ViewerControlling {
+    @ObservationIgnored let view = PDFView()
     private(set) var page = 1
+    private(set) var scale = 1.0
     let count: Int
+
+    var switcher: (index: Int, count: Int)? { (page - 1, count) }
+    var zoomLevel: Double? { scale }
 
     init(document: PDFDocument) {
         count = document.pageCount
@@ -390,18 +496,22 @@ private final class PDFController {
         view.displaysPageBreaks = true
         view.autoScales = true
         view.document = document
+        scale = Double(view.scaleFactor)
     }
 
     func pageChanged() {
         guard let doc = view.document, let current = view.currentPage else { return }
         page = doc.index(for: current) + 1
     }
+    func scaleChanged() { scale = Double(view.scaleFactor) }
 
-    func zoom(_ factor: CGFloat) {
+    func zoomStep(in zoomIn: Bool) {
         view.autoScales = false
-        view.scaleFactor = min(max(view.scaleFactor * factor, view.minScaleFactor), min(view.maxScaleFactor, 8))
+        let f: CGFloat = zoomIn ? 1.25 : 1 / 1.25
+        view.scaleFactor = min(max(view.scaleFactor * f, view.minScaleFactor), min(view.maxScaleFactor, 8))
+        scaleChanged()
     }
-    func fit() { view.autoScales = true }
+    func fit() { view.autoScales = true; scaleChanged() }
     func step(_ by: Int) {
         guard let doc = view.document, let p = doc.page(at: min(max(page - 1 + by, 0), count - 1)) else { return }
         view.go(to: p)
@@ -409,40 +519,18 @@ private final class PDFController {
 }
 
 private struct ArtifactPDFViewer: View {
-    let document: PDFDocument
-    @State private var controller: PDFController
-
-    init(document: PDFDocument) {
-        self.document = document
-        _controller = State(initialValue: PDFController(document: document))
-    }
+    let controller: PDFController
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Space.s) {
-                Button { controller.step(-1) } label: { Image(systemName: "chevron.up").frame(width: 24, height: 24) }
-                    .buttonStyle(SecondaryButtonStyle()).help("Previous page").accessibilityLabel("Previous page")
-                Button { controller.step(1) } label: { Image(systemName: "chevron.down").frame(width: 24, height: 24) }
-                    .buttonStyle(SecondaryButtonStyle()).help("Next page").accessibilityLabel("Next page")
-                Text(verbatim: "Page \(controller.page) of \(controller.count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                Spacer(minLength: Space.s)
-                Button("Fit") { controller.fit() }.buttonStyle(SecondaryButtonStyle()).help("Fit to the window")
-                Button { controller.zoom(1 / 1.25) } label: { Image(systemName: "minus").frame(width: 24, height: 24) }
-                    .buttonStyle(SecondaryButtonStyle()).help("Zoom out").accessibilityLabel("Zoom out")
-                Button { controller.zoom(1.25) } label: { Image(systemName: "plus").frame(width: 24, height: 24) }
-                    .buttonStyle(SecondaryButtonStyle()).help("Zoom in").accessibilityLabel("Zoom in")
+        HStack(spacing: 0) {
+            if controller.count > 1 {
+                PDFThumbnails(pdfView: controller.view).frame(width: 128)
+                Rectangle().fill(Theme.line).frame(width: 1)
             }
-            .padding(.horizontal, Space.m).frame(height: 36)
-            Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 0) {
-                if controller.count > 1 {
-                    PDFThumbnails(pdfView: controller.view).frame(width: 128)
-                    Rectangle().fill(Theme.line).frame(width: 1)
-                }
-                PDFHost(view: controller.view)
-            }
+            PDFHost(view: controller.view)
         }
         .onReceive(NotificationCenter.default.publisher(for: .PDFViewPageChanged, object: controller.view)) { _ in controller.pageChanged() }
+        .onReceive(NotificationCenter.default.publisher(for: .PDFViewScaleChanged, object: controller.view)) { _ in controller.scaleChanged() }
     }
 }
 
