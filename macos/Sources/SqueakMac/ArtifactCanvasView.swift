@@ -5,8 +5,8 @@ import SwiftUI
 
 // The artifact canvas: an Adobe-like unlimited pasteboard for Illustrator files, one-page PDFs, SVG and pictures.
 // Artboards are white pages with a soft shadow, side by side with their names; vector art is redrawn at the current
-// scale by a tiled layer on background threads (crisp at any zoom). A gesture previews by scaling the last drawn layer
-// and the crisp redraw follows when it settles, so pinch and pan never wait on rendering.
+// scale by a CATiledLayer drawing in WORLD coordinates. An NSScrollView with native magnification handles zoom and
+// pan — CATiledLayer refines detail per level on its own, so tiles are never invalidated by gestures.
 
 /// One artboard: its size on the pasteboard and what draws it.
 struct CanvasBoard: @unchecked Sendable {
@@ -48,7 +48,7 @@ final class CanvasController: ViewerControlling {
     let frames: [CGRect]
     private(set) var index = 0
     private(set) var zoomValue = 1.0
-    @ObservationIgnored let view: CanvasNSView
+    @ObservationIgnored let view: CanvasScrollView
 
     var switcher: (index: Int, count: Int)? { (index, boards.count) }
     var zoomLevel: Double? { zoomValue }
@@ -56,7 +56,7 @@ final class CanvasController: ViewerControlling {
     init(boards: [CanvasBoard]) {
         self.boards = boards
         frames = ArtboardLayout.place(boards.map(\.size))
-        view = CanvasNSView(boards: boards, frames: frames)
+        view = CanvasScrollView(boards: boards, frames: frames)
         view.onChange = { [weak self] zoom, nearest in
             guard let self else { return }
             if zoom != zoomValue { zoomValue = zoom }
@@ -67,10 +67,10 @@ final class CanvasController: ViewerControlling {
     func step(_ by: Int) {
         let next = ArtifactSwitcher.stepped(index, by: by, count: boards.count)
         index = next
-        view.show(frames[next])
+        view.scrollTo(worldRect: frames[next])
     }
     func zoomStep(in zoomIn: Bool) { view.zoomStep(in: zoomIn) }
-    func fit() { view.show(ArtboardLayout.bounds(frames)) }
+    func fit() { view.fitAll() }
 }
 
 struct ArtifactCanvasViewer: View {
@@ -79,35 +79,28 @@ struct ArtifactCanvasViewer: View {
 }
 
 private struct CanvasHost: NSViewRepresentable {
-    let view: CanvasNSView
-    func makeNSView(context: Context) -> CanvasNSView { view }
-    func updateNSView(_ v: CanvasNSView, context: Context) {}
+    let view: CanvasScrollView
+    func makeNSView(context: Context) -> CanvasScrollView { view }
+    func updateNSView(_ v: CanvasScrollView, context: Context) {}
 }
 
-/// Draws the boards on a CATiledLayer from background threads.
-private final class CanvasRenderer: NSObject, CALayerDelegate, @unchecked Sendable {
-    struct Snapshot { var viewport: CanvasViewport; var height: Double }
-    private let lock = NSLock()
+// MARK: - World-space tiled renderer
+
+/// Draws the boards on a CATiledLayer in WORLD coordinates from background threads.
+/// Pan and zoom never invalidate tiles; CATiledLayer refines detail per level on its own.
+private final class WorldTiledRenderer: NSObject, CALayerDelegate, @unchecked Sendable {
     private let pdfLock = NSLock()
-    private var snapshot = Snapshot(viewport: CanvasViewport(), height: 0)
     let boards: [CanvasBoard]
     let frames: [CGRect]
 
     init(boards: [CanvasBoard], frames: [CGRect]) { self.boards = boards; self.frames = frames }
 
-    func set(_ s: Snapshot) { lock.lock(); snapshot = s; lock.unlock() }
-    private func current() -> Snapshot { lock.lock(); defer { lock.unlock() }; return snapshot }
-
     func draw(_ layer: CALayer, in ctx: CGContext) {
-        let s = current()
-        let z = s.viewport.zoom
         let clip = ctx.boundingBoxOfClipPath
         for (i, board) in boards.enumerated() {
-            // Layer space is y-up; world and viewport are y-down.
             let f = frames[i]
-            let rect = CGRect(
-                x: (f.minX - s.viewport.origin.x) * z, y: s.height - (f.maxY - s.viewport.origin.y) * z,
-                width: f.width * z, height: f.height * z)
+            // CATiledLayer in a flipped document view: origin is top-left, y increases downward.
+            let rect = f
             guard rect.insetBy(dx: -40, dy: -40).intersects(clip) else { continue }
             ctx.saveGState()
             ctx.setShadow(offset: CGSize(width: 0, height: -3), blur: 14, color: CGColor(gray: 0, alpha: 0.45))
@@ -119,30 +112,33 @@ private final class CanvasRenderer: NSObject, CALayerDelegate, @unchecked Sendab
             switch board.art {
             case .pdf(let page, _):
                 pdfLock.lock()
-                ctx.concatenate(page.getDrawingTransform(.cropBox, rect: rect, rotate: 0, preserveAspectRatio: true))
+                // PDF pages draw in a y-up coordinate system. Flip inside the board rect.
+                ctx.saveGState()
+                ctx.translateBy(x: rect.minX, y: rect.maxY)
+                ctx.scaleBy(x: 1, y: -1)
+                let localRect = CGRect(origin: .zero, size: rect.size)
+                ctx.concatenate(page.getDrawingTransform(.cropBox, rect: localRect, rotate: 0, preserveAspectRatio: true))
                 ctx.drawPDFPage(page)
+                ctx.restoreGState()
                 pdfLock.unlock()
             case .image(let image):
-                ctx.interpolationQuality = z >= 2 ? .none : .high
+                // Current magnification from the CTM: a 512pt tile at 2× zoom has a 1024pt CTM scale.
+                let ctm = ctx.ctm
+                let scale = hypot(ctm.a, ctm.c) // approximate magnification from the transform
+                ctx.interpolationQuality = scale >= 2 ? .none : .high
+                // NSImage draws y-up; flip inside the board rect.
+                ctx.saveGState()
+                ctx.translateBy(x: rect.minX, y: rect.maxY)
+                ctx.scaleBy(x: 1, y: -1)
                 let gc = NSGraphicsContext(cgContext: ctx, flipped: false)
                 NSGraphicsContext.saveGraphicsState()
                 NSGraphicsContext.current = gc
-                image.draw(in: rect)
+                image.draw(in: CGRect(origin: .zero, size: rect.size))
                 NSGraphicsContext.restoreGraphicsState()
+                ctx.restoreGState()
             }
             ctx.restoreGState()
-            if boards.count > 1 { drawLabel(board.name, above: rect, in: ctx) }
         }
-    }
-
-    /// The artboard's name over its top-left corner, a fixed 11 pt at any zoom, in the window's muted ink.
-    private func drawLabel(_ text: String, above rect: CGRect, in ctx: CGContext) {
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 0.62, alpha: 1)]
-        let gc = NSGraphicsContext(cgContext: ctx, flipped: false)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = gc
-        NSString(string: text).draw(at: CGPoint(x: rect.minX, y: rect.maxY + 5), withAttributes: attrs)
-        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
@@ -151,41 +147,162 @@ private final class InstantTiledLayer: CATiledLayer {
     override class func fadeDuration() -> CFTimeInterval { 0 }
 }
 
-/// The window onto the pasteboard. Trackpad: pinch zooms about the pointer, two fingers pan. Space+drag pans, a mouse
-/// wheel with Command or Option zooms; Command +, -, 0 (fit all) and 1 (100%).
-@MainActor final class CanvasNSView: NSView {
+// MARK: - Label overlay layer
+
+/// A non-tiled overlay that draws board names at a fixed 11 pt regardless of magnification.
+private final class LabelOverlayDelegate: NSObject, CALayerDelegate, @unchecked Sendable {
+    let boards: [CanvasBoard]
+    let frames: [CGRect]
+    private let lock = NSLock()
+    private var storedMagnification: Double = 1
+
+    init(boards: [CanvasBoard], frames: [CGRect]) { self.boards = boards; self.frames = frames }
+
+    var magnification: Double {
+        get { lock.lock(); defer { lock.unlock() }; return storedMagnification }
+        set { lock.lock(); storedMagnification = newValue; lock.unlock() }
+    }
+
+    func draw(_ layer: CALayer, in ctx: CGContext) {
+        guard boards.count > 1 else { return }
+        let mag = magnification
+        // Font size divided by magnification so it appears as 11 pt on screen.
+        let fontSize = 11.0 / mag
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: fontSize),
+            .foregroundColor: NSColor(white: 0.62, alpha: 1),
+        ]
+        // The layer draws in world coordinates (the document view's coordinate system).
+        // In a flipped view, y=0 is top, so labels go above the board (y - offset).
+        let gap = 5.0 / mag
+        let gc = NSGraphicsContext(cgContext: ctx, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = gc
+        for (i, board) in boards.enumerated() {
+            let f = frames[i]
+            let pt = CGPoint(x: f.minX, y: f.minY - gap - fontSize)
+            NSString(string: board.name).draw(at: pt, withAttributes: attrs)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+// MARK: - The flipped document view backed by a CATiledLayer
+
+/// The document view inside the scroll view. Sized to the world bounds + padding. Draws artboards via CATiledLayer.
+private final class CanvasDocumentView: NSView {
+    override var isFlipped: Bool { true }
+
+    let renderer: WorldTiledRenderer
+    let labelDelegate: LabelOverlayDelegate
+    let tiledLayer = InstantTiledLayer()
+    let labelLayer = CALayer()
+
+    init(boards: [CanvasBoard], frames: [CGRect]) {
+        renderer = WorldTiledRenderer(boards: boards, frames: frames)
+        labelDelegate = LabelOverlayDelegate(boards: boards, frames: frames)
+        super.init(frame: .zero)
+        wantsLayer = true
+        // Configure the tiled layer for world-space drawing.
+        tiledLayer.delegate = renderer
+        tiledLayer.anchorPoint = .zero
+        tiledLayer.tileSize = CGSize(width: 512, height: 512)
+        tiledLayer.levelsOfDetail = 12
+        tiledLayer.levelsOfDetailBias = 7
+        tiledLayer.isOpaque = false
+        tiledLayer.needsDisplayOnBoundsChange = true
+        layer?.addSublayer(tiledLayer)
+        // The label overlay: non-tiled, redrawn when magnification changes.
+        labelLayer.delegate = labelDelegate
+        labelLayer.anchorPoint = .zero
+        labelLayer.isOpaque = false
+        labelLayer.needsDisplayOnBoundsChange = true
+        layer?.addSublayer(labelLayer)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        tiledLayer.frame = bounds
+        tiledLayer.contentsScale = window?.backingScaleFactor ?? 2
+        labelLayer.frame = bounds
+        labelLayer.contentsScale = window?.backingScaleFactor ?? 2
+        CATransaction.commit()
+    }
+
+    func updateLabels(magnification: Double) {
+        labelDelegate.magnification = magnification
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        labelLayer.setNeedsDisplay()
+        CATransaction.commit()
+    }
+}
+
+// MARK: - The scroll view
+
+/// An NSScrollView that provides native magnification (pinch/trackpad zoom) and scroll for the canvas.
+/// CATiledLayer draws in world coordinates; tiles are never invalidated by pan or zoom.
+@MainActor final class CanvasScrollView: NSView {
     private let boards: [CanvasBoard]
     private let frames: [CGRect]
-    private let renderer: CanvasRenderer
-    private let tiled = InstantTiledLayer()
-    private var committed = CanvasViewport()
-    private var live = CanvasViewport()
+    private let artboardBounds: CGRect
+    private let scrollView = NSScrollView()
+    private let documentView: CanvasDocumentView
     private var laidOut = false
-    private var settle: Task<Void, Never>?
     private var spaceDown = false
     private var dragging = false
+    nonisolated(unsafe) private var boundsObserver: NSObjectProtocol?
     var onChange: ((Double, Int?) -> Void)?
 
     init(boards: [CanvasBoard], frames: [CGRect]) {
         self.boards = boards
         self.frames = frames
-        renderer = CanvasRenderer(boards: boards, frames: frames)
+        artboardBounds = ArtboardLayout.bounds(frames)
+        documentView = CanvasDocumentView(boards: boards, frames: frames)
         super.init(frame: .zero)
         wantsLayer = true
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = true
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .allowed
+        scrollView.horizontalScrollElasticity = .allowed
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = CGFloat(CanvasZoom.range.lowerBound)
+        scrollView.maxMagnification = CGFloat(CanvasZoom.range.upperBound)
+        scrollView.documentView = documentView
+        scrollView.usesPredominantAxisScrolling = false
+
+        addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
         applyPasteboard()
-        tiled.delegate = renderer
-        tiled.anchorPoint = .zero
-        tiled.tileSize = CGSize(width: 512, height: 512)
-        tiled.levelsOfDetail = 1
-        tiled.levelsOfDetailBias = 0
-        tiled.isOpaque = false
-        tiled.needsDisplayOnBoundsChange = false
-        layer?.addSublayer(tiled)
+
+        // Observe clip view bounds changes (pan + zoom) to publish state.
+        let clipView = scrollView.contentView
+        clipView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.boundsChanged() }
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        if let obs = boundsObserver { NotificationCenter.default.removeObserver(obs) }
+    }
+
     override var acceptsFirstResponder: Bool { true }
-    override var isFlipped: Bool { false }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -193,109 +310,126 @@ private final class InstantTiledLayer: CATiledLayer {
     }
 
     private func applyPasteboard() {
-        effectiveAppearance.performAsCurrentDrawingAppearance { layer?.backgroundColor = NSColor(Theme.pasteboard).cgColor }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color = NSColor(Theme.pasteboard).cgColor
+            scrollView.backgroundColor = NSColor(cgColor: color) ?? .black
+            scrollView.contentView.layer?.backgroundColor = color
+            layer?.backgroundColor = color
+        }
     }
 
     override func layout() {
         super.layout()
         guard bounds.width > 0, bounds.height > 0 else { return }
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        tiled.bounds = CGRect(origin: .zero, size: bounds.size)
-        tiled.position = .zero
-        tiled.contentsScale = window?.backingScaleFactor ?? 2
-        CATransaction.commit()
+        updateDocumentSize()
         if !laidOut {
             laidOut = true
-            live = .fitting(ArtboardLayout.bounds(frames), in: bounds.size)
+            fitAll()
         }
-        commit()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
-        tiled.contentsScale = window.backingScaleFactor
+        documentView.tiledLayer.contentsScale = window.backingScaleFactor
+        documentView.labelLayer.contentsScale = window.backingScaleFactor
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window, window.firstResponder is NSText == false else { return }
             window.makeFirstResponder(self)
         }
     }
 
-    // MARK: Viewport
+    // MARK: Document size
 
-    /// Fit `rect` (world) to the window, animated by simply jumping: a settled redraw follows at once.
-    func show(_ rect: CGRect) {
+    private func updateDocumentSize() {
+        let visibleSize = scrollView.contentView.bounds.size
+        let docSize = CanvasDocumentSize.documentSize(artboardBounds: artboardBounds, viewportSize: visibleSize)
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
+        // Position the artboards within the document view: the document view's origin in world coords is `docOrigin`,
+        // so each artboard's frame in document-view coordinates is offset by -docOrigin.
+        let docFrame = CGRect(origin: .zero, size: docSize)
+        if documentView.frame != docFrame {
+            documentView.frame = docFrame
+            // The tiled layer's bounds should match, offset so that world coords map correctly.
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            documentView.tiledLayer.bounds = CGRect(origin: CGPoint(x: docOrigin.x, y: docOrigin.y), size: docSize)
+            documentView.tiledLayer.position = .zero
+            documentView.labelLayer.bounds = CGRect(origin: CGPoint(x: docOrigin.x, y: docOrigin.y), size: docSize)
+            documentView.labelLayer.position = .zero
+            CATransaction.commit()
+        }
+    }
+
+    // MARK: Navigation
+
+    func scrollTo(worldRect: CGRect) {
         guard bounds.width > 0 else { return }
-        live = .fitting(rect, in: bounds.size)
-        commit()
+        let visibleSize = scrollView.contentView.bounds.size
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
+        let mag = CanvasDocumentSize.fitMagnification(rect: worldRect, viewportSize: visibleSize, maxMag: scrollView.magnification)
+        scrollView.magnification = CGFloat(mag)
+        let pt = CanvasDocumentSize.centredScrollPoint(
+            worldRect: worldRect, magnification: mag, viewportSize: visibleSize, docOrigin: docOrigin)
+        scrollView.contentView.setBoundsOrigin(pt)
+        documentView.updateLabels(magnification: mag)
+        publish()
     }
 
     func zoomStep(in zoomIn: Bool) {
-        let c = CGPoint(x: bounds.midX, y: bounds.height - bounds.midY)
-        live = live.zoomed(to: CanvasZoom.step(live.zoom, in: zoomIn), anchor: c)
-        commit()
+        let current = Double(scrollView.magnification)
+        let next = CanvasZoom.step(current, in: zoomIn)
+        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+        let inScrollView = convert(centre, to: scrollView)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            scrollView.animator().setMagnification(CGFloat(next), centeredAt: inScrollView)
+        }
     }
 
     func zoomTo(_ z: Double) {
-        live = live.zoomed(to: z, anchor: CGPoint(x: bounds.midX, y: bounds.height - bounds.midY))
-        commit()
-    }
-
-    /// Draw crisp at `live` now: reset the preview and re-render the tiles.
-    private func commit() {
-        settle?.cancel()
-        committed = live
-        renderer.set(.init(viewport: live, height: bounds.height))
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        tiled.setAffineTransform(.identity)
-        tiled.setNeedsDisplay()
-        CATransaction.commit()
-        publish()
-    }
-
-    /// During a gesture: move the existing layer to match `live`, and redraw once the gesture rests.
-    private func previewLive() {
-        let p = live.preview(from: committed)
-        let h = bounds.height
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        // y-down translate and scale to the layer's y-up space.
-        tiled.setAffineTransform(CGAffineTransform(a: p.scale, b: 0, c: 0, d: p.scale, tx: p.translate.width, ty: h * (1 - p.scale) - p.translate.height))
-        CATransaction.commit()
-        publish()
-        settle?.cancel()
-        settle = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
-            self?.commit()
+        let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+        let inScrollView = convert(centre, to: scrollView)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            scrollView.animator().setMagnification(CGFloat(CanvasZoom.clamp(z)), centeredAt: inScrollView)
         }
+    }
+
+    func fitAll() {
+        guard bounds.width > 0, artboardBounds.width > 0 else { return }
+        let visibleSize = scrollView.contentView.bounds.size
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
+        let mag = CanvasDocumentSize.fitMagnification(rect: artboardBounds, viewportSize: visibleSize)
+        scrollView.magnification = CGFloat(mag)
+        let pt = CanvasDocumentSize.centredScrollPoint(
+            worldRect: artboardBounds, magnification: mag, viewportSize: visibleSize, docOrigin: docOrigin)
+        scrollView.contentView.setBoundsOrigin(pt)
+        documentView.updateLabels(magnification: mag)
+        publish()
+    }
+
+    // MARK: State publishing
+
+    private func boundsChanged() {
+        let mag = Double(scrollView.magnification)
+        documentView.updateLabels(magnification: mag)
+        publish()
     }
 
     private func publish() {
-        let centre = live.world(fromView: CGPoint(x: bounds.midX, y: bounds.height / 2))
-        onChange?(live.zoom, ArtboardLayout.nearest(frames, to: centre))
-    }
-
-    private func viewPoint(_ event: NSEvent) -> CGPoint {
-        let p = convert(event.locationInWindow, from: nil)
-        return CGPoint(x: p.x, y: bounds.height - p.y)
+        let mag = Double(scrollView.magnification)
+        // Visible centre in document-view coordinates, then to world coordinates.
+        let clipBounds = scrollView.contentView.bounds
+        let centreInDoc = CGPoint(x: clipBounds.midX / CGFloat(mag), y: clipBounds.midY / CGFloat(mag))
+        let visibleSize = scrollView.contentView.bounds.size
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
+        let worldCentre = CGPoint(x: centreInDoc.x + docOrigin.x, y: centreInDoc.y + docOrigin.y)
+        onChange?(mag, ArtboardLayout.nearest(frames, to: worldCentre))
     }
 
     // MARK: Input
-
-    override func magnify(with event: NSEvent) {
-        live = live.zoomed(to: live.zoom * CanvasZoom.factor(magnification: Double(event.magnification)), anchor: viewPoint(event))
-        previewLive()
-    }
-
-    override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
-            let dy = Double(event.scrollingDeltaY) * (event.hasPreciseScrollingDeltas ? 0.01 : 0.05)
-            live = live.zoomed(to: live.zoom * (1 + dy), anchor: viewPoint(event))
-        } else {
-            live = live.panned(byView: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
-        }
-        previewLive()
-    }
 
     override func keyDown(with event: NSEvent) {
         if event.characters == " " { spaceDown = true; window?.invalidateCursorRects(for: self); NSCursor.openHand.set() } else { super.keyDown(with: event) }
@@ -310,8 +444,11 @@ private final class InstantTiledLayer: CATiledLayer {
     }
     override func mouseDragged(with event: NSEvent) {
         guard dragging else { return }
-        live = live.panned(byView: CGSize(width: event.deltaX, height: event.deltaY))
-        previewLive()
+        // Pan by adjusting the clip view's bounds origin.
+        var origin = scrollView.contentView.bounds.origin
+        origin.x -= event.deltaX
+        origin.y -= event.deltaY
+        scrollView.contentView.setBoundsOrigin(origin)
     }
     override func mouseUp(with event: NSEvent) {
         dragging = false
@@ -326,7 +463,7 @@ private final class InstantTiledLayer: CATiledLayer {
         switch ch {
         case "+", "=": zoomStep(in: true)
         case "-": zoomStep(in: false)
-        case "0": show(ArtboardLayout.bounds(frames))
+        case "0": fitAll()
         case "1": zoomTo(1)
         default: return false
         }

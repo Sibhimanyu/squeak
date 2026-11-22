@@ -2,8 +2,9 @@ import CoreGraphics
 import CryptoKit
 import Foundation
 
-// Pure rules behind the artifact canvas viewer: Illustrator stub detection, zoom, the pasteboard's artboard layout and
-// the render cache key. The views (ArtifactViewer.swift, ArtifactCanvasView.swift) only draw what these decide.
+// Pure rules behind the artifact canvas viewer: Illustrator stub detection, zoom, the pasteboard's artboard layout,
+// document-size math for the scroll view, and the render cache key. The views (ArtifactViewer.swift,
+// ArtifactCanvasView.swift) only draw what these decide.
 
 /// An Illustrator file saved without PDF compatibility still carries a one-page PDF, whose only content is Adobe's
 /// placeholder sentence. That page is not the artwork and must never be shown as it.
@@ -72,7 +73,7 @@ public enum ArtifactRenderCache {
                 meta.open("w");
                 var json = "[";
                 for (var k = 0; k < names.length; k++) {
-                  json += (k ? "," : "") + "\\"" + String(names[k]).replace(/(["\\\\])/g, "\\\\$1") + "\\"";
+                  json += (k ? "," : "") + "\\\"" + String(names[k]).replace(/([\"\\\\])/g, "\\\\$1") + "\\\"";
                 }
                 meta.write(json + "]");
                 meta.close();
@@ -117,7 +118,7 @@ public enum ArtifactRenderCache {
     public static func names(from data: Data) -> [String]? { try? JSONDecoder().decode([String].self, from: data) }
 }
 
-/// Zoom for the canvas: 2% to 6400%, stepped by the usual stops, and the pointer-anchored viewport maths.
+/// Zoom for the canvas: 2% to 6400%, stepped by the usual stops.
 public enum CanvasZoom {
     public static let range: ClosedRange<Double> = 0.02...64
     public static let stops: [Double] = [0.02, 0.03, 0.05, 0.0625, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64]
@@ -141,48 +142,44 @@ public enum CanvasZoom {
     }
 }
 
-/// Which part of the pasteboard the window shows: `origin` is the world point at the window's top-left, `zoom` the
-/// points per world unit. World and window are both y-down.
-public struct CanvasViewport: Equatable, Sendable {
-    public var origin: CGPoint
-    public var zoom: Double
-
-    public init(origin: CGPoint = .zero, zoom: Double = 1) {
-        self.origin = origin
-        self.zoom = CanvasZoom.clamp(zoom)
+/// Document-size maths for the NSScrollView-backed canvas: the world bounds of all artboards plus pasteboard padding
+/// (one viewport on every side so the user can pan freely), and the fit magnification.
+public enum CanvasDocumentSize {
+    /// The document view's size in world points: artboard bounds inflated by one viewport on every side.
+    /// `viewportSize` is the clip view's visible size in points (at magnification 1). Returns at least 1×1.
+    public static func documentSize(artboardBounds: CGRect, viewportSize: CGSize) -> CGSize {
+        let padX = max(viewportSize.width, 1)
+        let padY = max(viewportSize.height, 1)
+        let w = artboardBounds.width + 2 * padX
+        let h = artboardBounds.height + 2 * padY
+        return CGSize(width: max(w, 1), height: max(h, 1))
     }
 
-    public func world(fromView p: CGPoint) -> CGPoint { CGPoint(x: origin.x + p.x / zoom, y: origin.y + p.y / zoom) }
-    public func view(fromWorld p: CGPoint) -> CGPoint { CGPoint(x: (p.x - origin.x) * zoom, y: (p.y - origin.y) * zoom) }
-
-    /// Zoom to `newZoom` (clamped) keeping the world point under `anchor` (window coordinates) where it is.
-    public func zoomed(to newZoom: Double, anchor: CGPoint) -> CanvasViewport {
-        let z = CanvasZoom.clamp(newZoom)
-        let w = world(fromView: anchor)
-        return CanvasViewport(origin: CGPoint(x: w.x - anchor.x / z, y: w.y - anchor.y / z), zoom: z)
+    /// The origin of the document view in world coordinates (the top-left corner of the document rect).
+    public static func documentOrigin(artboardBounds: CGRect, viewportSize: CGSize) -> CGPoint {
+        let padX = max(viewportSize.width, 1)
+        let padY = max(viewportSize.height, 1)
+        return CGPoint(x: artboardBounds.minX - padX, y: artboardBounds.minY - padY)
     }
 
-    /// Content follows the fingers: move by `delta` window points.
-    public func panned(byView delta: CGSize) -> CanvasViewport {
-        CanvasViewport(origin: CGPoint(x: origin.x - delta.width / zoom, y: origin.y - delta.height / zoom), zoom: zoom)
+    /// The magnification that fits `rect` (world) inside `viewportSize` with `padding` pts around it, capped at `maxMag`.
+    public static func fitMagnification(
+        rect: CGRect, viewportSize: CGSize, padding: Double = 48, maxMag: Double = 1
+    ) -> Double {
+        guard rect.width > 0, rect.height > 0, viewportSize.width > 0, viewportSize.height > 0 else { return 1 }
+        let zx = max(viewportSize.width - 2 * padding, 1) / rect.width
+        let zy = max(viewportSize.height - 2 * padding, 1) / rect.height
+        return CanvasZoom.clamp(min(zx, zy, maxMag))
     }
 
-    /// The viewport showing `rect` (world) centred in a window of `size`, with `padding` window points around it. A
-    /// small piece is never enlarged past `maxZoom` (so one tiny artboard fits at 100% rather than 6400%).
-    public static func fitting(_ rect: CGRect, in size: CGSize, padding: Double = 48, maxZoom: Double = 1) -> CanvasViewport {
-        guard rect.width > 0, rect.height > 0, size.width > 0, size.height > 0 else { return CanvasViewport() }
-        let zx = max(size.width - 2 * padding, 1) / rect.width
-        let zy = max(size.height - 2 * padding, 1) / rect.height
-        let z = CanvasZoom.clamp(min(zx, zy, maxZoom))
-        let origin = CGPoint(x: rect.midX - size.width / (2 * z), y: rect.midY - size.height / (2 * z))
-        return CanvasViewport(origin: origin, zoom: z)
-    }
-
-    /// The affine map from a layer already drawn at `committed` to how `self` should look: scale then translate, in
-    /// window (y-down) points. Used to preview a gesture before the crisp redraw.
-    public func preview(from committed: CanvasViewport) -> (scale: Double, translate: CGSize) {
-        let s = zoom / committed.zoom
-        return (s, CGSize(width: (committed.origin.x - origin.x) * zoom, height: (committed.origin.y - origin.y) * zoom))
+    /// The scroll position (document-view origin in the clip view) that centres `worldRect` at `magnification` in a
+    /// clip view of `viewportSize`, given the document view's `docOrigin`.
+    public static func centredScrollPoint(
+        worldRect: CGRect, magnification: Double, viewportSize: CGSize, docOrigin: CGPoint
+    ) -> CGPoint {
+        let cx = (worldRect.midX - docOrigin.x) * magnification - viewportSize.width / 2
+        let cy = (worldRect.midY - docOrigin.y) * magnification - viewportSize.height / 2
+        return CGPoint(x: max(cx, 0), y: max(cy, 0))
     }
 }
 

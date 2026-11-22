@@ -4,7 +4,7 @@ import SqueakMacCore
 
 /// Renders a stub `.ai` (saved without PDF content) with the Illustrator installed on this Mac: ExtendScript through
 /// AppleScript `do javascript` opens the file, saves every artboard as a PDF into the cache and closes it unsaved.
-/// Only ever run from the explicit "Render preview with Illustrator" button; the result is cached by path and mtime.
+/// Runs when the person opens the file (their own Illustrator, their own Mac; never for someone else); cached by path and mtime.
 enum IllustratorRender {
     struct Failure: Error { let message: String }
 

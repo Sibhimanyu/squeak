@@ -266,18 +266,22 @@ struct ArtifactViewerPage: View {
     /// the largest thumbnail Quick Look has and "Open with...".
     private func illustrator(_ thumb: NSImage?) -> some View {
         VStack(spacing: Space.m) {
-            if let thumb {
+            // With Illustrator installed the file renders as soon as it opens (one per file, cached): never show the
+            // placeholder page Illustrator embeds ("saved without PDF content"), only the file icon while it works.
+            if illustratorURL == nil, let thumb {
                 Image(nsImage: thumb).resizable().scaledToFit().frame(maxWidth: 720, maxHeight: 420)
                     .overlay(Rectangle().strokeBorder(Theme.line))
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable().frame(width: 96, height: 96)
             }
-            Text(verbatim: IllustratorStub.explanation).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            if illustratorURL == nil || rendering != .running {
+                Text(verbatim: IllustratorStub.explanation).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            }
             switch rendering {
             case .running:
                 HStack(spacing: Space.s) {
                     ProgressView().controlSize(.small)
-                    Text("Illustrator is rendering the artboards. This can take a minute.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text("Rendering with Illustrator\u{2026}").font(Typo.body).foregroundStyle(Theme.muted)
                 }
             case .failed(let why):
                 Text(verbatim: why).font(Typo.body).foregroundStyle(Theme.negative).multilineTextAlignment(.center).textSelection(.enabled)
@@ -293,6 +297,7 @@ struct ArtifactViewerPage: View {
             }
         }
         .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: path) { if let app = illustratorURL, rendering == .idle { renderWithIllustrator(app) } }
     }
 
     private func renderWithIllustrator(_ app: URL) {

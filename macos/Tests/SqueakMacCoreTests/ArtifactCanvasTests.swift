@@ -55,40 +55,69 @@ import Testing
         #expect(CanvasZoom.factor(magnification: -2) > 0)
     }
 
-    @Test func zoomKeepsTheWorldPointUnderTheCursor() {
-        let v = CanvasViewport(origin: CGPoint(x: 100, y: 50), zoom: 1)
-        let anchor = CGPoint(x: 300, y: 200)
-        let before = v.world(fromView: anchor)
-        let z = v.zoomed(to: 4, anchor: anchor)
-        #expect(z.zoom == 4)
-        let after = z.world(fromView: anchor)
-        #expect(abs(after.x - before.x) < 1e-9 && abs(after.y - before.y) < 1e-9)
-        #expect(v.zoomed(to: 1000, anchor: anchor).zoom == 64)
+    // MARK: Document size (replaces CanvasViewport tests)
+
+    @Test func documentSizeAddsPadding() {
+        let ab = CGRect(x: 0, y: 0, width: 1000, height: 500)
+        let vp = CGSize(width: 800, height: 600)
+        let ds = CanvasDocumentSize.documentSize(artboardBounds: ab, viewportSize: vp)
+        #expect(abs(ds.width - 2600) < 1e-9)
+        #expect(abs(ds.height - 1700) < 1e-9)
     }
 
-    @Test func panFollowsTheFingersAtAnyZoom() {
-        let v = CanvasViewport(origin: .zero, zoom: 2).panned(byView: CGSize(width: 20, height: -10))
-        #expect(v.origin == CGPoint(x: -10, y: 5))
+    @Test func documentOriginOffsetsFromArtboardBounds() {
+        let ab = CGRect(x: 100, y: 50, width: 400, height: 300)
+        let vp = CGSize(width: 200, height: 150)
+        let o = CanvasDocumentSize.documentOrigin(artboardBounds: ab, viewportSize: vp)
+        #expect(abs(o.x - (-100)) < 1e-9)
+        #expect(abs(o.y - (-100)) < 1e-9)
     }
 
-    @Test func fittingCentresAndNeverBlowsUpASmallBoard() {
-        let v = CanvasViewport.fitting(CGRect(x: 0, y: 0, width: 1000, height: 500), in: CGSize(width: 548, height: 400), padding: 24)
-        #expect(abs(v.zoom - 0.5) < 1e-9)
-        let c = v.view(fromWorld: CGPoint(x: 500, y: 250))
-        #expect(abs(c.x - 274) < 1e-9 && abs(c.y - 200) < 1e-9)
-        #expect(CanvasViewport.fitting(CGRect(x: 0, y: 0, width: 10, height: 10), in: CGSize(width: 800, height: 600)).zoom == 1)
+    @Test func documentSizeMinimumIsOneByOne() {
+        let ds = CanvasDocumentSize.documentSize(artboardBounds: .zero, viewportSize: .zero)
+        #expect(ds.width >= 1 && ds.height >= 1)
     }
 
-    @Test func previewMapsACommittedLayerToTheLiveViewport() {
-        let committed = CanvasViewport(origin: CGPoint(x: 10, y: 20), zoom: 2)
-        let live = committed.zoomed(to: 4, anchor: CGPoint(x: 50, y: 50))
-        let p = live.preview(from: committed)
-        let w = CGPoint(x: 33, y: 41)
-        let c = committed.view(fromWorld: w)
-        let mapped = CGPoint(x: c.x * p.scale + p.translate.width, y: c.y * p.scale + p.translate.height)
-        let want = live.view(fromWorld: w)
-        #expect(abs(mapped.x - want.x) < 1e-9 && abs(mapped.y - want.y) < 1e-9)
+    @Test func fitMagnificationCentresAndNeverBlowsUpASmallBoard() {
+        let mag = CanvasDocumentSize.fitMagnification(
+            rect: CGRect(x: 0, y: 0, width: 1000, height: 500),
+            viewportSize: CGSize(width: 548, height: 400), padding: 24)
+        #expect(abs(mag - 0.5) < 1e-9)
+        // A small board should not be enlarged past 1×.
+        let small = CanvasDocumentSize.fitMagnification(
+            rect: CGRect(x: 0, y: 0, width: 10, height: 10),
+            viewportSize: CGSize(width: 800, height: 600))
+        #expect(small == 1)
     }
+
+    @Test func fitMagnificationHandlesZeroRect() {
+        let mag = CanvasDocumentSize.fitMagnification(
+            rect: .zero, viewportSize: CGSize(width: 800, height: 600))
+        #expect(mag == 1)
+    }
+
+    @Test func centredScrollPointCentresTheRect() {
+        let ab = CGRect(x: 0, y: 0, width: 1000, height: 500)
+        let vp = CGSize(width: 800, height: 600)
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: ab, viewportSize: vp)
+        let pt = CanvasDocumentSize.centredScrollPoint(
+            worldRect: ab, magnification: 0.5, viewportSize: vp, docOrigin: docOrigin)
+        // Centre of ab in doc coords = (500 - docOrigin.x, 250 - docOrigin.y) = (500+800, 250+600) = (1300, 850)
+        // at mag 0.5: (1300*0.5 - 400, 850*0.5 - 300) = (250, 125)
+        #expect(abs(pt.x - 250) < 1e-9)
+        #expect(abs(pt.y - 125) < 1e-9)
+    }
+
+    @Test func centredScrollPointNeverNegative() {
+        let ab = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let vp = CGSize(width: 2000, height: 2000)
+        let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: ab, viewportSize: vp)
+        let pt = CanvasDocumentSize.centredScrollPoint(
+            worldRect: ab, magnification: 1, viewportSize: vp, docOrigin: docOrigin)
+        #expect(pt.x >= 0 && pt.y >= 0)
+    }
+
+    // MARK: Layout
 
     @Test func artboardsSitSideBySide() {
         let f = ArtboardLayout.place([CGSize(width: 100, height: 200), CGSize(width: 50, height: 80)], gap: 10)
