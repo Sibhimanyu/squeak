@@ -233,6 +233,11 @@ function serializeSession(
     title: session.title,
     repoName: session.repoName,
     branch: session.branch,
+    // Ducks own their branch: the duck behind the chat and how the cards name it (absent for a plain chat).
+    ...(session.duckId ? { duckId: session.duckId } : {}),
+    ...(session.duckName ? { duckName: session.duckName } : {}),
+    ...(session.duckDuty ? { duckDuty: session.duckDuty } : {}),
+    ...(session.onMain ? { onMain: true as const } : {}),
     cwd: session.cwd,
     detail: session.detail,
     /**

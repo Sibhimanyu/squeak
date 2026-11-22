@@ -84,3 +84,53 @@ describe("/state conductorWaiting", () => {
     expect(out[2]).not.toHaveProperty("conductorWaiting");
   });
 });
+
+describe("/state duck fields", () => {
+  it("carries duckId, duckName, duckDuty and onMain from a native chat's session (live shape)", () => {
+    const sessions = [
+      {
+        key: "squeak-native:d7d89252-31b6-4f65-9c77-74f46c6ea5aa",
+        agent: "claude",
+        origin: "squeak",
+        title: "Rebuild and Improve Website Content",
+        branch: "rethink-presence",
+        duckId: "b661a98c-97be-4b39-8a02-4287efbf2c10",
+        duckName: "Rebuild and Improve Website Content",
+        duckDuty: "off",
+        onMain: true,
+        state: "working",
+        lastActivityAt: "2026-10-23T00:00:00.000Z",
+      },
+      {
+        key: "plain",
+        agent: "claude",
+        origin: "conductor",
+        title: "p",
+        state: "working",
+        lastActivityAt: "2026-10-23T00:00:00.000Z",
+      },
+    ];
+    const out = serializeState(
+      {
+        snapshot: {
+          generatedAt: "2026-10-23T00:00:00.000Z",
+          sessions,
+          active: sessions,
+          attention: [],
+          codexUsage: null,
+        },
+      } as unknown as FleetMonitor,
+      null,
+      null,
+      null,
+    ) as { active: Record<string, unknown>[] };
+    expect(out.active[0]).toMatchObject({
+      duckId: "b661a98c-97be-4b39-8a02-4287efbf2c10",
+      duckName: "Rebuild and Improve Website Content",
+      duckDuty: "off",
+      onMain: true,
+      branch: "rethink-presence",
+    });
+    expect(out.active[1]).not.toHaveProperty("duckId");
+  });
+});
