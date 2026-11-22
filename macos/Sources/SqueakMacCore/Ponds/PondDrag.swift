@@ -173,6 +173,12 @@ public struct PondDrag: Sendable, Equatable {
         (home(page) - position) * width
     }
 
+    /// Where the live pages sit: the staged page's rest, still while a snapshot glide moves the bitmaps, `drawn` otherwise.
+    public static func layoutPosition(staging: PondPage?, snapshotActive: Bool, restPage: PondPage, drawn: Double) -> Double {
+        if let staging { return home(staging) }
+        return snapshotActive ? home(restPage) : drawn
+    }
+
     public mutating func reset() {
         x = 0; y = 0; active = false; spent = false; moved = false; samples = []; axis = SwipeAxis()
         origin = 0; position = 0

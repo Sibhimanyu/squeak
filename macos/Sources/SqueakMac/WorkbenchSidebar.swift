@@ -378,7 +378,7 @@ struct WorkbenchSidebar: View {
                 unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
-                count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
+                count: (projectFolded || listed == 0) ? PondRowCount.of(ducksMode: model.ducksMode, counts: model.ducksMode ? native.flatMap { RoomRosterStore.shared.model(for: $0.id).counts } : nil, treeChats: sections.chatCount(of: key), listed: listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
                 onAdd: model.ducksMode ? native.map { p in { model.openNewMainThread(projectId: p.id) } } : native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } },
                 addHelp: model.ducksMode ? "New duck in \(name)" : "New duck in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
@@ -390,6 +390,8 @@ struct WorkbenchSidebar: View {
                 badge: PondsModel.shared.chrome(key: key).badge,
                 pondId: pondRecord?.id, projectId: entry?.projectId
             ) { openHome(key) }
+            // Ducks mode: the row's number is the daemon's on-duty count; keep it fresh as the pond's ducks change.
+            .task(id: model.ducksMode ? "\(native?.id ?? "")/\(listed)" : "") { if model.ducksMode, let p = native { await RoomRosterStore.shared.model(for: p.id).refresh(host: model.nativeHost) } }
             .padding(.top, 6 + (gapSlot == index ? 22 : 0))
             .overlay(alignment: .top) {
                 // The gap that opens where the pond will land, with its insertion line.

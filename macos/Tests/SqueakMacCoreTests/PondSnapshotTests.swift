@@ -58,3 +58,19 @@ struct PondLiveScrimTests {
         #expect(abs(PondSnapshotPlan.liveScrim(x: 900, width: 900, snapshotActive: false, moving: true) - 0.28) < 1e-9)
     }
 }
+
+@Suite("Pond layout position")
+struct PondLayoutPositionTests {
+    /// Live bug (greenroom, 2026-11-22): the pond page unmounted mid-snapshot-glide; its shared state kept
+    /// snapshotActive with restPage dashboard, so the remounted Room sat a full width off screen, blank.
+    @Test func staleSnapshotStateLeavesRoomOffScreen() {
+        let stale = PondDrag.layoutPosition(staging: nil, snapshotActive: true, restPage: .dashboard, drawn: 1)
+        #expect(PondDrag.x(of: .room, position: stale, width: 800) == 800)
+    }
+
+    /// After `unmount(page:)` the state is at rest on the page: the Room sits at 0.
+    @Test func restedStateShowsRoom() {
+        let rest = PondDrag.layoutPosition(staging: nil, snapshotActive: false, restPage: .room, drawn: PondDrag.home(.room))
+        #expect(PondDrag.x(of: .room, position: rest, width: 800) == 0)
+    }
+}

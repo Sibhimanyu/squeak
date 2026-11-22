@@ -94,8 +94,7 @@ final class PondPanState {
     var drawn: Double { mode == .rest ? PondDrag.home(restPage) : position }
     /// Where the live pages sit: still while a snapshot glide moves the bitmaps, `drawn` otherwise.
     var layoutPosition: Double {
-        if let staging { return PondDrag.home(staging) }
-        return snapshotActive ? PondDrag.home(restPage) : drawn
+        PondDrag.layoutPosition(staging: staging, snapshotActive: snapshotActive, restPage: restPage, drawn: drawn)
     }
 
     private func stage(_ page: PondPage?) {
@@ -141,6 +140,12 @@ final class PondPanState {
     }
 
     func mount(page: PondPage) { mode = .rest; restPage = page; glide = nil; token += 1 }
+
+    /// The pond page left the screen (a pond page mounts only while shown, this state outlives it): whatever was in flight
+    /// can never finish, so rest on `page` with no snapshot or staging, or the next mount finds the Room slid off screen.
+    func unmount(page: PondPage) {
+        mount(page: page); snapshotActive = false; staging = nil; strip = nil
+    }
 
     func track(_ p: Double) {
         if mode != .dragging {
@@ -298,6 +303,7 @@ struct PondSpace<Dashboard: View>: View {
             current: { RoomViewPref.shared.mode(for: key) }, origin: { pan.presented() },
             trackingEnabled: !reduceMotion, update: { update($0) }))
         .onChange(of: page) { _, new in pan.reconcile(page: new, width: width) }
+        .onDisappear { pan.unmount(page: RoomViewPref.shared.mode(for: key)) }
         .task { await runHint() }
     }
 
