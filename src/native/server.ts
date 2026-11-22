@@ -553,7 +553,8 @@ export class NativeServer {
     }
     if (area === "projects" && id && sub === "ducks" && parts.length === 4) {
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
-      if (method === "GET") return this.json(res, 200, { ducks: this.room.listDucks(id) });
+      if (method === "GET")
+        return this.json(res, 200, { ducks: this.room.listDucks(id), counts: this.room.duckCounts(id) });
       if (method === "POST") {
         const b = await this.body(req);
         const unknown = Object.keys(b).filter((k) => k !== "name" && k !== "role");

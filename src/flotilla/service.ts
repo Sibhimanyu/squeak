@@ -2573,8 +2573,17 @@ export class FlotillaService extends EventEmitter {
         return 0;
       }
       const me = this.identity;
-      this.pruneLeft(new Set(list.map((e) => e.pondId)));
+      this.pruneLeft(new Set(list.filter((e) => !e.left).map((e) => e.pondId)));
       for (const entry of list) {
+        if (entry.left) {
+          // This account left the pond on another device: drop it here and never ask for it again.
+          const mine = this.pondsFile.data.ponds[entry.pondId];
+          if (mine && mine.role !== "owner") {
+            this.forgetPond(entry.pondId);
+            this.emit("changed", entry.pondId);
+          }
+          continue;
+        }
         const existing = this.pondsFile.data.ponds[entry.pondId];
         const lapsed =
           existing?.deviceJoin && existing.status === "pending" && (existing.inviteExpiresAt ?? 0) <= this.now();
@@ -2841,6 +2850,9 @@ export class FlotillaService extends EventEmitter {
     // Kept on disk: a restart inside the day must not ask to be added back.
     this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
     this.pondsFile.save();
+    // Every other device of this account drops the pond on its next account sync, without the owner's Mac. A relay
+    // that does not know the route (older) refuses or fails: the owner's removal still does it, later.
+    await this.options.relay?.leaveAccountPond?.(pondId).catch(() => undefined);
     this.emit("changed", pondId);
   }
 
@@ -4457,6 +4469,14 @@ export class FlotillaService extends EventEmitter {
     // composer check is still refused here.
     const need = COMMAND_CAP[cmd.kind];
     if (need && from.role !== "owner" && !effectiveCaps(from.role, from.caps)[need]) return CAP_REFUSAL[need];
+    // Code (changed files, patches) leaves this Mac only for a member at the "git" level: the owner's own flag is on, the
+    // pond has a Git remote and the member has a machine of their own. Anyone else is remote, whatever their client claims.
+    if (
+      cmd.kind === "diff" &&
+      from.role !== "owner" &&
+      !(flag("pondOwnThreads") && pond.gitRemote && from.nest !== null)
+    )
+      return REMOTE_NO_CODE;
     if (thread && (cmd.kind === "message" || cmd.kind === "steer" || cmd.kind === "answer")) {
       const w = threadWriteDecision(from.id, this.selfId(pond), thread.access);
       if (!w.ok) return w.reason;

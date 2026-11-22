@@ -24,6 +24,8 @@
 //                         ownerKey, name?}]} for the caller's own account only; POST /account/pond-devices {pondId, publicKey, boxKey?,
 //                         client, nest?} (same callers, 10 a minute per account) writes the relay-owned channels/<pond>/devreqs/<deviceId>
 //                         and answers a join-scope token (docs/ponds.md, "Members are accounts")
+//   POST   /account/pond-leaves {pondId} (same callers): marks the caller's own index entry left (idempotent, 403 if not listed);
+//                         GET /account/ponds then returns it with left:true; the owner's remove or a fresh add clears it
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
 //   GET    /account/handoff?return=<pinned web origin> (cookie): the web app on another origin (squeak.onslate.in) signs in HERE
 //                         (the function's own origin, where Catalyst can read the session) and gets an app token back in the URL
@@ -1066,10 +1068,31 @@ function createRelay(deps) {
         pondId: r.doc,
         ownerKey: v.ownerKey,
         ...(typeof v.name === "string" && v.name ? { name: v.name } : {}),
+        ...(v.left === true ? { left: true } : {}),
       });
       if (ponds.length >= ACCT_PONDS_MAX) break;
     }
     return out(200, { ponds });
+  }
+
+  /**
+   * POST /account/pond-leaves { pondId }: the caller's account marks its own index entry for the pond as left (idempotent).
+   * The entry stays, flagged `left`, so every device of the account sees it; the owner's remove clears it, and a fresh add
+   * (the put in handlePondAccounts) rewrites the row without the marker. 403 when the account is not listed for the pond.
+   */
+  async function handlePondLeave(req, res, method, mac) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    const user = await accountOf(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    const body = await readJson(req, 1024);
+    if (typeof body.pondId !== "string" || !scoped.POND.test(body.pondId)) return out(400, { error: "ids" });
+    const pk = `${ACCT_PONDS_PK}/${user.userId}`;
+    const row = parseOr(await deps.store.get(pk, body.pondId));
+    if (!row || typeof row.ownerKey !== "string") return out(403, { error: "pond" });
+    if (row.left !== true)
+      await deps.store.put(pk, body.pondId, JSON.stringify({ ...row, left: true, leftAt: Date.now() }));
+    return out(204);
   }
 
   /**
@@ -1096,7 +1119,7 @@ function createRelay(deps) {
     if (body.nest !== undefined && body.nest !== null && (typeof body.nest !== "string" || body.nest.length > 100))
       return out(400, { error: "nest" });
     const member = parseOr(await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, body.pondId));
-    if (!member) return out(403, { error: "pond" });
+    if (!member || member.left === true) return out(403, { error: "pond" });
     if (!(await spend(PONDDEV_RATE_PK, user.userId, 60 * 1000, PONDDEV_PER_MINUTE))) return out(429, { error: "rate" });
     const deviceId = crypto
       .createHash("sha256")
@@ -1243,6 +1266,7 @@ function createRelay(deps) {
       const forbidden = () => send(res, 403, {});
       if (route === "/ponds/short/redeem") return await handleShortRedeem(req, res, method, mac);
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
+      if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
       {
         const m = /^\/ponds\/([^/]+)\/members\/accounts$/.exec(route);

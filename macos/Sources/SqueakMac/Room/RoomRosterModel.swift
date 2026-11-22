@@ -8,14 +8,18 @@ import SqueakMacCore
 final class RoomRosterModel {
     let projectId: String
     private(set) var ducks: [PondDuck]?
+    /// The daemon's dashboard numbers; nil from an older daemon (the page then counts its rows).
+    private(set) var counts: PondCounts?
+    /// Chats whose duck is off duty: the dashboard's Off duty filter.
+    var offDutySessions: Set<String> { Set((ducks ?? []).filter { $0.duty == .off }.compactMap(\.currentSessionId)) }
     var error: String?
     private(set) var creating = false
 
     init(projectId: String) { self.projectId = projectId }
 
     func refresh(host: NativeHostClient) async {
-        guard let list = try? await DuckClient(host: host).list(project: projectId) else { return }
-        ducks = list
+        guard let r = try? await DuckClient(host: host).roster(project: projectId) else { return }
+        ducks = r.ducks; counts = r.counts
     }
 
     /// Rename, set role, duty: optimistic.
@@ -34,6 +38,7 @@ final class RoomRosterModel {
         do {
             let duck = try await DuckClient(host: host).perform(action)
             ducks = RoomRoster.upserting(duck, into: ducks ?? [])
+            await refresh(host: host)   // the daemon's counts follow the change
         } catch {
             ducks = before
             self.error = RoomJobs.refusal(error)

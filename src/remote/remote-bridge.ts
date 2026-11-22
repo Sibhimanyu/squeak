@@ -1,4 +1,5 @@
 import { isUnclaimedHeadless } from "../fleet/active.js";
+import { pondCounts, type PondCounts } from "../fleet/pond-counts.js";
 import { PHONE_CALLS_CAP } from "../voice/phone-voice.js";
 import { isEngineId } from "../voice/voice-engines.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
@@ -516,6 +517,8 @@ export interface PhoneViewPond {
   activity?: RollupActivity;
   working?: number;
   needsYou?: number;
+  /** The pond dashboard's numbers (`pond-counts.ts`); the phone draws them, and counts its own only when absent. */
+  counts?: PondCounts;
 }
 
 /**
@@ -2141,6 +2144,23 @@ export class RemoteBridge {
     const richer = this.phoneCaps.includes(PHONE_PONDS2_CAP);
     const iso = (ms: number | undefined): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
     const ducksOwn = flag("ducksOwnBranch");
+    // One duck per chat's duck (its newest chat speaks for it), else one per chat; archived chats are not ducks.
+    const countsOf = (list: FleetSession[]): PondCounts => {
+      const ducks = new Map<string, FleetSession>();
+      for (const s of list) {
+        if (s.retired) continue;
+        const key = s.duckId ?? s.key;
+        const seen = ducks.get(key);
+        if (!seen || (Date.parse(s.lastActivityAt) || 0) > (Date.parse(seen.lastActivityAt) || 0)) ducks.set(key, s);
+      }
+      return pondCounts(
+        [...ducks.values()].map((s) => ({
+          duty: s.duckDuty === "off" ? "off" : "on",
+          needsYou: needsYou(s),
+          working: s.state === "working" || (s.ducklings?.running ?? 0) > 0,
+        })),
+      );
+    };
     // Ducks own their branch: each pond's branches (not Main), with how many ducks work on one and its newest activity.
     const branchesOf = (pond: PhonePond): NonNullable<PhoneViewPond["branches"]> => {
       const found = new Map<string, { ducks: Set<string>; ms: number }>();
@@ -2202,6 +2222,7 @@ export class RemoteBridge {
             ...(pond.labels && pond.labels.length > 0 ? { labels: pond.labels } : {}),
             ...(last ? { lastActivityAt: last } : {}),
             ...roll(rollupStatus(byPond.get(pond.id) ?? [])),
+            ...(pond.kind !== "joined" ? { counts: countsOf(byPond.get(pond.id) ?? []) } : {}),
             ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
             ...(ducksOwn && pond.kind !== "joined" ? { branches: branchesOf(pond) } : {}),
             ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
@@ -5853,6 +5874,8 @@ export class RemoteBridge {
       ...this.pondRef(session),
       // Ducks own their branch (flag on): the chat's duck and where it works (a branch, or `onMain`). Older phones ignore them.
       ...this.duckRef(session),
+      // Its duck is off duty (absent = on duty); older phones ignore it.
+      ...(session.duckDuty === "off" ? { duckDuty: "off" as const } : {}),
       label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
       // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
       title: chatTitle(session),

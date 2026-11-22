@@ -1217,6 +1217,20 @@ final class AppModel {
         memory.save()
     }
 
+    /// The one rule: no place points at a pond the directory no longer has. Called when a loaded directory changes
+    /// (leaving, being removed, an owner deleting the pond, a refresh). The current page, Back and Forward, where
+    /// Settings returns to and the per-pond chat memory all drop the pond. A nil `live` (not loaded) does nothing.
+    func prunePonds(live: Set<String>?) {
+        guard live != nil else { return }
+        let pruned = location.prune(livePonds: live)
+        returnLocation = returnLocation.prune(livePonds: live)
+        navHistory.prune(keeping: { $0 == nil || $0!.prune(livePonds: live) == $0! })
+        var memory = placeMemory
+        memory.prune(livePonds: live)
+        if memory != placeMemory { placeMemory = memory; memory.save() }
+        if pruned != location { WorkbenchNav.goHome(self) }
+    }
+
     /// The remembered chat of a pond, when it still exists.
     func resumableChat(pond key: String) -> SessionKey? {
         placeMemory.lastChat(pond: key).flatMap { session($0) != nil ? $0 : nil }

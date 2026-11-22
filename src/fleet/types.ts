@@ -136,6 +136,8 @@ export interface ObservedSession {
   duckId?: string;
   /** That duck's name (its own, else its chat's title), for a card's "Duck · branch". */
   duckName?: string;
+  /** "off" when that duck is off duty (absent = on duty); only for a native chat with a duck. */
+  duckDuty?: "off";
   /** The chat works in the pond's own folder (Main), not on a branch. Set with `duckId`. */
   onMain?: true;
   title: string | null;

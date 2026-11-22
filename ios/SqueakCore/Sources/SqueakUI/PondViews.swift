@@ -423,29 +423,31 @@ struct PondDashboard: View {
     }
 
     private func tiles(_ item: PondItem) -> some View {
-        Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+        let counts = PondCounts.resolve(item.pond?.counts, sessions: item.sessions)
+        return Grid(horizontalSpacing: 12, verticalSpacing: 12) {
             GridRow {
-                tile(item, .all, "tray.full", Theme.ink)
-                tile(item, .needsYou, "exclamationmark.bubble", Theme.needsYou)
+                tile(item, .onDuty, "person.crop.circle.badge.checkmark", Theme.ink, counts)
+                tile(item, .working, "bolt.horizontal", Theme.working, counts)
             }
             GridRow {
-                tile(item, .working, "bolt.horizontal", Theme.working)
-                tile(item, .shared, "person.2", Theme.info)
+                tile(item, .needsYou, "exclamationmark.bubble", Theme.needsYou, counts)
+                tile(item, .offDuty, "moon", Theme.muted, counts)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
     }
 
-    private func tile(_ item: PondItem, _ scope: PondScope, _ symbol: String, _ tint: Color) -> some View {
-        let count = scope == .all ? (model.pondThreads(item.id)?.total ?? item.sessions.count) : PondList.sessions(item, scope: scope).count
+    private func tile(_ item: PondItem, _ scope: PondScope, _ symbol: String, _ tint: Color, _ counts: PondCounts) -> some View {
+        let count = PondTileModel.count(scope, counts)
         return Button { Haptics.play(.navigate); path.append(.scope(item.id, scope)) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(count > 0 || scope == .all ? tint : Theme.subtle)
+                    Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(count > 0 || scope == .onDuty ? tint : Theme.subtle)
                     Spacer()
-                    Text("\(count)").font(.title.bold()).monospacedDigit().foregroundStyle(Theme.ink)
+                    Text("\(count)").font(scope == .onDuty ? .largeTitle.bold() : .title.bold()).monospacedDigit().foregroundStyle(Theme.ink)
                 }
                 Text(scope.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                if let line = PondTileModel.secondary(scope, counts) { Text(line).font(.caption).foregroundStyle(Theme.subtle) }
             }
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)

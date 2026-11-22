@@ -35,7 +35,7 @@ class Cloud {
     };
   }
   /** A Mac; pass the same `dir` to restart it (a new service over the same files). */
-  mac(name: string, options: { owner?: boolean; dir?: string } = {}) {
+  mac(name: string, options: { owner?: boolean; dir?: string; relay?: unknown } = {}) {
     const dir = options.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-service-"));
     if (!options.dir) this.dirs.push(dir);
     const store = this.store();
@@ -46,6 +46,7 @@ class Cloud {
       nest: `${name}'s Mac`,
       ...(options.owner ? { location: LOCATION } : {}),
       storeFor: () => store,
+      ...(options.relay ? { relay: options.relay as never } : {}),
     });
     return { dir, service };
   }
@@ -199,6 +200,55 @@ describe("a left pond is not asked for again, across a restart", () => {
     await restart().syncAccountPonds();
     expect(asked).toEqual([pond.id]);
     expect(JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).leftUntil).toBeUndefined();
+  });
+
+  it("tells the account's relay, and another device of the account drops the pond on its next sync", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    const left: string[] = [];
+    const B = c.mac("Aarav", { relay: { leaveAccountPond: async (id: string) => void left.push(id) } });
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    // Another device of the account: the relay lists the pond as left; it is dropped and never asked for.
+    const asked: string[] = [];
+    const other = c.mac("Aarav", {
+      dir: B.dir,
+      relay: {
+        accountPonds: async () => [{ pondId: pond.id, name: "Greenroom", ownerKey: "k", left: true }],
+        requestDevice: async (r: { pondId: string }) => {
+          asked.push(r.pondId);
+          throw new Error("refused");
+        },
+      },
+    });
+    expect((await other.service.directoryRecords()).map((r) => r.id)).toContain(pond.id);
+    await other.service.syncAccountPonds();
+    expect((await other.service.directoryRecords()).map((r) => r.id)).not.toContain(pond.id);
+    expect(asked).toEqual([]);
+    // The leaving device writes the leave at account level; an older relay refusing it changes nothing.
+    await B.service.leave(pond.id);
+    expect(left).toEqual([pond.id]);
+  });
+
+  it("a relay without the leave route leaves the leave to the owner's Mac", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    const B = c.mac("Aarav", {
+      relay: {
+        leaveAccountPond: async () => {
+          throw new Error("404");
+        },
+      },
+    });
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await expect(B.service.leave(pond.id)).resolves.toBeUndefined();
   });
 
   it("is dropped once the owner's removal is seen (the pond is no longer listed)", async () => {

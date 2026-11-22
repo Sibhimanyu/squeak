@@ -86,6 +86,20 @@ public struct NavHistory<Place: Equatable & Sendable>: Equatable, Sendable {
         index = places.count - 1
     }
 
+    /// Drops every place `isKept` refuses (Home, the nil place, is asked too), keeping the current stop where it was.
+    public mutating func prune(keeping isKept: (Place?) -> Bool) {
+        var kept: [Place?] = []
+        var newIndex = -1
+        for (i, p) in places.enumerated() where isKept(p) {
+            // Two stops that become neighbours and are equal are one.
+            if let last = kept.last, last == p { if i <= index { newIndex = kept.count - 1 }; continue }
+            kept.append(p)
+            if i <= index { newIndex = kept.count - 1 }
+        }
+        places = kept
+        index = kept.isEmpty ? -1 : max(newIndex, 0)
+    }
+
     /// The most recently visited place (not Home) that `isOpenable` still accepts: where "Home" returns to.
     public func lastVisited(where isOpenable: (Place) -> Bool) -> Place? {
         places.prefix(index + 1).reversed().compactMap { $0 }.first(where: isOpenable)

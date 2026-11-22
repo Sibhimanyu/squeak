@@ -113,4 +113,66 @@ final class WorkbenchLocationTests: XCTestCase {
         let chat = UpdateRestoreMarker(fromVersion: "2.0.0", window: .conversation, session: key("a").stringValue)
         XCTAssertEqual(chat.restoredLocation, .chat(key("a")))
     }
+
+    // MARK: A location never points at a pond that is gone
+
+    func testLeaveClearsEveryPlaceThatPointedAtThePond() {
+        let live: Set<String>? = ["keep"]
+        XCTAssertEqual(WorkbenchLocation.pondHome(pond: "gone").prune(livePonds: live), .home)
+        XCTAssertEqual(WorkbenchLocation.pondSettings(pond: "gone").prune(livePonds: live), .home)
+        XCTAssertEqual(WorkbenchLocation.pondThread(pond: "gone", pondId: "x", threadId: "t").prune(livePonds: live), .home)
+        XCTAssertEqual(WorkbenchLocation.compose(.newThread, pond: "gone", workspace: nil).prune(livePonds: live), .home)
+        XCTAssertEqual(WorkbenchLocation.pondHome(pond: "keep").prune(livePonds: live), .pondHome(pond: "keep"))
+        XCTAssertEqual(WorkbenchLocation.archived.prune(livePonds: live), .archived)
+        XCTAssertEqual(WorkbenchLocation.chat(key("a")).prune(livePonds: live), .chat(key("a")))
+
+        var memory = PlaceMemory()
+        memory.remember(.chat(key("a")), pond: "gone", workspace: nil)
+        memory.remember(.chat(key("b")), pond: "keep", workspace: nil)
+        memory.prune(livePonds: live)
+        XCTAssertNil(memory.lastChat(pond: "gone"))
+        XCTAssertEqual(memory.lastChat(pond: "keep"), key("b"))
+    }
+
+    func testBackAfterLeaveNeverReachesThePond() {
+        var h = NavHistory<WorkbenchLocation>()
+        h.visit(nil)
+        h.visit(.pondHome(pond: "gone"))
+        h.visit(.pondSettings(pond: "gone"))
+        h.visit(.pondHome(pond: "keep"))
+        h.visit(nil)
+        h.prune(keeping: { $0 == nil || $0!.prune(livePonds: ["keep"]) == $0! })
+        var seen: [WorkbenchLocation?] = []
+        while case .some(let place) = h.back() { seen.append(place) }
+        XCTAssertEqual(seen.count, 2)
+        XCTAssertFalse(seen.contains { $0?.pondKey == "gone" })
+        XCTAssertEqual(seen.first ?? nil, .pondHome(pond: "keep"))
+        XCTAssertFalse(h.canGoBack)
+    }
+
+    func testHistoryPruneKeepsTheCurrentStop() {
+        var h = NavHistory<WorkbenchLocation>()
+        h.visit(.pondHome(pond: "keep"))
+        h.visit(.pondHome(pond: "gone"))
+        h.visit(.archived)
+        _ = h.back()
+        _ = h.back()
+        h.prune(keeping: { $0?.prune(livePonds: ["keep"]) == $0 })
+        XCTAssertFalse(h.canGoBack)
+        XCTAssertTrue(h.canGoForward)
+    }
+
+    func testUnloadedDirectoryPrunesNothing() {
+        XCTAssertEqual(WorkbenchLocation.pondHome(pond: "any").prune(livePonds: nil), .pondHome(pond: "any"))
+        var memory = PlaceMemory()
+        memory.remember(.chat(key("a")), pond: "any", workspace: nil)
+        memory.prune(livePonds: nil)
+        XCTAssertEqual(memory.lastChat(pond: "any"), key("a"))
+    }
+
+    func testDirectoryLiveKeys() {
+        let d = PondDirectory(ponds: [PondDirectory.Pond(id: "p", name: "P", projectId: "proj", hidden: false, labels: [], folder: nil)])
+        XCTAssertTrue(d.hasPond(key: "p"))
+        XCTAssertFalse(d.hasPond(key: "gone"))
+    }
 }

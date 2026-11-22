@@ -763,7 +763,14 @@ describe("room routes", () => {
     const ok = await call(h, "GET", `/native/projects/${p.project.id}/room`);
     expect(ok.status).toBe(200);
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await ok.json()).toEqual({ posts: [], latestSeq: 0, threads: [], turns: [], jobs: [] });
+    expect(await ok.json()).toEqual({
+      posts: [],
+      latestSeq: 0,
+      threads: [],
+      turns: [],
+      jobs: [],
+      counts: { onDuty: 0, working: 0, needsYou: 0, offDuty: 0, total: 0 },
+    });
   });
 
   it("POST takes a person's message (strict body) and GET pages it with since/before/limit", async () => {

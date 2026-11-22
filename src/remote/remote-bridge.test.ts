@@ -6279,6 +6279,8 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
     // The stream with a chat comes first; no hidden flag on a visible pond.
     expect(view.ponds[0].streams.map((s: { id: string }) => s.id)).toEqual(["w-b", "w-a"]);
     expect(view.ponds[0].hidden).toBeUndefined();
+    // The daemon owns the dashboard numbers: one on-duty chat here, not working, not waiting.
+    expect(view.ponds[0].counts).toEqual({ onDuty: 1, working: 0, needsYou: 0, offDuty: 0, total: 1 });
     expect(view.ponds[1]).toMatchObject({ hidden: true, colour: "teal", labels: ["writing"], archivedStreams: 3 });
     expect(view.pondOrder).toEqual({ mode: "manual", ids: ["proj-docs", "proj-shop"] });
     expect(view.pondDetail).toMatchObject({ id: "proj-shop", waiting: [{ name: "Ravi" }] });

@@ -96,6 +96,25 @@ describe("own threads off (the default)", () => {
     await expect(B.service.requestDiff(pondId, "t1")).rejects.not.toThrow(/remote pond/);
   });
 
+  it("the owner's Mac refuses a member's diff request in a remote pond, whatever the member's Mac sent", async () => {
+    const { A, B, pondId } = await pond();
+    A.host.sessions.set("a1", session("a1", { title: "Owner's" }));
+    const thread = await A.bridge.share(pondId, "a1");
+    // The member's Mac asks while it believes the pond is "git"; the owner's flag is off when the command is read.
+    process.env.SQUEAK_POND_OWN_THREADS = "on";
+    await B.service.requestDiff(pondId, thread.id);
+    delete process.env.SQUEAK_POND_OWN_THREADS;
+    expect(await A.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: expect.stringMatching(/remote pond/) }),
+    ]);
+    // With the owner's flag on the same member (a Mac, on a pond with a Git remote) is answered; no flag change breaks it.
+    process.env.SQUEAK_POND_OWN_THREADS = "on";
+    await B.service.requestDiff(pondId, thread.id);
+    // (The fake host has nothing to diff, so it says so: past the level check.)
+    const [out] = await A.bridge.runCommands(pondId);
+    expect(out!.reason ?? "").not.toMatch(/remote pond/);
+  });
+
   it("leaving is safe from any surface: gone from the directory at once, twice is a plain 404, an owner is refused", async () => {
     const { A, B, pondId } = await pond();
     expect((await B.service.directoryRecords()).map((r) => r.id)).toContain(pondId);

@@ -234,12 +234,15 @@ public struct DuckClient: Sendable {
     let host: NativeHostClient
     public init(host: NativeHostClient) { self.host = host }
 
-    public func list(project: String) async throws -> [PondDuck]? {
-        struct R: Decodable { var ducks: [LossyDuck] }
+    public func list(project: String) async throws -> [PondDuck]? { try await roster(project: project)?.ducks }
+
+    /// The ducks and the daemon's dashboard `counts` (nil from an older daemon).
+    public func roster(project: String) async throws -> (ducks: [PondDuck], counts: PondCounts?)? {
+        struct R: Decodable { var ducks: [LossyDuck]; var counts: PondCounts? }
         let r = DuckAction.list(project: project)
         do {
             let data = try await host.call(r.method, r.path, timeout: 10)
-            do { return try JSONDecoder().decode(R.self, from: data).ducks.compactMap(\.duck) } catch { throw NativeHostError.badResponse }
+            do { let d = try JSONDecoder().decode(R.self, from: data); return (d.ducks.compactMap(\.duck), d.counts) } catch { throw NativeHostError.badResponse }
         } catch where PondsClient.isAbsent(error) { return nil }
     }
 

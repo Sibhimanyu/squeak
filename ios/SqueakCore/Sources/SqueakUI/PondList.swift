@@ -62,15 +62,38 @@ struct StreamItem: Equatable, Identifiable {
 }
 
 enum PondScope: String, Hashable, CaseIterable {
-    case all, needsYou, working, shared
+    case all, onDuty, working, needsYou, offDuty, shared
+
+    /// The dashboard's tiles, left to right. Shared is a filter (and a label on a row), not a tile.
+    static let tiles: [PondScope] = [.onDuty, .working, .needsYou, .offDuty]
 
     var title: String {
         switch self {
         case .all: "All ducks"
-        case .needsYou: "Needs you"
+        case .onDuty: "On duty"
         case .working: "Working"
+        case .needsYou: "Needs you"
+        case .offDuty: "Off duty"
         case .shared: "Shared"
         }
+    }
+}
+
+/// What a dashboard tile says, from the Mac's counts (or the phone's fallback): pure.
+enum PondTileModel {
+    static func count(_ scope: PondScope, _ c: PondCounts) -> Int {
+        switch scope {
+        case .onDuty: c.onDuty
+        case .working: c.working
+        case .needsYou: c.needsYou
+        case .offDuty: c.offDuty
+        case .all, .shared: c.total
+        }
+    }
+
+    /// Off duty carries "<total> in all"; no other tile has a second line.
+    static func secondary(_ scope: PondScope, _ c: PondCounts) -> String? {
+        scope == .offDuty ? "\(c.total) in all" : nil
     }
 }
 
@@ -233,8 +256,10 @@ enum PondList {
     static func sessions(_ item: PondItem, scope: PondScope) -> [PhoneSnapshot.Session] {
         switch scope {
         case .all: item.sessions
-        case .needsYou: item.sessions.filter(\.needsYou)
-        case .working: item.sessions.filter { Presentation.inFilter($0, .working) }
+        case .onDuty: item.sessions.filter { !$0.isOffDuty }
+        case .needsYou: item.sessions.filter { !$0.isOffDuty && $0.needsYou }
+        case .working: item.sessions.filter { !$0.isOffDuty && Presentation.inFilter($0, .working) }
+        case .offDuty: item.sessions.filter(\.isOffDuty)
         case .shared: item.shared ? item.sessions : []
         }
     }

@@ -113,6 +113,9 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
     }
     enum CodingKeys: String, CodingKey { case schema, ponds, order, threads, other, pondOwnThreads, ducksOwnBranch }
 
+    /// Every key a place may hold for a pond that is here: its id, project id and pond id.
+    public var liveKeys: Set<String> { Set(ponds.flatMap { [$0.id, $0.projectId, $0.pondId].compactMap { $0 } }) }
+    public func hasPond(key: String) -> Bool { liveKeys.contains(key) }
     public func pond(id: String) -> Pond? { ponds.first { $0.id == id } }
     public func pond(projectId: String) -> Pond? { ponds.first { $0.projectId == projectId } }
     public func pond(pondId: String) -> Pond? { ponds.first { $0.pondId == pondId } }

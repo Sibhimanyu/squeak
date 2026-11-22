@@ -45,6 +45,13 @@ public enum WorkbenchLocation: Equatable, Hashable, Codable, Sendable {
         }
     }
 
+    /// The location with any pond that is not `live` taken out: a page of a gone pond is the Dashboard. A nil `live`
+    /// (the directory has not loaded) prunes nothing, so a slow start never wipes the places.
+    public func prune(livePonds live: Set<String>?) -> WorkbenchLocation {
+        guard let live, let key = pondKey, !live.contains(key) else { return self }
+        return .home
+    }
+
     /// Where the centre falls back to when a page over it closes: the open chat, else the Dashboard.
     public static func resting(chat: SessionKey?) -> WorkbenchLocation { chat.map { .chat($0) } ?? .home }
 
@@ -86,6 +93,12 @@ public struct PlaceMemory: Codable, Equatable, Sendable {
     public mutating func prune(existing: Set<SessionKey>) {
         pondChats = pondChats.filter { existing.contains($0.value) }
         workspaceChats = workspaceChats.filter { existing.contains($0.value) }
+    }
+
+    /// Forgets every pond that is not in `live`. A nil `live` (directory not loaded) forgets nothing.
+    public mutating func prune(livePonds live: Set<String>?) {
+        guard let live else { return }
+        pondChats = pondChats.filter { live.contains($0.key) }
     }
 
     public static let defaultsKey = "placeMemory"

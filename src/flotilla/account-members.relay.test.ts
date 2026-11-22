@@ -465,6 +465,38 @@ describe("members are accounts: a second device of the same account joins withou
   });
 });
 
+describe("members are accounts: leaving a pond marks the account's entry", () => {
+  it("pond-leaves flags the entry (idempotent), 403 when not listed, owner's add clears it, remove drops it", async () => {
+    const A = await mac(SIBHI);
+    const pond = await A.service.createPond({ name: "Leave", projectId: "pl", gitRemote: "git@github.com:acme/l.git" });
+    const members = (add: string[], remove: string[]) =>
+      fetch(`${deviceUrl}/ponds/${pond.id}/members/accounts`, {
+        method: "POST",
+        headers: { "x-squeak-relay": A.key, "content-type": "application/json" },
+        body: JSON.stringify({ ownerKey: A.service.me.publicKey, name: "Leave", add, remove }),
+      });
+    expect((await members([AARAV.userId], [])).status).toBe(204);
+    const token = await accountToken(AARAV);
+    const list = async () => ((await (await asAccount(token, "/account/ponds")).json()) as any).ponds as any[];
+    const leave = (t: string, pondId: string) =>
+      asAccount(t, "/account/pond-leaves", { method: "POST", body: JSON.stringify({ pondId }) });
+    expect(await list()).toEqual([{ pondId: pond.id, ownerKey: A.service.me.publicKey, name: "Leave" }]);
+    expect((await leave(token, pond.id)).status).toBe(204);
+    expect((await leave(token, pond.id)).status).toBe(204);
+    expect(await list()).toEqual([{ pondId: pond.id, ownerKey: A.service.me.publicKey, name: "Leave", left: true }]);
+    // not listed: 403; signed out: 401
+    expect((await leave(await accountToken(EVE), pond.id)).status).toBe(403);
+    expect((await fetch(`${deviceUrl}/account/pond-leaves`, { method: "POST", body: "{}" })).status).toBe(401);
+    // a fresh add clears the marker
+    await members([AARAV.userId], []);
+    expect((await list())[0].left).toBeUndefined();
+    // remove clears the entry including the marker
+    await leave(token, pond.id);
+    await members([], [AARAV.userId]);
+    expect(await list()).toEqual([]);
+  });
+});
+
 describe("members are accounts: what must not attach", () => {
   it("a member who joined signed out has no account to attach devices to", async () => {
     const A = await mac(SIBHI);

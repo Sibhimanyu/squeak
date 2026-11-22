@@ -24,8 +24,19 @@ struct PondRouteView: View {
         sidebarHidden ? PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
     }
 
+    /// The pond key the route is for; a loaded directory without it means the pond is gone.
+    private var goneKey: String? {
+        switch route {
+        case .home(let p), .settings(let p), .thread(let p, _, _): PondsModel.shared.isGone(p) ? p : nil
+        case .archived: nil
+        }
+    }
+
     var body: some View {
-        if case .home(let project) = route, let projectId = roomProject(project) {
+        if goneKey != nil {
+            // Never an empty owner pond: the location is pruned to the Dashboard; nothing draws meanwhile.
+            Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
+        } else if case .home(let project) = route, let projectId = roomProject(project) {
             PondSpace(key: project, projectId: projectId, leadingInset: sidebarClearance) { standard }
         } else {
             standard
@@ -76,6 +87,7 @@ struct PondHomeView: View {
     private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
     private var native: NativeProject? { ponds.native(key: key) }
+    private var roster: RoomRosterModel? { native.map { RoomRosterStore.shared.model(for: $0.id) } }
     private var localSessions: [HostSession] { model.pondProject(key).workspaces.flatMap(\.chats) }
     private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
@@ -86,7 +98,7 @@ struct PondHomeView: View {
             emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
+            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [])
     }
 
     var body: some View {
@@ -111,6 +123,7 @@ struct PondHomeView: View {
         .background(Theme.bg)
         .onAppear { ponds.note = nil }
         .pondHeartbeat(pond: pond?.id)
+        .task(id: native?.id) { if native != nil { await roster?.refresh(host: model.nativeHost) } }
     }
 
     // MARK: Identity and overview
@@ -251,24 +264,32 @@ struct PondHomeView: View {
     }
 
     private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: compact ? 2 : 4), spacing: 12) {
-            ForEach(PondDashboardScope.allCases, id: \.self) { item in
-                Button { scope = item } label: {
+        let counts = PondCounts.resolve(roster?.counts, rows: layout.threads)
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: compact ? 2 : 4), spacing: 12) {
+            ForEach(PondDashboardScope.tiles, id: \.self) { item in
+                let count = counts.count(item) + (item == .needsYou && role.canApproveJoins ? (detail?.joins.count ?? 0) : 0)
+                Button { scope = scope == item ? .all : item } label: {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 6) {
                             if item == .needsYou {
-                                Lucide(.triangleAlert, size: 13, color: layout.count(in: item) > 0 ? Theme.warning : Theme.muted)
+                                Lucide(.triangleAlert, size: 13, color: count > 0 ? Theme.warning : Theme.muted)
+                            } else if item == .working && count > 0 {
+                                WorkingGlyph(slot: 20, alignment: .leading, grid: .compact)
                             }
                             Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted)
                         }
-                        Text(verbatim: "\(layout.count(in: item) + (item == .needsYou && role.canApproveJoins ? (detail?.joins.count ?? 0) : 0))")
-                            .font(.system(size: 28, weight: .medium)).monospacedDigit().foregroundStyle(Theme.ink)
+                        Text(verbatim: "\(count)")
+                            .font(.system(size: item == .onDuty ? 34 : 28, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(item == .needsYou && count > 0 ? Theme.warning : Theme.ink)
+                        if let line = PondCounts.secondary(item, counts) {
+                            Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                     .background(scope == item ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("\(item.title), \(layout.count(in: item)) ducks")
+                .accessibilityLabel("\(item.title), \(count) ducks")
                 .accessibilityAddTraits(scope == item ? .isSelected : [])
                 .help("Show \(item.title.lowercased())")
             }
@@ -296,6 +317,11 @@ struct PondHomeView: View {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
                 }
+                Menu {
+                    Toggle("Shared", isOn: Binding(get: { scope == .shared }, set: { scope = $0 ? .shared : .all }))
+                } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .foregroundStyle(scope == .shared ? Theme.ink : Theme.muted).help("Filter").accessibilityLabel("Filter ducks")
             }
             .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
             if scope != .all || !query.isEmpty {

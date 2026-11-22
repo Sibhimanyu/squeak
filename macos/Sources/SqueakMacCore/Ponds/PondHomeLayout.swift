@@ -38,6 +38,8 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     /// Background helpers still running in this Mac's chat (the sidebar row's duckling). Another Mac's thread carries none:
     /// the pond data does not say, so it stays 0 rather than invented.
     public var ducklingsRunning: Int = 0
+    /// The duck is on duty (the host's roster says; a row it does not list is on duty).
+    public var onDuty: Bool = true
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
     /// Ducks mode: the duck's branch ("main" on main), the row's small mono label; nil otherwise.
@@ -103,7 +105,7 @@ public struct PondHomeLayout: Sendable, Equatable {
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
         emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil },
-        hiddenThreads: Set<String> = [], ownThreads: Bool = true
+        hiddenThreads: Set<String> = [], ownThreads: Bool = true, offDutySessions: Set<String> = []
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -147,6 +149,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
+                if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false }
                 if ws.isDucks { made.branch = DuckRow(session: s, isMain: main?.contains(s) ?? false).label }
                 return made
             }
@@ -211,13 +214,18 @@ public struct PondHomeLayout: Sendable, Equatable {
 
 /// A dashboard scope always filters the same deduplicated rows that the branch list displays.
 public enum PondDashboardScope: String, CaseIterable, Sendable {
-    case all, needsYou, working, shared
+    case all, onDuty, working, needsYou, offDuty, shared
+
+    /// The dashboard's tiles, left to right. Shared is a filter in the search field's menu, not a tile.
+    public static let tiles: [PondDashboardScope] = [.onDuty, .working, .needsYou, .offDuty]
 
     public var title: String {
         switch self {
         case .all: "All ducks"
-        case .needsYou: "Needs you"
+        case .onDuty: "On duty"
         case .working: "Working"
+        case .needsYou: "Needs you"
+        case .offDuty: "Off duty"
         case .shared: "Shared"
         }
     }
@@ -225,8 +233,10 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
     public func includes(_ row: PondChatRow) -> Bool {
         switch self {
         case .all: true
-        case .needsYou: row.state == .needsYou
-        case .working: row.state == .working || row.ducklingsRunning > 0
+        case .onDuty: row.onDuty
+        case .needsYou: row.onDuty && row.state == .needsYou
+        case .working: row.onDuty && (row.state == .working || row.ducklingsRunning > 0)
+        case .offDuty: !row.onDuty
         case .shared: row.shared
         }
     }

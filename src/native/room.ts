@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { pondCounts, type PondCounts } from "../fleet/pond-counts.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -353,7 +354,7 @@ export class Room extends EventEmitter {
   page(
     projectId: string,
     opts: { since?: number; before?: number; limit?: number },
-  ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[]; turns: RoomTurn[] } {
+  ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[]; turns: RoomTurn[]; counts?: PondCounts } {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
     const rows = this.store
       .roomPosts(projectId, {
@@ -379,6 +380,7 @@ export class Room extends EventEmitter {
       latestSeq: this.store.latestRoomSeq(projectId),
       threads: this.threads(projectId),
       turns: this.turns(projectId, from, to),
+      counts: this.duckCounts(projectId),
     };
   }
 
@@ -680,6 +682,17 @@ export class Room extends EventEmitter {
     return this.duckCandidates(projectId, 30 * 24 * 3_600_000, { offDuty: true })
       .map((c) => this.duckView(c.duck))
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt || a.id.localeCompare(b.id));
+  }
+
+  /** The pond dashboard's numbers over the ducks `listDucks` lists (`fleet/pond-counts.ts`). */
+  duckCounts(projectId: string): PondCounts {
+    return pondCounts(
+      this.listDucks(projectId).map((d) => ({
+        duty: d.duty,
+        working: d.state === "working",
+        needsYou: d.state === "waiting",
+      })),
+    );
   }
 
   /** An identity with no session yet: a name (1..32) and an optional role. */

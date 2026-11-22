@@ -51,6 +51,11 @@ export interface PondRelay {
    * in the pond's index, writes the relay-owned device request the owner's Mac reads, and answers a token that reads
    * what the owner writes back for this device. Throws `RelayRefused` with the status (403 not a member or removed, 429).
    */
+  /**
+   * This account leaves the pond on every device (`POST /account/pond-leaves { pondId }`): the relay marks the account's
+   * index entry `left` and `accountPonds` then lists it with `left: true`. Absent or refused on an older relay.
+   */
+  leaveAccountPond?(pondId: string): Promise<void>;
   requestDevice?(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }>;
 }
 
@@ -65,6 +70,8 @@ export interface AccountPond {
   pondId: string;
   ownerKey: string;
   name?: string;
+  /** This account left the pond (on any device): other devices drop it and never ask to be added. */
+  left?: true;
 }
 
 export interface DeviceRequestBody {
@@ -240,17 +247,28 @@ export class HttpPondRelay implements PondRelay {
     const body = (await response.json().catch(() => null)) as { ponds?: unknown } | null;
     if (!body || !Array.isArray(body.ponds)) throw new Error("catalyst account/ponds: unexpected answer");
     return body.ponds.flatMap((row: unknown) => {
-      const r = row as { pondId?: unknown; ownerKey?: unknown; name?: unknown } | null;
+      const r = row as { pondId?: unknown; ownerKey?: unknown; name?: unknown; left?: unknown } | null;
       return r && typeof r.pondId === "string" && typeof r.ownerKey === "string"
         ? [
             {
               pondId: r.pondId,
               ownerKey: r.ownerKey,
               ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
+              ...(r.left === true ? { left: true as const } : {}),
             },
           ]
         : [];
     });
+  }
+
+  async leaveAccountPond(pondId: string): Promise<void> {
+    const response = await this.fetchImpl(`${this.url}/account/pond-leaves`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      body: JSON.stringify({ pondId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
   }
 
   async requestDevice(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }> {

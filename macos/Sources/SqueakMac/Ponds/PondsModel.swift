@@ -105,6 +105,7 @@ final class PondsModel {
             if oldValue?.pondOwnThreads != directory?.pondOwnThreads { ponds = PondOwnThreads.adjusted(ponds, ownThreads: ownThreads) }
             // Ducks mode changes how the tree is built: every derived list and the focus read again.
             if oldValue?.ducksMode != directory?.ducksMode { AppModel.shared.inputsChanged() }
+            if let directory, directoryLoad.loaded { AppModel.shared.prunePonds(live: directory.liveKeys) }
         }
     }
     /// Stashed own-Mac threads: the daemon's word (docs/ponds.md); every pond list is read through it.
@@ -243,6 +244,12 @@ final class PondsModel {
     /// Demo and capture runs have no host: the directory is made from the demo projects (id = project id).
     func useDemoDirectory(_ list: [NativeProject]) {
         directory = PondDirectory(ponds: list.map { PondDirectory.Pond(id: $0.id, name: $0.name, projectId: $0.id, hidden: $0.hidden, labels: $0.labels, folder: $0.rootPath) })
+    }
+
+    /// True when the directory has loaded and has no pond under `key`: its page must not draw.
+    func isGone(_ key: String) -> Bool {
+        guard directoryLoad.loaded, let directory else { return false }
+        return !directory.hasPond(key: key)
     }
 
     /// What the directory load has seen so far; the sidebar reads it to tell "loading" from "no ponds".
@@ -555,11 +562,19 @@ final class PondsModel {
         guard membership(of: key) != .owner else { return false }
         let id = (directory?.pond(id: key) ?? directory?.pond(pondId: key))?.pondId ?? pond(key: key)?.id ?? key
         guard await leave(pond: id) else { return false }
-        if var d = directory { d.ponds.removeAll { $0.id == key || $0.pondId == id }; directory = d }
-        ponds.removeAll { $0.id == id }
-        WorkbenchNav.goHome(AppModel.shared)
-        await refreshDirectory()
+        await dropGone(id: id, key: key)
         return true
+    }
+
+    /// A pond that is gone (left, deleted): out of the directory and the list at once (the directory's change prunes every
+    /// place that pointed at it), the Dashboard, then the host's word.
+    private func dropGone(id: String, key: String? = nil) async {
+        let key = key ?? id
+        if var d = directory { d.ponds.removeAll { $0.id == key || $0.id == id || $0.pondId == id }; directory = d }
+        ponds.removeAll { $0.id == id }
+        if let live = directory?.liveKeys, directoryLoad.loaded { AppModel.shared.prunePonds(live: live) }
+        else if AppModel.shared.location.pondKey == key || AppModel.shared.location.pondKey == id { WorkbenchNav.goHome(AppModel.shared) }
+        await refreshDirectory()
     }
 
     func removeMyDevice(pond: String, deviceKeyId: String) async {
@@ -574,7 +589,7 @@ final class PondsModel {
 
     func deletePond(pond: String) async -> Bool {
         let ok = await act("delete:\(pond)", pond: pond, success: nil) { try await self.client!.deletePond(pond: pond) }
-        if ok { route = nil }
+        if ok { await dropGone(id: pond) }
         return ok
     }
 
