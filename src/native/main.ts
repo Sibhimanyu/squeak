@@ -1,4 +1,4 @@
-import { flag } from "../squeak/flags.js";
+import { flag, initFlags } from "../squeak/flags.js";
 import path from "node:path";
 
 import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
@@ -23,7 +23,14 @@ import { RoomSummariser } from "./room-summary.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
+/** The host is its own process: it must read `<supportDir>/flags.json` itself, as the daemon's config load does, or a
+ * flag set in the file (not the environment) is on in the daemon and off in the host. */
+export function initHostFlags(supportDir: string): void {
+  initFlags(supportDir);
+}
+
 export async function runHost(supportDir: string): Promise<void> {
+  initHostFlags(supportDir);
   // Before anything starts an agent or a script: they inherit this PATH.
   logger.info("squeak host PATH", { from: adoptLoginShellPath() });
   startSystemProxy();
