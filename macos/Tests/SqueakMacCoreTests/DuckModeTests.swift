@@ -131,4 +131,15 @@ import Testing
         raw = DuckGroupPrefs.toggled(raw, pond: "p1")
         #expect(!DuckGroupPrefs.contains(raw, pond: "p1") && DuckGroupPrefs.contains(raw, pond: "p2"))
     }
+
+    /// Live shape (2026-11-22): the host's /native/sessions carries duckId and branch; the daemon's /state does not carry duckId.
+    @Test func duckIdAndBranchComeFromTheHostList() throws {
+        let host = #"{"id":"d7d89252-31b6-4f65-9c77-74f46c6ea5aa","workspaceId":"87d08ded","cwd":"/x/hong-kong","agent":"claude","title":"Rebuild and Improve Website Content","status":"idle","branch":"rethink-presence","duckId":"b661a98c-97be-4b39-8a02-4287efbf2c10"}"#
+        let ns = try JSONDecoder().decode(NativeSession.self, from: Data(host.utf8))
+        let h = NativeAdapter.map(ns, overlay: nil)
+        #expect(h.duckId == "b661a98c-97be-4b39-8a02-4287efbf2c10")
+        #expect(h.branch == "rethink-presence")
+        let old = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"a","status":"idle"}"#.utf8))
+        #expect(NativeAdapter.map(old, overlay: nil).duckId == nil)
+    }
 }

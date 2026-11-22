@@ -142,7 +142,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             title: DaemonAdapter.nonEmpty(s.title) ?? d?.title ?? "",
             distinctTitle: DaemonAdapter.nonEmpty(d?.distinctTitle),
             repoName: DaemonAdapter.nonEmpty(d?.repoName) ?? folder,
-            branch: DaemonAdapter.nonEmpty(d?.branch),
+            branch: DaemonAdapter.nonEmpty(s.branch) ?? DaemonAdapter.nonEmpty(d?.branch),
             cwd: DaemonAdapter.nonEmpty(s.cwd),
             agent: s.agent,
             state: ask == nil ? state : .blocked,
@@ -167,7 +167,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.largeCompacting = s.isLarge ? s.largeCompacting : nil
         h.autoCompactAt = s.autoCompactAt
         h.lastTurnEndedAt = s.lastTurnEndedAt
-        h.duckId = DaemonAdapter.nonEmpty(d?.duckId)
+        h.duckId = DaemonAdapter.nonEmpty(s.duckId) ?? DaemonAdapter.nonEmpty(d?.duckId)
         h.hostDucklingsOnly = s.ducklingsOnly
         h.retryable = s.retryable && state == .error ? true : nil
         return h

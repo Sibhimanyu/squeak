@@ -278,12 +278,14 @@ struct PondHomeView: View {
                             }
                             Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted)
                         }
+                        .frame(height: 16)  // the working glyph or the alert icon never makes one tile taller
                         Text(verbatim: "\(count)")
-                            .font(.system(size: item == .onDuty ? 34 : 28, weight: .medium)).monospacedDigit()
+                            .font(.system(size: 28, weight: .medium)).monospacedDigit()
                             .foregroundStyle(item == .needsYou && count > 0 ? Theme.warning : Theme.ink)
-                        if let line = PondCounts.secondary(item, counts) {
-                            Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted)
-                        }
+                        // Every tile reserves the secondary line ("21 in all" on Off duty) so the four are one height.
+                        let line = PondCounts.secondary(item, counts)
+                        Text(verbatim: line ?? " ").font(Typo.meta).foregroundStyle(Theme.muted)
+                            .opacity(line == nil ? 0 : 1).accessibilityHidden(line == nil)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                     .background(scope == item ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12))

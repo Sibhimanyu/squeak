@@ -93,8 +93,13 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var contextLimit: Int?
     /// When the person archived the chat; nil in the list (and from a host that predates archiving).
     public var archivedAt: Date?
+    /// The host's own word for the chat's branch and duck (flag `ducksOwnBranch`). The daemon's `/state` carries no
+    /// `duckId`, so the host's list is where the Mac learns it.
+    public var branch: String?
+    public var duckId: String?
 
     enum CodingKeys: String, CodingKey {
+        case branch, duckId
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
         case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable, autoCompactAt
     }
@@ -120,6 +125,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
         archivedAt = c.lenient(String.self, .archivedAt).flatMap(DaemonDate.parse)
+        branch = c.lenient(String.self, .branch)
+        duckId = c.lenient(String.self, .duckId)
         backgroundCount = c.lenient(Background.self, .background)?.count
         ducklings = c.lenient(DucklingSet.self, .ducklings)
         helpersWorking = c.lenient(Bool.self, .helpersWorking) ?? false
