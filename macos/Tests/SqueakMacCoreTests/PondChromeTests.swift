@@ -54,11 +54,12 @@ final class PondChromeTests: XCTestCase {
     func testPeopleOnlyStripAndPlus() {
         let rec = InspectorTabsRecord(open: [.code, .files], selected: .code)
         let s = InspectorStrip.make(context: .pond, record: rec, terminals: [UUID()], peopleOnly: true)
-        XCTAssertEqual(s.tabs, [.pond]); XCTAssertEqual(s.selected, .pond)
+        XCTAssertEqual(s.tabs, [.pond, .artifacts]); XCTAssertEqual(s.selected, .pond); XCTAssertEqual(s.pinned, .pond)
+        XCTAssertEqual(InspectorStrip.make(context: .pond, record: InspectorTabsRecord(open: [], selected: .artifacts), peopleOnly: true).selected, .artifacts)
         XCTAssertTrue(InspectorStrip.plusItems(context: .pond, peopleOnly: true).isEmpty)
         XCTAssertEqual(InspectorStrip.make(context: .pond, record: rec).tabs, [.pond, .artifacts, .code, .files])
-        // Beside a chat, a remote pond keeps its panels with no Artifacts; an owner's has the pinned tab.
-        XCTAssertEqual(InspectorStrip.make(context: .stream(panels: [.code]), peopleOnly: true).tabs, [.panel(.code)])
+        // Beside a chat a remote pond has the pinned Artifacts tab too.
+        XCTAssertEqual(InspectorStrip.make(context: .stream(panels: [.code]), peopleOnly: true).tabs, [.panel(.code), .artifacts])
         XCTAssertEqual(InspectorStrip.make(context: .stream(panels: [.code])).tabs, [.panel(.code), .artifacts])
     }
 

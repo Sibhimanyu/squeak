@@ -167,7 +167,7 @@ struct PondInspectorZone: View {
         case .files:
             CodePanelView(session: model.selectedSession, fixedTab: .files)
         case .artifacts:
-            ArtifactsTab(projectId: projectId)
+            if PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly { RemoteArtifactsTab(key: key) } else { ArtifactsTab(projectId: projectId) }
         case .terminal(let id):
             TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
         }

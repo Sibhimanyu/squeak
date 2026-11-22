@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { HostEvent } from "../native/host.js";
 import type {
   MessageRow,
@@ -11,7 +12,11 @@ import { Normalizer } from "./normalize.js";
 import {
   FlotillaError,
   KEEP_EVENTS,
+  ARTIFACT_ID,
+  MAX_ARTIFACT_BYTES,
+  MAX_ARTIFACT_ITEMS,
   MAX_DIFF_RESULT_BYTES,
+  type SharedArtifact,
   MAX_PATHS,
   MAX_TEXT,
   type DiffResult,
@@ -49,6 +54,12 @@ export interface HostPort {
   timelineTail?(id: string): TimelineEvent[];
 }
 
+/** One artifact the owner's Mac may hand over: `path` is absolute and stays here, `id` is the wire id. */
+export interface ShareableArtifactRow extends SharedArtifact {
+  id: string;
+  absPath: string;
+}
+
 /** What sending a message to a thread says: where it is now, and one sentence for it. */
 export interface SendResult {
   ok: boolean;
@@ -79,6 +90,11 @@ export interface BridgeOptions {
     projectId: string,
     spec: { text: string; agent: "claude" | "codex"; model: string; permissionMode: string; main: true },
   ) => Promise<{ sessionId: string } | null>;
+  /**
+   * The owner's artifacts a member may be handed (outputs only; see `Artifacts.shareable`): each with the absolute path
+   * that never leaves this Mac. Without it this Mac answers `artifacts` with an empty list.
+   */
+  artifacts?: (projectId: string, privateSessionIds: ReadonlySet<string>) => Array<ShareableArtifactRow>;
   /** The permission mode a member's thread starts in (the owner's default); `bypassPermissions` is never honoured. */
   permissionModeFor?: (pondId: string) => string | undefined;
 }
@@ -428,6 +444,7 @@ export class FlotillaBridge {
   private async execute(pondId: string, v: VerifiedCommand): Promise<void> {
     const { cmd, from } = v;
     if (cmd.kind === "start") return this.startFor(pondId, v);
+    if (cmd.kind === "artifacts" || cmd.kind === "artifact") return this.artifactsFor(pondId, v);
     const thread = v.thread;
     if (!thread) throw new FlotillaError("no such thread");
     const session = this.host.getSession(thread.sessionId);
@@ -505,6 +522,53 @@ export class FlotillaBridge {
       files,
       summary: { files: changes.files, added: changes.added, removed: changes.removed },
       ...(patch ? { patch } : {}),
+    });
+  }
+
+  /**
+   * `artifacts`: the list. `artifact`: one file, only when its id is in the list this Mac would give right now (so a
+   * path cannot name anything else), under the size cap, sent in chunks. Refusals are short fixed sentences.
+   */
+  private async artifactsFor(pondId: string, v: VerifiedCommand): Promise<void> {
+    const { cmd, from } = v;
+    const projectId = this.service.projectIdOf(pondId);
+    const rows =
+      projectId && this.options.artifacts
+        ? this.options.artifacts(projectId, this.service.privateSessionIds(pondId)).slice(0, MAX_ARTIFACT_ITEMS)
+        : [];
+    const items: SharedArtifact[] = rows.map((r) => ({
+      path: r.id,
+      name: r.name,
+      kind: r.kind,
+      source: r.source,
+      modifiedAt: r.modifiedAt,
+      size: r.size,
+      ...(r.duckName ? { duckName: r.duckName } : {}),
+      ...(r.branch ? { branch: r.branch } : {}),
+    }));
+    if (cmd.kind === "artifacts") {
+      await this.service.publishArtifactsResult(pondId, { id: cmd.id, to: from.id, items });
+      return;
+    }
+    const row = cmd.path && ARTIFACT_ID.test(cmd.path) ? rows.find((r) => r.id === cmd.path) : undefined;
+    const refuse = async (line: string): Promise<void> => {
+      await this.service.publishArtifactsRefusal(pondId, cmd.id, from.id, line);
+    };
+    if (!row) return refuse("That file is no longer shared.");
+    let bytes: Buffer;
+    try {
+      const st = fs.statSync(row.absPath);
+      if (!st.isFile()) return refuse("That file is no longer shared.");
+      if (st.size > MAX_ARTIFACT_BYTES) return refuse("That file is too large to send (25 MB at most).");
+      bytes = fs.readFileSync(row.absPath);
+    } catch {
+      return refuse("That file is no longer shared.");
+    }
+    await this.service.publishArtifactsResult(pondId, {
+      id: cmd.id,
+      to: from.id,
+      items: [],
+      file: { path: row.id, name: row.name, kind: row.kind, bytes },
     });
   }
 

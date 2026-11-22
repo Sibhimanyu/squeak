@@ -138,8 +138,11 @@ public struct InspectorStrip: Equatable, Sendable {
         context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), terminals: [UUID] = [],
         selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, artifactsSelected: Bool = false, peopleOnly: Bool = false
     ) -> InspectorStrip {
-        // A remote pond has no code on this Mac: the Pond tab (People, Recent) alone, whatever was saved.
-        if peopleOnly, case .pond = context { return InspectorStrip(tabs: [.pond], selected: .pond, pinned: .pond) }
+        // A remote pond has no code on this Mac: the Pond tab (People, Recent) and Artifacts (the owner's outputs, fetched on
+        // request), whatever else was saved.
+        if peopleOnly, case .pond = context {
+            return InspectorStrip(tabs: [.pond, .artifacts], selected: record.selected == .artifacts ? .artifacts : .pond, pinned: .pond)
+        }
         var tabs: [RightTab] = []
         switch context {
         case .pond:
@@ -156,9 +159,9 @@ public struct InspectorStrip: Equatable, Sendable {
         case .stream(let panels):
             let shown = panels.filter { $0 != .terminal }
             tabs = (shown.isEmpty ? [.code] : shown).map { .panel($0) }
-            // Artifacts sits right after the first panel, pinned, as it does beside a pond page (a remote pond keeps its
-            // people-only chrome and gets none).
-            if !peopleOnly { tabs.insert(.artifacts, at: 1) }
+            // Artifacts sits right after the first panel, pinned, as it does beside a pond page (a remote pond's lists the
+            // owner's outputs).
+            tabs.insert(.artifacts, at: 1)
         }
         tabs += terminals.map { .terminal($0) }
         let pinned = tabs[0]

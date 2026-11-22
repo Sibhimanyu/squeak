@@ -7,6 +7,7 @@ const NEW_THREAD_MODE = "bypassPermissions";
 import { CatalystStore } from "../cloud/catalyst-store.js";
 import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
+import { Artifacts } from "../native/artifacts.js";
 import type { HostEvent } from "../native/host.js";
 import type { SessionHost } from "../native/host.js";
 import type { AgentTools } from "../native/agent-tools.js";
@@ -227,9 +228,24 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
       return createCloudStore(at as CloudLocation);
     },
   });
+  const artifactsOf = new Artifacts({ store: deps.store });
   const bridge = new FlotillaBridge(service, hostPortFor(deps), {
     // A member's thread on this Mac: in the pond's folder (Main for a git pond), always asking first.
     startChat: (projectId, spec) => startInProject(deps, projectId, spec),
+    // What a member of a pond may be handed: outputs from non-private chats, never source code.
+    artifacts: (projectId, privateSessionIds) =>
+      artifactsOf.shareable(projectId, privateSessionIds).map((a) => ({
+        id: a.id,
+        absPath: a.path,
+        path: a.id,
+        name: a.name,
+        kind: a.kind,
+        source: a.source,
+        modifiedAt: a.modifiedAt,
+        size: a.size,
+        ...(a.duckName ? { duckName: a.duckName } : {}),
+        ...(a.branch ? { branch: a.branch } : {}),
+      })),
   });
   const routes = new FlotillaRoutes({
     service,

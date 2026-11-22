@@ -109,7 +109,7 @@ import Testing
 
     @Test func remotePondAndOldSavesStayPeopleOnlyOrClean() throws {
         var r = InspectorTabsRecord(); r.open(.artifacts)
-        #expect(InspectorStrip.make(context: .pond, record: r, peopleOnly: true).tabs == [.pond])
+        #expect(InspectorStrip.make(context: .pond, record: r, peopleOnly: true).tabs == [.pond, .artifacts])
         let old = try JSONDecoder().decode(InspectorTabsRecord.self, from: Data(#"{"open":["files","bogus"],"selected":"artifacts"}"#.utf8))
         #expect(old.open == [.files] && old.selected == .artifacts)
         // Artifacts is always in the strip, so a saved Artifacts selection is kept.
@@ -127,12 +127,12 @@ import Testing
         #expect(InspectorStrip.make(context: .stream(panels: [.pond, .code])).tabs == [.panel(.pond), .artifacts, .panel(.code)])
     }
 
-    @Test func artifactsCanBeTheShownTabButAShellWinsAndPeopleOnlyHasNone() {
+    @Test func artifactsCanBeTheShownTabButAShellWinsAndPeopleOnlyHasIt() {
         let id = UUID()
         #expect(InspectorStrip.make(context: .stream(panels: [.code]), artifactsSelected: true).selected == .artifacts)
         #expect(InspectorStrip.make(context: .stream(panels: [.code]), terminals: [id], selectedTerminal: id, artifactsSelected: true).selected == .terminal(id))
         #expect(InspectorStrip.make(context: .stream(panels: [.code])).selected == .panel(.code))
         let remote = InspectorStrip.make(context: .stream(panels: [.code]), artifactsSelected: true, peopleOnly: true)
-        #expect(remote.tabs == [.panel(.code)] && remote.selected == .panel(.code))
+        #expect(remote.tabs == [.panel(.code), .artifacts] && remote.selected == .artifacts)
     }
 }

@@ -38,10 +38,25 @@ struct ArtifactViewerPage: View {
     @State private var slides: Int?
     @State private var systemApp: String?
     @State private var illustratorURL: URL?
+    /// A remote pond's file once the owner's Mac has sent it: the cached copy on this Mac. Until then there is nothing to open.
+    @State private var fetched: RemoteArtifactFile?
+    @State private var fetching: Fetch?
 
-    private var url: URL { URL(fileURLWithPath: path) }
+    private enum Fetch: Equatable { case downloading(Double?), failed(String) }
+
+    /// A remote pond's artifact: `path` is the owner's wire id, not a path.
+    private var remote: Bool { PondsModel.shared.chrome(key: pond).inspectorPeopleRecentOnly }
+    private var ownerMac: String { PondsModel.shared.chrome(key: pond).ownerMac }
+    /// What the viewer reads: the cached copy for a remote pond (empty until it arrives), else the file itself.
+    private var filePath: String { remote ? (fetched?.path ?? "") : path }
+    private var url: URL { URL(fileURLWithPath: filePath) }
 
     private var item: ArtifactItem {
+        if remote {
+            if let hit = RemoteArtifactsStore.shared.model(for: pond).items.first(where: { $0.path == path }) { return hit }
+            if let f = fetched { return ArtifactItem(path: path, name: f.name, kind: f.kind, size: f.size) }
+            return ArtifactItem(path: path, name: "File")
+        }
         let id = PondsModel.shared.native(key: pond)?.id
         if let id, let hit = ArtifactsStore.shared.model(for: id).items.first(where: { $0.path == path }) { return hit }
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
@@ -62,21 +77,45 @@ struct ArtifactViewerPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.bg)
         .task(id: path) {
-            content = nil; slides = nil
-            let found = await ArtifactLoader.load(path: path)
+            content = nil; slides = nil; fetched = nil; fetching = nil
+            if remote {
+                guard await download() else { return }
+            }
+            let local = filePath
+            let found = await ArtifactLoader.load(path: local)
             content = found
-            if case .quickLook = found { slides = await ArtifactLoader.slideCount(path: path) }
+            if case .quickLook = found { slides = await ArtifactLoader.slideCount(path: local) }
         }
-        .task(id: path) {
+        .task(id: filePath) {
             systemApp = ArtifactLoader.defaultAppName(for: url)
             illustratorURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.adobe.illustrator")
         }
+    }
+
+    /// Asks the owner's Mac for the file and waits for it (progress shown); false when it did not come.
+    private func download() async -> Bool {
+        guard let pondId = PondsModel.shared.pond(key: pond)?.id else { fetching = .failed("This pond is not available."); return false }
+        fetching = .downloading(nil)
+        do {
+            let answer = try await RemoteArtifacts.waitForFile(
+                PondsClient(host: model.nativeHost), pond: pondId, id: path, progress: { p in Task { @MainActor in fetching = .downloading(p) } })
+            switch answer {
+            case .ready(let file): fetched = file; fetching = nil; return true
+            case .failed(let why): fetching = .failed(why)
+            case .pending: fetching = .failed(RemoteArtifacts.offline(ownerMac))
+            }
+        } catch is CancellationError {
+        } catch {
+            fetching = .failed("Squeak couldn\u{2019}t fetch this file. Try again.")
+        }
+        return false
     }
 
     // MARK: Header and toolbar
 
     private func header(_ item: ArtifactItem) -> some View {
         var extras: [String] = []
+        if remote { extras.append(RemoteArtifacts.fromLine(ownerMac)) }
         if let slides { extras.append(slides == 1 ? "1 slide" : "\(slides) slides") }
         if case .image(_, let px) = content, px.width > 0 { extras.append("\(Int(px.width)) \u{00D7} \(Int(px.height))") }
         return HStack(spacing: Space.s) {
@@ -101,10 +140,10 @@ struct ArtifactViewerPage: View {
     private func toolbar(_ item: ArtifactItem) -> some View {
         HStack(spacing: Space.s) {
             Button(Artifacts.openLabel(kind: item.kind, systemApp: systemApp)) { openDefault() }
-                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing)
+                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing || (remote && fetched == nil))
             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing)
-            ArtifactCopyPath(path: path)
+                .buttonStyle(SecondaryButtonStyle()).disabled(isMissing || (remote && fetched == nil))
+            if !remote || fetched != nil { ArtifactCopyPath(path: filePath) }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Space.l).frame(height: 40)
@@ -120,9 +159,9 @@ struct ArtifactViewerPage: View {
         Group {
             switch content {
             case nil:
-                Text("Opening\u{2026}").font(Typo.body).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
+                waiting
             case .missing:
-                message(title: "This file was moved or deleted", detail: path)
+                message(title: "This file was moved or deleted", detail: filePath)
             case .web(let u): ArtifactWebPage(url: u)
             case .markdown(let text, let u): MarkdownFilePreview(text: text, fileURL: u, root: u.deletingLastPathComponent())
             case .pdf(let box): ArtifactPDFViewer(document: box.document)
@@ -134,6 +173,29 @@ struct ArtifactViewerPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .id(path)
+    }
+
+    /// Before the content is read: "Opening", or a remote file's download with its progress, or why it did not come.
+    @ViewBuilder private var waiting: some View {
+        switch fetching {
+        case .downloading(let p)?:
+            VStack(spacing: Space.s) {
+                if let p, p > 0 { ProgressView(value: min(p, 1)).frame(width: 220) } else { ProgressView().controlSize(.small) }
+                Text(verbatim: RemoteArtifacts.downloading(p)).font(Typo.body).foregroundStyle(Theme.muted)
+                Text(verbatim: RemoteArtifacts.fromLine(ownerMac)).font(Typo.meta).foregroundStyle(Theme.subtle)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed(let why)?:
+            VStack(spacing: Space.s) {
+                Text("Couldn\u{2019}t get this file").font(Typo.heading).foregroundStyle(Theme.ink)
+                Text(verbatim: why).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                Button("Try again") { Task { if await download() { content = await ArtifactLoader.load(path: filePath) } } }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
+        case nil:
+            Text("Opening\u{2026}").font(Typo.body).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func message(title: String, detail: String) -> some View {

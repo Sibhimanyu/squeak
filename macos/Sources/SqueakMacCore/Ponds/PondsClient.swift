@@ -21,7 +21,7 @@ public struct PondsClient: Sendable {
     /// Pond reads go to a relay that can take several seconds; the host answers within about 6 s, from its last read if it must.
     static let readTimeout: TimeInterval = 25
 
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw NativeHostError.badResponse }
     }
 

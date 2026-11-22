@@ -440,7 +440,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         let shownTerminal = dock.activeTerminals.shown(in: zone)
         let shells = dockTerminalTabs(in: zone, session: session)
         let pin = StreamArtifactsPin.shared
-        let artifactsProject = zone == .right ? StreamArtifactsPin.projectId(for: session) : nil
+        let artifactsProject = zone == .right ? (StreamArtifactsPin.projectId(for: session) ?? StreamArtifactsPin.remoteKey(for: session)) : nil
         let firstPanel = state.panels.first(where: { $0 != .terminal && !InspectorStash.hides($0) })
         // Beside a chat the pond's Artifacts tab sits right after the first panel, pinned (policy in `InspectorStrip`).
         let showsArtifacts = artifactsProject != nil && InspectorStrip.make(
@@ -574,9 +574,11 @@ struct DockZoneBody: View {
         let fileModel = session?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         let file = DockStore.shared.files.selected[zone].flatMap { path in fileModel?.open.first { $0.path == path } }
         let shell = DockStore.shared.activeTerminals.shown(in: zone)
-        let artifactsProject = zone == .right && StreamArtifactsPin.shared.shown ? StreamArtifactsPin.projectId(for: session) : nil
+        let artifactsProject = zone == .right && StreamArtifactsPin.shared.shown ? (StreamArtifactsPin.projectId(for: session) ?? StreamArtifactsPin.remoteKey(for: session)) : nil
         Group {
-            if let artifactsProject, !StreamArtifactsPin.peopleOnly(for: session) {
+            if artifactsProject != nil, let remote = StreamArtifactsPin.remoteKey(for: session) {
+                RemoteArtifactsTab(key: remote)
+            } else if let artifactsProject {
                 ArtifactsTab(projectId: artifactsProject)
             } else if let ref = DockStore.shared.ducklings.selected[zone], let session, ref.session == session.key {
                 DucklingPanel(session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId)
@@ -819,9 +821,13 @@ struct MiddleClick: NSViewRepresentable {
         return PondsModel.shared.entry(key)?.projectId
     }
 
-    /// A remote pond has no files on this Mac: it keeps its people-only chrome, with no Artifacts tab.
-    static func peopleOnly(for session: HostSession?) -> Bool {
-        guard let session, let key = PondsModel.shared.key(of: session) else { return false }
-        return PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly
+    /// A remote pond has no files on this Mac: it keeps its people-only chrome, and its Artifacts tab lists what the owner's
+    /// Mac hands over.
+    static func peopleOnly(for session: HostSession?) -> Bool { remoteKey(for: session) != nil }
+
+    /// The pond key of a chat in a remote pond; nil for any other chat.
+    static func remoteKey(for session: HostSession?) -> String? {
+        guard let session, let key = PondsModel.shared.key(of: session), PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly else { return nil }
+        return key
     }
 }

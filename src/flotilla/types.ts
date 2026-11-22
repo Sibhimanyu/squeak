@@ -227,7 +227,7 @@ export const MAX_TEXT = 20_000;
 export const KEEP_EVENTS = 1200;
 
 /** The only things a member can ask of a thread's starter. Approving and stopping are not among them. */
-export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start"] as const;
+export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start", "artifacts", "artifact"] as const;
 export type CommandKind = (typeof COMMAND_KINDS)[number];
 
 export interface CommandDoc {
@@ -261,6 +261,103 @@ export interface DiffResult {
   summary?: { files: number; added: number; removed: number };
   /** The one file's patch the member asked for, up to `MAX_DIFF_RESULT_BYTES` of text. */
   patch?: { path: string; text: string; truncated: boolean };
+}
+
+/**
+ * The owner's artifacts for a member (`artifacts` lists, `artifact` fetches one file). Pond-level commands: no thread.
+ * Answers are sealed, owner-signed documents in `tevents` (`art-r<command id>`, and `art-r<command id>-<n>` for a file's
+ * chunks: a relay document holds under 900 KB, so a file travels in pieces). All of them live `ARTIFACT_RESULT_TTL_MS`.
+ */
+export const ARTIFACT_RESULT_TTL_MS = 10 * 60_000;
+/** Largest file the owner's Mac hands to a member. */
+export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+/** A chunk's raw bytes: base64 twice (the value, then the sealed box) must stay under the relay's 900 KB box. */
+export const ARTIFACT_CHUNK_BYTES = 360 * 1024;
+export const MAX_ARTIFACT_ITEMS = 150;
+/** Files one member may ask for per pond per hour. */
+export const ARTIFACT_FETCH_PER_HOUR = 30;
+/** An artifact's id on the wire: a hash of its path on the owner's Mac, never the path itself. */
+export const ARTIFACT_ID = /^[a-f0-9]{16}$/;
+
+export interface SharedArtifact {
+  /** The wire id (see `ARTIFACT_ID`). */
+  path: string;
+  name: string;
+  kind: string;
+  duckName?: string;
+  branch?: string;
+  source: "shown" | "found";
+  modifiedAt: number;
+  size: number;
+}
+
+export interface ArtifactsResult {
+  /** The command's id. */
+  id: string;
+  /** The member who asked. */
+  to: string;
+  at: number;
+  expiresAt: number;
+  ownerName?: string;
+  items: SharedArtifact[];
+  /** A plain sentence when the owner's Mac refused the request (a file gone, too large). */
+  error?: string;
+  /** Present for an `artifact` command: the file sent, in `chunks` documents. */
+  file?: { path: string; name: string; kind: string; size: number; chunks: number; sha256: string };
+}
+
+export function readArtifactsResult(v: unknown): ArtifactsResult | null {
+  if (!rec(v) || !rec(v.artifacts)) return null;
+  const r = v.artifacts;
+  if (!s(r.id, 80) || !s(r.to, 64) || !n(r.at) || !n(r.expiresAt) || !Array.isArray(r.items)) return null;
+  const items: SharedArtifact[] = [];
+  for (const i of r.items.slice(0, MAX_ARTIFACT_ITEMS)) {
+    if (!rec(i) || !s(i.path, 16) || !ARTIFACT_ID.test(i.path) || !s(i.name, 300) || !s(i.kind, 20)) continue;
+    if (!n(i.modifiedAt) || !n(i.size) || (i.source !== "shown" && i.source !== "found")) continue;
+    items.push({
+      path: i.path,
+      name: i.name,
+      kind: i.kind,
+      source: i.source,
+      modifiedAt: i.modifiedAt,
+      size: i.size,
+      ...(s(i.duckName, 120) ? { duckName: i.duckName } : {}),
+      ...(s(i.branch, 200) ? { branch: i.branch } : {}),
+    });
+  }
+  const f = r.file;
+  const file =
+    rec(f) &&
+    s(f.path, 16) &&
+    ARTIFACT_ID.test(f.path) &&
+    s(f.name, 300) &&
+    s(f.kind, 20) &&
+    n(f.size) &&
+    n(f.chunks) &&
+    f.size <= MAX_ARTIFACT_BYTES &&
+    f.chunks >= 0 &&
+    f.chunks <= Math.ceil(MAX_ARTIFACT_BYTES / ARTIFACT_CHUNK_BYTES) &&
+    s(f.sha256, 64)
+      ? { path: f.path, name: f.name, kind: f.kind, size: f.size, chunks: f.chunks, sha256: f.sha256 }
+      : undefined;
+  return {
+    id: r.id,
+    to: r.to,
+    at: r.at,
+    expiresAt: r.expiresAt,
+    ...(s(r.ownerName, 120) ? { ownerName: r.ownerName } : {}),
+    items,
+    ...(s(r.error, 200) ? { error: r.error } : {}),
+    ...(file ? { file } : {}),
+  };
+}
+
+/** One piece of a file: `{ chunk: { id, n, data } }`, `data` base64 of up to `ARTIFACT_CHUNK_BYTES` bytes. */
+export function readArtifactChunk(v: unknown): { id: string; n: number; data: string } | null {
+  if (!rec(v) || !rec(v.chunk)) return null;
+  const c = v.chunk;
+  if (!s(c.id, 80) || !n(c.n) || !s(c.data, 700_000)) return null;
+  return { id: c.id, n: c.n, data: c.data };
 }
 
 export const MAX_DIFF_RESULT_BYTES = 1024 * 1024;

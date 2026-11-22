@@ -6,7 +6,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { handleMcpMessage } from "./agent-tools.js";
-import { artifactKindFromPath, Artifacts, mergeArtifacts, scanArtifactFolder, type ArtifactItem } from "./artifacts.js";
+import {
+  artifactKindFromPath,
+  artifactWireId,
+  Artifacts,
+  mergeArtifacts,
+  scanArtifactFolder,
+  type ArtifactItem,
+} from "./artifacts.js";
 import { SessionHost } from "./host.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
@@ -193,5 +200,45 @@ describe("show records and the route", () => {
       (await fetch(`http://127.0.0.1:${port}/native/projects/nope/artifacts`, { headers: { "x-squeak-token": token } }))
         .status,
     ).toBe(404);
+  });
+});
+
+describe("what a remote member may be handed", () => {
+  it("outputs only: no source kinds, nothing from a private chat or duck, never a path", () => {
+    const store = new NativeStore(":memory:");
+    const root = tmp("art-share-");
+    const outside = tmp("art-outside-");
+    const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind: "folder" });
+    const write = (dir: string, name: string) => {
+      fs.writeFileSync(path.join(dir, name), "x");
+      return path.join(dir, name);
+    };
+    const pub = write(root, "deck.pdf");
+    const code = write(root, "main.ts");
+    const secret = write(root, "secret.pdf");
+    const duckPdf = write(root, "duck.pdf");
+    const found = write(root, "found.png");
+    const elsewhere = write(outside, "shown.png");
+    fs.symlinkSync(path.join(outside, "shown.png"), path.join(root, "link.png"));
+    const duck = store.createDuck({ projectId: project.id, name: "Mallard", currentSessionId: "sess-private" });
+    const rec = (p: string, sessionId: string, duckId?: string) =>
+      store.recordShownArtifact({ projectId: project.id, path: p, sessionId, duckId: duckId ?? null, at: 5 });
+    rec(pub, "sess-public");
+    rec(code, "sess-public");
+    rec(secret, "sess-private");
+    rec(duckPdf, "sess-public", duck.id);
+    rec(elsewhere, "sess-public");
+    const svc = new Artifacts({ store });
+    const got = svc.shareable(project.id, new Set(["sess-private"]));
+    const names = got.map((a) => a.name).sort();
+    // a found symlink is never listed (the scan skips it); a shown file outside every pond folder is never shared
+    expect(names).toEqual(["deck.pdf", "found.png"]);
+    expect(got.every((a) => a.id === artifactWireId(a.path) && /^[a-f0-9]{16}$/.test(a.id))).toBe(true);
+    expect(got.find((a) => a.name === "found.png")!.path).toBe(path.resolve(found));
+    // with nothing private, the shown pdf of a private chat and duck come back, source code still does not
+    const open = svc.shareable(project.id, new Set()).map((a) => a.name);
+    expect(open).toContain("secret.pdf");
+    expect(open).toContain("duck.pdf");
+    expect(open).not.toContain("main.ts");
   });
 });

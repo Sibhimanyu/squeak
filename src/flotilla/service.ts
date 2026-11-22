@@ -1,6 +1,8 @@
 import { applyRepair, backupAndJournal, planRepair, type RepairAction, type RepairRecord } from "./repair.js";
 import { joinedAccess, type DirRecord } from "./directory.js";
+import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import path from "node:path";
 
 import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
@@ -48,8 +50,17 @@ import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
 import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { LockDoc, TaskView } from "./tasks.js";
 import {
+  ARTIFACT_CHUNK_BYTES,
+  ARTIFACT_FETCH_PER_HOUR,
+  ARTIFACT_ID,
+  ARTIFACT_RESULT_TTL_MS,
   COMMAND_KINDS,
   DIFF_RESULT_TTL_MS,
+  MAX_ARTIFACT_BYTES,
+  readArtifactChunk,
+  readArtifactsResult,
+  type ArtifactsResult,
+  type SharedArtifact,
   DOC_ID,
   FlotillaError,
   START_PER_HOUR,
@@ -112,6 +123,8 @@ const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
   answer: "answer-question",
   diff: "request-diff",
   start: "start-thread",
+  artifacts: "view-pond",
+  artifact: "view-pond",
 };
 
 /** Which of the owner's switches each command needs. */
@@ -121,6 +134,8 @@ const COMMAND_CAP: Record<(typeof COMMAND_KINDS)[number], Cap | null> = {
   answer: "answer",
   diff: "diffs",
   start: "start",
+  artifacts: "see",
+  artifact: "see",
 };
 
 /** What a refusal says when the owner switched something off: calm, fixed, and never a command's content. */
@@ -549,7 +564,7 @@ export interface CommandOutcome {
 export interface VerifiedCommand {
   cmd: CommandDoc;
   from: MemberDoc;
-  /** Null for `start`: there is no thread yet. */
+  /** Null for `start`, `artifacts` and `artifact`: they name no thread. */
   thread: LocalThread | null;
 }
 
@@ -4327,6 +4342,249 @@ export class FlotillaService extends EventEmitter {
     return result.expiresAt > this.now() ? result : null;
   }
 
+  // artifacts: the owner's outputs, for a member who cannot see code (docs/ponds.md, "Artifacts across Macs")
+
+  /** The chats of this pond that are private on this Mac: nothing they made is ever handed to a member. */
+  privateSessionIds(pondId: string): Set<string> {
+    const out = new Set<string>();
+    for (const th of Object.values(this.pond(pondId).threads)) if (th.private) out.add(th.sessionId);
+    return out;
+  }
+
+  /** A member's Mac asks the pond owner's Mac for its artifacts (`kind: "artifacts"`) or one file (`"artifact"`). */
+  async requestArtifacts(pondId: string, id?: string): Promise<{ requestId: string; ownerName: string }> {
+    const pond = this.activePond(pondId);
+    if (pond.role === "owner") throw new FlotillaError("That is your own Mac: its artifacts are here.");
+    if (id !== undefined && !ARTIFACT_ID.test(id)) throw new FlotillaError("not an artifact");
+    this.allow(pond, "view-pond", {}, VIEWERS_READ);
+    const members = await this.members(pond);
+    const me = this.meIn(pond);
+    if (!this.capsIn(pond, members, me.id).see) throw new FlotillaError(CAP_REFUSAL.see, 403);
+    const owner = members.get(memberIdOf(pond.ownerKey));
+    if (!owner) throw new FlotillaError("Can't reach Squeak's cloud.", 503);
+    const now = this.now();
+    const cmd: CommandDoc = {
+      id: randomId(12),
+      kind: id ? "artifact" : "artifacts",
+      threadId: "",
+      issuedAt: now,
+      expiresAt: now + 5 * 60_000,
+      nonce: randomId(12),
+      ...(id ? { path: id } : {}),
+    };
+    await this.put(pond, "tcmds", cmd.id, cmd);
+    return { requestId: cmd.id, ownerName: owner.name };
+  }
+
+  /**
+   * The owner's answer: a file's chunks first (so a result that exists means every chunk does), then the result document.
+   * All are deleted after `ARTIFACT_RESULT_TTL_MS`.
+   */
+  async publishArtifactsResult(
+    pondId: string,
+    input: {
+      id: string;
+      to: string;
+      items: SharedArtifact[];
+      file?: { path: string; name: string; kind: string; bytes: Buffer };
+    },
+  ): Promise<ArtifactsResult> {
+    const pond = this.activePond(pondId);
+    const doc = `art-r${input.id}`;
+    if (!DOC_ID.test(doc) || pond.role !== "owner") throw new FlotillaError("not a command this Mac runs");
+    const at = this.now();
+    const expiresAt = at + ARTIFACT_RESULT_TTL_MS;
+    const docs: string[] = [];
+    let file: ArtifactsResult["file"];
+    if (input.file) {
+      const bytes = input.file.bytes;
+      if (bytes.length > MAX_ARTIFACT_BYTES) throw new FlotillaError("That file is too large to send.");
+      const chunks = Math.ceil(bytes.length / ARTIFACT_CHUNK_BYTES);
+      for (let i = 0; i < chunks; i++) {
+        const piece = bytes.subarray(i * ARTIFACT_CHUNK_BYTES, (i + 1) * ARTIFACT_CHUNK_BYTES);
+        const chunkDoc = `${doc}-${i}`;
+        await this.put(pond, "tevents", chunkDoc, { chunk: { id: input.id, n: i, data: piece.toString("base64") } });
+        docs.push(chunkDoc);
+        (pond.results ??= []).push({ doc: chunkDoc, until: expiresAt });
+      }
+      file = {
+        path: input.file.path,
+        name: input.file.name,
+        kind: input.file.kind,
+        size: bytes.length,
+        chunks,
+        sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+      };
+    }
+    const result: ArtifactsResult = {
+      id: input.id,
+      to: input.to,
+      at,
+      expiresAt,
+      ownerName: this.meIn(pond).name,
+      items: input.items,
+      ...(file ? { file } : {}),
+    };
+    await this.put(pond, "tevents", doc, { artifacts: result });
+    docs.push(doc);
+    (pond.results ??= []).push({ doc, until: expiresAt });
+    this.save();
+    const timer = setTimeout(
+      () => void Promise.all(docs.map((d) => this.deleteResult(pond.id, d).catch(() => undefined))),
+      ARTIFACT_RESULT_TTL_MS + 1000,
+    );
+    timer.unref?.();
+    return result;
+  }
+
+  /** The owner's refusal of one request, kept short and fixed (a file gone, too large): the member's Mac shows it. */
+  async publishArtifactsRefusal(pondId: string, id: string, to: string, error: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    const doc = `art-r${id}`;
+    if (!DOC_ID.test(doc) || pond.role !== "owner") return;
+    const at = this.now();
+    const result: ArtifactsResult = {
+      id,
+      to,
+      at,
+      expiresAt: at + ARTIFACT_RESULT_TTL_MS,
+      ownerName: this.meIn(pond).name,
+      items: [],
+      error,
+    };
+    await this.put(pond, "tevents", doc, { artifacts: result });
+    (pond.results ??= []).push({ doc, until: result.expiresAt });
+    this.save();
+    const timer = setTimeout(
+      () => void this.deleteResult(pond.id, doc).catch(() => undefined),
+      ARTIFACT_RESULT_TTL_MS + 1000,
+    );
+    timer.unref?.();
+  }
+
+  /** The owner's answer to an `artifacts` / `artifact` request, or null until its Mac writes it (or after it expires). */
+  async artifactsResult(pondId: string, requestId: string): Promise<ArtifactsResult | null> {
+    const pond = this.activePond(pondId);
+    const doc = `art-r${requestId}`;
+    if (!DOC_ID.test(doc)) throw new FlotillaError("not a request");
+    const members = await this.members(pond);
+    const ownerId = memberIdOf(pond.ownerKey);
+    const ownerKey = keysOfMember(members.get(ownerId));
+    const raw = await this.storeOf(pond).get(this.docPath(pond.id, "tevents", doc));
+    if (!raw || ownerKey.length === 0) return null;
+    const read = this.readSigned(pond, "tevents", doc, raw, (d) => (d === ownerId ? ownerKey : null));
+    const result = read ? readArtifactsResult(read.value) : null;
+    if (!result || result.id !== requestId) return null;
+    return result.expiresAt > this.now() ? result : null;
+  }
+
+  private readonly downloads = new Map<string, { chunks: Buffer[]; busy: Promise<void> | null; done?: string }>();
+
+  /**
+   * A member's Mac reads the file the owner sent: chunk by chunk (a poll takes what it can in a few seconds), checked
+   * against the size and hash the owner signed, then kept under `<support>/artifact-cache/<pond>/` (pruned). Answers
+   * `{ ready: false, progress? }` until the whole file is here, then `{ ready: true, file }` with the local path.
+   */
+  async artifactFile(
+    pondId: string,
+    requestId: string,
+  ): Promise<{
+    ready: boolean;
+    error?: string;
+    progress?: { have: number; total: number };
+    file?: { path: string; name: string; kind: string; size: number; ownerName?: string };
+  }> {
+    const result = await this.artifactsResult(pondId, requestId);
+    if (!result) return { ready: false };
+    if (result.error) return { ready: false, error: result.error };
+    const meta = result.file;
+    if (!meta) return { ready: false };
+    const key = `${pondId}:${requestId}`;
+    const state = this.downloads.get(key) ?? { chunks: [], busy: null };
+    this.downloads.set(key, state);
+    const done = (p: string) => ({
+      ready: true,
+      file: {
+        path: p,
+        name: meta.name,
+        kind: meta.kind,
+        size: meta.size,
+        ...(result.ownerName ? { ownerName: result.ownerName } : {}),
+      },
+    });
+    if (state.done && fs.existsSync(state.done)) return done(state.done);
+    if (!state.busy) {
+      state.busy = this.pullChunks(pondId, requestId, meta.chunks, state).finally(() => {
+        state.busy = null;
+      });
+    }
+    await Promise.race([state.busy, new Promise((r) => setTimeout(r, 4000))]).catch(() => undefined);
+    if (state.chunks.length < meta.chunks) {
+      return { ready: false, progress: { have: state.chunks.length, total: meta.chunks } };
+    }
+    const bytes = Buffer.concat(state.chunks);
+    if (bytes.length !== meta.size || crypto.createHash("sha256").update(bytes).digest("hex") !== meta.sha256) {
+      this.downloads.delete(key);
+      return { ready: false, error: "The file did not arrive intact. Try again." };
+    }
+    const dir = path.join(this.options.supportDir, "artifact-cache", pondId);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const safe =
+      meta.name
+        .replace(/[^A-Za-z0-9._ -]/g, "_")
+        .replace(/^\.+/, "_")
+        .slice(-100) || "file";
+    const file = path.join(dir, `${meta.path}-${safe}`);
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    state.done = file;
+    state.chunks = [];
+    this.pruneArtifactCache(dir, file);
+    return done(file);
+  }
+
+  private async pullChunks(
+    pondId: string,
+    requestId: string,
+    total: number,
+    state: { chunks: Buffer[] },
+  ): Promise<void> {
+    const pond = this.activePond(pondId);
+    const members = await this.members(pond);
+    const ownerId = memberIdOf(pond.ownerKey);
+    const ownerKey = keysOfMember(members.get(ownerId));
+    const store = this.storeOf(pond);
+    while (state.chunks.length < total) {
+      const n = state.chunks.length;
+      const doc = `art-r${requestId}-${n}`;
+      const raw = await store.get(this.docPath(pond.id, "tevents", doc));
+      const read = raw ? this.readSigned(pond, "tevents", doc, raw, (d) => (d === ownerId ? ownerKey : null)) : null;
+      const chunk = read ? readArtifactChunk(read.value) : null;
+      if (!chunk || chunk.id !== requestId || chunk.n !== n)
+        throw new FlotillaError("The file is no longer available.");
+      state.chunks.push(Buffer.from(chunk.data, "base64"));
+    }
+  }
+
+  /** Keeps a pond's cache to a week, 40 files and 400 MB, oldest first; the file just written stays. */
+  pruneArtifactCache(dir: string, keep: string): void {
+    try {
+      const now = this.now();
+      const rows = fs
+        .readdirSync(dir)
+        .map((name) => ({ file: path.join(dir, name), st: fs.statSync(path.join(dir, name)) }))
+        .filter((r) => r.st.isFile())
+        .sort((a, b) => b.st.mtimeMs - a.st.mtimeMs);
+      let bytes = 0;
+      rows.forEach((r, i) => {
+        bytes += r.st.size;
+        const old = now - r.st.mtimeMs > 7 * 24 * 3600_000;
+        if (r.file !== keep && (old || i >= 40 || bytes > 400 * 1024 * 1024)) fs.rmSync(r.file, { force: true });
+      });
+    } catch {
+      // a cache that cannot be pruned is only large
+    }
+  }
+
   /** A member asks the pond owner's Mac to start a thread there (a pond with no Git remote, or "Run on their Mac"). */
   async requestStart(
     pondId: string,
@@ -4373,6 +4631,21 @@ export class FlotillaService extends EventEmitter {
     return true;
   }
   private readonly startLog = new Map<string, number[]>();
+
+  /** At most `ARTIFACT_FETCH_PER_HOUR` file fetches per member per pond per hour (in memory). */
+  private takeArtifactSlot(pondId: string, memberId: string): boolean {
+    const key = `${pondId}:${memberId}`;
+    const now = this.now();
+    const recent = (this.artifactLog.get(key) ?? []).filter((at) => now - at < 60 * 60_000);
+    if (recent.length >= ARTIFACT_FETCH_PER_HOUR) {
+      this.artifactLog.set(key, recent);
+      return false;
+    }
+    recent.push(now);
+    this.artifactLog.set(key, recent);
+    return true;
+  }
+  private readonly artifactLog = new Map<string, number[]>();
 
   /**
    * The starter's side: every pending command for one of this Mac's threads, checked, handed to `run` if good,
@@ -4452,13 +4725,15 @@ export class FlotillaService extends EventEmitter {
     const raw = value as { threadId?: unknown; kind?: unknown } | null;
     // `start` names no thread: the pond's owner's Mac is the one that answers it, and every other Mac leaves it be.
     const starting = raw?.kind === "start";
-    if (starting) {
+    // `artifacts` / `artifact` are pond-level too: only the owner's Mac holds the outputs, and it answers.
+    const podLevel = starting || raw?.kind === "artifacts" || raw?.kind === "artifact";
+    if (podLevel) {
       if (pond.role !== "owner") return "not-mine";
     } else if (typeof raw?.threadId === "string" && !pond.threads[raw.threadId]) return "not-mine";
     const cmd = readCommand(value);
     if (!cmd || cmd.id !== id) return "not a command this Mac runs";
-    const thread = starting ? null : (pond.threads[cmd.threadId] ?? null);
-    if (!starting && !thread) return "not-mine";
+    const thread = podLevel ? null : (pond.threads[cmd.threadId] ?? null);
+    if (!podLevel && !thread) return "not-mine";
     // The only things a member can ask of a starter are COMMAND_ACTION's: approving and stopping are not among them.
     if (thread?.private) return "that thread is private";
     const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
@@ -4489,6 +4764,8 @@ export class FlotillaService extends EventEmitter {
     for (const [key, until] of Object.entries(pond.nonces)) if (until < now) delete pond.nonces[key];
     if (pond.nonces[nonceKey] !== undefined) return "already used";
     if (starting && !this.takeStartSlot(pond.id, from.id)) return "too many threads started this hour";
+    if (cmd.kind === "artifact" && !this.takeArtifactSlot(pond.id, from.id))
+      return "too many files asked for this hour";
     pond.nonces[nonceKey] = cmd.expiresAt + MAX_SKEW_MS;
     this.save();
     return { cmd, from, thread };
@@ -4524,6 +4801,7 @@ export class FlotillaService extends EventEmitter {
     this.backoffs.delete(pondId);
     this.summaryCache.delete(pondId);
     this.forgetSnapshot(pondId);
+    fs.rmSync(path.join(this.options.supportDir, "artifact-cache", pondId), { recursive: true, force: true });
   }
 }
 

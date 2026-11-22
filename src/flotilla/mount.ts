@@ -471,6 +471,36 @@ export class FlotillaRoutes {
       ctx.json(200, result ? { ready: true, result } : { ready: false });
       return true;
     }
+    // The owner's artifacts, for a member (a signed `artifacts` / `artifact` command; answers arrive in the pond). POST asks,
+    // GET reads: `{ ready, result? }` for the list, `{ ready, progress?, error?, file? }` for a file (`file.path` is the
+    // cached copy on this Mac).
+    if (b === "artifacts" && parts.length === 3 && method === "POST") {
+      exact(await ctx.body(), []);
+      ctx.json(202, { ready: false, ...(await service.requestArtifacts(pondId)) });
+      return true;
+    }
+    if (b === "artifacts" && parts.length === 3 && method === "GET") {
+      const request = ctx.url.searchParams.get("request");
+      if (!request) throw new FlotillaError("request is required");
+      const result = await service.artifactsResult(pondId, request);
+      if (result?.error) ctx.json(200, { ready: false, error: result.error });
+      else ctx.json(200, result ? { ready: true, result } : { ready: false });
+      return true;
+    }
+    if (b === "artifacts" && c === "fetch" && parts.length === 4 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["path"]);
+      const id = str(body.path);
+      if (!id) throw new FlotillaError("path is required");
+      ctx.json(202, { ready: false, ...(await service.requestArtifacts(pondId, id)) });
+      return true;
+    }
+    if (b === "artifacts" && c === "fetch" && parts.length === 4 && method === "GET") {
+      const request = ctx.url.searchParams.get("request");
+      if (!request) throw new FlotillaError("request is required");
+      ctx.json(200, await service.artifactFile(pondId, request));
+      return true;
+    }
     // A member asks the owner's Mac to start a thread (a pond with no Git remote, or "Run on <owner>'s Mac"). The thread
     // appears in the pond with `requester.requestId` = the id answered here, which is how the member's Mac opens it.
     if (b === "start" && parts.length === 3 && method === "POST") {

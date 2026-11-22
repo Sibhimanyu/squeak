@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -232,6 +233,42 @@ export function mergeArtifacts(shown: ArtifactItem[], found: ArtifactItem[]): Ar
   return [...byPath.values()].sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path));
 }
 
+/** What a pond member may be handed: outputs only, never source code (`other`), never a private thread's or duck's. */
+export const SHAREABLE_KINDS: ReadonlySet<ArtifactKind> = new Set([
+  "page",
+  "doc",
+  "slides",
+  "image",
+  "pdf",
+  "psd",
+  "ai",
+  "svg",
+  "video",
+  "audio",
+]);
+
+/** The wire id of an artifact: a hash of its absolute path, so a member never sees where it sits on the owner's Mac. */
+export function artifactWireId(absPath: string): string {
+  return crypto.createHash("sha256").update(path.resolve(absPath)).digest("hex").slice(0, 16);
+}
+
+export interface ShareableArtifact extends ArtifactItem {
+  /** The wire id; `path` stays the absolute path and never leaves this Mac. */
+  id: string;
+}
+
+function realInside(file: string, roots: string[]): boolean {
+  try {
+    const real = fs.realpathSync(file);
+    return roots.some((r) => {
+      const rr = fs.realpathSync(r);
+      return real === rr || real.startsWith(rr + path.sep);
+    });
+  } catch {
+    return false;
+  }
+}
+
 export interface ArtifactsDeps {
   store: NativeStore;
   now?: () => number;
@@ -284,6 +321,43 @@ export class Artifacts {
       id ? duckNames.get(id) : undefined,
     );
     return { artifacts: mergeArtifacts(shown, found).filter((a) => fileExists(a.path)) };
+  }
+
+  /**
+   * The list a remote member gets (and the only files one may fetch): the usual list without source-code kinds, without
+   * anything a private thread produced (a shown row of that session, or a file of a duck whose chat is private) and with
+   * every found file proven, by real path, to sit inside one of the pond's folders (a symlink out is not).
+   */
+  shareable(projectId: string, privateSessionIds: ReadonlySet<string>): ShareableArtifact[] {
+    const project = this.deps.store.getProject(projectId);
+    if (!project) return [];
+    // A private duck hides what it showed and everything in its own working copy; Main's files are the pond's, not its.
+    const privateDucks = new Set<string>();
+    const privateCopies = new Set<string>();
+    for (const d of this.deps.store.listDucks(projectId)) {
+      const sessions = [...(d.currentSessionId ? [d.currentSessionId] : []), ...this.deps.store.duckSessionIds(d.id)];
+      if (!sessions.some((id) => privateSessionIds.has(id))) continue;
+      privateDucks.add(d.id);
+      if (d.workspaceId) privateCopies.add(d.id);
+    }
+    const roots = this.folders(projectId, project.rootPath).map((f) => f.root);
+    const hiddenPaths = new Set(
+      this.deps.store
+        .listShownArtifacts(projectId)
+        .filter((r) => privateSessionIds.has(r.sessionId) || (r.duckId && privateDucks.has(r.duckId)))
+        .map((r) => path.resolve(r.path)),
+    );
+    return this.list(projectId)
+      .artifacts.filter(
+        (a) =>
+          SHAREABLE_KINDS.has(a.kind) &&
+          !(a.source === "found" && a.duckId && privateCopies.has(a.duckId)) &&
+          !hiddenPaths.has(path.resolve(a.path)) &&
+          // Every shared file must really sit inside a pond folder, shown or found: a duck that showed ~/Documents/x
+          // must not hand it to members.
+          realInside(a.path, roots),
+      )
+      .map((a) => ({ ...a, id: artifactWireId(a.path) }));
   }
 
   /** Main + every stream/working copy for the pond, tagged with the duck that sits there when known. */
