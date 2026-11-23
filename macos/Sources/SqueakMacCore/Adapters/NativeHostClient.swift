@@ -885,11 +885,13 @@ public struct NativeHostClient: Sendable {
 
     /// `send`, with the whole reply: a chat that sat in a pond's Main moves to its own branch first, and the host
     /// answers `movedTo`, the new chat that got the message.
-    public func sendReply(id: String, text: String, mode: SendMode, clientNonce: String? = nil) async throws -> NativeSendReply {
+    public func sendReply(id: String, text: String, mode: SendMode, clientNonce: String? = nil, room: Bool = false) async throws -> NativeSendReply {
         var delays = sendRetryDelays[...]
         var body: [String: NativeJSON] = ["text": .string(text), "mode": .string(mode.rawValue)]
         // The host echoes this on the turn it starts, so this Mac's own row meets it without a second one.
         if let clientNonce { body["clientNonce"] = .string(clientNonce) }
+        // An @duck send from a pond's room: the host marks its turn, the only kind the room shows.
+        if room { body["room"] = .bool(true) }
         while true {
             do {
                 let r = try await call(

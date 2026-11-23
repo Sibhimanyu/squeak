@@ -389,7 +389,8 @@ export class Room extends EventEmitter {
     const out: RoomTurn[] = [];
     for (const s of this.sessionsOf(projectId)) {
       for (const t of this.reader.turns(s.id)) {
-        if (t.startedAt >= from && t.startedAt <= to) out.push(this.toTurn(s, t));
+        // A person's direct chat with a duck is never the room's: only turns sent from the room.
+        if (t.room && t.startedAt >= from && t.startedAt <= to) out.push(this.toTurn(s, t));
       }
     }
     out.sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
@@ -528,7 +529,7 @@ export class Room extends EventEmitter {
       const s = this.store.getSession(sessionId);
       const pond = s ? projectOfSession(this.store, s) : null;
       const base = s ? this.reader.turns(sessionId).find((x) => x.turnId === turnId) : undefined;
-      if (!s || !pond || !base) return;
+      if (!s || !pond || !base?.room) return;
       this.emit("turn", { projectId: pond.id, turn: this.toTurn(s, base) });
       if (base.endedAt !== undefined) {
         // An ended turn changes no more (but a late reply may still land): forget its window soon.

@@ -77,7 +77,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const jobs = new RoomJobs({
     store,
     room,
-    send: (id, text) => host.send(id, text),
+    send: (id, text) => host.send(id, text, { room: true }),
     newThread: (projectId, text, title, attach) => server!.newJobThread(projectId, text, title, attach),
     start: (spec) => server!.startDuckSession(spec),
     newBranch: (projectId, text) => server!.newStreamBranch(projectId, text),

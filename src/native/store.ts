@@ -203,6 +203,10 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX shown_artifacts_project ON shown_artifacts(project_id, at DESC);
   `,
+  // A queued message sent from a pond's room: its turn is the room's, not a direct chat's.
+  `
+  ALTER TABLE queue ADD COLUMN room INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -1126,15 +1130,23 @@ export class NativeStore {
   }
 
   // queue
-  enqueue(sessionId: string, text: string, author?: MessageAuthor, clientNonce?: string): QueueRow {
+  enqueue(sessionId: string, text: string, author?: MessageAuthor, clientNonce?: string, room?: boolean): QueueRow {
     const id = randomUUID();
     const createdAt = nowIso();
     this.db
       .prepare(
-        "INSERT INTO queue (id,session_id,text,created_at,author_id,author_name,client_nonce) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO queue (id,session_id,text,created_at,author_id,author_name,client_nonce,room) VALUES (?,?,?,?,?,?,?,?)",
       )
-      .run(id, sessionId, text, createdAt, author?.id ?? null, author?.name ?? null, clientNonce ?? null);
-    return { id, sessionId, text, createdAt, ...(author ? { author } : {}), ...(clientNonce ? { clientNonce } : {}) };
+      .run(id, sessionId, text, createdAt, author?.id ?? null, author?.name ?? null, clientNonce ?? null, room ? 1 : 0);
+    return {
+      id,
+      sessionId,
+      text,
+      createdAt,
+      ...(author ? { author } : {}),
+      ...(clientNonce ? { clientNonce } : {}),
+      ...(room ? { room: true as const } : {}),
+    };
   }
   queued(sessionId: string): QueueRow[] {
     return (
@@ -1145,6 +1157,7 @@ export class NativeStore {
       text: r.text as string,
       createdAt: r.created_at as string,
       ...(r.held === 1 ? { held: true } : {}),
+      ...(r.room === 1 ? { room: true as const } : {}),
       ...(typeof r.client_nonce === "string" && r.client_nonce ? { clientNonce: r.client_nonce } : {}),
       ...authorOf(r),
     }));

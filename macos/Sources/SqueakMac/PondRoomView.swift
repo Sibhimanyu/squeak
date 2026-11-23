@@ -349,7 +349,7 @@ struct PondRoomView: View {
                     words = RoomAttachmentFiles.compose(text, imageRefs: imageRefs, fileRefs: fileRefs)
                 } catch { return (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the attachments." }
             }
-            Task { _ = await model.send(words, to: s.key) }
+            Task { _ = await model.send(words, to: s.key, fromRoom: true) }
             if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
                 Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
             }
