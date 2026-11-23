@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.33.1
+
+**Chats always work on their own branch.**
+
+- A new chat in a git pond starts on its own branch, so Skip approvals no longer asks for every command. A chat still in Main moves to its own branch when you write to it, and the app opens the new chat.
+- A duckling sent back to work shows as working again until it reports.
+
 ## 2.33.0
 
 **Ducks own their branch, and pond tiles that say what's happening.**
