@@ -27,7 +27,14 @@ import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
-import { ducksOwnBranch, Placement, PlacementError, parsePlace, projectOfSession } from "./placement.js";
+import {
+  ducksOwnBranch,
+  mainReadOnlyRoot,
+  Placement,
+  PlacementError,
+  parsePlace,
+  projectOfSession,
+} from "./placement.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -555,6 +562,23 @@ export class NativeServer {
         if (!text) throw new HttpError(400, "text is required");
         const mode = b.mode === "steer" ? "steer" : "queue";
         const clientNonce = str(b.clientNonce)?.slice(0, 80);
+        // Chats never work on Main: a chat still sitting in a git pond's Main moves to its own branch first, and the
+        // message goes to the new chat (`movedTo`).
+        const current = store.getSession(id);
+        if (current && mainReadOnlyRoot(store, current)) {
+          try {
+            const moved = await this.placement.move(
+              id,
+              { kind: "new", title: jobTitle(text) },
+              (spec) => this.options.host.create(spec),
+              text,
+            );
+            if (moved.session) return this.json(res, 200, { queued: false, movedTo: moved.session.id });
+          } catch (error) {
+            if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+            throw error;
+          }
+        }
         // The person messaging an off-duty duck puts it back on duty.
         if (store.duckOf(id).duty === "off") this.room.setDuty(id, true);
         return this.json(res, 200, await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}) }));
@@ -1354,7 +1378,11 @@ export class NativeServer {
       }
       let placed;
       try {
-        const req = parsePlace(b.place);
+        let req = parsePlace(b.place);
+        // Main is no place to start a chat in a git pond: it gets a branch of its own, like `main: true`.
+        if (req.kind === "main" && this.options.store.getProject(projectId ?? "")?.kind === "git") {
+          req = { kind: "new", ...(str(b.text) ? { title: jobTitle(str(b.text)!) } : {}) };
+        }
         const duck = req.kind === "join" && req.duckId ? this.options.store.duckRow(req.duckId) : null;
         const pond = projectId ?? duck?.projectId;
         if (!pond) throw new HttpError(400, "place needs a projectId");
@@ -1405,11 +1433,14 @@ export class NativeServer {
       const project = this.options.store.getProject(projectId);
       if (!project) throw new HttpError(404, "no such project");
       cwd = project.rootPath;
+      if (project.kind === "git" && ducksOwnBranch()) ({ cwd, workspaceId } = await this.ownBranch(project.id, b));
     } else if (!cwd && projectId && !workspaceId) {
       // A plain-folder pond has no streams: its chats run in the folder itself.
       const project = this.options.store.getProject(projectId);
-      // Ducks own their branch: no place named means Main (read-only), so a question or a plan starts at once.
-      if (project?.kind === "folder" || (project?.kind === "git" && ducksOwnBranch())) cwd = project.rootPath;
+      if (project?.kind === "folder") cwd = project.rootPath;
+      // Ducks own their branch: no place named means a branch and worktree of the chat's own, never Main.
+      else if (project?.kind === "git" && ducksOwnBranch())
+        ({ cwd, workspaceId } = await this.ownBranch(project.id, b));
     }
     if (!cwd) throw new HttpError(400, "cwd, or projectId with newWorkspace, is required");
     return this.withDuck(
@@ -1424,6 +1455,27 @@ export class NativeServer {
         ...(agentPrefix ? { agentPrefix } : {}),
       }),
     );
+  }
+
+  /** A new chat's own branch and worktree (before its first turn), titled from its first text. Failing fails the request. */
+  private async ownBranch(
+    projectId: string,
+    b: Record<string, unknown>,
+  ): Promise<{ cwd: string; workspaceId: string | null }> {
+    const text = str(b.text);
+    try {
+      const placed = await this.placement.resolve(projectId, {
+        kind: "new",
+        ...(text ? { title: jobTitle(text) } : {}),
+      });
+      return { cwd: placed.cwd, workspaceId: placed.workspaceId };
+    } catch (error) {
+      if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+      throw new HttpError(
+        500,
+        `could not make a branch for this chat: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   /** Ducks own their branch: a new chat has its duck at once, so the pond's branch list counts it (the room would make it lazily). */

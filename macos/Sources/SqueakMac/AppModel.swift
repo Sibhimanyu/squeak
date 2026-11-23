@@ -1939,6 +1939,10 @@ final class AppModel {
             }
             if let s = target, case .accepted = result { await refreshNativePending(s) }
         }
+        // A chat that sat in Main moved to its own branch with this message: open the new chat.
+        if case .accepted = result, let to = nativeAdapter.moved.take(from: key.hostSessionId.replacingOccurrences(of: NativeAdapter.keyPrefix, with: "")) {
+            await openMovedChat(from: key, to: to)
+        }
         // A send that did not go: the chat is not working after all.
         switch result {
         case .refused(let why), .notSent(let why):

@@ -637,8 +637,11 @@ Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-br
   hook (every mode) and `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the root; "Skip approvals" and
   "Accept edits" are held at Ask there, so a shell command still asks; Codex runs in its read-only sandbox.
 - **Agent-led placement.** The note lists the pond's active branches (branch, title, ducks, last activity). Tools
-  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)`, `move_to_main(message?)` start a fresh chat for
+  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)` start a fresh chat for
   the same duck in the new place (an agent's history is tied to its folder). Listed only with the flag on.
+- **Chats never work on Main.** A new chat in a git pond (no place, or `main: true`) gets its own branch and worktree
+  before its first turn; a message to an old chat sitting in Main moves it first (`{ movedTo }` in the reply). An
+  explicit `place` or stream still wins; a failed worktree fails the request.
 - **Clean-up.** A working copy with no live duck (on duty, chat not archived), no busy chat, a clean folder and a branch
   pushed or merged is removed; the branch stays. After a move, and every 15 min while the host runs.
 - **Held back (no behaviour).** `nest` / `poweredBy` are optional on `DuckView` and `RoomThread` for members' own ducks.

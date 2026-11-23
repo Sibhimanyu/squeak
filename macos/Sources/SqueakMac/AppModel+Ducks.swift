@@ -22,6 +22,22 @@ extension AppModel {
 
     /// Branch off, Work with…, Move to main: the host starts a fresh chat for the same duck in the new place; its tab
     /// replaces the old one in the same slot, then it opens (no close and open, so the strip does not flicker).
+    /// A message to a chat in Main went to a new chat on its own branch: adopt it, swap its tab in, open it if the old one was open.
+    func openMovedChat(from old: SessionKey, to sid: String) async {
+        let agent = session(old)?.agent ?? "claude"
+        let key = SessionKey(provider: "\(agent)-squeak", workspaceId: nil, hostSessionId: NativeAdapter.keyPrefix + sid)
+        let workspace = (sidebarTree.place(of: old) ?? pondPageTree.place(of: old))?.workspace.id
+        if let made = try? await nativeHost.session(id: sid) {
+            let stand = NativeAdapter.started(made)
+            rememberStarted(stand)
+            await broker.adopt(stand, adapterId: nativeAdapter.id)
+        }
+        await broker.refresh()
+        let wasOpen = location == .chat(old)
+        if let workspace { replaceStreamTab(.thread(old.stringValue), with: .thread(key.stringValue), in: workspace) }
+        if wasOpen { select(key) }
+    }
+
     func moveDuck(_ s: HostSession, to place: DuckPlace) {
         guard let duckId = s.duckId, !demoMode else { return }
         let old = s.key

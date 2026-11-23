@@ -267,7 +267,7 @@ describe("placement lines (ducks own their branch)", () => {
     expect(note).toContain("Main is read-only for ducks");
     expect(note).toMatch(/- sibhi\/login: Login; ducks: Quiet Creek, Staff Otter; active 5 min ago/);
     expect(note).toMatch(/- sibhi\/billing: Billing; no duck on it now; active 3 h ago/);
-    for (const tool of ["branch_off", "join_branch", "move_to_main"]) expect(note).toContain(tool);
+    for (const tool of ["branch_off", "join_branch"]) expect(note).toContain(tool);
   });
 
   it("a branch: shared working copy, concurrent edits; no branches yet says so", () => {

@@ -47,10 +47,10 @@ export function placementLines(p: NonNullable<ThreadContextInput["placement"]>, 
   const lines =
     p.mode === "main"
       ? [
-          "You are in Main, the pond's own folder, and Main is read-only for ducks: never create, edit or delete files in it (Squeak refuses the edit). Reading, searching, answering questions, planning and reviewing are fine here, and you can start at once. When you need to change files, call branch_off (optional name for the work, optional from) to get your own branch and working copy, or join_branch to share a branch another duck is already on. move_to_main brings you back here.",
+          "You are in Main, the pond's own folder, and Main is read-only for ducks: never create, edit or delete files in it (Squeak refuses the edit). Chats normally work on a branch of their own, so call branch_off (optional name for the work, optional from) to get your own branch and working copy, or join_branch to share a branch another duck is already on.",
         ]
       : [
-          `You work on branch ${branch ?? "(unnamed)"} in a working copy of its own. Other ducks on the same branch share this folder and may edit at the same time, so re-read a file before editing it and say in the room what you are changing. branch_off starts separate work on a new branch, join_branch moves you to another duck's branch, move_to_main to Main (read-only).`,
+          `You work on branch ${branch ?? "(unnamed)"} in a working copy of its own. Other ducks on the same branch share this folder and may edit at the same time, so re-read a file before editing it and say in the room what you are changing. branch_off starts separate work on a new branch, join_branch moves you to another duck's branch. Main is read-only.`,
         ];
   if (p.branches.length > 0) {
     lines.push(

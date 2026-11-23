@@ -89,7 +89,7 @@ export interface AgentToolDeps {
   room?: Room;
   /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
   jobs?: RoomJobs;
-  /** Placement for `branch_off`, `join_branch`, `move_to_main` (flag `ducksOwnBranch`). Absent: those tools say so. */
+  /** Placement for `branch_off`, `join_branch` (flag `ducksOwnBranch`). Absent: those tools say so. */
   placement?: Placement;
   now?: () => number;
   /** git, injectable for tests. */
@@ -353,13 +353,6 @@ export const PLACEMENT_TOOLS: ToolDef[] = [
     description:
       "Move to a branch another duck is on (or one that exists), sharing its working copy; ducks on one branch may edit at the same time. Give duck (a name or id) or branch, as the pond's list of active branches shows. A new chat for you starts there; end this turn after it.",
     inputSchema: obj({ duck: { type: "string" }, branch: { type: "string" }, message: { type: "string" } }),
-    readOnly: false,
-  },
-  {
-    name: "move_to_main",
-    description:
-      "Move to Main, the pond's own folder, which is read-only for ducks in a git pond: for questions, plans and reviews. A new chat for you starts there; end this turn after it.",
-    inputSchema: obj({ message: { type: "string" } }),
     readOnly: false,
   },
 ];
@@ -1024,6 +1017,7 @@ export class AgentTools {
 
   private async placeTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
     if (!ducksOwnBranch()) throw new ToolError("Branches are not managed by ducks in this Squeak yet.");
+    if (name === "move_to_main") throw new ToolError("Chats work on their own branch; Main is read-only.");
     const { placement, store } = this.deps;
     if (!placement) throw new ToolError("Placement is unavailable here.");
     const text = (k: string): string | undefined =>
@@ -1033,8 +1027,7 @@ export class AgentTools {
       throw new ToolError("This chat moved enough times this hour.");
     }
     let req: PlaceRequest;
-    if (name === "move_to_main") req = { kind: "main" };
-    else if (name === "branch_off") {
+    if (name === "branch_off") {
       const from = text("from");
       const here = s.branch ?? store.duckBySession(s.id)?.branch ?? undefined;
       req = {
