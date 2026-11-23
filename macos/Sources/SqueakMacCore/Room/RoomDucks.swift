@@ -45,6 +45,11 @@ public enum RoomDucks {
         }.map { duck($0, now: now) }
     }
 
+    /// The header's avatars: only ducks on duty (the host's `duty`); none when every duck is closed.
+    public static func headerDucks(_ threads: [RoomThread], now: Date = Date()) -> [RoomDuck] {
+        roster(threads.filter(\.onDuty), now: now)
+    }
+
     public static func duck(_ t: RoomThread, now: Date = Date()) -> RoomDuck {
         let presence: RoomDuckPresence = !t.onDuty ? .off : (t.state == .working ? .working : (t.state == .waiting ? .waiting : .idle))
         let title = t.title.trimmingCharacters(in: .whitespaces)
@@ -78,14 +83,10 @@ public enum RoomDucks {
         return "\(s / 86_400)d ago"
     }
 
-    /// How many ducks the header counts: the pond's whole roster (what the inspector lists) once it is loaded, never fewer
-    /// than the page's threads (the roster arrives after the page).
-    public static func headerCount(roster: Int?, threads: Int) -> Int { max(roster ?? 0, threads) }
-
-    /// "2 people \u{00B7} 5 ducks".
+    /// "2 people \u{00B7} 5 ducks on duty": the header counts only ducks with a live chat.
     public static func subtitle(people: Int, ducks: Int) -> String {
         let p = people == 1 ? "1 person" : "\(people) people"
-        let d = ducks == 0 ? "no ducks yet" : (ducks == 1 ? "1 duck" : "\(ducks) ducks")
+        let d = ducks == 0 ? "no ducks on duty" : (ducks == 1 ? "1 duck on duty" : "\(ducks) ducks on duty")
         return "\(p) \u{00B7} \(d)"
     }
 

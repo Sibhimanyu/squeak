@@ -482,7 +482,9 @@ private struct WorkbenchTabs: View {
                             NewTerminalAction.perform(model, in: .centre)
                         } else if workspace.isDucks, let pid = model.focus.pond.flatMap({ PondsModel.shared.entry($0)?.projectId }) ?? chats.first.flatMap({ model.duckPondKey($0) }).flatMap({ PondsModel.shared.entry($0)?.projectId }) {
                             // Ducks mode: a new duck in the pond; the daemon decides where it works.
-                            model.openNewMainThread(projectId: pid)
+                            // Opened from a duck's chat: the new chat works with that duck's branch.
+                            let current = chats.first(where: { $0.key == model.focus.chat }) ?? chats.first
+                            model.openNewMainThread(projectId: pid, duckPlace: current.flatMap { DuckList.plusPlace(for: $0, main: model.mainPlace(key: model.duckPondKey($0) ?? "")) })
                         } else if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
                         } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {

@@ -193,12 +193,6 @@ struct RoomMessagesTests {
         #expect(RoomHandoff.isLong((1...7).map(String.init).joined(separator: "\n")))
     }
 
-    @Test func theHeaderCountsTheWholeRosterOnceLoaded() {
-        #expect(RoomDucks.headerCount(roster: nil, threads: 3) == 3)
-        #expect(RoomDucks.headerCount(roster: 6, threads: 3) == 6)
-        #expect(RoomDucks.subtitle(people: 1, ducks: 6) == "1 person \u{00B7} 6 ducks")
-    }
-
     @Test func aHostWithoutTurnsFallsBackToThePostsAsDuckMessages() {
         let agent = RoomAuthor(kind: .agent, id: "x", name: "Claude")
         let f = feed(posts: [post(1, "Adding a toggle", by: agent, at: base, kind: .working, sid: "s1")], threads: [thread("s1", name: "Pip")], serves: false)
@@ -295,6 +289,13 @@ struct RoomMessagesTests {
         #expect(w[0].detail == nil && w[0].name == "T-s2")
     }
 
+    @Test func headerShowsOnlyDucksOnDuty() {
+        let closed = [thread("a", name: "A", duty: .off), thread("b", name: "B", duty: .off)]
+        #expect(RoomDucks.headerDucks(closed, now: now).isEmpty)
+        let mixed = closed + [thread("c", name: "C")]
+        #expect(RoomDucks.headerDucks(mixed, now: now).map(\.sessionId) == ["c"])
+    }
+
     @Test func presenceTextAndRosterOrder() {
         let hour = now.addingTimeInterval(-7200)
         let ms = Int64(hour.timeIntervalSince1970 * 1000)
@@ -314,9 +315,9 @@ struct RoomMessagesTests {
     }
 
     @Test func headerWordsAndTabTooltip() {
-        #expect(RoomDucks.subtitle(people: 2, ducks: 5) == "2 people \u{00B7} 5 ducks")
-        #expect(RoomDucks.subtitle(people: 1, ducks: 1) == "1 person \u{00B7} 1 duck")
-        #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks yet")
+        #expect(RoomDucks.subtitle(people: 2, ducks: 5) == "2 people \u{00B7} 5 ducks on duty")
+        #expect(RoomDucks.subtitle(people: 1, ducks: 1) == "1 person \u{00B7} 1 duck on duty")
+        #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks on duty")
         #expect(RoomDucks.closeTooltip(name: "Marlow") == "Close \u{2014} Marlow goes off duty")
         #expect(RoomDucks.cleanName("  Pip ") == "Pip" && RoomDucks.cleanName("") == nil && RoomDucks.cleanName(String(repeating: "x", count: 33)) == nil)
         #expect(RoomDucks.cleanRole("") == .clear && RoomDucks.cleanRole(" Builder ") == .set("Builder") && RoomDucks.cleanRole(String(repeating: "x", count: 81)) == nil)

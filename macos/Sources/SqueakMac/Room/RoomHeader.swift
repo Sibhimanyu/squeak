@@ -64,7 +64,6 @@ struct RoomHeader: View {
     let open: (String) -> Void
     var leadingInset: CGFloat = 0
     /// Every duck of the pond (the inspector's list); the page's threads hold only the recent ones.
-    var rosterCount: Int?
     @Environment(AppModel.self) private var model
     private var ponds: PondsModel { .shared }
 
@@ -78,7 +77,7 @@ struct RoomHeader: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Text(verbatim: RoomDucks.subtitle(people: people, ducks: RoomDucks.headerCount(roster: rosterCount, threads: ducks.count))).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             HStack(spacing: 14) {

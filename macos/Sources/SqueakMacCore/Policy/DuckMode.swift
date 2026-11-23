@@ -99,6 +99,15 @@ public enum DuckList {
             .map { DuckRow(session: $0, isMain: main?.contains($0) ?? false) }
     }
 
+    /// The "+" in a duck's chat strip: a new chat working WITH that duck (its duck, else its branch). nil on main or with
+    /// no branch known: a plain new duck (never Main).
+    public static func plusPlace(for s: HostSession, main: MainPlace?) -> DuckPlace? {
+        if main?.contains(s) == true { return nil }
+        if let id = s.duckId, !id.isEmpty { return .join(duckId: id) }
+        if let b = s.branch, !b.isEmpty { return .joinBranch(b) }
+        return nil
+    }
+
     /// A duck's current chat: the newest not-archived chat with its `duckId` in `pool`; a chat with no duck is itself.
     public static func current(_ s: HostSession, in pool: [HostSession]) -> HostSession {
         guard let id = s.duckId else { return s }

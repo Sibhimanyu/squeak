@@ -15,11 +15,13 @@ import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
 import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/index.js";
 import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
-import { AgentTools } from "./agent-tools.js";
+import type { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
 import { RoomJobs } from "./room-jobs.js";
 import { RoomSummariser } from "./room-summary.js";
+import type { Placement } from "./placement.js";
+import { createSharedTools } from "./shared-tools.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
@@ -77,7 +79,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const jobs = new RoomJobs({
     store,
     room,
-    send: (id, text) => host.send(id, text),
+    send: (id, text) => host.send(id, text, { room: true }),
     newThread: (projectId, text, title, attach) => server!.newJobThread(projectId, text, title, attach),
     start: (spec) => server!.startDuckSession(spec),
     newBranch: (projectId, text) => server!.newStreamBranch(projectId, text),
@@ -107,34 +109,31 @@ export async function runHost(supportDir: string): Promise<void> {
   }
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
   // Ponds: on for everyone (local ponds need no cloud); SQUEAK_FLOTILLA=off constructs nothing from src/flotilla.
-  let shared: { sources: WorkspaceSources; tools: AgentTools } | null = null;
+  let shared: { sources: WorkspaceSources; placement: Placement; tools: AgentTools } | null = null;
   if (flotillaEnabled()) {
-    shared = {
-      sources: new WorkspaceSources({ store, workspaces }),
-      tools: new AgentTools({
-        store,
-        workspaces,
-        send: (id, text) => host.send(id, text),
-        create: (spec) => host.create(spec),
-        post: (id, kind, payload) => host.post(id, kind, payload),
-        room,
-        jobs,
-        pond: {
-          prefs: new ProjectPrefs(supportDir),
-          // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
-          ripple: async (projectId, projectName, text, by) => {
-            const service = flotilla?.service;
-            if (!service) return;
-            const pond = service.ensureLocalPond({ name: projectName, projectId });
-            if (pond.local) {
-              logger.info("pond upkeep: local pond, no Ripple", { pond: pond.id });
-              return;
-            }
-            await service.ripple(pond.id, text, by ? { id: `agent:${by.toLowerCase()}`, name: by } : undefined);
-          },
+    shared = createSharedTools({
+      store,
+      workspaces,
+      send: (id, text) => host.send(id, text),
+      create: (spec) => host.create(spec),
+      post: (id, kind, payload) => host.post(id, kind, payload),
+      room,
+      jobs,
+      pond: {
+        prefs: new ProjectPrefs(supportDir),
+        // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
+        ripple: async (projectId, projectName, text, by) => {
+          const service = flotilla?.service;
+          if (!service) return;
+          const pond = service.ensureLocalPond({ name: projectName, projectId });
+          if (pond.local) {
+            logger.info("pond upkeep: local pond, no Ripple", { pond: pond.id });
+            return;
+          }
+          await service.ripple(pond.id, text, by ? { id: `agent:${by.toLowerCase()}`, name: by } : undefined);
         },
-      }),
-    };
+      },
+    });
     flotilla = createFlotilla({ host, store, workspaces, ...shared, supportDir });
   }
   server = new NativeServer({

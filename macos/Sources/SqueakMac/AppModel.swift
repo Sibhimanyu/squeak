@@ -1921,13 +1921,15 @@ final class AppModel {
     /// `answering`: the text answers what the agent last said (a lettered option), so a host that checks is
     /// told which turn, and refuses it once the chat has moved on.
     func send(
-        _ text: String, to key: SessionKey, mode: SendMode = .queue, answering: Bool = false, clearsDraft: Bool = true
+        _ text: String, to key: SessionKey, mode: SendMode = .queue, answering: Bool = false, clearsDraft: Bool = true,
+        fromRoom: Bool = false
     ) async -> SendResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
+        if fromRoom { nativeAdapter.roomSends.record(from: key.hostSessionId.replacingOccurrences(of: NativeAdapter.keyPrefix, with: ""), to: "room") }
         readOnSend(key)
         let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
         if key == lastChat, clearsDraft { draftTask?.cancel(); draft = "" }
@@ -1970,6 +1972,10 @@ final class AppModel {
             case .refused, .notSent: native.pending.settleLocal(id: localCard, accepted: false, queued: false)
             }
             if let s = target, case .accepted = result { await refreshNativePending(s) }
+        }
+        // A chat that sat in Main moved to its own branch with this message: open the new chat.
+        if case .accepted = result, let to = nativeAdapter.moved.take(from: key.hostSessionId.replacingOccurrences(of: NativeAdapter.keyPrefix, with: "")) {
+            await openMovedChat(from: key, to: to)
         }
         // A send that did not go: the chat is not working after all.
         switch result {

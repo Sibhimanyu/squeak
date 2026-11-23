@@ -5,7 +5,9 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { READ_ONLY_ROOT_REASON, readOnlyDenial } from "./claude-runner.js";
 import { SessionHost } from "./host.js";
+import { mainReadOnlyRoot } from "./placement.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
@@ -96,6 +98,20 @@ async function start() {
   return { dir, repo, store, host, workspaces, call, pond, folderPond, sent, rpc, tool };
 }
 
+/** A chat sitting in the pond's Main (what an older chat looks like; a new chat can no longer start there). */
+async function mainChat(h: Awaited<ReturnType<typeof start>>): Promise<SessionRow> {
+  const s = await h.host.create({
+    cwd: h.pond.rootPath,
+    agent: "claude",
+    model: "m",
+    permissionMode: "default",
+    workspaceId: null,
+    text: "go",
+  });
+  h.store.duckForSession(s.id, h.pond.id);
+  return h.store.getSession(s.id)!;
+}
+
 const body = (h: { pond: { id: string } }, extra: Record<string, unknown>) => ({
   agent: "claude",
   model: "claude-sonnet-4-5",
@@ -126,9 +142,11 @@ describe("POST /native/sessions place (flag on)", () => {
   it("main, new (typed branch), join by branch and by duck", async () => {
     flagOn(true);
     const h = await start();
+    // Main is no place to start a chat in a git pond: it gets a branch of its own.
     const main = await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }));
     expect(main.status).toBe(201);
-    expect(main.json.session).toMatchObject({ cwd: h.pond.rootPath, workspaceId: null });
+    expect(main.json.session.cwd).not.toBe(h.pond.rootPath);
+    expect(main.json.session.workspaceId).toBeTruthy();
     const made = await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/login" } }));
     expect(made.status).toBe(201);
     expect(made.json.session).toMatchObject({ branch: "feat/login" });
@@ -147,15 +165,26 @@ describe("POST /native/sessions place (flag on)", () => {
       { agent: "claude", model: "m", text: "go", place: { kind: "join", duckId: duck.id } },
     );
     expect(byDuck.json.session.workspaceId).toBe(ws);
-    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(1);
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(2); // Main became a branch too
   });
 
-  it("a bare projectId starts in Main (read-only) in a git pond; a folder pond gets its folder", async () => {
+  it("a bare projectId, or main: true, starts on a branch of its own in a git pond; a folder pond gets its folder", async () => {
     flagOn(true);
     const h = await start();
-    const bare = await h.call("POST", "/native/sessions", body(h, {}));
-    expect(bare.status).toBe(201);
-    expect(bare.json.session).toMatchObject({ cwd: h.pond.rootPath, workspaceId: null });
+    for (const extra of [{}, { main: true }]) {
+      const res = await h.call("POST", "/native/sessions", body(h, { text: "Fix the login form", ...extra }));
+      expect(res.status).toBe(201);
+      const s = res.json.session as SessionRow;
+      expect(s.workspaceId).toBeTruthy();
+      expect(s.cwd).not.toBe(h.pond.rootPath);
+      expect(s.branch).toMatch(/fix-the-login-form/);
+      expect(mainReadOnlyRoot(h.store, s)).toBeNull();
+    }
+    // An explicit join still joins.
+    const first = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/x" } }))).json
+      .session as SessionRow;
+    const joined = await h.call("POST", "/native/sessions", body(h, { place: { kind: "join", branch: "feat/x" } }));
+    expect(joined.json.session.workspaceId).toBe(first.workspaceId);
     const folder = await h.call("POST", "/native/sessions", body({ pond: h.folderPond }, {}));
     expect(folder.json.session.cwd).toBe(h.folderPond.rootPath);
   });
@@ -163,7 +192,6 @@ describe("POST /native/sessions place (flag on)", () => {
   it("the aliases still work, and mixing them with place is refused", async () => {
     flagOn(true);
     const h = await start();
-    expect((await h.call("POST", "/native/sessions", body(h, { main: true }))).status).toBe(201);
     const fresh = await h.call("POST", "/native/sessions", body(h, { newWorkspace: true, branch: "feat/alias" }));
     expect(fresh.json.session.branch).toBe("feat/alias");
     const byWs = await h.call("POST", "/native/sessions", body(h, { workspaceId: fresh.json.session.workspaceId }));
@@ -212,8 +240,7 @@ describe("POST /native/ducks/<id>/place", () => {
   it("moves the duck to a new branch, joins, returns to Main; 404, 400 and 409 (working) are answered", async () => {
     flagOn(true);
     const h = await start();
-    const first = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }))).json
-      .session as SessionRow;
+    const first = await mainChat(h);
     const duck = h.store.duckForSession(first.id, h.pond.id)!;
     const url = `/native/ducks/${duck.id}/place`;
     // The first chat is working (the stub runner reports it): the duck cannot move.
@@ -244,7 +271,29 @@ describe("POST /native/ducks/<id>/place", () => {
   });
 });
 
-describe("agent tools: branch_off, join_branch, move_to_main", () => {
+describe("a message to a chat sitting in Main", () => {
+  it("moves it to its own branch and the message goes to the new chat; an edit aimed at Main is still refused", async () => {
+    flagOn(true);
+    const h = await start();
+    const old = await mainChat(h);
+    h.store.setStatus(old.id, "idle");
+    const res = await h.call("POST", `/native/sessions/${old.id}/messages`, { text: "Add dark mode" });
+    expect(res.status).toBe(200);
+    const next = h.store.getSession(res.json.movedTo)!;
+    expect(next.id).not.toBe(old.id);
+    expect(next.workspaceId).toBeTruthy();
+    expect(next.cwd).not.toBe(h.pond.rootPath);
+    expect(h.sent.find((x) => x.session === next.id)!.text).toContain("Add dark mode");
+    expect(h.sent.filter((x) => x.session === old.id).every((x) => !x.text.includes("dark mode"))).toBe(true);
+    // The backstop: Main stays read-only.
+    expect(mainReadOnlyRoot(h.store, old)).toBe(h.pond.rootPath);
+    expect(readOnlyDenial(h.pond.rootPath, old.cwd, "Edit", { file_path: `${h.pond.rootPath}/a.txt` })).toBe(
+      READ_ONLY_ROOT_REASON,
+    );
+  });
+});
+
+describe("agent tools: branch_off, join_branch (move_to_main refuses)", () => {
   it("are hidden and refused with the flag off", async () => {
     flagOn(false);
     const h = await start();
@@ -252,7 +301,7 @@ describe("agent tools: branch_off, join_branch, move_to_main", () => {
     const id = main.json.session.id as string;
     const list = await h.rpc<{ tools: { name: string }[] }>(id, { jsonrpc: "2.0", id: 2, method: "tools/list" });
     const names = list.tools.map((t: { name: string }) => t.name);
-    for (const n of ["branch_off", "join_branch", "move_to_main"]) expect(names).not.toContain(n);
+    for (const n of ["branch_off", "join_branch"]) expect(names).not.toContain(n);
     const res = await h.tool(id, "branch_off", { name: "x" });
     expect(res.isError).toBe(true);
     expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(0);
@@ -261,12 +310,12 @@ describe("agent tools: branch_off, join_branch, move_to_main", () => {
   it("flag on: listed; a duck in Main branches off, joins and returns, carrying its duck and message", async () => {
     flagOn(true);
     const h = await start();
-    const main = await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }));
-    const first = main.json.session as SessionRow;
+    const first = await mainChat(h);
     const duck = h.store.duckForSession(first.id, h.pond.id)!;
     const list = await h.rpc<{ tools: { name: string }[] }>(first.id, { jsonrpc: "2.0", id: 2, method: "tools/list" });
     const names = list.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["branch_off", "join_branch", "move_to_main"]));
+    expect(names).toEqual(expect.arrayContaining(["branch_off", "join_branch"]));
+    expect(names).not.toContain("move_to_main");
 
     const off = await h.tool(first.id, "branch_off", { name: "Login form", message: "Build the form" });
     expect(off.isError).toBeUndefined();
@@ -279,21 +328,17 @@ describe("agent tools: branch_off, join_branch, move_to_main", () => {
 
     // Another duck joins it by the first duck's name.
     h.store.updateDuck(duck.id, { name: "Quiet Creek" });
-    const other = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }))).json
-      .session as SessionRow;
+    const other = await mainChat(h);
     const joined = await h.tool(other.id, "join_branch", { duck: "quiet creek" });
     expect(joined.isError).toBeUndefined();
     const otherDuck = h.store.duckBySession(other.id)!;
     expect(h.store.duckRow(otherDuck.id)!.workspaceId).toBe(second.workspaceId);
     expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(1);
 
-    // Back to Main: a chat there, read-only, same duck.
+    // Main is not a place to work any more.
     const back = await h.tool(second.id, "move_to_main");
-    expect(back.isError).toBeUndefined();
-    const third = h.store.getSession(h.store.duckRow(duck.id)!.currentSessionId!)!;
-    expect(third).toMatchObject({ cwd: h.pond.rootPath, workspaceId: null });
-    const again = await h.tool(third.id, "move_to_main");
-    expect(again.content[0]!.text).toMatch(/already in Main/);
+    expect(back.isError).toBe(true);
+    expect(back.content[0]!.text).toMatch(/Main is read-only/);
   });
 
   it("branch_off from a branch cuts from that branch; join_branch by name of a branch; unknown duck is an error", async () => {
@@ -338,13 +383,12 @@ describe("the thread context places the duck", () => {
     const a = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/a" } }))).json
       .session as SessionRow;
     h.store.setTitle(a.id, "Login");
-    const main = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }))).json
-      .session as SessionRow;
+    const main = await mainChat(h);
     const text = note(h, main);
     expect(text).toContain("Main is read-only for ducks");
     expect(text).toContain("pond app");
     expect(text).toMatch(/- feat\/a: .*ducks: Login/);
-    for (const t of ["branch_off", "join_branch", "move_to_main"]) expect(text).toContain(t);
+    for (const t of ["branch_off", "join_branch"]) expect(text).toContain(t);
   });
 
   it("flag on, on a branch: shares the working copy; flag off: no placement lines at all; folder pond: none", async () => {

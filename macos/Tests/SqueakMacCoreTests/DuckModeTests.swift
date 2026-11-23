@@ -142,6 +142,32 @@ import Testing
         let old = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"a","status":"idle"}"#.utf8))
         #expect(NativeAdapter.map(old, overlay: nil).duckId == nil)
     }
+
+    @Test func ducksModeNeverShowsMainOnAnyPath() {
+        // Every opening path in ducks mode reads the ducks line: pond context, fixed branch, shortcut with Main known.
+        for fixed in [false, true] {
+            for pond in [false, true] {
+                #expect(NewChatIn.placeLine(ducksFlag: true, conductorWorkspace: false, fixedPlace: fixed, hasPond: pond, ownerMac: false, hasMain: true) == .ducks)
+            }
+        }
+        // The old regression: a pond context with Main known fell through to "In: Main".
+        #expect(NewChatIn.placeLine(ducksFlag: true, conductorWorkspace: false, fixedPlace: false, hasPond: true, ownerMac: false, hasMain: true) != .inMain)
+    }
+
+    @Test func nonDucksPlaceLineIsUnchanged() {
+        #expect(NewChatIn.placeLine(ducksFlag: false, conductorWorkspace: false, fixedPlace: false, hasPond: false, ownerMac: false, hasMain: true) == .inMain)
+        #expect(NewChatIn.placeLine(ducksFlag: false, conductorWorkspace: false, fixedPlace: false, hasPond: true, ownerMac: false, hasMain: false) == .pond)
+        #expect(NewChatIn.placeLine(ducksFlag: false, conductorWorkspace: false, fixedPlace: true, hasPond: false, ownerMac: false, hasMain: false) == .fixed)
+        #expect(NewChatIn.placeLine(ducksFlag: false, conductorWorkspace: true, fixedPlace: true, hasPond: false, ownerMac: false, hasMain: true) == .fixed)
+        #expect(NewChatIn.placeLine(ducksFlag: false, conductorWorkspace: false, fixedPlace: false, hasPond: false, ownerMac: false, hasMain: false) == .picker)
+    }
+
+    @Test func plusInADucksChatJoinsThatDuck() {
+        #expect(DuckList.plusPlace(for: chat("a", duck: "D1", branch: "rethink-presence", cwd: "/wt/a", ago: 1), main: main) == .join(duckId: "D1"))
+        #expect(DuckList.plusPlace(for: chat("b", branch: "rethink-presence", cwd: "/wt/b", ago: 1), main: main) == .joinBranch("rethink-presence"))
+        #expect(DuckList.plusPlace(for: chat("m", duck: "M", branch: "main", cwd: "/repo", ago: 1), main: main) == nil)
+        #expect(DuckList.plusPlace(for: chat("n", ago: 1), main: main) == nil)
+    }
 }
 
 @Suite struct PondRowCountTests {

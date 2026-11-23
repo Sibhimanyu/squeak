@@ -533,7 +533,12 @@ RoomTurn   = { id: "<sessionId>:<turnId>", sessionId, threadTitle, agent, starte
 ```
 
 **Turns come from timelines** (`room-turns.ts`, no store of their own): one per `turn.started` that is not an
-agent-run turn (`auto`), to its `turn.ended`; the author is the message's pond member (`me: false`) or the owner
+agent-run turn (`auto`) and was sent from the room (`room: true`), to its `turn.ended`. A person's direct chat with a duck
+is never in the room: its turns carry no `room`, so neither `GET .../room` nor the SSE `turn` frames serve them (the room
+shows only room messages, `@duck` sends made from it with the duck's reply, and the ducks' own posts). The mark is set
+where the room starts the turn: the Mac's `@duck` send (`POST /native/sessions/<id>/messages { room: true }`) and every
+job send/start (Go, Allow, New duck). It rides the queue row (`queue.room`) so a queued message keeps it, and
+`turn.started` in the timeline log, so it survives a restart. Older turns (before the mark) are not shown. The author is the message's pond member (`me: false`) or the owner
 (`me: true`); `intent` is the chat's newest `working` post since the turn began. A per-chat cache is topped up by
 timeline seq. `GET .../room` answers `{ posts, latestSeq, threads, turns }`: turns oldest to newest, those that started
 inside the page's window (a plain page: the last 24 h, newest 100; a `since`/`before` page: the span of its posts).
@@ -637,8 +642,11 @@ Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-br
   hook (every mode) and `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the root; "Skip approvals" and
   "Accept edits" are held at Ask there, so a shell command still asks; Codex runs in its read-only sandbox.
 - **Agent-led placement.** The note lists the pond's active branches (branch, title, ducks, last activity). Tools
-  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)`, `move_to_main(message?)` start a fresh chat for
+  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)` start a fresh chat for
   the same duck in the new place (an agent's history is tied to its folder). Listed only with the flag on.
+- **Chats never work on Main.** A new chat in a git pond (no place, or `main: true`) gets its own branch and worktree
+  before its first turn; a message to an old chat sitting in Main moves it first (`{ movedTo }` in the reply). An
+  explicit `place` or stream still wins; a failed worktree fails the request.
 - **Clean-up.** A working copy with no live duck (on duty, chat not archived), no busy chat, a clean folder and a branch
   pushed or merged is removed; the branch stays. After a move, and every 15 min while the host runs.
 - **Held back (no behaviour).** `nest` / `poweredBy` are optional on `DuckView` and `RoomThread` for members' own ducks.

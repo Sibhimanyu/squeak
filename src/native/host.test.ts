@@ -437,6 +437,26 @@ describe("SessionHost", () => {
     expect(runners[0]!.sent).toEqual(["go", "now"]);
   });
 
+  it("marks a turn sent from the room, also when it waited in the queue; a direct send is unmarked", async () => {
+    const { host, store, runners } = setup({ canSteer: false });
+    const k = await host.create({ ...spec, text: "direct" });
+    const started = () =>
+      host
+        .timelinePage(k.id, { since: 0 })
+        .events.filter((e) => e.type === "turn.started")
+        .map((e) => ({ text: (e as { text: string }).text, room: (e as { room?: true }).room }));
+    expect(started()).toEqual([{ text: "direct", room: undefined }]);
+    // busy: the room's message is queued with its mark, and the turn it later starts keeps it (a restart reads the row)
+    await host.send(k.id, "from the room", { room: true });
+    expect(store.queued(k.id)[0]!.room).toBe(true);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    expect(started()).toEqual([
+      { text: "direct", room: undefined },
+      { text: "from the room", room: true },
+    ]);
+  });
+
   it("steerQueued on an idle chat starts that message", async () => {
     const { host, store, runners } = setup({ canSteer: false });
     const k = await host.create({ ...spec, text: "go" });

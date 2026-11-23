@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.33.2
+
+**The room is the room; your chats stay yours.**
+
+- A pond's Room shows only what was said in the room and the ducks' own posts. Direct chats with a duck stay out.
+- The Room header shows only ducks on duty.
+- In ducks mode the new-chat page never offers Main; the "+" in a duck's chat starts a chat on that duck's branch.
+- Ducks can branch off again (they were told "Placement is unavailable here").
+
+## 2.33.1
+
+**Chats always work on their own branch.**
+
+- A new chat in a git pond starts on its own branch, so Skip approvals no longer asks for every command. A chat still in Main moves to its own branch when you write to it, and the app opens the new chat.
+- A duckling sent back to work shows as working again until it reports.
+
 ## 2.33.0
 
 **Ducks own their branch, and pond tiles that say what's happening.**

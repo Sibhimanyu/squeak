@@ -179,4 +179,46 @@ describe("backgroundTasks", () => {
       ]);
     });
   });
+
+  describe("SendMessage resume", () => {
+    const AID = "a033929437e8b4b8b";
+    const note = (taskId: string, toolId: string, m: number) => ({
+      ...notification(toolId, "completed", "ok", m),
+      message: {
+        content: `<task-notification><task-id>${taskId}</task-id><tool-use-id>${toolId}</tool-use-id><status>completed</status><summary>ok</summary></task-notification>`,
+      },
+    });
+    const base = () => [
+      use("L", "Agent", { description: "menu bug", run_in_background: true }, 9),
+      {
+        ...result("L", 9),
+        toolUseResult: { isAsync: true, status: "async_launched", agentId: AID },
+      },
+      note(AID, "L", 6),
+    ];
+    const send = (to: string, body: Record<string, unknown>) => [
+      use("S", "SendMessage", { to, message: "again" }, 4),
+      { ...result("S", 4), toolUseResult: body },
+    ];
+
+    it("a resumed agent runs again until its notification", () => {
+      const ok = { success: true, resumedAgentId: AID, revivedAgentId: AID };
+      const running = backgroundTasks([...base(), ...send(AID, ok)], NOW);
+      expect(running.find((t) => t.id === "S")).toMatchObject({
+        kind: "agent",
+        label: "menu bug",
+        status: "running",
+        background: true,
+        agentId: AID,
+      });
+      const done = backgroundTasks([...base(), ...send(AID, ok), note(AID, "S", 1)], NOW);
+      expect(done.find((t) => t.id === "S")?.status).toBe("done");
+    });
+
+    it("a failed or unknown resume adds nothing", () => {
+      expect(backgroundTasks([...base(), ...send(AID, { success: false })], NOW).some((t) => t.id === "S")).toBe(false);
+      const unknown = { success: true, resumedAgentId: "nope123456" };
+      expect(backgroundTasks([...base(), ...send("nope123456", unknown)], NOW).some((t) => t.id === "S")).toBe(false);
+    });
+  });
 });

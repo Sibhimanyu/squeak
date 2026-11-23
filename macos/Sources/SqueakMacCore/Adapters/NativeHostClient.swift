@@ -764,6 +764,18 @@ extension NativeEvent {
 
 // MARK: Client
 
+/// The host's answer to a message: queued behind a running turn, and/or the chat it moved to.
+public struct NativeSendReply: Equatable, Sendable {
+    public var queued: Bool
+    public var movedTo: String?
+    public init(queued: Bool, movedTo: String? = nil) { self.queued = queued; self.movedTo = movedTo }
+    public static func decode(_ data: Data) -> NativeSendReply {
+        let j = try? JSONDecoder().decode(NativeJSON.self, from: data)
+        let moved = j?["movedTo"]?.string
+        return NativeSendReply(queued: j?["queued"]?.bool ?? false, movedTo: (moved?.isEmpty == false) ? moved : nil)
+    }
+}
+
 public struct NativeHostClient: Sendable {
     public static let defaultPort = 8479
     /// Two re-tries, 300 ms then 1 s, only for a connection that never opened (see `send`).
@@ -868,16 +880,24 @@ public struct NativeHostClient: Sendable {
     /// was written) is tried again twice, 300 ms and 1 s apart; anything else (a timeout, a dropped connection, any
     /// answer from the host) is final, so a message the host may have accepted is never sent twice.
     public func send(id: String, text: String, mode: SendMode, clientNonce: String? = nil) async throws -> Bool {
+        try await sendReply(id: id, text: text, mode: mode, clientNonce: clientNonce).queued
+    }
+
+    /// `send`, with the whole reply: a chat that sat in a pond's Main moves to its own branch first, and the host
+    /// answers `movedTo`, the new chat that got the message.
+    public func sendReply(id: String, text: String, mode: SendMode, clientNonce: String? = nil, room: Bool = false) async throws -> NativeSendReply {
         var delays = sendRetryDelays[...]
         var body: [String: NativeJSON] = ["text": .string(text), "mode": .string(mode.rawValue)]
         // The host echoes this on the turn it starts, so this Mac's own row meets it without a second one.
         if let clientNonce { body["clientNonce"] = .string(clientNonce) }
+        // An @duck send from a pond's room: the host marks its turn, the only kind the room shows.
+        if room { body["room"] = .bool(true) }
         while true {
             do {
                 let r = try await call(
                     "POST", "/native/sessions/\(Self.id(id))/messages",
                     body: .object(body), timeout: 20, maybeSent: true)
-                return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+                return NativeSendReply.decode(r)
             } catch NativeHostError.hostDown {
                 guard let wait = delays.popFirst() else { throw NativeHostError.hostDown }
                 if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }

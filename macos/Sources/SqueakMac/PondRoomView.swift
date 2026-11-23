@@ -201,11 +201,9 @@ struct PondRoomView: View {
         let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.branch)
             + (model.native.projects.first { $0.id == projectId }.map { [$0.defaultBranch] } ?? [])
         VStack(spacing: 0) {
-            if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset,
-                                         rosterCount: RoomRosterStore.shared.model(for: projectId).ducks?.count) }
+            if let key { RoomHeader(key: key, ducks: RoomDucks.headerDucks(room.feed.threads), open: openThread, leadingInset: leadingInset) }
             content(room)
         }
-        .task(id: projectId) { await RoomRosterStore.shared.model(for: projectId).refresh(host: model.nativeHost) }
         .overlay(alignment: .top) {
             if let openNote {
                 Text(verbatim: openNote).font(.system(size: 12)).foregroundStyle(Theme.ink)
@@ -351,7 +349,7 @@ struct PondRoomView: View {
                     words = RoomAttachmentFiles.compose(text, imageRefs: imageRefs, fileRefs: fileRefs)
                 } catch { return (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the attachments." }
             }
-            Task { _ = await model.send(words, to: s.key) }
+            Task { _ = await model.send(words, to: s.key, fromRoom: true) }
             if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
                 Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
             }

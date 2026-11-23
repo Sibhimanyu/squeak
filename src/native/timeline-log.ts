@@ -265,6 +265,7 @@ export class TimelineRecorder {
       author?: MessageAuthor | undefined;
       clientNonce?: string | undefined;
       queuedId?: string | undefined;
+      room?: boolean | undefined;
       at: string;
     },
   ): void {

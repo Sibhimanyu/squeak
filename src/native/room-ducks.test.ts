@@ -166,6 +166,7 @@ describe("ducks", () => {
       type: "turn.started",
       turnId: "t1",
       promptMessageId: "m",
+      room: true,
       text: "polish the control bar",
       at: iso(65),
     } as any);
@@ -207,7 +208,7 @@ describe("ducks", () => {
       h.srv.room.noteTimeline(s.id, e);
     };
     const now = new Date().toISOString();
-    send({ type: "turn.started", turnId: "t1", promptMessageId: "m", text: "go", at: now });
+    send({ type: "turn.started", turnId: "t1", promptMessageId: "m", room: true, text: "go", at: now });
     const step = (id: string, label: string, status: string) =>
       send({ type: "step.updated", turnId: "t1", stepId: id, kind: "tool", label, status, at: now });
     step("a1", "Start fix the bar spacing in the background", "running");
@@ -237,7 +238,14 @@ describe("ducks", () => {
     const frames: any[] = [];
     h.srv.room.on("turn", (f) => frames.push(f));
     const now = new Date().toISOString();
-    h.log.append(s.id, { type: "turn.started", turnId: "t1", promptMessageId: "m", text: "go", at: now } as any);
+    h.log.append(s.id, {
+      type: "turn.started",
+      turnId: "t1",
+      promptMessageId: "m",
+      room: true,
+      text: "go",
+      at: now,
+    } as any);
     const label = "Start fix the bar in the background";
     // launch step ends at once (async_launched) and the turn ends
     h.log.append(s.id, {
@@ -270,6 +278,7 @@ describe("ducks", () => {
       type: "turn.started",
       turnId: "t1",
       promptMessageId: "m",
+      room: true,
       text: "go",
       at: new Date().toISOString(),
     } as any);

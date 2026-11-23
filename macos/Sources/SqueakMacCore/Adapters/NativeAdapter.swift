@@ -78,6 +78,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     private let daemon: DaemonClient?
     /// The newest rows read per chat, so a refresh asks the host only for rows after the last seq held.
     public let rowCache = NativeRowCache()
+    /// Chats a message moved to a new branch: old host id -> new host id, until the app takes it.
+    public let moved = MovedChats()
+    /// Chats whose next message comes from a pond's room (an @duck send): the host marks that turn as the room's.
+    public let roomSends = MovedChats()
     let nameCache = NativeNameCache()
 
     /// Forgets a chat's held rows (the chat was opened afresh, or the host said its rows were reset).
@@ -305,7 +309,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let id = Self.nativeId(session) else { return .notSent(reason: "Squeak has no way to reply to this session") }
         do {
-            let queued = try await host.send(id: id, text: text, mode: mode, clientNonce: clientId.uuidString)
+            let fromRoom = roomSends.take(from: id) != nil
+            let reply = try await host.sendReply(id: id, text: text, mode: mode, clientNonce: clientId.uuidString, room: fromRoom)
+            if let to = reply.movedTo { moved.record(from: id, to: to) }
+            let queued = reply.queued
             // Claude cannot take text mid-turn: steering it queued instead, and the result says so.
             let note = mode == .steer && queued ? "Queued: this chat can't take a message mid-turn." : nil
             return .accepted(via: "native", delivery: queued ? .queued : .sent, note: note)
@@ -506,6 +513,15 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             return .failed(reason: "Request failed")
         }
     }
+}
+
+/// Where a message sent to an old chat went: the chat it moved to, kept until the app opens it.
+public final class MovedChats: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: [String: String] = [:]
+    public init() {}
+    public func record(from: String, to: String) { lock.lock(); ids[from] = to; lock.unlock() }
+    public func take(from: String) -> String? { lock.lock(); defer { lock.unlock() }; return ids.removeValue(forKey: from) }
 }
 
 /// Rows held per chat (the newest contiguous tail). Append-only: the host's rows after a seq never change.

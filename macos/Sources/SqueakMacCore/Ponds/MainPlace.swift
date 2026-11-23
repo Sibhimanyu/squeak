@@ -64,6 +64,18 @@ public enum NewChatIn {
         return newestStream.map { .existing($0) } ?? .new
     }
 
+    /// The one line above the composer. Ducks mode never offers or shows Main: every path there reads the ducks line,
+    /// whatever opened the page (a pond's Start a thread, a duck's "+", a branch's "+", the shortcut).
+    public enum PlaceLine: Equatable, Sendable { case ducks, inMain, pond, fixed, picker }
+
+    public static func placeLine(ducksFlag: Bool, conductorWorkspace: Bool, fixedPlace: Bool, hasPond: Bool, ownerMac: Bool, hasMain: Bool) -> PlaceLine {
+        if ducksFlag, !conductorWorkspace, !(hasPond && ownerMac), hasMain || hasPond { return .ducks }
+        if hasMain, !conductorWorkspace, !fixedPlace { return .inMain }
+        if hasPond { return .pond }
+        if fixedPlace || conductorWorkspace { return .fixed }
+        return .picker
+    }
+
     /// "Main", a stream's title, or "New stream" for the control's label.
     public static func label(_ choice: StartThreadStream, main: MainPlace?, streams: [NativeWorkspace]) -> String {
         switch choice {

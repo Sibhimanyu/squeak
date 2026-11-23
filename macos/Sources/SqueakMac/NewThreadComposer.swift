@@ -36,7 +36,7 @@ final class NewThreadState {
     var offer = NewChatIn.Offer()
     /// Ducks mode (`ducksOwnBranch`): no "In:" picker; the daemon decides where the duck works unless "Work with…" names a duck or
     /// branch (`duckPlace`). Off, none of this shows.
-    var ducksMode: Bool { conductorWorkspace == nil && !fixedPlace && AppModel.shared.ducksMode }
+    var ducksMode: Bool { conductorWorkspace == nil && AppModel.shared.ducksMode }
     var duckPlace: DuckPlace?
     /// The ducks and branches "Work with…" offers: the pond's, by its project.
     var joinTargets: [DuckJoinTarget] {
@@ -95,7 +95,7 @@ final class NewThreadState {
 
     func prepare(model: AppModel, route: NewPage = .thread(projectId: nil, workspaceId: nil), projectId: String? = nil,
                  workspaceId: String? = nil, text: String? = nil, error: String? = nil, conductorWorkspaceId: String? = nil,
-                 pond: PondThreadContext? = nil, contextPond: Bool = false) {
+                 pond: PondThreadContext? = nil, contextPond: Bool = false, duckPlace: DuckPlace? = nil) {
         loadTask?.cancel()
         self.pond = pond
         main = nil
@@ -108,9 +108,10 @@ final class NewThreadState {
         noTarget = false
         images.clear()
         place = nil
-        duckPlace = nil
+        self.duckPlace = duckPlace
         conductorWorkspace = nil
-        fixedPlace = conductorWorkspaceId != nil || (projectId != nil && workspaceId != nil)
+        // Ducks mode has no fixed stream: a branch's "+" is a new duck in the pond, working with that branch.
+        fixedPlace = conductorWorkspaceId != nil || (projectId != nil && workspaceId != nil && !AppModel.shared.ducksMode)
         loading = true
         starting = false
         focus += 1
@@ -137,7 +138,13 @@ final class NewThreadState {
                 // inside a pond begin in Main.
                 let mainProject: NativeProject? = pond.flatMap { p in projects.first { $0.id == p.projectId } }
                     ?? (workspaceId == nil ? (projectId.flatMap { id in projects.first { $0.id == id } } ?? (contextPond ? Self.contextProject(model: model, projects: projects) : nil)) : nil)
-                main = workspaceId == nil ? mainProject.flatMap { MainPlace(project: $0) } : nil
+                let ducks = AppModel.shared.ducksMode
+                if ducks, workspaceId != nil, projectId != nil {
+                    if let w = model.git.workspaces.first(where: { $0.id == workspaceId }), self.duckPlace == nil, !w.branch.isEmpty { self.duckPlace = .joinBranch(w.branch) }
+                    main = projects.first { $0.id == projectId }.flatMap { MainPlace(project: $0) }
+                } else {
+                    main = workspaceId == nil ? mainProject.flatMap { MainPlace(project: $0) } : nil
+                }
                 if var pond {
                     let recentByPath = Dictionary(model.sidebarTree.projects.flatMap(\.workspaces).compactMap { w in
                         w.chats.first(where: { $0.source == .squeak })?.cwd.flatMap { c in w.lastActivityAt.map { (c, $0) } }
@@ -307,9 +314,11 @@ struct NewThreadComposer: View {
     // MARK: Place
 
     @ViewBuilder private var placeLine: some View {
-        if state.ducksMode, state.pond == nil, let main = state.main {
-            ducksLine(pond: main.pondName)
-        } else if let main = state.main, state.conductorWorkspace == nil, !state.fixedPlace {
+        let kind = NewChatIn.placeLine(ducksFlag: state.ducksMode, conductorWorkspace: state.conductorWorkspace != nil, fixedPlace: state.fixedPlace,
+                                       hasPond: state.pond != nil, ownerMac: state.pond?.ownerMac != nil, hasMain: state.main != nil)
+        if kind == .ducks, let name = state.main?.pondName ?? state.pond?.pondName {
+            ducksLine(pond: name)
+        } else if kind == .inMain, let main = state.main {
             VStack(alignment: .leading, spacing: 8) {
                 inLine(main)
                 if state.showsBusyOffer, let busy = state.busyMain { busyOffer(busy) }
