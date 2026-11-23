@@ -45,7 +45,7 @@ struct DashboardPage: View {
             }
             .padding(.horizontal, Space.xl).padding(.bottom, Space.l)
             GeometryReader { geometry in
-                let width = max(220, (geometry.size.width - 36) / 4)
+                let width = max(170, (geometry.size.width - 36) / 4)  // four lanes fit beside the right zone; narrower still scrolls
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(columns) { column in

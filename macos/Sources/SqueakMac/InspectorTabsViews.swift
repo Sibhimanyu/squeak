@@ -201,13 +201,16 @@ struct HomeInspectorZone: View {
                         ForEach(tabs, id: \.id) { t in
                             DockTerminalTab(tab: t, folder: folder, zone: .right, selected: strip.selected == .terminal(t.id), height: Metrics.header, indicator: indicator)
                         }
-                        InspectorPlusMenu(label: Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())) { _ in
-                            NewTerminalAction.open(folder: folder, in: .right)
-                        }
                     }
                     .padding(.horizontal, Space.s)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity)
+                // Outside the scroll view so it always shows, even with no tabs (a lone menu in an empty horizontal
+                // scroll view collapsed to nothing).
+                Button { NewTerminalAction.open(folder: folder, in: .right) } label: {
+                    Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help("New terminal").accessibilityLabel("New terminal").padding(.trailing, Space.s)
             }
             .frame(height: Metrics.header).frame(maxWidth: .infinity).clipped()
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
@@ -216,8 +219,11 @@ struct HomeInspectorZone: View {
             if case .terminal(let id)? = strip.selected {
                 TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
             } else {
-                Text("No terminal open. Press + to start one.").font(Typo.body).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding(Space.m)
+                VStack(spacing: Space.s) {
+                    Text("No terminal open.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("New terminal") { NewTerminalAction.open(folder: folder, in: .right) }.buttonStyle(SecondaryButtonStyle())
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding(Space.m)
             }
         }
         .frame(width: width).frame(maxHeight: .infinity).clipped()
