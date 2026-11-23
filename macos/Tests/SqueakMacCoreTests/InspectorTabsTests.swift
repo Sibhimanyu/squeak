@@ -136,3 +136,28 @@ import Testing
         #expect(remote.tabs == [.panel(.code), .artifacts] && remote.selected == .artifacts)
     }
 }
+
+@Suite struct HomeInspectorTabsTests {
+    @Test func dashboardWithNoShellIsJustThePlus() {
+        let s = InspectorStrip.make(context: .home)
+        #expect(s.tabs.isEmpty && s.selected == nil && s.pinned == nil)
+        #expect(InspectorStrip.plusItems(context: .home) == [.newTerminal])
+    }
+
+    @Test func dashboardListsOnlyShellsAndTheyAllClose() {
+        let a = UUID(), b = UUID()
+        let s = InspectorStrip.make(context: .home, terminals: [a, b])
+        #expect(s.tabs == [.terminal(a), .terminal(b)] && s.selected == .terminal(a))
+        #expect(s.isClosable(.terminal(a)) && s.isDraggable(.terminal(b)))
+        #expect(!s.tabs.contains(.pond) && !s.tabs.contains(.artifacts) && !s.tabs.contains(.code))
+        #expect(InspectorStrip.make(context: .home, terminals: [a, b], selectedTerminal: b).selected == .terminal(b))
+        #expect(InspectorStrip.make(context: .home, terminals: [a], selectedTerminal: b).selected == .terminal(a))
+    }
+
+    @Test func pondAndStreamStripsKeepTheirPinnedFirstTab() {
+        #expect(InspectorStrip.make(context: .pond).pinned == .pond)
+        #expect(InspectorStrip.make(context: .pond).tabs == [.pond, .artifacts])
+        #expect(InspectorStrip.make(context: .stream(panels: [.code])).tabs == [.panel(.code), .artifacts])
+        #expect(InspectorStrip.make(context: .stream(panels: [.code])).pinned == .panel(.code))
+    }
+}

@@ -1,6 +1,7 @@
 import AppKit
 import SqueakIcons
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 // The conversation of the pond room (draft A): groups of bubbles, a duck's reply with its chip and ducklings, the ask
@@ -422,6 +423,10 @@ private struct RoomSystemView: View {
     var open: (() -> Void)?
 
     var body: some View {
+        if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) } else { quiet }
+    }
+
+    private var quiet: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
                 Text(verbatim: line.text).font(.system(size: 12)).foregroundStyle(Theme.subtle)
@@ -436,6 +441,66 @@ private struct RoomSystemView: View {
         }
         .frame(maxWidth: .infinity).padding(.vertical, 2)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A duck's note to another duck: the same left edge as every duck message (avatar column, then name row and body).
+private struct RoomHandoffCard: View {
+    let note: RoomHandoff
+    let at: Int64
+    var open: (() -> Void)?
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var style: MessageStyle {
+        var s = MessageStyle.reading
+        s.collapseLines = .max
+        return s
+    }
+
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16, style: .continuous)
+    }
+
+    var body: some View {
+        let collapsed = note.isLong && !expanded
+        HStack(alignment: .top, spacing: 11) {
+            if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    (Text(verbatim: note.from).fontWeight(.semibold).foregroundStyle(Theme.ink)
+                        + Text(verbatim: " \u{2192} ").foregroundStyle(Theme.muted)
+                        + Text(verbatim: note.to ?? "another duck").fontWeight(.semibold).foregroundStyle(note.to == nil ? Theme.muted : Theme.ink))
+                        .font(.system(size: 13)).lineLimit(1)
+                        .onTapGesture { open?() }.pointerHand(open != nil)
+                    Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    MessageText(markdown: note.body, style: style)
+                        .frame(maxHeight: collapsed ? 6 * 22 : nil, alignment: .top).clipped()
+                        .mask(alignment: .top) {
+                            VStack(spacing: 0) {
+                                Rectangle()
+                                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: collapsed ? 24 : 0)
+                            }
+                        }
+                    if note.isLong {
+                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { expanded.toggle() } } label: {
+                            Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                                .frame(minHeight: 24).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).pointerHand()
+                        .accessibilityLabel(expanded ? "Show less of this note" : "Show more of this note")
+                    }
+                }
+                .padding(.horizontal, 13).padding(.vertical, 8)
+                .background(Theme.surface, in: shape)
+                .overlay(shape.strokeBorder(Theme.line))
+                .frame(maxWidth: 640, alignment: .leading)
+            }
+            Spacer(minLength: 60)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

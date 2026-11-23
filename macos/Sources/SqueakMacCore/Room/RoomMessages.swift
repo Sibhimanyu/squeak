@@ -92,6 +92,29 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     /// The duck whose tab the line opens (a handoff opens the duck it went to); nil for a line about no duck.
     public var opens: String?
     public var place: RoomPlaceChip? = nil
+    /// A duck's note to another duck: drawn as a card (avatar, name, "to", time, Markdown), not as a quiet line.
+    public var handoff: RoomHandoff? = nil
+}
+
+/// A duck-to-duck note. `body` is the whole note, never cut: the view clamps it and offers Show more.
+public struct RoomHandoff: Sendable, Equatable {
+    public var fromSessionId: String?
+    public var from: String
+    public var agent: String?
+    /// The receiving duck's name; nil when the post names none ("to another duck").
+    public var to: String?
+    public var body: String
+
+    /// "Pip \u{2192} Sage" or "Pip \u{2192} another duck".
+    public var title: String { "\(from) \u{2192} \(to ?? "another duck")" }
+
+    /// Longer than the card shows at rest: more lines than `maxLines`, or a very long run of words.
+    public static let maxLines = 6
+    public static let maxChars = 480
+    public var isLong: Bool { Self.isLong(body) }
+    public static func isLong(_ text: String) -> Bool {
+        text.count > maxChars || text.split(separator: "\n", omittingEmptySubsequences: false).count > maxLines
+    }
 }
 
 public enum RoomItem: Sendable, Equatable, Identifiable {
@@ -182,10 +205,13 @@ public enum RoomMessages {
             if p.kind == .handoff || (p.level == .agents && p.author.kind != .person) {
                 if p.kind == .handoff || p.toSessionId != nil {
                     let from = p.sessionId.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
-                    let to = p.toSessionId.flatMap { threads[$0]?.duckName } ?? "another duck"
+                    let to = p.toSessionId.flatMap { threads[$0]?.duckName }
+                    let note = RoomHandoff(
+                        fromSessionId: p.sessionId, from: from, agent: p.sessionId.flatMap { threads[$0]?.agent }, to: to,
+                        body: p.text.trimmingCharacters(in: .whitespacesAndNewlines))
                     entries.append(Entry(at: p.at, order: 0, content: .system(RoomSystemLine(
-                        id: r.id, at: p.at, text: "\(from) handed off to \(to) \u{2014} \u{201C}\(p.text)\u{201D}", jobId: nil, buttons: [],
-                        opens: p.toSessionId ?? p.sessionId))))
+                        id: r.id, at: p.at, text: "\(note.title): \(note.body)", jobId: nil, buttons: [],
+                        opens: p.toSessionId ?? p.sessionId, handoff: note))))
                 }
             } else if p.author.kind == .person, p.level == .room {
                 let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me" || p.author.id == "owner"

@@ -29,6 +29,9 @@ public struct StreamTabs: Codable, Equatable, Sendable {
     public struct Strip: Codable, Equatable, Sendable {
         public var tabs: [StreamTab] = []
         public var selected: StreamTab?
+        /// The preview tab (at most one per stream): a file, artifact or canvas opened by a single click. A later
+        /// single click replaces it; pinning (or a double-click) makes it a normal tab. Never a thread.
+        public var preview: StreamTab?
     }
 
     private var strips: [String: Strip] = [:]
@@ -70,6 +73,43 @@ public struct StreamTabs: Codable, Equatable, Sendable {
         strips[workspace] = strip
     }
 
+    // MARK: Preview tab
+
+    /// The stream's preview tab, if it has one.
+    public func previewTab(_ workspace: String) -> StreamTab? { strips[workspace]?.preview }
+    public func isPreview(_ tab: StreamTab, in workspace: String) -> Bool { strips[workspace]?.preview == tab }
+
+    /// Opens `tab` as the stream's preview (a single click on a file, artifact or canvas). A tab already open (pinned
+    /// or the preview itself) is only selected. Otherwise it takes the preview's slot, or is added after the selected
+    /// tab when there is no preview. Threads are never previews: they open as normal tabs. Returns the tab that was
+    /// replaced, so the caller can let go of what it showed.
+    @discardableResult
+    public mutating func openPreview(_ tab: StreamTab, in workspace: String, seed: [StreamTab] = []) -> StreamTab? {
+        guard tab.kind != .thread else { open(tab, in: workspace, seed: seed); return nil }
+        var strip = strips[workspace] ?? Strip(tabs: Self.unique(seed))
+        if strip.tabs.contains(tab) { strip.selected = tab; strips[workspace] = strip; return nil }
+        var replaced: StreamTab?
+        if let old = strip.preview, let at = strip.tabs.firstIndex(of: old) {
+            strip.tabs[at] = tab
+            replaced = old
+        } else if let sel = strip.selected, let at = strip.tabs.firstIndex(of: sel) { strip.tabs.insert(tab, at: at + 1) }
+        else { strip.tabs.append(tab) }
+        strip.preview = tab
+        strip.selected = tab
+        strips[workspace] = strip
+        return replaced
+    }
+
+    /// Pins the preview tab (a double-click, "Keep open", an edit): it stays a normal tab and the next single click
+    /// opens a new preview. Returns whether `tab` was the preview.
+    @discardableResult
+    public mutating func pin(_ tab: StreamTab, in workspace: String) -> Bool {
+        guard var strip = strips[workspace], strip.preview == tab else { return false }
+        strip.preview = nil
+        strips[workspace] = strip
+        return true
+    }
+
     /// The tab of the thread shown in the centre always exists: added (and selected) when the strip lacks it, even if
     /// the list does not know the thread yet; a strip that has it only has its selection moved there. Returns whether
     /// anything changed.
@@ -95,6 +135,7 @@ public struct StreamTabs: Codable, Equatable, Sendable {
     public mutating func close(_ tab: StreamTab, in workspace: String) -> StreamTab? {
         guard var strip = strips[workspace], let at = strip.tabs.firstIndex(of: tab) else { return strips[workspace]?.selected }
         strip.tabs.remove(at: at)
+        if strip.preview == tab { strip.preview = nil }
         if strip.selected == tab {
             strip.selected = strip.tabs.isEmpty ? nil : strip.tabs[min(at, strip.tabs.count - 1)]
         }
@@ -112,7 +153,9 @@ public struct StreamTabs: Codable, Equatable, Sendable {
             open(new, in: workspace)
             return true
         }
-        if strip.tabs.contains(new) { strip.tabs.remove(at: at) } else { strip.tabs[at] = new }
+        let merged = strip.tabs.contains(new)
+        if merged { strip.tabs.remove(at: at) } else { strip.tabs[at] = new }
+        if strip.preview == old { strip.preview = merged || new.kind == .thread ? nil : new }
         if strip.selected == old { strip.selected = new }
         strips[workspace] = strip
         return true
@@ -143,6 +186,7 @@ public struct StreamTabs: Codable, Equatable, Sendable {
                 strip.selected = strip.tabs[was...].first(where: kept.contains) ?? kept.last
             }
             strip.tabs = kept
+            if let p = strip.preview, !kept.contains(p) { strip.preview = nil }
             strips[key] = strip
             changed = true
         }

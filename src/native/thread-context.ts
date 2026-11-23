@@ -79,6 +79,10 @@ export const DUCKLING_LINES = [
   'In Squeak your subagents are called ducklings: say "duckling" when you start, check on or report one, with a light touch and at most one playful verb per mention (e.g. "I\'ve sent a duckling to fix the bar spacing", "The duckling on the bar changes now has five tweaks", "One duckling is still paddling on full-screen spaces"). Keep the task, status and results exact and never pad; never call the person or yourself a duck.',
 ];
 
+/** The canvas format note: short, it is in every thread's prompt. */
+export const CANVAS_LINE =
+  "Canvases (slides, posters, logos, social posts): use canvas_create, canvas_add_artboard, canvas_update_artboard and canvas_open, never loose HTML files. Each artboard is one self-contained HTML/CSS file (inline SVG allowed) whose body is exactly its width x height pixels (deck 1920x1080, poster 1080x1350, logo 1024x1024, social 1080x1080), with text kept as real text, images from the canvas's assets/ folder by relative path, and no external network assets except fonts (system or web-safe stacks by default).";
+
 /** A compact `squeak` skill for Codex, which has no skills: Claude gets the real SKILL.md through the plugin. */
 export const CODEX_SQUEAK_GUIDE = [
   "Squeak guide (the full version is the `squeak` skill Claude chats get):",
@@ -131,6 +135,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
       : "The Squeak guide appended below has the details.",
     ...(input.placement ? placementLines(input.placement, input.branch) : []),
     ...DUCKLING_LINES,
+    CANVAS_LINE,
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),
     ASK_ESSENCE,

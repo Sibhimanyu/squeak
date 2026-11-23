@@ -401,13 +401,33 @@ final class AppModel {
 
     /// A file tab opened in the stream joins the saved strip where it was opened (after the selected tab), once; a tab
     /// restored from the strip is already there and is left alone.
-    func fileTabOpened(_ path: String, in workspace: SidebarWorkspace) {
+    ///
+    /// Preview tabs: a file opens in the stream's preview tab, replacing the file or artifact that was previewing (a
+    /// double-click, `pinOnOpen`, opens it as a normal tab). A preview with unsaved edits is pinned, never replaced.
+    func fileTabOpened(_ path: String, in workspace: SidebarWorkspace, files: FilesModel? = nil) {
         let tab = StreamTab.file(path)
         guard !streamTabs.tabs(workspace.id).contains(tab) else { return }
         let closed = WorkbenchPrefs.shared.closed
         let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
-        streamTabs.open(tab, in: workspace.id, seed: seed)
+        if files?.pinOnOpen.remove(path) != nil {
+            streamTabs.open(tab, in: workspace.id, seed: seed)
+        } else {
+            pinDirtyPreview(in: workspace.id, files: files)
+            let replaced = streamTabs.openPreview(tab, in: workspace.id, seed: seed)
+            if let replaced, replaced.kind == .file { files?.close(replaced.id, force: true) }
+        }
         saveStreamTabs()
+    }
+
+    /// A preview file with unsaved edits is kept: it is pinned before another click would replace it.
+    func pinDirtyPreview(in workspace: String, files: FilesModel?) {
+        guard let p = streamTabs.previewTab(workspace), p.kind == .file, files?.open.first(where: { $0.path == p.id })?.dirty == true else { return }
+        streamTabs.pin(p, in: workspace)
+    }
+
+    /// Keeps the tab open: it stops being the preview, so the next single click opens a new one.
+    func pinTab(_ tab: StreamTab, in workspace: SidebarWorkspace) {
+        if streamTabs.pin(tab, in: workspace.id) { saveStreamTabs() }
     }
 
     func fileTabClosed(_ path: String, in workspace: SidebarWorkspace) {
@@ -1214,12 +1234,24 @@ final class AppModel {
     /// Opens an artifact (or focuses it, when already open) as a tab in its pond's chat strip, after the chats. The
     /// location is the artifact, so Back and Forward step through it like any other place. A pond with no chat to hold a
     /// strip gets the viewer as a layer over the current page.
-    func openArtifact(pond: String, path: String) {
+    ///
+    /// A single click opens it in the stream's preview tab (replacing the file or artifact previewing there); `pin`
+    /// (a double-click) keeps it as a normal tab.
+    func openArtifact(pond: String, path: String, pin: Bool = false) {
         if let ctx = artifactContext(pond: pond), let place = stripPlace(of: ctx.key) {
             let workspace = place.workspace
             let closed = WorkbenchPrefs.shared.closed
             let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
-            streamTabs.open(.artifact(pond: pond, path: path), in: workspace.id, seed: seed)
+            let tab = StreamTab.artifact(pond: pond, path: path)
+            let files = ctx.cwd.flatMap { $0.isEmpty ? nil : filesModel(root: $0) }
+            if pin {
+                if streamTabs.tabs(workspace.id).contains(tab) { streamTabs.pin(tab, in: workspace.id); streamTabs.select(tab, in: workspace.id) }
+                else { streamTabs.open(tab, in: workspace.id, seed: seed) }
+            } else {
+                pinDirtyPreview(in: workspace.id, files: files)
+                let replaced = streamTabs.openPreview(tab, in: workspace.id, seed: seed)
+                if let replaced, replaced.kind == .file { files?.close(replaced.id, force: true) }
+            }
             saveStreamTabs()
             if lastChat != ctx.key { select(ctx.key) }
             // Nothing else is the shown tab, so clicking any of them is a change the strip can see.

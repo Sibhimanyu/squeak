@@ -201,9 +201,11 @@ struct PondRoomView: View {
         let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.branch)
             + (model.native.projects.first { $0.id == projectId }.map { [$0.defaultBranch] } ?? [])
         VStack(spacing: 0) {
-            if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset) }
+            if let key { RoomHeader(key: key, ducks: RoomDucks.roster(room.feed.threads), open: openThread, leadingInset: leadingInset,
+                                         rosterCount: RoomRosterStore.shared.model(for: projectId).ducks?.count) }
             content(room)
         }
+        .task(id: projectId) { await RoomRosterStore.shared.model(for: projectId).refresh(host: model.nativeHost) }
         .overlay(alignment: .top) {
             if let openNote {
                 Text(verbatim: openNote).font(.system(size: 12)).foregroundStyle(Theme.ink)

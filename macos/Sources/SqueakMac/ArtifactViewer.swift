@@ -83,8 +83,17 @@ struct ArtifactViewerPage: View {
     private var isMissing: Bool { if case .missing = content { true } else { false } }
 
     var body: some View {
+        if path.hasSuffix(".canvas"), !remote {
+            // A canvas is a folder of artboards: its own viewer, with its own toolbar line.
+            CanvasViewerPage(pond: pond, path: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded)
+        } else {
+            fileBody
+        }
+    }
+
+    private var fileBody: some View {
         let item = item
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             if !embedded { header(item) }
             toolbar(item)
             Rectangle().fill(Theme.line).frame(height: 1)
@@ -325,7 +334,7 @@ struct ArtifactViewerPage: View {
 }
 
 /// Compact tool button (DESIGN.md small control): 24 pt high, `surface-raised` with a `line` edge, `meta` type.
-private struct CompactToolStyle: ButtonStyle {
+struct CompactToolStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -341,7 +350,7 @@ private struct CompactToolStyle: ButtonStyle {
 }
 
 /// An icon-only compact button with a tooltip and VoiceOver label.
-private struct ToolIcon: View {
+struct ToolIcon: View {
     let name: LucideName
     let help: String
     let action: () -> Void
@@ -352,7 +361,7 @@ private struct ToolIcon: View {
     }
 }
 
-private struct ArtifactCopyPath: View {
+struct ArtifactCopyPath: View {
     let path: String
     @State private var copied = false
     var body: some View {
@@ -398,7 +407,7 @@ private enum ArtifactLoader {
                 if let (image, px) = image(url) {
                     return .canvas([CanvasBoard.board(image: image, pixels: px, name: url.lastPathComponent)], pixels: px == .zero ? nil : px)
                 }
-            case .quickLook, .other: return .quickLook(url)
+            case .quickLook, .other, .canvas: return .quickLook(url)  // a canvas never gets here: its page is CanvasViewerPage
             case .media:
                 let audio = ["m4a", "mp3", "wav", "aac"].contains(url.pathExtension.lowercased())
                 return .media(url, audio: audio)

@@ -148,9 +148,17 @@ final class FilesModel {
 
     // MARK: Open files
 
-    func openFile(_ path: String, line: Int? = nil) {
+    /// Paths whose tab should open as a normal tab, not the preview (a double-click on the row); the strip takes them.
+    @ObservationIgnored var pinOnOpen: Set<String> = []
+    /// A file already open that a double-click asked to keep open: the strip pins it (`PinRequest.id` makes each a change).
+    private(set) var pinRequest: PinRequest?
+    struct PinRequest: Equatable { let path: String; let id = UUID() }
+
+    /// Opens `path` in the preview tab (a single click); `pin` opens it as a normal tab, or keeps one open that is the preview.
+    func openFile(_ path: String, line: Int? = nil, pin: Bool = false) {
         note = nil
         selection = path
+        if pin { if open.contains(where: { $0.path == path }) { pinRequest = PinRequest(path: path) } else { pinOnOpen.insert(path) } }
         if let existing = open.first(where: { $0.path == path }) {
             activePath = existing.path
             if let line { existing.jump = LineJump(line: line) }

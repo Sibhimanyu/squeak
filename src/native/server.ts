@@ -10,6 +10,17 @@ import path from "node:path";
 import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
 import { Artifacts } from "./artifacts.js";
+import {
+  CanvasError,
+  CanvasWatcher,
+  createCanvas,
+  isCanvasKind,
+  listCanvasesIn,
+  readCanvas,
+  resolveCanvasDir,
+  summarize,
+  type CanvasSummary,
+} from "./canvases.js";
 import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpoint } from "./agent-tools.js";
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
@@ -165,6 +176,7 @@ export class NativeServer {
   readonly room: Room;
   readonly jobs: RoomJobs;
   private readonly artifacts: Artifacts;
+  private readonly canvasWatcher = new CanvasWatcher();
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
@@ -259,6 +271,7 @@ export class NativeServer {
   async stop(): Promise<void> {
     this.planner.stop();
     this.artifacts.close();
+    this.canvasWatcher.close();
     if (this.placementTimer) clearInterval(this.placementTimer);
     this.placementTimer = null;
     const server = this.server;
@@ -1181,6 +1194,38 @@ export class NativeServer {
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
       return this.json(res, 200, this.artifacts.list(id));
     }
+    if (area === "projects" && id && sub === "canvases" && parts.length === 4) {
+      const project = store.getProject(id);
+      if (!project) throw new HttpError(404, "no such project");
+      try {
+        if (method === "GET") return this.json(res, 200, { canvases: this.canvasesOf(id) });
+        if (method === "POST") {
+          const body = await this.body(req);
+          const title = str(body.title);
+          if (!title) throw new HttpError(400, "title is required");
+          if (body.kind !== undefined && !isCanvasKind(body.kind)) throw new HttpError(400, "unknown canvas kind");
+          const made = createCanvas(project.rootPath, title, body.kind);
+          this.artifacts.changed(id);
+          return this.json(res, 201, { canvas: summarize(made.path), detail: made });
+        }
+      } catch (err) {
+        if (err instanceof CanvasError) throw new HttpError(400, err.message);
+        throw err;
+      }
+    }
+    if (area === "canvases" && id === "stream" && parts.length === 3 && method === "GET") {
+      const dir = this.canvasDir(url.searchParams.get("path"));
+      return this.canvasStream(req, res, dir);
+    }
+    if (area === "canvases" && !id && method === "GET") {
+      const dir = this.canvasDir(url.searchParams.get("path"));
+      try {
+        return this.json(res, 200, readCanvas(dir));
+      } catch (err) {
+        if (err instanceof CanvasError) throw new HttpError(400, err.message);
+        throw err;
+      }
+    }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       // Archiving a gone stream happens in the background: the list never waits on a slow `git` start.
       void this.options.workspaces.reconcileGoneAsync(id).catch(() => undefined);
@@ -1543,6 +1588,52 @@ export class NativeServer {
       workspaceId: null,
       title: title || jobTitle(text),
       text: text + (attach?.(project.rootPath) ?? ""),
+    });
+  }
+
+  /** Every folder of every pond (Main and working copies): the places a canvas may live. */
+  private canvasRoots(): string[] {
+    return this.options.store
+      .listProjects()
+      .flatMap((p) => this.artifacts.folders(p.id, p.rootPath).map((f) => f.root));
+  }
+
+  /** A pond's canvases from Main and every duck's working copy, newest first. */
+  private canvasesOf(projectId: string): CanvasSummary[] {
+    const project = this.options.store.getProject(projectId);
+    if (!project) return [];
+    const seen = new Set<string>();
+    const out: CanvasSummary[] = [];
+    for (const f of this.artifacts.folders(projectId, project.rootPath)) {
+      for (const c of listCanvasesIn(f.root, f)) {
+        if (seen.has(c.path)) continue;
+        seen.add(c.path);
+        out.push(c);
+      }
+    }
+    return out.sort((a, b) => b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path));
+  }
+
+  private canvasDir(candidate: string | null): string {
+    if (!candidate) throw new HttpError(400, "path is required");
+    try {
+      return resolveCanvasDir(candidate, this.canvasRoots());
+    } catch (err) {
+      if (err instanceof CanvasError) throw new HttpError(404, err.message);
+      throw err;
+    }
+  }
+
+  /** `event: hello`, then `event: changed` whenever a file in the canvas folder changes (debounced 300 ms); a ping every 25 s. */
+  private canvasStream(req: http.IncomingMessage, res: http.ServerResponse, dir: string): void {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    const stop = this.canvasWatcher.subscribe(dir, () => res.write(`event: changed\ndata: {}\n\n`));
+    res.write(`event: hello\ndata: {}\n\n`);
+    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 25_000);
+    beat.unref();
+    req.on("close", () => {
+      clearInterval(beat);
+      stop();
     });
   }
 

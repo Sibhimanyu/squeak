@@ -677,3 +677,18 @@ Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-br
   writes the closing reply's first sentence). Capped at 3000 characters, oldest lines trimmed.
 - The agent note adds "You are <name>, a duck in <pond>; your role: <role>", the current stream (from the note's own
   "This thread" line) and the notebook (a running agent gets it at its next start, which a fresh session always is).
+
+## Canvas
+
+A canvas is a folder `canvases/<slug>.canvas/` in a pond (Main or a duck's working copy, so git and branches carry it):
+`canvas.json` (`{version: 1, title, kind: deck|poster|logo|social|blank, artboards: [{id, name, width, height,
+background?}]}` in order), `artboards/<id>.html` (self-contained HTML/CSS, inline SVG ok, body exactly width x height px)
+and `assets/` (images, by relative path). Starting sizes: deck 1920x1080, poster 1080x1350, logo 1024x1024, social
+1080x1080. Phase 1 has no hand editing; system and web-safe fonts only.
+
+- Host: `src/native/canvases.ts` (format, templates, path safety, watcher). Routes (token-gated, no CORS):
+  `GET /native/projects/<id>/canvases`, `POST /native/projects/<id>/canvases {title, kind}`,
+  `GET /native/canvases?path=` and an SSE `GET /native/canvases/stream?path=` (`hello`, then `changed`, debounced 300 ms).
+  A canvas also lists in Artifacts as kind `canvas`.
+- Agent tools: `canvas_create`, `canvas_add_artboard`, `canvas_update_artboard`, `canvas_open`; the format note is
+  `CANVAS_LINE` in `src/native/thread-context.ts`.

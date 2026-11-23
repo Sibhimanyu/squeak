@@ -123,7 +123,7 @@ struct PondInspectorZone: View {
                     .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
                     .accessibilityLabel(notice)
             }
-            content(strip.selected)
+            content(strip.selected ?? .pond)
         }
         .onChange(of: key) { notice = nil }
         .frame(width: width).frame(maxHeight: .infinity).clipped()
@@ -170,6 +170,61 @@ struct PondInspectorZone: View {
             if PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly { RemoteArtifactsTab(key: key) } else { ArtifactsTab(projectId: projectId) }
         case .terminal(let id):
             TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
+        }
+    }
+}
+
+/// The right zone on the Dashboard: no pond is focused, so the strip is the shells of the last place the person was (the
+/// folder of the last chat, else the home folder) and the "+". Shells are live and keyed by folder in `DockStore`, so
+/// moving between the Dashboard and a pond or chat only changes which are listed; none is restarted.
+struct HomeInspectorZone: View {
+    let width: CGFloat
+    @Environment(AppModel.self) private var model
+    @Namespace private var indicator
+
+    private var folder: String {
+        TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder ?? TerminalWorkspace.key(NSHomeDirectory())
+    }
+
+    var body: some View {
+        let dock = DockStore.shared
+        let folder = folder
+        let tabs = dock.activeFolder == folder
+            ? dock.activeTerminals.terminals(in: .right).compactMap { id in TerminalHost.shared.registry.tabs(folder).first { $0.id == id } } : []
+        let strip = InspectorStrip.make(
+            context: .home, terminals: tabs.map(\.id), selectedTerminal: dock.activeFolder == folder ? dock.activeTerminals.shown(in: .right) : nil)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: Space.m + PaneToggle.size)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(tabs, id: \.id) { t in
+                            DockTerminalTab(tab: t, folder: folder, zone: .right, selected: strip.selected == .terminal(t.id), height: Metrics.header, indicator: indicator)
+                        }
+                        InspectorPlusMenu(label: Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())) { _ in
+                            NewTerminalAction.open(folder: folder, in: .right)
+                        }
+                    }
+                    .padding(.horizontal, Space.s)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity)
+            }
+            .frame(height: Metrics.header).frame(maxWidth: .infinity).clipped()
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+            .background(WindowDragArea())
+            .animation(Motion.standard, value: strip.selected)
+            if case .terminal(let id)? = strip.selected {
+                TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
+            } else {
+                Text("No terminal open. Press + to start one.").font(Typo.body).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center).padding(Space.m)
+            }
+        }
+        .frame(width: width).frame(maxHeight: .infinity).clipped()
+        .background(Theme.bg.ignoresSafeArea())
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
+        .task(id: folder) {
+            dock.syncTerminals(folder: folder, live: TerminalHost.shared.registry.tabs(folder).map(\.id))
         }
     }
 }

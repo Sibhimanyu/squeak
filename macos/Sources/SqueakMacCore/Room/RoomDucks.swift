@@ -78,6 +78,10 @@ public enum RoomDucks {
         return "\(s / 86_400)d ago"
     }
 
+    /// How many ducks the header counts: the pond's whole roster (what the inspector lists) once it is loaded, never fewer
+    /// than the page's threads (the roster arrives after the page).
+    public static func headerCount(roster: Int?, threads: Int) -> Int { max(roster ?? 0, threads) }
+
     /// "2 people \u{00B7} 5 ducks".
     public static func subtitle(people: Int, ducks: Int) -> String {
         let p = people == 1 ? "1 person" : "\(people) people"

@@ -154,4 +154,101 @@ final class StreamTabsFileTests: XCTestCase {
         XCTAssertTrue(t.artifactTabs("w").isEmpty)
         XCTAssertEqual(ArtifactTabID.parse(ArtifactTabID.make(pond: "p", path: "a|b"))?.path, "a|b")
     }
+
+    // MARK: Preview tab
+
+    private let a = StreamTab.thread("a")
+    private let f1 = StreamTab.file("one.md"), f2 = StreamTab.file("two.md"), f3 = StreamTab.file("three.md")
+    private let art = StreamTab.artifact(pond: "p", path: "/r/x.psd")
+
+    func testSingleClickReplacesThePreview() {
+        var t = StreamTabs()
+        t.open(a, in: "w")
+        XCTAssertNil(t.openPreview(f1, in: "w"))
+        XCTAssertEqual(t.openPreview(f2, in: "w"), f1)
+        XCTAssertEqual(t.tabs("w"), [a, f2])
+        XCTAssertEqual(t.previewTab("w"), f2)
+        XCTAssertEqual(t.selected("w"), f2)
+        XCTAssertEqual(t.openPreview(art, in: "w"), f2)
+        XCTAssertEqual(t.tabs("w"), [a, art])
+    }
+
+    func testPinnedIsNeverReplacedAndNextClickMakesANewPreview() {
+        var t = StreamTabs()
+        t.openPreview(f1, in: "w")
+        XCTAssertTrue(t.pin(f1, in: "w"))
+        XCTAssertFalse(t.isPreview(f1, in: "w"))
+        XCTAssertNil(t.openPreview(f2, in: "w"))
+        XCTAssertEqual(t.tabs("w"), [f1, f2])
+        XCTAssertEqual(t.openPreview(f3, in: "w"), f2)
+        XCTAssertEqual(t.tabs("w"), [f1, f3])
+        XCTAssertFalse(t.pin(f1, in: "w"))
+    }
+
+    func testReopeningAPinnedOrPreviewItemJustFocusesIt() {
+        var t = StreamTabs()
+        t.openPreview(f1, in: "w"); t.pin(f1, in: "w")
+        t.openPreview(f2, in: "w")
+        XCTAssertNil(t.openPreview(f1, in: "w"))
+        XCTAssertEqual(t.selected("w"), f1)
+        XCTAssertEqual(t.tabs("w"), [f1, f2])
+        XCTAssertEqual(t.previewTab("w"), f2)
+        XCTAssertNil(t.openPreview(f2, in: "w"))
+        XCTAssertEqual(t.previewTab("w"), f2)
+    }
+
+    func testClosingThePreviewFreesTheSlot() {
+        var t = StreamTabs()
+        t.open(a, in: "w")
+        t.openPreview(f1, in: "w")
+        t.close(f1, in: "w")
+        XCTAssertNil(t.previewTab("w"))
+        XCTAssertNil(t.openPreview(f2, in: "w"))
+        XCTAssertEqual(t.tabs("w"), [a, f2])
+    }
+
+    func testThreadsAreNeverPreviews() {
+        var t = StreamTabs()
+        t.openPreview(f1, in: "w")
+        XCTAssertNil(t.openPreview(a, in: "w"))
+        XCTAssertEqual(t.previewTab("w"), f1)
+        XCTAssertFalse(t.isPreview(a, in: "w"))
+        XCTAssertFalse(t.pin(a, in: "w"))
+    }
+
+    func testPreviewIsPerWorkspaceAndSurvivesPruneOnlyWhileItsTabDoes() {
+        var t = StreamTabs()
+        t.openPreview(f1, in: "w"); t.openPreview(f2, in: "v")
+        XCTAssertEqual(t.previewTab("w"), f1)
+        XCTAssertEqual(t.previewTab("v"), f2)
+        t.prune(exists: { $0 != f1 })
+        XCTAssertNil(t.previewTab("w"))
+        XCTAssertEqual(t.previewTab("v"), f2)
+    }
+
+    func testPreviewFlagPersists() throws {
+        var t = StreamTabs()
+        t.open(a, in: "w"); t.openPreview(f1, in: "w")
+        let back = try JSONDecoder().decode(StreamTabs.self, from: JSONEncoder().encode(t))
+        XCTAssertEqual(back, t)
+        XCTAssertTrue(back.isPreview(f1, in: "w"))
+        XCTAssertEqual(back.openPreviewReplacedForTest(f2), f1)
+    }
+
+    func testOldSavedStripsWithoutAPreviewStillDecode() throws {
+        var t = StreamTabs()
+        t.open(a, in: "w"); t.open(f1, in: "w")
+        var json = String(data: try JSONEncoder().encode(t), encoding: .utf8)!
+        json = json.replacingOccurrences(of: ",\"preview\":null", with: "")
+        let back = try JSONDecoder().decode(StreamTabs.self, from: Data(json.utf8))
+        XCTAssertEqual(back.tabs("w"), [a, f1])
+        XCTAssertNil(back.previewTab("w"))
+    }
+}
+
+private extension StreamTabs {
+    func openPreviewReplacedForTest(_ tab: StreamTab) -> StreamTab? {
+        var copy = self
+        return copy.openPreview(tab, in: "w")
+    }
 }

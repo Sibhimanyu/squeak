@@ -15,6 +15,7 @@ import {
   readLabels,
   type ProjectPrefs,
 } from "./project-prefs.js";
+import { addArtboard, CanvasError, createCanvas, readCanvas, resolveCanvasDir, updateArtboard } from "./canvases.js";
 import { JobError, type RoomJobs } from "./room-jobs.js";
 import { ducksOwnBranch, Placement, PlacementError, type PlaceRequest } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
@@ -216,6 +217,55 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
+    name: "canvas_create",
+    description:
+      "Create a canvas (artboards for slides, a poster, logo sheet or social post) in this chat's folder under canvases/. kind is deck, poster, logo, social or blank; it starts with one artboard (a title slide for a deck). Returns the canvas path. Then add or change artboards with canvas_add_artboard and canvas_update_artboard, and canvas_open to show it.",
+    inputSchema: obj(
+      { title: { type: "string" }, kind: { type: "string", enum: ["deck", "poster", "logo", "social", "blank"] } },
+      ["title"],
+    ),
+    readOnly: false,
+  },
+  {
+    name: "canvas_add_artboard",
+    description:
+      "Add an artboard to a canvas. canvas is the path returned by canvas_create or its short name. html is the whole artboard: self-contained HTML/CSS (inline SVG allowed) whose body is exactly width x height pixels (the canvas's last artboard size when you omit them), text kept as real text, images from the canvas's assets/ folder by relative path, no network assets except web fonts.",
+    inputSchema: obj(
+      {
+        canvas: { type: "string" },
+        name: { type: "string" },
+        width: { type: "integer", minimum: 16, maximum: 8000 },
+        height: { type: "integer", minimum: 16, maximum: 8000 },
+        html: { type: "string" },
+      },
+      ["canvas", "name", "html"],
+    ),
+    readOnly: false,
+  },
+  {
+    name: "canvas_update_artboard",
+    description:
+      "Change an artboard of a canvas: its html (the whole file again, same rules as canvas_add_artboard) and/or its name and size. id is the artboard id from canvas_add_artboard or the canvas's canvas.json. The open canvas redraws that artboard by itself.",
+    inputSchema: obj(
+      {
+        canvas: { type: "string" },
+        id: { type: "string" },
+        html: { type: "string" },
+        name: { type: "string" },
+        width: { type: "integer", minimum: 16, maximum: 8000 },
+        height: { type: "integer", minimum: 16, maximum: 8000 },
+      },
+      ["canvas", "id"],
+    ),
+    readOnly: false,
+  },
+  {
+    name: "canvas_open",
+    description: "Open a canvas in the person's Squeak window as a tab. canvas is its path or short name.",
+    inputSchema: obj({ canvas: { type: "string" } }, ["canvas"]),
+    readOnly: false,
+  },
+  {
     name: "set_merge_branch",
     description:
       "Pick a different branch for this stream to merge into; its changes and new pull requests are measured against it. Give the name as it is on origin, without 'origin/', and fetch it first. Nothing is rebased.",
@@ -412,6 +462,13 @@ const textOf = (payload: unknown): string | null => {
   return null;
 };
 
+/** The listed numeric args that were given as numbers. */
+function numberArgs<K extends string>(args: Record<string, unknown>, keys: K[]): Partial<Record<K, number>> {
+  const out: Partial<Record<K, number>> = {};
+  for (const k of keys) if (typeof args[k] === "number") out[k] = args[k] as number;
+  return out;
+}
+
 export class AgentTools {
   private readonly sent: { from: string; to: string; at: number }[] = [];
   private readonly starts: { from: string; at: number }[] = [];
@@ -567,6 +624,68 @@ export class AgentTools {
           bytes: size,
         });
         return `Opened ${path.basename(real)} in the person's Squeak window.`;
+      }
+      case "canvas_create": {
+        const title = str("title")?.trim();
+        if (!title) throw new ToolError("title is required.");
+        const made = this.canvasOp(() => createCanvas(s.cwd, title, str("kind")));
+        this.noteCanvasChanged(s);
+        return `Created canvas "${made.canvas.title}" (${made.canvas.kind}) at ${made.path}. Its artboard ids: ${made.artboards.map((a) => a.id).join(", ")}. Files: artboards/<id>.html. Open it with canvas_open.`;
+      }
+      case "canvas_add_artboard": {
+        const dir = this.canvasDirOf(s, str("canvas"));
+        const name = str("name");
+        const html = str("html");
+        if (!name || html === undefined) throw new ToolError("name and html are required.");
+        const board = this.canvasOp(() => addArtboard(dir, { name, html, ...numberArgs(args, ["width", "height"]) }));
+        this.noteCanvasChanged(s);
+        return `Added artboard ${board.id} (${board.width}x${board.height}) to the canvas.`;
+      }
+      case "canvas_update_artboard": {
+        const dir = this.canvasDirOf(s, str("canvas"));
+        const id = str("id");
+        if (!id) throw new ToolError("id is required.");
+        const html = str("html");
+        const name = str("name");
+        const board = this.canvasOp(() =>
+          updateArtboard(dir, id, {
+            ...(html !== undefined ? { html } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...numberArgs(args, ["width", "height"]),
+          }),
+        );
+        return `Updated artboard ${board.id} (${board.width}x${board.height}).`;
+      }
+      case "canvas_open": {
+        const dir = this.canvasDirOf(s, str("canvas"));
+        const detail = this.canvasOp(() => readCanvas(dir));
+        const relative = path.relative(fs.realpathSync(s.cwd), dir);
+        const shownPath = path.join(s.cwd, relative);
+        const pond = this.pondOf(s);
+        if (pond) {
+          try {
+            const duck = this.deps.store.duckBySession(s.id);
+            this.deps.store.recordShownArtifact({
+              projectId: pond.id,
+              path: shownPath,
+              duckId: duck?.id ?? s.duckId ?? null,
+              sessionId: s.id,
+              branch: s.branch ?? duck?.branch ?? null,
+              at: this.now(),
+            });
+            this.deps.artifactShown?.(pond.id);
+          } catch {
+            /* best effort */
+          }
+        }
+        this.deps.post(s.id, "squeak/show", {
+          path: shownPath,
+          relative,
+          name: path.basename(dir),
+          title: detail.canvas.title,
+          bytes: 0,
+        });
+        return `Opened canvas "${detail.canvas.title}" in the person's Squeak window.`;
       }
       case "set_merge_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
@@ -936,6 +1055,36 @@ export class AgentTools {
     if (!stat.isFile()) throw new ToolError("That is not a file.");
     if (stat.size > MAX_SHOW_IMAGE_BYTES) throw new ToolError("That image is over 25 MB.");
     return { real, size: stat.size };
+  }
+
+  private canvasOp<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (err) {
+      if (err instanceof CanvasError) throw new ToolError(err.message);
+      throw err;
+    }
+  }
+
+  private noteCanvasChanged(s: SessionRow): void {
+    const pond = this.pondOf(s);
+    if (pond) this.deps.artifactShown?.(pond.id);
+  }
+
+  /** The canvas folder a duck named: a path inside this chat's folder, or a short name under canvases/. */
+  canvasDirOf(s: SessionRow, name: string | undefined): string {
+    if (!name?.trim()) throw new ToolError("canvas is required.");
+    const given = name.trim();
+    const plain = !/[\\/]/.test(given);
+    const candidate = plain
+      ? path.join(s.cwd, "canvases", given.endsWith(".canvas") ? given : `${given}.canvas`)
+      : path.resolve(s.cwd, given.startsWith("~/") ? path.join(os.homedir(), given.slice(2)) : given);
+    try {
+      return resolveCanvasDir(candidate, [s.cwd]);
+    } catch (err) {
+      if (err instanceof CanvasError) throw new ToolError(err.message);
+      throw err;
+    }
   }
 
   /** A file to open in the Mac app: only inside the chat's own folder, after symlinks are resolved. */

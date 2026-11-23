@@ -25,8 +25,8 @@ struct RoomMessagesTests {
         f.apply(page: RoomPage(posts: posts, latestSeq: posts.map(\.seq).max() ?? 0, threads: threads, turns: serves ? turns : nil, jobs: jobs))
         return f
     }
-    private func post(_ seq: Int, _ text: String, by: RoomAuthor, at: Int64, kind: RoomPostKind = .message, level: RoomLevel = .room, sid: String? = nil) -> RoomPost {
-        RoomPost(seq: seq, id: "p\(seq)", author: by, sessionId: sid, kind: kind, level: level, text: text, at: at)
+    private func post(_ seq: Int, _ text: String, by: RoomAuthor, at: Int64, kind: RoomPostKind = .message, level: RoomLevel = .room, sid: String? = nil, to: String? = nil) -> RoomPost {
+        RoomPost(seq: seq, id: "p\(seq)", author: by, sessionId: sid, kind: kind, level: level, text: text, toSessionId: to, at: at)
     }
     private func groups(_ items: [RoomItem]) -> [RoomMessageGroup] { items.compactMap { if case .group(let g) = $0 { g } else { nil } } }
     private func texts(_ m: RoomMessage) -> [String] { m.parts.compactMap { if case .text(let t, _) = $0 { t } else { nil } } }
@@ -176,7 +176,27 @@ struct RoomMessagesTests {
         let items = RoomMessages.build(feed: f, now: now, calendar: cal)
         #expect(groups(items).isEmpty)
         let lines = items.compactMap { if case .system(let s) = $0 { s.text } else { nil } }
-        #expect(lines.count == 1 && lines[0].hasPrefix("Pip handed off to another duck"))
+        #expect(lines.count == 1 && lines[0].hasPrefix("Pip \u{2192} another duck"))
+    }
+
+    @Test func aHandoffNoteIsACardWithTheWholeMarkdownNote() {
+        let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
+        let note = "Production side:\n- Public client OAuth ON, justification written\n- Lines still to check: category and sibh"
+        let f = feed(posts: [post(1, note, by: agent, at: base, kind: .handoff, sid: "s1", to: "s2")],
+                     threads: [thread("s1", name: "Pip"), thread("s2", name: "Sage")])
+        let items = RoomMessages.build(feed: f, now: now, calendar: cal)
+        let lines = items.compactMap { if case .system(let s) = $0 { s } else { nil } }
+        let h = lines[0].handoff
+        #expect(h?.title == "Pip \u{2192} Sage" && h?.body == note && h?.fromSessionId == "s1" && lines[0].opens == "s2")
+        #expect(h?.isLong == false)
+        #expect(RoomHandoff.isLong(String(repeating: "word ", count: 120)))
+        #expect(RoomHandoff.isLong((1...7).map(String.init).joined(separator: "\n")))
+    }
+
+    @Test func theHeaderCountsTheWholeRosterOnceLoaded() {
+        #expect(RoomDucks.headerCount(roster: nil, threads: 3) == 3)
+        #expect(RoomDucks.headerCount(roster: 6, threads: 3) == 6)
+        #expect(RoomDucks.subtitle(people: 1, ducks: 6) == "1 person \u{00B7} 6 ducks")
     }
 
     @Test func aHostWithoutTurnsFallsBackToThePostsAsDuckMessages() {

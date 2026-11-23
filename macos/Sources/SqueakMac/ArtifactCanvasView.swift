@@ -90,12 +90,19 @@ private struct CanvasHost: NSViewRepresentable {
 /// Pan and zoom never invalidate tiles; CATiledLayer refines detail per level on its own.
 private final class WorldTiledRenderer: NSObject, CALayerDelegate, @unchecked Sendable {
     private let pdfLock = NSLock()
-    let boards: [CanvasBoard]
-    let frames: [CGRect]
+    private let stateLock = NSLock()
+    private var storedBoards: [CanvasBoard]
+    private var storedFrames: [CGRect]
 
-    init(boards: [CanvasBoard], frames: [CGRect]) { self.boards = boards; self.frames = frames }
+    init(boards: [CanvasBoard], frames: [CGRect]) { storedBoards = boards; storedFrames = frames }
+
+    /// A canvas of artboards drawn by web views swaps a board's picture while the viewer is open.
+    func set(boards: [CanvasBoard], frames: [CGRect]) {
+        stateLock.lock(); storedBoards = boards; storedFrames = frames; stateLock.unlock()
+    }
 
     func draw(_ layer: CALayer, in ctx: CGContext) {
+        stateLock.lock(); let boards = storedBoards, frames = storedFrames; stateLock.unlock()
         let clip = ctx.boundingBoxOfClipPath
         for (i, board) in boards.enumerated() {
             let f = frames[i]
@@ -151,12 +158,17 @@ private final class InstantTiledLayer: CATiledLayer {
 
 /// A non-tiled overlay that draws board names at a fixed 11 pt regardless of magnification.
 private final class LabelOverlayDelegate: NSObject, CALayerDelegate, @unchecked Sendable {
-    let boards: [CanvasBoard]
-    let frames: [CGRect]
+    private var storedBoards: [CanvasBoard]
+    private var storedFrames: [CGRect]
+    private var storedAlways = false
     private let lock = NSLock()
     private var storedMagnification: Double = 1
 
-    init(boards: [CanvasBoard], frames: [CGRect]) { self.boards = boards; self.frames = frames }
+    init(boards: [CanvasBoard], frames: [CGRect]) { storedBoards = boards; storedFrames = frames }
+
+    func set(boards: [CanvasBoard], frames: [CGRect], alwaysLabel: Bool) {
+        lock.lock(); storedBoards = boards; storedFrames = frames; storedAlways = alwaysLabel; lock.unlock()
+    }
 
     var magnification: Double {
         get { lock.lock(); defer { lock.unlock() }; return storedMagnification }
@@ -164,7 +176,8 @@ private final class LabelOverlayDelegate: NSObject, CALayerDelegate, @unchecked 
     }
 
     func draw(_ layer: CALayer, in ctx: CGContext) {
-        guard boards.count > 1 else { return }
+        lock.lock(); let boards = storedBoards, frames = storedFrames, always = storedAlways; lock.unlock()
+        guard boards.count > 1 || (always && !boards.isEmpty) else { return }
         let mag = magnification
         // Font size divided by magnification so it appears as 11 pt on screen.
         let fontSize = 11.0 / mag
@@ -231,6 +244,15 @@ private final class CanvasDocumentView: NSView {
         CATransaction.commit()
     }
 
+    func set(boards: [CanvasBoard], frames: [CGRect], alwaysLabel: Bool) {
+        renderer.set(boards: boards, frames: frames)
+        labelDelegate.set(boards: boards, frames: frames, alwaysLabel: alwaysLabel)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        tiledLayer.setNeedsDisplay()
+        labelLayer.setNeedsDisplay()
+        CATransaction.commit()
+    }
+
     func updateLabels(magnification: Double) {
         labelDelegate.magnification = magnification
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -244,9 +266,9 @@ private final class CanvasDocumentView: NSView {
 /// An NSScrollView that provides native magnification (pinch/trackpad zoom) and scroll for the canvas.
 /// CATiledLayer draws in world coordinates; tiles are never invalidated by pan or zoom.
 @MainActor final class CanvasScrollView: NSView {
-    private let boards: [CanvasBoard]
-    private let frames: [CGRect]
-    private let artboardBounds: CGRect
+    private var boards: [CanvasBoard]
+    private var frames: [CGRect]
+    private var artboardBounds: CGRect
     private let scrollView = NSScrollView()
     private let documentView: CanvasDocumentView
     private var laidOut = false
@@ -322,7 +344,7 @@ private final class CanvasDocumentView: NSView {
         super.layout()
         guard bounds.width > 0, bounds.height > 0 else { return }
         updateDocumentSize()
-        if !laidOut {
+        if !laidOut, artboardBounds.width > 0 {
             laidOut = true
             fitAll()
         }
@@ -341,14 +363,25 @@ private final class CanvasDocumentView: NSView {
 
     // MARK: Document size
 
-    private func updateDocumentSize() {
+    /// The boards changed (a redrawn picture, a new size, a new artboard): draw them again, keeping zoom and position
+    /// unless `refit`. `alwaysLabel` names a single board too.
+    func update(boards: [CanvasBoard], frames: [CGRect], alwaysLabel: Bool = false, refit: Bool = false) {
+        self.boards = boards
+        self.frames = frames
+        artboardBounds = ArtboardLayout.bounds(frames)
+        documentView.set(boards: boards, frames: frames, alwaysLabel: alwaysLabel)
+        updateDocumentSize(force: true)
+        if refit { fitAll() } else { publish() }
+    }
+
+    private func updateDocumentSize(force: Bool = false) {
         let visibleSize = scrollView.contentView.bounds.size
         let docSize = CanvasDocumentSize.documentSize(artboardBounds: artboardBounds, viewportSize: visibleSize)
         let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
         // Position the artboards within the document view: the document view's origin in world coords is `docOrigin`,
         // so each artboard's frame in document-view coordinates is offset by -docOrigin.
         let docFrame = CGRect(origin: .zero, size: docSize)
-        if documentView.frame != docFrame {
+        if force || documentView.frame != docFrame {
             documentView.frame = docFrame
             // The tiled layer's bounds should match, offset so that world coords map correctly.
             CATransaction.begin(); CATransaction.setDisableActions(true)

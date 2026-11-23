@@ -100,6 +100,8 @@ public struct InspectorTabsRecord: Codable, Equatable, Sendable {
 public enum InspectorContext: Equatable, Sendable {
     case pond
     case stream(panels: [DockPanel])
+    /// The Dashboard: no pond is focused, so only the shells of the last place the person was (and the "+").
+    case home
 }
 
 /// What the "+" offers; the first is what a plain click does.
@@ -127,9 +129,10 @@ public enum InspectorPlusItem: String, CaseIterable, Sendable {
 
 public struct InspectorStrip: Equatable, Sendable {
     public var tabs: [RightTab]
-    public var selected: RightTab
-    /// The tab that cannot be closed or dragged out: always the first.
-    public var pinned: RightTab
+    /// Nil only on the Dashboard with no shell open (the strip is just the "+").
+    public var selected: RightTab?
+    /// The tab that cannot be closed or dragged out: always the first (nil on the Dashboard, where every shell closes).
+    public var pinned: RightTab?
 
     /// The strip for a context. `terminals` are the shells placed in the right zone; `selectedTerminal` is the shown one.
     /// The strip is never empty: beside a pond the Pond tab is always first; in a stream the first panel the zone holds
@@ -143,8 +146,14 @@ public struct InspectorStrip: Equatable, Sendable {
         if peopleOnly, case .pond = context {
             return InspectorStrip(tabs: [.pond, .artifacts], selected: record.selected == .artifacts ? .artifacts : .pond, pinned: .pond)
         }
+        if case .home = context {
+            // The Dashboard: the open shells, nothing else; no Pond, Artifacts or Code tab without a pond.
+            let pick = selectedTerminal.flatMap { terminals.contains($0) ? $0 : nil } ?? terminals.first
+            return InspectorStrip(tabs: terminals.map { .terminal($0) }, selected: pick.map { .terminal($0) }, pinned: nil)
+        }
         var tabs: [RightTab] = []
         switch context {
+        case .home: break
         case .pond:
             // Artifacts always sits beside Pond (top right), never behind the "+" menu.
             tabs.append(.pond)
@@ -167,6 +176,7 @@ public struct InspectorStrip: Equatable, Sendable {
         let pinned = tabs[0]
         var selected = tabs[0]
         switch context {
+        case .home: break
         case .pond:
             if let t = selectedTerminal, terminals.contains(t) { selected = .terminal(t); break }
             switch record.selected {
@@ -186,14 +196,15 @@ public struct InspectorStrip: Equatable, Sendable {
     }
 
     /// Pinned: no close button, and it cannot be dragged out of the strip.
-    public func isPinned(_ tab: RightTab) -> Bool { tab == pinned || tab == .artifacts }
+    public func isPinned(_ tab: RightTab) -> Bool { pinned != nil && (tab == pinned || tab == .artifacts) }
     public func isClosable(_ tab: RightTab) -> Bool { !isPinned(tab) }
     public func isDraggable(_ tab: RightTab) -> Bool { !isPinned(tab) }
 
     /// The "+" menu, same in both contexts. Files and Code are left out of a pond's menu while open (they would only
     /// re-select), but never in a stream, where they are panels of the zone.
     public static func plusItems(context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), peopleOnly: Bool = false) -> [InspectorPlusItem] {
-        peopleOnly ? [] : InspectorPlusItem.allCases.filter { $0 != .artifacts }  // Artifacts is always in the strip
+        if case .home = context { return [.newTerminal] }  // no pond: nothing to open but a shell
+        return peopleOnly ? [] : InspectorPlusItem.allCases.filter { $0 != .artifacts }  // Artifacts is always in the strip
     }
     public static let plusDefault = InspectorPlusItem.newTerminal
 }

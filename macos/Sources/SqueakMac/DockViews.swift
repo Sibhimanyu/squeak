@@ -234,6 +234,9 @@ struct DockItemTab<Icon: View>: View {
     var activity: TabActivity = .idle
     /// The right zone's first tab: no close button, and it cannot be dragged out or moved.
     var pinned = false
+    /// A preview tab: italic title; a double-click or "Keep open" calls `pin` and it becomes a normal tab.
+    var preview = false
+    var pin: (() -> Void)?
     let select: () -> Void
     let close: () -> Void
     @ViewBuilder var icon: () -> Icon
@@ -252,7 +255,7 @@ struct DockItemTab<Icon: View>: View {
                          guard !pinned else { return }
                          if inside { dock.hoveredTab = item } else if dock.hoveredTab == item { dock.hoveredTab = nil }
                      }, close: close, icon: icon) {
-                Text(verbatim: title).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted)
+                Text(verbatim: title).font(Typo.body).italic(preview).foregroundStyle(selected ? Theme.ink : Theme.muted)
                     .lineLimit(1).truncationMode(.tail)
             }
     }
@@ -262,6 +265,7 @@ struct DockItemTab<Icon: View>: View {
         return Group { tab }
         // Not a Button: a Button takes the mouse-down and the drag never starts.
         .onTapGesture(perform: select)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if preview { pin?() } })
         .overlay(MiddleClick(action: close))
         .accessibilityAddTraits(.isButton)
         .opacity(dock.dragging == item ? 0.35 : 1)
@@ -284,6 +288,7 @@ struct DockItemTab<Icon: View>: View {
                 }
             }
             Divider()
+            if preview, let pin { Button("Keep open", action: pin) }
             Button("Close tab", action: close)
         }
     }
@@ -377,11 +382,14 @@ struct DockFileTab: View {
     let selected: Bool
     let height: CGFloat
     let indicator: Namespace.ID
+    /// The stream's preview tab: its title is italic until it is pinned.
+    var preview = false
+    var pin: (() -> Void)?
     let select: () -> Void
 
     var body: some View {
         DockItemTab(item: .file(file.path), title: file.name, zone: zone, selected: selected, height: height, indicator: indicator,
-                    dirty: file.dirty, select: select, close: { files.close(file.path) }) {
+                    dirty: file.dirty, preview: preview, pin: pin, select: select, close: { files.close(file.path) }) {
             Lucide(.fileText, size: 13, color: selected ? Theme.ink : Theme.muted)
         }
     }

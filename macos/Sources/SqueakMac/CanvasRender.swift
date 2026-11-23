@@ -1,0 +1,130 @@
+import AppKit
+import PDFKit
+import SqueakMacCore
+import WebKit
+
+// Draws a canvas's artboards. Each artboard is a self-contained HTML file; a WKWebView that is never on screen loads it
+// (read access to the canvas folder only, page scripts off) and hands back a picture or a PDF page. One artboard at a
+// time, so memory stays flat however many a canvas has. The pasteboard shows the pictures; export reuses the same path.
+
+enum CanvasRenderError: Error {
+    case loadFailed
+    case snapshotFailed
+    case pdfFailed
+}
+
+@MainActor
+enum CanvasRender {
+    /// One web view for one artboard: sized exactly to it, loaded, fonts and pictures settled.
+    private final class Page: NSObject, WKNavigationDelegate {
+        let web: WKWebView
+        private var done: CheckedContinuation<Void, Error>?
+
+        init(size: CGSize) {
+            let config = WKWebViewConfiguration()
+            config.defaultWebpagePreferences.allowsContentJavaScript = false
+            web = WKWebView(frame: CGRect(origin: .zero, size: size), configuration: config)
+            super.init()
+            web.navigationDelegate = self
+            web.setValue(false, forKey: "drawsBackground")
+        }
+
+        func load(file: URL, readRoot: URL) async throws {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                done = c
+                web.loadFileURL(file, allowingReadAccessTo: readRoot)
+            }
+            // Web fonts and late pictures: let layout settle once more.
+            _ = try? await web.callAsyncJavaScript("await document.fonts.ready; return 1", contentWorld: .defaultClient)
+            try? await Task.sleep(for: .milliseconds(60))
+        }
+
+        private func finish(_ result: Result<Void, Error>) {
+            guard let c = done else { return }
+            done = nil
+            c.resume(with: result)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(.success(())) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(.failure(CanvasRenderError.loadFailed)) }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            finish(.failure(CanvasRenderError.loadFailed))
+        }
+    }
+
+    /// A picture of the artboard. `width` is the picture's width in points; on a Retina screen it carries twice the
+    /// pixels, which is the "2x" the pasteboard draws.
+    static func image(board: CanvasArtboardInfo, root: URL, width: CGFloat? = nil) async throws -> NSImage {
+        let page = Page(size: board.size)
+        try await page.load(file: URL(fileURLWithPath: board.file), readRoot: root)
+        let config = WKSnapshotConfiguration()
+        config.rect = CGRect(origin: .zero, size: board.size)
+        config.snapshotWidth = NSNumber(value: Double(width ?? board.size.width))
+        config.afterScreenUpdates = true
+        return try await withCheckedThrowingContinuation { c in
+            page.web.takeSnapshot(with: config) { image, error in
+                if let image { c.resume(returning: image) } else { c.resume(throwing: error ?? CanvasRenderError.snapshotFailed) }
+            }
+        }
+    }
+
+    /// The artboard as a one-page PDF of its own size.
+    static func pdfPage(board: CanvasArtboardInfo, root: URL) async throws -> Data {
+        let page = Page(size: board.size)
+        try await page.load(file: URL(fileURLWithPath: board.file), readRoot: root)
+        let config = WKPDFConfiguration()
+        config.rect = CGRect(origin: .zero, size: board.size)
+        return try await withCheckedThrowingContinuation { c in
+            page.web.createPDF(configuration: config) { result in
+                switch result {
+                case .success(let data): c.resume(returning: data)
+                case .failure: c.resume(throwing: CanvasRenderError.pdfFailed)
+                }
+            }
+        }
+    }
+
+    /// PNG bytes of the artboard at exactly `pixels` (the snapshot redrawn into a bitmap of that size).
+    static func png(board: CanvasArtboardInfo, root: URL, scale: CanvasExport.Scale) async throws -> Data {
+        let pixels = CanvasExport.pixelSize(board.size, scale: scale)
+        let image = try await image(board: board, root: root, width: pixels.width)
+        return try await Task.detached(priority: .userInitiated) { try Self.encodePNG(image, pixels: pixels) }.value
+    }
+
+    nonisolated private static func encodePNG(_ image: NSImage, pixels: CGSize) throws -> Data {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(pixels.width), pixelsHigh: Int(pixels.height), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let ctx = NSGraphicsContext(bitmapImageRep: rep) else { throw CanvasRenderError.snapshotFailed }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        ctx.imageInterpolation = .high
+        image.draw(in: CGRect(origin: .zero, size: pixels), from: .zero, operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = rep.representation(using: .png, properties: [:]) else { throw CanvasRenderError.snapshotFailed }
+        return data
+    }
+
+    /// Stitches one-page PDFs into one document, in order. Off the main thread.
+    nonisolated static func merge(_ pages: [Data]) -> Data? {
+        let doc = PDFDocument()
+        for data in pages {
+            guard let part = PDFDocument(data: data), let page = part.page(at: 0) else { continue }
+            doc.insert(page, at: doc.pageCount)
+        }
+        return doc.pageCount == 0 ? nil : doc.dataRepresentation()
+    }
+
+    /// The placeholder drawn while an artboard has no picture yet: a quiet "Rendering…" on a white board.
+    static func placeholder(size: CGSize, text words: String) -> NSImage {
+        let box = CGSize(width: 480, height: max(1, 480 * size.height / max(size.width, 1)))
+        return NSImage(size: box, flipped: false) { rect in
+            NSColor.white.setFill(); rect.fill()
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 20, weight: .medium), .foregroundColor: NSColor(white: 0.55, alpha: 1)]
+            let text = NSString(string: words)
+            let s = text.size(withAttributes: attrs)
+            text.draw(at: CGPoint(x: rect.midX - s.width / 2, y: rect.midY - s.height / 2), withAttributes: attrs)
+            return true
+        }
+    }
+}

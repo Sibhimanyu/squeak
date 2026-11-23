@@ -6,7 +6,7 @@ import Foundation
 
 /// What a file is, for its icon, its preview and the app that opens it.
 public enum ArtifactKind: String, Sendable, CaseIterable {
-    case page, doc, slides, image, pdf, psd, ai, svg, video, audio, other
+    case page, doc, slides, image, pdf, psd, ai, svg, video, audio, canvas, other
 
     /// The host's word, or `other` for one this build does not know.
     public init(wire: String?) { self = wire.flatMap(ArtifactKind.init(rawValue:)) ?? .other }
@@ -17,6 +17,7 @@ public enum ArtifactKind: String, Sendable, CaseIterable {
         case "html", "htm", "md", "markdown", "mdx": self = .page
         case "pdf": self = .pdf
         case "psd": self = .psd
+        case "canvas": self = .canvas
         case "ai": self = .ai
         case "svg": self = .svg
         case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "tif", "tiff": self = .image
@@ -233,6 +234,7 @@ public enum Artifacts {
         case .svg: "SVG"
         case .video: "Video"
         case .audio: "Audio"
+        case .canvas: "Canvas"
         case .other: "File"
         }
     }
@@ -268,6 +270,8 @@ public enum ArtifactPreview: Equatable, Sendable {
     case quickLook
     /// AVKit: video and audio.
     case media
+    /// A `.canvas` folder: the canvas viewer (artboards on a pasteboard).
+    case canvas
     /// Nothing above knows it: Quick Look first, then the file's icon with Open and Reveal.
     case other
 
@@ -277,6 +281,7 @@ public enum ArtifactPreview: Equatable, Sendable {
         case "md", "markdown", "mdx": .markdown
         case "pdf": .pdf
         case "ai": .illustrator
+        case "canvas": .canvas
         case "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "psd": .image
         case "svg": .svg
         case "pptx", "ppt", "key", "docx", "doc", "xlsx", "xls", "pages", "numbers", "rtf", "csv", "txt": .quickLook
@@ -290,7 +295,7 @@ public enum ArtifactPreview: Equatable, Sendable {
     public static func fallback(after preview: ArtifactPreview) -> ArtifactPreview? {
         switch preview {
         case .pdf, .image, .svg, .media, .web, .markdown: .quickLook
-        case .illustrator, .quickLook, .other: nil
+        case .illustrator, .quickLook, .canvas, .other: nil
         }
     }
 

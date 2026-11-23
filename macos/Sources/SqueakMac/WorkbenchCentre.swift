@@ -444,7 +444,9 @@ private struct WorkbenchTabs: View {
                         case .file(let f):
                             if let files, dock.files.zone(of: f.path) == .centre {
                                 DockFileTab(files: files, file: f, zone: .centre, selected: !composing && artifact == nil && files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
-                                            height: Metrics.tabStrip, indicator: tabIndicator) {
+                                            height: Metrics.tabStrip, indicator: tabIndicator,
+                                            preview: model.streamTabs.isPreview(.file(f.path), in: workspace.id),
+                                            pin: { model.pinTab(.file(f.path), in: workspace) }) {
                                     dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                                     dock.update { $0.selectChats() }
                                     model.leaveArtifact()
@@ -456,6 +458,8 @@ private struct WorkbenchTabs: View {
                     ForEach(artifactTabs, id: \.path) { a in
                         ArtifactStripTab(pond: a.pond, path: a.path, selected: artifact?.pond == a.pond && artifact?.path == a.path,
                                          height: Metrics.tabStrip, indicator: tabIndicator,
+                                         preview: model.streamTabs.isPreview(.artifact(pond: a.pond, path: a.path), in: workspace.id),
+                                         pin: { model.pinTab(.artifact(pond: a.pond, path: a.path), in: workspace) },
                                          open: { model.openArtifact(pond: a.pond, path: a.path) },
                                          close: { model.closeArtifactTab(pond: a.pond, path: a.path, in: workspace) })
                             .transition(.opacity)
@@ -520,8 +524,11 @@ private struct WorkbenchTabs: View {
         }
         .onChange(of: files?.open.filter { !$0.isListing }.map(\.path) ?? []) { old, new in
             guard files?.restoredTabs == true else { return }
-            for p in new where !old.contains(p) { model.fileTabOpened(p, in: workspace) }
+            for p in new where !old.contains(p) { model.fileTabOpened(p, in: workspace, files: files) }
             for p in old where !new.contains(p) { model.fileTabClosed(p, in: workspace) }
+        }
+        .onChange(of: files?.pinRequest) { _, req in
+            if let req { model.pinTab(.file(req.path), in: workspace) }
         }
         .modifier(CentreFileDockSync(files: files))
         .modifier(ArtifactLeaveSync(files: files))
@@ -740,6 +747,8 @@ private struct ArtifactStripTab: View {
     let selected: Bool
     let height: CGFloat
     let indicator: Namespace.ID
+    var preview = false
+    var pin: () -> Void = {}
     let open: () -> Void
     let close: () -> Void
 
@@ -749,11 +758,16 @@ private struct ArtifactStripTab: View {
                  titleWidth: TabTitleMeasure.width(item.name, semibold: false), close: close,
                  icon: { Lucide(item.kind.lucide, size: 13, color: selected ? Theme.ink : Theme.muted) },
                  title: {
-                     Text(verbatim: item.name).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted)
+                     Text(verbatim: item.name).font(Typo.body).italic(preview).foregroundStyle(selected ? Theme.ink : Theme.muted)
                          .lineLimit(1).truncationMode(.middle)
                  })
             .contentShape(Rectangle())
             .onTapGesture(perform: open)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if preview { pin() } })
+            .squeakContextMenu {
+                if preview { Button("Keep open", action: pin) }
+                Button("Close tab", action: close)
+            }
             .accessibilityElement(children: .combine).accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityLabel(item.name).help(item.name)
     }

@@ -222,6 +222,7 @@ private struct TreeRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if !e.isDirectory { files.openFile(e.path, pin: true) } })
             .onHover { hovering = $0 }
             .squeakContextMenu { FileContextMenu(files: files, path: e.path, isDirectory: e.isDirectory) }
             .onDrag { dragProvider(FileDrop.token(root: files.root, path: e.path), kind: .fileToken) }

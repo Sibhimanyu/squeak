@@ -96,6 +96,10 @@ struct ArtifactsTab: View {
         model.openArtifact(pond: PondsModel.shared.key(forProject: projectId), path: item.path)
     }
 
+    private func pinOpen(_ item: ArtifactItem) {
+        model.openArtifact(pond: PondsModel.shared.key(forProject: projectId), path: item.path, pin: true)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if !feed.items.isEmpty { ArtifactSearchBar(query: $query, focused: $searchFocused) }
@@ -131,7 +135,7 @@ struct ArtifactsTab: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: group.title).font(Typo.meta).foregroundStyle(Theme.subtle)
                                 .padding(.horizontal, Space.s).padding(.bottom, 2)
-                            ForEach(group.items) { item in ArtifactRow(item: item, selected: model.location.artifactPath == item.path) { open(item) } }
+                            ForEach(group.items) { item in ArtifactRow(item: item, selected: model.location.artifactPath == item.path, pin: { pinOpen(item) }) { open(item) } }
                         }
                     }
                 }
@@ -153,6 +157,7 @@ extension ArtifactKind {
         case .psd: .layers
         case .ai: .palette
         case .svg: .penTool
+        case .canvas: .layers
         }
     }
 }
@@ -167,6 +172,8 @@ private struct ArtifactRow: View {
     var selected = false
     /// A row of a remote pond: the file is on the owner's Mac, so there is no path to open, reveal or copy until it is fetched.
     var remote = false
+    /// A double-click keeps the artifact open (it leaves the preview tab).
+    var pin: () -> Void = {}
     let select: () -> Void
     @State private var hovering = false
     @State private var copied = false
@@ -195,6 +202,7 @@ private struct ArtifactRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: select)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { pin() })
         .contextMenu {
             if !remote {
                 Button(Artifacts.openLabel(item.kind)) { ArtifactActions.openDefault(item) }
@@ -328,7 +336,8 @@ struct RemoteArtifactsTab: View {
                             Text(verbatim: group.title).font(Typo.meta).foregroundStyle(Theme.subtle)
                                 .padding(.horizontal, Space.s).padding(.bottom, 2)
                             ForEach(group.items) { item in
-                                ArtifactRow(item: item, selected: model.location.artifactPath == item.path, remote: true) {
+                                ArtifactRow(item: item, selected: model.location.artifactPath == item.path, remote: true,
+                                            pin: { model.openArtifact(pond: key, path: item.path, pin: true) }) {
                                     model.openArtifact(pond: key, path: item.path)
                                 }
                             }

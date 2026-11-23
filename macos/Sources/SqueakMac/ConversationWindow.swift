@@ -124,7 +124,9 @@ struct ConversationView: View {
         let showingSettings = focus.isSettings
         // The right zone belongs to the page: a chat's dock column, or a pond home's room inspector.
         let chatOpen = focus.page == .chat && model.selectedSession != nil
-        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : (rightWanted && chatOpen)
+        // The Dashboard keeps its right zone too (its shells and "+"), open or closed by the same dock toggle as a chat's.
+        let homeCtx = focus.page == .home && roomCtx == nil
+        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
             window: windowWidth,
@@ -136,8 +138,8 @@ struct ConversationView: View {
         let showsInspector = showsInspectorWanted && solved.rightShown
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
-        let toggleRightPane: () -> Void = { guard rightAvailable || roomCtx != nil else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else { dock.update { $0.toggleRight() } } }
-        let paneOpen = chatOpen || roomCtx != nil
+        let toggleRightPane: () -> Void = { guard rightAvailable || roomCtx != nil || homeCtx else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
+        let paneOpen = chatOpen || roomCtx != nil || homeCtx
         HStack(spacing: 0) {
             // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
             // place (no horizontal travel); the slot itself still slides when the sidebar is toggled.
@@ -182,6 +184,7 @@ struct ConversationView: View {
                     if showsInspector, paneOpen {
                         VStack(spacing: 0) {
                             if let roomCtx { RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW) }
+                            else if homeCtx { HomeInspectorZone(width: inspectorW) }
                             else { DockRightColumn(session: model.selectedSession, width: inspectorW) }
                             if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW)
                                     .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
@@ -231,7 +234,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && (rightAvailable || roomCtx != nil), window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && (rightAvailable || roomCtx != nil || homeCtx), window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)

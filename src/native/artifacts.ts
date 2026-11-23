@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 
+import { canvasModified, isCanvasDir } from "./canvases.js";
 import type { NativeStore, ShownArtifactRow } from "./store.js";
 
 /**
@@ -21,6 +22,7 @@ export type ArtifactKind =
   | "svg"
   | "video"
   | "audio"
+  | "canvas"
   | "other";
 export type ArtifactSource = "shown" | "found";
 
@@ -107,6 +109,7 @@ const AUDIO_EXTENSIONS = new Set([".m4a", ".mp3", ".wav", ".aac"]);
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tif", ".tiff"]);
 
 export function artifactKindFromPath(filePath: string): ArtifactKind {
+  if (filePath.endsWith(".canvas")) return "canvas";
   const ext = path.extname(filePath).toLowerCase();
   if (PAGE_EXTENSIONS.has(ext)) return "page";
   if (ext === ".pdf") return "pdf";
@@ -149,6 +152,21 @@ export function scanArtifactFolder(
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (skip.has(e.name)) continue;
+        if (isCanvasDir(full)) {
+          // A canvas is one artifact: its folder; its artboards and assets are not listed on their own.
+          out.push({
+            path: full,
+            name: e.name,
+            kind: "canvas",
+            ...(folder.duckId ? { duckId: folder.duckId } : {}),
+            ...(folder.duckName ? { duckName: folder.duckName } : {}),
+            ...(folder.branch ? { branch: folder.branch } : {}),
+            source: "found",
+            modifiedAt: canvasModified(full),
+            size: 0,
+          });
+          continue;
+        }
         walk(full, depth + 1);
         continue;
       }
@@ -190,7 +208,7 @@ export function shownArtifactsLive(
     } catch {
       continue;
     }
-    if (!st.isFile()) continue;
+    if (!st.isFile() && !(st.isDirectory() && isCanvasDir(r.path))) continue;
     const name = path.basename(r.path);
     const duck = r.duckId ? duckName(r.duckId) : undefined;
     out.push({
@@ -201,8 +219,8 @@ export function shownArtifactsLive(
       ...(duck ? { duckName: duck } : {}),
       ...(r.branch ? { branch: r.branch } : {}),
       source: "shown",
-      modifiedAt: Math.floor(st.mtimeMs) || r.at,
-      size: st.size,
+      modifiedAt: (st.isDirectory() ? canvasModified(r.path) : Math.floor(st.mtimeMs)) || r.at,
+      size: st.isDirectory() ? 0 : st.size,
     });
   }
   return out;
@@ -292,7 +310,8 @@ export interface ArtifactsDeps {
 
 function fileExists(p: string): boolean {
   try {
-    return fs.statSync(p).isFile();
+    const st = fs.statSync(p);
+    return st.isFile() || (st.isDirectory() && isCanvasDir(p));
   } catch {
     return false;
   }
@@ -535,7 +554,7 @@ export class Artifacts extends EventEmitter {
   }
 
   /** Main + every stream/working copy for the pond, tagged with the duck that sits there when known. */
-  private folders(projectId: string, rootPath: string): ArtifactFolder[] {
+  folders(projectId: string, rootPath: string): ArtifactFolder[] {
     const ducks = this.deps.store.listDucks(projectId);
     const byWs = new Map(ducks.filter((d) => d.workspaceId).map((d) => [d.workspaceId!, d] as const));
     const mainDuck = ducks.find((d) => !d.workspaceId && d.currentSessionId);
