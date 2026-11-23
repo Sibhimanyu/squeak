@@ -18,6 +18,18 @@ cd "$HERE"
 CFG="${SQUEAK_DEV_CONFIG:-debug}"   # SQUEAK_DEV_CONFIG=release: optimised, as the shipped app
 swift build -c "$CFG" --product SqueakMac
 BINDIR="$(swift build -c "$CFG" --show-bin-path)"
+# Quit whatever Squeak is running BEFORE the bundle is touched (replacing a running binary and re-signing it can
+# get it killed with "Code Signature Invalid"). SIGTERM is a normal quit in the app (it ends through
+# applicationWillTerminate, so Heresay records a clean run); wait up to 10 s per process, KILL only if still alive.
+if [ "$BUILD_ONLY" != 1 ]; then
+  PIDS="$( { pgrep -f "Products/Debug/SqueakMac"; pgrep -f "Squeak Dev.app/Contents/MacOS/SqueakMac"; pgrep -f "/Applications/Squeak.app/Contents/MacOS/SqueakMac"; } 2>/dev/null | sort -u || true)"
+  for pid in $PIDS; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in $PIDS; do
+    for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then echo "Squeak ($pid) did not quit in 10 s: killing" >&2; kill -KILL "$pid" 2>/dev/null || true; fi
+  done
+fi
+
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
 
 CHANGED=0
@@ -118,10 +130,5 @@ if ! defaults read "$ID" >/dev/null 2>&1 && defaults read SqueakMac >/dev/null 2
   defaults export SqueakMac - | defaults import "$ID" - && echo "copied SqueakMac defaults to $ID"
 fi
 
-# Quit whatever Squeak is running (SIGTERM: the installed app ignores AppleScript quit), then open the dev bundle.
-pkill -TERM -f "Products/Debug/SqueakMac" || true
-pkill -TERM -f "Squeak Dev.app/Contents/MacOS/SqueakMac" || true
-pkill -TERM -f "/Applications/Squeak.app/Contents/MacOS/SqueakMac" || true
-sleep 1
 open "$APP"
 echo "Squeak Dev running"

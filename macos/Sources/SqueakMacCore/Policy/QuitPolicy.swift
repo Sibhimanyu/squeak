@@ -14,8 +14,10 @@ public enum QuitPolicy {
     ///   the app switcher send the same event with no reason, and those count as window quits.
     /// - updating: Sparkle is installing an update and needs the app to exit.
     /// - hasAppWindows: a real window (conversation, Settings, Welcome) is open.
-    public static func decide(explicitQuit: Bool, systemQuit: Bool, updating: Bool, hasAppWindows: Bool) -> Decision {
-        if explicitQuit || systemQuit || updating { return .quit }
+    /// - signalQuit: the process got SIGTERM (a dev relaunch, `kill`, launchd). Always a real quit: it must
+    ///   finish so the SDKs see a normal exit, never turn into "close the windows".
+    public static func decide(explicitQuit: Bool, systemQuit: Bool, updating: Bool, hasAppWindows: Bool, signalQuit: Bool = false) -> Decision {
+        if explicitQuit || systemQuit || updating || signalQuit { return .quit }
         // No window open: nothing to close, so the user meant the whole app.
         return hasAppWindows ? .closeWindows : .quit
     }

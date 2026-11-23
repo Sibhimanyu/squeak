@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.33.3
+
+**Quitting is quitting.**
+
+- When macOS or a script asks Squeak to quit (a kill signal), it now quits normally instead of being cut off, so it no longer reports a false "closed unexpectedly" next time.
+
 ## 2.33.2
 
 **The room is the room; your chats stay yours.**

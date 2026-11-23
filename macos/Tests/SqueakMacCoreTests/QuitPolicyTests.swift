@@ -4,6 +4,10 @@ import Testing
 
 @Suite("QuitPolicy")
 struct QuitPolicyTests {
+    @Test func sigtermQuitIsARealQuitEvenWithWindowsOpen() {
+        #expect(QuitPolicy.decide(explicitQuit: false, systemQuit: false, updating: false, hasAppWindows: true, signalQuit: true) == .quit)
+    }
+
     @Test func cmdQWithWindowClosesWindowsOnly() {
         #expect(QuitPolicy.decide(explicitQuit: false, systemQuit: false, updating: false, hasAppWindows: true) == .closeWindows)
     }
