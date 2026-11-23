@@ -66,6 +66,8 @@ export interface NativeServerOptions {
   tools?: AgentTools;
   /** Tests inject one with fake git/gh; default runs the real ones. */
   sources?: WorkspaceSources;
+  /** The Placement the shared agent tools use (main.ts), so both move chats through one instance. */
+  placement?: Placement;
   /** Flotilla's routes (`src/flotilla`), only when it is on. */
   flotilla?: {
     handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
@@ -212,7 +214,7 @@ export class NativeServer {
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
-    this.placement = new Placement({ store: options.store, workspaces, sources: this.sources });
+    this.placement = options.placement ?? new Placement({ store: options.store, workspaces, sources: this.sources });
     this.pickers = new RepoPickers({ store: options.store });
     this.planner = new Planner(options.store, async (spec) => {
       const project = options.store.getProject(spec.projectId);
