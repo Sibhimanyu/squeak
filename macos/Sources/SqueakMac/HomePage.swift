@@ -29,7 +29,7 @@ struct DashboardPage: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             HStack(spacing: 12) {
-                SearchField(text: $query, placeholder: "Filter streams…")
+                SearchField(text: $query, placeholder: model.ducksMode ? "Filter ducks and branches…" : "Filter streams…")
                     .frame(maxWidth: 320)
                 Spacer(minLength: 0)
                 let total = columns.reduce(0) { $0 + $1.workspaces.count }
@@ -40,7 +40,7 @@ struct DashboardPage: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
-                Text("\(total) \(total == 1 ? "workspace" : "workspaces")")
+                Text(model.ducksMode ? "\(total) \(total == 1 ? "branch" : "branches")" : "\(total) \(total == 1 ? "workspace" : "workspaces")")
                     .font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit()
             }
             .padding(.horizontal, Space.xl).padding(.bottom, Space.l)
@@ -74,16 +74,16 @@ struct DashboardPage: View {
                         }
                     }
                     .buttonStyle(.plain).font(Typo.body).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Show all streams")
+                    .accessibilityLabel(model.ducksMode ? "Show all work" : "Show all streams")
                 } else {
-                    Text("Your streams, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text(model.ducksMode ? "Your ducks' work, at a glance." : "Your streams, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
                 }
             }
             Spacer(minLength: 12)
             if let resume = model.dashboardResumeSession {
                 Button { model.select(resume.key) } label: {
                     HStack(spacing: 7) {
-                        Text("Continue last stream")
+                        Text(model.ducksMode ? "Continue last duck" : "Continue last stream")
                         Lucide(.arrowRight, size: 14, color: Theme.ink)
                     }
                 }
@@ -162,7 +162,7 @@ private struct DashboardWorkspaceCard: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
                 HStack(spacing: 6) {
-                    Text("\(workspace.chats.count) \(workspace.chats.count == 1 ? "chat" : "chats")")
+                    Text("\(workspace.chats.count) \(model.ducksMode ? (workspace.chats.count == 1 ? "duck" : "ducks") : (workspace.chats.count == 1 ? "chat" : "chats"))")
                         .font(Typo.meta).foregroundStyle(Theme.subtle)
                     Spacer(minLength: 0)
                     if let chat { AgentAvatar(session: chat, size: 14) }
