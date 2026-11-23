@@ -57,6 +57,10 @@ interface Tracked extends Duckling {
   notified?: boolean;
   /** The Agent tool's `model` input (an alias such as "sonnet"), before a sidechain row names the real one. */
   modelAlias?: string;
+  /** The subagent's own id, from its launch (or resume) result. */
+  agentId?: string;
+  /** For a run woken with SendMessage: the tool-use id of the launch it continues (its own rows may name either). */
+  resumedFrom?: string;
 }
 
 const rec = (v: unknown): Record<string, unknown> | undefined =>
@@ -91,6 +95,8 @@ export class DucklingTracker {
   private readonly tasks = new Map<string, Tracked>();
   /** The CLI's `task_id` → our id (the tool-use id), from `task_started`. */
   private readonly byTask = new Map<string, string>();
+  /** SendMessage calls waiting for their result: tool-use id → the call's `to` and `message`. */
+  private readonly sends = new Map<string, { to: string; message: string }>();
 
   feed(row: MessageRow): void {
     const p = rec(row.payload);
@@ -127,6 +133,10 @@ export class DucklingTracker {
         const id = str(block.id);
         const name = str(block.name) ?? "";
         const input = rec(block.input) ?? {};
+        if (name === "SendMessage" && id) {
+          this.sends.set(id, { to: str(input.to) ?? "", message: str(input.message) ?? "" });
+          continue;
+        }
         const background = input.run_in_background === true;
         const kind: DucklingKind | null =
           name === "Agent" || name === "Task" ? "agent" : name === "Bash" && background ? "shell" : null;
@@ -153,10 +163,21 @@ export class DucklingTracker {
     const blocks = Array.isArray(content) ? content.map(rec) : [];
     for (const block of blocks) {
       if (!block || block.type !== "tool_result") continue;
-      const task = this.tasks.get(str(block.tool_use_id) ?? "");
-      if (!task || task.status !== "running") continue;
       const launched = rec(p.tool_use_result) ?? rec(p.toolUseResult);
       const text = resultText(block);
+      const sent = this.sends.get(str(block.tool_use_id) ?? "");
+      if (sent) {
+        this.sends.delete(str(block.tool_use_id) ?? "");
+        this.resume(str(block.tool_use_id)!, sent, block, launched, text, row);
+        continue;
+      }
+      const task = this.tasks.get(str(block.tool_use_id) ?? "");
+      if (!task) continue;
+      if (task.kind === "agent" && !task.agentId) {
+        const agentId = str(launched?.agentId) ?? /\bagentId: ([A-Za-z0-9]+)/.exec(text)?.[1];
+        if (agentId) task.agentId = agentId;
+      }
+      if (task.status !== "running") continue;
       // A subagent launches async unless told otherwise: its result only says it started. A foreground one ends here.
       if (task.background) continue;
       if (
@@ -192,11 +213,61 @@ export class DucklingTracker {
     }
   }
 
+  /** A successful SendMessage that resumed a known subagent starts a new running duckling, ended by its notification. */
+  private resume(
+    id: string,
+    sent: { to: string; message: string },
+    block: Record<string, unknown>,
+    launched: Record<string, unknown> | undefined,
+    text: string,
+    row: MessageRow,
+  ): void {
+    if (block.is_error === true || this.tasks.has(id)) return;
+    let body: Record<string, unknown> | undefined;
+    try {
+      body = rec(JSON.parse(text));
+    } catch {
+      body = undefined;
+    }
+    if (launched?.success === false || body?.success === false) return;
+    const ids = [
+      str(launched?.resumedAgentId),
+      str(launched?.revivedAgentId),
+      str(body?.resumedAgentId),
+      str(body?.revivedAgentId),
+    ].filter((v): v is string => !!v);
+    const candidates = ids.length > 0 ? ids : sent.to ? [sent.to] : [];
+    let origin: Tracked | undefined;
+    for (const t of this.tasks.values()) {
+      if (t.kind !== "agent" || !t.agentId) continue;
+      if (candidates.includes(t.agentId)) origin = t;
+    }
+    if (!origin) return;
+    this.tasks.set(id, {
+      id,
+      kind: "agent",
+      title: origin.title,
+      status: "running",
+      startedAt: row.createdAt,
+      brief: sent.message,
+      seq: row.seq,
+      background: true,
+      agentId: origin.agentId!,
+      resumedFrom: origin.resumedFrom ?? origin.id,
+      ...(origin.model ? { model: origin.model } : {}),
+      ...(origin.modelAlias ? { modelAlias: origin.modelAlias } : {}),
+    });
+  }
+
   private feedTask(subtype: string, p: Record<string, unknown>, at: string): void {
     const taskId = str(p.task_id);
     const toolUseId = str(p.tool_use_id);
     if (subtype === "task_started") {
-      if (taskId && toolUseId) this.byTask.set(taskId, toolUseId);
+      if (taskId && toolUseId) {
+        this.byTask.set(taskId, toolUseId);
+        const t = this.tasks.get(toolUseId);
+        if (t && !t.agentId) t.agentId = taskId;
+      }
       return;
     }
     const id = toolUseId ?? (taskId ? this.byTask.get(taskId) : undefined);
@@ -283,7 +354,11 @@ export class DucklingTracker {
       ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
     };
     const entries = rowsAfterLaunch
-      .filter((r) => r.role === "agent" && rec(r.payload)?.parent_tool_use_id === id)
+      .filter((r) => {
+        if (r.role !== "agent") return false;
+        const parent = rec(r.payload)?.parent_tool_use_id;
+        return parent === id || (t.resumedFrom !== undefined && parent === t.resumedFrom && r.seq > t.seq);
+      })
       .map((r) => ({ ...(rec(r.payload) as Record<string, unknown>), isSidechain: true, timestamp: r.createdAt }));
     const steps = claudeSteps(entries, 40, { sidechain: true });
     return { ...item, brief: t.brief, steps, ...(t.report ? { report: t.report } : {}) };
