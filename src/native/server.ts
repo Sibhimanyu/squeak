@@ -190,7 +190,7 @@ export class NativeServer {
       new RoomJobs({
         store: options.store,
         room: this.room,
-        send: (id, text) => host.send(id, text),
+        send: (id, text) => host.send(id, text, { room: true }),
         newThread: (projectId, text, title, attach) => this.newJobThread(projectId, text, title, attach),
         start: (spec) => this.startDuckSession(spec),
         newBranch: (projectId, text) => this.newStreamBranch(projectId, text),
@@ -564,6 +564,8 @@ export class NativeServer {
         if (!text) throw new HttpError(400, "text is required");
         const mode = b.mode === "steer" ? "steer" : "queue";
         const clientNonce = str(b.clientNonce)?.slice(0, 80);
+        // Set by the Mac's room composer for an @duck send: that turn is the room's (a direct chat's never is).
+        const room = b.room === true;
         // Chats never work on Main: a chat still sitting in a git pond's Main moves to its own branch first, and the
         // message goes to the new chat (`movedTo`).
         const current = store.getSession(id);
@@ -583,7 +585,11 @@ export class NativeServer {
         }
         // The person messaging an off-duty duck puts it back on duty.
         if (store.duckOf(id).duty === "off") this.room.setDuty(id, true);
-        return this.json(res, 200, await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}) }));
+        return this.json(
+          res,
+          200,
+          await host.send(id, text, { mode, ...(clientNonce ? { clientNonce } : {}), ...(room ? { room } : {}) }),
+        );
       }
     }
     if (area === "projects" && id && sub === "ducks" && parts.length === 4) {
@@ -1570,6 +1576,7 @@ export class NativeServer {
       title: spec.title,
       text: spec.text + (spec.attach?.(cwd) ?? ""),
       duckId: spec.duck.id,
+      room: true,
     });
   }
 
@@ -1597,6 +1604,7 @@ export class NativeServer {
       workspaceId: null,
       title: title || jobTitle(text),
       text: text + (attach?.(project.rootPath) ?? ""),
+      room: true,
     });
   }
 

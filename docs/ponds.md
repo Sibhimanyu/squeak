@@ -533,7 +533,12 @@ RoomTurn   = { id: "<sessionId>:<turnId>", sessionId, threadTitle, agent, starte
 ```
 
 **Turns come from timelines** (`room-turns.ts`, no store of their own): one per `turn.started` that is not an
-agent-run turn (`auto`), to its `turn.ended`; the author is the message's pond member (`me: false`) or the owner
+agent-run turn (`auto`) and was sent from the room (`room: true`), to its `turn.ended`. A person's direct chat with a duck
+is never in the room: its turns carry no `room`, so neither `GET .../room` nor the SSE `turn` frames serve them (the room
+shows only room messages, `@duck` sends made from it with the duck's reply, and the ducks' own posts). The mark is set
+where the room starts the turn: the Mac's `@duck` send (`POST /native/sessions/<id>/messages { room: true }`) and every
+job send/start (Go, Allow, New duck). It rides the queue row (`queue.room`) so a queued message keeps it, and
+`turn.started` in the timeline log, so it survives a restart. Older turns (before the mark) are not shown. The author is the message's pond member (`me: false`) or the owner
 (`me: true`); `intent` is the chat's newest `working` post since the turn began. A per-chat cache is topped up by
 timeline seq. `GET .../room` answers `{ posts, latestSeq, threads, turns }`: turns oldest to newest, those that started
 inside the page's window (a plain page: the last 24 h, newest 100; a `since`/`before` page: the span of its posts).

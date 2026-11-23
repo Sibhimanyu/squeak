@@ -42,6 +42,8 @@ export type TimelineBody =
       queuedId?: string;
       /** The agent began this turn by itself (a background helper reported in): there is no prompt. */
       auto?: true;
+      /** Sent from the pond's room (an @duck send, a job): the only turns the room shows. A direct chat has none. */
+      room?: true;
       at: string;
     }
   | {
@@ -170,6 +172,7 @@ export class TimelineProjector {
     clientNonce?: string | undefined;
     queuedId?: string | undefined;
     auto?: boolean | undefined;
+    room?: boolean | undefined;
     at: string;
   }): TimelineBody[] {
     const out: TimelineBody[] = [];
@@ -199,6 +202,7 @@ export class TimelineProjector {
       ...(author ? { author } : {}),
       ...(input.queuedId ? { queuedId: input.queuedId } : {}),
       ...(input.auto ? { auto: true as const } : {}),
+      ...(input.room ? { room: true as const } : {}),
       at: input.at,
     });
     return out;

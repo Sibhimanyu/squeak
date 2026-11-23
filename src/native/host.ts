@@ -136,6 +136,8 @@ export interface CreateSpec {
   agentPrefix?: string;
   /** A duck taking this session as its current place (made before the agent starts, so its note carries the duck). */
   duckId?: string;
+  /** The first message comes from the pond's room (a job): its turn is a room turn. */
+  room?: boolean;
 }
 
 /** Where in an agent's own history a fork stops. */
@@ -719,8 +721,8 @@ export class SessionHost extends EventEmitter {
     this.emit("event", { type: "pending", sessionId: id, op, id: itemId, ...extra } satisfies HostEvent);
   }
 
-  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor, clientNonce?: string): void {
-    const row = this.store.enqueue(id, text, author, clientNonce);
+  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor, clientNonce?: string, room?: boolean): void {
+    const row = this.store.enqueue(id, text, author, clientNonce, room);
     this.timeline.ensure(
       id,
       () => this.store.messagesBefore(id, null, 2000),
@@ -773,20 +775,20 @@ export class SessionHost extends EventEmitter {
     const created = this.store.createSession(spec);
     if (spec.duckId) this.store.attachSessionToDuck(spec.duckId, created.id);
     if (spec.agentPrefix && spec.text) this.firstBrief.set(created.id, spec.agentPrefix);
-    if (spec.text) await this.send(created.id, spec.text);
+    if (spec.text) await this.send(created.id, spec.text, spec.room ? { room: true } : {});
     return this.store.getSession(created.id)!;
   }
 
   async send(
     id: string,
     text: string,
-    options: { mode?: "queue" | "steer"; author?: MessageAuthor; clientNonce?: string } = {},
+    options: { mode?: "queue" | "steer"; author?: MessageAuthor; clientNonce?: string; room?: boolean } = {},
   ): Promise<{ queued: boolean }> {
     const s = this.require(id);
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
     const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
     if (settingUp && !BUSY.has(s.status)) {
-      this.enqueueAndEmit(id, text, options.author, options.clientNonce);
+      this.enqueueAndEmit(id, text, options.author, options.clientNonce, options.room);
       return { queued: true };
     }
     if (BUSY.has(s.status)) {
@@ -812,10 +814,13 @@ export class SessionHost extends EventEmitter {
           return { queued: false };
         }
       }
-      this.enqueueAndEmit(id, text, options.author, options.clientNonce);
+      this.enqueueAndEmit(id, text, options.author, options.clientNonce, options.room);
       return { queued: true };
     }
-    await this.startTurn(s, text, false, options.author, undefined, { clientNonce: options.clientNonce });
+    await this.startTurn(s, text, false, options.author, undefined, {
+      clientNonce: options.clientNonce,
+      room: options.room,
+    });
     return { queued: false };
   }
 
@@ -1237,6 +1242,7 @@ export class SessionHost extends EventEmitter {
       await this.startTurn(s, item.text, false, item.author, undefined, {
         queuedId: queueId,
         clientNonce: item.clientNonce,
+        room: item.room,
       });
       return;
     }
@@ -1362,7 +1368,7 @@ export class SessionHost extends EventEmitter {
     steered = false,
     author?: MessageAuthor,
     agentBody?: string,
-    extra: { clientNonce?: string | undefined; queuedId?: string | undefined } = {},
+    extra: { clientNonce?: string | undefined; queuedId?: string | undefined; room?: boolean | undefined } = {},
   ): Promise<void> {
     this.clearTimer(s.id);
     // A chat that has no log yet (made before it existed) gets one from its rows first, so the new turn lands after them.
@@ -1383,6 +1389,7 @@ export class SessionHost extends EventEmitter {
       author,
       clientNonce: extra.clientNonce,
       queuedId: extra.queuedId,
+      room: extra.room,
       at: userRow.createdAt,
     });
     const turn = this.store.addTurn(s.id, text, userRow.seq);
@@ -1887,6 +1894,7 @@ export class SessionHost extends EventEmitter {
       await this.startTurn(s, next.text, false, next.author, undefined, {
         queuedId: next.id,
         clientNonce: next.clientNonce,
+        room: next.room,
       });
     } else {
       this.armTimer(id);

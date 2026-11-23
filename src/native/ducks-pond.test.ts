@@ -110,7 +110,14 @@ async function rig(kind: "git" | "folder" = "git") {
     });
   const log = new TimelineLog(store.db);
   const turn = (s: SessionRow, id: string, text: string, minAgo: number, reply?: string) => {
-    log.append(s.id, { type: "turn.started", turnId: id, promptMessageId: "m", text, at: iso(minAgo) } as any);
+    log.append(s.id, {
+      type: "turn.started",
+      turnId: id,
+      promptMessageId: "m",
+      room: true,
+      text,
+      at: iso(minAgo),
+    } as any);
     if (reply) {
       log.append(s.id, { type: "reply.done", turnId: id, messageId: `r-${id}`, text: reply, at: iso(minAgo) } as any);
       log.append(s.id, { type: "turn.ended", turnId: id, outcome: "done", at: iso(minAgo) } as any);

@@ -6,7 +6,7 @@ import type { TimelineEvent } from "./timeline.js";
 
 /**
  * The room's turns, derived from each chat's timeline (no source of truth of their own): a turn is one
- * `turn.started` (not an agent-run one) to its `turn.ended`, with the reply the agent closed it with.
+ * `turn.started` (sent from the room, not an agent-run one) to its `turn.ended`, with the reply the agent closed it with.
  */
 
 export const TURN_TEXT_MAX = 200;
@@ -63,6 +63,8 @@ export interface TurnBase {
   endedAt?: number;
   outcome?: "finished" | "stopped" | "error";
   prompt: string;
+  /** Started from the pond's room; only these turns are served to it. */
+  room?: true;
   authorName?: string;
   /** The turn's closing reply (full text, capped), the agent's own words. */
   reply?: string;
@@ -254,6 +256,7 @@ export class TurnReader {
         startedAt: Number.isFinite(at) ? at : this.now(),
         startSeq: e.seq,
         prompt: oneLine(e.text) || "Message",
+        ...(e.room ? { room: true as const } : {}),
         ...(e.author ? { authorName: e.author.name } : {}),
       };
       if (answerChoice(e.text)) {

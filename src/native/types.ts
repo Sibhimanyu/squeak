@@ -176,6 +176,8 @@ export interface QueueRow {
   held?: boolean;
   /** The composer that sent it: carried to the timeline so its optimistic row reconciles. */
   clientNonce?: string;
+  /** Sent from the pond's room: the turn it starts is a room turn. */
+  room?: true;
 }
 
 /** What is waiting beside a chat's running turn: a queued message, or a steer the agent has not taken in yet. */

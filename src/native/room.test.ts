@@ -150,13 +150,41 @@ describe("room turns", () => {
     const s = p.chat("Wire retry");
     const log = new TimelineLog(store.db);
     const start = (turnId: string, text: string, minAgo: number, extra: Record<string, unknown> = {}) =>
-      log.append(s.id, { type: "turn.started", turnId, promptMessageId: "m", text, at: iso(minAgo), ...extra } as any);
+      log.append(s.id, {
+        type: "turn.started",
+        turnId,
+        promptMessageId: "m",
+        text,
+        room: true,
+        at: iso(minAgo),
+        ...extra,
+      } as any);
     const reply = (turnId: string, text: string, minAgo: number, id = `r-${turnId}`) =>
       log.append(s.id, { type: "reply.done", turnId, messageId: id, text, at: iso(minAgo) });
     const end = (turnId: string, minAgo: number, outcome: "done" | "stopped" | "failed" = "done", extra = {}) =>
       log.append(s.id, { type: "turn.ended", turnId, outcome, at: iso(minAgo), ...extra });
     return { store, p, room, s, log, start, reply, end };
   }
+
+  it("a direct chat's turn is not a room turn (GET and SSE); a turn sent from the room is; agent posts still show", () => {
+    const r = rig();
+    const frames: any[] = [];
+    r.room.on("turn", (f) => frames.push(f));
+    r.start("t1", "private question to the duck", 30, { room: undefined });
+    r.reply("t1", "A private answer.", 29);
+    r.end("t1", 29);
+    r.start("t2", "@Wire retry look at the uploader", 20);
+    r.reply("t2", "Looked at it.", 19);
+    r.end("t2", 19);
+    r.room.agentPost(r.s, { kind: "done", text: "Retry shipped" });
+    const page = r.room.page(r.p.project.id, {});
+    expect(page.turns.map((t) => t.prompt)).toEqual(["@Wire retry look at the uploader"]);
+    expect(page.posts.map((x) => x.text)).toContain("Retry shipped");
+    // SSE: only the room's turn is framed
+    r.room.noteTimeline(r.s.id, { type: "turn.ended", turnId: "t1", outcome: "done", at: iso(29) } as any);
+    r.room.noteTimeline(r.s.id, { type: "turn.ended", turnId: "t2", outcome: "done", at: iso(19) } as any);
+    expect(frames.map((f) => f.turn.prompt)).toEqual(["@Wire retry look at the uploader"]);
+  });
 
   it("derives a finished turn: prompt, owner author, outcome text, duration", () => {
     const r = rig();
@@ -476,7 +504,7 @@ describe("turn frames", () => {
 
   it("emits on start, on a new intent and progress, and on end; coalesced to one frame per turn per 500 ms", () => {
     const r = rig();
-    r.send({ type: "turn.started", turnId: "t1", promptMessageId: "m", text: "go", at: at() });
+    r.send({ type: "turn.started", turnId: "t1", promptMessageId: "m", room: true, text: "go", at: at() });
     expect(r.frames).toHaveLength(1);
     expect(r.frames[0]).toMatchObject({ projectId: r.p.project.id, turn: { id: `${r.s.id}:t1`, prompt: "go" } });
     expect(r.frames[0].turn.outcome).toBeUndefined();
@@ -841,6 +869,7 @@ describe("room routes", () => {
       type: "turn.started",
       turnId: "t1",
       promptMessageId: "m",
+      room: true,
       text: "go now",
       at: new Date().toISOString(),
     } as const;
