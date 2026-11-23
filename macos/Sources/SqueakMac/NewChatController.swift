@@ -22,7 +22,7 @@ final class NewChatController {
     let branch = NewBranchState()
     let thread = NewThreadState()
 
-    func open(_ route: NewPage, text: String? = nil, error: String? = nil, pondThread: PondThreadContext? = nil) {
+    func open(_ route: NewPage, text: String? = nil, error: String? = nil, pondThread: PondThreadContext? = nil, duckPlace: DuckPlace? = nil) {
         let model = AppModel.shared
         // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
         var (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
@@ -54,7 +54,7 @@ final class NewChatController {
             enter(.newBranch, projectId: projectId)
         case .thread(let projectId, let workspaceId):
             thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread,
-                           contextPond: projectId == nil && workspaceId == nil && pondThread == nil)
+                           contextPond: projectId == nil && workspaceId == nil && pondThread == nil, duckPlace: duckPlace)
             enter(.newThread, projectId: projectId, workspaceId: workspaceId)
         case .conductorThread(let workspaceId):
             thread.prepare(model: model, route: route, conductorWorkspaceId: workspaceId)
@@ -165,8 +165,8 @@ extension AppModel {
     }
 
     /// A new thread in a git pond's Main (its own folder): the sidebar's Main row and ⌘N inside a pond.
-    func openNewMainThread(projectId: String) {
-        NewChatController.shared.open(.thread(projectId: projectId, workspaceId: nil))
+    func openNewMainThread(projectId: String, duckPlace: DuckPlace? = nil) {
+        NewChatController.shared.open(.thread(projectId: projectId, workspaceId: nil), duckPlace: duckPlace)
     }
 
     /// The "+" on a Conductor workspace: a chat there, through the daemon.
