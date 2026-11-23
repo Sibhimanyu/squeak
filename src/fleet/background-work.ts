@@ -60,6 +60,7 @@ export function readBackgroundWork(transcriptPath: string, nowMs: number): Backg
 
 export function backgroundTasks(entries: Record<string, unknown>[], nowMs: number): BackgroundTask[] {
   const tasks = new Map<string, BackgroundTask>();
+  const sends = new Map<string, string>();
   for (const entry of entries) {
     if (entry.isSidechain === true) continue;
     const at = asString(entry.timestamp);
@@ -74,6 +75,10 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
         const id = asString(block.id);
         const name = asString(block.name) ?? "";
         const input = asRecord(block.input) ?? {};
+        if (name === "SendMessage" && id) {
+          sends.set(id, asString(input.to) ?? "");
+          continue;
+        }
         const background = input.run_in_background === true;
         const kind: BackgroundKind | null =
           name === "Agent" || name === "Task" ? "agent" : name === "Bash" && background ? "shell" : null;
@@ -86,9 +91,16 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
     const blocks = asArray(content).map(asRecord);
     for (const block of blocks) {
       if (!block || asString(block.type) !== "tool_result") continue;
-      const task = tasks.get(asString(block.tool_use_id) ?? "");
-      if (!task) continue;
       const launched = asRecord(entry.toolUseResult);
+      const sendId = asString(block.tool_use_id) ?? "";
+      const sentTo = sends.get(sendId);
+      if (sentTo !== undefined) {
+        sends.delete(sendId);
+        resumeTask(tasks, sendId, sentTo, block, launched, at ?? null);
+        continue;
+      }
+      const task = tasks.get(sendId);
+      if (!task) continue;
       if (task.kind === "agent" && !task.agentId) {
         const agentId = asString(launched?.agentId) ?? /\bagentId: ([A-Za-z0-9]+)/.exec(resultText(block))?.[1];
         if (agentId && AGENT_ID_PATTERN.test(agentId)) task.agentId = agentId;
@@ -139,6 +151,41 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
       task.status === "running" ? age(task.startedAt) < STALE_RUNNING_MS : age(task.endedAt) < FINISHED_SHOWN_MS,
     )
     .slice(-MAX_TASKS);
+}
+
+/** A successful SendMessage that resumed a known subagent is a new running task, ended by its own notification. */
+function resumeTask(
+  tasks: Map<string, BackgroundTask>,
+  id: string,
+  to: string,
+  block: Record<string, unknown>,
+  launched: Record<string, unknown> | null,
+  at: string | null,
+): void {
+  if (block.is_error === true || tasks.has(id)) return;
+  let body: Record<string, unknown> | null;
+  try {
+    body = asRecord(JSON.parse(resultText(block)));
+  } catch {
+    body = null;
+  }
+  if (launched?.success === false || body?.success === false) return;
+  const ids = [launched?.resumedAgentId, launched?.revivedAgentId, body?.resumedAgentId, body?.revivedAgentId]
+    .map(asString)
+    .filter((v): v is string => !!v);
+  const candidates = ids.length > 0 ? ids : to ? [to] : [];
+  let origin: BackgroundTask | undefined;
+  for (const t of tasks.values()) if (t.kind === "agent" && t.agentId && candidates.includes(t.agentId)) origin = t;
+  if (!origin) return;
+  tasks.set(id, {
+    id,
+    kind: "agent",
+    label: origin.label,
+    background: true,
+    status: "running",
+    startedAt: at,
+    agentId: origin.agentId!,
+  });
 }
 
 function resultText(block: Record<string, unknown>): string {
