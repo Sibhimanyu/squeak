@@ -327,6 +327,86 @@ describe("show", () => {
   });
 });
 
+describe("show reaches the Mac", () => {
+  const listen = async (h: Harness, answer: (ev: { id: string; sessionId: string; path: string }) => unknown) => {
+    const token = fs.readFileSync(path.join(h.dir, "hook-token"), "utf8").trim();
+    const ctl = new AbortController();
+    const res = await fetch(`${h.base}/native/show-requests/stream`, {
+      headers: { "x-squeak-token": token },
+      signal: ctl.signal,
+    });
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    const seen: { id: string; sessionId: string; path: string }[] = [];
+    let hello!: () => void;
+    const ready = new Promise<void>((r) => (hello = r));
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buf += dec.decode(value);
+          for (let i = buf.indexOf("\n\n"); i >= 0; i = buf.indexOf("\n\n")) {
+            const frame = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            if (frame.startsWith("event: hello")) hello();
+            if (!frame.startsWith("event: open")) continue;
+            const ev = JSON.parse(frame.split("data: ")[1]!);
+            seen.push(ev);
+            await fetch(`${h.base}/native/show-requests/${ev.id}/ack`, {
+              method: "POST",
+              headers: { "x-squeak-token": token, "content-type": "application/json" },
+              body: JSON.stringify(answer(ev)),
+            });
+          }
+        }
+      } catch {
+        /* closed */
+      }
+    })();
+    await ready;
+    open.push(async () => {
+      ctl.abort();
+      await pump;
+    });
+    return seen;
+  };
+
+  const page = (h: Harness) => {
+    const a = chat(h, h.dir, "A");
+    fs.writeFileSync(path.join(h.dir, "page.html"), "<h1>hi</h1>");
+    return a;
+  };
+
+  it("tells the duck it is not open when no window listens", async () => {
+    const h = await start();
+    const a = page(h);
+    const r = await callTool(h, a.id, "show", { path: "page.html" });
+    expect(r.content[0]!.text).toMatch(/Did not open/);
+    expect(r.content[0]!.text).toMatch(/No Squeak window/);
+    expect(r.content[0]!.text).not.toMatch(/^Opened/);
+  });
+
+  it("says opened only after the window acks, and sends the chat id and path", async () => {
+    const h = await start();
+    const a = page(h);
+    const seen = await listen(h, () => ({ ok: true }));
+    const r = await callTool(h, a.id, "show", { path: "page.html" });
+    expect(r.content[0]!.text).toMatch(/^Opened page.html/);
+    expect(seen[0]).toMatchObject({ sessionId: a.id, path: path.join(h.dir, "page.html") });
+  });
+
+  it("passes the window's refusal on to the duck", async () => {
+    const h = await start();
+    const a = page(h);
+    await listen(h, () => ({ ok: false, message: "That chat is not open here." }));
+    const r = await callTool(h, a.id, "show", { path: "page.html" });
+    expect(r.content[0]!.text).toMatch(/Did not open/);
+    expect(r.content[0]!.text).toMatch(/not open here/);
+  });
+});
+
 describe("stream_changes", () => {
   it("includes commits, uncommitted and untracked work against the target branch", async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tools-repo-"));

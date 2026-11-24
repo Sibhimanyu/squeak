@@ -10,6 +10,7 @@ import path from "node:path";
 import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
 import { Artifacts } from "./artifacts.js";
+import { ShowRelay } from "./show-relay.js";
 import {
   applyCanvasOp,
   CANVAS_MAX_HTML_BYTES,
@@ -188,12 +189,14 @@ export class NativeServer {
   readonly room: Room;
   readonly jobs: RoomJobs;
   private readonly artifacts: Artifacts;
+  private readonly showRelay: ShowRelay;
   private readonly canvasWatcher = new CanvasWatcher();
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
     this.artifacts = new Artifacts({ store: options.store });
+    this.showRelay = new ShowRelay();
     this.room =
       options.room ??
       new Room({
@@ -258,6 +261,7 @@ export class NativeServer {
         jobs: this.jobs,
         placement: this.placement,
         artifactShown: (projectId) => this.artifacts.changed(projectId),
+        openShown: (req) => this.showRelay.request(req),
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
@@ -1213,6 +1217,13 @@ export class NativeServer {
         }),
       });
     }
+    if (area === "show-requests" && id === "stream" && parts.length === 3 && method === "GET") {
+      return this.showStream(req, res);
+    }
+    if (area === "show-requests" && id && sub === "ack" && parts.length === 4 && method === "POST") {
+      const body = await this.body(req);
+      return this.json(res, 200, { ok: this.showRelay.ack(id, body.ok === true, str(body.message) ?? undefined) });
+    }
     if (
       area === "projects" &&
       id &&
@@ -1722,6 +1733,24 @@ export class NativeServer {
     req.on("close", () => {
       clearInterval(beat);
       stop();
+    });
+  }
+
+  /** `event: hello`, then `event: open` for each file a duck showed (the window opens it and acks); a ping every 25 s. */
+  private showStream(req: http.IncomingMessage, res: http.ServerResponse): void {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    const onOpen = (r: unknown): void => {
+      res.write(`event: open\ndata: ${JSON.stringify(r)}\n\n`);
+    };
+    this.showRelay.on("open", onOpen);
+    this.showRelay.setListening(true);
+    res.write(`event: hello\ndata: {}\n\n`);
+    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 25_000);
+    beat.unref();
+    req.on("close", () => {
+      clearInterval(beat);
+      this.showRelay.off("open", onOpen);
+      this.showRelay.setListening(false);
     });
   }
 

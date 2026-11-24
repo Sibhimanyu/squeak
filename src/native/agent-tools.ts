@@ -1,3 +1,4 @@
+import type { ShowAck, ShowRequest } from "./show-relay.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -71,6 +72,8 @@ export interface AgentToolDeps {
   }): Promise<SessionRow>;
   /** A duck showed a file in this pond: the Artifacts tab should look again. */
   artifactShown?(projectId: string): void;
+  /** Asks a Squeak window to open a shown file as a tab and waits for its answer (absent: the tool does not wait). */
+  openShown?(req: ShowRequest): Promise<ShowAck>;
   /** Persists and broadcasts a message in a chat (the host's message path). */
   post(sessionId: string, kind: string, payload: unknown): void;
   /** The workspace's run script and setup output (the host's own; no interactive terminal). */
@@ -609,14 +612,18 @@ export class AgentTools {
             /* best effort */
           }
         }
+        const title = str("title")?.trim().slice(0, 200) || null;
         this.deps.post(s.id, "squeak/show", {
           path: shownPath,
           relative,
           name: path.basename(real),
-          title: str("title")?.trim().slice(0, 200) || null,
+          title,
           bytes: size,
         });
-        return `Opened ${path.basename(real)} in the person's Squeak window.`;
+        return this.openedMessage(
+          path.basename(real),
+          await this.askToOpen(s, pond?.id ?? null, shownPath, relative, title),
+        );
       }
       case "canvas_create": {
         const title = str("title")?.trim();
@@ -678,7 +685,10 @@ export class AgentTools {
           title: detail.canvas.title,
           bytes: 0,
         });
-        return `Opened canvas "${detail.canvas.title}" in the person's Squeak window.`;
+        return this.openedMessage(
+          `canvas "${detail.canvas.title}"`,
+          await this.askToOpen(s, pond?.id ?? null, shownPath, relative, detail.canvas.title),
+        );
       }
       case "set_merge_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
@@ -1048,6 +1058,28 @@ export class AgentTools {
     if (!stat.isFile()) throw new ToolError("That is not a file.");
     if (stat.size > MAX_SHOW_IMAGE_BYTES) throw new ToolError("That image is over 25 MB.");
     return { real, size: stat.size };
+  }
+
+  /** Waits for the Mac's answer (null: this host has no relay, so nothing to wait for). */
+  private async askToOpen(
+    s: SessionRow,
+    projectId: string | null,
+    shownPath: string,
+    relative: string,
+    title: string | null,
+  ): Promise<ShowAck | null> {
+    if (!this.deps.openShown) return null;
+    try {
+      return await this.deps.openShown({ sessionId: s.id, projectId, path: shownPath, relative, title });
+    } catch {
+      return { ok: false, reason: "timeout", message: "Squeak could not be asked to open it." };
+    }
+  }
+
+  /** What the duck is told: opened only when the Mac said so; otherwise why not, and that the file is still listed. */
+  private openedMessage(what: string, ack: ShowAck | null): string {
+    if (!ack || ack.ok) return `Opened ${what} in the person's Squeak window.`;
+    return `Did not open ${what} as a tab: ${ack.message} It is listed in the pond's Artifacts tab; do not tell the person it is open.`;
   }
 
   private canvasOp<T>(fn: () => T): T {

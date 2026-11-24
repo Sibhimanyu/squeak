@@ -206,8 +206,6 @@ struct ToolCallRow: View {
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
-    /// Shown files already opened by themselves this run: a row that scrolls back into view never opens again.
-    @MainActor private static var autoOpened: Set<String> = []
     private var expandable: Bool { detail?.expands == true }
     /// The file a Read/Write/Edit row is about, in full (the label keeps only the name).
     private var targetPath: String? { preview.targetIsPath || preview.kind == .edit ? detail?.path : nil }
@@ -235,19 +233,11 @@ struct ToolCallRow: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(preview.meta.map { ", \($0)" } ?? "")\(running ? ", running" : "")")
                 .accessibilityValue(expandable ? (open ? "Expanded" : "Collapsed") : "")
-            if case .shown(let path, let at)? = detail {
+            if case .shown(let path, _)? = detail {
                 Button { linker?.files.openPath(URL(fileURLWithPath: path)) } label: {
                     Text("Open \(ChangesPresentation.fileName(path))").font(Typo.meta)
                 }
                 .buttonStyle(.link).padding(.leading, 28).padding(.bottom, 4)
-                .onAppear {
-                    guard let files = linker?.files else { return }
-                    let key = "\(path)@\(at.timeIntervalSince1970)"
-                    if ShownFile.shouldAutoOpen(shownAt: at, now: Date(), alreadyOpened: Self.autoOpened.contains(key)) {
-                        Self.autoOpened.insert(key)
-                        files.openPath(URL(fileURLWithPath: path))
-                    }
-                }
             } else if case .image(let path, let caption, let card)? = detail {
                 // A picture the person attached in this turn is not repeated: the label says what was read.
                 if card || !PictureLayout.isAttached(path, attached: attached) {

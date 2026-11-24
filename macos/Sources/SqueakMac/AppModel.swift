@@ -291,6 +291,7 @@ final class AppModel {
     @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
     /// One file browser and its open files per workspace folder (`FilesModel.swift`).
     @ObservationIgnored var filesModels: [String: FilesModel] = [:]
+    @ObservationIgnored private var shownFilesTask: Task<Void, Never>?
     /// Git, pull request, workspace lifecycle and project settings of the Squeak-run chats (`AppModel+Git.swift`).
     let git = GitModel()
     /// What a send to a working chat does by default (the daemon's `/control/send-default`); nil until read.
@@ -587,6 +588,7 @@ final class AppModel {
         native.onTimelineChanged = { [weak self] in self?.refreshClaudeActivity() }
         native.onProjectsChanged = { [weak self] in self?.nativeProjectsChanged() }
         startLoops()
+        if !demoMode, !captureMode, Bundled.isApp { watchShownFiles() }
         // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
         updater.onNeedsAttention = { [weak self] in self?.showUpdateWhereThePersonIs() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
@@ -1260,6 +1262,49 @@ final class AppModel {
             DockStore.shared.update { $0.selectChats() }
         }
         location = .artifact(pond: pond, path: path)
+    }
+
+    // MARK: Files ducks show
+
+    /// Opens every file a duck shows as a tab, whatever the window is on (another chat, a pond page, the Dashboard, or
+    /// nothing open at all), and tells the host whether it did, so the duck never claims a tab that is not there.
+    func watchShownFiles() {
+        shownFilesTask?.cancel()
+        let host = nativeHost
+        shownFilesTask = Task { [weak self] in
+            for await request in host.showRequests() {
+                guard !Task.isCancelled else { return }
+                let outcome = self?.openShown(request) ?? .refused("Squeak's window is closing.")
+                await host.ackShow(id: request.id, outcome: outcome)
+            }
+        }
+    }
+
+    /// The shown file as a kept tab in its chat's strip (the duck showed it on purpose, so a later show never replaces
+    /// it), selected, in the chat's own workspace: the chat comes to the front if another place was on screen.
+    func openShown(_ request: ShowRequest) -> ShowOutcome {
+        guard let chat = allSessions.first(where: { $0.key.hostSessionId == "squeak-native:\(request.sessionId)" || $0.key.hostSessionId == request.sessionId }) else {
+            return .refused("Squeak's window does not list the chat that showed it.")
+        }
+        guard let cwd = chat.cwd, !cwd.isEmpty, let place = stripPlace(of: chat.key) else {
+            return .refused("The chat that showed it has no tab strip in the window.")
+        }
+        switch ShownFilePlan.make(path: request.path, cwd: cwd, exists: FileManager.default.isReadableFile(atPath: request.path)) {
+        case .refuse(let why): return .refused(why)
+        case .open(let tab):
+            showConversationWindow()
+            let workspace = place.workspace
+            let closed = WorkbenchPrefs.shared.closed
+            let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+            let files = filesModel(root: cwd)
+            streamTabs.open(.file(tab), in: workspace.id, seed: seed)
+            saveStreamTabs()
+            select(chat.key)
+            DockStore.shared.deselectTerminals(.centre); DockStore.shared.deselectDucklings(.centre)
+            DockStore.shared.update { $0.selectChats() }
+            if tab.hasPrefix("/") { files.openOutside(URL(fileURLWithPath: tab)) } else { files.openFile(tab) }
+            return .opened
+        }
     }
 
     /// Closes an artifact tab; when it was the one on screen, the chat comes back.
