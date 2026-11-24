@@ -25,39 +25,24 @@ import {
   summarize,
   type CanvasSummary,
 } from "./canvases.js";
+import { ChatStarter } from "./chat-starter.js";
 import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpoint } from "./agent-tools.js";
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore, RoomPostRow } from "./store.js";
-import type { SessionRow } from "./types.js";
 import { Room, RoomError } from "./room.js";
 import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
-import { slug } from "./workspace-sources.js";
-import { JobError, jobTitle, RoomJobs, type RoomJob, type StartSpec } from "./room-jobs.js";
+import { JobError, jobTitle, RoomJobs, type RoomJob } from "./room-jobs.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
-import {
-  ducksOwnBranch,
-  mainReadOnlyRoot,
-  Placement,
-  PlacementError,
-  parsePlace,
-  projectOfSession,
-} from "./placement.js";
+import { ducksOwnBranch, mainReadOnlyRoot, Placement, PlacementError, parsePlace } from "./placement.js";
 import { logger } from "../utils/logger.js";
-
-/**
- * The mode a thread the person starts begins in when the caller names none: "Skip approvals" (`bypassPermissions` for
- * Claude; Codex maps it to approvals never + full access, `codexPolicyFor`). Only `POST /native/sessions` uses it:
- * routines and the backlog carry their own mode and are never in this one, and a chat an agent starts takes at most its parent's.
- */
-export const NEW_THREAD_PERMISSION_MODE = "bypassPermissions";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
@@ -83,6 +68,8 @@ export interface NativeServerOptions {
   sources?: WorkspaceSources;
   /** The Placement the shared agent tools use (main.ts), so both move chats through one instance. */
   placement?: Placement;
+  /** The one way a chat starts (main.ts builds it for the jobs too); default is built from the host and store. */
+  starter?: ChatStarter;
   /** Flotilla's routes (`src/flotilla`), only when it is on. */
   flotilla?: {
     handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
@@ -177,6 +164,8 @@ export class NativeServer {
   private readonly git: GitActions;
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
+  /** The one way a Duck's chat starts (placement, model, Duck link); the routes only parse and map errors. */
+  readonly starter: ChatStarter;
   /** Ducks own their branch (flag): place requests, moves, clean-up of unused working copies. */
   readonly placement: Placement;
   private placementTimer: NodeJS.Timeout | null = null;
@@ -203,16 +192,21 @@ export class NativeServer {
         store: options.store,
         ...(options.supportDir ? { attachmentsDir: path.join(options.supportDir, "room-attachments") } : {}),
       });
+    this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
+    this.placement = options.placement ?? new Placement({ store: options.store, workspaces, sources: this.sources });
+    this.starter =
+      options.starter ??
+      new ChatStarter({ store: options.store, host, workspaces, placement: this.placement, room: this.room });
     this.jobs =
       options.jobs ??
       new RoomJobs({
         store: options.store,
         room: this.room,
         send: (id, text) => host.send(id, text, { room: true }),
-        newThread: (projectId, text, title, attach) => this.newJobThread(projectId, text, title, attach),
-        start: (spec) => this.startDuckSession(spec),
-        newBranch: (projectId, text) => this.newStreamBranch(projectId, text),
-        checkBranch: (projectId, branch) => this.checkStreamBranch(projectId, branch),
+        newThread: (projectId, text, title, attach) => this.starter.jobThread(projectId, text, title, attach),
+        start: (spec) => this.starter.startDuck(spec),
+        newBranch: (projectId, text) => this.starter.newBranch(projectId, text),
+        checkBranch: (projectId, branch) => this.starter.checkBranch(projectId, branch),
       });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
@@ -224,22 +218,20 @@ export class NativeServer {
         store: options.store,
         workspaces,
         send: (id, text) => host.send(id, text),
-        create: (spec) => host.create(spec),
+        create: (spec) => this.starter.create(spec),
       });
     // A new workspace's first message waits for its setup script; the first message names the branch.
     workspaces.on("setup-settled", (ws: { id: string }, failure: string | null) => {
       void host.workspaceSettled(ws.id, failure).catch(() => undefined);
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
-    this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
-    this.placement = options.placement ?? new Placement({ store: options.store, workspaces, sources: this.sources });
     this.pickers = new RepoPickers({ store: options.store });
     this.planner = new Planner(options.store, async (spec) => {
       const project = options.store.getProject(spec.projectId);
       if (!project) throw new PlannerError("no such project", 404);
       // A plain-folder pond has no streams: the work runs in the folder.
       const ws = spec.newWorkspace && project.kind === "git" ? workspaces.createWorkspace(spec.projectId) : null;
-      return host.create({
+      return this.starter.create({
         cwd: ws?.path ?? project.rootPath,
         agent: spec.agent,
         model: spec.model,
@@ -255,7 +247,7 @@ export class NativeServer {
         store: options.store,
         workspaces,
         send: (id, text) => host.send(id, text),
-        create: (spec) => host.create(spec),
+        create: (spec) => this.starter.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
         room: this.room,
         jobs: this.jobs,
@@ -594,7 +586,7 @@ export class NativeServer {
             const moved = await this.placement.move(
               id,
               { kind: "new", title: jobTitle(text) },
-              (spec) => this.options.host.create(spec),
+              (spec) => this.starter.create(spec),
               text,
             );
             if (moved.session) return this.json(res, 200, { queued: false, movedTo: moved.session.id });
@@ -675,7 +667,7 @@ export class NativeServer {
         const moved = await this.placement.move(
           current.id,
           want,
-          (spec) => this.options.host.create(spec),
+          (spec) => this.starter.create(spec),
           b.message as string | undefined,
         );
         return this.json(res, 200, { sessionId: (moved.session ?? current).id });
@@ -1442,14 +1434,10 @@ export class NativeServer {
   }
 
   private async createSession(b: Record<string, unknown>) {
-    const { host, workspaces } = this.options;
     const agent = b.agent;
     if (agent !== "claude" && agent !== "codex") throw new HttpError(400, "agent must be claude or codex");
     const model = str(b.model);
     if (!model) throw new HttpError(400, "model is required");
-    let cwd = str(b.cwd);
-    let workspaceId: string | null = null;
-    const projectId = str(b.projectId);
     // Split the work (Claude only): the brief goes in front of the first message for the agent; the chat shows what was typed.
     let agentPrefix: string | undefined;
     if (b.split !== undefined && b.split !== null) {
@@ -1459,235 +1447,12 @@ export class NativeServer {
       if (!checked.ok) throw new HttpError(400, checked.reason);
       agentPrefix = splitBrief(checked.split) ?? undefined;
     }
-    if (b.main !== undefined && typeof b.main !== "boolean") throw new HttpError(400, "main must be true or false");
-    if (b.place !== undefined) {
-      // `place` replaces `main`, `newWorkspace` and `workspaceId` (which stay as aliases) when ducks own their branch.
-      if (!ducksOwnBranch()) throw new HttpError(400, "place needs ducksOwnBranch (SQUEAK_DUCKS_OWN_BRANCH) turned on");
-      if (b.main !== undefined || b.newWorkspace !== undefined || str(b.workspaceId) || cwd) {
-        throw new HttpError(400, "give place, or main, newWorkspace, workspaceId and cwd, not both");
-      }
-      let placed;
-      try {
-        let req = parsePlace(b.place);
-        // Main is no place to start a chat in a git pond: it gets a branch of its own, like `main: true`.
-        if (req.kind === "main" && this.options.store.getProject(projectId ?? "")?.kind === "git") {
-          req = { kind: "new", ...(str(b.text) ? { title: jobTitle(str(b.text)!) } : {}) };
-        }
-        const duck = req.kind === "join" && req.duckId ? this.options.store.duckRow(req.duckId) : null;
-        const pond = projectId ?? duck?.projectId;
-        if (!pond) throw new HttpError(400, "place needs a projectId");
-        placed = await this.placement.resolve(pond, req);
-      } catch (error) {
-        if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
-        throw error;
-      }
-      return this.withDuck(
-        await host.create({
-          cwd: placed.cwd,
-          agent,
-          model,
-          permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
-          effort: str(b.effort),
-          workspaceId: placed.workspaceId,
-          ...(str(b.text) ? { text: str(b.text)! } : {}),
-          ...(agentPrefix ? { agentPrefix } : {}),
-        }),
-      );
-    }
-    if (b.main === true && (b.newWorkspace === true || str(b.workspaceId))) {
-      throw new HttpError(400, "main is not a stream");
-    }
-    if (b.main !== true && projectId && b.newWorkspace === true) {
-      const ws = workspaces.createWorkspace(projectId, undefined, undefined, optionalBranch(b.branch));
-      cwd = ws.path;
-      workspaceId = ws.id;
-    } else if (b.main !== true && str(b.workspaceId)) {
-      // An existing workspace: its own folder, never one the caller names, and only while it is usable.
-      const ws = this.options.store.getWorkspace(str(b.workspaceId)!);
-      if (!ws) throw new HttpError(404, "no such stream");
-      if (ws.state === "archived") throw new HttpError(409, "that stream is archived");
-      cwd = ws.path;
-      workspaceId = ws.id;
-    }
-    if (b.main !== true && !workspaceId && cwd) {
-      // A caller that names a stream's folder (an older Mac) still lands in that stream: the folder names it.
-      const under = this.options.store
-        .listProjects()
-        .flatMap((p) => this.options.store.listWorkspaces(p.id))
-        .find((w) => w.state !== "archived" && w.path === cwd);
-      if (under) workspaceId = under.id;
-    }
-    if (b.main === true) {
-      // Main: the pond's own folder, no stream, never a folder the caller names.
-      if (!projectId) throw new HttpError(400, "main needs a projectId");
-      const project = this.options.store.getProject(projectId);
-      if (!project) throw new HttpError(404, "no such project");
-      cwd = project.rootPath;
-      if (project.kind === "git" && ducksOwnBranch()) ({ cwd, workspaceId } = await this.ownBranch(project.id, b));
-    } else if (!cwd && projectId && !workspaceId) {
-      // A plain-folder pond has no streams: its chats run in the folder itself.
-      const project = this.options.store.getProject(projectId);
-      if (project?.kind === "folder") cwd = project.rootPath;
-      // Ducks own their branch: no place named means a branch and worktree of the chat's own, never Main.
-      else if (project?.kind === "git" && ducksOwnBranch())
-        ({ cwd, workspaceId } = await this.ownBranch(project.id, b));
-    }
-    if (!cwd) throw new HttpError(400, "cwd, or projectId with newWorkspace, is required");
-    return this.withDuck(
-      await host.create({
-        cwd,
-        agent,
-        model,
-        permissionMode: str(b.permissionMode) ?? NEW_THREAD_PERMISSION_MODE,
-        effort: str(b.effort),
-        workspaceId,
-        ...(str(b.text) ? { text: str(b.text)! } : {}),
-        ...(agentPrefix ? { agentPrefix } : {}),
-      }),
-    );
-  }
-
-  /** A new chat's own branch and worktree (before its first turn), titled from its first text. Failing fails the request. */
-  private async ownBranch(
-    projectId: string,
-    b: Record<string, unknown>,
-  ): Promise<{ cwd: string; workspaceId: string | null }> {
-    const text = str(b.text);
     try {
-      const placed = await this.placement.resolve(projectId, {
-        kind: "new",
-        ...(text ? { title: jobTitle(text) } : {}),
-      });
-      return { cwd: placed.cwd, workspaceId: placed.workspaceId };
+      return await this.starter.fromRequest(b, { agent, model, ...(agentPrefix ? { agentPrefix } : {}) });
     } catch (error) {
       if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
-      throw new HttpError(
-        500,
-        `could not make a branch for this chat: ${error instanceof Error ? error.message : error}`,
-      );
+      throw error;
     }
-  }
-
-  /** Ducks own their branch: a new chat has its duck at once, so the pond's branch list counts it (the room would make it lazily). */
-  private withDuck(session: SessionRow): SessionRow {
-    if (!ducksOwnBranch()) return session;
-    const project = projectOfSession(this.options.store, session);
-    if (project) this.options.store.duckForSession(session.id, project.id);
-    return this.options.store.getSession(session.id) ?? session;
-  }
-
-  /** The model of the duck's newest chat, else of the pond's newest one that has a model. */
-  private modelFor(projectId: string, duckSession: SessionRow | null): { agent: SessionRow["agent"]; model: string } {
-    const { store } = this.options;
-    const own = duckSession && duckSession.model && duckSession.model !== "default" ? duckSession : null;
-    const sessions = store.listSessions().filter((s) => s.model && s.model !== "default");
-    const pick =
-      own ??
-      sessions.filter(
-        (s) => !s.archivedAt && this.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id),
-      )[0] ??
-      sessions[0];
-    if (!pick) throw new JobError("Squeak has no chat to take a model from yet; start a chat first.", 409);
-    return { agent: pick.agent, model: pick.model };
-  }
-
-  /** A free branch for a new stream, slugged from the job text; null in a pond with no streams. */
-  newStreamBranch(projectId: string, text: string): string | null {
-    const { store, workspaces } = this.options;
-    const project = store.getProject(projectId);
-    if (!project || project.kind !== "git") return null;
-    const prefix = workspaces.settingsFor(project).effective.branchPrefix;
-    const base = slug(jobTitle(text), 40);
-    for (let n = 1; n <= 30; n++) {
-      const candidate = `${prefix}${base}${n > 1 ? `-${n}` : ""}`;
-      try {
-        return workspaces.resolveNewBranch(project, candidate).branch;
-      } catch {
-        /* taken or not a branch git accepts: try the next */
-      }
-    }
-    return null;
-  }
-
-  /** A typed branch for a new stream, as git accepts it, or a JobError that says why not. */
-  checkStreamBranch(projectId: string, branch: string): string {
-    const project = this.options.store.getProject(projectId);
-    if (!project) throw new JobError("No such pond.", 404);
-    try {
-      return this.options.workspaces.resolveNewBranch(project, branch).branch;
-    } catch (error) {
-      throw new JobError(error instanceof Error ? error.message : "That branch name isn't usable.", 409);
-    }
-  }
-
-  /**
-   * A fresh session for a duck, in the place the job names: an existing stream, a new stream off the default branch
-   * (a worktree, setup scripts included), or the pond's own folder. The duck's identity rides in the session's note.
-   */
-  async startDuckSession(spec: StartSpec): Promise<SessionRow> {
-    const { store, host, workspaces } = this.options;
-    const project = store.getProject(spec.projectId);
-    if (!project) throw new JobError("No such pond.", 404);
-    let cwd = project.rootPath;
-    let workspaceId: string | null = null;
-    if (spec.place?.kind === "stream") {
-      const ws = store.getWorkspace(spec.place.workspaceId);
-      if (!ws || ws.projectId !== project.id || ws.state === "archived") {
-        throw new JobError("That stream isn't available in this pond any more.", 409);
-      }
-      cwd = ws.path;
-      workspaceId = ws.id;
-    } else if (spec.place?.kind === "new") {
-      try {
-        const ws = workspaces.createWorkspace(project.id, undefined, undefined, spec.place.branch, spec.title);
-        cwd = ws.path;
-        workspaceId = ws.id;
-      } catch (error) {
-        if (error instanceof WorkspaceError) throw new JobError(error.message, 409);
-        throw error;
-      }
-    }
-    const cur = spec.duck.currentSessionId ? store.getSession(spec.duck.currentSessionId) : null;
-    const { agent, model } = this.modelFor(project.id, cur);
-    return host.create({
-      cwd,
-      agent,
-      model,
-      permissionMode: NEW_THREAD_PERMISSION_MODE,
-      workspaceId,
-      title: spec.title,
-      text: spec.text + (spec.attach?.(cwd) ?? ""),
-      duckId: spec.duck.id,
-      room: true,
-    });
-  }
-
-  /** A job's new thread: the pond's own folder (Main), the owner's default permission mode, the model of its newest chat. */
-  async newJobThread(
-    projectId: string,
-    text: string,
-    title: string,
-    attach?: (cwd: string) => string,
-  ): Promise<SessionRow> {
-    const { store, host } = this.options;
-    const project = store.getProject(projectId);
-    if (!project) throw new JobError("No such pond.", 404);
-    const sessions = store.listSessions().filter((s) => s.model && s.model !== "default");
-    const pick =
-      sessions.filter(
-        (s) => !s.archivedAt && this.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id),
-      )[0] ?? sessions[0];
-    if (!pick) throw new JobError("Squeak has no chat to take a model from yet; start a chat first.", 409);
-    return host.create({
-      cwd: project.rootPath,
-      agent: pick.agent,
-      model: pick.model,
-      permissionMode: NEW_THREAD_PERMISSION_MODE,
-      workspaceId: null,
-      title: title || jobTitle(text),
-      text: text + (attach?.(project.rootPath) ?? ""),
-      room: true,
-    });
   }
 
   /** Every folder of every pond (Main and working copies): the places a canvas may live. */

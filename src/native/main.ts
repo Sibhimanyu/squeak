@@ -20,7 +20,8 @@ import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
 import { RoomJobs } from "./room-jobs.js";
 import { RoomSummariser } from "./room-summary.js";
-import type { Placement } from "./placement.js";
+import { Placement } from "./placement.js";
+import { ChatStarter } from "./chat-starter.js";
 import { createSharedTools } from "./shared-tools.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
@@ -76,17 +77,21 @@ export async function runHost(supportDir: string): Promise<void> {
     logger.warn("stale duck cleanup skipped", { error: String(error) });
   }
   new RoomSummariser({ host, store, room }).start();
+  const workspaces = new WorkspaceManager({ store });
+  // One place starts every chat: the jobs, the agent tools, the Planner and the routes all go through the starter.
+  const sources = new WorkspaceSources({ store, workspaces });
+  const placement = new Placement({ store, workspaces, sources });
+  const starter = new ChatStarter({ store, host, workspaces, placement, room });
   const jobs = new RoomJobs({
     store,
     room,
     send: (id, text) => host.send(id, text, { room: true }),
-    newThread: (projectId, text, title, attach) => server!.newJobThread(projectId, text, title, attach),
-    start: (spec) => server!.startDuckSession(spec),
-    newBranch: (projectId, text) => server!.newStreamBranch(projectId, text),
-    checkBranch: (projectId, branch) => server!.checkStreamBranch(projectId, branch),
+    newThread: (projectId, text, title, attach) => starter.jobThread(projectId, text, title, attach),
+    start: (spec) => starter.startDuck(spec),
+    newBranch: (projectId, text) => starter.newBranch(projectId, text),
+    checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),
   });
   jobs.attach(host);
-  const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
   host.start();
@@ -115,7 +120,9 @@ export async function runHost(supportDir: string): Promise<void> {
       store,
       workspaces,
       send: (id, text) => host.send(id, text),
-      create: (spec) => host.create(spec),
+      create: (spec) => starter.create(spec),
+      sources,
+      placement,
       post: (id, kind, payload) => host.post(id, kind, payload),
       room,
       jobs,
@@ -141,6 +148,9 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     workspaces,
     ...(flotilla && shared ? { flotilla, ...shared } : {}),
+    sources,
+    placement,
+    starter,
     room,
     jobs,
     supportDir,

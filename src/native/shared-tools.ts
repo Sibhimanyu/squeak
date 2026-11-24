@@ -8,13 +8,20 @@ import { WorkspaceSources } from "./workspace-sources.js";
  * both the server and the agents' branch tools (branch_off, join_branch): without it those tools refuse.
  */
 export function createSharedTools(
-  deps: Omit<AgentToolDeps, "placement" | "workspaces"> & { workspaces: WorkspaceManager },
+  deps: Omit<AgentToolDeps, "placement" | "workspaces"> & {
+    workspaces: WorkspaceManager;
+    /** Already built by the caller (main.ts, which the chat starter needs too); made here when absent. */
+    sources?: WorkspaceSources;
+    placement?: Placement;
+  },
 ): {
   sources: WorkspaceSources;
   placement: Placement;
   tools: AgentTools;
 } {
-  const sources = new WorkspaceSources({ store: deps.store, workspaces: deps.workspaces });
-  const placement = new Placement({ store: deps.store, workspaces: deps.workspaces, sources });
-  return { sources, placement, tools: new AgentTools({ ...deps, placement }) };
+  const sources = deps.sources ?? new WorkspaceSources({ store: deps.store, workspaces: deps.workspaces });
+  const placement = deps.placement ?? new Placement({ store: deps.store, workspaces: deps.workspaces, sources });
+  const toolDeps: Record<string, unknown> = { ...deps };
+  delete toolDeps.sources;
+  return { sources, placement, tools: new AgentTools({ ...(toolDeps as typeof deps), placement }) };
 }
