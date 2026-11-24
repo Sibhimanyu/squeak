@@ -591,6 +591,7 @@ describe("a reply made on the iPhone", () => {
   });
 
   it("moves a duck when the phone signs a duck-place command, only with the flag on", async () => {
+    process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
     const { remote, config, pondCalls, refreshPonds } = bridge("turn-1");
     await refreshPonds();
     const off = await remote.handleCommand(config, fixture.pondDuckPlaceCommandId, fixture.pondDuckPlaceCommand);

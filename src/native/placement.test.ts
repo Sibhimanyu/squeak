@@ -23,7 +23,7 @@ afterEach(() => {
 });
 const flagOn = (on: boolean) => {
   if (on) process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
-  else delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+  else process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
 };
 
 function setup(opts: { origin?: boolean } = {}) {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { vi, afterEach, describe, expect, it } from "vitest";
+import { vi, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Every git launch can stall ~3 s on this Mac (endpoint security), so these git-heavy tests get room.
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
@@ -20,8 +20,16 @@ import { WorkspaceManager } from "./workspaces.js";
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 
+// These tests cover Main chats in stream mode; ducks-own-branch (on by default) is covered in ducks-own-branch.test.ts.
+const duckFlagBefore = process.env.SQUEAK_DUCKS_OWN_BRANCH;
+beforeEach(() => {
+  process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
+});
+
 const stops: (() => Promise<void>)[] = [];
 afterEach(async () => {
+  if (duckFlagBefore === undefined) delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+  else process.env.SQUEAK_DUCKS_OWN_BRANCH = duckFlagBefore;
   while (stops.length) await stops.pop()!();
   forgetMainBranch();
 });

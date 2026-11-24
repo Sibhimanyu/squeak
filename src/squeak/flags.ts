@@ -100,11 +100,11 @@ export const FLAGS = [
   {
     name: "ducksOwnBranch",
     env: "SQUEAK_DUCKS_OWN_BRANCH",
-    default: false,
+    default: true,
     description:
-      "Ducks own their branch: in a git pond every new chat gets its own branch and worktree before its first turn (never Main, which is read-only for ducks), and agent tools branch_off and join_branch move it. Off: streams are the container, as before.",
-    stage: "beta",
-    parse: "on-word",
+      "Ducks own their branch: in a git pond every new chat gets its own branch and worktree before its first turn (never Main, which is read-only for ducks), and agent tools branch_off and join_branch move it. On by default; off (SQUEAK_DUCKS_OWN_BRANCH=off or flags.json) keeps streams as the container.",
+    stage: "stable",
+    parse: "off-word-extended",
   },
 ] as const satisfies readonly FlagDefinition[];
 

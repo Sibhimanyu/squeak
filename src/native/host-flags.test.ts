@@ -6,13 +6,13 @@ import { flag } from "../squeak/flags.js";
 import { initHostFlags } from "./main.js";
 
 describe("host flags", () => {
-  // Regression: the host never read flags.json, so ducksOwnBranch set in the file was on in the daemon and off in the host.
+  // Regression: the host never read flags.json, so ducksOwnBranch set in the file was honoured by the daemon but ignored by the host.
   it("reads flags.json from the support dir", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "host-flags-"));
-    writeFileSync(path.join(dir, "flags.json"), JSON.stringify({ ducksOwnBranch: true }));
+    writeFileSync(path.join(dir, "flags.json"), JSON.stringify({ ducksOwnBranch: false }));
     initHostFlags(dir);
-    expect(flag("ducksOwnBranch", {})).toBe(true);
-    initHostFlags(mkdtempSync(path.join(tmpdir(), "host-flags-empty-")));
     expect(flag("ducksOwnBranch", {})).toBe(false);
+    initHostFlags(mkdtempSync(path.join(tmpdir(), "host-flags-empty-")));
+    expect(flag("ducksOwnBranch", {})).toBe(true);
   });
 });
