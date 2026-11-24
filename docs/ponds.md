@@ -6,7 +6,7 @@ Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. **O
 
 There is no "convert to a pond" step. The host keeps a **local pond** for every project (native projects by `projectId`; the other projects the Mac lists, Conductor's, by name): `GET /native/ponds` and `POST /native/ponds/local` call `ensureLocalPond`, which is synchronous and returns the pond a project already has (local or published, by project id, else by name for a pond with no project), so a project tied to a published pond never gets a second one and no existing pond or chat is touched. A local pond is a `local: true` entry in `flotilla/ponds.json`: its key exists but **nothing goes to any cloud**, nothing is watched, no network call is made, and with no cloud set up the service still constructs and works (`store: null`). Its home is the same page as a published one (a flock of just you, threads, Ripples) with one quiet line that only this Mac can see it.
 
-**The first invite publishes.** `POST /native/ponds/<id>/invites` on a local pond runs `publish` first (the same documents `createPond` writes: the pond's meta with name and gitRemote, the owner's member document, a first Ripple), then makes the invite. One publish per pond runs at a time (a double click shares it); a failure before the owner document is written leaves the pond local with the same id and key, so a retry reuses it and no orphan is made. With no cloud the answer is the plain sentence "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond." and nothing changes. The Mac's Invite signs in to the Squeak account first when it is signed out, then continues to the invite.
+**The first invite publishes.** `POST /native/ponds/<id>/invites` on a local pond runs `publish` first (the same documents `createPond` writes: the pond's meta with name and gitRemote, the owner's member document, a first Ripple), then makes the invite. One publish per pond runs at a time (a double click shares it); a failure before the owner document is written leaves the pond local with the same id and key, so a retry reuses it and no orphan is made. The Mac's Invite signs in to the Squeak account first when it is signed out, then continues to the invite; signing in gives the Mac the hosted cloud, so there is nothing else to set up. If the daemon still has no cloud store, the answer is the plain sentence "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond." and nothing changes.
 
 ## Words (DESIGN.md §9)
 
@@ -210,24 +210,24 @@ assumes a Mac.
    Catalyst app domain (Firebase, or not deployed yet) an invite has no link, only the code. The page is Catalyst **web client hosting**
    in the relay's own project (`cloud/catalyst-relay/client`, assembled by `scripts/build-guest-client.sh`), so it is served from the same
    origin as the relay (`/server/squeak_relay`) and reaches it by a relative path; served anywhere else it uses the relay URL the invite
-   carries. Unverified until the first deploy: that the legacy web client is served under `/app/` (the Catalyst SDK notes say so:
-   "`/app/index.html` is for legacy Web Client Hosting") and that `join.html` is served at `/app/join.html`.
+   carries.
    A guest's member key is one P-256 point used for both ECDSA and ECDH, and WebCrypto binds a key to one algorithm: the browser
    makes the pair extractable, imports the private half twice as non-extractable keys and drops the extractable copy; only the
    non-extractable keys are kept (IndexedDB). The invite's secret is used once for the join proof and never stored.
 4. A web guest is **not handed the store-wide relay key** (it opens every channel in the store). On approval the owner's Mac asks the
    relay for a pond-scoped token (`POST /pond-token { pondId, memberId, ttlSec }`, relay key required), which the guest receives
-   sealed to their member key. `cloud/catalyst-relay/functions/squeak_relay/scoped.js` + `handler.js` implement it, undeployed:
+   sealed to their member key. `cloud/catalyst-relay/functions/squeak_relay/scoped.js` + `handler.js` implement it:
    - `pt.<pondId>.<memberId>.<expiry>.<mac>`, HMAC under the relay key; sent as `x-squeak-pond-token` instead of `x-squeak-relay`.
    - Valid only for `/doc` and `/list` inside that pond's channel; writes only to `presence`, `tcmds`, `joins`, `holds`, `ripples`
      (never `members`, `keys`, `threads`, `tevents`, `pond`). Reads are of sealed documents only.
    - Revoked on removal (`POST /pond-revoke`, a record in the store the relay checks on every request); a new token lifts it.
    - Data Streams: a guest may subscribe only to its pond's own channel (`POST /pond-stream { name }`, channel name derived from a hash
      of the pond id), which the relay also notifies on every write in that pond; it never gets the store-wide `/token`.
-     Not yet: the flotilla service issues and stores these tokens (it still writes with the store it was given), and the SDK call that
-     creates a pond's stream channel is not wired (the relay answers 503 until the channel exists). The web UI is `web/join.html`
+     The flotilla service issues and stores these tokens, and a joiner's store is opened with the pond token (`storeFor` in
+     `src/flotilla/index.ts`). The SDK call that creates a pond's stream channel is not wired (the relay answers 503 until the
+     channel exists). The web UI is `web/join.html`
      (docs/web-app.md, "Web guests"); it uses `/pond-stream` with a 60 s safety poll, so it works without that channel.
-     A Mac invite for a Catalyst store still carries the store location, relay key included; narrowing that (a join-only token) is open.
+     A Mac invite for a Catalyst store carries the relay URL and a join-only token (`jt`), never the relay key.
 
 5. **Sign-in identifies, never grants.** Guests may sign in with Catalyst Hosted login (Zoho, Google, email). The relay's
    `GET /me` (no relay key, `no-store`) answers `{userId, email, name}` or a bare 401. When a guest writes its join request, the
@@ -238,7 +238,7 @@ assumes a Mac.
    join with nobody signed in (`401 {"error":"signin"}`). An invite may be pinned to an email (`POST /pond-token` with `email`, a
    join token only; the Mac's `invite(pondId, role, email)` and `POST /ponds/<id>/invites {email}`): the join is then refused
    `401 signin` / `403 email` unless that account matches, whatever `GUEST_SIGNIN` says. On Firebase there is no relay and none
-   of this. Unverified until deployed: the real `getCurrentUser` answer and that the Hosted-login cookie reaches the function.
+   of this.
 
 ## Tasks, claims and scope locks
 
@@ -413,8 +413,7 @@ Nobody types or changes a name; a person is called by their Squeak account (Cata
 
 ## Not yet
 
-a push path, scheduling across Nests, handoffs, Eggs, enforcing locks on file writes, shared secrets. Real use needs a
-deployed relay with the new kinds; that deploy and any cloud project are the owner's to start.
+a push path, scheduling across Nests, handoffs, Eggs, enforcing locks on file writes, shared secrets.
 
 ### Who wrote a message (host side)
 

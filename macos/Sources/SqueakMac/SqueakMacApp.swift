@@ -152,7 +152,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
 
+    /// SIGTERM becomes a normal quit, so `willTerminate` runs and Heresay records a clean exit (the default action
+    /// kills the process outright and the next launch files a false "closed unexpectedly").
+    private var termSource: DispatchSourceSignal?
+    private func installSigtermHandler() {
+        signal(SIGTERM, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        src.setEventHandler {
+            QuitIntent.shared.signalQuit = true
+            NSApp.terminate(nil)
+        }
+        src.resume()
+        termSource = src
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installSigtermHandler()
         // No Dock icon, even from a bare `swift run` (the bundle also sets LSUIElement).
         NSApp.setActivationPolicy(.accessory)
         ActivationPolicyController.shared.start()
@@ -230,7 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? event?.paramDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue
         let decision = QuitPolicy.decide(
             explicitQuit: intent.explicitQuit, systemQuit: isQuitEvent && QuitPolicy.isSystemQuitReason(reason),
-            updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
+            updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow),
+            signalQuit: intent.signalQuit)
         UpdateLog.standard.write("quit: decision=\(decision == .quit ? "quit" : "closeWindows") explicit=\(intent.explicitQuit) system=\(isQuitEvent && QuitPolicy.isSystemQuitReason(reason)) updating=\(intent.updating) installPending=\(intent.installPending) userQuit=\(intent.userQuit)")
         if decision == .quit { Self.terminating = true }
         switch decision {
@@ -261,6 +277,8 @@ final class QuitIntent {
     static let shared = QuitIntent()
     /// Set by the popover's Quit row and "Quit Squeak Completely"; never reset, the app is going.
     var explicitQuit = false
+    /// Set when the process received SIGTERM: a quit that must complete (see `QuitPolicy.decide`).
+    var signalQuit = false
     /// Set by Sparkle just before it terminates the app to install an update.
     var updating = false
     /// Set when Sparkle has an update staged that installs on the next real quit.

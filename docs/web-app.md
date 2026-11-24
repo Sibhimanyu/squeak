@@ -1,11 +1,12 @@
 # Squeak for Web: structure
 
-`web/` is a static page (no build step) that pairs with a Mac and shows what the Mac shows a phone. The
+`web/` is a static page (no build step) that signs in to a Mac and shows what the Mac shows a phone. The
 channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `sync.js` (view, presence,
 results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
 
-Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's QR and "Copy web link" use `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12, and browsers paired there pair once more): the no-install phone option with the iPhone app's features, minus Face ID
-and the same-Wi-Fi direct route. The owner's web path is sign-in only: you sign in with your Squeak account and open a Mac. There is no QR, pairing code or paste box on
+Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's "Copy web link" uses `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12). It is the no-install phone option, and it does less than the iPhone app. It has no Face ID, no same-Wi-Fi direct route and no push notifications, and it does not follow a Mac that moves the channel (sign in again). New iPhone features are not assumed to exist here: check `web/js/screens.js` and the screens below for what does.
+
+The owner's web path is sign-in only: you sign in with your Squeak account and open a Mac. There is no QR, pairing code or paste box on
 any screen (an old `#pair=` link shows the sign-in with "Pairing codes are gone. Sign in with the same account as your Mac."). Signed in with the
 same account as your Mac, this browser joins it by itself.
 

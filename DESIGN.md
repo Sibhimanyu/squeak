@@ -1059,7 +1059,7 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 
 ##### Terminal panel (⌘J)
 
-A built-in terminal like Conductor's, at the **bottom of the centre column** (under the chat, full column width); the toolbar's terminal icon and ⌘J toggle it, closed by default and remembered.
+A built-in terminal. It lives in the **bottom dock zone** by default (under the chat, full column width), and each shell is a tab that can be dragged to any zone; the toolbar's terminal icon and ⌘J toggle it, closed by default and remembered.
 
 - **Size:** a hairline drag handle on the top edge (same rules and `Tokens.Divider` as the pane handles, resize up/down cursor, double click restores 240); height 120pt to 60% of the column, remembered. Panes and chat keep their place above it.
 - **Tabs:** a 32pt strip (the chat tabs' look, 24pt tabs, `selected` fill): the shell's own title (else the shell's name, `zsh 2` for later ones), a × on the selected or hovered tab, **+** and a hide ×. ⌃⇧` adds one from anywhere (⌘T is always a new chat tab, even with the terminal focused), ⌘K clears it (screen and scrollback) and keeps its other meaning (search) anywhere else. Collapsing the panel (⌘J, its chevron, closing the last tab) moves the keys to the message field; a hidden terminal never holds them. Closing a tab ends its shell; only when a process other than the shell holds the terminal does it ask ("Stop what is running here?", names the process).

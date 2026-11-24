@@ -1,14 +1,14 @@
 # Voice: Squeak rings you through your PBX
 
 Two ways to place the call. **Gateway (recommended):** a Home Assistant add-on on your LAN places it, and the Mac
-asks for each call through Firebase, so the Mac can be on any network. **Direct:** the Mac registers with the PBX
+asks for each call through Squeak's cloud relay, so the Mac can be on any network. **Direct:** the Mac registers with the PBX
 itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when both are set up.
 
 ## Gateway setup
 
 1. Build and install the add-on (step 2) and start it. Open the **Squeak Voice** panel in Home Assistant's sidebar: it
    shows a code like `K7M2-QX9P`. In Squeak for Mac: Settings > Phone calls > Add gateway, type the code, approve.
-   The add-on posts a sealed request on the shared signalling database (`claim-protocol.ts`, `addon-claim.ts`), the
+   The add-on posts a sealed request on the cloud relay (`claim-protocol.ts`, `addon-claim.ts`), the
    Mac seals its channel and key to the add-on's key, and the add-on keeps them in `/data/pairing.json`
    (design: `.context/claim-flow-contract.md`). The panel (`addon-panel.ts`, ingress port 8099, answers only the
    Supervisor at 172.30.32.2) also shows SIP registration, PIN state and the recent log, never a key.
@@ -22,11 +22,9 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
    Assistant itself, add `https://github.com/Sibhimanyu/squeak` under Add-on store > menu > Repositories
    (`repository.yaml` at the root makes the repo one); it pulls the prebuilt image for the `version` in
    `config.yaml`, which the "Squeak Voice add-on image" workflow must have built first.
-3. Deploy the database rules once (`firebase deploy --only database`): they allow the `voice`, `voiceresult` and `voicepair`
-   kinds in the channel.
-4. The add-on reports to the Mac every 30 s (a sealed `voiceresult/gwstatus` document: version, whether the PBX accepted
+3. The add-on reports to the Mac every 30 s (a sealed `voiceresult/gwstatus` document: version, whether the PBX accepted
    its registration and why not, the PIN state), which Settings > Phone calls shows.
-5. Restart Squeak (`./scripts/ship.sh`).
+4. Restart Squeak.
 
 **Who it rings** is set in Squeak for Mac, Settings > Phone calls (`GET/POST /control/voice`, saved in
 `voice-settings.json`), and travels in each sealed request. Only an internal extension (2 to 6 digits) is accepted,
@@ -45,7 +43,7 @@ voice is plainer than the Mac's.
 
 ## Phone calls setup in Squeak for Mac
 
-Settings > Voice opens on a **Phone calls setup** list: the gateway paired, the add-on up to date, the extension to
+Settings > Phone calls opens on a **Phone calls setup** list: the gateway paired, the add-on up to date, the extension to
 ring, a PIN (or consciously off), the realistic voice and a test call that was answered, each with its own button and a
 summary line ("Phone calls are ready" / "2 steps left"). It reads only what the daemon already says
 (`GET /control/voice`, the gateway view, the install status); the rules live in `PhoneCallsChecklist` (SqueakMacCore).
@@ -268,8 +266,7 @@ directory it publishes (`ask: true`); without that flag the steps above are exac
 
 Needs on the Mac: `whisper-cli` and `ffmpeg` (`brew install whisper-cpp ffmpeg`) and a speech model at
 `~/Library/Application Support/squeak/whisper/ggml-base.en.bin` (or `SQUEAK_VOICE_WHISPER_MODEL`). Without them
-calling in stays off and the log says which is missing. The gateway needs the Firebase rules for `voicedir`,
-`voiceup` and `voicedown` (`firebase deploy --only database`).
+calling in stays off and the log says which is missing.
 
 `scripts/e2e-voice.ts` runs the whole call on one Mac with no PBX: the real SIP phone answers a second baresip that
 types the PIN and speaks a message, and Whisper transcribes it.

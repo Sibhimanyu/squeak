@@ -68,7 +68,7 @@ picks one. Every current `RtdbRest` user takes a `CloudStore` instead (types onl
 ```
 
 Absent file: today's behaviour (Firebase from `SQUEAK_REMOTE_DATABASE_URL` in `.env`). `active` decides the store the
-bridge, the voice relay and pairing use. The Cliq relay stays on Firestore (out of scope).
+bridge, the voice relay and pairing use. The Cliq relay uses the same store (docs/cliq.md).
 
 ## Pairing and devices
 
@@ -78,7 +78,7 @@ Catalyst `cu` = relay base URL and `ck` = relay key (`cu`, not `c`: in a pairing
 `.catalystserverless.com/.in/.eu/.com.au/.jp/.ca/.sa` or `.catalystappsail.*` (mirror of the RTDB host check). A device
 paired before keeps Firebase until told to move.
 
-**Moving.** `POST /control/cloud/select` to a provider other than the active one: the Mac first checks the target
+**Moving.** When a Mac that was on another store gets its hosted key, the Mac first checks the target
 (`/ping` ready + a test round trip), then writes one sealed, signed `state` document `move` on the _current_ store
 (`{v:1, provider, r?|c?, ck?, at}`) that paired phones and the add-on act on: they verify it like any Mac-signed doc,
 switch their store, and confirm by writing their presence on the new store. The Mac switches at once after writing it
@@ -215,75 +215,23 @@ only after its owner signs in (a Squeak account is required to use the hosted cl
 
 ## Daemon control routes (token-gated `x-squeak-token`, no CORS, like every `/control/*`)
 
-- `GET /control/cloud` →
-  ```json
-  {
-    "active": "firebase",
-    "firebase": {
-      "configured": true,
-      "projectId": "...",
-      "databaseUrl": "...",
-      "lastTest": { "at": 0, "ok": true, "writeMs": 136, "readMs": 135, "noticeMs": 142 }
-    },
-    "catalyst": {
-      "configured": false,
-      "cli": { "installed": true, "version": "1.29.1", "loggedIn": true, "org": "..." },
-      "projectId": null,
-      "projectName": null,
-      "dc": "in",
-      "appUrl": null,
-      "steps": [
-        { "id": "cli", "state": "done" },
-        { "id": "project", "state": "todo" },
-        { "id": "table", "state": "todo" },
-        { "id": "deploy", "state": "todo" },
-        { "id": "channel", "state": "todo" },
-        { "id": "verify", "state": "todo" }
-      ],
-      "lastTest": null
-    }
-  }
-  ```
-  `state` is `done | todo | working | error`, plus optional `detail` (a fixed sentence) and `consoleUrl` (where to click).
-- `GET /control/cloud/catalyst/projects` → `{ projects: [{id, name}] }` (from the CLI, for the picker).
-- `POST /control/cloud/catalyst/project` `{ projectId }` → selects it (CLI `project:use`, records id, name, app domain).
-- `POST /control/cloud/catalyst/deploy` `{}` → packs `cloud/catalyst-relay` with a fresh or kept relay key and runs
-  `catalyst deploy --only functions:squeak_relay` in a private copy under the support dir; progress in `steps`.
-- `POST /control/cloud/catalyst/check` `{}` → re-reads every step (CLI status, `/ping`).
-- `POST /control/cloud/test` `{ provider }` → `{ ok, writeMs, readMs, noticeMs, error? }` (a throwaway random channel,
-  written, watched, read and deleted; never real channel data).
-- `POST /control/cloud/select` `{ provider }` → `{ ok, moved, error? }`.
-- `POST /control/cloud/firebase/rename` `{ displayName }` → renames the Firebase project's display name (Firebase CLI's
-  token or REST `projects.patch`); `{ ok, error? }`. Catalyst has no rename API: the tab shows the console steps.
-- Errors are fixed sentences; never a CLI's raw output or a token.
+- `GET /control/cloud` answers `{ active, hosted, firebase: { configured, projectId, databaseUrl, lastTest }, catalyst:
+{ configured, projectId, projectName, dc, appUrl, lastTest } }`. `hosted` is the block the Mac app draws
+  (`cloud/hosted.ts`: `needs-sign-in`, `connecting`, `ready`, `error`).
+- `POST /control/cloud/hosted/connect` `{}` starts or restarts the hosted connection with what is linked (202; 409
+  `not-signed-in`).
+- `POST /control/cloud/move-now` `{}` runs a move that was held (202; 409 `not-signed-in`).
+- `POST /control/cloud/hosted/relay` `{ relay }` sends device traffic to a pinned relay base, or `null` to put it back
+  on the account origin.
+- `POST /control/cloud/test` `{ provider }` answers `{ ok, writeMs, readMs, noticeMs, error? }` (a throwaway random
+  channel, written, watched, read and deleted; never real channel data).
+- Self-hosting is gone. The old routes to pick a Catalyst project, deploy a relay, select a provider or set up Firebase
+  answer `410 self-hosting-removed`. Errors are fixed sentences; never a CLI's raw output or a token.
 
-## Catalyst setup steps (what the Mac tab shows, in order)
+## Mac app
 
-| id        | who                     | what                                                                                                      | done when                              |
-| --------- | ----------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `cli`     | app/daemon              | Catalyst CLI installed and signed in (`npm i -g zcatalyst-cli`, `catalyst login` opens the browser)       | `catalyst project:list` works          |
-| `project` | **you, in the console** | create a project (Console → Create Project), then pick it in the tab                                      | a project is selected                  |
-| `table`   | **you, in the console** | Cloud Scale → NoSQL → Create Table `squeak_docs`, partition key `pk` (String), sort key `doc` (String)    | `/ping` `store: ready` (after deploy)  |
-| `deploy`  | daemon                  | deploy `squeak_relay` with the relay key                                                                  | `/ping` answers with the right version |
-| `channel` | **you, in the console** | Cloud Scale → Data Streams → Create Channel `squeak_notice`, access control Custom Logic → `squeak_relay` | `/ping` `channel: ready`               |
-| `verify`  | daemon                  | a test round trip on Catalyst                                                                             | `lastTest.ok`                          |
-
-Console links use the project's DC (`https://console.catalyst.zoho.<tld>`).
-
-## Mac app: Settings › Cloud (a new tab)
-
-Two cards, Firebase and Catalyst, each with: status line (In use / Ready / Not set up), project and region, the last
-test's numbers, **Set up** (Firebase: the existing `FirebaseSetupModel` flow moves here; Catalyst: the step list above,
-each step's button: Run / Open console / Check), **Test**, **Rename** (Firebase: a name field; Catalyst: the console
-steps), and **Use this** (confirm sheet: "Paired devices will move to Catalyst."). Hidden routes (older daemon) → the tab
-shows only the existing Firebase settings. DESIGN.md applies.
-
-## Setting up Catalyst: what the CLI can and cannot do (verified on CLI 1.29.1)
-
-- `catalyst project:list` and `project:use` are interactive (an org menu) outside a project, so setup does not use them. `catalyst init -ni` with no `-p` fails by design and prints the account's projects as `* name(id)` lines (the CLI calls them "orgs"); that is the project picker. `catalyst init -p <id> -ni` needs no `--org`, writes only a local `.catalystrc` (no cloud change) and holds the project's name and `domain.name` (`<project>-<orgId>.development`). The app URL is `https://<domain.name>.catalystserverless.<tld>`.
-- The CLI never names the data centre; `dc` defaults to `in` and is a setting (`CatalystSetup.setConfig`).
-- Function env vars come only from `deployment.env_variables` in the function's `catalyst-config.json` (a deploy overwrites console-set ones); setup writes `RELAY_KEY` there in its private copy `<support>/catalyst-relay`, never in the repo.
-- Assumed, not run (a deploy changes a real project): `catalyst deploy --only functions:squeak_relay -ni`, and that the CLI ships the function's `node_modules` (setup runs `npm ci --omit=dev` first).
+There is no Cloud tab. Settings › Account shows the hosted block: signed out, connecting, connected or an error, with
+Reconnect. Signing in is the whole setup: the Mac gets its own key from the hosted relay.
 
 ## History in the cloud (relay 1.5.0)
 

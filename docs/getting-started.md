@@ -1,15 +1,15 @@
 # Getting started with Squeak
 
-Squeak is a menu-bar app for your Mac that shows every Claude Code and Codex
-session on it, tells you which ones need you, and lets you answer them. This
-page is the longer version of the README's Quick start.
+Squeak is a Mac app where you and AI agents work together. It runs Claude and Codex chats for you, tells you which ones
+need you, and lets you answer from the Mac, your iPhone, the web, Telegram or Zoho Cliq. This page is the longer
+version of the README's Quick start.
 
 ## What you need
 
 - A Mac with Apple silicon, running macOS 14 or later.
-- [Conductor](https://conductor.build) if you want to answer Conductor chats or
-  start new ones from Squeak. Without it, Squeak still watches `claude` and
-  `codex` sessions in your terminal.
+- Claude Code or Codex installed on the Mac, so Squeak has an agent to run.
+- [Conductor](https://conductor.build), only if you want your Conductor chats in Squeak. It is an extension, off until
+  you add it.
 
 ## 1. Install Squeak for Mac
 
@@ -22,40 +22,33 @@ page is the longer version of the README's Quick start.
    yet**, so macOS warns the first time. Right-click the app, choose Open, then
    Open again. If macOS still blocks it, go to System Settings › Privacy &
    Security and choose **Open Anyway** next to the Squeak message.
-5. Squeak has no Dock icon. Look for it in the menu bar.
 
 Squeak updates itself (Sparkle). You can turn automatic checks off in
 Settings › About.
 
-## 2. Run the guided Setup walkthrough
+## 2. Set up
 
-On first launch, choose **Set up Squeak** on the Welcome screen. That starts
-the guided setup and installs Squeak's background service. It walks through
-the service and agent hooks first; both are required. The remaining steps cover
-Conductor, replies into Conductor's window, notifications, the quick-message
-shortcut, iPhone, Telegram, Zoho Cliq, phone calls and Keep awake. You can skip
-optional steps, and the summary and **Settings › Setup** show what is done or
-still needs attention. Reopen any skipped or unfinished step there.
+On first launch, choose **Set up Squeak** on the Welcome screen. The guided setup has four steps:
 
-Reading Conductor chats works with nothing else set up.
+- **Start Squeak** installs the background service. Required.
+- **Your agents** finds Claude Code and Codex on this Mac and connects them. Required.
+- **Account** signs you in with Zoho, Google or email. Optional.
+- **Your phone** is a reminder to sign in on your iPhone with the same account. Optional.
 
-## 3. Turn on live replies and new chats (Conductor)
+You can skip the optional steps. While any step is still to do, a **Finish setting up** card sits at the top of the
+Settings sidebar. Open it to finish.
 
-Reading is free; replying and starting chats from Squeak need Conductor's
-remote-control relay pointed at Squeak.
+## 3. Add extensions (optional)
 
-1. Open **Settings › Conductor** and press the setup button. Squeak backs up
-   Conductor's database before it changes anything, and can undo the change
-   from the same page.
-2. macOS may show a **Keychain prompt**. Squeak adds one login Keychain item
-   that Conductor's relay needs. Allow it.
-3. **Quit and reopen Conductor once.** It only reads the setting at launch.
-4. Settings › Conductor should say connected. This can take a moment after
-   Conductor starts.
+Settings › Extensions lists everything that is off until you add it:
 
-Terminal agents (`claude` or `codex` in Terminal.app) are answered by typing
-into their Terminal tab. That needs the optional Accessibility step and, the
-first time, an Automation prompt for Squeak Hands to control Terminal. Other
+- **Claude Code (external)** and **Codex (external)** show chats you started outside Squeak, in Terminal or the Claude
+  desktop app. Adding one puts Squeak's hooks in that agent's settings; removing it takes them out again.
+- **Conductor** shows your Conductor chats and lets you start one from Squeak.
+- **Telegram**, **Zoho Cliq** and **Phone calls** are described below.
+
+Terminal agents (`claude` or `codex` in Terminal.app) are answered by typing into their Terminal tab. That needs the
+Accessibility permission and, the first time, an Automation prompt for Squeak Hands to control Terminal. Other
 terminals (iTerm, tmux, ssh), Claude Desktop and Cowork stay watch-only.
 
 ## 4. Telegram (optional)
@@ -70,43 +63,25 @@ Squeak sends cards to a bot you own, with buttons to answer.
 
 The Cliq channel is built for a particular Zoho org setup: a managed org blocks
 a personal Zoho OAuth app, so taps and replies come back through three Deluge
-handlers you paste into a Cliq bot and a relay in your own Firebase project.
-If you are not in a Zoho org, skip it. Follow [`cliq.md`](cliq.md).
+handlers you paste into a Cliq bot. If you are not in a Zoho org, skip it.
+Follow [`cliq.md`](cliq.md).
 
-## 6. iPhone (optional)
+## 6. iPhone and web (optional)
 
-The iPhone app is installed through SideStore, not the App Store. It reaches
-your Mac through Firebase. In Squeak for Mac, open **Settings › iPhone** and
-choose **Set up…**. The recommended option creates and configures a Firebase
-project in your Google account. You can also choose Squeak's limited shared
-server, which needs no project of your own; its feature and usage limits are
-listed in [`remote-channel.md`](remote-channel.md#setting-up-firebase-and-the-shared-server-2026-10-29).
-The data stored there is encrypted, and replies are signed by a key on the
-phone that you approve on the Mac.
+Sign in to Squeak on the Mac first (Settings › Account). Then sign in with the same account on your other devices. They
+find your Mac by themselves. There are no codes to scan or type.
 
-After setup, the pairing sheet opens. Scan its code with the iPhone app and
-approve the request on the Mac. If you move from the shared server to your own
-Firebase later, pair the iPhone again.
+The iPhone app needs iOS 18 or later and is installed through SideStore, not the App Store. Add
+`https://sibhimanyu.github.io/squeak/ios/source.json` as a source in SideStore.
 
-The full design and setup are in [`remote-channel.md`](remote-channel.md).
+If you would rather not sideload, open
+<https://squeak-60083782173.development.catalystserverless.in/app/index.html> in a phone browser and sign in. The web
+app covers less than the iPhone app; see [`web-app.md`](web-app.md).
 
-### No install: Squeak for Web
-
-If you would rather not sideload the app, open <https://squeak-60083782173.development.catalystserverless.in/app/index.html> in
-a phone browser. It has the same features as the iPhone app (new chats with
-presets and split, answering plans and questions, queue and steer, Mac
-controls, keep awake, notifications, usage, films review), except Face ID and
-the same-Wi-Fi direct route. It needs the same Firebase project
-(`SQUEAK_REMOTE_PROJECT`). Pair by choosing **Pair an iPhone** in Squeak for
-Mac, then scan the code with the page's camera button or paste the link.
-The iPhone app is optional.
+The design is in [`remote-channel.md`](remote-channel.md).
 
 ## Known limits
 
-- **Conductor's interface is undocumented.** Live replies depend on how
-  Conductor's remote control works today. A Conductor update can break it.
-  Squeak is tested against specific Conductor versions and logs a warning on
-  any other. If replies stop after an update, restart Conductor first.
 - **Not notarized yet.** Expect the Gatekeeper warning on first open.
 - **Apple silicon only**, macOS 14 or later.
 - **Sessions in other terminals, Claude Desktop and Cowork are watch-only.**
@@ -115,28 +90,20 @@ The iPhone app is optional.
 
 ## Troubleshooting
 
-**Replies or new chats fail with "relay isn't connected".**
-Open Settings › Conductor. If it says to restart, quit and reopen Conductor.
-If it says Conductor's version is untested, Squeak has left the relay off for
-safety. Make sure Conductor's own mobile or remote access is not showing an
-error. Reply typing into Conductor's window still works with the Accessibility
-step.
-
 **Sessions never show as "needs you" or never update instantly.**
-The agent hooks are missing. Open **Settings › Setup** and reopen **Agent
-hooks**. Squeak merges them into `~/.claude/settings.json` without removing
-other tools' entries.
+For chats started outside Squeak, check that the Claude Code (external) or Codex (external) extension is added in
+Settings › Extensions. That is what installs the hooks.
 
 **The app says the background service is not running.**
-Open **Settings › About › Background service**. Install it if it is missing, or
+Open **Settings › Background service**. Install it if it is missing, or
 use Repair if a version failed its health check. The service listens only on
 `127.0.0.1:8477`.
 
-**Reading Conductor chats works, but nothing can be sent.**
+**Nothing can be sent.**
 Sending, terminal sessions and every channel need the background service; fix
 that first.
 
-**Copy diagnostics.** Settings › About › Copy diagnostics gives a redacted
+**Copy diagnostics.** Settings › Background service has Copy diagnostics, a redacted
 report you can attach to a bug report.
 
 To remove Squeak again, see [Uninstalling Squeak](uninstall.md).

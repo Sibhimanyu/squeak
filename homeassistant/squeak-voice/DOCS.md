@@ -1,12 +1,12 @@
 # Squeak Voice
 
-Squeak on your Mac asks for a phone call through Firebase when a coding agent is waiting on you. This add-on
+Squeak on your Mac asks for a phone call through Squeak's cloud relay when a coding agent is waiting on you. This add-on
 places the call: it registers as a 3CX extension through your SBC and rings your phone. Press your PIN, then a
 key, and the answer goes back to the agent. The Mac needs no route to your PBX, so it works from any network.
 
-Everything sent through Firebase is sealed with a key only Squeak and this add-on hold. You never copy that key: you
+Everything sent through the relay is sealed with a key only Squeak and this add-on hold. You never copy that key: you
 pair the add-on with a short code it shows. The PIN is set from the Squeak app (Settings > Phone calls) and kept only in this
-add-on's storage; it travels sealed, so Firebase never sees it. Who to ring is also set in the app.
+add-on's storage; it travels sealed, so the relay never sees it. Who to ring is also set in the app.
 
 ## Setup
 
@@ -59,7 +59,7 @@ updated this way: copy the new files again, then press Update in Home Assistant.
 ## Notes
 
 - When the PIN is asked is set in the Squeak app (Settings > Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
-- 0.21.0: follows Squeak for Mac when it moves the phone channel between Firebase and Zoho Catalyst (Settings › Cloud), without pairing again; can also be paired straight to a Catalyst setup.
+- 0.21.0: follows Squeak for Mac when it moves the phone channel between Firebase and Zoho Catalyst, without pairing again; can also be paired straight to a Catalyst setup.
 - 0.20.0: answer by voice. Calling in asks "Which workspace?" and "Which chat?" out loud and you say a name or a number (keys still work at any point; after two misses it goes back to the keypad menu). The PIN stays on the keypad. Waiting lines vary and follow the character set in Squeak for Mac, and the Mac's own messages (refusals, outcomes) come in its voice. Needs Squeak for Mac's daemon from the same day.
 - 0.19.0: faster turns. Your recording goes to the Mac in pieces while you are still talking, so the Mac has it moments after you stop. The read-back of what you said plays in the Mac's voice as it is made, instead of after the whole of it, and a sentence that is late is waited for (up to 8 s) and only that sentence falls back to the add-on's own voice. The Mac does this only for an add-on of 0.19.0 or newer.
 - 0.18.0: a new chat from a call: in a workspace's chat menu, press 0 for a new chat there. Say what it should do; Squeak reads back the workspace, the model and your words, and only a yes (said, or 1 on the keypad) starts it. The model is the one picked in Squeak for Mac (Settings › Phone calls › New chats from calls use). The Mac offers it only to an add-on of 0.18.0 or newer.
