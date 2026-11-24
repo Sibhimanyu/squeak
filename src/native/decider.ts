@@ -182,7 +182,12 @@ export class Decider {
     const W = DECIDER_WEIGHTS;
     // One call for all of the Ducks' texts: an embedding adapter pays its start-up once.
     const flat = ducks.flatMap((d) => d.tasks.map((t) => ({ duck: d.id, text: t })));
-    const sims = flat.length ? await this.similarity.similarities(task, flat.map((f) => f.text)) : [];
+    const sims = flat.length
+      ? await this.similarity.similarities(
+          task,
+          flat.map((f) => f.text),
+        )
+      : [];
     const best = new Map<string, { sim: number; text: string }>();
     flat.forEach((f, i) => {
       const sim = clamp01(sims[i] ?? 0);
@@ -230,7 +235,8 @@ export class Decider {
     if (top.score >= W.give) return { kind: "duck", duckId: top.duckId, reason: top.reason, ranked };
     if (top.score < W.hatch) return { kind: "hatch", reason: "nothing here is related", ranked };
     // Unsure: the nearest few go to the model, which may still say it is not sure.
-    if (!this.model || opts.useModel === false) return { kind: "hatch", reason: "not sure who fits, so a fresh Duck", ranked };
+    if (!this.model || opts.useModel === false)
+      return { kind: "hatch", reason: "not sure who fits, so a fresh Duck", ranked };
     const near = ranked.filter((r) => r.score >= W.hatch).slice(0, 3);
     const byId = new Map(ducks.map((d) => [d.id, d]));
     let choice: ModelChoice | null = null;

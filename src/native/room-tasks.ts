@@ -483,7 +483,6 @@ export class RoomTasks extends EventEmitter {
 
   // ---- starting at once, with limits ----
 
-
   private rules(projectId: string): StartRules {
     return this.o.settings?.(projectId) ?? { askBeforeStarting: false, maxWorkingDucks: DEFAULT_MAX_WORKING_DUCKS };
   }
@@ -618,7 +617,9 @@ export class RoomTasks extends EventEmitter {
     const byId = new Map(pool.map((p) => [p.duck.id, p]));
     const refOf = (r: ScoredDuck, reason = r.reason): TaskThreadRef | null => {
       const p = byId.get(r.duckId);
-      return p ? ref({ duck: p.row, session: p.session, state: p.state, score: r.score, reason, pitch: pitchOf(reason) }) : null;
+      return p
+        ? ref({ duck: p.row, session: p.session, state: p.state, score: r.score, reason, pitch: pitchOf(reason) })
+        : null;
     };
     delete job.suggestion;
     delete job.candidates;

@@ -138,7 +138,11 @@ describe("decider model", () => {
   });
 
   it("when the model is unsure, errors, names a Duck it was not shown, or is absent, it hatches", async () => {
-    const ports = [fakeModel(null).port, fakeModel(new Error("down")).port, fakeModel({ kind: "duck", duckId: "zz" }).port];
+    const ports = [
+      fakeModel(null).port,
+      fakeModel(new Error("down")).port,
+      fakeModel({ kind: "duck", duckId: "zz" }).port,
+    ];
     for (const port of ports) {
       const d = new Decider({ similarity: fixed(unsure), model: port });
       expect((await d.decide(SMALL, [duck("a")])).kind).toBe("hatch");

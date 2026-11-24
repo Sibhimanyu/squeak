@@ -380,7 +380,9 @@ describe("place and go", () => {
     const done = await h.act(j.id, { action: "new" });
     expect(h.store.getSession(done.handedTo!.sessionId)!.workspaceId).toBeNull();
     expect(
-      await h.code(h.act((await h.job("tidy the footer links")).id, { action: "go", place: { kind: "new", branch: "x" } })),
+      await h.code(
+        h.act((await h.job("tidy the footer links")).id, { action: "go", place: { kind: "new", branch: "x" } }),
+      ),
     ).toBe(409);
   });
 });
