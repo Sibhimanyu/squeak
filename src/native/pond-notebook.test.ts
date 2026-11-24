@@ -256,7 +256,7 @@ describe("the Notebook route", () => {
   it("serves and edits the Notebook, token-gated with no CORS header", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pond-notebook-srv-"));
     const store = new NativeStore(":memory:");
-    const host = new SessionHost({ store } as any);
+    const host = new SessionHost({ store } as never);
     const tokenPath = path.join(dir, "hook-token");
     const srv = new NativeServer({
       host,
@@ -282,8 +282,8 @@ describe("the Notebook route", () => {
         body: JSON.stringify({ entries: ["a lesson", "another"] }),
       });
       expect(put.status).toBe(200);
-      const got = (await (await fetch(url, { headers })).json()) as any;
-      expect(got.entries.map((e: any) => e.text)).toEqual(["a lesson", "another"]);
+      const got = (await (await fetch(url, { headers })).json()) as { entries: Array<{ text: string }> };
+      expect(got.entries.map((e) => e.text)).toEqual(["a lesson", "another"]);
       const bad = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ entries: "nope" }) });
       expect(bad.status).toBe(400);
       expect((await fetch(url.replace(project.id, "nope"), { headers })).status).toBe(404);

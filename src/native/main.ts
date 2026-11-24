@@ -1,4 +1,4 @@
-import { flag, initFlags } from "../squeak/flags.js";
+import { initFlags } from "../squeak/flags.js";
 import path from "node:path";
 
 import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
