@@ -40,6 +40,7 @@ import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
+import { GitPond, ghAdapter, type GitHubAdapter } from "./git-pond.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
 import {
@@ -101,6 +102,8 @@ export interface NativeServerOptions {
   cleanup?: DiskCleanup;
   /** Tests inject one with a fake git; default runs the real one. */
   history?: VersionHistory;
+  /** Tests inject a fake GitHub; default is the Mac's `gh` sign-in. Never create a real repository in a test. */
+  github?: GitHubAdapter;
   /** The pond rooms; one is made when absent (the same instance must reach `tools` for agents to share it). */
   room?: Room;
   /** Room jobs; one is made when absent (it must be the one `tools` and main.ts's auto check share). */
@@ -186,6 +189,7 @@ export class NativeServer {
   private readonly agentSettings: AgentSettings | null;
   private readonly cleanup: DiskCleanup;
   private readonly history: VersionHistory;
+  private readonly gitPond: GitPond;
   readonly room: Room;
   readonly jobs: RoomJobs;
   private readonly artifacts: Artifacts;
@@ -195,6 +199,7 @@ export class NativeServer {
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
+    this.gitPond = new GitPond(options.store, this.history, options.github ?? ghAdapter);
     this.artifacts = new Artifacts({ store: options.store });
     this.showRelay = new ShowRelay();
     this.room =
@@ -1095,6 +1100,18 @@ export class NativeServer {
         if (b.commit !== undefined && typeof b.commit !== "boolean")
           throw new HttpError(400, "commit must be true or false");
         return this.json(res, 200, { project: await this.history.enable(id, { commit: b.commit === true }) });
+      } catch (error) {
+        if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
+        throw error;
+      }
+    }
+    if (area === "projects" && id && sub === "git-pond" && parts.length === 4 && method === "POST") {
+      // "Make it a Git Pond": version history, a GitHub repo under the Owner's account (private unless asked), a push.
+      try {
+        const b = await this.body(req);
+        if (b.visibility !== undefined && b.visibility !== "private" && b.visibility !== "public")
+          throw new HttpError(400, "visibility must be private or public");
+        return this.json(res, 200, await this.gitPond.make(id, b.visibility === "public" ? "public" : "private"));
       } catch (error) {
         if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
         throw error;
