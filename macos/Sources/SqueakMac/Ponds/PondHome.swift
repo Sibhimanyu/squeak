@@ -344,7 +344,7 @@ struct PondHomeView: View {
                         .font(.system(size: 24)).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     Text(layout.isEmpty ? "Room for your next idea" : "No matching ducks")
                         .font(Typo.heading).foregroundStyle(Theme.ink)
-                    Text(layout.isEmpty ? "Start a duck to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
+                    Text(layout.isEmpty ? FirstPondJourney.emptyPondDetail(plainFolder: native?.isPlainFolder == true) : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     if layout.isEmpty {
                         if chrome.start != .hidden, pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {

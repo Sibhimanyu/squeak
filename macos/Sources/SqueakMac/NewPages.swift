@@ -159,15 +159,18 @@ struct NewPondPage: View {
                 }
                 VStack(spacing: Space.s) {
                     choice(.blank, icon: .plus) {
-                        Text(verbatim: PondFolder.path(home: "~", name: state.form.name).map { "Makes the folder \($0)." } ?? "Makes a folder in ~/Squeak with that name.")
-                            .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                        Text(verbatim: FirstPondJourney.choiceNote(.blank, blankPath: PondFolder.path(home: "~", name: state.form.name)) ?? "")
+                            .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                     choice(.folder, icon: .folder) {
-                        HStack(spacing: 8) {
-                            Button("Choose folder\u{2026}") { state.chooseFolder() }.buttonStyle(SecondaryButtonStyle())
-                            if let p = state.form.folderPath {
-                                Text(verbatim: p).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Button("Choose folder\u{2026}") { state.chooseFolder() }.buttonStyle(SecondaryButtonStyle())
+                                if let p = state.form.folderPath {
+                                    Text(verbatim: p).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                                }
                             }
+                            if let note = FirstPondJourney.choiceNote(.folder, blankPath: nil) { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted) }
                         }
                     }
                     choice(.clone, icon: .gitBranch) {

@@ -25,8 +25,29 @@ struct DashboardPage: View {
     private var ducklingTotals: (running: Int, threads: Int) { DashboardBoard.ducklingTotals(columns) }
 
     var body: some View {
+        if !model.hasPonds && !model.pondsLoading {
+            firstPond
+        } else {
+            board
+        }
+    }
+
+    /// A newcomer's first screen: no pond yet, so say what a pond is and offer the one next step.
+    private var firstPond: some View {
+        VStack(spacing: Space.m) {
+            DuckMark(width: 56)
+            Text(FirstPondJourney.noPondsTitle).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
+            Text(FirstPondJourney.noPondsDetail).font(Typo.body).foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
+            Button(PondWords.newPond) { model.openNewPond() }.buttonStyle(PrimaryButtonStyle()).padding(.top, Space.xs)
+        }
+        .padding(Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var board: some View {
         let columns = self.columns
-        VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 0) {
             header
             HStack(spacing: 12) {
                 SearchField(text: $query, placeholder: model.ducksMode ? "Filter ducks and branches…" : "Filter streams…")
