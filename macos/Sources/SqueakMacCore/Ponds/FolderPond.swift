@@ -44,4 +44,16 @@ public enum FolderPond {
         let ignore = preview.hasGitignore ? "" : " A .gitignore is added that leaves out macOS files and folders like node_modules."
         return .commit(question: "Save what is in this folder (\(what)) as the first version?\(ignore)")
     }
+
+    /// "Make it a Git Pond": the choice and the result, in the app's words.
+    public static let gitPondIntro = "Put this folder on GitHub: Squeak turns on version history, saves what is in the folder as the first version, creates a repository under your GitHub account on this Mac, and pushes. The pond then has streams."
+    public static func gitPondQuestion(isPublic: Bool) -> String {
+        isPublic
+            ? "Anyone on the internet will be able to see this folder's files on GitHub."
+            : "Only you will be able to see this repository on GitHub."
+    }
+    public static func gitPondResult(url: String?) -> String {
+        guard let url, !url.isEmpty else { return "This pond is now a Git Pond, and it is on GitHub." }
+        return "This pond is now a Git Pond, and it is on GitHub: \(url)"
+    }
 }

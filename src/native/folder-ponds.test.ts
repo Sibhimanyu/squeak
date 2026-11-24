@@ -11,6 +11,8 @@ vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 import { AgentTools } from "./agent-tools.js";
 import { GitActions } from "./git-actions.js";
 import { SessionHost } from "./host.js";
+import type { GitHubAdapter, GitHubStatus, RepoVisibility } from "./git-pond.js";
+import { GH_NOT_INSTALLED, GH_NOT_SIGNED_IN } from "./git-pond.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
@@ -26,7 +28,7 @@ afterEach(async () => {
   while (stops.length) await stops.pop()!();
 });
 
-async function start() {
+async function start(github?: GitHubAdapter) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "folder-pond-")));
   const folder = path.join(dir, "notes");
   fs.mkdirSync(folder);
@@ -51,7 +53,15 @@ async function start() {
   });
   const workspaces = new WorkspaceManager({ store, workspacesRoot: path.join(dir, "ws") });
   const tokenPath = path.join(dir, "hook-token");
-  const server = new NativeServer({ host, store, workspaces, tokenPath, port: 0, routines: false });
+  const server = new NativeServer({
+    host,
+    store,
+    workspaces,
+    tokenPath,
+    port: 0,
+    routines: false,
+    ...(github ? { github } : {}),
+  });
   const port = await server.start();
   const token = fs.readFileSync(tokenPath, "utf8").trim();
   stops.push(async () => {
@@ -226,6 +236,71 @@ describe("turning on version history", () => {
     expect((await h.call("POST", `/native/projects/${h.pond.id}/history`, { commit: "yes" })).status).toBe(400);
     expect((await h.call("POST", `/native/projects/${h.pond.id}/history`, {})).status).toBe(200);
     expect((await h.call("POST", `/native/projects/${h.pond.id}/history`, {})).json.project.kind).toBe("git");
+  });
+});
+
+/** A fake GitHub: "creating" a repo makes a bare one in a temp folder and pushes there. */
+function fakeGitHub(status: GitHubStatus = { ok: true, login: "owner" }) {
+  const created: { name: string; visibility: RepoVisibility; remote: string }[] = [];
+  const adapter: GitHubAdapter = {
+    status: async () => status,
+    createAndPush: async ({ name, visibility, dir }) => {
+      const remote = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fake-gh-")), `${name}.git`);
+      execFileSync("git", ["init", "--bare", "-q", remote]);
+      git(dir, "remote", "add", "origin", remote);
+      git(dir, "push", "-q", "origin", "main");
+      created.push({ name, visibility, remote });
+      return { url: `https://github.com/owner/${name}` };
+    },
+  };
+  return { adapter, created };
+}
+
+describe("making a folder pond a Git Pond", () => {
+  it("inits, commits, creates a private repo, pushes, and the pond gains streams", async () => {
+    const gh = fakeGitHub();
+    const h = await start(gh.adapter);
+    const r = await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, {});
+    expect(r.status).toBe(200);
+    expect(r.json.project).toMatchObject({ kind: "git", defaultBranch: "main" });
+    expect(r.json.url).toBe("https://github.com/owner/notes");
+    expect(gh.created).toMatchObject([{ name: "notes", visibility: "private" }]);
+    expect(execFileSync("git", ["-C", gh.created[0]!.remote, "rev-parse", "main"], { encoding: "utf8" }).trim()).toBe(
+      git(h.folder, "rev-parse", "HEAD"),
+    );
+    expect(git(h.folder, "ls-files")).toContain("todo.txt");
+    expect(fs.existsSync(h.workspaces.createWorkspace(h.pond.id).path)).toBe(true);
+  });
+
+  it("makes a public repo when asked, and refuses anything else", async () => {
+    const gh = fakeGitHub();
+    const h = await start(gh.adapter);
+    expect((await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, { visibility: "secret" })).status).toBe(400);
+    expect((await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, { visibility: "public" })).status).toBe(200);
+    expect(gh.created[0]!.visibility).toBe("public");
+  });
+
+  it("says so plainly when gh is missing or not signed in, and leaves the folder alone", async () => {
+    for (const [reason, message] of [
+      ["not-installed", GH_NOT_INSTALLED],
+      ["not-signed-in", GH_NOT_SIGNED_IN],
+    ] as const) {
+      const h = await start(fakeGitHub({ ok: false, reason }).adapter);
+      const r = await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, {});
+      expect(r.status).toBe(409);
+      expect(r.json.error).toBe(message);
+      expect(fs.existsSync(path.join(h.folder, ".git"))).toBe(false);
+      expect(h.store.getProject(h.pond.id)!.kind).toBe("folder");
+    }
+  });
+
+  it("a Git Pond that already has a remote is refused", async () => {
+    const gh = fakeGitHub();
+    const h = await start(gh.adapter);
+    await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, {});
+    const again = await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, {});
+    expect(again.status).toBe(409);
+    expect(gh.created).toHaveLength(1);
   });
 });
 

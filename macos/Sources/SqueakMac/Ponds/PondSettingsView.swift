@@ -28,6 +28,10 @@ struct PondSettingsView: View {
     @State private var historyBusy = false
     @State private var historyProblem: String?
     @State private var confirmHistory = false
+    @State private var confirmGitPond = false
+    @State private var gitPondBusy = false
+    @State private var gitPondProblem: String?
+    @State private var gitPondResult: String?
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
@@ -52,6 +56,11 @@ struct PondSettingsView: View {
                             if let problem {
                                 Label(problem, systemImage: "exclamationmark.circle")
                                     .font(Typo.footnote).foregroundStyle(Theme.negative)
+                                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            }
+                            if let gitPondResult {
+                                Label(gitPondResult, systemImage: "checkmark.circle")
+                                    .font(Typo.footnote).foregroundStyle(Theme.ink)
                                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                             }
                             look(native).id("Appearance")
@@ -114,6 +123,15 @@ struct PondSettingsView: View {
                 case .withoutCommit(let reason): Text(verbatim: reason)
                 }
             }
+        }
+        .confirmationDialog("Make \(project) a Git Pond?", isPresented: $confirmGitPond, titleVisibility: .visible) {
+            if let native {
+                Button("Private repository on GitHub") { makeGitPond(native, isPublic: false) }
+                Button("Public repository on GitHub") { makeGitPond(native, isPublic: true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(verbatim: FolderPond.gitPondQuestion(isPublic: false) + " Choose public only if you want everyone to see it.")
         }
         .confirmationDialog("Remove \(project) from Squeak?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Remove from Squeak", role: .destructive) { remove() }
@@ -243,6 +261,20 @@ struct PondSettingsView: View {
                     Text(verbatim: historyProblem).font(Typo.body).foregroundStyle(Theme.negative)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
+                Text(verbatim: FolderPond.gitPondIntro)
+                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Make it a Git Pond\u{2026}") {
+                        gitPondProblem = nil
+                        if model.demoMode { gitPondProblem = "Demo data: nothing is changed." } else { confirmGitPond = true }
+                    }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(gitPondBusy || historyBusy)
+                    if gitPondBusy { ProgressView().controlSize(.small) }
+                }
+                if let gitPondProblem {
+                    Text(verbatim: gitPondProblem).font(Typo.body).foregroundStyle(Theme.negative)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
             }
         }
     }
@@ -258,6 +290,19 @@ struct PondSettingsView: View {
                 history = try await model.nativeHost.versionHistoryPreview(projectId: p.id)
                 confirmHistory = true
             } catch let e as NativeHostError { historyProblem = e.reason } catch { historyProblem = "Squeak couldn\u{2019}t look at this folder." }
+        }
+    }
+
+    private func makeGitPond(_ p: NativeProject, isPublic: Bool) {
+        gitPondBusy = true
+        gitPondProblem = nil
+        Task {
+            defer { gitPondBusy = false }
+            do {
+                let url = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
+                gitPondResult = FolderPond.gitPondResult(url: url)
+                await model.refreshNativeProjects()
+            } catch let e as NativeHostError { gitPondProblem = e.reason } catch { gitPondProblem = "Squeak couldn\u{2019}t make this pond a Git Pond." }
         }
     }
 
