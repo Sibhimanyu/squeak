@@ -61,6 +61,25 @@ describe("buildPondRoom", () => {
     expect((doc.items[1] as { detail?: string }).detail).toBeUndefined();
   });
 
+  it("expands a Duck's status line or plan card with the host's own detail", () => {
+    const duck = { kind: "agent", id: "s1", name: "Pixel" };
+    const doc = buildPondRoom("p", {
+      member: false,
+      page: {
+        posts: [
+          { ...post(1, "d", "Done: icons", duck), kind: "done", detail: "Re-rendered all four sizes." },
+          { ...post(2, "p", "Plan: crisp icons", duck), kind: "plan", detail: "Spec\n1. Re-render at 2x" },
+          post(3, "c", "looks good", OWNER),
+        ],
+      },
+    });
+    expect(doc.items).toMatchObject([
+      { t: "duck", tone: "done", line: "Done: icons", detail: "Done: icons\nRe-rendered all four sizes." },
+      { t: "duck", tone: "working", line: "Plan: crisp icons", detail: "Plan: crisp icons\nSpec\n1. Re-render at 2x" },
+      { t: "message", text: "looks good" },
+    ]);
+  });
+
   it("draws a Task with its state and the routing line, and leaves dropped ones out", () => {
     const doc = buildPondRoom("p", {
       member: false,

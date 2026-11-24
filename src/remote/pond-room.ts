@@ -180,7 +180,10 @@ export function buildPondRoom(pondId: string, read: PhoneRoomRead): PondRoomDoc 
       } else {
         const line = clip(firstLine(text), LINE_MAX);
         if (!line) continue;
-        const whole = text.trim();
+        // The host's own `detail` (a status line's expansion, a plan card's spec and plan) wins; else the rest of the text.
+        const whole = [text.trim(), str(post.detail).trim()]
+          .filter((part, i, all) => part && (i === 0 || part !== all[0]))
+          .join("\n");
         const tone: PondRoomTone = postKind === "done" ? "done" : postKind === "needs" ? "needs" : "working";
         entries.push({
           at,
