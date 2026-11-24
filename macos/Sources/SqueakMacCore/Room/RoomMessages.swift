@@ -154,7 +154,8 @@ public enum RoomMessages {
     }
 
     public static func build(
-        feed: RoomFeed, now: Date = Date(), calendar: Calendar = .current, owner: String? = nil, filesFor: (String) -> Int? = { _ in nil }
+        feed: RoomFeed, now: Date = Date(), calendar: Calendar = .current, owner: String? = nil, filesFor: (String) -> Int? = { _ in nil },
+        memberView: Bool = false, selfId: String? = nil
     ) -> [RoomItem] {
         var entries: [Entry] = []
         let threads = Dictionary(feed.threads.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
@@ -216,13 +217,16 @@ public enum RoomMessages {
                         opens: p.toSessionId ?? p.sessionId, handoff: note))))
                 }
             } else if p.author.kind == .person, p.level == .room {
-                let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me" || p.author.id == "owner"
+                // A Member's own messages (from any of their Macs) are theirs by member id; the Owner's are "owner" only on the Owner's Mac.
+                let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me"
+                    || (!memberView && p.author.id == "owner") || (selfId != nil && p.author.id == selfId)
                 var m = RoomMessage(
                     id: r.id, at: p.at > 0 ? p.at : Int64(now.timeIntervalSince1970 * 1000),
                     author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: p.text.isEmpty && !p.attachments.isEmpty ? [] : [.text(p.text, .normal)])
                 m.attachments = p.attachments
                 m.pending = r.pending; m.failed = r.failed; m.postId = p.id
-                m.canMakeTask = RoomTasks.canMakeTask(r, jobs: feed.jobs)
+                // A Member's Room draws what the Owner's Mac published: Tasks are made and dropped there.
+                m.canMakeTask = !memberView && RoomTasks.canMakeTask(r, jobs: feed.jobs)
                 m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId
                 add(m, order: 0)
             } else if p.level == .room, p.author.kind == .agent, p.kind == .message || !feed.servesTurns {
@@ -239,7 +243,8 @@ public enum RoomMessages {
             let at = max(job.createdAt, postAt)
             let local = feed.jobLocal[job.id]
             // Every Task shows with its state; a dropped one leaves.
-            if let card = RoomTasks.card(for: job, among: feed.jobs, local: local, excluded: feed.taskExcluded[job.id] ?? []) {
+            if var card = RoomTasks.card(for: job, among: feed.jobs, local: local, excluded: feed.taskExcluded[job.id] ?? []) {
+                if memberView { card.canDrop = false }
                 entries.append(Entry(at: at, order: 1, content: .system(RoomSystemLine(
                     id: "task:\(job.id)", at: at, text: card.title, jobId: nil, buttons: [], opens: card.opens, task: card))))
             }

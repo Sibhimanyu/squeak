@@ -12,8 +12,8 @@ const crypto = require("node:crypto");
 
 const POND = /^[A-Za-z0-9_-]{22,64}$/;
 const MEMBER = /^[A-Za-z0-9_-]{1,64}$/;
-/** What a guest's token may write: its own presence, commands, join request, holds and ripples. Never members, keys, threads or tevents. */
-const GUEST_WRITE = new Set(["presence", "tcmds", "joins", "holds", "ripples"]);
+/** What a guest's token may write: its own presence, commands, join request, holds and ripples. Room posts (rposts) are the inbox the owner Mac applies; never room, rtasks, members, keys, threads or tevents. */
+const GUEST_WRITE = new Set(["presence", "tcmds", "joins", "holds", "ripples", "rposts"]);
 /** A Mac member also starts threads, so it writes its threads and their event batches. */
 const MEMBER_WRITE = new Set([...GUEST_WRITE, "threads", "tevents"]);
 /** An invite's token writes the join request and nothing else. */

@@ -7,6 +7,7 @@ import { FlotillaBridge } from "./bridge.js";
 import type { Failure } from "./coordination.js";
 import { FlotillaError, isRole, type Role } from "./types.js";
 import type { FlotillaService } from "./service.js";
+import type { RoomSync } from "./room-sync.js";
 
 /** One request as the native server hands it over, after it checked the token. */
 export interface RouteContext {
@@ -48,6 +49,8 @@ export interface MountDeps {
   startInProject?(projectId: string, spec: StartSpec): Promise<{ sessionId: string } | null>;
   /** The native projects on this Mac: each is a local pond from the moment it exists (`ensureLocalPond`). */
   projects?(): Array<{ id: string; name: string; rootPath: string }>;
+  /** The Room as a Member's Mac reads and posts it (`room-sync.ts`); absent where the host has no Room. */
+  roomSync?: RoomSync;
   heartbeatMs?: number;
 }
 
@@ -519,6 +522,9 @@ export class FlotillaRoutes {
       );
       return true;
     }
+    if (b === "room" && this.deps.roomSync) {
+      if (await this.room(ctx, pondId, this.deps.roomSync)) return true;
+    }
     if (b === "tasks" || b === "locks") {
       if (await this.coordinate(ctx, pondId)) return true;
     }
@@ -536,6 +542,106 @@ export class FlotillaRoutes {
       return true;
     }
     return false;
+  }
+
+  /**
+   * A Member's view of the Owner's Room (docs/ponds.md, "The Room reaches Members"): `GET` the page (the Owner's own Room page
+   * shape, plus `ownerOffline` and `canPost`), `POST { text }` a message that waits for the Owner's Mac, and `GET .../stream`
+   * (server-sent events: `hello`, `post`, `task`, `owner`).
+   */
+  private async room(ctx: RouteContext, pondId: string, sync: RoomSync): Promise<boolean> {
+    const { method, parts } = ctx;
+    const num = (k: string): number | undefined => {
+      const raw = ctx.url.searchParams.get(k);
+      if (raw === null) return undefined;
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)))
+        throw new FlotillaError(`${k} must be a whole number`);
+      return Number(raw);
+    };
+    if (parts.length === 3 && method === "GET") {
+      const since = num("since");
+      const before = num("before");
+      const limit = num("limit");
+      ctx.json(
+        200,
+        await sync.page(pondId, {
+          ...(since !== undefined ? { since } : {}),
+          ...(before !== undefined ? { before } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        }),
+      );
+      return true;
+    }
+    if (parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["text"]);
+      if (typeof body.text !== "string") throw new FlotillaError("text must be text");
+      // 202: it is in the cloud; it is in the Room when the Owner's Mac has applied it.
+      ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text)) });
+      return true;
+    }
+    if (parts[3] === "stream" && parts.length === 4 && method === "GET") {
+      await this.roomStream(ctx, pondId, sync);
+      return true;
+    }
+    return false;
+  }
+
+  private async roomStream(ctx: RouteContext, pondId: string, sync: RoomSync): Promise<void> {
+    // Read once before answering, so a refusal is a plain error and not a stream that never starts.
+    let page = await sync.page(pondId, { limit: 200 });
+    const { res, req } = ctx;
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    let latest = page.latestSeq;
+    const taskSeen = new Map<string, number>(page.tasks.map((t) => [t.id, t.updatedAt]));
+    let offline = page.ownerOffline?.line ?? null;
+    const owner = (line: string | null): string =>
+      `event: owner\ndata: ${JSON.stringify({ offline: line !== null, ...(line ? { line } : {}) })}\n\n`;
+    res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: latest })}\n\n`);
+    res.write(owner(offline));
+    let busy = false;
+    let again = false;
+    const look = async (): Promise<void> => {
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        do {
+          again = false;
+          page = await sync.page(pondId, { since: latest, limit: 200 });
+          for (const p of page.posts) {
+            res.write(`id: ${p.seq}\nevent: post\ndata: ${JSON.stringify(p)}\n\n`);
+            latest = Math.max(latest, p.seq);
+          }
+          for (const t of page.tasks) {
+            if (taskSeen.get(t.id) === t.updatedAt) continue;
+            taskSeen.set(t.id, t.updatedAt);
+            res.write(`event: task\ndata: ${JSON.stringify(t)}\n\n`);
+          }
+          const line = page.ownerOffline?.line ?? null;
+          if (line !== offline) {
+            offline = line;
+            res.write(owner(line));
+          }
+        } while (again);
+      } catch {
+        // A read that failed (cloud away, access ended): the next change or beat tries again.
+      } finally {
+        busy = false;
+      }
+    };
+    const off = sync.watch(pondId, () => void look());
+    // The Owner's Mac going quiet is not a notice: look again on the beat.
+    const beat = setInterval(() => {
+      res.write(": ping\n\n");
+      void look();
+    }, this.deps.heartbeatMs ?? 25_000);
+    beat.unref();
+    await new Promise<void>((resolve) => req.on("close", resolve));
+    clearInterval(beat);
+    off();
   }
 
   /** Pond actions that cannot be undone say which pond they mean: the body is exactly `{ pondId }`. */

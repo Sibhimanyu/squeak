@@ -1,0 +1,61 @@
+{
+  "posts": [
+    {
+      "v": 1,
+      "seq": 1,
+      "id": "f6ab8514-67da-4829-968b-e35667ab1a5b",
+      "author": {
+        "kind": "person",
+        "id": "srLZvhzfsHbCzK0K",
+        "name": "Sibhi"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "Shall we start with the irrigation timer?",
+      "at": 1795548552478
+    },
+    {
+      "v": 1,
+      "seq": 2,
+      "id": "556d5b64-110b-406a-a752-7826f098d166",
+      "author": {
+        "kind": "agent",
+        "name": "Maple"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "On it: reading the timer first.",
+      "at": 1795548552478
+    },
+    {
+      "v": 1,
+      "seq": 3,
+      "id": "5907553d-51e5-454c-a388-b4bdd17ae07a",
+      "author": {
+        "kind": "person",
+        "id": "srLZvhzfsHbCzK0K",
+        "name": "Sibhi"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "Please make the timer respect the weather",
+      "at": 1795548552478
+    }
+  ],
+  "latestSeq": 3,
+  "threads": [],
+  "turns": [],
+  "tasks": [
+    {
+      "v": 1,
+      "id": "task:1058cc32-b660-430a-b79f-6450824b2c03",
+      "messageId": "5907553d-51e5-454c-a388-b4bdd17ae07a",
+      "title": "Please make the timer respect the weather",
+      "text": "Please make the timer respect the weather",
+      "state": "waiting",
+      "createdAt": 1795548552478,
+      "updatedAt": 1795548552478
+    }
+  ],
+  "canPost": true
+}

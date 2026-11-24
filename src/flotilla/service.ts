@@ -48,6 +48,7 @@ import { joinWords } from "./join-words.js";
 import { normalizeShortCode } from "./short-code.js";
 import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
 import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
+import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
 import type { LockDoc, TaskView } from "./tasks.js";
 import {
   ARTIFACT_CHUNK_BYTES,
@@ -3008,6 +3009,8 @@ export class FlotillaService extends EventEmitter {
       ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
     } satisfies PondMeta);
     await this.republishThreads(pond);
+    // The Room's posts and Tasks move to the new key too (room-sync.ts rewrites them).
+    this.emit("rotated", pond.id);
   }
 
   // refresh: what a wake-up does
@@ -3952,6 +3955,74 @@ export class FlotillaService extends EventEmitter {
         return out;
       },
       ripple: async (text, kind) => void (await this.ripple(pondId, text, undefined, kind).catch(() => undefined)),
+    };
+  }
+
+  /**
+   * The pond a project of this Mac was published as (this Mac its owner), else null: only a shared pond carries its Room to
+   * Members. A local pond never leaves the Mac.
+   */
+  sharedPondOfProject(projectId: string): string | null {
+    const found = Object.values(this.pondsFile.data.ponds).find(
+      (p) => p.projectId === projectId && p.role === "owner" && p.status === "active" && !p.local,
+    );
+    return found ? found.id : null;
+  }
+
+  /**
+   * The narrow handle `room-sync.ts` builds the Room and its Tasks on (docs/ponds.md, "The Room reaches Members"): sealed,
+   * signed documents of a kind it names, each read back with who signed it and what that member may do now; and whether the
+   * owner's Mac has shown itself lately (the same presence the thread lines use).
+   */
+  roomPort(pondId: string): RoomPort {
+    const pond = this.activePond(pondId);
+    if (pond.local) throw new FlotillaError("This pond is not shared yet.", 409);
+    const store = this.storeOf(pond);
+    const ownerId = memberIdOf(pond.ownerKey);
+    return {
+      pondId: pond.id,
+      projectId: pond.projectId ?? null,
+      role: pond.role,
+      me: { id: this.selfId(pond), name: this.nameIn(pond) },
+      ownerId,
+      now: this.now,
+      put: (kind, docId, value) => this.put(pond, kind, docId, value),
+      remove: (kind, docId) => store.delete(this.docPath(pond.id, kind, docId)),
+      list: async (kind) => {
+        const members = await this.members(pond);
+        const out: RoomSignedDoc[] = [];
+        for (const { id, doc } of await store.list(`channels/${pond.id}/${kind}`)) {
+          const read = this.readSigned(pond, kind, id, doc, (d) => keysOfMember(members.get(d)));
+          const member = read ? members.get(read.device) : undefined;
+          if (!read || !member) continue;
+          out.push({
+            id,
+            value: read.value,
+            device: read.device,
+            role: member.role,
+            name: this.shownName(pond, member),
+            caps: effectiveCaps(member.role, member.caps),
+          });
+        }
+        return out;
+      },
+      caps: async () => this.capsIn(pond, await this.members(pond), this.selfId(pond)),
+      owner: async () => {
+        const members = await this.members(pond);
+        const owner = members.get(ownerId);
+        const ownerName = owner ? owner.name : this.ownerLabel(pond);
+        if (pond.role === "owner") return { name: ownerName, online: true };
+        const online = new Set<string>();
+        for (const { id, doc } of await store.list(`channels/${pond.id}/presence`)) {
+          const read = this.readSigned(pond, "presence", id, doc, (d) => keysOfMember(members.get(d)));
+          const p = read ? readPresence(read.value) : null;
+          if (!p || p.memberId !== read!.device || p.until <= this.now()) continue;
+          const at = p.at ?? p.until - PRESENCE_MS;
+          if (p.online && (p.at !== undefined ? this.now() < p.until : this.now() - at < ONLINE_MS))
+            online.add(p.memberId);
+        }
+        return { name: ownerName, online: online.has(ownerId) };
+      },
     };
   }
 

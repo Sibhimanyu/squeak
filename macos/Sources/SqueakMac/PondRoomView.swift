@@ -11,7 +11,13 @@ final class PondRoomModel {
     enum Phase: Equatable { case loading, ready, unavailable, failed }
 
     let projectId: String
+    /// A Member's view of someone else's pond: `projectId` is the pond's id and the host answers from what the Owner's Mac published.
+    let member: Bool
     private(set) var feed = RoomFeed()
+    /// Member's view: the sentence shown while the Owner's Mac is not running; nil while it is.
+    private(set) var ownerOffline: String?
+    /// Member's view: false when the Owner turned messaging off for this person.
+    private(set) var canPost = true
     private(set) var phase: Phase = .loading
     private(set) var loadingOlder = false
     var filter = RoomFilter()
@@ -23,14 +29,19 @@ final class PondRoomModel {
     /// The attachments of a message still on its way, kept so Retry sends them again.
     @ObservationIgnored private var outgoing: [String: [OutgoingAttachment]] = [:]
 
-    init(projectId: String) { self.projectId = projectId }
+    init(projectId: String, member: Bool = false) { self.projectId = projectId; self.member = member }
+
+    private func client(_ host: NativeHostClient) -> RoomClient { RoomClient(host: host, member: member) }
+
+    /// What a Member sees when the Owner's Mac does not name itself (a stream frame without a sentence).
+    static let ownerAwayLine = "The Owner\u{2019}s Mac is offline; Ducks will pick this up when it\u{2019}s back"
 
     /// Reads the room, then follows its stream until the task is cancelled.
     func run(host: NativeHostClient) async {
         guard !running else { return }
         running = true
         defer { running = false }
-        let client = RoomClient(host: host)
+        let client = client(host)
         await initialRead(client)
         guard phase == .ready || phase == .failed else { return }
         for await event in client.events(project: projectId) {
@@ -44,6 +55,7 @@ final class PondRoomModel {
             case .turn(let t): feed.upsert(turn: t)
             case .task(let j): feed.upsert(job: j)
             case .thread(let t): feed.upsert(thread: t)
+            case .owner(let line): ownerOffline = line.map { $0.isEmpty ? Self.ownerAwayLine : $0 }
             case .reconnected: await catchUp(client)
             }
         }
@@ -55,6 +67,7 @@ final class PondRoomModel {
             var f = feed
             f.apply(page: page, pageSize: Self.pageSize)
             feed = f
+            if member { ownerOffline = page.ownerOffline; canPost = page.canPost }
             phase = .ready
         } catch {
             phase = .failed
@@ -73,13 +86,14 @@ final class PondRoomModel {
         var f = feed
         f.apply(page: page)
         feed = f
+        if member { ownerOffline = page.ownerOffline; canPost = page.canPost }
     }
 
     func loadOlder(host: NativeHostClient) async {
         guard feed.hasMoreBefore, !loadingOlder, let before = feed.oldestSeq else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        guard let page = try? await RoomClient(host: host).page(project: projectId, before: before, limit: Self.pageSize) else { return }
+        guard let page = try? await client(host).page(project: projectId, before: before, limit: Self.pageSize) else { return }
         var f = feed
         f.prepend(page: page, pageSize: Self.pageSize)
         feed = f
@@ -90,6 +104,7 @@ final class PondRoomModel {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty || !attachments.isEmpty else { return }
         let level: RoomLevel = .room
+        guard !member || attachments.isEmpty else { return }
         let id = feed.addPending(
             text: clean, level: level, author: RoomAuthor(kind: .person, name: "You"), at: Int64(Date().timeIntervalSince1970 * 1000),
             attachments: attachments.map(\.placeholder))
@@ -107,6 +122,7 @@ final class PondRoomModel {
     func makeJob(messageId: String, host: NativeHostClient) async {
         let key = "msg:" + messageId
         feed.clearJobLocal(key)
+        guard !member else { return }
         do { feed.upsert(job: try await RoomClient(host: host).makeJob(project: projectId, messageId: messageId)) }
         catch { feed.failJob(key, message: RoomTasks.refusal(error)) }
     }
@@ -155,8 +171,17 @@ final class PondRoomModel {
     }
 
     private func deliver(pendingId: String, text: String, level: RoomLevel, host: NativeHostClient) async {
+        if member {
+            // Queued for the Owner's Mac: the row stays pending until its post comes back through the stream (the feed matches it
+            // by text), so a message sent while that Mac is away keeps reading as waiting.
+            do {
+                let queued = try await client(host).queue(pond: projectId, text: text)
+                if queued.offline { ownerOffline = queued.line ?? Self.ownerAwayLine }
+            } catch { feed.markFailed(pendingId: pendingId) }
+            return
+        }
         do {
-            let post = try await RoomClient(host: host).send(project: projectId, text: text, level: level, attachments: outgoing[pendingId] ?? [])
+            let post = try await client(host).send(project: projectId, text: text, level: level, attachments: outgoing[pendingId] ?? [])
             outgoing[pendingId] = nil
             feed.reconcile(pendingId: pendingId, with: post)
         } catch {
@@ -170,9 +195,9 @@ final class PondRoomModel {
 final class PondRoomStore {
     static let shared = PondRoomStore()
     private var models: [String: PondRoomModel] = [:]
-    func model(for projectId: String) -> PondRoomModel {
+    func model(for projectId: String, member: Bool = false) -> PondRoomModel {
         if let m = models[projectId] { return m }
-        let m = PondRoomModel(projectId: projectId)
+        let m = PondRoomModel(projectId: projectId, member: member)
         models[projectId] = m
         return m
     }
@@ -184,6 +209,8 @@ final class PondRoomStore {
 /// (`RoomRightColumn`).
 struct PondRoomView: View {
     let projectId: String
+    /// A Member's view of the Owner's Room (the id is the pond's): read and post, nothing else.
+    var member = false
     /// The pond's directory key.
     var key: String?
     /// Room for the sidebar toggle when the sidebar is closed.
@@ -197,7 +224,14 @@ struct PondRoomView: View {
     @State private var ledger = RoomFadeLedger()
     @State private var openNote: String?
 
-    private var room: PondRoomModel { PondRoomStore.shared.model(for: projectId) }
+    private var room: PondRoomModel { PondRoomStore.shared.model(for: projectId, member: member) }
+
+    /// Why a Member cannot post (the Owner turned messaging off, or the role only watches); nil when they can.
+    private var postBlock: String? {
+        guard member else { return nil }
+        if case .disabled(let reason) = key.map({ PondsModel.shared.chrome(key: $0).composer }) ?? .full { return reason }
+        return room.canPost ? nil : "The owner has turned off messaging for you in this pond."
+    }
 
     var body: some View {
         let room = room
@@ -231,12 +265,25 @@ struct PondRoomView: View {
         case .loading, .failed:
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
-            let items = RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count })
+            let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
+            let items = RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)
-                column { RoomComposer(room: room, pondName: key.map { PondsModel.shared.name(key: $0) } ?? "the pond", send: sendTo) }
-                    .padding(.bottom, Space.l).padding(.top, Space.s)
+                if let line = room.ownerOffline {
+                    // Said once, quietly, above the composer: nothing is lost, the Owner's Mac will pick it up.
+                    column { Text(verbatim: line).font(.system(size: 12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading) }
+                        .padding(.top, Space.s).accessibilityAddTraits(.isStaticText).accessibilityLabel(line)
+                }
+                column {
+                    if let block = postBlock {
+                        Text(verbatim: block).font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else {
+                        RoomComposer(room: room, pondName: key.map { PondsModel.shared.name(key: $0) } ?? "the pond", send: sendTo)
+                    }
+                }
+                .padding(.bottom, Space.l).padding(.top, Space.s)
             }
         }
     }
@@ -358,6 +405,8 @@ struct PondRoomView: View {
                 Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
             }
         case .everyone, .person:
+            // A Member's message is words only for now: pictures and files stay on the Mac they were attached on.
+            if member, !items.isEmpty { return "Pictures and files aren\u{2019}t shared with the Owner\u{2019}s Mac yet." }
             Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
         }
         return nil

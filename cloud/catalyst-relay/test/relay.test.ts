@@ -96,7 +96,7 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     // joinids is the relay's own (the signed-in user behind a join request): the RTDB has no relay and no such kind.
     expect([...KINDS].sort()).toEqual([...fromRules, "joinids", "devreqs", "devresults", "cliq", "hist"].sort());
-    expect(fromRules.length).toBe(26);
+    expect(fromRules.length).toBe(29);
     for (const kind of [
       "pond",
       "members",
@@ -108,6 +108,9 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
       "tcmds",
       "ripples",
       "keys",
+      "room",
+      "rposts",
+      "rtasks",
     ]) {
       expect(parseDocPath(path(kind, "d1"))?.kind).toBe(kind);
     }
@@ -477,6 +480,20 @@ describe("pond-scoped access for web guests", () => {
     expect((await guestReq(f.deps, "GET", `/list?prefix=channels/${POND}/threads`, token)).status).toBe(200);
     expect((await guestReq(f.deps, "GET", "/ping", token)).status).toBe(404);
     expect((await guestReq(f.deps, "POST", "/pond-token", token, { pondId: POND, memberId: "m2" })).status).toBe(404);
+  });
+
+  it("lets a member post to the Room inbox but never write the Room or its Tasks", async () => {
+    const f = fakes();
+    const token = await issued(f);
+    expect((await guestReq(f.deps, "PUT", pdoc("rposts", "p1"), token, { doc: doc() })).status).toBe(204);
+    expect((await guestReq(f.deps, "GET", pdoc("rposts", "p1"), token)).status).toBe(200);
+    for (const kind of ["room", "rtasks"]) {
+      expect((await guestReq(f.deps, "PUT", pdoc(kind, "p1"), token, { doc: doc() })).status).toBe(403);
+    }
+    // The owner's relay key writes them, and a member reads them.
+    const put = await call(f.deps, "PUT", pdoc("room", "p1"), { body: { doc: doc() } });
+    expect(put.status).toBe(204);
+    expect((await guestReq(f.deps, "GET", pdoc("room", "p1"), token)).status).toBe(200);
   });
 
   it("refuses a forged token and a revoked one", async () => {
