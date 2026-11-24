@@ -60,8 +60,9 @@ if ! otool -l "$APP/Contents/MacOS/SqueakMac" | grep -q "@executable_path/../Fra
 fi
 
 # Helpers: build once (they are slow and rarely change); delete the file to rebuild.
-for h in squeak-fans squeak-apps squeak-hands; do
-  if [ ! -e "$APP/Contents/Helpers/$h" ] && [ ! -e "$APP/Contents/Helpers/Squeak Hands.app" ]; then
+for h in squeak-fans squeak-apps squeak-decider squeak-hands; do
+  want="$h"; [ "$h" = squeak-hands ] && want="Squeak Hands.app"
+  if [ ! -e "$APP/Contents/Helpers/$want" ]; then
     "$REPO/helpers/$h/build.sh" "$APP/Contents/Helpers" >/dev/null 2>&1 || echo "note: helper $h not built" >&2
     CHANGED=1
   fi
@@ -120,6 +121,7 @@ if [ "$CHANGED" = 1 ] || ! codesign --verify "$APP" >/dev/null 2>&1; then
   codesign -s "$IDENTITY" --force "$APP/Contents/Frameworks/Sparkle.framework"
   [ -e "$APP/Contents/Helpers/squeak-fans" ] && codesign -s "$IDENTITY" --force --identifier com.squeak.fans "$APP/Contents/Helpers/squeak-fans"
   [ -e "$APP/Contents/Helpers/squeak-apps" ] && codesign -s "$IDENTITY" --force --identifier com.squeak.apps "$APP/Contents/Helpers/squeak-apps"
+  [ -e "$APP/Contents/Helpers/squeak-decider" ] && codesign -s "$IDENTITY" --force --identifier com.squeak.decider "$APP/Contents/Helpers/squeak-decider"
   codesign -s "$IDENTITY" --force --identifier "$ID" "$APP"
   codesign --verify --strict "$APP"
 fi

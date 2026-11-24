@@ -42,6 +42,9 @@ mkdir -p "$APP/Contents/Helpers"
 # squeak-apps (helpers/squeak-apps): the running and installed apps, and a polite quit, for the iPhone's
 # Mac controls page. No permission needed.
 "$REPO/helpers/squeak-apps/build.sh" "$APP/Contents/Helpers" >/dev/null
+# squeak-decider (helpers/squeak-decider): on-device sentence embeddings and the Apple model for routing a new Task;
+# the session host calls it and falls back to its own TF-IDF and Haiku when it is missing or Apple Intelligence is off.
+"$REPO/helpers/squeak-decider/build.sh" "$APP/Contents/Helpers" >/dev/null
 # Squeak Hands (helpers/squeak-hands): types replies into Conductor/Terminal and reports its own grants.
 # It signs itself with the Apple Development identity (the grant is tied to it). The app copies it to
 # ~/Library/Application Support/squeak/Squeak Hands.app when that is missing or older (HandsInstaller).
@@ -136,6 +139,7 @@ done
 codesign -s "$IDENTITY" --force "$APP/Contents/Frameworks/Sparkle.framework"
 codesign -s "$IDENTITY" --force --identifier com.squeak.fans "$APP/Contents/Helpers/squeak-fans"
 codesign -s "$IDENTITY" --force --identifier com.squeak.apps "$APP/Contents/Helpers/squeak-apps"
+codesign -s "$IDENTITY" --force --identifier com.squeak.decider "$APP/Contents/Helpers/squeak-decider"
 codesign -s "$IDENTITY" --force "$APP"
 codesign --verify --deep --strict "$APP"
 

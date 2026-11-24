@@ -19,6 +19,9 @@ import type { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
 import { RoomTasks } from "./room-tasks.js";
+import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
+import { haikuDecider } from "./decider.js";
+import { createDecider, deciderHelperDirs, resolveDeciderHelper } from "./on-device.js";
 import { RoomSummariser } from "./room-summary.js";
 import { Placement } from "./placement.js";
 import { ChatStarter } from "./chat-starter.js";
@@ -82,6 +85,16 @@ export async function runHost(supportDir: string): Promise<void> {
   const sources = new WorkspaceSources({ store, workspaces });
   const placement = new Placement({ store, workspaces, sources });
   const starter = new ChatStarter({ store, host, workspaces, placement, room });
+  // Routing a new Task: this Mac's own models by default (the bundled squeak-decider helper), Haiku by the setting or
+  // whenever the helper cannot answer. The setting is read on every Task, so a change needs no restart.
+  let titleCall: TitleModelCall | null = null;
+  const agentSettings = new AgentSettings(supportDir);
+  const decider = createDecider({
+    setting: () => agentSettings.get().deciderModel,
+    helper: () => resolveDeciderHelper({ dirs: deciderHelperDirs(supportDir) }),
+    haiku: haikuDecider(() => (titleCall ??= defaultTitleCall())),
+    onModelError: (error) => logger.warn("decider model failed", { error: String(error) }),
+  });
   const jobs = new RoomTasks({
     store,
     room,
@@ -90,7 +103,7 @@ export async function runHost(supportDir: string): Promise<void> {
     start: (spec) => starter.startDuck(spec),
     newBranch: (projectId, text) => starter.newBranch(projectId, text),
     checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),
-    deciderModel: "haiku",
+    decider,
     contextPercent: (s) => host.contextOf(s)?.percent ?? null,
   });
   jobs.attach(host);

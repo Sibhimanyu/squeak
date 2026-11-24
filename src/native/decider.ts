@@ -288,6 +288,12 @@ export const DECIDER_SYSTEM =
 
 const MODEL_TIMEOUT_MS = 8000;
 
+/** The one prompt every model adapter sends (Haiku and the on-device model read the same words). */
+export function deciderPrompt(input: DeciderModelInput): string {
+  const ducks = input.ducks.map((d, i) => `${i + 1}. ${d.name}${d.summary ? ` - ${d.summary}` : ""}`).join("\n");
+  return `Task:\n${input.task.slice(0, 600)}\n\nDucks:\n${ducks}\n\nJSON:`;
+}
+
 /** The model port over a small-model call (Haiku, the same transport the job check and titles use). */
 export function haikuDecider(call: () => TitleModelCall, timeoutMs = MODEL_TIMEOUT_MS): DeciderModelPort {
   return {
@@ -298,10 +304,9 @@ export function haikuDecider(call: () => TitleModelCall, timeoutMs = MODEL_TIMEO
         const timedOut = new Promise<never>((_, reject) =>
           abort.signal.addEventListener("abort", () => reject(new Error("decider timed out")), { once: true }),
         );
-        const ducks = input.ducks.map((d, i) => `${i + 1}. ${d.name}${d.summary ? ` - ${d.summary}` : ""}`).join("\n");
         const raw = await Promise.race([
           call()({
-            prompt: `Task:\n${input.task.slice(0, 600)}\n\nDucks:\n${ducks}\n\nJSON:`,
+            prompt: deciderPrompt(input),
             system: DECIDER_SYSTEM,
             signal: abort.signal,
           }),

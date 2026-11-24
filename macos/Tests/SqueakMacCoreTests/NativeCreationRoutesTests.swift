@@ -98,4 +98,14 @@ private func body(_ r: Recorder) -> NativeJSON? {
         _ = try await client(r).createSession(NativeNewSession(agent: "claude", model: "m", projectId: "p", newWorkspace: true, text: "go", split: WorkSplit()))
         #expect(body(r)?["newWorkspace"]?.bool == true && body(r)?["split"] == nil)
     }
+
+    @Test func deciderModelReadsAndWritesTheAgentSetting() async throws {
+        let r = Recorder(#"{"claudeAiConnectors":false,"deciderModel":"on-device"}"#)
+        #expect(try await client(r).deciderModel() == "on-device")
+        #expect(r.last?.url.path == "/native/agent-settings")
+        #expect(try await client(r).setDeciderModel("haiku"))
+        #expect(r.last?.method == "PUT" && body(r)?["deciderModel"]?.string == "haiku")
+        // a host from before the setting sends no key
+        #expect(try await client(Recorder(#"{"claudeAiConnectors":false}"#)).deciderModel() == nil)
+    }
 }
