@@ -661,17 +661,18 @@ RoomTask = { id: "task:<uuid>", messageId /* the message that made it */, text, 
 ### Ducks
 
 A **duck** is a person-like identity that belongs to the **pond**, not to a stream or a chat: a name, a role, a colour, a
-notebook and a duty (user-facing copy says duck; the code keeps session/thread). A duck works in one place at a time.
-Taking a job in another place starts a **fresh session there** carrying its name, role and notebook; the old session
+duty (user-facing copy says duck; the code keeps session/thread). Lessons live in the **Pond Notebook**, not on the duck.
+A duck works in one place at a time.
+Taking a job in another place starts a **fresh session there** carrying its name and role; the old session
 becomes history (still the duck's: its turns carry the duck's `duckId`). Squeak never chats and nothing starts without
 the person's Go or Allow. Host side: `room.ts` (`duckView`, `listDucks`, `createDuck`, `setDuckById`, `setDutyById`,
-the notebook writer), `store.ts` (`ducks` and `duck_sessions`, created lazily like `room_jobs`, no numbered migration;
-`session_ducks` is only read once, to migrate), `duck-notebook.ts`.
+), `store.ts` (`ducks` and `duck_sessions`, created lazily like `room_jobs`, no numbered migration;
+`session_ducks` is only read once, to migrate).
 
 ```
 Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessionId?, place?: Place,
          state: "working"|"waiting"|"idle"|"error", lastActiveAt, sessions /* how many it has had */,
-         notebook, createdAt }
+         notebook /* always "": migrated into the Pond Notebook */, createdAt }
 Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
 ```
 
@@ -726,15 +727,23 @@ applies (the columns exist and fill; behaviour is as before).
   `RoomThread` still carries `name`, `role?`, `duty`, `lastActiveAt` and `RoomTurn.ducklings?` as before.
 - Off duty: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to the duck's chats
   refused. A person's message to it, or a Go/Allow on a job, puts it back on duty.
-- Matching ranks **ducks**: name, role and the current chat's title count 3 each, the `working` intent 2, notebook words and
+- Matching ranks **ducks**: name, role and the current chat's title count 3 each, the `working` intent 2, notebook words (none now) and
   the duck's last four turns (across all its sessions) 1.5. `suggestion.sessionId` is its current session ("" for a duck
   with none), `suggestion.duckId` its id; a working duck is suggested with `state: "working"` (it can claim "after this").
   `pitch` and `reason` read as before.
-- **Notebook**: when a duck's turn ends, one line is appended: `- <date> <job> -> <outcome sentence> [<branch>]` (the
-  outcome from a Haiku call when the reply is long and `SQUEAK_ROOM_SUMMARY` is not off, 8 s timeout; a failure or timeout
-  writes the closing reply's first sentence). Capped at 3000 characters, oldest lines trimmed.
+- **Pond Notebook** (`pond-notebook.ts`, table `pond_notebook`, migration after `room_posts` detail): one shared list of
+  lessons per pond, at most 40 lessons and 6000 characters in all (300 each, one line). Past either cap the lessons
+  given out in a briefing longest ago go first (`last_used_at`, then oldest). Written only at Task end: the agent tool
+  `note_to_notebook {lesson, taskDone: true}` is refused unless the chat holds a working Task from the Room and says
+  `taskDone`, and after 3 lessons for that Task. Every new Duck's catch-up briefing (`RoomTasks.briefingOf`, the
+  `notebook` hook) lists it and tells the Duck to add only lessons that will last; reading marks each lesson used.
+  The Owner reads and edits it: `GET`/`PUT /native/projects/<id>/notebook` (`{entries: string[]}` replaces the list in
+  that order; over the caps is a 400, not a trim), drawn in Pond settings > Agents (`PondNotebookSection.swift`,
+  `NativeNotebook.swift`). The old per-duck notebooks moved into it once at startup (`migrateDuckNotebooks`, one entry
+  per line, by "earlier ducks", then cleared); nothing writes `ducks.notebook` any more, and a duck's agent note no
+  longer carries a notebook.
 - The agent note adds "You are <name>, a duck in <pond>; your role: <role>", the current stream (from the note's own
-  "This thread" line) and the notebook (a running agent gets it at its next start, which a fresh session always is).
+  "This thread" line).
 
 ## Canvas
 
