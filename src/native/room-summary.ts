@@ -8,12 +8,14 @@ import type { NativeStore } from "./store.js";
 /**
  * Fallback for agents that do not post: while a chat works and someone is looking at its pond's room, one small
  * Haiku call turns the turn's prompt and its latest step labels (never raw tool input) into a `working` line posted
- * on the chat's behalf. A failure posts nothing.
+ * on the chat's behalf. Never per turn: a chat gets at most one line per half hour (the Room carries state changes
+ * only), and none in a solo pond (not shared, one Duck working). A failure posts nothing.
  */
 
-export const SUMMARY_QUIET_MS = 90_000;
+/** A chat that posted a `working` line (itself or by us) is left alone this long: a state change, not a per-turn post. */
+export const SUMMARY_QUIET_MS = 30 * 60_000;
 export const SUMMARY_MIN_STEPS = 3;
-export const SUMMARY_EVERY_MS = 3 * 60_000;
+export const SUMMARY_EVERY_MS = 30 * 60_000;
 const MAX_WORDS = 12;
 const KEEP_LABELS = 8;
 
@@ -135,6 +137,7 @@ export class RoomSummariser {
       if (!s || s.status !== "working") return;
       const pond = projectOfSession(this.o.store, s);
       if (!pond || !this.o.room.recentlyViewed(pond.id) || this.running.has(pond.id)) return;
+      if (this.o.room.quietFor(pond.id)) return;
       const last = this.o.store.latestRoomMarks(pond.id).get(sessionId)?.working;
       if (last && now - last.at < SUMMARY_QUIET_MS) return;
       t.lastSummaryAt = now;
@@ -168,6 +171,7 @@ export class RoomSummariser {
       if (!s || s.status !== "working") return;
       const last = this.o.store.latestRoomMarks(projectId).get(sessionId)?.working;
       if (last && this.now() - last.at < SUMMARY_QUIET_MS) return;
+      if (this.o.room.quietFor(projectId)) return;
       this.o.room.post({
         projectId,
         author: { kind: "squeak", name: s.title?.trim() || "Claude" },

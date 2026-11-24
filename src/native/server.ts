@@ -196,6 +196,8 @@ export class NativeServer {
       new Room({
         store: options.store,
         ...(options.supportDir ? { attachmentsDir: path.join(options.supportDir, "room-attachments") } : {}),
+        members: (id) => this.pondMembers(id),
+        deliver: (id, text) => host.send(id, text, { room: true }),
       });
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
     this.placement = options.placement ?? new Placement({ store: options.store, workspaces, sources: this.sources });
@@ -411,6 +413,20 @@ export class NativeServer {
   private directoryLast: { at: number; gen: number; value: PondDirectory } | null = null;
   private directoryBuilding: { gen: number; promise: Promise<PondDirectory> } | null = null;
   private directoryGen = 0;
+
+  /**
+   * How many other people are members of a pond, from the last directory snapshot (never waits: 0 until one exists,
+   * and a rebuild starts). The Room's solo silence reads it.
+   */
+  pondMembers(projectId: string): number {
+    const last = this.directoryLast;
+    if (!last) {
+      void this.rebuildDirectory().catch(() => undefined);
+      return 0;
+    }
+    if (Date.now() - last.at >= DIRECTORY_TTL_MS) void this.rebuildDirectory().catch(() => undefined);
+    return last.value.ponds.find((p) => p.id === projectId)?.members.length ?? 0;
+  }
 
   /** A write changed something: the next ask waits for a fresh build rather than serve the last one. */
   invalidateDirectory(): void {
@@ -1186,7 +1202,10 @@ export class NativeServer {
       }
       if (method === "POST") {
         const b = await this.body(req, ROOM_ATTACH_BODY_BYTES);
-        const unknown = Object.keys(b).filter((k) => k !== "text" && k !== "level" && k !== "attachments");
+        const unknown = Object.keys(b).filter(
+          (k) => k !== "text" && k !== "level" && k !== "attachments" && k !== "replyTo",
+        );
+        if (b.replyTo !== undefined && typeof b.replyTo !== "string") throw new HttpError(400, "replyTo must be text");
         if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
         if (b.level !== undefined && b.level !== "room" && b.level !== "agents") {
           throw new HttpError(400, "level must be room or agents");
@@ -1197,6 +1216,7 @@ export class NativeServer {
             b.text === undefined && b.attachments !== undefined ? "" : b.text,
             b.level === "agents" ? "agents" : "room",
             b.attachments,
+            b.replyTo as string | undefined,
           );
           return this.json(res, 201, { post: this.room.toPosts(id, [post])[0] });
         } catch (error) {

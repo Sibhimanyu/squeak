@@ -288,6 +288,7 @@ public enum RoomPresentation {
         case .done: KindLabel(text: "done", attention: false)
         case .needs: KindLabel(text: "needs you", attention: true)
         case .handoff: KindLabel(text: "handoff", attention: false)
+        case .plan: KindLabel(text: "plan", attention: false)
         case .message: nil
         }
     }

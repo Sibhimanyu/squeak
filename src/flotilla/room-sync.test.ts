@@ -68,6 +68,7 @@ function ownerHost(service: FlotillaService) {
   const jobs = new RoomTasks({
     store,
     room,
+    settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }),
     send: async () => undefined,
     newThread: async () => ({}) as SessionRow,
     call: async () => '{"job":false,"text":""}',
@@ -94,6 +95,7 @@ function memberSync(who: Mac) {
   const jobs = new RoomTasks({
     store,
     room,
+    settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }),
     send: async () => undefined,
     newThread: async () => ({}) as SessionRow,
     enabled: () => false,

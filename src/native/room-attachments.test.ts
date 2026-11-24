@@ -20,6 +20,9 @@ import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
 
+/** A Duck's briefing without its how-to-work tail, so these tests read the Task text itself. */
+const unbrief = (t: string): string => t.replace(/\n\nHow to work this task:(\n- [^\n]*)+/, "");
+
 const open: (() => Promise<void>)[] = [];
 afterEach(async () => {
   while (open.length) await open.pop()!();
@@ -46,9 +49,9 @@ function rig() {
     store,
     room,
     settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }), // these tests tap Go
-    send: async (id, text) => void sent.push({ id, text }),
+    send: async (id, text) => void sent.push({ id, text: unbrief(text) }),
     newThread: async (_p, text, title, attach) => {
-      started.push(text + (attach?.(duckDir) ?? ""));
+      started.push(unbrief(text) + (attach?.(duckDir) ?? ""));
       return chat(title);
     },
     call: async (i) => {

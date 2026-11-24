@@ -36,7 +36,11 @@ export const ROOM_AGENT_POSTS_PER_HOUR = 30;
 export const ROOM_THREAD_WINDOW_MS = 24 * 3_600_000;
 export const ROOM_VIEWED_MS = 10 * 60_000;
 
-export const ROOM_KINDS: readonly RoomPostKind[] = ["working", "done", "needs", "message", "handoff"];
+export const ROOM_KINDS: readonly RoomPostKind[] = ["working", "done", "needs", "message", "handoff", "plan"];
+/** The Room line a Duck's status change posts, and a spec+plan card's body: expandable detail, never a long line. */
+export const ROOM_DETAIL_MAX = 4000;
+/** The posts that tell people a Duck's state changed; the ones a solo Pond skips. */
+export const STATUS_KINDS: readonly RoomPostKind[] = ["working", "done"];
 export const ROOM_LEVELS: readonly RoomLevel[] = ["room", "agents"];
 
 export class RoomError extends Error {}
@@ -50,6 +54,10 @@ export interface RoomPost {
   level: RoomLevel;
   text: string;
   toSessionId?: string;
+  /** What a one-line status post expands to (a `plan` card's spec and plan). */
+  detail?: string;
+  /** The card (a `plan` post) this message comments on. */
+  replyTo?: string;
   /** Pictures and files the person attached (a person's message only). */
   attachments?: RoomAttachment[];
   at: number;
@@ -148,6 +156,8 @@ export function toRoomPost(r: RoomPostRow): RoomPost {
     level: r.level,
     text: r.text,
     ...(r.toSessionId ? { toSessionId: r.toSessionId } : {}),
+    ...(r.detail ? { detail: r.detail } : {}),
+    ...(r.replyTo ? { replyTo: r.replyTo } : {}),
     at: r.at,
   };
 }
@@ -170,6 +180,8 @@ export interface NewRoomPost {
   level?: RoomLevel;
   text: string;
   toSessionId?: string;
+  detail?: string;
+  replyTo?: string;
   /** A person's pictures and files, as the Mac sent them (checked here: PNG/JPEG by bytes, size and count limits). */
   attachments?: unknown;
   /** Squeak's own start/end lines: a fixed id makes a replayed event a no-op. */
@@ -186,6 +198,13 @@ export interface RoomOptions {
   notebookSummary?: TitleModelCall | "default";
   /** Where attachments' bytes are kept (the support dir's `room-attachments`); a temp folder when absent (tests). */
   attachmentsDir?: string;
+  /** How many other people are members of the pond (0 = not shared). Absent: the solo-pond silence is off. */
+  members?: (projectId: string) => number;
+  /**
+   * Wakes a Duck with a message (the host's `send`: it starts a turn on an idle chat and waits in the queue behind a
+   * running one, never mid-step). The Room wakes a Duck only on an @mention or a comment on its own card.
+   */
+  deliver?: (sessionId: string, text: string) => Promise<unknown> | void;
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
@@ -276,6 +295,10 @@ export class Room extends EventEmitter {
       checked.length > 0 && typeof input.text === "string" && !input.text.trim()
         ? ""
         : Room.cleanText(input.text, input.kind);
+    const detail = Room.cleanDetail(input.detail, input.kind);
+    const replyTo = input.replyTo ? this.cardOf(input.projectId, input.replyTo) : null;
+    if (input.replyTo && !replyTo) throw new RoomError("That card isn't in this room.");
+    if (replyTo && input.author.kind !== "person") throw new RoomError("Only a person comments on a card.");
     const row = this.store.addRoomPost({
       ...(input.id ? { id: input.id } : {}),
       projectId: input.projectId,
@@ -287,6 +310,8 @@ export class Room extends EventEmitter {
       level,
       text,
       toSessionId: input.toSessionId ?? null,
+      detail,
+      replyTo: replyTo?.id ?? null,
       at: input.at ?? this.now(),
     });
     if (checked.length > 0) {
@@ -299,13 +324,90 @@ export class Room extends EventEmitter {
       }
     }
     this.emit("post", row);
+    this.wake(row);
     return row;
   }
 
+  /** Detail as a post carries it: trimmed, at most 4000 characters, only on a post that is not a plain message. */
+  static cleanDetail(raw: unknown, kind: RoomPostKind): string | null {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw !== "string") throw new RoomError("detail must be text");
+    if (kind === "message") throw new RoomError("A message has no detail; put it in the text.");
+    const t = raw.trim();
+    if (!t) return null;
+    if ([...t].length > ROOM_DETAIL_MAX) throw new RoomError(`Keep detail under ${ROOM_DETAIL_MAX} characters.`);
+    return t;
+  }
+
+  /** A spec+plan card of this pond, by post id. */
+  private cardOf(projectId: string, id: string): RoomPostRow | null {
+    const r = this.store.roomPostById(id);
+    return r && r.projectId === projectId && r.kind === "plan" ? r : null;
+  }
+
+  /**
+   * True while the pond is solo: nobody else is a member and at most one Duck is working. A solo pond's Ducks skip
+   * Room status lines (nobody reads them); the Room becomes useful the moment it is shared or a second Duck works.
+   */
+  quietFor(projectId: string): boolean {
+    try {
+      // Without a members count (a bare Room in a test) nothing is gated.
+      if (!this.options.members || this.options.members(projectId) > 0) return false;
+      return this.listDucks(projectId).filter((d) => d.state === "working").length <= 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The only things that wake a Duck from the Room: an @mention of it (by a person or another Duck), and a comment
+   * on its own spec+plan card. Chatting never does. `deliver` queues behind a running turn, so it lands between turns.
+   */
+  private wake(row: RoomPostRow): void {
+    const deliver = this.options.deliver;
+    if (!deliver) return;
+    try {
+      const targets = new Map<string, string>();
+      const card = row.replyTo ? this.store.roomPostById(row.replyTo) : null;
+      if (card?.sessionId && row.authorKind === "person") {
+        targets.set(
+          card.sessionId,
+          `[Room] ${row.authorName} commented on your plan "${card.text}":\n${row.text.trim()}`,
+        );
+      }
+      if (row.text && row.kind === "message") {
+        for (const duck of this.store.listDucks(row.projectId)) {
+          const sid = duck.currentSessionId;
+          if (!sid || sid === row.sessionId || targets.has(sid) || !duck.name) continue;
+          if (!mentions(row.text, duck.name)) continue;
+          if (duck.duty === "off") {
+            if (row.authorKind !== "person") continue;
+            this.setDutyById(duck.id, true);
+          }
+          targets.set(sid, `[Room] ${row.authorName} mentioned you:\n${row.text.trim()}`);
+        }
+      }
+      for (const [sid, text] of targets) {
+        void Promise.resolve(deliver(sid, text)).catch((error) =>
+          logger.warn("room wake failed", { error: String(error) }),
+        );
+      }
+    } catch (error) {
+      logger.warn("room wake failed", { error: String(error) });
+    }
+  }
+
   /** The person's post. */
-  personPost(projectId: string, text: unknown, level: RoomLevel = "room", attachments?: unknown): RoomPostRow {
+  personPost(
+    projectId: string,
+    text: unknown,
+    level: RoomLevel = "room",
+    attachments?: unknown,
+    replyTo?: string,
+  ): RoomPostRow {
     return this.post({
       ...(attachments !== undefined ? { attachments } : {}),
+      ...(replyTo ? { replyTo } : {}),
       projectId,
       author: { kind: "person", id: "owner", name: this.ownerName() },
       kind: "message",
@@ -314,13 +416,27 @@ export class Room extends EventEmitter {
     });
   }
 
-  /** An agent's own post, limited to 30 an hour per chat. */
+  /**
+   * An agent's own post, limited to 30 an hour per chat. A Duck posts only when its state changes, so a second
+   * `working` or `done` line in one turn is dropped, and a solo pond (`quietFor`) drops status lines altogether:
+   * null then, nothing posted.
+   */
   agentPost(
     s: SessionRow,
-    input: { kind: RoomPostKind; level?: RoomLevel; text: string; toSessionId?: string },
-  ): RoomPostRow {
+    input: {
+      kind: RoomPostKind;
+      level?: RoomLevel;
+      text: string;
+      detail?: string;
+      toSessionId?: string;
+    },
+  ): RoomPostRow | null {
     const pond = projectOfSession(this.store, s);
     if (!pond) throw new RoomError("This chat isn't in a pond, so it has no room to post to.");
+    if ((input.level ?? "room") === "room" && STATUS_KINDS.includes(input.kind)) {
+      if (this.quietFor(pond.id)) return null;
+      if (this.postedThisTurn(s.id, input.kind)) return null;
+    }
     const hour = this.now() - 3_600_000;
     const recent = (this.sent.get(s.id) ?? []).filter((t) => t > hour);
     if (recent.length >= ROOM_AGENT_POSTS_PER_HOUR) {
@@ -336,6 +452,16 @@ export class Room extends EventEmitter {
     recent.push(this.now());
     this.sent.set(s.id, recent);
     return row;
+  }
+
+  /** The chat already posted a line of this kind since its current turn began. */
+  private postedThisTurn(sessionId: string, kind: RoomPostKind): boolean {
+    const turn = this.reader.turns(sessionId).at(-1);
+    const since = turn && turn.endedAt === undefined ? turn.startedAt : null;
+    if (since === null) return false;
+    const last = this.store.latestWorkingPost(sessionId, since, this.now() + 1);
+    if (kind === "working") return last !== null;
+    return this.store.roomPostsBySession(sessionId, since).some((p) => p.kind === kind);
   }
 
   /** The wire form of posts, with their attachments. */
@@ -919,6 +1045,15 @@ export function cleanDuckPatch(patch: { name?: unknown; role?: unknown }): {
     }
   }
   return clean;
+}
+
+/** `@Name` in text, as a whole word (case-insensitive); a name may hold spaces. */
+export function mentions(text: string, name: string): boolean {
+  const escaped = name
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+  return escaped !== "" && new RegExp(`(?:^|[^\\w@])@${escaped}(?![\\w])`, "i").test(text);
 }
 
 function isDucklingStep(event: object): boolean {

@@ -193,6 +193,45 @@ struct RoomMessagesTests {
         #expect(RoomHandoff.isLong((1...7).map(String.init).joined(separator: "\n")))
     }
 
+    @Test func duckToDuckNotesAreClosedByDefaultAndOpenOnATap() {
+        let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
+        let f = feed(posts: [post(1, "Sage, the API changed.\nSee routes.ts for the new shape.", by: agent, at: base, kind: .message, level: .agents, sid: "s1", to: "s2")],
+                     threads: [thread("s1", name: "Pip"), thread("s2", name: "Sage")])
+        let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
+        let h = lines[0].handoff!
+        #expect(h.summary == "Sage, the API changed.")
+        var d = h.disclosure
+        #expect(!d.isOpen)
+        d.toggle()
+        #expect(d.isOpen)
+        d.toggle()
+        #expect(!d.isOpen)
+    }
+
+    @Test func aDucksStateChangeIsOneLineWhoseDetailOpensOnATap() {
+        let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
+        let took = RoomPost(seq: 1, id: "p1", author: agent, sessionId: "s1", kind: .working, text: "Redoing settings", at: base)
+        let plan = RoomPost(seq: 2, id: "p2", author: agent, sessionId: "s1", kind: .plan, text: "Redo settings", detail: "1. Grid\n2. Tests", at: base + min)
+        let blocked = RoomPost(seq: 3, id: "p3", author: agent, sessionId: "s1", kind: .needs, text: "Need an API key", at: base + 2 * min)
+        let f = feed(posts: [took, plan, blocked], threads: [thread("s1", name: "Pip")])
+        let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s.status } else { nil } }
+        #expect(lines.map(\.kind) == [.took, .plan, .blocked])
+        #expect(lines.map(\.name) == ["Pip", "Pip", "Pip"])
+        #expect(lines[0].verb == "took it" && !lines[0].isExpandable)
+        #expect(lines[1].isExpandable && lines[1].detail == "1. Grid\n2. Tests" && lines[1].commentTarget == "p2")
+        #expect(lines[0].commentTarget == nil)
+        var d = lines[1].disclosure
+        #expect(!d.isOpen)
+        d.toggle()
+        #expect(d.isOpen)
+    }
+
+    @Test func postDetailAndCommentTargetDecode() throws {
+        let json = #"{"seq":1,"id":"p1","author":{"kind":"agent","name":"x"},"kind":"plan","level":"room","text":"T","detail":"D","replyTo":"p0","at":5}"#
+        let p = try JSONDecoder().decode(RoomPost.self, from: Data(json.utf8))
+        #expect(p.kind == .plan && p.detail == "D" && p.replyTo == "p0")
+    }
+
     @Test func aHostWithoutTurnsFallsBackToThePostsAsDuckMessages() {
         let agent = RoomAuthor(kind: .agent, id: "x", name: "Claude")
         let f = feed(posts: [post(1, "Adding a toggle", by: agent, at: base, kind: .working, sid: "s1")], threads: [thread("s1", name: "Pip")], serves: false)

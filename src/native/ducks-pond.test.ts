@@ -17,6 +17,9 @@ import { TimelineLog } from "./timeline-log.js";
 import type { SessionRow } from "./types.js";
 import { WorkspaceManager } from "./workspaces.js";
 
+/** A Duck's briefing without its how-to-work tail, so these tests read the Task text itself. */
+const unbrief = (t: string): string => t.replace(/\n\nHow to work this task:(\n- [^\n]*)+/, "");
+
 const open: (() => Promise<void>)[] = [];
 afterEach(async () => {
   while (open.length) await open.pop()!();
@@ -50,13 +53,13 @@ async function rig(kind: "git" | "folder" = "git") {
     store,
     room,
     settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }), // these tests tap Go
-    send: async (id, text) => void sent.push({ id, text }),
+    send: async (id, text) => void sent.push({ id, text: unbrief(text) }),
     newThread: async () => {
       throw new Error("unused");
     },
     // The real stream creation, minus the agent: a session in the stream (or Main) mapped to the duck.
     start: async (spec) => {
-      started.push(spec);
+      started.push({ ...spec, text: unbrief(spec.text) });
       const project = store.getProject(spec.projectId)!;
       let cwd = project.rootPath;
       let workspaceId: string | null = null;
