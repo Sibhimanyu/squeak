@@ -10,6 +10,7 @@ import type { CloudLocation } from "../cloud/location.js";
 import { Artifacts } from "../native/artifacts.js";
 import type { HostEvent } from "../native/host.js";
 import type { SessionHost } from "../native/host.js";
+import type { ChatStarter } from "../native/chat-starter.js";
 import type { AgentTools } from "../native/agent-tools.js";
 import type { NativeStore } from "../native/store.js";
 import type { WorkspaceSources } from "../native/workspace-sources.js";
@@ -48,6 +49,8 @@ export interface Flotilla {
 
 export interface FlotillaDeps {
   host: SessionHost;
+  /** The one way a chat starts (placement, Duck link); the host's own create is never called from here. */
+  starter: Pick<ChatStarter, "create">;
   store: NativeStore;
   workspaces: WorkspaceManager;
   sources: WorkspaceSources;
@@ -76,7 +79,7 @@ const normalizeRemote = (url: string): string =>
  * not (a pond can be any folder). Null when the project is not here.
  */
 export async function startInProject(
-  deps: Pick<FlotillaDeps, "store" | "workspaces" | "host">,
+  deps: Pick<FlotillaDeps, "store" | "workspaces" | "starter">,
   projectId: string,
   spec: StartSpec,
 ): Promise<{ sessionId: string } | null> {
@@ -89,7 +92,7 @@ export async function startInProject(
       throw new FlotillaError("That stream is not in this pond's project.", 404);
     }
     if (existing.state === "archived") throw new FlotillaError("That stream is archived.", 400);
-    const session = await deps.host.create({
+    const session = await deps.starter.create({
       cwd: existing.path,
       agent: spec.agent,
       model: spec.model,
@@ -113,7 +116,7 @@ export async function startInProject(
   }
   // Main: the pond's own folder, whatever it is; no stream is made.
   const ws = isRepo && !spec.main ? deps.workspaces.createWorkspace(project.id) : null;
-  const session = await deps.host.create({
+  const session = await deps.starter.create({
     cwd: ws ? ws.path : project.rootPath,
     agent: spec.agent,
     model: spec.model,
@@ -276,7 +279,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
       }
       project ??= await deps.sources.clone(remote);
       const ws = deps.workspaces.createWorkspace(project.id);
-      const session = await deps.host.create({
+      const session = await deps.starter.create({
         cwd: ws.path,
         agent: spec.agent,
         model: spec.model,
