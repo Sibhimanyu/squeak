@@ -185,6 +185,23 @@ struct ProjectSettingsDraftTests {
         #expect(q["reviewModel"] == .null && q["reviewEffort"] == .null)
     }
 
+    @Test func taskStartingDefaultsToAtOnceWithFourDucksAndSendsOnlyChanges() throws {
+        let s = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(Self.json.utf8))
+        #expect(s.effective.askBeforeStarting == false && s.effective.maxWorkingDucks == 4)
+        var d = ProjectSettingsDraft(s)
+        #expect(d.askBeforeStarting == false && d.maxWorkingDucks == 4)
+        d.askBeforeStarting = true
+        d.maxWorkingDucks = 2
+        let p = d.patch(from: s)
+        #expect(p["askBeforeStarting"] == .bool(true) && p["maxWorkingDucks"] == .number(2))
+
+        let set = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(#"{"settings":{"askBeforeStarting":true,"maxWorkingDucks":6},"effective":{"askBeforeStarting":true,"maxWorkingDucks":6}}"#.utf8))
+        var again = ProjectSettingsDraft(set)
+        #expect(again.askBeforeStarting && again.maxWorkingDucks == 6 && again.patch(from: set).isEmpty)
+        again.maxWorkingDucks = 99
+        #expect(again.patch(from: set)["maxWorkingDucks"] == .number(20))
+    }
+
     @Test func anUnchangedDraftSendsNothing() throws {
         let s = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(Self.json.utf8))
         #expect(ProjectSettingsDraft(s).patch(from: s).isEmpty)

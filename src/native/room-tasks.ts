@@ -5,6 +5,7 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import type { HostEvents, Room, RoomThread } from "./room.js";
+import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { firstSentence, oneLine } from "./room-turns.js";
 import type { HostEvent } from "./host.js";
@@ -67,6 +68,8 @@ export interface RoomTask {
   candidates?: TaskThreadRef[];
   /** Chosen by the host when the job is made; the person can override it on Go. Absent in a plain-folder pond. */
   place?: TaskPlace;
+  /** Squeak starts this Task itself, in order, once a Duck is free: set when it is made with a destination. */
+  inLine?: true;
   claim?: {
     sessionId: string;
     duckId?: string;
@@ -185,6 +188,12 @@ export interface StartSpec {
   attach?: (cwd: string) => string;
 }
 
+/** How a Pond starts routed Tasks (its settings). */
+export interface StartRules {
+  askBeforeStarting: boolean;
+  maxWorkingDucks: number;
+}
+
 /** A stream's recent turns must match the job this strongly (a title word is 3, a turn word 1.5) to continue there. */
 export const JOB_CONTINUE_SCORE = 4.5;
 
@@ -201,6 +210,8 @@ export interface RoomTasksOptions {
   newBranch?: (projectId: string, text: string) => string | null;
   /** The typed branch as git accepts it for a new stream, or a TaskError saying why not. */
   checkBranch?: (projectId: string, branch: string) => string;
+  /** The Pond's start rules; absent means the defaults (start at once, 4 working Ducks). */
+  settings?: (projectId: string) => StartRules;
   call?: TitleModelCall;
   /** Defaults to the SQUEAK_ROOM_JOBS switch. */
   enabled?: () => boolean;
@@ -215,6 +226,8 @@ export class RoomTasks extends EventEmitter {
   private readonly claims = new Map<string, number[]>();
   private readonly busy = new Set<string>();
   private readonly inflight = new Set<Promise<void>>();
+  private readonly lining = new Set<string>();
+  private readonly lineAgain = new Set<string>();
   private call: TitleModelCall | null;
 
   constructor(private readonly o: RoomTasksOptions) {
@@ -269,6 +282,7 @@ export class RoomTasks extends EventEmitter {
       try {
         if (e.type === "timeline" && ["turn.started", "reply.done", "turn.ended"].includes(e.event.type)) {
           this.reconcileSession(e.sessionId);
+          if (e.event.type === "turn.ended") this.startWaiting();
         }
       } catch (error) {
         logger.warn("room job watcher failed", { error: String(error) });
@@ -385,7 +399,10 @@ export class RoomTasks extends EventEmitter {
       if (task.proposed) {
         delete task.proposed;
         if (typeof parentTaskId === "string") task.parentTaskId = parentTaskId;
-        return this.save(projectId, task);
+        if (this.hasDestination(task) && !this.rules(projectId).askBeforeStarting) task.inLine = true;
+        const taken = this.save(projectId, task);
+        if (taken.inLine) this.startSoon(projectId);
+        return taken;
       }
       throw new TaskError("That message is already a task.", 409);
     }
@@ -414,7 +431,11 @@ export class RoomTasks extends EventEmitter {
       if (c.images + c.files > 0) text = c.files > 0 ? "See the attached files." : "See the attached images.";
     }
     if (!text) text = "See the discussion in the room.";
-    const at = this.now();
+    // Tasks line up by creation time, so two made in the same millisecond must not tie (the line starts them in order).
+    const newest = this.o.store
+      .roomJobRows(projectId)
+      .reduce((m, r) => Math.max(m, (JSON.parse(r.data) as RoomTask).createdAt), 0);
+    const at = Math.max(this.now(), newest + 1);
     const task: RoomTask = {
       id: o.reopen?.id ?? `task:${randomUUID()}`,
       messageId,
@@ -428,7 +449,95 @@ export class RoomTasks extends EventEmitter {
       updatedAt: at,
     };
     Object.assign(task, this.routeFor(projectId, text));
-    return this.save(projectId, task);
+    if (!o.proposed && this.hasDestination(task) && !this.rules(projectId).askBeforeStarting) task.inLine = true;
+    const saved = this.save(projectId, task);
+    if (saved.inLine) this.startSoon(projectId);
+    return saved;
+  }
+
+  // ---- starting at once, with limits ----
+
+  private rules(projectId: string): StartRules {
+    return this.o.settings?.(projectId) ?? { askBeforeStarting: false, maxWorkingDucks: DEFAULT_MAX_WORKING_DUCKS };
+  }
+
+  /**
+   * THE START SEAM. A Task has a destination when the router (routeFor today, a decider later) named a Duck for it.
+   * Anything that sets `suggestion` before this point plugs in; the person's own Go/New never reaches here.
+   */
+  private hasDestination(task: RoomTask): boolean {
+    return !!task.suggestion?.duckId && !!this.o.store.duckRow(task.suggestion.duckId);
+  }
+
+  /** The Ducks working in a pond: a running chat, or a Task handed to it that has not ended. */
+  private workingDucks(projectId: string): Set<string> {
+    const out = new Set<string>();
+    for (const d of this.o.store.listDucks(projectId)) {
+      if (this.o.room.duckView(d).state === "working") out.add(d.id);
+    }
+    for (const r of this.o.store.roomJobRows(projectId)) {
+      const t = JSON.parse(r.data) as RoomTask;
+      if (t.state === "working" && t.handedTo?.duckId) out.add(t.handedTo.duckId);
+    }
+    return out;
+  }
+
+  /** Starts what can start (in the background, never throwing into the caller). */
+  private startSoon(projectId: string): void {
+    const run = this.startLine(projectId)
+      .catch((error) => logger.warn("starting waiting tasks failed", { error: String(error) }))
+      .finally(() => this.inflight.delete(run));
+    this.inflight.add(run);
+  }
+
+  /** A Duck finished, a setting changed or a Task was dropped: whoever is waiting in line may start now. */
+  startWaiting(projectId?: string): void {
+    for (const p of projectId ? [projectId] : this.o.store.listProjects().map((x) => x.id)) {
+      if (this.o.store.roomJobRows(p).some((r) => (JSON.parse(r.data) as RoomTask).inLine)) this.startSoon(p);
+    }
+  }
+
+  /**
+   * Waiting Tasks that Squeak starts itself, oldest first. One that goes to a busy Duck queues behind that Duck's work
+   * and takes no slot; one that needs an idle Duck waits while the pond is at its limit, and nobody jumps the line.
+   */
+  private async startLine(projectId: string): Promise<void> {
+    if (this.lining.has(projectId)) {
+      this.lineAgain.add(projectId);
+      return;
+    }
+    this.lining.add(projectId);
+    try {
+      do {
+        this.lineAgain.delete(projectId);
+        await this.startLineOnce(projectId);
+      } while (this.lineAgain.has(projectId));
+    } finally {
+      this.lining.delete(projectId);
+    }
+  }
+
+  private async startLineOnce(projectId: string): Promise<void> {
+    const rules = this.rules(projectId);
+    if (rules.askBeforeStarting) return;
+    const line = this.o.store
+      .roomJobRows(projectId)
+      .map((r) => JSON.parse(r.data) as RoomTask)
+      .filter((t) => t.inLine && t.state === "waiting" && !t.proposed && t.claim?.status !== "asking")
+      .sort((a, b) => a.createdAt - b.createdAt);
+    for (const t of line) {
+      const duck = t.suggestion?.duckId ? this.o.store.duckRow(t.suggestion.duckId) : null;
+      if (!duck) continue;
+      const working = this.workingDucks(projectId);
+      const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
+      const queues = working.has(duck.id) && cur && !cur.archivedAt;
+      if (!queues && working.size >= rules.maxWorkingDucks) break;
+      try {
+        await this.act(projectId, t.id, queues ? { action: "go", sessionId: cur.id } : { action: "go" });
+      } catch (error) {
+        logger.warn("could not start a waiting task", { error: String(error) });
+      }
+    }
   }
 
   /**
@@ -765,9 +874,14 @@ export class RoomTasks extends EventEmitter {
         if (body.messageIds !== undefined) this.trim(job, body.messageIds);
       }
       switch (action) {
-        case "drop":
+        case "drop": {
           job.state = "dropped";
-          return this.save(projectId, job);
+          delete job.inLine;
+          const dropped = this.save(projectId, job);
+          // A dropped working Task frees its Duck.
+          this.startWaiting(projectId);
+          return dropped;
+        }
         case "deny":
           if (job.claim?.status !== "asking") throw new TaskError("No Duck is asking to take this task.", 409);
           job.claim.status = "denied";

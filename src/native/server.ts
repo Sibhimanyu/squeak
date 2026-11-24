@@ -212,6 +212,11 @@ export class NativeServer {
         start: (spec) => this.starter.startDuck(spec),
         newBranch: (projectId, text) => this.starter.newBranch(projectId, text),
         checkBranch: (projectId, branch) => this.starter.checkBranch(projectId, branch),
+        settings: (projectId) => {
+          const project = options.store.getProject(projectId);
+          const e = project ? workspaces.settingsFor(project).effective : null;
+          return { askBeforeStarting: e?.askBeforeStarting ?? false, maxWorkingDucks: e?.maxWorkingDucks ?? 4 };
+        },
       });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
@@ -1393,8 +1398,11 @@ export class NativeServer {
     if (area === "projects" && id && sub === "settings" && parts.length === 4) {
       const project = store.getProject(id);
       if (!project) throw new HttpError(404, "no such project");
-      if (method === "PATCH")
+      if (method === "PATCH") {
         store.saveProjectSettings(patchSettings(store.getProjectSettings(id), await this.body(req)));
+        // A raised limit, or Ask before starting turned off, lets Tasks that are waiting in line start.
+        this.jobs.startWaiting(id);
+      }
       if (method === "GET" || method === "PATCH") return this.json(res, 200, workspaces.settingsFor(project));
     }
     if (area === "workspaces" && id) {
