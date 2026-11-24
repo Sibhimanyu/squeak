@@ -13,6 +13,11 @@ final class CanvasPasteboard: ViewerControlling {
     private(set) var frames: [CGRect] = []
     @ObservationIgnored let view = CanvasScrollView(boards: [], frames: [])
     @ObservationIgnored private var hadBoards = false
+    /// The artboard nearest the viewport changed (the person scrolled): what to draw first changes with it.
+    @ObservationIgnored var onNearestChange: (() -> Void)?
+
+    /// The viewport's centre, taken as the centre of the nearest artboard.
+    var viewportCentre: CGPoint? { frames.indices.contains(index) ? CGPoint(x: frames[index].midX, y: frames[index].midY) : nil }
 
     var switcher: (index: Int, count: Int)? { count > 0 ? (index, count) : nil }
     var zoomLevel: Double? { count > 0 ? zoomValue : nil }
@@ -21,7 +26,7 @@ final class CanvasPasteboard: ViewerControlling {
         view.onChange = { [weak self] zoom, nearest in
             guard let self else { return }
             if zoom != zoomValue { zoomValue = zoom }
-            if let nearest, nearest != index { index = nearest }
+            if let nearest, nearest != index { index = nearest; onNearestChange?() }
         }
     }
 
@@ -62,7 +67,7 @@ final class CanvasModel {
 
     @ObservationIgnored private let host: NativeHostClient
     @ObservationIgnored private var drawn: [String: CanvasBoards.Stamp] = [:]
-    @ObservationIgnored private var pumping = false
+    @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var stopped = false
     @ObservationIgnored private var follow: Task<Void, Never>?
     @ObservationIgnored private var exporting: Task<Void, Never>?
@@ -84,6 +89,13 @@ final class CanvasModel {
     func start() {
         stopped = false
         follow?.cancel()
+        pasteboard.onNearestChange = { [weak self] in self?.pump() }
+        CanvasSnapshotStore.shared.observeEvictions(path: path) { [weak self] ids in
+            guard let self else { return }
+            for id in ids { images[id] = nil; drawn[id] = nil }
+            present()
+            pump()
+        }
         if !readOnly {
             pasteboard.view.onBoardClick = { [weak self] i in self?.editor.begin(index: i) }
             pasteboard.view.onBackgroundClick = { [weak self] in self?.editor.end() }
@@ -109,6 +121,8 @@ final class CanvasModel {
         stopped = true
         follow?.cancel(); follow = nil
         exporting?.cancel(); exporting = nil
+        for t in running.values { t.cancel() }
+        CanvasSnapshotStore.shared.stopObserving(path: path)
     }
 
     private func reload() async {
@@ -144,26 +158,66 @@ final class CanvasModel {
         pasteboard.show(boards)
     }
 
-    /// Draws stale artboards one after another; the next is chosen from the latest detail each time, so a change that
-    /// lands mid-way is picked up and a board that vanished is skipped.
+    private func key(_ board: CanvasArtboardInfo, _ d: CanvasDetail) -> CanvasSnapshotKey {
+        CanvasSnapshotKey(canvasPath: path, board: board, assetsModifiedAt: d.assetsModifiedAt)
+    }
+
+    /// Draws stale artboards, nearest the viewport first, on the pool's slots. Each one is answered from the memory or
+    /// disk cache when its file is unchanged, and drawn otherwise. Re-chosen from the latest detail and viewport after
+    /// every change, so a board that vanished is skipped, a change that lands mid-way is picked up, and renders for
+    /// artboards the person scrolled far away from are cancelled.
     private func pump() {
-        guard !pumping else { return }
-        pumping = true
-        Task { [weak self] in
-            // The board being edited is drawn by its live page; its picture is taken when editing ends.
-            while let self, !self.stopped, let d = self.detail,
-                let id = CanvasBoards.needingRender(drawn: self.drawn, detail: d).first(where: { $0 != self.editor.boardID }),
-                let board = d.artboards.first(where: { $0.id == id }) {
-                let stamp = CanvasBoards.Stamp(board, assetsModifiedAt: d.assetsModifiedAt)
+        guard !stopped, let d = detail else { return }
+        let store = CanvasSnapshotStore.shared
+        store.retain(path: path, current: Set(d.artboards.map { key($0, d) }))
+        let ids = d.artboards.map(\.id)
+        var frames: [String: CGRect] = [:]
+        if pasteboard.frames.count == ids.count { frames = Dictionary(uniqueKeysWithValues: zip(ids, pasteboard.frames)) }
+        let order = CanvasRenderPlan.priority(ids: ids, frames: frames, centre: pasteboard.viewportCentre ?? .zero)
+        let cost = Dictionary(uniqueKeysWithValues: d.artboards.map { ($0.id, key($0, d).pixelBytes) })
+        let wanted = Set(CanvasRenderPlan.withinBudget(order: order, cost: cost, budget: CanvasSnapshotStore.memoryBudget))
+        // The board being edited is drawn by its live page; its picture is taken when editing ends.
+        let needing = Set(CanvasBoards.needingRender(drawn: drawn, detail: d)).subtracting([editor.boardID].compactMap { $0 })
+        let waiting = order.filter { needing.contains($0) && wanted.contains($0) && running[$0] == nil }
+        let slots = CanvasRenderPool.shared.slotCount
+        for id in CanvasRenderPlan.cancellations(inFlight: Array(running.keys), waiting: waiting, order: order, keep: slots + 2) {
+            running[id]?.cancel()
+        }
+        for id in waiting where running.count < slots {
+            guard let board = d.artboards.first(where: { $0.id == id }) else { continue }
+            start(board, in: d)
+        }
+    }
+
+    private func start(_ board: CanvasArtboardInfo, in d: CanvasDetail) {
+        let id = board.id, stamp = CanvasBoards.Stamp(board, assetsModifiedAt: d.assetsModifiedAt), key = key(board, d)
+        running[id] = Task { [weak self] in
+            let store = CanvasSnapshotStore.shared
+            var image: NSImage?
+            var cancelled = false
+            if let hit = store.memory(key) {
+                image = hit
+            } else if let hit = await store.disk(key) {
+                image = hit
+            } else {
                 do {
-                    self.images[id] = try await CanvasRender.image(board: board, root: self.root)
+                    let drawnImage = try await CanvasRender.image(board: board, root: URL(fileURLWithPath: key.canvasPath), width: board.width * Double(key.scale))
+                    store.put(drawnImage, key)
+                    image = drawnImage
+                } catch is CancellationError {
+                    cancelled = true
                 } catch {
-                    self.images[id] = CanvasRender.placeholder(size: board.size, text: "Couldn\u{2019}t draw this artboard")
+                    image = CanvasRender.placeholder(size: board.size, text: "Couldn\u{2019}t draw this artboard")
                 }
-                self.drawn[id] = stamp
-                self.present()
             }
-            self?.pumping = false
+            guard let self else { return }
+            running[id] = nil
+            if !cancelled, !Task.isCancelled, !stopped, let image {
+                images[id] = image
+                drawn[id] = stamp
+                present()
+            }
+            pump()
         }
     }
 

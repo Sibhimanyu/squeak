@@ -363,13 +363,17 @@ struct SessionDetail: View {
                 }
                 .onChange(of: model.paging.loading) { _, loading in
                     // Still at the top after a page (a short one): the next page is wanted too.
-                    if !loading, topVisible, model.paging.error == nil, keepAnchor == nil { pageUp() }
+                    if TimelinePaging.wantsNextPage(topVisible: topVisible, paging: model.paging, holdingAnchor: keepAnchor != nil), !loading { pageUp() }
                 }
                 .task(id: keepAnchor) {
                     // The anchor only has to hold while the new rows are laid out.
                     guard keepAnchor != nil else { return }
                     try? await Task.sleep(for: .milliseconds(700))
-                    if !Task.isCancelled, !model.paging.loading { keepAnchor = nil }
+                    if !Task.isCancelled, !model.paging.loading {
+                        keepAnchor = nil
+                        // A small page can leave the top in view: the next one is wanted now, not on the next scroll.
+                        if TimelinePaging.wantsNextPage(topVisible: topVisible, paging: model.paging, holdingAnchor: false) { pageUp() }
+                    }
                 }
             }
         }

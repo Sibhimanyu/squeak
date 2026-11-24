@@ -3,9 +3,11 @@ import PDFKit
 import SqueakMacCore
 import WebKit
 
-// Draws a canvas's artboards. Each artboard is a self-contained HTML file; a WKWebView that is never on screen loads it
-// (read access to the canvas folder only, page scripts off) and hands back a picture or a PDF page. One artboard at a
-// time, so memory stays flat however many a canvas has. The pasteboard shows the pictures; export reuses the same path.
+// Draws a canvas's artboards. Each artboard is a self-contained HTML file; a small pool of web views that are never on
+// screen (two, one shared configuration, read access to the canvas folder only, page scripts off) loads it and hands
+// back a picture or a PDF page. A slot is taken for one artboard, then blanked and given back, so memory stays flat
+// however many artboards a canvas has: there is never a web view per artboard. The live editing page (CanvasEditor) is
+// its own, single web view and is not part of the pool.
 
 enum CanvasRenderError: Error {
     case loadFailed
@@ -13,72 +15,144 @@ enum CanvasRenderError: Error {
     case pdfFailed
 }
 
+/// A fixed number of reusable offscreen web views. Callers wait their turn (first come, first served) and a waiter
+/// that is cancelled leaves the line at once.
 @MainActor
-enum CanvasRender {
-    /// One web view for one artboard: sized exactly to it, loaded, fonts and pictures settled.
-    private final class Page: NSObject, WKNavigationDelegate {
+final class CanvasRenderPool {
+    static let shared = CanvasRenderPool(slots: 2)
+
+    private final class Slot: NSObject, WKNavigationDelegate {
         let web: WKWebView
         private var done: CheckedContinuation<Void, Error>?
+        private var navigation: WKNavigation?
 
-        init(size: CGSize) {
-            let config = WKWebViewConfiguration()
-            config.defaultWebpagePreferences.allowsContentJavaScript = false
-            web = WKWebView(frame: CGRect(origin: .zero, size: size), configuration: config)
+        init(configuration: WKWebViewConfiguration) {
+            web = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
             super.init()
             web.navigationDelegate = self
             web.setValue(false, forKey: "drawsBackground")
         }
 
-        func load(file: URL, readRoot: URL) async throws {
-            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
-                done = c
-                web.loadFileURL(file, allowingReadAccessTo: readRoot)
+        func load(file: URL, readRoot: URL, size: CGSize) async throws {
+            web.setFrameSize(size)
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                    done = c
+                    navigation = web.loadFileURL(file, allowingReadAccessTo: readRoot)
+                }
+            } onCancel: {
+                Task { @MainActor in self.web.stopLoading() }
             }
+            try Task.checkCancellation()
             // Web fonts and late pictures: let layout settle once more.
-            _ = try? await web.callAsyncJavaScript("await document.fonts.ready; return 1", contentWorld: .defaultClient)
+            _ = try? await web.callAsyncJavaScript(
+                "await document.fonts.ready; await Promise.all([...document.images].map(i => i.decode().catch(() => {}))); return 1",
+                contentWorld: .defaultClient)
             try? await Task.sleep(for: .milliseconds(60))
+            try Task.checkCancellation()
         }
 
-        private func finish(_ result: Result<Void, Error>) {
-            guard let c = done else { return }
+        /// Drops the page so an idle slot holds no artboard's memory.
+        func blank() {
+            navigation = nil
+            if let c = done { done = nil; c.resume(throwing: CanvasRenderError.loadFailed) }
+            web.loadHTMLString("", baseURL: nil)
+        }
+
+        private func finish(_ nav: WKNavigation!, _ result: Result<Void, Error>) {
+            guard nav === navigation, let c = done else { return }
             done = nil
             c.resume(with: result)
         }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(.success(())) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(.failure(CanvasRenderError.loadFailed)) }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finish(navigation, .success(())) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            finish(navigation, .failure(CanvasRenderError.loadFailed))
+        }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            finish(.failure(CanvasRenderError.loadFailed))
+            finish(navigation, .failure(CanvasRenderError.loadFailed))
         }
     }
 
-    /// A picture of the artboard. `width` is the picture's width in points; on a Retina screen it carries twice the
-    /// pixels, which is the "2x" the pasteboard draws.
+    /// One configuration (so one web content process pool) for every slot.
+    private static let configuration: WKWebViewConfiguration = {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        return config
+    }()
+
+    let slotCount: Int
+    private var slots: [Slot] = []
+    private var free: [Slot] = []
+    private var waiters: [(id: UUID, cont: CheckedContinuation<Slot, Error>)] = []
+
+    init(slots: Int) { slotCount = max(1, slots) }
+
+    private func acquire() async throws -> Slot {
+        try Task.checkCancellation()
+        if let slot = free.popLast() { return slot }
+        if slots.count < slotCount {
+            let slot = Slot(configuration: Self.configuration)
+            slots.append(slot)
+            return slot
+        }
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Slot, Error>) in
+                waiters.append((id, c))
+            }
+        } onCancel: {
+            Task { @MainActor in
+                guard let i = self.waiters.firstIndex(where: { $0.id == id }) else { return }
+                self.waiters.remove(at: i).cont.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    private func release(_ slot: Slot) {
+        slot.blank()
+        if !waiters.isEmpty { waiters.removeFirst().cont.resume(returning: slot) } else { free.append(slot) }
+    }
+
+    /// Loads the artboard into a pooled web view sized to it and runs `body` on the settled page; the slot goes back
+    /// blank afterwards, whatever happens.
+    func withPage<T>(file: URL, readRoot: URL, size: CGSize, _ body: (WKWebView) async throws -> T) async throws -> T {
+        let slot = try await acquire()
+        defer { release(slot) }
+        try await slot.load(file: file, readRoot: readRoot, size: size)
+        return try await body(slot.web)
+    }
+}
+
+@MainActor
+enum CanvasRender {
+    /// A picture of the artboard. `width` is the picture's width in points; the pool takes it as pixels, so pass
+    /// twice the artboard's width for a 2x picture.
     static func image(board: CanvasArtboardInfo, root: URL, width: CGFloat? = nil) async throws -> NSImage {
-        let page = Page(size: board.size)
-        try await page.load(file: URL(fileURLWithPath: board.file), readRoot: root)
-        let config = WKSnapshotConfiguration()
-        config.rect = CGRect(origin: .zero, size: board.size)
-        config.snapshotWidth = NSNumber(value: Double(width ?? board.size.width))
-        config.afterScreenUpdates = true
-        return try await withCheckedThrowingContinuation { c in
-            page.web.takeSnapshot(with: config) { image, error in
-                if let image { c.resume(returning: image) } else { c.resume(throwing: error ?? CanvasRenderError.snapshotFailed) }
+        try await CanvasRenderPool.shared.withPage(file: URL(fileURLWithPath: board.file), readRoot: root, size: board.size) { web in
+            let config = WKSnapshotConfiguration()
+            config.rect = CGRect(origin: .zero, size: board.size)
+            config.snapshotWidth = NSNumber(value: Double(width ?? board.size.width))
+            config.afterScreenUpdates = true
+            return try await withCheckedThrowingContinuation { c in
+                web.takeSnapshot(with: config) { image, error in
+                    if let image { c.resume(returning: image) } else { c.resume(throwing: error ?? CanvasRenderError.snapshotFailed) }
+                }
             }
         }
     }
 
     /// The artboard as a one-page PDF of its own size.
     static func pdfPage(board: CanvasArtboardInfo, root: URL) async throws -> Data {
-        let page = Page(size: board.size)
-        try await page.load(file: URL(fileURLWithPath: board.file), readRoot: root)
-        let config = WKPDFConfiguration()
-        config.rect = CGRect(origin: .zero, size: board.size)
-        return try await withCheckedThrowingContinuation { c in
-            page.web.createPDF(configuration: config) { result in
-                switch result {
-                case .success(let data): c.resume(returning: data)
-                case .failure: c.resume(throwing: CanvasRenderError.pdfFailed)
+        try await CanvasRenderPool.shared.withPage(file: URL(fileURLWithPath: board.file), readRoot: root, size: board.size) { web in
+            let config = WKPDFConfiguration()
+            config.rect = CGRect(origin: .zero, size: board.size)
+            return try await withCheckedThrowingContinuation { c in
+                web.createPDF(configuration: config) { result in
+                    switch result {
+                    case .success(let data): c.resume(returning: data)
+                    case .failure: c.resume(throwing: CanvasRenderError.pdfFailed)
+                    }
                 }
             }
         }

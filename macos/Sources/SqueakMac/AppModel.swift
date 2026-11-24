@@ -2528,7 +2528,7 @@ extension AppModel {
     /// The first read of the chat's log; false when the host has no timeline (an older one), which sends the chat down the old path.
     func startNativeTimeline(_ s: HostSession) async -> Bool {
         do {
-            let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: nil)
+            let page = try await nativeAdapter.timeline(for: s, since: nil, turns: TimelinePaging.firstPage, before: nil)
             guard native.key == s.key else { return true }
             // The host's log is behind what this Mac held (reset or rebuilt): that is from a log that no longer exists.
             if page.lastSeq < native.timeline.lastSeq { native.timeline = TurnTimeline() }
@@ -2643,7 +2643,7 @@ extension AppModel {
             guard let self else { return }
             defer { native.olderLoading = false; if native.key == key { showTimeline(key) } }
             do {
-                let page = try await nativeAdapter.timeline(for: s, since: nil, turns: 30, before: before)
+                let page = try await nativeAdapter.timeline(for: s, since: nil, turns: TimelinePaging.olderPage, before: before)
                 guard native.key == key else { return }
                 native.timeline.prepend(page.events, hasEarlier: page.hasEarlier)
                 scheduleDetails(s)

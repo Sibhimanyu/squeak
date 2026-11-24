@@ -207,6 +207,11 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE queue ADD COLUMN room INTEGER NOT NULL DEFAULT 0;
   `,
+  // A restarted host rebuilds each chat's helpers from its last day of rows: a chat idle for longer is skipped by
+  // this index instead of scanning every row it ever stored.
+  `
+  CREATE INDEX IF NOT EXISTS messages_session_created ON messages(session_id, created_at);
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -986,7 +991,8 @@ export class NativeStore {
   helperRows(sessionId: string, sinceIso: string, limit = 20_000): MessageRow[] {
     const rows = this.db
       .prepare(
-        `SELECT * FROM messages WHERE session_id=? AND role='agent' AND created_at>=?
+        `SELECT seq, session_id, role, kind, payload, created_at, author_id, author_name FROM messages INDEXED BY messages_session_created
+           WHERE session_id=? AND role='agent' AND created_at>=?
            AND (kind='assistant' OR kind='user' OR kind LIKE 'system/task_%')
            AND payload NOT LIKE '%"parent_tool_use_id":"%'
          ORDER BY seq DESC LIMIT ?`,

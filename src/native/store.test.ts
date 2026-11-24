@@ -8,6 +8,24 @@ import type { MessageRow } from "./types.js";
 import { MIGRATIONS, NativeStore } from "./store.js";
 
 describe("NativeStore", () => {
+  it("helperRows reads a chat's last day through the created_at index, skips an idle chat, and keeps the author", () => {
+    const store = new NativeStore(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "native-store-")), "native.db"));
+    const s = store.createSession({ cwd: "/x", agent: "claude", model: "m", permissionMode: "default" });
+    const launch = { message: { content: [{ type: "tool_use", id: "t1", name: "Task", input: {} }] } };
+    store.appendMessage(s.id, "agent", "assistant", launch);
+    store.appendMessage(s.id, "agent", "assistant", { ...launch, parent_tool_use_id: "t1" });
+    store.appendMessage(s.id, "user", "user/text", { text: "mine" });
+    const day = new Date(Date.now() - 86_400_000).toISOString();
+    expect(store.helperRows(s.id, day)).toHaveLength(1);
+    expect(store.helperRows(s.id, new Date(Date.now() + 1000).toISOString())).toHaveLength(0);
+    const plan = store.db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT seq FROM messages INDEXED BY messages_session_created WHERE session_id=? AND created_at>=?",
+      )
+      .all(s.id, day) as { detail: string }[];
+    expect(plan.map((p) => p.detail).join(" ")).toContain("messages_session_created");
+  });
+
   it("keeps every step of every turn, thinking and tool calls included, across a reopen, and pages them whole", () => {
     // The Mac builds a finished turn's folded steps from these rows: nothing may be dropped, for either agent.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
@@ -83,7 +101,7 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE shown_artifacts;"); // the Artifacts migration is newest
     old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 15}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 16}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -126,7 +144,7 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE shown_artifacts;");
     old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 11}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 12}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -244,7 +262,7 @@ describe("NativeStore", () => {
       if (withoutDuckTables) old.db.exec("DROP TABLE ducks; DROP TABLE duck_sessions; DROP TABLE session_ducks;");
       old.db.exec("DROP TABLE shown_artifacts;");
       old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 3}`);
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 4}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };
