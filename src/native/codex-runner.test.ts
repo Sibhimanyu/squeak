@@ -239,6 +239,22 @@ describe("CodexRunner", () => {
     expect(log.statuses).toContain("awaiting_approval");
   });
 
+  it("declines a patch that touches a file another Duck holds (folder Pond lock), without asking anyone", async () => {
+    const { client, log, runner } = setup(() => ({ decision: "allow" }));
+    (runner as unknown as { options: { hooks: RunnerHooks } }).options.hooks.guardEdit = (files) =>
+      files.includes("a.txt") ? "a.txt is locked: Sage is editing it" : null;
+    await runner.send("go");
+    note(client, "item/started", { item: { type: "fileChange", id: "fc-1", changes: [{ path: "a.txt" }] } });
+    client.emit("server-request", {
+      id: 1,
+      method: "item/fileChange/requestApproval",
+      params: { threadId: "thread-1", itemId: "fc-1" },
+    });
+    await tick();
+    expect(client.responses).toEqual([{ id: 1, result: { decision: "decline" } }]);
+    expect(log.requests).toEqual([]);
+  });
+
   it("answers a request it does not handle with method-not-found", async () => {
     const { client, runner } = setup();
     await runner.send("go");

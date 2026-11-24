@@ -141,6 +141,13 @@ const EDIT_PATH_KEYS: Record<string, string> = {
 };
 
 /** Why a tool call is refused in a read-only root, or null. A relative path is read against the chat's folder. */
+/** The files an edit tool call names (one path key per tool), or none for any other tool. */
+export function editedFiles(toolName: string, input: Record<string, unknown>): string[] {
+  const key = EDIT_PATH_KEYS[toolName];
+  const raw = key ? input[key] : undefined;
+  return typeof raw === "string" && raw ? [raw] : [];
+}
+
 export function readOnlyDenial(
   root: string | null | undefined,
   cwd: string,
@@ -267,13 +274,20 @@ export class ClaudeRunner implements Runner {
                     unknown
                   >,
                 );
-                if (reason) {
+                const toolName = typeof call.tool_name === "string" ? call.tool_name : "";
+                const toolInput = (
+                  typeof call.tool_input === "object" && call.tool_input !== null ? call.tool_input : {}
+                ) as Record<string, unknown>;
+                // A folder Pond's per-file lock, in every mode like the read-only refusal.
+                const files = editedFiles(toolName, toolInput);
+                const locked = !reason && files.length > 0 ? hooks.guardEdit?.(files) : null;
+                if (reason || locked) {
                   return {
                     continue: true,
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "deny",
-                      permissionDecisionReason: reason,
+                      permissionDecisionReason: reason ?? locked,
                     },
                   };
                 }
@@ -678,6 +692,9 @@ export class ClaudeRunner implements Runner {
     if (isSqueakTool(toolName)) return { behavior: "allow", updatedInput: input };
     const refused = readOnlyDenial(this.options.readOnlyRoot, this.options.cwd, toolName, input);
     if (refused) return { behavior: "deny", message: refused };
+    const files = editedFiles(toolName, input);
+    const locked = files.length > 0 ? this.options.hooks.guardEdit?.(files) : null;
+    if (locked) return { behavior: "deny", message: locked };
     // Tools that only read never ask, in any mode.
     if (READ_ONLY_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     const kind = requestKindFor(toolName);

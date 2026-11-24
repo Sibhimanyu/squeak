@@ -55,6 +55,7 @@ import { DEFAULT_PAGE_TURNS, TimelineLog, TimelineRecorder } from "./timeline-lo
 import type { ReplyDelta, TimelineEvent } from "./timeline.js";
 import type { NativeStore } from "./store.js";
 import { PendingInput } from "./pending-input.js";
+import { FileLocks, lockedMessage, type FileClash } from "./file-locks.js";
 import {
   ResumeFailedError,
   type AgentKind,
@@ -213,6 +214,8 @@ export interface HostOptions {
   claudeAiConnectors?: () => boolean;
   /** The owner's pond member name, for the `[from <name> · owner]` line; the macOS full name otherwise. */
   ownerName?: () => string | null;
+  /** How long a folder-Pond file lock may sit idle before it expires (default 10 min). */
+  fileLockIdleMs?: number;
   /** How recent a chat must be to have its agent warmed when the host starts (default 30 min; 0 = never). */
   warmRecentMs?: number;
   /** Names untitled chats; the real one (Haiku, with a local fallback) unless a runner factory is injected, then none. */
@@ -274,6 +277,10 @@ export class SessionHost extends EventEmitter {
   private readonly factory: RunnerFactory;
   private readonly idleMs: number;
   private readonly checkpoints = new Checkpointer();
+  /** Per-file locks for Ducks editing a folder Pond directly (no Streams there). */
+  private readonly fileLocks: FileLocks;
+  /** Clashes already announced this turn (blocked chat|file|holder), so a retrying Duck posts one line. */
+  private readonly clashed = new Set<string>();
   /** Words to start the next turn with, set while a steer's interrupt is still ending the running one. */
   private readonly steerNext = new Map<string, string>();
   private readonly steerAuthor = new Map<string, MessageAuthor | null>();
@@ -341,6 +348,7 @@ export class SessionHost extends EventEmitter {
         (this.foregroundHelpers.get(id) ?? 0) > 0 ? { label: this.helperLabels.get(id) ?? "helper" } : null,
     });
     this.ownerNameOf = options.ownerName ?? (() => null);
+    this.fileLocks = new FileLocks(options.fileLockIdleMs);
     this.factory =
       options.runnerFactory ??
       defaultRunnerFactory(
@@ -1276,6 +1284,10 @@ export class SessionHost extends EventEmitter {
 
   private setStatus(id: string, status: SessionStatus, endedTurn = false): void {
     this.store.setStatus(id, status, endedTurn);
+    if (!BUSY.has(status)) {
+      this.fileLocks.releaseSession(id);
+      for (const k of this.clashed) if (k.startsWith(`${id}|`)) this.clashed.delete(k);
+    }
     const context = this.contexts.get(id);
     this.emit("event", {
       type: "status",
@@ -1297,6 +1309,36 @@ export class SessionHost extends EventEmitter {
 
   /** A brief for a chat's next message (its first, or the one after a preset pick), kept until that turn starts (it may wait for a setup script). Memory only. */
   private readonly firstBrief = new Map<string, string>();
+
+  /**
+   * Folder Ponds have no Streams: Ducks edit the folder itself. A Duck's edit takes a per-file lock (until its turn
+   * ends, or ten idle minutes); another Duck's edit to a locked file is refused with the holder named, and the clash
+   * is announced as `file-clash` for the Room. Null: go ahead. Git Ponds (own Streams) are never guarded.
+   */
+  private guardEdit(sessionId: string, files: string[]): string | null {
+    const s = this.store.getSession(sessionId);
+    if (!s || s.workspaceId) return null;
+    const pond = this.store.getProjectByRoot(s.cwd);
+    if (!pond || pond.kind !== "folder") return null;
+    const absolute = [...new Set(files.map((f) => path.resolve(s.cwd, f)))];
+    const name =
+      this.store.duckBySession(sessionId)?.name?.trim() ||
+      s.title?.trim() ||
+      (s.agent === "codex" ? "Codex" : "Claude");
+    for (const file of absolute) {
+      const holder = this.fileLocks.heldByOther(pond.id, file, sessionId);
+      if (!holder) continue;
+      const shown = path.relative(s.cwd, file) || file;
+      const once = `${sessionId}|${file}|${holder.sessionId}`;
+      if (!this.clashed.has(once)) {
+        this.clashed.add(once);
+        this.emit("file-clash", { projectId: pond.id, sessionId, name, file: shown, holder } satisfies FileClash);
+      }
+      return lockedMessage(shown, holder.name);
+    }
+    for (const file of absolute) this.fileLocks.take(pond.id, file, { sessionId, name });
+    return null;
+  }
 
   private async startTurn(
     s: SessionRow,
@@ -1451,6 +1493,7 @@ export class SessionHost extends EventEmitter {
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
       onConsumed: (uuids) => this.pendingInput.consumedUuids(id, uuids),
+      guardEdit: (files) => this.guardEdit(id, files),
       onForegroundHelpers: (count, oldest) => {
         if (count > 0) {
           this.foregroundHelpers.set(id, count);
@@ -1493,6 +1536,7 @@ export class SessionHost extends EventEmitter {
       },
       onExit: (error) => {
         this.runners.delete(id);
+        this.fileLocks.releaseSession(id);
         this.background.delete(id);
         this.foregroundHelpers.delete(id);
         this.helperLabels.delete(id);
