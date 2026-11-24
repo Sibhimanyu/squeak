@@ -656,11 +656,12 @@ describe("summariser", () => {
       },
     ]);
     // throttled: 3 more steps right after make nothing
-    r.advance(SUMMARY_QUIET_MS + 1000);
+    r.advance(SUMMARY_QUIET_MS - 60_000);
     r.steps(3);
     await r.sum.idle();
     expect(r.posts()).toHaveLength(1);
-    r.advance(3 * 60_000);
+    r.advance(2 * 60_000);
+    r.room.markViewed(r.p.project.id);
     r.steps(3);
     await r.sum.idle();
     expect(r.posts()).toHaveLength(2);
@@ -755,6 +756,8 @@ async function start(): Promise<Harness> {
     host,
     store,
     workspaces: new WorkspaceManager({ store, workspacesRoot: path.join(dir, "ws") }),
+    // A shared pond: these tests read the Room's status lines (solo ponds drop them).
+    room: new Room({ store, members: () => 1 }),
     tokenPath,
     port: 0,
     heartbeatMs: 40,

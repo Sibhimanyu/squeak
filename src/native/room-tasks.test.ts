@@ -25,6 +25,9 @@ import { TimelineLog } from "./timeline-log.js";
 import type { SessionRow } from "./types.js";
 import { WorkspaceManager } from "./workspaces.js";
 
+/** A Duck's briefing without its how-to-work tail, so these tests read the Task text itself. */
+const unbrief = (t: string): string => t.replace(/\n\nHow to work this task:(\n- [^\n]*)+/, "");
+
 const open: (() => Promise<void>)[] = [];
 afterEach(async () => {
   while (open.length) await open.pop()!();
@@ -61,11 +64,11 @@ function rig(
   const jobs = new RoomTasks({
     store,
     room,
-    send: async (id, text) => void sent.push({ id, text }),
+    send: async (id, text) => void sent.push({ id, text: unbrief(text) }),
     newThread: async (_p, text, title) => {
       const s = chat(title);
       made.push(s);
-      calls.push(text);
+      calls.push(unbrief(text));
       return s;
     },
     settings: () => rules,
@@ -369,7 +372,7 @@ describe("tools and routes", () => {
   it("a routed Task starts over HTTP without Go, waits at the limit, and Ask before starting restores Go", async () => {
     const h = await server();
     const sent: Array<{ id: string; text: string }> = [];
-    (h.host as any).send = async (id: string, text: string) => void sent.push({ id, text });
+    (h.host as any).send = async (id: string, text: string) => void sent.push({ id, text: unbrief(text) });
     const a = h.chat("Layout builder");
     const b = h.chat("Billing webhook");
     for (const [s, past] of [
