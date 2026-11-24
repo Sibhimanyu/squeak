@@ -20,6 +20,7 @@ import {
   ROOM_CLOUD_POSTS,
   ROOM_INBOX_LIFE_MS,
   ownerOfflineLine,
+  roomDocOf,
 } from "./room-sync.js";
 import type { FlotillaBridge } from "./bridge.js";
 
@@ -59,12 +60,12 @@ function mac(name: string, at: { now: number } = clock): Mac {
 }
 
 /** The Owner's host side: a real Room, Tasks and store, wired to the sync (no session host needed). */
-function ownerHost(service: FlotillaService) {
+function ownerHost(service: FlotillaService, deliver?: (sessionId: string, text: string) => void) {
   const store = new NativeStore(":memory:");
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), "room-folder-"));
   dirs.push(folder);
   const project = store.createProject({ name: "site", rootPath: folder, defaultBranch: "main", kind: "folder" });
-  const room = new Room({ store, ownerName: () => "Sibhi", now: () => clock.now });
+  const room = new Room({ store, ownerName: () => "Sibhi", now: () => clock.now, ...(deliver ? { deliver } : {}) });
   const jobs = new RoomTasks({
     store,
     room,
@@ -391,6 +392,208 @@ describe("the Room reaches Members", () => {
     const after = await bSync.page(pondId);
     expect(after.posts.length).toBe(before);
     expect(after.posts.at(-1)!.text).toBe(`bulk ${ROOM_CLOUD_POSTS + 4}`);
+  });
+});
+
+describe("Members see the whole Room: detail, plan cards, canvas cards, comments", () => {
+  let A: Mac;
+  let B: Mac;
+  let V: Mac;
+  let pondId = "";
+  let host: ReturnType<typeof ownerHost>;
+  let bSync: RoomSync;
+  let vSync: RoomSync;
+  const delivered: Array<{ sid: string; text: string }> = [];
+  let planId = "";
+
+  const apply = async () => {
+    await A.service.pass(pondId);
+    await host.sync.idle();
+  };
+
+  beforeAll(async () => {
+    A = mac("Sibhi");
+    B = mac("Aarav");
+    V = mac("Vera");
+    host = ownerHost(A.service, (sid, text) => void delivered.push({ sid, text }));
+    pondId = (await A.service.createPond({ name: "Site", projectId: host.project.id })).id;
+    await admit(A, pondId, B);
+    await admit(A, pondId, V, "viewer");
+    bSync = memberSync(B);
+    vSync = memberSync(V);
+    await A.service.setPresence(pondId, {});
+  });
+
+  it("a spec+plan card, a line's detail and a canvas card reach Members; the Owner's folder stays home", async () => {
+    const plan = host.room.post({
+      projectId: host.project.id,
+      author: { kind: "agent", id: "sess-1", name: "Maple" },
+      sessionId: "sess-1",
+      kind: "plan",
+      text: "Plan: redo the footer",
+      detail: "Spec: links.\nPlan: 1. fix hrefs",
+    });
+    planId = plan.id;
+    host.room.post({
+      projectId: host.project.id,
+      author: { kind: "agent", id: "sess-1", name: "Maple" },
+      sessionId: "sess-1",
+      kind: "needs",
+      text: "Need a decision",
+      detail: "Which footer layout?",
+    });
+    host.room.post({
+      projectId: host.project.id,
+      author: { kind: "agent", id: "sess-1", name: "Maple" },
+      sessionId: "sess-1",
+      kind: "done",
+      text: "Footer done",
+      canvases: [
+        {
+          id: "abc123",
+          path: "/Users/owner/secret/canvas",
+          slug: "footer",
+          title: "Footer deck",
+          kind: "deck",
+          artboards: 3,
+        },
+      ],
+    });
+    await host.sync.idle();
+    for (const sync of [bSync, vSync]) {
+      const page = await sync.page(pondId);
+      expect(page.posts.map((p) => p.kind)).toEqual(["plan", "needs", "done"]);
+      expect(page.posts[0]).toMatchObject({
+        text: "Plan: redo the footer",
+        detail: "Spec: links.\nPlan: 1. fix hrefs",
+      });
+      expect(page.posts[1]!.detail).toBe("Which footer layout?");
+      expect(page.posts[2]!.canvases).toEqual([{ id: "abc123", title: "Footer deck", kind: "deck", artboards: 3 }]);
+    }
+    expect(JSON.stringify((await bSync.page(pondId)).posts)).not.toContain("/Users/owner");
+    // Plain posts stay as thin as before.
+    expect(Object.keys((await bSync.page(pondId)).posts[1]!)).not.toContain("canvases");
+  });
+
+  it("a Member's comment on a plan card reaches that Duck like the Owner's, and lands in the Room as a reply", async () => {
+    delivered.length = 0;
+    const sent = await bSync.post(pondId, "Please keep the old logo.", planId);
+    await apply();
+    const row = host.store.roomPostById(`m-${sent.id}`);
+    expect(row).toMatchObject({ authorName: "Aarav", replyTo: planId, kind: "message" });
+    expect(delivered).toEqual([
+      {
+        sid: "sess-1",
+        text: `[Room] Aarav commented on your plan "Plan: redo the footer":\nPlease keep the old logo.`,
+      },
+    ]);
+    const posts = (await vSync.page(pondId)).posts;
+    expect(posts.at(-1)).toMatchObject({ text: "Please keep the old logo.", replyTo: planId });
+  });
+
+  it("a comment from a viewer or a muted Member is dropped, and one on a card that is not a plan is too", async () => {
+    delivered.length = 0;
+    const rpost = async (who: Mac, id: string, doc: unknown) => rawDoc(who, pondId, "rposts", id, doc);
+    const at = clock.now;
+    await rpost(V, "000000001-viewer", { v: 1, id: "000000001-viewer", text: "no", at, replyTo: planId });
+    const note = host.room.personPost(host.project.id, "just a message");
+    await rpost(B, "000000002-notplan", { v: 1, id: "000000002-notplan", text: "hm", at, replyTo: note.id });
+    await apply();
+    expect(delivered).toEqual([]);
+    expect(host.store.roomPostById("m-000000001-viewer")).toBeNull();
+    expect(host.store.roomPostById("m-000000002-notplan")).toBeNull();
+    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: false } });
+    await B.service.refresh(pondId);
+    await rpost(B, "000000003-muted", { v: 1, id: "000000003-muted", text: "hm", at, replyTo: planId });
+    await apply();
+    expect(delivered).toEqual([]);
+    expect(host.store.roomPostById("m-000000003-muted")).toBeNull();
+    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
+    await B.service.refresh(pondId);
+  });
+
+  it("a Room published before these fields existed is written again once, so Members see its detail", async () => {
+    const port = A.service.roomPort(pondId);
+    const old = roomDocOf(host.store.roomPostById(planId)!, port.ownerId)!;
+    delete old.detail;
+    await port.put("room", planId, old);
+    expect((await bSync.page(pondId)).posts.find((p) => p.id === planId)!.detail).toBeUndefined();
+    // A restart of the Owner's Mac: a fresh sync learns what the cloud holds.
+    const again = new RoomSync({
+      service: A.service,
+      room: host.room,
+      jobs: host.jobs,
+      store: host.store,
+      now: () => clock.now,
+    });
+    await again.publish(pondId);
+    expect((await bSync.page(pondId)).posts.find((p) => p.id === planId)!.detail).toContain("Plan: 1. fix hrefs");
+  });
+
+  it("answers over the host route with replyTo, and refuses one that is not a card id", async () => {
+    const routes = new FlotillaRoutes({
+      service: B.service,
+      bridge: {} as FlotillaBridge,
+      remoteOf: async () => null,
+      startOwn: async () => ({ sessionId: "x" }),
+      roomSync: bSync,
+    });
+    const call = async (body: Record<string, unknown>) => {
+      let status = 0;
+      await routes.handle({
+        req: {} as never,
+        res: {} as never,
+        method: "POST",
+        parts: ["ponds", pondId, "room"],
+        url: new URL(`http://x/native/ponds/${pondId}/room`),
+        body: async () => body,
+        json: (s: number) => void (status = s),
+      });
+      return status;
+    };
+    expect(await call({ text: "ok", replyTo: planId })).toBe(202);
+    expect(await call({ text: "bad", replyTo: "no way" })).toBe(400);
+    expect(await call({ text: "bad", replyTo: 5 })).toBe(400);
+  });
+});
+
+describe("a Member's Room documents", () => {
+  it("reads the new fields, drops a wrong one without losing the post, and still reads an older document", () => {
+    const post = {
+      v: 1,
+      seq: 3,
+      id: "p1",
+      author: { kind: "agent", name: "Maple" },
+      kind: "plan",
+      level: "room",
+      text: "Plan",
+      at: 5,
+    };
+    expect(readRoomDoc(post)).toEqual(post);
+    const full = {
+      ...post,
+      detail: "body",
+      replyTo: "p0",
+      canvases: [{ id: "c1", title: "Deck", kind: "deck", artboards: 2 }],
+    };
+    expect(readRoomDoc(full)).toEqual(full);
+    expect(readRoomDoc({ ...full, detail: 7, replyTo: "bad id", canvases: [{ id: 1 }, full.canvases[0]] })).toEqual({
+      ...post,
+      canvases: full.canvases,
+    });
+    expect(readInboxDoc({ v: 1, id: "p1", text: "hi", at: 5, replyTo: "p0" })).toEqual({
+      v: 1,
+      id: "p1",
+      text: "hi",
+      at: 5,
+      replyTo: "p0",
+    });
+    expect(readInboxDoc({ v: 1, id: "p1", text: "hi", at: 5, replyTo: "bad id" })).toEqual({
+      v: 1,
+      id: "p1",
+      text: "hi",
+      at: 5,
+    });
   });
 });
 

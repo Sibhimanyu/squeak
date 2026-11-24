@@ -574,10 +574,10 @@ export class FlotillaRoutes {
     }
     if (parts.length === 3 && method === "POST") {
       const body = await ctx.body();
-      exact(body, ["text"]);
+      exact(body, ["text", "replyTo"]);
       if (typeof body.text !== "string") throw new FlotillaError("text must be text");
       // 202: it is in the cloud; it is in the Room when the Owner's Mac has applied it.
-      ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text)) });
+      ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text, body.replyTo)) });
       return true;
     }
     if (parts.length === 4 && parts[3] === "tasks" && method === "POST") {

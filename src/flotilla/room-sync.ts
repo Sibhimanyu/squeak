@@ -1,7 +1,14 @@
 import { EventEmitter } from "node:events";
 
 import { logger } from "../utils/logger.js";
-import { isSqueakLine, Room, RoomError, ROOM_MAX_TEXT } from "../native/room.js";
+import {
+  isSqueakLine,
+  Room,
+  RoomError,
+  ROOM_CANVAS_CARDS_MAX,
+  ROOM_DETAIL_MAX,
+  ROOM_MAX_TEXT,
+} from "../native/room.js";
 import { TaskError, type RoomTask, type RoomTasks, type TaskOrigin, type TaskState } from "../native/room-tasks.js";
 import type { NativeStore, RoomPostKind } from "../native/store.js";
 import { randomId } from "./crypto.js";
@@ -51,6 +58,14 @@ export interface RoomPort {
   owner(): Promise<{ name: string; online: boolean }>;
 }
 
+/** A canvas card as a Member sees it: no folder (that stays on the Owner's Mac), just what the card draws and the wire id. */
+export interface RoomCanvasDoc {
+  id: string;
+  title: string;
+  kind: string;
+  artboards: number;
+}
+
 /** `room`/<post id>: one Room post, written by the Owner's Mac. `seq` is the Owner's own, so every Mac orders alike. */
 export interface RoomDoc {
   v: 1;
@@ -60,6 +75,12 @@ export interface RoomDoc {
   kind: RoomPostKind;
   level: "room";
   text: string;
+  /** What a one-line post expands to (a `plan` card's spec and plan). Optional: older documents carry none. */
+  detail?: string;
+  /** The canvases a Duck's Task made or changed (a `done` line); a Member views them, never edits. */
+  canvases?: RoomCanvasDoc[];
+  /** The `plan` card a person's comment is on. */
+  replyTo?: string;
   at: number;
 }
 
@@ -69,6 +90,8 @@ export interface RoomInboxDoc {
   id: string;
   text: string;
   at: number;
+  /** A comment on this `plan` card (a Room post id); the Owner's Mac delivers it to that Duck like the Owner's own comment. */
+  replyTo?: string;
   /** Present for "Make task": the Room message to make a Task from (`text` is then empty). */
   task?: { messageId: string };
 }
@@ -92,7 +115,7 @@ export interface RoomTaskDoc {
 const rec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const POST_KINDS: readonly string[] = ["working", "done", "needs", "message", "handoff"];
+const POST_KINDS: readonly string[] = ["working", "done", "needs", "message", "handoff", "plan"];
 const TASK_STATES: readonly string[] = ["waiting", "working", "blocked", "done", "dropped"];
 
 export function readRoomDoc(v: unknown): RoomDoc | null {
@@ -102,6 +125,11 @@ export function readRoomDoc(v: unknown): RoomDoc | null {
   const a = v.author;
   if (!rec(a) || (a.kind !== "person" && a.kind !== "agent") || !str(a.name, 100) || !a.name) return null;
   if (a.id !== undefined && !str(a.id, 80)) return null;
+  // The newer fields are optional, and a wrong one drops only itself: the post still reads.
+  const detail =
+    typeof v.detail === "string" && v.detail.trim() && v.detail.length <= ROOM_DETAIL_MAX * 2 ? v.detail : "";
+  const replyTo = typeof v.replyTo === "string" && DOC_ID.test(v.replyTo) && v.replyTo.length <= 80 ? v.replyTo : "";
+  const canvases = readCanvasDocs(v.canvases);
   return {
     v: 1,
     seq: v.seq,
@@ -110,8 +138,23 @@ export function readRoomDoc(v: unknown): RoomDoc | null {
     kind: v.kind as RoomPostKind,
     level: "room",
     text: v.text,
+    ...(detail ? { detail } : {}),
+    ...(canvases.length > 0 ? { canvases } : {}),
+    ...(replyTo ? { replyTo } : {}),
     at: v.at,
   };
+}
+
+function readCanvasDocs(v: unknown): RoomCanvasDoc[] {
+  if (!Array.isArray(v)) return [];
+  const out: RoomCanvasDoc[] = [];
+  for (const c of v) {
+    if (!rec(c) || !str(c.id, 80) || !c.id || !str(c.title, 200) || !str(c.kind, 40)) continue;
+    if (!num(c.artboards) || !Number.isInteger(c.artboards) || c.artboards < 0) continue;
+    out.push({ id: c.id, title: c.title, kind: c.kind, artboards: c.artboards });
+    if (out.length >= ROOM_CANVAS_CARDS_MAX) break;
+  }
+  return out;
 }
 
 export function readInboxDoc(v: unknown): RoomInboxDoc | null {
@@ -122,7 +165,8 @@ export function readInboxDoc(v: unknown): RoomInboxDoc | null {
     if (!rec(v.task) || !str(v.task.messageId, 80) || !v.task.messageId) return null;
     return { v: 1, id: v.id, text: "", at: v.at, task: { messageId: v.task.messageId } };
   }
-  return { v: 1, id: v.id, text: v.text, at: v.at };
+  const replyTo = typeof v.replyTo === "string" && DOC_ID.test(v.replyTo) && v.replyTo.length <= 80 ? v.replyTo : "";
+  return { v: 1, id: v.id, text: v.text, at: v.at, ...(replyTo ? { replyTo } : {}) };
 }
 
 /** A Task's id is `task:<uuid>` on the Owner's Mac; the document id is the same with every character a path cannot hold made a dash. */
@@ -165,11 +209,16 @@ export function roomDocOf(
     level: string;
     text: string;
     at: number;
+    detail?: string | null;
+    replyTo?: string | null;
+    /** JSON, `RoomCanvasCard[]`. */
+    canvases?: string | null;
   },
   ownerId?: string,
 ): RoomDoc | null {
   if (row.level !== "room" || (row.authorKind !== "person" && row.authorKind !== "agent")) return null;
   if (!DOC_ID.test(row.id) || !row.text) return null;
+  const canvases = canvasDocsOf(row.canvases);
   return {
     v: 1,
     seq: row.seq,
@@ -186,8 +235,21 @@ export function roomDocOf(
     kind: row.kind,
     level: "room",
     text: row.text.slice(0, ROOM_MAX_TEXT * 4),
+    ...(row.detail ? { detail: row.detail.slice(0, ROOM_DETAIL_MAX * 2) } : {}),
+    ...(canvases.length > 0 ? { canvases } : {}),
+    ...(row.replyTo && DOC_ID.test(row.replyTo) ? { replyTo: row.replyTo } : {}),
     at: row.at,
   };
+}
+
+/** A done line's canvas cards for the cloud: the folder is dropped, the wire id stays. */
+function canvasDocsOf(raw: string | null | undefined): RoomCanvasDoc[] {
+  if (!raw) return [];
+  try {
+    return readCanvasDocs(JSON.parse(raw) as unknown);
+  } catch {
+    return [];
+  }
 }
 
 export function taskDocOf(t: RoomTask): RoomTaskDoc | null {
@@ -392,6 +454,7 @@ export class RoomSync extends EventEmitter {
               kind: "message",
               level: "room",
               text: doc.text,
+              ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
               // The Member's own time, never later than now.
               at: Math.min(doc.at, now),
             }),
@@ -415,8 +478,19 @@ export class RoomSync extends EventEmitter {
     const known = all ? new Set<string>() : (this.published.get(pondId) ?? new Set<string>());
     // First time since this Mac started: learn what the cloud already holds, so a restart rewrites nothing it need not.
     const first = !all && !this.published.has(pondId);
-    if (first) for (const d of await port.list("room")) known.add(d.id);
     const rows = this.o.store.roomPosts(projectId, { limit: ROOM_CLOUD_POSTS }).filter((r) => !isSqueakLine(r));
+    if (first) {
+      // A document written before detail, canvases or replyTo travelled is not what the Room holds now: it is written again.
+      const want = new Map<string, string>();
+      for (const row of rows) {
+        const doc = roomDocOf(row, port.ownerId);
+        if (doc) want.set(doc.id, JSON.stringify(doc));
+      }
+      for (const d of await port.list("room")) {
+        const read = readRoomDoc(d.value);
+        if (!want.has(d.id) || (read && JSON.stringify(read) === want.get(d.id))) known.add(d.id);
+      }
+    }
     const keep = new Set<string>();
     for (const row of rows) {
       const doc = roomDocOf(row, port.ownerId);
@@ -498,7 +572,11 @@ export class RoomSync extends EventEmitter {
    * A Member's message: signed and written to the inbox. It shows in the Room when the Owner's Mac applies it (at once when
    * that Mac is running); while it is away the post waits in the cloud, in order, and `offline` says so.
    */
-  async post(pondId: string, text: unknown): Promise<{ id: string; offline: boolean; line?: string }> {
+  async post(
+    pondId: string,
+    text: unknown,
+    replyTo?: unknown,
+  ): Promise<{ id: string; offline: boolean; line?: string }> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: post from the pond.", 400);
     if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
@@ -512,9 +590,12 @@ export class RoomSync extends EventEmitter {
       if (error instanceof RoomError) throw new FlotillaError(error.message, 400);
       throw error;
     }
+    if (replyTo !== undefined && (typeof replyTo !== "string" || !DOC_ID.test(replyTo) || replyTo.length > 80)) {
+      throw new FlotillaError("replyTo must be a Room card id");
+    }
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
-    const doc: RoomInboxDoc = { v: 1, id, text: clean, at };
+    const doc: RoomInboxDoc = { v: 1, id, text: clean, at, ...(replyTo ? { replyTo } : {}) };
     await port.put("rposts", id, doc);
     const owner = await port.owner().catch(() => null);
     return owner && !owner.online ? { id, offline: true, line: ownerOfflineLine(owner.name) } : { id, offline: false };
