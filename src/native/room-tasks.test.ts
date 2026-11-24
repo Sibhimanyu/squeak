@@ -3,14 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { handleMcpMessage } from "./agent-tools.js";
 import { SessionHost } from "./host.js";
 import { Room } from "./room.js";
-import { JobError, parseJobCheck, RoomJobs, type RoomJob } from "./room-jobs.js";
+import { asksForTask, parseJobCheck, RoomTasks, stripTaskPhrase, TaskError, type RoomTask } from "./room-tasks.js";
 import { NativeServer } from "./server.js";
-import { NativeStore } from "./store.js";
+import { NativeStore, taskFromJobData } from "./store.js";
 import { TimelineLog } from "./timeline-log.js";
 import type { SessionRow } from "./types.js";
 import { WorkspaceManager } from "./workspaces.js";
@@ -32,7 +33,7 @@ function rig(opts: { call?: (i: any) => Promise<string>; enabled?: () => boolean
   const sent: Array<{ id: string; text: string }> = [];
   const made: SessionRow[] = [];
   const calls: string[] = [];
-  const jobs = new RoomJobs({
+  const jobs = new RoomTasks({
     store,
     room,
     send: async (id, text) => void sent.push({ id, text }),
@@ -82,12 +83,12 @@ describe("job check", () => {
   it("makes a suggested job from a model yes, and none from a no, a failure or a timeout", async () => {
     const yes = rig({ call: async () => '{"job":true,"text":"Fix the spacing in the layout builder"}' });
     yes.jobs.attach(yes.room as any);
-    const seen: RoomJob[] = [];
+    const seen: RoomTask[] = [];
     yes.jobs.on("job", (f) => seen.push(f.job));
     const post = yes.say("hey can someone fix the spacing in the layout builder");
     await yes.jobs.idle();
     expect(yes.jobs.list(yes.pid)).toMatchObject([
-      { messageId: post.id, text: "Fix the spacing in the layout builder", status: "suggested" },
+      { messageId: post.id, text: "Fix the spacing in the layout builder", state: "waiting" },
     ]);
     expect(seen).toHaveLength(1);
 
@@ -132,8 +133,8 @@ describe("job check", () => {
     await off.jobs.idle();
     expect(off.jobs.list(off.pid)).toEqual([]);
     const manual = off.jobs.fromMessage(off.pid, post.id);
-    expect(manual).toMatchObject({ status: "suggested", text: "please fix the login redirect bug" });
-    expect(() => off.jobs.fromMessage(off.pid, post.id)).toThrow(/already a job/);
+    expect(manual).toMatchObject({ state: "waiting", text: "please fix the login redirect bug" });
+    expect(() => off.jobs.fromMessage(off.pid, post.id)).toThrow(/already a task/);
     on = true;
   });
 });
@@ -172,7 +173,7 @@ describe("actions", () => {
   const code = async (p: Promise<unknown>) =>
     p.then(
       () => 0,
-      (e) => (e instanceof JobError ? e.status : -1),
+      (e) => (e instanceof TaskError ? e.status : -1),
     );
 
   it("go sends the text as a new turn to the suggestion and hands it over; a second action is a 409", async () => {
@@ -180,11 +181,10 @@ describe("actions", () => {
     const s = r.chat("Layout builder");
     const job = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
     const done = await act(r, job.id, { action: "go" });
-    expect(done).toMatchObject({ status: "handed", handedTo: { sessionId: s.id, newThread: false } });
+    expect(done).toMatchObject({ state: "working", handedTo: { sessionId: s.id, newThread: false } });
     expect(r.sent).toEqual([{ id: s.id, text: "fix the layout builder spacing" }]);
     expect(await code(act(r, job.id, { action: "go" }))).toBe(409);
-    expect(await code(act(r, job.id, { action: "dismiss" }))).toBe(409);
-    expect(await code(act(r, "job:none", { action: "go" }))).toBe(404);
+    expect(await code(act(r, "task:none", { action: "go" }))).toBe(404);
   });
 
   it("go needs a thread; a named one wins; a bad action or key is 400", async () => {
@@ -194,33 +194,33 @@ describe("actions", () => {
     expect(await code(act(r, job.id, { action: "go" }))).toBe(409);
     expect(await code(act(r, job.id, { action: "fly" }))).toBe(400);
     expect(await code(act(r, job.id, { action: "go", extra: 1 }))).toBe(400);
-    expect(await code(act(r, job.id, { action: "dismiss", sessionId: "x" }))).toBe(400);
+    expect(await code(act(r, job.id, { action: "drop", sessionId: "x" }))).toBe(400);
     expect((await act(r, job.id, { action: "go", sessionId: other.id })).handedTo?.sessionId).toBe(other.id);
   });
 
-  it("new starts a thread with the job text; dismiss is final", async () => {
+  it("new starts a thread with the job text; drop is final", async () => {
     const r = rig();
     const job = r.jobs.fromMessage(r.pid, r.say("add a dark mode toggle to settings").id);
     const handed = await act(r, job.id, { action: "new" });
-    expect(handed).toMatchObject({ status: "handed", handedTo: { newThread: true, sessionId: r.made[0]!.id } });
+    expect(handed).toMatchObject({ state: "working", handedTo: { newThread: true, sessionId: r.made[0]!.id } });
     expect(r.calls).toEqual(["add a dark mode toggle to settings"]);
     const other = r.jobs.fromMessage(r.pid, r.say("remove the old banner from home").id);
-    expect((await act(r, other.id, { action: "dismiss" })).status).toBe("dismissed");
+    expect((await act(r, other.id, { action: "drop" })).state).toBe("dropped");
     expect(await code(act(r, other.id, { action: "new" }))).toBe(409);
     expect(r.made).toHaveLength(1);
   });
 
-  it("follows the handed turn: handed, running, then done with the outcome sentence", async () => {
+  it("follows the handed turn: working, then done with the outcome sentence", async () => {
     const r = rig();
     r.jobs.attach(r.room as any);
     const s = r.chat("Layout builder");
     const job = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
     await act(r, job.id, { action: "go" });
     const status = () => r.jobs.get(job.id)!.job;
-    expect(status().status).toBe("handed");
+    expect(status().state).toBe("working");
     r.turn(s, "u1", "fix the layout builder spacing", 0);
     r.jobs.reconcileJob(r.pid, status());
-    expect(status()).toMatchObject({ status: "running", handedTo: { turnId: `${s.id}:u1` } });
+    expect(status()).toMatchObject({ state: "working", handedTo: { turnId: `${s.id}:u1` } });
     r.log.append(s.id, {
       type: "reply.done",
       turnId: "u1",
@@ -230,7 +230,7 @@ describe("actions", () => {
     });
     r.log.append(s.id, { type: "turn.ended", turnId: "u1", outcome: "done", at: iso(0) } as any);
     r.jobs.reconcileJob(r.pid, status());
-    expect(status()).toMatchObject({ status: "done", outcomeText: "Spacing is fixed." });
+    expect(status()).toMatchObject({ state: "done", result: "Spacing is fixed." });
 
     const f = rig();
     const t = f.chat("Uploader");
@@ -238,7 +238,7 @@ describe("actions", () => {
     await f.jobs.act(f.pid, j.id, { action: "go" });
     f.turn(t, "x", "fix the uploader retry", 0, { minAgo: 0, outcome: "failed" });
     f.jobs.reconcileJob(f.pid, f.jobs.get(j.id)!.job);
-    expect(f.jobs.get(j.id)!.job.status).toBe("failed");
+    expect(f.jobs.get(j.id)!.job.state).toBe("blocked");
   });
 
   it("claims: ask, allow hands over, deny keeps the job; a claim never starts work", async () => {
@@ -254,13 +254,13 @@ describe("actions", () => {
     expect(r.jobs.openFor(r.pid, b)).toEqual([]);
 
     const denied = await act(r, job.id, { action: "deny" });
-    expect(denied).toMatchObject({ status: "suggested", claim: { status: "denied" } });
+    expect(denied).toMatchObject({ state: "waiting", claim: { status: "denied" } });
     expect(await code(act(r, job.id, { action: "deny" }))).toBe(409);
     expect(await code(act(r, job.id, { action: "allow" }))).toBe(409);
     expect(() => r.jobs.claim(a, r.pid, job.id)).toThrow(/said no/);
     expect(r.jobs.claim(b, r.pid, job.id).claim).toMatchObject({ sessionId: b.id, status: "asking" });
     const allowed = await act(r, job.id, { action: "allow" });
-    expect(allowed).toMatchObject({ status: "handed", handedTo: { sessionId: b.id }, claim: { status: "allowed" } });
+    expect(allowed).toMatchObject({ state: "working", handedTo: { sessionId: b.id }, claim: { status: "allowed" } });
     expect(r.sent).toEqual([{ id: b.id, text: "fix the layout builder spacing" }]);
   });
 });
@@ -303,16 +303,16 @@ describe("tools and routes", () => {
     const s = h.chat("Layout builder");
     const post = h.srv.room.personPost(h.project.id, "fix the layout builder spacing");
     const base = `/native/projects/${h.project.id}/room`;
-    expect((await h.call("POST", `${base}/jobs`, { messageId: post.id, x: 1 })).status).toBe(400);
-    expect((await h.call("POST", `${base}/jobs`, { messageId: "nope" })).status).toBe(404);
-    const made = await h.call("POST", `${base}/jobs`, { messageId: post.id });
+    expect((await h.call("POST", `${base}/tasks`, { messageId: post.id, x: 1 })).status).toBe(400);
+    expect((await h.call("POST", `${base}/tasks`, { messageId: "nope" })).status).toBe(404);
+    const made = await h.call("POST", `${base}/tasks`, { messageId: post.id });
     expect(made.status).toBe(201);
-    const job = ((await made.json()) as any).job;
+    const job = ((await made.json()) as any).task;
     expect(job.suggestion.sessionId).toBe(s.id);
-    expect(((await (await h.call("GET", base)).json()) as any).jobs).toHaveLength(1);
-    const dis = await h.call("POST", `${base}/jobs/${encodeURIComponent(job.id)}`, { action: "dismiss" });
-    expect(((await dis.json()) as any).job.status).toBe("dismissed");
-    expect((await h.call("POST", `${base}/jobs/${encodeURIComponent(job.id)}`, { action: "go" })).status).toBe(409);
+    expect(((await (await h.call("GET", base)).json()) as any).tasks).toHaveLength(1);
+    const dis = await h.call("POST", `${base}/tasks/${encodeURIComponent(job.id)}`, { action: "drop" });
+    expect(((await dis.json()) as any).task.state).toBe("dropped");
+    expect((await h.call("POST", `${base}/tasks/${encodeURIComponent(job.id)}`, { action: "go" })).status).toBe(409);
   });
 
   it("streams a job frame", async () => {
@@ -331,8 +331,8 @@ describe("tools and routes", () => {
     await until("event: hello");
     const post = h.srv.room.personPost(h.project.id, "add a dark mode toggle");
     h.srv.jobs.fromMessage(h.project.id, post.id);
-    await until("event: job");
-    expect(buf).toContain('"status":"suggested"');
+    await until("event: task");
+    expect(buf).toContain('"state":"waiting"');
     await reader.cancel();
   });
 
@@ -355,10 +355,188 @@ describe("tools and routes", () => {
     const claimed = await tool("claim_job", { jobId: job.id, eta: "5 min" });
     expect(claimed.isError).toBeFalsy();
     expect(h.srv.jobs.get(job.id)!.job).toMatchObject({
-      status: "suggested",
+      state: "waiting",
       claim: { status: "asking", eta: "5 min" },
     });
     expect((await tool("claim_job", { jobId: job.id })).isError).toBe(true);
     expect((await tool("claim_job", {})).isError).toBe(true);
+  });
+});
+
+describe("tasks", () => {
+  const ago = (r: ReturnType<typeof rig>, id: string, ms: number) =>
+    r.store.db.prepare("UPDATE room_posts SET at=at-? WHERE id=?").run(ms, id);
+
+  it("recognises 'make it a task' and its close variants, not a negation or a question about it", () => {
+    for (const t of [
+      "make it a task",
+      "Make this a task.",
+      "ok let's make that a task!",
+      "can you make this into a task?",
+      "turn this into a task please",
+      "make a task of it",
+      "fix the bar, make it a task",
+    ]) {
+      expect(asksForTask(t), t).toBe(true);
+    }
+    for (const t of [
+      "don't make it a task",
+      "no need to make this a task yet",
+      "should we make it a task?",
+      "the task list looks fine",
+      "make a note",
+    ]) {
+      expect(asksForTask(t), t).toBe(false);
+    }
+    expect(stripTaskPhrase("please make this a task")).toBe("");
+    expect(stripTaskPhrase("fix the bar and the nav, make it a task")).toBe("fix the bar and the nav");
+  });
+
+  it("the phrase makes a Task from the discussion since the previous Task, even with the check switched off", () => {
+    const r = rig({ enabled: () => false });
+    r.jobs.attach(r.room as any);
+    r.say("the layout builder spacing is off on mobile");
+    r.say("also the gap under the title is too big");
+    const first = r.say("make it a task");
+    const [t1] = r.jobs.list(r.pid);
+    expect(t1).toMatchObject({
+      messageId: first.id,
+      state: "waiting",
+      title: "also the gap under the title is too big",
+    });
+    expect(t1!.proposed).toBeUndefined();
+    expect(t1!.discussion.map((m) => m.text)).toEqual([
+      "the layout builder spacing is off on mobile",
+      "also the gap under the title is too big",
+      "make it a task",
+    ]);
+    r.say("now the settings page needs a dark mode toggle");
+    r.say("add a dark mode toggle to settings, make this a task");
+    const tasks = r.jobs.list(r.pid);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]).toMatchObject({
+      text: "add a dark mode toggle to settings",
+      title: "add a dark mode toggle to settings",
+    });
+    expect(tasks[1]!.discussion.map((m) => m.text)).toEqual([
+      "now the settings page needs a dark mode toggle",
+      "add a dark mode toggle to settings, make this a task",
+    ]);
+  });
+
+  it("the discussion is capped at the last 2 hours", () => {
+    const r = rig();
+    const old = r.say("an old thought about the footer");
+    ago(r, old.id, 3 * 3_600_000);
+    r.say("fresh thought about the header");
+    const t = r.jobs.fromMessage(r.pid, r.say("fix the header").id);
+    expect(t.discussion.map((m) => m.text)).toEqual(["fresh thought about the header", "fix the header"]);
+  });
+
+  it("a suggestion nobody took up does not cut the discussion; taking it up makes it a Task", async () => {
+    const r = rig({ call: async () => '{"job":true,"text":"Fix the spacing in the layout builder"}' });
+    r.jobs.attach(r.room as any);
+    r.say("context first about the layout builder");
+    const sug = r.say("please fix the spacing in the layout builder");
+    await r.jobs.idle();
+    expect(r.jobs.list(r.pid)[0]).toMatchObject({ messageId: sug.id, proposed: true, state: "waiting" });
+    r.say("something else to do with the footer, make it a task");
+    const made = r.jobs.list(r.pid).find((t) => !t.proposed)!;
+    expect(made.discussion.map((m) => m.text)[0]).toBe("context first about the layout builder");
+    expect(r.jobs.fromMessage(r.pid, sug.id).proposed).toBeUndefined();
+  });
+
+  it("the Make task action is refused twice, and a dropped Task can be made again", async () => {
+    const r = rig();
+    const post = r.say("fix the layout builder spacing");
+    const t = r.jobs.fromMessage(r.pid, post.id);
+    expect(() => r.jobs.fromMessage(r.pid, post.id)).toThrow(/already a task/);
+    expect((await r.jobs.act(r.pid, t.id, { action: "drop" })).state).toBe("dropped");
+    expect(r.jobs.fromMessage(r.pid, post.id)).toMatchObject({ id: t.id, state: "waiting" });
+  });
+
+  it("a Task can carry a parent Task", () => {
+    const r = rig();
+    const parent = r.jobs.fromMessage(r.pid, r.say("build the settings page").id);
+    const child = r.jobs.fromMessage(r.pid, r.say("add a dark mode toggle to settings").id, parent.id);
+    expect(child.parentTaskId).toBe(parent.id);
+    expect(() => r.jobs.fromMessage(r.pid, r.say("another one").id, "task:nope")).toThrow(/parent/);
+  });
+
+  it("the person's trim decides which messages the Duck is sent; Go and New both honour it", async () => {
+    const r = rig();
+    const s = r.chat("Layout builder");
+    const a = r.say("the layout builder spacing is off on mobile");
+    r.say("lunch is at noon");
+    const t = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
+    expect(t.discussion).toHaveLength(3);
+    await expect(r.jobs.act(r.pid, t.id, { action: "go", messageIds: ["nope"] })).rejects.toThrow(/isn't part/);
+    await expect(r.jobs.act(r.pid, t.id, { action: "go", messageIds: "x" })).rejects.toThrow(/list of message ids/);
+    await expect(r.jobs.act(r.pid, t.id, { action: "drop", messageIds: [] })).rejects.toThrow(/only for go/);
+    const sentTask = await r.jobs.act(r.pid, t.id, { action: "go", messageIds: [a.id, t.messageId] });
+    expect(sentTask.discussion.map((m) => m.id)).toEqual([a.id, t.messageId]);
+    expect(r.sent).toEqual([
+      {
+        id: s.id,
+        text: "fix the layout builder spacing\n\nRoom discussion before this, oldest first:\nSam: the layout builder spacing is off on mobile",
+      },
+    ]);
+    const u = r.jobs.fromMessage(r.pid, r.say("add a dark mode toggle to settings").id);
+    await r.jobs.act(r.pid, u.id, { action: "new", messageIds: [] });
+    expect(r.calls.at(-1)).toBe("add a dark mode toggle to settings");
+  });
+
+  it("a failed turn leaves the Task blocked, and a blocked Task can be dropped once", async () => {
+    const r = rig();
+    r.jobs.attach(r.room as any);
+    const s = r.chat("Layout builder");
+    const t = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
+    await r.jobs.act(r.pid, t.id, { action: "go" });
+    r.turn(s, "u1", "fix the layout builder spacing", 0, { minAgo: 0, outcome: "failed" });
+    r.jobs.reconcileJob(r.pid, r.jobs.get(t.id)!.job);
+    expect(r.jobs.get(t.id)!.job.state).toBe("blocked");
+    expect((await r.jobs.act(r.pid, t.id, { action: "drop" })).state).toBe("dropped");
+    await expect(r.jobs.act(r.pid, t.id, { action: "drop" })).rejects.toThrow(/already dropped/);
+  });
+
+  it("maps pre-Task rows to Task states once, at open", () => {
+    const old = (status: string, extra: object = {}) =>
+      JSON.stringify({
+        id: "job:1",
+        messageId: "m",
+        text: "Fix the bar. Now.",
+        status,
+        createdAt: 1,
+        updatedAt: 1,
+        ...extra,
+      });
+    const map = (status: string, extra?: object) => JSON.parse(taskFromJobData(old(status, extra))!);
+    expect(map("suggested")).toMatchObject({
+      state: "waiting",
+      proposed: true,
+      title: "Fix the bar. Now",
+      discussion: [],
+    });
+    expect(map("handed").state).toBe("working");
+    expect(map("running").state).toBe("working");
+    expect(map("failed").state).toBe("blocked");
+    expect(map("dismissed").state).toBe("dropped");
+    const done = map("done", { outcomeText: "Fixed." });
+    expect(done).toMatchObject({ state: "done", result: "Fixed." });
+    expect(done.status).toBeUndefined();
+    expect(done.outcomeText).toBeUndefined();
+    expect(taskFromJobData(JSON.stringify(done))).toBeNull();
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mig-"));
+    const file = path.join(dir, "n.db");
+    const raw = new Database(file);
+    raw.exec(
+      "CREATE TABLE room_jobs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, message_id TEXT NOT NULL, data TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+    );
+    raw.prepare("INSERT INTO room_jobs VALUES ('job:1','p','m',?,1)").run(old("done", { outcomeText: "Fixed." }));
+    raw.close();
+    const store = new NativeStore(file);
+    expect(JSON.parse(store.roomJobRows("p")[0]!.data)).toMatchObject({ state: "done", result: "Fixed." });
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

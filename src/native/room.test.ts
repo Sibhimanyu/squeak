@@ -796,7 +796,7 @@ describe("room routes", () => {
       latestSeq: 0,
       threads: [],
       turns: [],
-      jobs: [],
+      tasks: [],
       counts: { onDuty: 0, working: 0, needsYou: 0, offDuty: 0, total: 0 },
     });
   });

@@ -15,7 +15,7 @@ import {
   ROOM_IMAGE_MAX_BYTES,
   stripAttachmentLines,
 } from "./room-attachments.js";
-import { RoomJobs } from "./room-jobs.js";
+import { RoomTasks } from "./room-tasks.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
@@ -42,7 +42,7 @@ function rig() {
   const chat = (title: string) =>
     store.createSession({ cwd: duckDir, agent: "claude", model: "m", permissionMode: "default", title });
   const checks: string[] = [];
-  const jobs = new RoomJobs({
+  const jobs = new RoomTasks({
     store,
     room,
     send: async (id, text) => void sent.push({ id, text }),
@@ -194,7 +194,7 @@ describe("attachments travel into a duck's turn", () => {
       text: sent.text,
       at: new Date().toISOString(),
     } as any);
-    expect(r.jobs.reconcileJob(r.pid, r.jobs.get(job.id)!.job).status).toBe("running");
+    expect(r.jobs.reconcileJob(r.pid, r.jobs.get(job.id)!.job).state).toBe("working");
   });
 
   it("allow: a claim granted sends the attachments too", async () => {

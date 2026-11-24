@@ -18,7 +18,7 @@ import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import type { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
-import { RoomJobs } from "./room-jobs.js";
+import { RoomTasks } from "./room-tasks.js";
 import { RoomSummariser } from "./room-summary.js";
 import { Placement } from "./placement.js";
 import { ChatStarter } from "./chat-starter.js";
@@ -82,7 +82,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const sources = new WorkspaceSources({ store, workspaces });
   const placement = new Placement({ store, workspaces, sources });
   const starter = new ChatStarter({ store, host, workspaces, placement, room });
-  const jobs = new RoomJobs({
+  const jobs = new RoomTasks({
     store,
     room,
     send: (id, text) => host.send(id, text, { room: true }),

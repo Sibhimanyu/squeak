@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { appendNotebook, NOTEBOOK_MAX, notebookLine } from "./duck-notebook.js";
 import { SessionHost } from "./host.js";
 import { Room } from "./room.js";
-import { JobError, RoomJobs, type StartSpec } from "./room-jobs.js";
+import { TaskError, RoomTasks, type StartSpec } from "./room-tasks.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { buildThreadContext } from "./thread-context.js";
@@ -46,7 +46,7 @@ async function rig(kind: "git" | "folder" = "git") {
   const started: StartSpec[] = [];
   const sent: Array<{ id: string; text: string }> = [];
   let srvRef: NativeServer | null = null;
-  const jobs = new RoomJobs({
+  const jobs = new RoomTasks({
     store,
     room,
     send: async (id, text) => void sent.push({ id, text }),
@@ -128,7 +128,7 @@ async function rig(kind: "git" | "folder" = "git") {
   const code = (p: Promise<unknown>) =>
     p.then(
       () => 0,
-      (e) => (e instanceof JobError ? e.status : -1),
+      (e) => (e instanceof TaskError ? e.status : -1),
     );
   return { store, srv, room, jobs, project, call, stream, chatIn, turn, job, act, code, started, sent, log };
 }

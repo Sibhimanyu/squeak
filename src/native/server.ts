@@ -34,7 +34,7 @@ import { HostError, logHostError, type HostEvent, type SessionHost } from "./hos
 import type { NativeStore, RoomPostRow } from "./store.js";
 import { Room, RoomError } from "./room.js";
 import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
-import { JobError, jobTitle, RoomJobs, type RoomJob } from "./room-jobs.js";
+import { TaskError, taskTitle, RoomTasks, type RoomTask } from "./room-tasks.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -94,7 +94,7 @@ export interface NativeServerOptions {
   /** The pond rooms; one is made when absent (the same instance must reach `tools` for agents to share it). */
   room?: Room;
   /** Room jobs; one is made when absent (it must be the one `tools` and main.ts's auto check share). */
-  jobs?: RoomJobs;
+  jobs?: RoomTasks;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -180,7 +180,7 @@ export class NativeServer {
   private readonly history: VersionHistory;
   private readonly gitPond: GitPond;
   readonly room: Room;
-  readonly jobs: RoomJobs;
+  readonly jobs: RoomTasks;
   private readonly artifacts: Artifacts;
   private readonly showRelay: ShowRelay;
   private readonly canvasWatcher = new CanvasWatcher();
@@ -204,7 +204,7 @@ export class NativeServer {
       new ChatStarter({ store: options.store, host, workspaces, placement: this.placement, room: this.room });
     this.jobs =
       options.jobs ??
-      new RoomJobs({
+      new RoomTasks({
         store: options.store,
         room: this.room,
         send: (id, text) => host.send(id, text, { room: true }),
@@ -590,7 +590,7 @@ export class NativeServer {
           try {
             const moved = await this.placement.move(
               id,
-              { kind: "new", title: jobTitle(text) },
+              { kind: "new", title: taskTitle(text) },
               (spec) => this.starter.create(spec),
               text,
             );
@@ -1133,7 +1133,7 @@ export class NativeServer {
       area === "projects" &&
       id &&
       sub === "room" &&
-      parts[4] === "jobs" &&
+      parts[4] === "tasks" &&
       (parts.length === 5 || parts.length === 6)
     ) {
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
@@ -1141,13 +1141,13 @@ export class NativeServer {
       const b = await this.body(req);
       try {
         if (parts.length === 5) {
-          const unknown = Object.keys(b).filter((k) => k !== "messageId");
+          const unknown = Object.keys(b).filter((k) => k !== "messageId" && k !== "parentTaskId");
           if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
-          return this.json(res, 201, { job: this.jobs.fromMessage(id, b.messageId) });
+          return this.json(res, 201, { task: this.jobs.fromMessage(id, b.messageId, b.parentTaskId) });
         }
-        return this.json(res, 200, { job: await this.jobs.act(id, decodeURIComponent(parts[5]!), b) });
+        return this.json(res, 200, { task: await this.jobs.act(id, decodeURIComponent(parts[5]!), b) });
       } catch (error) {
-        if (error instanceof JobError) throw new HttpError(error.status, error.message);
+        if (error instanceof TaskError) throw new HttpError(error.status, error.message);
         throw error;
       }
     }
@@ -1175,7 +1175,7 @@ export class NativeServer {
             ...(before !== undefined ? { before } : {}),
             ...(limit !== undefined ? { limit: Math.min(200, Math.max(1, limit)) } : {}),
           }),
-          jobs: this.jobs.list(id),
+          tasks: this.jobs.list(id),
         });
       }
       if (method === "POST") {
@@ -1576,15 +1576,15 @@ export class NativeServer {
       if (f.projectId !== projectId) return;
       res.write(`event: thread\ndata: ${JSON.stringify(f.thread)}\n\n`);
     };
-    const onJob = (f: { projectId: string; job: RoomJob }): void => {
+    const onTask = (f: { projectId: string; job: RoomTask }): void => {
       if (f.projectId !== projectId) return;
-      res.write(`event: job\ndata: ${JSON.stringify(f.job)}\n\n`);
+      res.write(`event: task\ndata: ${JSON.stringify(f.job)}\n\n`);
     };
     // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
     room.on("post", onPost);
     room.on("turn", onTurn);
     room.on("thread", onThread);
-    this.jobs.on("job", onJob);
+    this.jobs.on("job", onTask);
     room.streamOpened(projectId);
     res.write(`event: hello\ndata: ${JSON.stringify({ latestSeq: this.options.store.latestRoomSeq(projectId) })}\n\n`);
     const beat = setInterval(() => {
@@ -1597,7 +1597,7 @@ export class NativeServer {
       room.off("post", onPost);
       room.off("turn", onTurn);
       room.off("thread", onThread);
-      this.jobs.off("job", onJob);
+      this.jobs.off("job", onTask);
       room.streamClosed(projectId);
     });
   }
