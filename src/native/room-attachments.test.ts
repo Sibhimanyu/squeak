@@ -45,6 +45,7 @@ function rig() {
   const jobs = new RoomTasks({
     store,
     room,
+    settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }), // these tests tap Go
     send: async (id, text) => void sent.push({ id, text }),
     newThread: async (_p, text, title, attach) => {
       started.push(text + (attach?.(duckDir) ?? ""));
@@ -265,6 +266,7 @@ describe("the room routes", () => {
       await host.stop();
     });
     const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
+    store.saveProjectSettings({ ...store.getProjectSettings(project.id), askBeforeStarting: true }); // these tests tap Go
     const other = store.createProject({ name: "other", rootPath: dir + "-o", defaultBranch: "main", kind: "folder" });
     const token = fs.readFileSync(tokenPath, "utf8").trim();
     const call = (method: string, url: string, body?: unknown, tok: string | null = token) =>

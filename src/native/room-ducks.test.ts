@@ -41,6 +41,7 @@ async function server() {
   });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ducks-pond-"));
   const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind: "folder" });
+  store.saveProjectSettings({ ...store.getProjectSettings(project.id), askBeforeStarting: true }); // these tests tap Go
   const chat = (title: string): SessionRow =>
     store.createSession({ cwd: root, agent: "claude", model: "m", permissionMode: "default", title });
   const token = fs.readFileSync(tokenPath, "utf8").trim();

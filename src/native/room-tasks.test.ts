@@ -23,7 +23,16 @@ afterEach(async () => {
 
 const iso = (minAgo: number): string => new Date(Date.now() - minAgo * 60_000).toISOString();
 
-function rig(opts: { call?: (i: any) => Promise<string>; enabled?: () => boolean; timeoutMs?: number } = {}) {
+function rig(
+  opts: {
+    call?: (i: any) => Promise<string>;
+    enabled?: () => boolean;
+    timeoutMs?: number;
+    rules?: { askBeforeStarting: boolean; maxWorkingDucks: number };
+  } = {},
+) {
+  // The Pond's start rules; most tests below are about Go, so they ask before starting.
+  const rules = opts.rules ?? { askBeforeStarting: true, maxWorkingDucks: 4 };
   const store = new NativeStore(":memory:");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-"));
   const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
@@ -43,6 +52,7 @@ function rig(opts: { call?: (i: any) => Promise<string>; enabled?: () => boolean
       calls.push(text);
       return s;
     },
+    settings: () => rules,
     call: opts.call ?? (async () => '{"job":false,"text":""}'),
     ...(opts.enabled ? { enabled: opts.enabled } : {}),
     ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
@@ -69,7 +79,7 @@ function rig(opts: { call?: (i: any) => Promise<string>; enabled?: () => boolean
     }
   };
   const say = (text: string) => room.personPost(project.id, text);
-  return { store, project, chat, room, jobs, sent, made, calls, log, turn, say, pid: project.id };
+  return { store, project, chat, room, jobs, sent, made, calls, log, turn, say, rules, pid: project.id };
 }
 
 describe("job check", () => {
@@ -286,6 +296,8 @@ describe("tools and routes", () => {
     });
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-pond-"));
     const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind: "folder" });
+    // These tests are about Go and claims; the start-at-once routes below turn this off over HTTP.
+    store.saveProjectSettings({ ...store.getProjectSettings(project.id), askBeforeStarting: true });
     const chat = (title: string): SessionRow =>
       store.createSession({ cwd: root, agent: "claude", model: "m", permissionMode: "default", title });
     const token = fs.readFileSync(tokenPath, "utf8").trim();
@@ -313,6 +325,68 @@ describe("tools and routes", () => {
     const dis = await h.call("POST", `${base}/tasks/${encodeURIComponent(job.id)}`, { action: "drop" });
     expect(((await dis.json()) as any).task.state).toBe("dropped");
     expect((await h.call("POST", `${base}/tasks/${encodeURIComponent(job.id)}`, { action: "go" })).status).toBe(409);
+  });
+
+  it("Pond settings: Ask before starting is off and the limit is 4 until set; bad values are 400", async () => {
+    const h = await server();
+    const url = `/native/projects/${h.project.id}/settings`;
+    const fresh = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-pond-"));
+    const other = h.store.createProject({ name: "two", rootPath: fresh, defaultBranch: "main", kind: "folder" });
+    const first = (await (await h.call("GET", `/native/projects/${other.id}/settings`)).json()) as any;
+    expect(first.effective).toMatchObject({ askBeforeStarting: false, maxWorkingDucks: 4 });
+    const set = (await (await h.call("PATCH", url, { askBeforeStarting: false, maxWorkingDucks: 2 })).json()) as any;
+    expect(set.effective).toMatchObject({ askBeforeStarting: false, maxWorkingDucks: 2 });
+    expect(set.settings).toMatchObject({ askBeforeStarting: false, maxWorkingDucks: 2 });
+    for (const bad of [0, 1.5, "many", 51, -1]) {
+      expect((await h.call("PATCH", url, { maxWorkingDucks: bad })).status).toBe(400);
+    }
+    const reset = (await (
+      await h.call("PATCH", url, { maxWorkingDucks: null, askBeforeStarting: null })
+    ).json()) as any;
+    expect(reset.effective).toMatchObject({ askBeforeStarting: false, maxWorkingDucks: 4 });
+  });
+
+  it("a routed Task starts over HTTP without Go, waits at the limit, and Ask before starting restores Go", async () => {
+    const h = await server();
+    const sent: Array<{ id: string; text: string }> = [];
+    (h.host as any).send = async (id: string, text: string) => void sent.push({ id, text });
+    const a = h.chat("Layout builder");
+    const b = h.chat("Billing webhook");
+    for (const [s, past] of [
+      [a, "refactor the layout builder grid"],
+      [b, "retry failed billing webhook events"],
+    ] as const) {
+      const log = new TimelineLog(h.store.db);
+      log.append(s.id, { type: "turn.started", turnId: "old", promptMessageId: "m", text: past, at: iso(30) } as any);
+      log.append(s.id, { type: "reply.done", turnId: "old", messageId: "r", text: "Done.", at: iso(20) });
+      log.append(s.id, { type: "turn.ended", turnId: "old", outcome: "done", at: iso(20) } as any);
+    }
+    const base = `/native/projects/${h.project.id}`;
+    await h.call("PATCH", `${base}/settings`, { askBeforeStarting: false, maxWorkingDucks: 1 });
+    const make = async (text: string) => {
+      const post = h.srv.room.personPost(h.project.id, text);
+      const made = (await (await h.call("POST", `${base}/room/tasks`, { messageId: post.id })).json()) as any;
+      await h.srv.jobs.idle();
+      return made.task.id as string;
+    };
+    const state = (id: string) => h.srv.jobs.get(id)!.job.state;
+    const t1 = await make("fix the layout builder spacing");
+    const t2 = await make("fix the billing webhook retry");
+    expect([state(t1), state(t2)]).toEqual(["working", "waiting"]);
+    expect(sent.map((x) => x.id)).toEqual([a.id]);
+    // Raising the limit over HTTP lets the one in line start.
+    await h.call("PATCH", `${base}/settings`, { maxWorkingDucks: 2 });
+    await h.srv.jobs.idle();
+    expect(state(t2)).toBe("working");
+    expect(sent.map((x) => x.id)).toEqual([a.id, b.id]);
+
+    await h.call("PATCH", `${base}/settings`, { askBeforeStarting: true });
+    const c = h.chat("Uploader");
+    void c;
+    const t3 = await make("also fix the layout builder grid on mobile");
+    expect(state(t3)).toBe("waiting");
+    const go = await h.call("POST", `${base}/room/tasks/${encodeURIComponent(t3)}`, { action: "go" });
+    expect(((await go.json()) as any).task.state).toBe("working");
   });
 
   it("streams a job frame", async () => {
@@ -439,7 +513,10 @@ describe("tasks", () => {
     r.say("context first about the layout builder");
     const sug = r.say("please fix the spacing in the layout builder");
     await r.jobs.idle();
-    expect(r.jobs.list(r.pid)[0]).toMatchObject({ messageId: sug.id, proposed: true, state: "waiting" });
+    expect(r.jobs.list(r.pid).find((t) => t.messageId === sug.id)).toMatchObject({
+      proposed: true,
+      state: "waiting",
+    });
     r.say("something else to do with the footer, make it a task");
     const made = r.jobs.list(r.pid).find((t) => !t.proposed)!;
     expect(made.discussion.map((m) => m.text)[0]).toBe("context first about the layout builder");
@@ -538,5 +615,112 @@ describe("tasks", () => {
     const store = new NativeStore(file);
     expect(JSON.parse(store.roomJobRows("p")[0]!.data)).toMatchObject({ state: "done", result: "Fixed." });
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("start at once, with limits", () => {
+  const topics = [
+    ["Layout builder", "refactor the layout builder grid", "fix the layout builder spacing"],
+    ["Billing webhook", "retry failed billing webhook events", "fix the billing webhook retry"],
+    ["Uploader", "resume interrupted uploader transfers", "fix the uploader resume"],
+  ] as const;
+  function ducks(r: ReturnType<typeof rig>) {
+    return topics.map(([title, past]) => {
+      const s = r.chat(title);
+      r.turn(s, `old-${title}`, past, 30, { minAgo: 20, reply: "Done." });
+      return s;
+    });
+  }
+  const finish = (r: ReturnType<typeof rig>, s: SessionRow, text: string, taskId: string) => {
+    r.turn(s, `t-${s.id}`, text, 0, { minAgo: 0, reply: "Finished." });
+    r.jobs.reconcileJob(r.pid, r.jobs.get(taskId)!.job);
+    r.jobs.startWaiting();
+  };
+  const state = (r: ReturnType<typeof rig>, id: string) => r.jobs.get(id)!.job.state;
+
+  it("a Task with a destination starts without Go by default", async () => {
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
+    const [a] = ducks(r);
+    const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    expect(t.suggestion?.sessionId).toBe(a!.id);
+    expect(t.state).toBe("waiting");
+    await r.jobs.idle();
+    expect(r.jobs.get(t.id)!.job).toMatchObject({ state: "working", handedTo: { sessionId: a!.id } });
+    expect(r.sent).toEqual([{ id: a!.id, text: topics[0][2] }]);
+  });
+
+  it("a Task without a destination, or only suggested by the check, does not start itself", async () => {
+    const r = rig({
+      rules: { askBeforeStarting: false, maxWorkingDucks: 4 },
+      call: async () => '{"job":true,"text":"Fix the layout builder spacing"}',
+    });
+    ducks(r);
+    r.jobs.attach(r.room as any);
+    const none = r.jobs.fromMessage(r.pid, r.say("rename the onboarding screen copy").id);
+    r.say("please fix the layout builder spacing");
+    await r.jobs.idle();
+    expect(r.sent).toEqual([]);
+    expect(none.state).toBe("waiting");
+    expect(r.jobs.list(r.pid).find((t) => t.proposed)).toMatchObject({ state: "waiting" });
+  });
+
+  it("Ask before starting keeps the Go tap", async () => {
+    const r = rig({ rules: { askBeforeStarting: true, maxWorkingDucks: 4 } });
+    const [a] = ducks(r);
+    const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    expect(state(r, t.id)).toBe("waiting");
+    expect(r.sent).toEqual([]);
+    await r.jobs.act(r.pid, t.id, { action: "go" });
+    expect(r.sent).toEqual([{ id: a!.id, text: topics[0][2] }]);
+  });
+
+  it("over the working-Ducks limit a Task waits, and Tasks start in order as Ducks finish", async () => {
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 1 } });
+    const [a, b, c] = ducks(r);
+    const ta = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    const tb = r.jobs.fromMessage(r.pid, r.say(topics[1][2]).id);
+    const tc = r.jobs.fromMessage(r.pid, r.say(topics[2][2]).id);
+    await r.jobs.idle();
+    expect([state(r, ta.id), state(r, tb.id), state(r, tc.id)]).toEqual(["working", "waiting", "waiting"]);
+    expect(r.sent.map((x) => x.id)).toEqual([a!.id]);
+
+    finish(r, a!, topics[0][2], ta.id);
+    await r.jobs.idle();
+    expect([state(r, ta.id), state(r, tb.id), state(r, tc.id)]).toEqual(["done", "working", "waiting"]);
+
+    finish(r, b!, topics[1][2], tb.id);
+    await r.jobs.idle();
+    expect([state(r, tb.id), state(r, tc.id)]).toEqual(["done", "working"]);
+    expect(r.sent.map((x) => x.id)).toEqual([a!.id, b!.id, c!.id]);
+  });
+
+  it("raising the limit starts the Tasks waiting in line", async () => {
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 1 } });
+    ducks(r);
+    const t1 = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    const t2 = r.jobs.fromMessage(r.pid, r.say(topics[1][2]).id);
+    await r.jobs.idle();
+    expect(state(r, t2.id)).toBe("waiting");
+    r.rules.maxWorkingDucks = 2;
+    r.jobs.startWaiting(r.pid);
+    await r.jobs.idle();
+    expect([state(r, t1.id), state(r, t2.id)]).toEqual(["working", "working"]);
+  });
+
+  it("a Task routed to a busy Duck queues behind its work and takes no slot", async () => {
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 1 } });
+    const [a] = ducks(r);
+    const first = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    r.store.setStatus(a!.id, "working");
+    const second = r.jobs.fromMessage(r.pid, r.say("also fix the layout builder grid spacing on mobile").id);
+    await r.jobs.idle();
+    expect(second.suggestion?.sessionId).toBe(a!.id);
+    expect(state(r, second.id)).toBe("working");
+    expect(r.sent.map((x) => x.id)).toEqual([a!.id, a!.id]);
+    expect(state(r, first.id)).toBe("working");
   });
 });

@@ -254,6 +254,10 @@ export interface ProjectSettingsRow {
   cloneDependencies: boolean | null;
   /** Context tokens at which a Claude chat compacts itself. null = the default (200k), 0 = off. */
   autoCompactTokens: number | null;
+  /** Room Tasks: a person taps Go before a routed Task starts. null = the default, off (Tasks start at once). */
+  askBeforeStarting: boolean | null;
+  /** Room Tasks: how many Ducks may work at once; more Tasks wait in line. null = the default, 4. */
+  maxWorkingDucks: number | null;
   prompts: Partial<Record<GitAction, string>>;
 }
 

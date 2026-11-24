@@ -212,6 +212,11 @@ export const MIGRATIONS: string[] = [
   `
   CREATE INDEX IF NOT EXISTS messages_session_created ON messages(session_id, created_at);
   `,
+  // Room Tasks: per-pond start rules (Ask before starting, working-Ducks limit).
+  `
+  ALTER TABLE project_settings ADD COLUMN ask_before_starting INTEGER;
+  ALTER TABLE project_settings ADD COLUMN max_working_ducks INTEGER;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -802,19 +807,22 @@ export class NativeStore {
       reviewEffort: (r?.review_effort as string | null | undefined) ?? null,
       cloneDependencies: r?.clone_dependencies === 0 ? false : r?.clone_dependencies === 1 ? true : null,
       autoCompactTokens: typeof r?.auto_compact_tokens === "number" ? r.auto_compact_tokens : null,
+      askBeforeStarting: r?.ask_before_starting === 0 ? false : r?.ask_before_starting === 1 ? true : null,
+      maxWorkingDucks: typeof r?.max_working_ducks === "number" ? r.max_working_ducks : null,
       prompts,
     };
   }
   saveProjectSettings(s: ProjectSettingsRow): void {
     this.db
       .prepare(
-        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort,clone_dependencies,auto_compact_tokens)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort,clone_dependencies,auto_compact_tokens,ask_before_starting,max_working_ducks)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
            archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
            merge_method=excluded.merge_method, prompts=excluded.prompts,
            review_model=excluded.review_model, review_effort=excluded.review_effort,
-           clone_dependencies=excluded.clone_dependencies, auto_compact_tokens=excluded.auto_compact_tokens`,
+           clone_dependencies=excluded.clone_dependencies, auto_compact_tokens=excluded.auto_compact_tokens,
+           ask_before_starting=excluded.ask_before_starting, max_working_ducks=excluded.max_working_ducks`,
       )
       .run(
         s.projectId,
@@ -828,6 +836,8 @@ export class NativeStore {
         s.reviewEffort,
         s.cloneDependencies === null ? null : s.cloneDependencies ? 1 : 0,
         s.autoCompactTokens,
+        s.askBeforeStarting === null ? null : s.askBeforeStarting ? 1 : 0,
+        s.maxWorkingDucks,
       );
   }
 

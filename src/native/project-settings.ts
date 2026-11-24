@@ -12,6 +12,10 @@ import {
 import type { NativeStore } from "./store.js";
 import { DEFAULT_AUTO_COMPACT_TOKENS } from "./api-wait.js";
 
+/** Room Tasks: how many Ducks may work at once in a Pond unless the Pond says otherwise. */
+export const DEFAULT_MAX_WORKING_DUCKS = 4;
+export const MAX_WORKING_DUCKS_CAP = 50;
+
 export type SettingSource = "project" | "conductor.json" | "default";
 
 /** Plain words. `{base}` and `{branch}` are filled in when the prompt is sent. */
@@ -115,6 +119,10 @@ export interface EffectiveSettings {
   cloneDependencies: boolean;
   /** Context tokens at which a Claude chat compacts itself: 200000 by default, 0 = off. */
   autoCompactTokens: number;
+  /** Room Tasks: a person taps Go before a routed Task starts (default off: it starts at once). */
+  askBeforeStarting: boolean;
+  /** Room Tasks: Ducks that may work at once; more Tasks wait in line and start as Ducks finish (default 4). */
+  maxWorkingDucks: number;
   prompts: Record<GitAction, string>;
 }
 
@@ -156,6 +164,8 @@ export function resolveSettings(store: NativeStore, project: ProjectRow, gitUser
       reviewEffort: settings.reviewEffort,
       cloneDependencies: settings.cloneDependencies !== false,
       autoCompactTokens: settings.autoCompactTokens ?? DEFAULT_AUTO_COMPACT_TOKENS,
+      askBeforeStarting: settings.askBeforeStarting === true,
+      maxWorkingDucks: settings.maxWorkingDucks ?? DEFAULT_MAX_WORKING_DUCKS,
       prompts,
     },
     sources: {
@@ -196,6 +206,8 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     "reviewEffort",
     "cloneDependencies",
     "autoCompactTokens",
+    "askBeforeStarting",
+    "maxWorkingDucks",
     "prompts",
   ]);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw new SettingsError(`Unknown setting: ${k}.`);
@@ -255,6 +267,18 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     else if (typeof v === "number" && Number.isFinite(v) && v >= 100_000 && v <= 1_000_000)
       next.autoCompactTokens = Math.round(v);
     else throw new SettingsError("autoCompactTokens must be 0 (off), or 100000 to 1000000.");
+  }
+  if ("askBeforeStarting" in body) {
+    const v = body.askBeforeStarting;
+    // A boolean, or null for the default (off).
+    next.askBeforeStarting = typeof v === "boolean" ? v : null;
+  }
+  if ("maxWorkingDucks" in body) {
+    const v = body.maxWorkingDucks;
+    if (v === null || v === "") next.maxWorkingDucks = null;
+    else if (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_WORKING_DUCKS_CAP)
+      next.maxWorkingDucks = v;
+    else throw new SettingsError(`maxWorkingDucks must be a whole number from 1 to ${MAX_WORKING_DUCKS_CAP}.`);
   }
   if ("prompts" in body) {
     const p = body.prompts;

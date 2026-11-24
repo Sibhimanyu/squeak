@@ -49,6 +49,7 @@ async function rig(kind: "git" | "folder" = "git") {
   const jobs = new RoomTasks({
     store,
     room,
+    settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }), // these tests tap Go
     send: async (id, text) => void sent.push({ id, text }),
     newThread: async () => {
       throw new Error("unused");

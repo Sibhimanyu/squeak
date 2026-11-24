@@ -121,18 +121,24 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
         /// A model for Review: when set, Review starts its own chat with it.
         public var reviewModel: String?
         public var reviewEffort: String?
+        /// Room Tasks: ask before a routed Task starts. nil = the default, off.
+        public var askBeforeStarting: Bool?
+        /// Room Tasks: Ducks that may work at once. nil = the default, 4.
+        public var maxWorkingDucks: Int?
         public var prompts: [String: String]
 
         public init(
             setupScript: String? = nil, runScript: String? = nil, archiveScript: String? = nil, branchPrefix: String? = nil,
-            mergeMethod: String? = nil, reviewModel: String? = nil, reviewEffort: String? = nil, prompts: [String: String] = [:]
+            mergeMethod: String? = nil, reviewModel: String? = nil, reviewEffort: String? = nil,
+            askBeforeStarting: Bool? = nil, maxWorkingDucks: Int? = nil, prompts: [String: String] = [:]
         ) {
             self.setupScript = setupScript; self.runScript = runScript; self.archiveScript = archiveScript
             self.branchPrefix = branchPrefix; self.mergeMethod = mergeMethod; self.prompts = prompts
             self.reviewModel = reviewModel; self.reviewEffort = reviewEffort
+            self.askBeforeStarting = askBeforeStarting; self.maxWorkingDucks = maxWorkingDucks
         }
 
-        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, prompts }
+        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, askBeforeStarting, maxWorkingDucks, prompts }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -143,6 +149,8 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
             mergeMethod = c.lenient(String.self, .mergeMethod)
             reviewModel = c.lenient(String.self, .reviewModel)
             reviewEffort = c.lenient(String.self, .reviewEffort)
+            askBeforeStarting = c.lenient(Bool.self, .askBeforeStarting)
+            maxWorkingDucks = c.lenient(Int.self, .maxWorkingDucks)
             prompts = c.lenient([String: String].self, .prompts) ?? [:]
         }
     }
@@ -155,18 +163,24 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
         public var mergeMethod: String
         public var reviewModel: String?
         public var reviewEffort: String?
+        /// Room Tasks: a person taps Go before a routed Task starts (default off).
+        public var askBeforeStarting: Bool
+        /// Room Tasks: Ducks that may work at once; more Tasks wait in line (default 4).
+        public var maxWorkingDucks: Int
         public var prompts: [String: String]
 
         public init(
             setupScript: String? = nil, runScript: String? = nil, archiveScript: String? = nil, branchPrefix: String = "",
-            mergeMethod: String = "squash", reviewModel: String? = nil, reviewEffort: String? = nil, prompts: [String: String] = [:]
+            mergeMethod: String = "squash", reviewModel: String? = nil, reviewEffort: String? = nil,
+            askBeforeStarting: Bool = false, maxWorkingDucks: Int = 4, prompts: [String: String] = [:]
         ) {
             self.setupScript = setupScript; self.runScript = runScript; self.archiveScript = archiveScript
             self.branchPrefix = branchPrefix; self.mergeMethod = mergeMethod; self.prompts = prompts
             self.reviewModel = reviewModel; self.reviewEffort = reviewEffort
+            self.askBeforeStarting = askBeforeStarting; self.maxWorkingDucks = maxWorkingDucks
         }
 
-        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, prompts }
+        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, askBeforeStarting, maxWorkingDucks, prompts }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -177,6 +191,8 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
             mergeMethod = c.lenient(String.self, .mergeMethod) ?? "squash"
             reviewModel = c.lenient(String.self, .reviewModel)
             reviewEffort = c.lenient(String.self, .reviewEffort)
+            askBeforeStarting = c.lenient(Bool.self, .askBeforeStarting) ?? false
+            maxWorkingDucks = c.lenient(Int.self, .maxWorkingDucks) ?? 4
             prompts = c.lenient([String: String].self, .prompts) ?? [:]
         }
     }
@@ -543,9 +559,17 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
     /// "" = review in the chat itself.
     public var reviewModel: String
     public var reviewEffort: String
+    /// Room Tasks: ask before a routed Task starts (off: Tasks start at once).
+    public var askBeforeStarting: Bool
+    /// Room Tasks: Ducks that may work at once (4 unless set).
+    public var maxWorkingDucks: Int
     public var prompts: [String: String]
 
+    public static let workingDucksRange = 1...20
+
     public init(_ s: NativeProjectSettings) {
+        askBeforeStarting = s.settings.askBeforeStarting ?? s.effective.askBeforeStarting
+        maxWorkingDucks = s.settings.maxWorkingDucks ?? s.effective.maxWorkingDucks
         reviewModel = s.settings.reviewModel ?? ""
         reviewEffort = s.settings.reviewEffort ?? ""
         setupScript = s.settings.setupScript ?? ""
@@ -570,6 +594,11 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
         if reviewModel != base.reviewModel { body["reviewModel"] = reviewModel.isEmpty ? .null : .string(reviewModel) }
         if reviewEffort != base.reviewEffort, !reviewModel.isEmpty || reviewEffort.isEmpty {
             body["reviewEffort"] = reviewEffort.isEmpty ? .null : .string(reviewEffort)
+        }
+        if askBeforeStarting != base.askBeforeStarting { body["askBeforeStarting"] = .bool(askBeforeStarting) }
+        if maxWorkingDucks != base.maxWorkingDucks {
+            let n = min(max(maxWorkingDucks, Self.workingDucksRange.lowerBound), Self.workingDucksRange.upperBound)
+            body["maxWorkingDucks"] = .number(Double(n))
         }
         var prompts: [String: NativeJSON] = [:]
         for a in NativeProjectSettings.actions where self.prompts[a] != base.prompts[a] {

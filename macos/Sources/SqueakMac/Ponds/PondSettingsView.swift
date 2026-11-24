@@ -337,6 +337,8 @@ struct PondSettingsView: View {
     private func agents(_ p: NativeProject) -> some View {
         section("Agents", "Choose how reviews, action prompts and scheduled work behave.") {
             if let original, draft != nil {
+                taskStarting
+                Divider().overlay(Theme.line)
                 reviewModel(original)
                 Divider().overlay(Theme.line)
                 DisclosureGroup(isExpanded: $promptsExpanded) {
@@ -353,6 +355,29 @@ struct PondSettingsView: View {
                 Divider().overlay(Theme.line)
                 BacklogSection(project: p)
             } else { loading }
+        }
+    }
+
+    /// How Tasks that have a Duck to go to begin: at once (the default), or when you tap Go; and how many Ducks work at once.
+    private var taskStarting: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle(isOn: Binding(get: { draft?.askBeforeStarting ?? false }, set: { draft?.askBeforeStarting = $0 })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ask before starting").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text("Off: a Task starts as soon as it has a Duck. On: it waits for you to tap Go.")
+                        .font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+            }
+            .toggleStyle(.switch)
+            VStack(alignment: .leading, spacing: 4) {
+                Stepper(value: Binding(get: { draft?.maxWorkingDucks ?? 4 }, set: { draft?.maxWorkingDucks = $0 }),
+                        in: ProjectSettingsDraft.workingDucksRange) {
+                    Text("Ducks working at once: \(draft?.maxWorkingDucks ?? 4)").font(Typo.label).foregroundStyle(Theme.ink)
+                }
+                .accessibilityLabel("Ducks working at once")
+                Text("More Tasks than this wait their turn and start as Ducks finish.")
+                    .font(Typo.meta).foregroundStyle(Theme.muted)
+            }
         }
     }
 
