@@ -33,8 +33,19 @@ public struct RoomCanvasCard: Sendable, Equatable, Decodable, Identifiable {
     public var kind: String
     public var artboards: Int
 
-    public init(id: String, path: String, title: String, kind: String, artboards: Int) {
+    public init(id: String, path: String = "", title: String, kind: String, artboards: Int) {
         self.id = id; self.path = path; self.title = title; self.kind = kind; self.artboards = artboards
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, path, title, kind, artboards }
+    /// A Member's card has no folder (it stays on the Owner's Mac): `path` is empty and the card opens by `id`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        path = (try? c.decode(String.self, forKey: .path)) ?? ""
+        title = try c.decode(String.self, forKey: .title)
+        kind = (try? c.decode(String.self, forKey: .kind)) ?? ""
+        artboards = (try? c.decode(Int.self, forKey: .artboards)) ?? 0
     }
 
     /// "Deck \u{00B7} 3 artboards".

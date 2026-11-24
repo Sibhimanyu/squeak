@@ -567,6 +567,7 @@ export function startGuest({
       ui.roomUi = createRoomScreen({
         onBack: () => (win.history.state?.r ? win.history.back() : closeRoom()),
         onSend: sendToRoom,
+        onComment: (cardId, text) => sendToRoom(text, cardId),
         onTakeBack: takeBackFromRoom,
       });
       ui.screen = "room";
@@ -596,10 +597,10 @@ export function startGuest({
     paint();
   }
 
-  async function sendToRoom(text) {
+  async function sendToRoom(text, replyTo) {
     const r = ui.room;
     try {
-      const { id, at } = await ui.pond.postToRoom(text);
+      const { id, at } = await ui.pond.postToRoom(text, replyTo);
       r.pending.push({ id, text, at, failed: false });
       r.error = null;
       paint();

@@ -61,9 +61,12 @@ public struct RoomClient: Sendable {
         do { return try JSONDecoder().decode(R.self, from: data).post } catch { throw NativeHostError.badResponse }
     }
 
-    /// A Member's message: `POST /native/ponds/<id>/room { text }` answers 202 once it is in the cloud.
-    public func queue(pond: String, text: String) async throws -> RoomQueued {
-        let data = try await host.call("POST", path(pond), body: .object(["text": .string(text)]), timeout: 20, maybeSent: true)
+    /// A Member's message: `POST /native/ponds/<id>/room { text }` answers 202 once it is in the cloud. With `replyTo` (a
+    /// spec+plan card's post id) it is a comment on that card: the Owner's Mac delivers it to that Duck at its next turn.
+    public func queue(pond: String, text: String, replyTo: String? = nil) async throws -> RoomQueued {
+        var fields: [String: NativeJSON] = ["text": .string(text)]
+        if let replyTo { fields["replyTo"] = .string(replyTo) }
+        let data = try await host.call("POST", path(pond), body: .object(fields), timeout: 20, maybeSent: true)
         guard let j = NativeJSON.parse(String(decoding: data, as: UTF8.self)), let id = j["id"]?.string else { throw NativeHostError.badResponse }
         return RoomQueued(id: id, offline: j["offline"]?.bool ?? false, line: j["line"]?.string)
     }

@@ -16,7 +16,7 @@ final class PondRoomTests: XCTestCase {
         XCTAssertEqual(doc.pond, "p-green")
         XCTAssertTrue(doc.canPost)
         XCTAssertTrue(doc.canTask)
-        XCTAssertEqual(doc.items.map(\.id), ["post-1", "task:task:1", "post-2", "post-3"])
+        XCTAssertEqual(doc.items.map(\.id), ["post-1", "task:task:1", "post-2", "post-3", "post-4", "post-5"])
         guard case .message(let first) = doc.items[0], case .task(let card) = doc.items[1],
               case .duck(let line) = doc.items[2], case .message(let last) = doc.items[3] else {
             return XCTFail("rows decode to their kinds")
@@ -34,6 +34,20 @@ final class PondRoomTests: XCTestCase {
         XCTAssertEqual(line.detail, "Re-rendering the menu icons at 2x\nChecked four sizes; the 16 px one is blurry.")
         XCTAssertFalse(last.mine)
         XCTAssertEqual(last.who, "Aarav")
+        guard case .duck(let plan) = doc.items[4], case .duck(let done) = doc.items[5] else { return XCTFail("a plan and a done line") }
+        XCTAssertEqual(plan.plan, true)
+        XCTAssertEqual(plan.detail, "Plan: crisp icons at 2x\nSpec: every menu icon at 2x.\nPlan: 1. re-render 2. check 16 px")
+        XCTAssertNil(line.plan)
+        XCTAssertNil(line.canvases)
+        XCTAssertEqual(done.canvases, [.init(id: "c0ffee", title: "Icon sheet", subtitle: "Deck \u{00B7} 3 artboards")])
+    }
+
+    func testAnOlderMacsDuckLineStillDecodesWithoutPlanOrCanvases() throws {
+        let json = #"{"v":1,"pond":"p","canPost":true,"canTask":false,"items":[{"t":"duck","id":"d","who":"Pixel","tone":"done","line":"Done","at":1}]}"#
+        let doc = try JSONDecoder().decode(PondRoomDoc.self, from: Data(json.utf8))
+        guard case .duck(let line) = doc.items[0] else { return XCTFail("a duck line") }
+        XCTAssertNil(line.plan)
+        XCTAssertNil(line.canvases)
     }
 
     func testEncodingARowKeepsItsKindSoTheMacReadsWhatThePhoneWrote() throws {

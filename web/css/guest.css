@@ -473,6 +473,30 @@ small {
   white-space: pre-wrap;
   color: var(--sq-ink);
 }
+.g-detail {
+  color: var(--sq-muted);
+}
+.g-canvas {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  background: var(--sq-surface);
+  border-radius: var(--sq-radius-card);
+}
+.g-comment {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+.g-comment-box {
+  flex: 1;
+  min-width: 0;
+}
+.g-reply {
+  display: block;
+  color: var(--sq-muted);
+}
 .g-kind {
   font-size: 13px;
 }

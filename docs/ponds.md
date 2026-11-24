@@ -579,6 +579,13 @@ documents (claims and locks stay) are not used for this: the Room's Tasks are `r
   `rtasks`/<task id with `:` made `-`> = `{ v:1, id, messageId, title, text, state, parentTaskId?, result?, createdAt, updatedAt }`
   (no discussion, place or Duck chat; a suggestion nobody took up is never published). `rposts`/<time-ordered id> =
   `{ v:1, id, text, at }`, written and signed by the Member.
+- **Detail, canvas cards, plan cards, comments.** A `room` document may also carry `detail` (a status line's or plan card's
+  expandable body), `canvases` (`[{ id (wire id), title, kind, artboards }]`, at most 6, on a `done` line; the canvas folder never
+  leaves the Owner's Mac, and a Member views a canvas, never edits it) and `replyTo` (the plan card a person's comment is on); its
+  `kind` may be `plan`. All optional, so older documents still decode, and a wrong one drops only itself. A Member comments on a
+  plan card with `POST /native/ponds/<id>/room { text, replyTo }`: the `rposts` document carries `replyTo`, and the Owner's Mac
+  applies it under the same rules as any Member message, as a reply the card's Duck is told about at its next turn. A document
+  published before these fields is written again by the first publish after the Owner's Mac starts.
 - **Publishing.** On a Room post or Task change the Owner's Mac writes what is new (a burst waits 400 ms; posts never change, so
   a post already in the cloud is not written again; the first publish after a start learns what the cloud holds). A key
   rotation (a Member removed) rewrites everything under the new key (`service` event `rotated`).

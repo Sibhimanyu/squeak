@@ -264,7 +264,7 @@ public enum RoomMessages {
                 let name = sid.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
                 let status = RoomStatusLine(
                     kind: kind, sessionId: sid, name: name, agent: sid.flatMap { threads[$0]?.agent }, summary: p.text,
-                    detail: p.detail, commentTarget: kind == .plan ? p.id : nil, canvases: kind == .done ? p.canvases : [])
+                    detail: p.detail, commentTarget: kind == .plan && (!memberView || canMakeMemberTask) ? p.id : nil, canvases: kind == .done ? p.canvases : [])
                 entries.append(Entry(at: p.at, order: 1, content: .system(RoomSystemLine(
                     id: r.id, at: p.at, text: "\(name) \(status.verb): \(p.text)", jobId: nil, buttons: [], opens: sid, status: status))))
             } else if p.author.kind == .person, p.level == .room {

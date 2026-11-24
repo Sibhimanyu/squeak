@@ -193,6 +193,44 @@ await A.pass(pondId);
 await ownerSync.idle();
 save("room-member-page-approval", await call("GET", `/native/ponds/${pondId}/room?limit=2`), 200);
 
+// A Duck's spec+plan card (with its detail) and a done line with a canvas card reach the Member; the Member comments on the
+// card through the same inbox, with `replyTo`, and the Owner's Mac applies it as a reply.
+const plan = room.post({
+  projectId: project.id,
+  author: { kind: "agent", id: "sess-1", name: "Maple" },
+  sessionId: "sess-1",
+  kind: "plan",
+  text: "Plan: weather-aware timer",
+  detail: "Spec: skip a run when rain is forecast.\nPlan: 1. read the forecast 2. gate the run",
+});
+room.post({
+  projectId: project.id,
+  author: { kind: "agent", id: "sess-1", name: "Maple" },
+  sessionId: "sess-1",
+  kind: "done",
+  text: "Done: timer reads the forecast",
+  canvases: [
+    {
+      id: "c0ffee",
+      path: "/Users/owner/orchard/canvases/timer",
+      slug: "timer",
+      title: "Timer sketch",
+      kind: "deck",
+      artboards: 3,
+    },
+  ],
+});
+await ownerSync.idle();
+await A.setPresence(pondId, {});
+save(
+  "room-member-comment-queued",
+  await call("POST", `/native/ponds/${pondId}/room`, { text: "Keep the manual override.", replyTo: plan.id }),
+  202,
+);
+await A.pass(pondId);
+await ownerSync.idle();
+save("room-member-page-plan", await call("GET", `/native/ponds/${pondId}/room?limit=4`), 200);
+
 ownerSync.stop();
 B.stop();
 A.stop();

@@ -108,8 +108,38 @@ export function createRoomScreen(handlers) {
       "div",
       { class: `g-msg ${row.mine ? "mine" : "theirs"}${row.attention ? " attention" : ""}`, "data-id": row.id },
       h("small", null, [row.mine ? "You" : row.who, row.label, when(row, now)].filter(Boolean).join(" · ")),
+      row.replyLine ? h("small", { class: "g-reply" }, row.replyLine) : null,
       h("p", null, row.text),
       status,
+    );
+  }
+
+  /** A Member's comment on a spec+plan card: queued for the Owner's Mac, which hands it to the Duck at its next turn. */
+  function commentBox(row) {
+    const field = h("input", {
+      class: "g-box g-comment-box",
+      type: "text",
+      placeholder: "Comment on this plan",
+      "aria-label": `Comment on ${row.who}'s plan`,
+      maxlength: 500,
+    });
+    const go = () => {
+      const text = field.value.trim();
+      if (!text) return;
+      field.value = "";
+      handlers.onComment?.(row.id, text);
+    };
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        go();
+      }
+    });
+    return h(
+      "div",
+      { class: "g-comment" },
+      field,
+      h("button", { class: "g-btn quiet", type: "button", onclick: go }, "Comment"),
     );
   }
 
@@ -126,6 +156,16 @@ export function createRoomScreen(handlers) {
       { class: "g-duck", "data-id": row.id },
       head,
       h("p", null, row.text),
+      row.detail ? h("p", { class: "g-detail" }, row.detail) : null,
+      ...(row.canvases ?? []).map((c) =>
+        h(
+          "div",
+          { class: "g-canvas", "data-id": c.id },
+          h("strong", null, c.title),
+          h("span", { class: "g-quiet" }, `${c.subtitle} \u00B7 View only`),
+        ),
+      ),
+      row.canComment ? commentBox(row) : null,
       h("small", null, when(row, now)),
     );
     // Even a short line can be opened (its time and exact words); what is open stays open across redraws.

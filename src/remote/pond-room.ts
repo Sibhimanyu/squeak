@@ -19,6 +19,15 @@ const LINE_MAX = 140;
 const TEXT_MAX = 2000;
 const DETAIL_MAX = 1200;
 
+/** A canvas a Duck's Task made or changed: the card a phone draws (view only; the phone never edits a canvas). */
+export interface PondRoomCanvas {
+  /** The wire id the Owner's Mac knows the canvas by. */
+  id: string;
+  title: string;
+  /** "Deck · 3 artboards", already worded by the Mac. */
+  subtitle: string;
+}
+
 export type PondRoomTone = "working" | "done" | "needs" | "failed";
 
 export type PondRoomItem =
@@ -45,6 +54,10 @@ export type PondRoomItem =
       line: string;
       /** What a tap shows beneath it; absent when the line says it all. */
       detail?: string;
+      /** A spec+plan card, not a status line. */
+      plan?: true;
+      /** The canvases a done line made or changed. */
+      canvases?: PondRoomCanvas[];
       at: number;
     }
   | {
@@ -184,6 +197,7 @@ export function buildPondRoom(pondId: string, read: PhoneRoomRead): PondRoomDoc 
         const whole = [text.trim(), str(post.detail).trim()]
           .filter((part, i, all) => part && (i === 0 || part !== all[0]))
           .join("\n");
+        const canvases = postKind === "done" ? canvasCards(post.canvases) : [];
         const tone: PondRoomTone = postKind === "done" ? "done" : postKind === "needs" ? "needs" : "working";
         entries.push({
           at,
@@ -195,6 +209,8 @@ export function buildPondRoom(pondId: string, read: PhoneRoomRead): PondRoomDoc 
             tone,
             line,
             ...(whole !== line ? { detail: clip(whole, DETAIL_MAX) } : {}),
+            ...(postKind === "plan" ? { plan: true as const } : {}),
+            ...(canvases.length > 0 ? { canvases } : {}),
             at,
           },
         });
@@ -305,6 +321,24 @@ export function buildPondRoom(pondId: string, read: PhoneRoomRead): PondRoomDoc 
     ...(member && offline ? { offline } : {}),
     items,
   };
+}
+
+const CANVAS_CARDS_MAX = 6;
+
+/** A done line's canvas cards: id, title and the one-line subtitle. A card without an id or title is skipped. */
+function canvasCards(v: unknown): PondRoomCanvas[] {
+  const out: PondRoomCanvas[] = [];
+  for (const c of list(v)) {
+    const id = str(c.id);
+    const title = clip(str(c.title), 120);
+    if (!id || !title) continue;
+    const kind = str(c.kind);
+    const name = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Canvas";
+    const boards = Math.max(0, num(c.artboards));
+    out.push({ id, title, subtitle: `${name} \u00B7 ${boards} ${boards === 1 ? "artboard" : "artboards"}` });
+    if (out.length >= CANVAS_CARDS_MAX) break;
+  }
+  return out;
 }
 
 function idOf(item: PondRoomItem): string {

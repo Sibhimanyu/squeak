@@ -640,7 +640,7 @@ export class GuestPond {
    * A message for the Room: signed and written to `rposts`, which only the Owner's Mac applies (at once when it runs, in
    * order when it is back). Refused here, before anything is written, for a viewer or when the Owner turned messaging off.
    */
-  async postToRoom(text) {
+  async postToRoom(text, replyTo) {
     const r = this.record;
     if (r.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
     const members = await this.members();
@@ -651,9 +651,13 @@ export class GuestPond {
     const clean = typeof text === "string" ? text.trim() : "";
     if (!clean) throw new GuestError("A post can't be empty.", 400);
     if ([...clean].length > ROOM_MAX_TEXT) throw new GuestError(`Keep a post under ${ROOM_MAX_TEXT} characters.`, 400);
+    // A comment on a spec+plan card names the card; the Owner's Mac delivers it to that Duck.
+    if (replyTo !== undefined && (typeof replyTo !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(replyTo))) {
+      throw new GuestError("That card can't be commented on.", 400);
+    }
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
-    await this.put("rposts", id, { v: 1, id, text: clean, at });
+    await this.put("rposts", id, { v: 1, id, text: clean, at, ...(replyTo ? { replyTo } : {}) });
     return { id, at };
   }
 

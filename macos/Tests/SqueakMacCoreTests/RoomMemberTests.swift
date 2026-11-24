@@ -188,4 +188,51 @@ struct RoomMemberTests {
         feed.queueJob("msg:p")
         #expect(feed.jobLocal["msg:p"]?.queued == true)
     }
+
+    // The whole Room reaches a Member: a spec+plan card with its detail, a done line's canvas card (view only, no folder), and a
+    // comment on the card queued through the Owner's Mac.
+
+    @Test func aMemberPageCarriesPlanDetailAndCanvasCards() async throws {
+        let page = try #require(try await member(try Replay().serve("room-member-page-plan")).page(project: "pond-1"))
+        let plan = try #require(page.posts.first { $0.kind == .plan })
+        #expect(plan.text == "Plan: weather-aware timer" && plan.detail?.hasPrefix("Spec: skip a run when rain is forecast.") == true)
+        let done = try #require(page.posts.first { $0.kind == .done })
+        let card = try #require(done.canvases.first)
+        #expect(done.canvases.count == 1 && card.id == "c0ffee" && card.title == "Timer sketch" && card.path.isEmpty)
+        #expect(card.subtitle == "Deck \u{00B7} 3 artboards" && card.openPath(memberView: true) == "c0ffee")
+        let reply = try #require(page.posts.first { $0.replyTo != nil })
+        #expect(reply.replyTo == plan.id && reply.author.name == "Aarav")
+    }
+
+    @Test func aMemberSeesPlanCardsAndCanvasCardsAndMayCommentOnAPlanWhenMessagingIsOn() async throws {
+        let page = try #require(try await member(try Replay().serve("room-member-page-plan")).page(project: "pond-1"))
+        var feed = RoomFeed()
+        feed.apply(page: page)
+        func lines(canPost: Bool) -> [RoomStatusLine] {
+            RoomMessages.build(feed: feed, memberView: true, selfId: "someone", canMakeMemberTask: canPost)
+                .compactMap { if case .system(let s) = $0 { s.status } else { nil } }
+        }
+        let on = lines(canPost: true)
+        let plan = try #require(on.first { $0.kind == .plan })
+        #expect(plan.isExpandable && plan.commentTarget == page.posts.first { $0.kind == .plan }?.id)
+        #expect(on.first { $0.kind == .done }?.canvases.map(\.title) == ["Timer sketch"])
+        // Messaging switched off: the card is read-only.
+        #expect(lines(canPost: false).first { $0.kind == .plan }?.commentTarget == nil)
+    }
+
+    @Test func aMembersCommentOnAPlanIsQueuedWithItsCard() async throws {
+        let t = try Replay().serve("room-member-comment-queued", status: 202)
+        let queued = try await member(t).queue(pond: "pond-1", text: "Keep the manual override.", replyTo: "card-1")
+        #expect(t.requests.first?.method == "POST" && t.requests.first?.url.path == "/native/ponds/pond-1/room")
+        let sent = try #require(t.requests.first?.body)
+        let body = NativeJSON.parse(String(decoding: sent, as: UTF8.self))
+        #expect(body?["text"]?.string == "Keep the manual override." && body?["replyTo"]?.string == "card-1")
+        #expect(queued.offline == false)
+    }
+
+    @Test func aCanvasCardWithoutAFolderStillDecodesAndAnOlderPageHasNoNewFields() throws {
+        let json = #"{"posts":[{"seq":1,"id":"a","author":{"kind":"agent","name":"x"},"kind":"done","level":"room","text":"t","canvases":[{"id":"c","title":"T","kind":"deck","artboards":2}],"at":1},{"seq":2,"id":"b","author":{"kind":"agent","name":"x"},"kind":"working","level":"room","text":"t","at":2}],"latestSeq":2,"threads":[],"turns":[],"canPost":true}"#
+        let page = try JSONDecoder().decode(RoomPage.self, from: Data(json.utf8))
+        #expect(page.posts[0].canvases.count == 1 && page.posts[1].canvases.isEmpty && page.posts[1].detail == nil && page.posts[1].replyTo == nil)
+    }
 }
