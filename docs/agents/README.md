@@ -13,5 +13,6 @@ Read only the file for the area you are touching. `AGENTS.md` at the root is the
 - `runtime.md` — proxy, native modules, launch agents, bot polling, sleep and pmset
 - `misc.md` — Telegram formatting, one fleet process, lint configs, ask-format, call voices
 - `cleanup.md` — code-health backlog and conventions
+- `issue-tracker.md`, `triage-labels.md`, `domain.md` — config for the mattpocock engineering skills (GitHub issues, triage labels, glossary/ADR rules)
 
 Older design docs in `docs/` (remote-channel, ponds, voice, cliq, flags, PROVENANCE, …) stay the source of truth for their area.
