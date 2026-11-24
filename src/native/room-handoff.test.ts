@@ -153,3 +153,33 @@ describe("a Duck hands work on with hand_off", () => {
     expect(r.jobs.list(r.pid)).toEqual([]);
   });
 });
+
+describe("a Member's @mention without the start permission", () => {
+  it("is routed to the mentioned Duck, waits for approval, and does not wake the Duck", async () => {
+    const r = rig();
+    r.duck("Sage");
+    const pixel = r.duck("Pixel");
+    r.jobs.withMemberPost("m-1", { memberId: "dev-1", name: "Mira", canStart: false }, () =>
+      r.room.post({
+        projectId: r.pid,
+        id: "m-1",
+        author: { kind: "person", id: "dev-1", name: "Mira" },
+        kind: "message",
+        level: "room",
+        text: "@Pixel fix the login page spacing",
+      }),
+    );
+    await r.jobs.idle();
+    const [task] = r.jobs.list(r.pid);
+    expect(task).toMatchObject({
+      state: "waiting",
+      approval: { name: "Mira" },
+      routing: { kind: "duck", duckId: pixel.d.id, by: "person" },
+    });
+    expect(r.sent).toEqual([]);
+    expect(r.woken).toEqual([]);
+    await r.jobs.act(r.pid, task!.id, { action: "approve" });
+    await r.jobs.idle();
+    expect(r.jobs.list(r.pid)[0]).toMatchObject({ state: "working", handedTo: { sessionId: pixel.s.id } });
+  });
+});

@@ -611,8 +611,9 @@ export class RoomTasks extends EventEmitter {
     };
     if (!o.proposed) this.gate(task, o.origin ?? this.memberPosts.get(messageId));
     this.save(projectId, task);
-    // A Member's Task without the start permission is routed (so the Owner sees where it would go) but does not start.
-    if (o.direct && !task.approval) return this.reroute(projectId, task, o.direct.duckId, o.direct.reason);
+    // A Member's Task without the start permission is routed (so the Owner sees where it would go) but does not start;
+    // an @mention still names its Duck (reroute starts nothing while the approval is pending).
+    if (o.direct) return this.reroute(projectId, task, o.direct.duckId, o.direct.reason);
     this.route(projectId, task.id, !o.proposed, !o.proposed && !task.approval);
     return task;
   }
