@@ -317,7 +317,7 @@ struct PondRoomView: View {
                 // first layout and the slide's picture of the Room shows real rows while the page is off screen.
                 VStack(alignment: .leading, spacing: 12) {
                     if items.isEmpty && working.isEmpty {
-                        Text("Say something to the room, or start a duck. What the ducks do shows up here.")
+                        Text(verbatim: FirstPondJourney.emptyRoom)
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
                     }
                     ForEach(items) { item in
