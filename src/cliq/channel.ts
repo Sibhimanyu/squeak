@@ -98,6 +98,8 @@ export interface CliqChannelDependencies {
   inbound?: CliqInbound | null;
   /** Runs a pond join decision from an invite card's button (`fleet/pond-invites.ts`). */
   pondInvites?: { decide(handle: number, approve: boolean): Promise<string> } | null;
+  /** Runs a Room task decision from a Room moment card's button (`fleet/room-moments.ts`). */
+  roomMoments?: { decide(handle: number, approve: boolean): Promise<string> } | null;
   /** The last Claude plan reading, for `usage`. */
   claudeLimits?: () => ClaudeLimits | null;
   now?: () => number;
@@ -278,6 +280,14 @@ export class CliqChannel {
           const said = this.deps.pondInvites
             ? await this.deps.pondInvites.decide(Number(pond[2]), pond[1] === "approve")
             : "That request is no longer waiting.";
+          await this.post(said);
+          return;
+        }
+        const room = /^room:(approve|drop):(\d+)$/.exec(record.arg);
+        if (room) {
+          const said = this.deps.roomMoments
+            ? await this.deps.roomMoments.decide(Number(room[2]), room[1] === "approve")
+            : "That task is no longer waiting.";
           await this.post(said);
           return;
         }
@@ -485,6 +495,19 @@ ${quote(text)}`,
     await this.post(
       text,
       fn ? buttons.map((b) => ({ label: b.label, key: `pond:${b.action}:${b.handle}`, function: fn })) : [],
+    );
+  }
+
+  /** A Room moment card (`fleet/room-moments.ts`); buttons need the two-way relay like the invite card's. */
+  async pushRoomCard(
+    text: string,
+    buttons: Array<{ label: string; action: "approve" | "drop"; handle: number }>,
+  ): Promise<void> {
+    const inbound = this.deps.inbound;
+    const fn = inbound ? { name: CLIQ_BUTTON_FUNCTION, owner: inbound.ownerEmail } : null;
+    await this.post(
+      text,
+      fn ? buttons.map((b) => ({ label: b.label, key: `room:${b.action}:${b.handle}`, function: fn })) : [],
     );
   }
 

@@ -34,6 +34,7 @@ import { HostError, logHostError, type HostEvent, type SessionHost } from "./hos
 import type { NativeStore, RoomPostRow } from "./store.js";
 import { Room, RoomError } from "./room.js";
 import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
+import { roomMoments } from "./room-moments.js";
 import { TaskError, taskTitle, RoomTasks, type RoomTask } from "./room-tasks.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
@@ -1172,6 +1173,29 @@ export class NativeServer {
         if (error instanceof TaskError) throw new HttpError(error.status, error.message);
         throw error;
       }
+    }
+    if (area === "projects" && id && sub === "room" && parts[4] === "moments" && parts.length === 5) {
+      // The Room moments that need a person (Telegram and Cliq read these; room-moments.ts). Read-only: it does not
+      // mark the Room viewed, so polling never hides a notification from the Room's own unread count.
+      const project = store.getProject(id);
+      if (!project) throw new HttpError(404, "no such project");
+      if (method !== "GET") throw new HttpError(404, "not found");
+      const raw = url.searchParams.get("since");
+      if (raw !== null && !/^\d+$/.test(raw)) throw new HttpError(400, "since must be a whole number");
+      const members = this.directoryLast?.value.ponds.find((p) => p.id === id)?.members.map((m) => m.name) ?? [];
+      return this.json(
+        res,
+        200,
+        roomMoments({
+          store,
+          room: this.room,
+          projectId: id,
+          pondName: project.name,
+          since: raw === null ? 0 : Number(raw),
+          tasks: this.jobs.list(id),
+          people: members,
+        }),
+      );
     }
     if (area === "projects" && id && sub === "room" && (parts.length === 4 || parts.length === 5)) {
       if (!store.getProject(id)) throw new HttpError(404, "no such project");

@@ -29,3 +29,14 @@ Telegram, the single fleet process, lint, ask-format, call voices.
   the brief for adding a model; `envs/`, `out/` stay out of git). WER says the words survive the line, never that the
   emotion is right: that needs ears. Qwen3 VoiceDesign re-invents its voice every render; CustomVoice's
   Chinese-native speakers garbled "Squeak".
+
+- **Room moments on Telegram and Cliq** (`src/fleet/room-moments.ts`, host side `src/native/room-moments.ts`, route
+  `GET /native/projects/<id>/room/moments?since=<seq>`): exactly three moments leave a Pond's Room, each one short card
+  (Pond, Duck or Member, one line) and sent once (`room-moments.json`). A Duck asking a person (a `needs` post, or a
+  Duck's @mention of a person who has posted or is a Member; never a Duck-to-Duck mention, a hand-off or the `agents`
+  level), a Task becoming `blocked`, and a Member's Task waiting for the Owner's approval, which carries Approve and Drop
+  that run the host's own Task actions (`fleet:room:<a|d>:<handle>` on Telegram, `room:<approve|drop>:<handle>` on Cliq;
+  Cliq buttons need the two-way relay). They ride the existing rules via `shouldPushRoomMomentTo`: a mute stops all; ask
+  is the `question` switch and blocked is the `stalled` switch, both held in quiet hours; approval is the `approval`
+  switch and quiet hours do not hold it. Everything else in the Room (status posts, messages, other Task states) sends
+  nothing; keep it that way. A Pond's first look only sets its cursor, so history is never announced.

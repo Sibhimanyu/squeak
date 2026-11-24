@@ -22,6 +22,7 @@ import {
 } from "./radar.js";
 import type { NotifyFilter } from "./notify-settings.js";
 import type { InviteButton } from "./pond-invites.js";
+import type { RoomMomentButton } from "./room-moments.js";
 import { replyTargetFor } from "./reply-router.js";
 import { NATIVE_HOST_DOWN, NativeHostError } from "../native/client.js";
 import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./reply-types.js";
@@ -89,6 +90,8 @@ export interface FleetControllerDependencies {
   nativeResponder?: { respond(requestId: string, decision: "allow" | "deny", message?: string): Promise<void> } | null;
   /** Runs a pond join decision from an invite card's button (`pond-invites.ts`); returns the sentence to show. */
   pondInvites?: { decide(handle: number, approve: boolean): Promise<string> } | null;
+  /** Runs a Room task decision (Approve / Drop) from a Room moment card (`room-moments.ts`). */
+  roomMoments?: { decide(handle: number, approve: boolean): Promise<string> } | null;
   now?: () => number;
 }
 
@@ -245,6 +248,20 @@ export class FleetController {
           return { handled: true, notice: "That request is no longer waiting." };
         }
         const notice = await this.deps.pondInvites.decide(handle, argument === "a");
+        if (messageId !== null) {
+          await this.tg()
+            .editMessageReplyMarkup(location.chatId, messageId, [])
+            .catch(() => undefined);
+        }
+        return { handled: true, notice };
+      }
+      case "room": {
+        // fleet:room:<a|d>:<handle>: a Room moment card's Approve / Drop. The host re-checks the Task.
+        const handle = Number.parseInt(parts[3] ?? "", 10);
+        if (!this.deps.roomMoments || !Number.isInteger(handle) || (argument !== "a" && argument !== "d")) {
+          return { handled: true, notice: "That task is no longer waiting." };
+        }
+        const notice = await this.deps.roomMoments.decide(handle, argument === "a");
         if (messageId !== null) {
           await this.tg()
             .editMessageReplyMarkup(location.chatId, messageId, [])
@@ -870,6 +887,22 @@ export class FleetController {
             buttons.map((b) => ({
               text: b.label,
               callback_data: `fleet:pond:${b.action === "approve" ? "a" : "d"}:${b.handle}`,
+            })),
+          ]
+        : undefined;
+    for (const target of this.pushTargets()) {
+      await this.send(target, text, keyboard);
+    }
+  }
+
+  /** A Room moment card (`room-moments.ts`) to the same chats. The push rules are the caller's to check. */
+  async pushRoomCard(text: string, buttons: RoomMomentButton[]): Promise<void> {
+    const keyboard: TelegramInlineKeyboard | undefined =
+      buttons.length > 0
+        ? [
+            buttons.map((b) => ({
+              text: b.label,
+              callback_data: `fleet:room:${b.action === "approve" ? "a" : "d"}:${b.handle}`,
             })),
           ]
         : undefined;

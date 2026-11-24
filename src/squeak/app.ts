@@ -38,10 +38,12 @@ import {
   NotifySettingsStore,
   PushCounter,
   shouldPushInviteTo,
+  shouldPushRoomMomentTo,
   wantsAllFinishes,
   type NotifyChannel,
 } from "../fleet/notify-settings.js";
 import { PondInviteNotifier } from "../fleet/pond-invites.js";
+import { RoomMomentNotifier } from "../fleet/room-moments.js";
 import { HOTSPOT_PHONE_RECENT_MS, HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
   FANS_HELPER_PRIVILEGED,
@@ -303,6 +305,7 @@ export class SqueakApp {
   private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
   private readonly pondInvites: PondInviteNotifier;
+  private readonly roomMoments: RoomMomentNotifier;
   /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
   private voice: VoiceChannel | null = null;
   private voiceSpeaker: Speaker | null = null;
@@ -1195,6 +1198,26 @@ export class SqueakApp {
         },
       ],
     });
+    // Room moments that need a person (fleet/room-moments.ts): three kinds, each through the channel's push rules.
+    this.roomMoments = new RoomMomentNotifier({
+      port: this.nativeHost,
+      file: path.join(config.supportDir, "room-moments.json"),
+      sinks: [
+        {
+          channel: "telegram",
+          allowed: (kind) =>
+            this.telegram !== null &&
+            shouldPushRoomMomentTo("telegram", kind, this.notifySettings.settings, Date.now()),
+          push: (card) => this.controller.pushRoomCard(card.text, card.buttons),
+        },
+        {
+          channel: "cliq",
+          allowed: (kind) =>
+            this.cliq !== null && shouldPushRoomMomentTo("cliq", kind, this.notifySettings.settings, Date.now()),
+          push: (card) => this.cliq!.pushRoomCard(card.text, card.buttons),
+        },
+      ],
+    });
     this.cliq = this.createCliq();
     this.voice = this.createVoice();
     this.memoInbox = this.createMemoInbox();
@@ -1217,6 +1240,7 @@ export class SqueakApp {
         respond: (requestId, decision, message) => this.nativeHost.respond(requestId, decision, message),
       },
       pondInvites: this.pondInvites,
+      roomMoments: this.roomMoments,
       // Telegram buttons only open https links, so the card points at a static page on GitHub Pages
       // (published by ios/scripts/release.sh) that hands off to the phone app.
       phoneLink: (conductorSessionId) => (this.remote?.hasPairedPhone() ? openInSqueakLink(conductorSessionId) : null),
@@ -1242,6 +1266,7 @@ export class SqueakApp {
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
     this.pondInvites.start();
+    this.roomMoments.start();
     this.voice?.start();
     if (this.voiceEnabled()) this.startMemoInbox();
     this.startTraceWatch();
@@ -1373,6 +1398,7 @@ export class SqueakApp {
       { name: "local channel", run: () => this.localChannel?.stop() },
       { name: "cliq", run: () => this.cliq?.stop() },
       { name: "pond invites", run: () => this.pondInvites.stop() },
+      { name: "room moments", run: () => this.roomMoments.stop() },
       { name: "voice", run: () => this.voice?.stop() },
       { name: "memo inbox", run: () => this.stopMemoInbox() },
       {
@@ -2719,6 +2745,7 @@ export class SqueakApp {
         claudeLimits: () => this.claudeLimits.latest(),
         notify: channelFilter(this.notifySettings, "cliq", Date.now, this.pushCounter),
         pondInvites: this.pondInvites,
+        roomMoments: this.roomMoments,
         inbound: twoWay
           ? {
               inbox: this.logCliqInbox(

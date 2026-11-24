@@ -65,6 +65,7 @@ function setup(
     ask?: (question: string) => Promise<AssistantAnswer>;
     notify?: NotifyFilter;
     onOwnerRecord?: () => void;
+    roomMoments?: { decide(handle: number, approve: boolean): Promise<string> };
   } = {},
 ) {
   let push: ((items: AttentionItem[]) => void) | null = null;
@@ -134,6 +135,7 @@ function setup(
     store,
     inbound: options.inbound === false ? null : inbound,
     notify: options.notify ?? null,
+    roomMoments: options.roomMoments ?? null,
     now: () => now,
   });
   channel.listen();
@@ -443,5 +445,36 @@ describe("CliqChannel notification settings", () => {
     expect(t.webhook.post).toHaveBeenCalledTimes(1);
     await t.quota();
     expect(t.webhook.post).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CliqChannel Room moment cards", () => {
+  it("puts Approve and Drop on a card when two-way, none when one-way", async () => {
+    const t = setup();
+    await t.channel.pushRoomCard("**Shop** · Aarav's task needs your OK\nAdd", [
+      { label: "Approve", action: "approve", handle: 4 },
+      { label: "Drop", action: "drop", handle: 4 },
+    ]);
+    expect(t.webhook.post.mock.calls[0]![1]!.buttons!.map((b) => [b.label, b.key])).toEqual([
+      ["Approve", "room:approve:4"],
+      ["Drop", "room:drop:4"],
+    ]);
+    const oneWay = setup({ inbound: false });
+    await oneWay.channel.pushRoomCard("card", [{ label: "Approve", action: "approve", handle: 4 }]);
+    expect(oneWay.webhook.post.mock.calls[0]![1]).toEqual({ buttons: [] });
+  });
+
+  it("runs the Task decision for a pressed button, and says so when nothing is wired", async () => {
+    const decide = vi.fn(async (_h: number, approve: boolean) => (approve ? "Approved: Add" : "Dropped: Add"));
+    const t = setup({ roomMoments: { decide } });
+    t.records.push(record({ kind: "button", arg: "room:drop:4", msgid: "m9" }));
+    await t.channel.pollOnce();
+    expect(decide).toHaveBeenCalledWith(4, false);
+    expect(lastPost(t.webhook)).toBe("Dropped: Add");
+
+    const bare = setup();
+    bare.records.push(record({ kind: "button", arg: "room:approve:4", msgid: "m9" }));
+    await bare.channel.pollOnce();
+    expect(lastPost(bare.webhook)).toBe("That task is no longer waiting.");
   });
 });
