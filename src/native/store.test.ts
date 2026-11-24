@@ -101,7 +101,10 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE shown_artifacts;"); // the Artifacts migration is newest
     old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 16}`);
+    old.db.exec(
+      "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
+    ); // the Task start rules are the newest
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 17}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -144,7 +147,10 @@ describe("NativeStore", () => {
     );
     old.db.exec("DROP TABLE shown_artifacts;");
     old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 12}`);
+    old.db.exec(
+      "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
+    ); // the Task start rules are the newest
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 13}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -262,7 +268,10 @@ describe("NativeStore", () => {
       if (withoutDuckTables) old.db.exec("DROP TABLE ducks; DROP TABLE duck_sessions; DROP TABLE session_ducks;");
       old.db.exec("DROP TABLE shown_artifacts;");
       old.db.exec("ALTER TABLE queue DROP COLUMN room;"); // the queue's room mark is the newest
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 4}`);
+      old.db.exec(
+        "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
+      ); // the Task start rules are the newest
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 5}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };

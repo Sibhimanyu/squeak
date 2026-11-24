@@ -146,10 +146,6 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE project_settings ADD COLUMN auto_compact_tokens INTEGER;
   `,
   `
-  ALTER TABLE project_settings ADD COLUMN ask_before_starting INTEGER;
-  ALTER TABLE project_settings ADD COLUMN max_working_ducks INTEGER;
-  `,
-  `
   CREATE TABLE timeline_events (
     session_id TEXT NOT NULL, seq INTEGER NOT NULL, turn_id TEXT, type TEXT NOT NULL,
     body TEXT NOT NULL, at TEXT NOT NULL,
@@ -215,6 +211,11 @@ export const MIGRATIONS: string[] = [
   // this index instead of scanning every row it ever stored.
   `
   CREATE INDEX IF NOT EXISTS messages_session_created ON messages(session_id, created_at);
+  `,
+  // Room Tasks: per-pond start rules (Ask before starting, working-Ducks limit).
+  `
+  ALTER TABLE project_settings ADD COLUMN ask_before_starting INTEGER;
+  ALTER TABLE project_settings ADD COLUMN max_working_ducks INTEGER;
   `,
 ];
 

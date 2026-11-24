@@ -340,7 +340,9 @@ describe("tools and routes", () => {
     for (const bad of [0, 1.5, "many", 51, -1]) {
       expect((await h.call("PATCH", url, { maxWorkingDucks: bad })).status).toBe(400);
     }
-    const reset = (await (await h.call("PATCH", url, { maxWorkingDucks: null, askBeforeStarting: null })).json()) as any;
+    const reset = (await (
+      await h.call("PATCH", url, { maxWorkingDucks: null, askBeforeStarting: null })
+    ).json()) as any;
     expect(reset.effective).toMatchObject({ askBeforeStarting: false, maxWorkingDucks: 4 });
   });
 
