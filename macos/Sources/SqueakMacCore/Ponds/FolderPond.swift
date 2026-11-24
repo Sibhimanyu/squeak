@@ -52,8 +52,12 @@ public enum FolderPond {
             ? "Anyone on the internet will be able to see this folder's files on GitHub."
             : "Only you will be able to see this repository on GitHub."
     }
-    public static func gitPondResult(url: String?) -> String {
-        guard let url, !url.isEmpty else { return "This pond is now a Git Pond, and it is on GitHub." }
-        return "This pond is now a Git Pond, and it is on GitHub: \(url)"
+    /// `note`: the host's sentence when it added secret rules to the folder's own .gitignore for the first commit.
+    public static func gitPondResult(url: String?, note: String? = nil) -> String {
+        let base = (url?.isEmpty ?? true)
+            ? "This pond is now a Git Pond, and it is on GitHub."
+            : "This pond is now a Git Pond, and it is on GitHub: \(url!)"
+        guard let note, !note.isEmpty else { return base }
+        return "\(base)\n\(note)"
     }
 }

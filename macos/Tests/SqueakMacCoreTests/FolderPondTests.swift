@@ -76,5 +76,6 @@ import Testing
         #expect(FolderPond.gitPondQuestion(isPublic: true).contains("Anyone"))
         #expect(FolderPond.gitPondResult(url: "https://github.com/o/notes").hasSuffix("https://github.com/o/notes"))
         #expect(!FolderPond.gitPondResult(url: nil).contains("http"))
+        #expect(FolderPond.gitPondResult(url: nil, note: "Added .env.* to .gitignore.").hasSuffix("\nAdded .env.* to .gitignore."))
     }
 }

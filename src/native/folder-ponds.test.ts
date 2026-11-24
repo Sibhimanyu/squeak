@@ -204,7 +204,7 @@ describe("turning on version history", () => {
     fs.writeFileSync(path.join(h.folder, "secret.txt"), "s\n");
     const r = await h.call("POST", `/native/projects/${h.pond.id}/history`, { commit: true });
     expect(r.status).toBe(200);
-    expect(fs.readFileSync(path.join(h.folder, ".gitignore"), "utf8")).toBe("secret.txt\n");
+    expect(fs.readFileSync(path.join(h.folder, ".gitignore"), "utf8").startsWith("secret.txt\n")).toBe(true);
     expect(git(h.folder, "ls-files").split("\n").sort()).toEqual([".gitignore", "node_modules/big.js", "todo.txt"]);
   });
 
@@ -221,6 +221,45 @@ describe("turning on version history", () => {
     expect(files).not.toContain(".env");
     expect(files).not.toContain(".env.local");
     expect(files).not.toContain("id.pem");
+  });
+
+  it("adds the missing secret rules to a .gitignore of its own before the first commit, and says so", async () => {
+    const h = await start();
+    fs.writeFileSync(path.join(h.folder, ".gitignore"), "secret.txt\nnode_modules/\n.env\n");
+    for (const f of [".env", ".env.local", ".env.example", "id.pem", "deploy.key", "id_rsa", "id_rsa.pub"]) {
+      fs.writeFileSync(path.join(h.folder, f), "s\n");
+    }
+    const r = await h.call("POST", `/native/projects/${h.pond.id}/history`, { commit: true });
+    expect(r.status).toBe(200);
+    expect(r.json.note).toBe(
+      "Added .env.*, *.pem, *.key, id_rsa* to .gitignore so secrets stay out of the first commit.",
+    );
+    const files = git(h.folder, "ls-files").split("\n");
+    expect(files).toContain(".env.example");
+    for (const f of [".env", ".env.local", "id.pem", "deploy.key", "id_rsa", "id_rsa.pub"])
+      expect(files).not.toContain(f);
+    const text = fs.readFileSync(path.join(h.folder, ".gitignore"), "utf8");
+    expect(text.startsWith("secret.txt\nnode_modules/\n.env\n")).toBe(true);
+    expect(text.match(/^\.env$/gm)).toHaveLength(1);
+  });
+
+  it("adds nothing, and says nothing, when the .gitignore already covers secrets", async () => {
+    const h = await start();
+    const own = ".env\n.env.*\n*.pem\n*.key\nid_rsa*\n";
+    fs.writeFileSync(path.join(h.folder, ".gitignore"), own);
+    const r = await h.call("POST", `/native/projects/${h.pond.id}/history`, { commit: true });
+    expect(r.json.note).toBeUndefined();
+    expect(fs.readFileSync(path.join(h.folder, ".gitignore"), "utf8")).toBe(own);
+  });
+
+  it("Make it a Git Pond passes the note on", async () => {
+    const gh = fakeGitHub();
+    const h = await start(gh.adapter);
+    fs.writeFileSync(path.join(h.folder, ".gitignore"), "secret.txt\n");
+    fs.writeFileSync(path.join(h.folder, "id_rsa"), "k\n");
+    const r = await h.call("POST", `/native/projects/${h.pond.id}/git-pond`, {});
+    expect(r.json.note).toContain("to .gitignore");
+    expect(git(h.folder, "ls-files")).not.toContain("id_rsa");
   });
 
   it("refuses a first commit over the file or size limit, with a sentence, and changes nothing", async () => {

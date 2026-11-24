@@ -100,12 +100,15 @@ export class PondNotebook {
     }
     const have = this.store.notebookEntries(projectId);
     const byText = new Map(have.map((e) => [e.text, e]));
-    this.store.removeNotebookEntries(have.map((e) => e.id));
-    for (const t of texts) {
-      const old = byText.get(t);
-      if (old) this.store.restoreNotebookEntry(old);
-      else this.store.addNotebookEntry(projectId, t, "owner", this.now());
-    }
+    // One transaction: a failure part way leaves the list as it was.
+    this.store.db.transaction(() => {
+      this.store.removeNotebookEntries(have.map((e) => e.id));
+      for (const t of texts) {
+        const old = byText.get(t);
+        if (old) this.store.restoreNotebookEntry(old);
+        else this.store.addNotebookEntry(projectId, t, "owner", this.now());
+      }
+    })();
     return this.view(projectId);
   }
 

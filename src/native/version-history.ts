@@ -26,6 +26,15 @@ export class HistoryError extends Error {
   }
 }
 
+/** The secret rules a first commit needs, each with a file name it must hide. */
+const SECRET_RULES: Array<{ rule: string; sample: string }> = [
+  { rule: ".env", sample: ".env" },
+  { rule: ".env.*", sample: ".env.local" },
+  { rule: "*.pem", sample: "squeak-probe.pem" },
+  { rule: "*.key", sample: "squeak-probe.key" },
+  { rule: "id_rsa*", sample: "id_rsa" },
+];
+
 /** A `.gitignore` for a folder that has none: macOS litter, editor leftovers and the usual dependency folders. */
 export const DEFAULT_GITIGNORE = `# macOS
 .DS_Store
@@ -56,6 +65,7 @@ target/
 *.pem
 *.key
 *.p12
+id_rsa*
 
 # Editors and logs
 .idea/
@@ -183,8 +193,16 @@ export class VersionHistory {
 
   /** `commit: true` is the person's confirmation to save what is in the folder as the first commit. */
   async enable(projectId: string, options: { commit: boolean }): Promise<ProjectRow> {
+    return (await this.enableWithNote(projectId, options)).project;
+  }
+
+  /** `enable`, plus a sentence when a `.gitignore` of the folder's own got secret rules added for the first commit. */
+  async enableWithNote(
+    projectId: string,
+    options: { commit: boolean },
+  ): Promise<{ project: ProjectRow; note?: string }> {
     const project = this.folderProject(projectId);
-    if (project.kind === "git") return project;
+    if (project.kind === "git") return { project };
     const root = project.rootPath;
     if (!fs.existsSync(root)) throw new HistoryError("This pond's folder is gone.", 409);
     if (this.store.busySessionsOfProject(project.id).length > 0) {
@@ -197,10 +215,12 @@ export class VersionHistory {
     const ownRepo = fs.existsSync(path.join(root, ".git"));
     const ignoreFile = path.join(root, ".gitignore");
     const wroteIgnore = !fs.existsSync(ignoreFile);
+    const ignoreBefore = wroteIgnore ? null : fs.readFileSync(ignoreFile);
     const fail = async (message: string): Promise<never> => {
       // Undo only what this call made.
       if (!ownRepo) fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
       if (wroteIgnore) fs.rmSync(ignoreFile, { force: true });
+      else if (ignoreBefore) fs.writeFileSync(ignoreFile, ignoreBefore);
       throw new HistoryError(message, 500);
     };
     if (!ownRepo && (await this.git(["init", "-q"], root)).code !== 0) {
@@ -209,6 +229,8 @@ export class VersionHistory {
     await this.git(["symbolic-ref", "HEAD", "refs/heads/main"], root);
     if (wroteIgnore) fs.writeFileSync(ignoreFile, DEFAULT_GITIGNORE);
     const hasHead = (await this.git(["rev-parse", "--verify", "--quiet", "HEAD"], root)).code === 0;
+    let note: string | undefined;
+    if (!hasHead && options.commit && !wroteIgnore) note = await this.hideSecrets(root, ignoreFile);
     if (!hasHead) {
       // Someone's own git identity is used when there is one; Squeak's only fills the gap.
       const named = (await this.git(["config", "user.name"], root)).stdout.trim();
@@ -228,6 +250,29 @@ export class VersionHistory {
       if (made.code !== 0) return fail("Git couldn't make the first snapshot.");
     }
     this.store.setProjectKind(project.id, "git", "main");
-    return this.store.getProject(project.id)!;
+    return { project: this.store.getProject(project.id)!, ...(note ? { note } : {}) };
+  }
+
+  /**
+   * A folder's own `.gitignore` may not hide secrets, and the first commit can be pushed to GitHub: append the safe
+   * rules it lacks (never touching what is there) and say which. Undefined when nothing was missing.
+   */
+  private async hideSecrets(root: string, ignoreFile: string): Promise<string | undefined> {
+    const missing: string[] = [];
+    for (const { rule, sample } of SECRET_RULES) {
+      // Exit 0: ignored. Exit 1: not ignored.
+      if ((await this.git(["check-ignore", "-q", "--no-index", sample], root)).code !== 0) missing.push(rule);
+    }
+    if (missing.length === 0) return undefined;
+    const have = fs.readFileSync(ignoreFile, "utf8");
+    const lines = [
+      ...(have === "" || have.endsWith("\n") ? [] : [""]),
+      "",
+      "# Secrets (added by Squeak before the first commit)",
+    ];
+    lines.push(...missing);
+    if (missing.includes(".env.*")) lines.push("!.env.example");
+    fs.writeFileSync(ignoreFile, `${have}${lines.join("\n")}\n`);
+    return `Added ${missing.join(", ")} to .gitignore so secrets stay out of the first commit.`;
   }
 }
