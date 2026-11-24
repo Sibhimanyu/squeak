@@ -48,17 +48,42 @@ public struct RoomTaskTarget: Sendable, Equatable, Decodable {
     public var state: String
     /// First person, from the host: "worked on the control bar an hour ago" (the duck says "I <pitch>"). Nil from an older host.
     public var pitch: String?
-    public init(sessionId: String, title: String, reason: String = "", state: String = "idle", pitch: String? = nil) {
-        self.sessionId = sessionId; self.title = title; self.reason = reason; self.state = state; self.pitch = pitch
+    /// The Duck itself (a Duck outlives its chats); nil from an older host.
+    public var duckId: String?
+    public init(sessionId: String, title: String, reason: String = "", state: String = "idle", pitch: String? = nil, duckId: String? = nil) {
+        self.sessionId = sessionId; self.title = title; self.reason = reason; self.state = state; self.pitch = pitch; self.duckId = duckId
     }
-    private enum CodingKeys: String, CodingKey { case sessionId, title, reason, state, pitch }
+    private enum CodingKeys: String, CodingKey { case sessionId, title, reason, state, pitch, duckId }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try c.decode(String.self, forKey: .sessionId)
+        duckId = (try? c.decode(String.self, forKey: .duckId)).flatMap { $0.isEmpty ? nil : $0 }
         title = (try? c.decode(String.self, forKey: .title)) ?? ""
         reason = (try? c.decode(String.self, forKey: .reason)) ?? ""
         state = (try? c.decode(String.self, forKey: .state)) ?? "idle"
         pitch = (try? c.decode(String.self, forKey: .pitch)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+    }
+}
+
+/// What the decider chose for a Task (or the person chose after): the words of the Room's one routing line.
+public struct RoomTaskRouting: Sendable, Equatable, Decodable {
+    /// "duck", "hatch" or "wait" (anything else reads as hatch).
+    public var kind: String
+    public var duckId: String?
+    public var name: String?
+    public var reason: String
+    public var byPerson: Bool
+    public init(kind: String, duckId: String? = nil, name: String? = nil, reason: String = "", byPerson: Bool = false) {
+        self.kind = kind; self.duckId = duckId; self.name = name; self.reason = reason; self.byPerson = byPerson
+    }
+    private enum CodingKeys: String, CodingKey { case kind, duckId, name, reason, by }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = (try? c.decode(String.self, forKey: .kind)) ?? "hatch"
+        duckId = (try? c.decode(String.self, forKey: .duckId)).flatMap { $0.isEmpty ? nil : $0 }
+        name = (try? c.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 }
+        reason = (try? c.decode(String.self, forKey: .reason)) ?? ""
+        byPerson = ((try? c.decode(String.self, forKey: .by)) ?? "") == "person"
     }
 }
 
@@ -146,6 +171,7 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
     public var discussion: [RoomTaskMessage]
     public var suggestion: RoomTaskTarget?
     public var candidates: [RoomTaskTarget]
+    public var routing: RoomTaskRouting?
     /// Chosen by the host; absent in a plain-folder pond (no streams) and from an older host.
     public var place: RoomTaskPlace?
     public var claim: RoomTaskClaim?
@@ -159,9 +185,9 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
         id: String, messageId: String, text: String = "", title: String? = nil, state: RoomTaskState = .waiting, proposed: Bool = false,
         parentTaskId: String? = nil, discussion: [RoomTaskMessage] = [], suggestion: RoomTaskTarget? = nil,
         candidates: [RoomTaskTarget] = [], claim: RoomTaskClaim? = nil, handedTo: RoomTaskHandedTo? = nil, result: String? = nil,
-        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomTaskPlace? = nil
+        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomTaskPlace? = nil, routing: RoomTaskRouting? = nil
     ) {
-        self.place = place
+        self.place = place; self.routing = routing
         self.id = id; self.messageId = messageId; self.text = text; self.title = title ?? RoomTasks.title(of: text)
         self.state = state; self.proposed = proposed; self.parentTaskId = parentTaskId; self.discussion = discussion
         self.suggestion = suggestion
@@ -170,7 +196,7 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, messageId, text, title, state, proposed, parentTaskId, discussion, suggestion, candidates, place, claim, handedTo, result
+        case id, messageId, text, title, state, proposed, parentTaskId, discussion, suggestion, candidates, routing, place, claim, handedTo, result
         case createdAt, updatedAt
     }
     public init(from decoder: Decoder) throws {
@@ -189,6 +215,7 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
         discussion = ((try? c.decode([Failable<RoomTaskMessage>].self, forKey: .discussion)) ?? []).compactMap(\.value)
         suggestion = try? c.decode(RoomTaskTarget.self, forKey: .suggestion)
         candidates = ((try? c.decode([Failable<RoomTaskTarget>].self, forKey: .candidates)) ?? []).compactMap(\.value)
+        routing = try? c.decode(RoomTaskRouting.self, forKey: .routing)
         place = try? c.decode(RoomTaskPlace.self, forKey: .place)
         claim = try? c.decode(RoomTaskClaim.self, forKey: .claim)
         handedTo = try? c.decode(RoomTaskHandedTo.self, forKey: .handedTo)
@@ -214,6 +241,8 @@ public enum RoomTaskAction: Sendable, Equatable {
     case drop
     case allow
     case deny
+    /// Give the waiting Task to another Duck (nil: a new one); nothing starts until the host's line or Go does.
+    case reroute(duckId: String?)
 
     public var body: NativeJSON { body(place: nil) }
 
@@ -229,6 +258,10 @@ public enum RoomTaskAction: Sendable, Equatable {
         case .drop: return .object(["action": .string("drop")])
         case .allow: o = ["action": .string("allow")]
         case .deny: return .object(["action": .string("deny")])
+        case .reroute(let id):
+            var r: [String: NativeJSON] = ["action": .string("reroute")]
+            if let id { r["duckId"] = .string(id) }
+            return .object(r)
         }
         if let place { o["place"] = place.json }
         if let include { o["messageIds"] = .array(include.map { .string($0) }) }
@@ -344,7 +377,7 @@ extension RoomTasks {
                 l.targetTitle = local?.pendingTitle ?? job.suggestion?.title
                 return l
             case .newThread: return base(.handing, mark: .working, lead: "Starting a new duck")
-            case .allow, .deny: break  // a claim's answer shows on the claim card; the line keeps its words
+            case .allow, .deny, .reroute: break  // the line keeps its words
             }
         }
         switch job.state {
@@ -549,6 +582,19 @@ public enum RoomPlaces {
 // MARK: - The Task in the Room
 
 /// One Task as the Room draws it: its title, its state, the Room messages it carries and what the person can do.
+/// The routing line and what its one tap offers.
+public struct RoomRoutingLine: Sendable, Equatable {
+    public struct Choice: Sendable, Equatable, Identifiable {
+        public var id: String { duckId ?? "new" }
+        /// nil = a new Duck.
+        public var duckId: String?
+        public var name: String
+    }
+    public var text: String
+    /// Other Ducks to send it to, then a new one; empty once the Task is under way (the line stays, the tap goes).
+    public var choices: [Choice]
+}
+
 public struct RoomTaskCard: Sendable, Equatable, Identifiable {
     public var id: String { "task:" + taskId }
     public var taskId: String
@@ -567,6 +613,8 @@ public struct RoomTaskCard: Sendable, Equatable, Identifiable {
     public var excluded: Set<String>
     public var canDrop: Bool
     public var error: String?
+    /// The one quiet routing line ("\u{2192} given to Pixel (related to icon work)"); nil until the decider has chosen.
+    public var routing: RoomRoutingLine? = nil
 
     public var trimmable: Bool { !discussion.isEmpty }
     /// "3 of 5 messages".
@@ -594,7 +642,26 @@ extension RoomTasks {
             result: task.state == .done ? task.result : nil,
             opens: task.handedTo?.sessionId,
             discussion: carried, excluded: excluded.intersection(carried.map(\.id)),
-            canDrop: task.state != .done, error: local?.error)
+            canDrop: task.state != .done, error: local?.error, routing: routingLine(for: task))
+    }
+
+    /// "\u{2192} given to Pixel (related to icon work)"; a new Duck and a wait read the same way.
+    public static func routingLine(for task: RoomTask) -> RoomRoutingLine? {
+        guard let r = task.routing, task.state != .dropped else { return nil }
+        let why = r.reason.isEmpty ? "" : " (\(r.reason))"
+        let text: String
+        switch r.kind {
+        case "duck": text = "\u{2192} given to \(r.name ?? task.suggestion?.title ?? "a duck")\(why)"
+        case "wait": text = "\u{2192} waiting\(why)"
+        default: text = "\u{2192} new duck\(why)"
+        }
+        guard task.state == .waiting else { return RoomRoutingLine(text: text, choices: []) }
+        var choices = task.candidates.compactMap { c -> RoomRoutingLine.Choice? in
+            guard let id = c.duckId, id != r.duckId else { return nil }
+            return .init(duckId: id, name: c.title)
+        }
+        if r.kind != "hatch" { choices.append(.init(duckId: nil, name: "A new duck")) }
+        return RoomRoutingLine(text: text, choices: choices)
     }
 
     /// The messages to send with Go, a new duck or Allow: all the Task carries minus the person's trim; nil when nothing

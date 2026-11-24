@@ -664,10 +664,13 @@ describe("start at once, with limits", () => {
     const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
     const [a] = ducks(r);
     const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
-    expect(t.suggestion?.sessionId).toBe(a!.id);
     expect(t.state).toBe("waiting");
     await r.jobs.idle();
-    expect(r.jobs.get(t.id)!.job).toMatchObject({ state: "working", handedTo: { sessionId: a!.id } });
+    expect(r.jobs.get(t.id)!.job).toMatchObject({
+      state: "working",
+      suggestion: { sessionId: a!.id },
+      handedTo: { sessionId: a!.id },
+    });
     expect(r.sent).toEqual([{ id: a!.id, text: topics[0][2] }]);
   });
 
@@ -740,7 +743,7 @@ describe("start at once, with limits", () => {
     r.store.setStatus(a!.id, "working");
     const second = r.jobs.fromMessage(r.pid, r.say("also fix the layout builder grid spacing on mobile").id);
     await r.jobs.idle();
-    expect(second.suggestion?.sessionId).toBe(a!.id);
+    expect(r.jobs.get(second.id)!.job.suggestion?.sessionId).toBe(a!.id);
     expect(state(r, second.id)).toBe("working");
     expect(r.sent.map((x) => x.id)).toEqual([a!.id, a!.id]);
     expect(state(r, first.id)).toBe("working");
@@ -795,7 +798,8 @@ describe("the decider routes a new Task", () => {
     const { r, layout } = layoutRig({ contextPercent: () => 92 });
     const full = await settled(r, r.jobs.fromMessage(r.pid, r.say(big).id));
     expect(full.routing).toMatchObject({ kind: "hatch" });
-    expect(full.candidates?.map((c) => c.sessionId)).toContain(layout.id);
+    expect(full.suggestion).toBeUndefined();
+    expect(layout.id).toBeTruthy();
     const calm = layoutRig({ contextPercent: () => 20 });
     const ok = await settled(calm.r, calm.r.jobs.fromMessage(calm.r.pid, calm.r.say(SPACING).id));
     expect(ok.routing).toMatchObject({ kind: "duck" });
@@ -814,7 +818,7 @@ describe("the decider routes a new Task", () => {
       status: "done",
       at: iso(20),
     });
-    expect(r.room.touchedFiles(r.store.duckForSession(s.id, r.pid).id)).toEqual(["ToolbarBadge.swift"]);
+    expect(r.room.touchedFiles(r.store.duckForSession(s.id, r.pid)!.id)).toEqual(["ToolbarBadge.swift"]);
     const t = await settled(r, r.jobs.fromMessage(r.pid, r.say("fix the toolbar badge colours").id));
     expect(t.routing).toMatchObject({ kind: "duck", name: "Pixel" });
     expect(t.routing!.reason).toBe("knows ToolbarBadge.swift");
@@ -929,5 +933,28 @@ describe("the decider routes a new Task", () => {
     await tap;
     await r.jobs.idle();
     expect(r.jobs.get(t.id)!.job.routing).toMatchObject({ kind: "hatch", by: "person" });
+  });
+});
+
+describe("a hatch starts a new Duck at once", () => {
+  it("an unrelated Task hatches through the starter, within the working limit", async () => {
+    const started: string[] = [];
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
+    const chat = r.chat("Layout builder");
+    r.turn(chat, "t1", "refactor the layout builder grid", 30, { minAgo: 10, reply: "Grid refactored." });
+    const t = r.jobs.fromMessage(r.pid, r.say("translate the onboarding strings to french").id);
+    await r.jobs.idle();
+    const now = r.jobs.get(t.id)!.job;
+    expect(now).toMatchObject({ state: "working", routing: { kind: "hatch" }, handedTo: { newThread: true } });
+    expect(r.calls).toEqual(["translate the onboarding strings to french"]);
+    expect(started).toEqual([]);
+  });
+
+  it("the Pond asking first keeps a hatch waiting for the person", async () => {
+    const r = rig({ rules: { askBeforeStarting: true, maxWorkingDucks: 4 } });
+    const t = r.jobs.fromMessage(r.pid, r.say("translate the onboarding strings to french").id);
+    await r.jobs.idle();
+    expect(r.jobs.get(t.id)!.job).toMatchObject({ state: "waiting", routing: { kind: "hatch" } });
+    expect(r.calls).toEqual([]);
   });
 });

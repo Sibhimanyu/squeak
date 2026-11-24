@@ -129,12 +129,30 @@ struct RoomTaskCardView: View {
                 }
                 if card.canDrop { Button("Drop") { act(card.taskId, .drop, nil) }.buttonStyle(SmallButtonStyle(role: .quiet)) }
             }
+            if let line = card.routing { routingLine(line) }
             if let p = card.parentTitle { Text(verbatim: "Part of \(p)").font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1) }
             if let r = card.result { Text(verbatim: r).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.center) }
             if let e = card.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative) }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 2)
         .accessibilityElement(children: .combine).accessibilityLabel(card.spoken)
+    }
+
+    /// The one quiet routing line; while the Task waits, one tap gives it to another Duck.
+    private func routingLine(_ line: RoomRoutingLine) -> some View {
+        HStack(spacing: 6) {
+            Text(verbatim: line.text).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.tail)
+            if !line.choices.isEmpty {
+                Menu {
+                    ForEach(line.choices) { c in
+                        Button(c.name) { act(card.taskId, .reroute(duckId: c.duckId), nil) }
+                    }
+                } label: {
+                    Text("Change").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Give this task to another duck")
+            }
+        }
     }
 
     private var stateBadge: some View {

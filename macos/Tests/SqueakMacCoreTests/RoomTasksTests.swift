@@ -264,4 +264,29 @@ struct RoomTasksTests {
         #expect(RoomTasks.canMakeTask(row, jobs: [job(proposed: true)]))
         #expect(!RoomTasks.canMakeTask(row, jobs: [job(state: .working)]))
     }
+
+    @Test func routingLineAndRerouteTap() throws {
+        let json = """
+        {"id":"job:1","messageId":"p1","text":"t","state":"waiting","createdAt":1,"updatedAt":1,
+         "suggestion":{"sessionId":"s1","duckId":"d1","title":"Pixel","reason":"related to icon work","state":"idle"},
+         "candidates":[{"sessionId":"s1","duckId":"d1","title":"Pixel"},{"sessionId":"s2","duckId":"d2","title":"Pip"}],
+         "routing":{"kind":"duck","duckId":"d1","name":"Pixel","reason":"related to icon work","by":"decider","at":2}}
+        """
+        let t = try JSONDecoder().decode(RoomTask.self, from: Data(json.utf8))
+        let line = try #require(RoomTasks.routingLine(for: t))
+        #expect(line.text == "\u{2192} given to Pixel (related to icon work)")
+        #expect(line.choices.map(\.name) == ["Pip", "A new duck"])
+        #expect(line.choices.map(\.duckId) == ["d2", nil])
+        // Under way: the line stays, the tap goes.
+        var going = t; going.state = .working
+        #expect(RoomTasks.routingLine(for: going)?.choices == [])
+        // A new duck reads as one and offers no "new duck" choice.
+        let hatch = RoomTask(id: "j", messageId: "p", routing: RoomTaskRouting(kind: "hatch", reason: "nothing here is related"))
+        #expect(RoomTasks.routingLine(for: hatch)?.text == "\u{2192} new duck (nothing here is related)")
+        #expect(RoomTasks.routingLine(for: hatch)?.choices.contains { $0.duckId == nil } == false)
+        #expect(RoomTasks.routingLine(for: job()) == nil)
+        #expect(RoomTaskAction.reroute(duckId: "d2").body == .object(["action": .string("reroute"), "duckId": .string("d2")]))
+        #expect(RoomTaskAction.reroute(duckId: nil).body == .object(["action": .string("reroute")]))
+        #expect(RoomTasks.card(for: t, among: [t])?.routing == line)
+    }
 }
