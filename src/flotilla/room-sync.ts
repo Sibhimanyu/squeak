@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { logger } from "../utils/logger.js";
 import { isSqueakLine, Room, RoomError, ROOM_MAX_TEXT } from "../native/room.js";
-import type { RoomTask, RoomTasks, TaskState } from "../native/room-tasks.js";
+import { TaskError, type RoomTask, type RoomTasks, type TaskOrigin, type TaskState } from "../native/room-tasks.js";
 import type { NativeStore, RoomPostKind } from "../native/store.js";
 import { randomId } from "./crypto.js";
 import type { Caps } from "./permissions.js";
@@ -69,6 +69,8 @@ export interface RoomInboxDoc {
   id: string;
   text: string;
   at: number;
+  /** Present for "Make task": the Room message to make a Task from (`text` is then empty). */
+  task?: { messageId: string };
 }
 
 /** `rtasks`/<task id>: a Task as Members see it (no discussion, no place, no Duck's chat). Written by the Owner's Mac. */
@@ -79,6 +81,8 @@ export interface RoomTaskDoc {
   title: string;
   text: string;
   state: TaskState;
+  /** Set while the Task waits for the Owner's approval (a Member made it without the start permission). */
+  needsApproval?: { name: string };
   parentTaskId?: string;
   result?: string;
   createdAt: number;
@@ -114,6 +118,10 @@ export function readInboxDoc(v: unknown): RoomInboxDoc | null {
   if (!rec(v) || v.v !== 1 || !str(v.id, 80) || !DOC_ID.test(v.id) || !str(v.text, ROOM_MAX_TEXT * 4) || !num(v.at)) {
     return null;
   }
+  if (v.task !== undefined) {
+    if (!rec(v.task) || !str(v.task.messageId, 80) || !v.task.messageId) return null;
+    return { v: 1, id: v.id, text: "", at: v.at, task: { messageId: v.task.messageId } };
+  }
   return { v: 1, id: v.id, text: v.text, at: v.at };
 }
 
@@ -127,6 +135,8 @@ export function readRoomTaskDoc(v: unknown): RoomTaskDoc | null {
   }
   if (!num(v.createdAt) || !num(v.updatedAt)) return null;
   if (v.parentTaskId !== undefined && !str(v.parentTaskId, 80)) return null;
+  const na = v.needsApproval;
+  if (na !== undefined && (!rec(na) || !str(na.name, 100))) return null;
   if (v.result !== undefined && !str(v.result, 1000)) return null;
   return {
     v: 1,
@@ -135,6 +145,7 @@ export function readRoomTaskDoc(v: unknown): RoomTaskDoc | null {
     title: v.title,
     text: v.text,
     state: v.state as TaskState,
+    ...(rec(na) && typeof na.name === "string" ? { needsApproval: { name: na.name } } : {}),
     ...(typeof v.parentTaskId === "string" && v.parentTaskId ? { parentTaskId: v.parentTaskId } : {}),
     ...(typeof v.result === "string" && v.result ? { result: v.result } : {}),
     createdAt: v.createdAt,
@@ -188,6 +199,7 @@ export function taskDocOf(t: RoomTask): RoomTaskDoc | null {
     title: t.title.slice(0, 300),
     text: t.text.slice(0, 4000),
     state: t.state,
+    ...(t.approval && t.state === "waiting" ? { needsApproval: { name: t.approval.name } } : {}),
     ...(t.parentTaskId ? { parentTaskId: t.parentTaskId.slice(0, 80) } : {}),
     ...(t.result ? { result: t.result.slice(0, 1000) } : {}),
     createdAt: t.createdAt,
@@ -360,18 +372,30 @@ export class RoomSync extends EventEmitter {
         from.caps.message &&
         now - doc.at <= ROOM_INBOX_LIFE_MS &&
         this.takeSlot(pondId, from.device);
-      if (fine) {
+      const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.caps.start };
+      if (fine && doc.task) {
+        // "Make task": the Owner's Task rules, with the approval gate for a Member without the start permission.
         try {
-          this.o.room.post({
-            projectId: port.projectId,
-            id: `m-${doc.id}`,
-            author: { kind: "person", id: from.device, name: from.name },
-            kind: "message",
-            level: "room",
-            text: doc.text,
-            // The Member's own time, never later than now.
-            at: Math.min(doc.at, now),
-          });
+          this.o.jobs.fromMessage(port.projectId, doc.task.messageId, undefined, origin);
+          applied += 1;
+        } catch (error) {
+          if (!(error instanceof TaskError)) throw error;
+        }
+      } else if (fine) {
+        const postId = `m-${doc.id}`;
+        try {
+          this.o.jobs.withMemberPost(postId, origin, () =>
+            this.o.room.post({
+              projectId: port.projectId!,
+              id: postId,
+              author: { kind: "person", id: from.device, name: from.name },
+              kind: "message",
+              level: "room",
+              text: doc.text,
+              // The Member's own time, never later than now.
+              at: Math.min(doc.at, now),
+            }),
+          );
           applied += 1;
         } catch (error) {
           if (!(error instanceof RoomError)) throw error;
@@ -491,6 +515,28 @@ export class RoomSync extends EventEmitter {
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
     const doc: RoomInboxDoc = { v: 1, id, text: clean, at };
+    await port.put("rposts", id, doc);
+    const owner = await port.owner().catch(() => null);
+    return owner && !owner.online ? { id, offline: true, line: ownerOfflineLine(owner.name) } : { id, offline: false };
+  }
+
+  /**
+   * "Make task" from a Member's Mac: the same sealed inbox as a message. The Owner's Mac makes the Task when it applies it; a
+   * Member without the start permission gets a Task that waits for the Owner's approval.
+   */
+  async makeTask(pondId: string, messageId: unknown): Promise<{ id: string; offline: boolean; line?: string }> {
+    const port = this.o.service.roomPort(pondId);
+    if (port.role === "owner") throw new FlotillaError("That is your own Room: make the task from the pond.", 400);
+    if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
+    if (!(await port.caps()).message) {
+      throw new FlotillaError("The owner has turned off messaging for you in this pond.", 403);
+    }
+    if (typeof messageId !== "string" || !messageId || messageId.length > 80) {
+      throw new FlotillaError("messageId must be a Room message id");
+    }
+    const at = this.now();
+    const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
+    const doc: RoomInboxDoc = { v: 1, id, text: "", at, task: { messageId } };
     await port.put("rposts", id, doc);
     const owner = await port.owner().catch(() => null);
     return owner && !owner.online ? { id, offline: true, line: ownerOfflineLine(owner.name) } : { id, offline: false };

@@ -580,6 +580,12 @@ export class FlotillaRoutes {
       ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text)) });
       return true;
     }
+    if (parts.length === 4 && parts[3] === "tasks" && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["messageId"]);
+      ctx.json(202, { queued: true, ...(await sync.makeTask(pondId, body.messageId)) });
+      return true;
+    }
     if (parts[3] === "stream" && parts.length === 4 && method === "GET") {
       await this.roomStream(ctx, pondId, sync);
       return true;

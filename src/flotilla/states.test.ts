@@ -79,6 +79,7 @@ async function flock(w: World, roles: Array<{ name: string; role: "member" | "vi
     await M.service.join((await A.service.invite(pond.id, role)).code);
     const [req] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    if (role === "member") await A.service.setMemberCaps(pond.id, M.service.me.id, { preset: "collaborator" });
     await M.service.refresh(pond.id);
     others.push(M);
   }

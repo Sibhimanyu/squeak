@@ -88,6 +88,14 @@ public struct RoomClient: Sendable {
         return try Self.job(try await host.call("POST", path(project) + "/tasks", body: body, timeout: 20))
     }
 
+    /// A Member's "Make task": `POST /native/ponds/<id>/room/tasks { messageId }` answers 202 once it is in the cloud; the Task shows
+    /// when the Owner's Mac has made it (waiting for the Owner's approval unless the Member may start).
+    public func queueTask(pond: String, messageId: String) async throws -> RoomQueued {
+        let data = try await host.call("POST", path(pond) + "/tasks", body: .object(["messageId": .string(messageId)]), timeout: 20)
+        guard let j = NativeJSON.parse(String(decoding: data, as: UTF8.self)), let id = j["id"]?.string else { throw NativeHostError.badResponse }
+        return RoomQueued(id: id, offline: j["offline"]?.bool ?? false, line: j["line"]?.string)
+    }
+
     /// Go / New thread / Just a note / Allow / No: `POST .../room/tasks/<id>`. A 409 carries its own sentence.
     public func act(project: String, jobId: String, action: RoomTaskAction, place: RoomTaskPlace? = nil, include: [String]? = nil) async throws -> RoomTask {
         let taskPath = path(project) + "/tasks/" + NativeHostClient.id(jobId)

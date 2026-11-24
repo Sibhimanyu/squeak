@@ -195,7 +195,7 @@ public enum RoomMessages {
 
     public static func build(
         feed: RoomFeed, now: Date = Date(), calendar: Calendar = .current, owner: String? = nil, filesFor: (String) -> Int? = { _ in nil },
-        memberView: Bool = false, selfId: String? = nil
+        memberView: Bool = false, selfId: String? = nil, canMakeMemberTask: Bool = true
     ) -> [RoomItem] {
         var entries: [Entry] = []
         let threads = Dictionary(feed.threads.map { ($0.sessionId, $0) }, uniquingKeysWith: { a, _ in a })
@@ -274,8 +274,10 @@ public enum RoomMessages {
                     author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: p.text.isEmpty && !p.attachments.isEmpty ? [] : [.text(p.text, .normal)])
                 m.attachments = p.attachments
                 m.pending = r.pending; m.failed = r.failed; m.postId = p.id
-                // A Member's Room draws what the Owner's Mac published: Tasks are made and dropped there.
-                m.canMakeTask = !memberView && RoomTasks.canMakeTask(r, jobs: feed.jobs)
+                // A Member can make a Task from a message (queued for the Owner's Mac, where it may wait for approval) when they
+                // may post at all; dropping and approving stay with the Owner.
+                m.canMakeTask = (!memberView || canMakeMemberTask) && feed.jobLocal["msg:" + p.id]?.queued != true
+                    && RoomTasks.canMakeTask(r, jobs: feed.jobs)
                 m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId
                 add(m, order: 0)
             } else if p.level == .room, p.author.kind == .agent, p.kind == .message || !feed.servesTurns {
@@ -292,7 +294,7 @@ public enum RoomMessages {
             let at = max(job.createdAt, postAt)
             let local = feed.jobLocal[job.id]
             // Every Task shows with its state; a dropped one leaves.
-            if var card = RoomTasks.card(for: job, among: feed.jobs, local: local, excluded: feed.taskExcluded[job.id] ?? []) {
+            if var card = RoomTasks.card(for: job, among: feed.jobs, local: local, excluded: feed.taskExcluded[job.id] ?? [], memberView: memberView) {
                 if memberView { card.canDrop = false }
                 entries.append(Entry(at: at, order: 1, content: .system(RoomSystemLine(
                     id: "task:\(job.id)", at: at, text: card.title, jobId: nil, buttons: [], opens: card.opens, task: card))))
@@ -303,6 +305,13 @@ public enum RoomMessages {
             }
             if job.state == .waiting {
                 if let pend = local?.pending, pend == .drop { continue }
+                // A Member's Task waits for the Owner: the Owner gets Approve / Drop, the Member only the card's words.
+                if !job.proposed, let who = job.approvalName {
+                    if !memberView { entries.append(Entry(at: at, order: 2, content: .system(approvalLine(job, who: who, local: local, at: at)))) }
+                    continue
+                }
+                // Members never act on a Task (Go and Start run on the Owner's Mac): they see its card.
+                if memberView { continue }
                 if let s = job.suggestion {
                     add(offerMessage(job, target: s, local: local, threads: threads, at: at, place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])), order: 2)
                 } else {
@@ -376,7 +385,7 @@ public enum RoomMessages {
             switch p {
             case .go: note = "Handing over\u{2026}"; buttons = []
             case .newThread: note = "Starting a new duck\u{2026}"; buttons = []
-            case .drop, .allow, .deny, .reroute: break
+            case .drop, .allow, .deny, .reroute, .approve: break
             }
         }
         let others = job.candidates.filter { $0.sessionId != s.sessionId }
@@ -403,6 +412,19 @@ public enum RoomMessages {
         return RoomMessage(
             id: "job:\(job.id):claim", at: at, author: a,
             parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: [], note: note, error: local?.error, isClaim: true, place: place))])
+    }
+
+    /// "Aarav asked for this task \u{2014}  [Approve] [Drop]": the Owner lets a Member's Task go ahead, or drops it.
+    static func approvalLine(_ job: RoomTask, who: String, local: RoomTaskLocal?, at: Int64) -> RoomSystemLine {
+        var buttons = [
+            RoomTaskButton(id: "approve", title: "Approve", role: .primary, action: .approve),
+            RoomTaskButton(id: "note", title: "Drop", role: .quiet, action: .drop),
+        ]
+        var note: String?
+        if local?.pending == .approve { buttons = []; note = "Approving\u{2026}" }
+        return RoomSystemLine(
+            id: "job:\(job.id):approve", at: at, text: "\(who) asked for this task \u{2014}", jobId: job.id, buttons: buttons,
+            error: local?.error, note: note)
     }
 
     static func noDuckLine(_ job: RoomTask, local: RoomTaskLocal?, at: Int64, place: RoomPlaceChip? = nil) -> RoomSystemLine {

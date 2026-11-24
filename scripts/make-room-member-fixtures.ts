@@ -54,6 +54,7 @@ const jobs = new RoomTasks({
   newThread: async () => ({}) as SessionRow,
   call: async () => '{"job":false,"text":""}',
   enabled: () => false,
+  settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }),
   now: () => clock.now,
 });
 const A = service("Sibhi", "Sibhi's Mac");
@@ -182,6 +183,15 @@ await new Promise((r) => setTimeout(r, 600));
 controller.abort();
 await pump;
 fs.writeFileSync(path.join(out, "room-member-stream.txt"), seen.replace(/^: ping\n\n/gm, ""));
+
+// A Member makes a Task from a message: it is queued for the owner's Mac, which makes it wait for the owner's approval
+// (the Member's start permission is off by default); the Member's page then says so.
+const ask = room.personPost(project.id, "Could the timer also log each run?");
+await ownerSync.idle();
+save("room-member-task-queued", await call("POST", `/native/ponds/${pondId}/room/tasks`, { messageId: ask.id }), 202);
+await A.pass(pondId);
+await ownerSync.idle();
+save("room-member-page-approval", await call("GET", `/native/ponds/${pondId}/room?limit=2`), 200);
 
 ownerSync.stop();
 B.stop();

@@ -178,6 +178,9 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
     public var handedTo: RoomTaskHandedTo?
     /// How it ended: the Duck's first sentence.
     public var result: String?
+    /// Set while the Task waits for the Owner's approval: the name of the Member who made it (their start permission is off).
+    /// The Owner's host says `approval { by, name }`; a Member's page says `needsApproval { name }`.
+    public var approvalName: String?
     public var createdAt: Int64
     public var updatedAt: Int64
 
@@ -185,9 +188,9 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
         id: String, messageId: String, text: String = "", title: String? = nil, state: RoomTaskState = .waiting, proposed: Bool = false,
         parentTaskId: String? = nil, discussion: [RoomTaskMessage] = [], suggestion: RoomTaskTarget? = nil,
         candidates: [RoomTaskTarget] = [], claim: RoomTaskClaim? = nil, handedTo: RoomTaskHandedTo? = nil, result: String? = nil,
-        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomTaskPlace? = nil, routing: RoomTaskRouting? = nil
+        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomTaskPlace? = nil, routing: RoomTaskRouting? = nil, approvalName: String? = nil
     ) {
-        self.place = place; self.routing = routing
+        self.place = place; self.routing = routing; self.approvalName = approvalName
         self.id = id; self.messageId = messageId; self.text = text; self.title = title ?? RoomTasks.title(of: text)
         self.state = state; self.proposed = proposed; self.parentTaskId = parentTaskId; self.discussion = discussion
         self.suggestion = suggestion
@@ -197,8 +200,9 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, messageId, text, title, state, proposed, parentTaskId, discussion, suggestion, candidates, routing, place, claim, handedTo, result
-        case createdAt, updatedAt
+        case createdAt, updatedAt, approval, needsApproval
     }
+    private struct Approver: Decodable { var name: String }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A Task with no id, message or readable state cannot be placed or acted on; the page drops it.
@@ -220,6 +224,8 @@ public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
         claim = try? c.decode(RoomTaskClaim.self, forKey: .claim)
         handedTo = try? c.decode(RoomTaskHandedTo.self, forKey: .handedTo)
         result = (try? c.decode(String.self, forKey: .result)).flatMap { $0.isEmpty ? nil : $0 }
+        let approver = (try? c.decode(Approver.self, forKey: .approval)) ?? (try? c.decode(Approver.self, forKey: .needsApproval))
+        approvalName = approver.map { $0.name.trimmingCharacters(in: .whitespaces).isEmpty ? "A Member" : $0.name }
         createdAt = c.ms(.createdAt) ?? 0
         updatedAt = c.ms(.updatedAt) ?? createdAt
     }
@@ -243,6 +249,8 @@ public enum RoomTaskAction: Sendable, Equatable {
     case deny
     /// Give the waiting Task to another Duck (nil: a new one); nothing starts until the host's line or Go does.
     case reroute(duckId: String?)
+    /// The Owner lets a Member's Task go ahead (it waited for approval).
+    case approve
 
     public var body: NativeJSON { body(place: nil) }
 
@@ -262,6 +270,7 @@ public enum RoomTaskAction: Sendable, Equatable {
             var r: [String: NativeJSON] = ["action": .string("reroute")]
             if let id { r["duckId"] = .string(id) }
             return .object(r)
+        case .approve: return .object(["action": .string("approve")])
         }
         if let place { o["place"] = place.json }
         if let include { o["messageIds"] = .array(include.map { .string($0) }) }
@@ -304,8 +313,10 @@ public struct RoomTaskLocal: Sendable, Equatable {
     public var pendingTitle: String?
     /// A refusal or failure, shown inline under the line until the job next changes.
     public var error: String?
-    public init(pending: RoomTaskAction? = nil, pendingTitle: String? = nil, error: String? = nil) {
-        self.pending = pending; self.pendingTitle = pendingTitle; self.error = error
+    /// A Member's "Make task" sent to the Owner's Mac and not yet seen as a Task: the message stops offering it.
+    public var queued: Bool
+    public init(pending: RoomTaskAction? = nil, pendingTitle: String? = nil, error: String? = nil, queued: Bool = false) {
+        self.pending = pending; self.pendingTitle = pendingTitle; self.error = error; self.queued = queued
     }
 }
 
@@ -377,7 +388,7 @@ extension RoomTasks {
                 l.targetTitle = local?.pendingTitle ?? job.suggestion?.title
                 return l
             case .newThread: return base(.handing, mark: .working, lead: "Starting a new duck")
-            case .allow, .deny, .reroute: break  // the line keeps its words
+            case .allow, .deny, .reroute, .approve: break  // a claim's answer shows on the claim card; the line keeps its words
             }
         }
         switch job.state {
@@ -615,6 +626,8 @@ public struct RoomTaskCard: Sendable, Equatable, Identifiable {
     public var error: String?
     /// The one quiet routing line ("\u{2192} given to Pixel (related to icon work)"); nil until the decider has chosen.
     public var routing: RoomRoutingLine? = nil
+    /// Waiting for the Owner's approval: who asked. The label says whose turn it is.
+    public var approvalName: String? = nil
 
     public var trimmable: Bool { !discussion.isEmpty }
     /// "3 of 5 messages".
@@ -630,19 +643,20 @@ public struct RoomTaskCard: Sendable, Equatable, Identifiable {
 extension RoomTasks {
     /// The card for a Task; nil for a dropped one (it leaves the Room, the row stays put).
     public static func card(
-        for task: RoomTask, among tasks: [RoomTask], local: RoomTaskLocal? = nil, excluded: Set<String> = []
+        for task: RoomTask, among tasks: [RoomTask], local: RoomTaskLocal? = nil, excluded: Set<String> = [], memberView: Bool = false
     ) -> RoomTaskCard? {
         if task.state == .dropped { return nil }
         if local?.pending == .drop { return nil }
         let carried = task.state == .waiting ? task.discussion.filter { $0.id != task.messageId } : []
+        let approval = task.state == .waiting && !task.proposed ? task.approvalName : nil
         return RoomTaskCard(
             taskId: task.id, title: task.title, state: task.state,
-            stateLabel: task.proposed && task.state == .waiting ? "Suggested" : task.state.label,
+            stateLabel: approval != nil ? approvalLabel(memberView: memberView) : task.proposed && task.state == .waiting ? "Suggested" : task.state.label,
             parentTitle: task.parentTaskId.flatMap { p in tasks.first { $0.id == p }?.title },
             result: task.state == .done ? task.result : nil,
             opens: task.handedTo?.sessionId,
             discussion: carried, excluded: excluded.intersection(carried.map(\.id)),
-            canDrop: task.state != .done, error: local?.error, routing: routingLine(for: task))
+            canDrop: task.state != .done, error: local?.error, routing: routingLine(for: task), approvalName: approval)
     }
 
     /// "\u{2192} given to Pixel (related to icon work)"; a new Duck and a wait read the same way.
@@ -663,6 +677,9 @@ extension RoomTasks {
         if r.kind != "hatch" { choices.append(.init(duckId: nil, name: "A new duck")) }
         return RoomRoutingLine(text: text, choices: choices)
     }
+
+    /// Whose turn a Member's Task is: the Owner's (they approve it), or what the Member sees while they wait.
+    public static func approvalLabel(memberView: Bool) -> String { memberView ? "Waiting for the Owner\u{2019}s approval" : "Needs your approval" }
 
     /// The messages to send with Go, a new duck or Allow: all the Task carries minus the person's trim; nil when nothing
     /// was trimmed (the host then sends what it carries).

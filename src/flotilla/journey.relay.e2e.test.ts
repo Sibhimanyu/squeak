@@ -254,6 +254,7 @@ describe("the multiplayer journey over the real relay", () => {
     const [join] = (await A.service.view(pondId)).joins;
     expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
     await A.service.decideJoin(pondId, join!.requestId, { approve: true });
+    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
     await B.service.refresh(pondId);
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");

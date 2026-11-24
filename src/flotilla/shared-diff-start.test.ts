@@ -154,6 +154,8 @@ describe("a member reads the changes of someone else's thread", () => {
       await m.service.join((await A.service.invite(pondId, role)).code);
       for (const j of (await A.service.view(pondId)).joins)
         await A.service.decideJoin(pondId, j.requestId, { approve: true });
+      // A Member does not start by default; the Collaborator preset does.
+      if (role === "member") await A.service.setMemberCaps(pondId, m.service.me.id, { preset: "collaborator" });
       await m.service.refresh(pondId);
     }
     A.host.sessions.set("s1", session("s1"));
@@ -282,6 +284,8 @@ describe("a member starts a thread on the owner's Mac", () => {
       await m.service.join((await A.service.invite(pondId, role)).code);
       for (const j of (await A.service.view(pondId)).joins)
         await A.service.decideJoin(pondId, j.requestId, { approve: true });
+      // A Member does not start by default; the Collaborator preset does.
+      if (role === "member") await A.service.setMemberCaps(pondId, m.service.me.id, { preset: "collaborator" });
       await m.service.refresh(pondId);
     }
   });

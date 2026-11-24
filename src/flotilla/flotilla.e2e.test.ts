@@ -177,6 +177,8 @@ describe("two Macs over one store", () => {
     const joins = (await A.service.view(pondId)).joins;
     expect(joins).toHaveLength(2);
     for (const j of joins) await A.service.decideJoin(pondId, j.requestId, { approve: true });
+    // A Member does not start by default; these tests have B start things.
+    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
     await B.service.refresh(pondId);
     await V.service.refresh(pondId);
     const view = await B.service.view(pondId);
@@ -440,6 +442,7 @@ describe("web guests and the wire", () => {
     const [join] = (await A.service.view(pond.id)).joins;
     expect(join).toMatchObject({ client: "web", nest: null });
     await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
+    await A.service.setMemberCaps(pond.id, W.service.me.id, { preset: "collaborator" });
     await W.service.refresh(pond.id);
     const view = await W.service.view(pond.id);
     expect(view.members.find((m) => m.you)).toMatchObject({ nest: null });

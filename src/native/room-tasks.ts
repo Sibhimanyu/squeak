@@ -83,6 +83,11 @@ export interface RoomTask {
   place?: TaskPlace;
   /** Squeak starts this Task itself, in order, once a Duck is free: set when it is made with a destination. */
   inLine?: true;
+  /**
+   * A Member made it and may not start things (the `start` permission is off): it waits for the Owner's approval
+   * (`approve`, Go, New or Allow from the Owner's Room) and is never started or offered to a Duck before that.
+   */
+  approval?: { by: string; name: string };
   claim?: {
     sessionId: string;
     duckId?: string;
@@ -94,6 +99,13 @@ export interface RoomTask {
   handedTo?: { sessionId: string; duckId?: string; title: string; turnId?: string; newThread: boolean };
   createdAt: number;
   updatedAt: number;
+}
+
+/** Who made a Task from a Member's words, and whether they may start things. */
+export interface TaskOrigin {
+  memberId: string;
+  name: string;
+  canStart: boolean;
 }
 
 export class TaskError extends Error {
@@ -268,6 +280,8 @@ export class RoomTasks extends EventEmitter {
   private readonly routings = new Map<string, Promise<void>>();
   private readonly decider: Decider;
   private call: TitleModelCall | null;
+  /** Members' posts being applied right now (post id to who): a Task made from one waits for approval unless they may start. */
+  private readonly memberPosts = new Map<string, TaskOrigin>();
 
   constructor(private readonly o: RoomTasksOptions) {
     super();
@@ -485,7 +499,7 @@ export class RoomTasks extends EventEmitter {
    * A Task from a message: the person's phrase, the Make task action, or taking up a suggestion (skips the check).
    * A suggestion for the message becomes a plain Task; a dropped one is made again.
    */
-  fromMessage(projectId: string, messageId: unknown, parentTaskId?: unknown): RoomTask {
+  fromMessage(projectId: string, messageId: unknown, parentTaskId?: unknown, origin?: TaskOrigin): RoomTask {
     if (typeof messageId !== "string" || !messageId) throw new TaskError("messageId is required.", 400);
     const post = this.o.store.roomPostById(messageId);
     if (!post || post.projectId !== projectId || post.kind !== "message") {
@@ -504,6 +518,7 @@ export class RoomTasks extends EventEmitter {
       if (task.state === "dropped") {
         return this.create(projectId, messageId, task.text, {
           reopen: task,
+          ...(origin ? { origin } : {}),
           ...(typeof parentTaskId === "string"
             ? { parentTaskId }
             : task.parentTaskId
@@ -514,13 +529,38 @@ export class RoomTasks extends EventEmitter {
       if (task.proposed) {
         delete task.proposed;
         if (typeof parentTaskId === "string") task.parentTaskId = parentTaskId;
+        this.gate(task, origin);
         this.save(projectId, task);
-        this.route(projectId, task.id, true, !this.rules(projectId).askBeforeStarting);
+        this.route(projectId, task.id, true, !task.approval && !this.rules(projectId).askBeforeStarting);
         return task;
       }
       throw new TaskError("That message is already a task.", 409);
     }
-    return this.create(projectId, messageId, post.text, typeof parentTaskId === "string" ? { parentTaskId } : {});
+    return this.create(projectId, messageId, post.text, {
+      ...(typeof parentTaskId === "string" ? { parentTaskId } : {}),
+      ...(origin ? { origin } : {}),
+    });
+  }
+
+  /**
+   * Runs `fn` (a Member's post being applied) so that a Task it makes by phrase knows who asked. Taking a Task up for the Owner
+   * (the Owner's own Make task, Go or New) is approval by itself and never comes through here.
+   */
+  withMemberPost<T>(postId: string, origin: TaskOrigin, fn: () => T): T {
+    this.memberPosts.set(postId, origin);
+    try {
+      return fn();
+    } finally {
+      this.memberPosts.delete(postId);
+    }
+  }
+
+  /** A Task a Member made without the start permission waits for the Owner: no line, no Duck, until approved. */
+  private gate(task: RoomTask, origin: TaskOrigin | undefined): void {
+    if (origin && !origin.canStart) {
+      task.approval = { by: origin.memberId.slice(0, 80), name: origin.name.slice(0, 100) };
+      delete task.inLine;
+    } else delete task.approval;
   }
 
   private create(
@@ -533,6 +573,7 @@ export class RoomTasks extends EventEmitter {
       parentTaskId?: string;
       /** Routed straight to this Duck (an @mention): the decider does not run. */
       direct?: { duckId: string; reason: string };
+      origin?: TaskOrigin;
     } = {},
   ): RoomTask {
     const post = this.o.store.roomPostById(messageId);
@@ -568,9 +609,11 @@ export class RoomTasks extends EventEmitter {
       createdAt: o.reopen?.createdAt ?? at,
       updatedAt: at,
     };
+    if (!o.proposed) this.gate(task, o.origin ?? this.memberPosts.get(messageId));
     this.save(projectId, task);
-    if (o.direct) return this.reroute(projectId, task, o.direct.duckId, o.direct.reason);
-    this.route(projectId, task.id, !o.proposed, !o.proposed);
+    // A Member's Task without the start permission is routed (so the Owner sees where it would go) but does not start.
+    if (o.direct && !task.approval) return this.reroute(projectId, task, o.direct.duckId, o.direct.reason);
+    this.route(projectId, task.id, !o.proposed, !o.proposed && !task.approval);
     return task;
   }
 
@@ -1039,7 +1082,7 @@ export class RoomTasks extends EventEmitter {
     if (!me) return [];
     const out: Array<{ job: RoomTask; why: string; score: number }> = [];
     for (const job of this.list(projectId)) {
-      if (job.state !== "waiting") continue;
+      if (job.state !== "waiting" || job.approval) continue;
       if (job.claim && job.claim.status !== "denied" && job.claim.sessionId !== session.id) continue;
       if (job.claim?.status === "denied" && job.claim.sessionId === session.id) continue;
       const hit = this.score(
@@ -1066,6 +1109,7 @@ export class RoomTasks extends EventEmitter {
     if (!found || found.projectId !== projectId) throw new TaskError("No such job in this pond.", 404);
     const job = found.job;
     if (job.state !== "waiting") throw new TaskError("That task is no longer open.", 409);
+    if (job.approval) throw new TaskError("That task is waiting for the Owner's approval.", 409);
     if (this.o.store.duckOf(session.id).duty === "off") {
       throw new TaskError("You are off duty, so you can't take jobs; the person can put you back on duty.", 409);
     }
@@ -1106,8 +1150,8 @@ export class RoomTasks extends EventEmitter {
     );
     if (unknown.length) throw new TaskError(`unknown key: ${unknown[0]}`, 400);
     const action = body.action;
-    if (!["go", "new", "drop", "allow", "deny", "reroute"].includes(action as string)) {
-      throw new TaskError("action must be go, new, drop, allow, deny or reroute", 400);
+    if (!["go", "new", "drop", "allow", "deny", "reroute", "approve"].includes(action as string)) {
+      throw new TaskError("action must be go, new, drop, allow, deny, reroute or approve", 400);
     }
     if (body.messageIds !== undefined && !["go", "allow", "new"].includes(action as string)) {
       throw new TaskError("messageIds is only for go, allow and new", 400);
@@ -1148,16 +1192,32 @@ export class RoomTasks extends EventEmitter {
       if (action === "go" || action === "allow" || action === "new") {
         // Taking a suggestion up makes it a Task; the person's trim is what the Duck is sent.
         delete job.proposed;
+        delete job.approval;
         if (body.messageIds !== undefined) this.trim(job, body.messageIds);
       }
       switch (action) {
         case "reroute":
           return this.reroute(projectId, job, body.duckId as string | undefined);
+        case "approve": {
+          // The Owner lets a Member's Task go ahead: it proceeds like the Owner's own, started at once if it can be.
+          if (!job.approval) throw new TaskError("That task is not waiting for approval.", 409);
+          // Its routing may still be running; the destination it names is what starts.
+          const routing = this.routings.get(job.id);
+          if (routing) await routing;
+          const fresh = this.get(jobId)?.job ?? job;
+          delete fresh.approval;
+          if (this.hasDestination(fresh) && !this.rules(projectId).askBeforeStarting) fresh.inLine = true;
+          const approved = this.save(projectId, fresh);
+          // After this call lets go of the Task, or the line would find it busy.
+          if (approved.inLine) queueMicrotask(() => this.startSoon(projectId));
+          return approved;
+        }
         case "drop": {
           const was = job.state;
           const sid = job.handedTo?.sessionId;
           job.state = "dropped";
           delete job.inLine;
+          delete job.approval;
           const dropped = this.save(projectId, job);
           // A dropped working Task frees its Duck, and the Duck is told (it stops at its next turn).
           this.startWaiting(projectId);
@@ -1275,7 +1335,8 @@ export class RoomTasks extends EventEmitter {
 
   /** A re-routed Task that is not waiting for the person starts the way a routed one does. */
   private enterLine(projectId: string, job: RoomTask): RoomTask {
-    if (!job.proposed && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting) job.inLine = true;
+    if (!job.proposed && !job.approval && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting)
+      job.inLine = true;
     const saved = this.save(projectId, job);
     if (saved.inLine) this.startSoon(projectId);
     return saved;

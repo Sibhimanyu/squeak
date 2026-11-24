@@ -751,6 +751,73 @@ describe("start at once, with limits", () => {
     expect(r.sent.map((x) => x.id)).toEqual([a!.id, a!.id]);
     expect(state(r, first.id)).toBe("working");
   });
+  describe("a Member's Task waits for the Owner unless they may start", () => {
+    const aarav = { memberId: "m-aarav", name: "Aarav" };
+
+    it("waits, is never started or offered to a Duck, and the Owner approves it to start at once", async () => {
+      const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
+      const [a] = ducks(r);
+      const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id, undefined, { ...aarav, canStart: false });
+      expect(t).toMatchObject({ state: "waiting", approval: { by: "m-aarav", name: "Aarav" } });
+      expect(t.inLine).toBeUndefined();
+      await r.jobs.idle();
+      r.jobs.startWaiting(r.pid);
+      await r.jobs.idle();
+      expect(r.sent).toEqual([]);
+      expect(r.jobs.openFor(r.pid, a!)).toEqual([]);
+      expect(() => r.jobs.claim(a!, r.pid, t.id)).toThrow(/approval/);
+
+      const approved = await r.jobs.act(r.pid, t.id, { action: "approve" });
+      expect(approved.approval).toBeUndefined();
+      await r.jobs.idle();
+      expect(r.jobs.get(t.id)!.job).toMatchObject({ state: "working", handedTo: { sessionId: a!.id } });
+      expect(r.sent).toEqual([{ id: a!.id, text: topics[0][2] }]);
+      await expect(r.jobs.act(r.pid, t.id, { action: "approve" })).rejects.toThrow(/409|already|taken/i);
+    });
+
+    it("proceeds like the Owner's own Task when the Member may start", async () => {
+      const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
+      const [a] = ducks(r);
+      const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id, undefined, { ...aarav, canStart: true });
+      expect(t.approval).toBeUndefined();
+      await r.jobs.idle();
+      expect(r.jobs.get(t.id)!.job).toMatchObject({ state: "working", handedTo: { sessionId: a!.id } });
+    });
+
+    it("a Member's 'make it a task' words wait too; the Owner's own words do not", async () => {
+      const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 4 } });
+      ducks(r);
+      r.jobs.attach(r.room as any);
+      r.jobs.withMemberPost("m-1", { ...aarav, canStart: false }, () => {
+        r.room.post({
+          projectId: r.pid,
+          id: "m-1",
+          author: { kind: "person", id: "m-aarav", name: "Aarav" },
+          kind: "message",
+          level: "room",
+          text: `make it a task: ${topics[1][2]}`,
+        });
+      });
+      await r.jobs.idle();
+      expect(r.jobs.list(r.pid)).toMatchObject([{ messageId: "m-1", state: "waiting", approval: { name: "Aarav" } }]);
+      expect(r.sent).toEqual([]);
+      r.say(`make it a task: ${topics[2][2]}`);
+      await r.jobs.idle();
+      expect(r.sent).toHaveLength(1);
+    });
+
+    it("the Owner can drop it, or hand it out with Go, which is approval too", async () => {
+      const r = rig();
+      const [a] = ducks(r);
+      const one = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id, undefined, { ...aarav, canStart: false });
+      const two = r.jobs.fromMessage(r.pid, r.say(topics[1][2]).id, undefined, { ...aarav, canStart: false });
+      expect((await r.jobs.act(r.pid, one.id, { action: "drop" })).state).toBe("dropped");
+      expect(r.jobs.get(one.id)!.job.approval).toBeUndefined();
+      const went = await r.jobs.act(r.pid, two.id, { action: "go", sessionId: a!.id });
+      expect(went).toMatchObject({ state: "working" });
+      expect(went.approval).toBeUndefined();
+    });
+  });
 });
 
 describe("the decider routes a new Task", () => {

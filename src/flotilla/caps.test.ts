@@ -4,7 +4,9 @@ import { CAP_PRESETS, effectiveCaps, readCapsPatch, threadWriteDecision } from "
 
 describe("per-member capabilities", () => {
   it("role defaults, presets and muted", () => {
-    expect(effectiveCaps("member")).toMatchObject({ message: true, answer: true, start: true });
+    // A Member does not start by default (their Tasks wait for the Owner); the Collaborator preset does.
+    expect(effectiveCaps("member")).toMatchObject({ message: true, answer: true, start: false });
+    expect(effectiveCaps("member", CAP_PRESETS.collaborator.caps)).toMatchObject({ start: true });
     expect(effectiveCaps("viewer")).toEqual({ see: true, diffs: true, message: false, answer: false, start: false });
     expect(effectiveCaps("viewer", { message: true })).toMatchObject({ message: false });
     const m = CAP_PRESETS.member;
