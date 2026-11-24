@@ -70,4 +70,11 @@ import Testing
         #expect(Set(WorkspaceFileIndex.gitList(in: dir)) == ["a.txt", "sub/b.md", "sub/deeper/c.txt"])
         #expect(WorkspaceFileIndex.walk(in: dir + "/missing").isEmpty)
     }
+
+    @Test func gitPondWordsSayWhoCanSeeTheRepoAndWhereItIs() {
+        #expect(FolderPond.gitPondQuestion(isPublic: false).contains("Only you"))
+        #expect(FolderPond.gitPondQuestion(isPublic: true).contains("Anyone"))
+        #expect(FolderPond.gitPondResult(url: "https://github.com/o/notes").hasSuffix("https://github.com/o/notes"))
+        #expect(!FolderPond.gitPondResult(url: nil).contains("http"))
+    }
 }

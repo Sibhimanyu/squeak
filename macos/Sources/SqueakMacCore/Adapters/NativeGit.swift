@@ -307,6 +307,15 @@ extension NativeHostClient {
     public func turnOnVersionHistory(projectId: String, commit: Bool) async throws {
         _ = try await call("POST", "/native/projects/\(Self.id(projectId))/history", body: .object(["commit": .bool(commit)]), timeout: 180)
     }
+
+    /// `POST /native/projects/<id>/git-pond`: version history with a first commit, a GitHub repo under the Owner's
+    /// account (private unless `isPublic`) and a push. Returns the repo's address. The host says in a sentence when
+    /// `gh` is missing or not signed in.
+    public func makeGitPond(projectId: String, isPublic: Bool) async throws -> String? {
+        let body: NativeJSON = .object(["visibility": .string(isPublic ? "public" : "private")])
+        let data = try await call("POST", "/native/projects/\(Self.id(projectId))/git-pond", body: body, timeout: 300)
+        return try? JSONDecoder.native(NativeGitPondReply.self, data).url
+    }
 }
 
 extension JSONDecoder {
@@ -572,6 +581,7 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
     }
 }
 
+struct NativeGitPondReply: Decodable { var url: String? }
 struct NativeHistoryReply: Decodable { var kind: String?; var preview: NativeHistoryPreview? }
 
 /// What turning on version history would save: the files and size of the folder, and whether it is within the limits.
