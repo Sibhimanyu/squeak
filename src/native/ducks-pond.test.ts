@@ -78,8 +78,8 @@ async function rig(kind: "git" | "folder" = "git") {
       store.attachSessionToDuck(spec.duck.id, s.id);
       return s;
     },
-    newBranch: (p, t) => srvRef!.newStreamBranch(p, t),
-    checkBranch: (p, b) => srvRef!.checkStreamBranch(p, b),
+    newBranch: (p, t) => srvRef!.starter.newBranch(p, t),
+    checkBranch: (p, b) => srvRef!.starter.checkBranch(p, b),
     call: async () => '{"job":false,"text":""}',
   });
   const srv = new NativeServer({ host, store, workspaces, tokenPath, port: 0, heartbeatMs: 40, room, jobs });

@@ -318,11 +318,15 @@ describe("flotilla routes", () => {
     });
     const plain = fs.mkdtempSync(path.join(os.tmpdir(), "plain-"));
     const p1 = h.store.createProject({ name: "Plain", rootPath: plain, defaultBranch: "main" });
-    const a = await startInProject({ store: h.store, workspaces, host: h.host }, p1.id, {
-      text: "t",
-      agent: "claude",
-      model: "m",
-    });
+    const a = await startInProject(
+      { store: h.store, workspaces, starter: { create: (spec) => h.host.create(spec) } },
+      p1.id,
+      {
+        text: "t",
+        agent: "claude",
+        model: "m",
+      },
+    );
     const row = h.store.getSession(a!.sessionId)!;
     expect(row.cwd).toBe(plain);
     expect(row.workspaceId).toBeNull();
@@ -331,16 +335,20 @@ describe("flotilla routes", () => {
     sh("init", "-b", "main");
     sh("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "i");
     const p2 = h.store.createProject({ name: "Repo", rootPath: repo, defaultBranch: "main" });
-    const b = await startInProject({ store: h.store, workspaces, host: h.host }, p2.id, {
-      text: "t",
-      agent: "claude",
-      model: "m",
-    });
+    const b = await startInProject(
+      { store: h.store, workspaces, starter: { create: (spec) => h.host.create(spec) } },
+      p2.id,
+      {
+        text: "t",
+        agent: "claude",
+        model: "m",
+      },
+    );
     const row2 = h.store.getSession(b!.sessionId)!;
     expect(row2.workspaceId).not.toBeNull();
     expect(row2.cwd).not.toBe(repo);
     expect(
-      await startInProject({ store: h.store, workspaces, host: h.host }, "nope", {
+      await startInProject({ store: h.store, workspaces, starter: { create: (spec) => h.host.create(spec) } }, "nope", {
         text: "t",
         agent: "claude",
         model: "m",
