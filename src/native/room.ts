@@ -187,6 +187,8 @@ export interface NewRoomPost {
   /** Squeak's own start/end lines: a fixed id makes a replayed event a no-op. */
   id?: string;
   at?: number;
+  /** Skip the @mention wake (the post is a hand-off the Task carries to that Duck). */
+  noWake?: boolean;
 }
 
 export interface RoomOptions {
@@ -324,7 +326,7 @@ export class Room extends EventEmitter {
       }
     }
     this.emit("post", row);
-    this.wake(row);
+    if (!input.noWake) this.wake(row);
     return row;
   }
 
@@ -380,6 +382,8 @@ export class Room extends EventEmitter {
           const sid = duck.currentSessionId;
           if (!sid || sid === row.sessionId || targets.has(sid) || !duck.name) continue;
           if (!mentions(row.text, duck.name)) continue;
+          // A message that is already a Task routed to this Duck reaches it as the Task, not as a second nudge.
+          if (this.routedTo(row.id, duck.id)) continue;
           if (duck.duty === "off") {
             if (row.authorKind !== "person") continue;
             this.setDutyById(duck.id, true);
@@ -394,6 +398,17 @@ export class Room extends EventEmitter {
       }
     } catch (error) {
       logger.warn("room wake failed", { error: String(error) });
+    }
+  }
+
+  /** True when the message is a Task that was routed straight to `duckId` (an @mention hand-off). */
+  private routedTo(messageId: string, duckId: string): boolean {
+    const r = this.store.roomJobRowByMessage(messageId);
+    if (!r) return false;
+    try {
+      return (JSON.parse(r.data) as { routing?: { by?: string; duckId?: string } }).routing?.duckId === duckId;
+    } catch {
+      return false;
     }
   }
 
@@ -429,6 +444,8 @@ export class Room extends EventEmitter {
       text: string;
       detail?: string;
       toSessionId?: string;
+      /** The post is a hand-off the Task carries to the Duck: do not also wake it with an @mention. */
+      noWake?: boolean;
     },
   ): RoomPostRow | null {
     const pond = projectOfSession(this.store, s);

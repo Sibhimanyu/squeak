@@ -144,6 +144,18 @@ export function tokens(text: string): Set<string> {
   return out;
 }
 
+/** `text` without the `@Name` mention (and the run of spaces it leaves). */
+export function stripMention(text: string, name: string): string {
+  const escaped = name
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+  return text
+    .replace(new RegExp(`(^|[^\\w@])@${escaped}(?![\\w])[,:]?`, "gi"), "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -321,6 +333,7 @@ export class RoomTasks extends EventEmitter {
     const onPost = (p: RoomPostRow): void => {
       if (p.authorKind !== "person" || p.kind !== "message" || p.level !== "room") return;
       // "make it a task" is rules, not a model: it works with the check switched off.
+      if (this.fromMention(p)) return;
       if (asksForTask(p.text)) this.fromPhrase(p);
       else this.check(p);
     };
@@ -403,6 +416,62 @@ export class RoomTasks extends EventEmitter {
     this.create(post.projectId, post.id, answer.text.trim() || post.text, { proposed: true });
   }
 
+  /**
+   * A person's message that @mentions a Duck and asks it for work ("@Pixel fix the login") is a Task for that Duck at
+   * once, no decider. A bare ping ("@Pixel thanks") and a name that is no Duck's stay ordinary chat. True when handled.
+   */
+  private fromMention(post: RoomPostRow): boolean {
+    try {
+      const duck = this.mentionedDuck(post.projectId, post.text);
+      if (!duck) return false;
+      const rest = stripMention(post.text, duck.name!);
+      if (wordCount(rest) < MIN_WORDS && !looksImperative(rest)) return false;
+      if (this.o.store.roomJobRowByMessage(post.id)) return true;
+      this.handOff(post.projectId, post.id, duck.id, { text: rest, reason: "you @mentioned it" });
+      return true;
+    } catch (error) {
+      logger.warn("@mention hand-off failed", { error: String(error) });
+      return false;
+    }
+  }
+
+  /** The first Duck of the pond @mentioned in `text`. */
+  mentionedDuck(projectId: string, text: string): DuckRow | null {
+    return this.o.store.listDucks(projectId).find((d) => d.name && mentions(text, d.name)) ?? null;
+  }
+
+  /**
+   * A Task given straight to `duckId` (an @mention by a person or a Duck): routed to it with no decider run, and, like
+   * any routed Task, started in the line unless the Pond asks first. A Duck's hand-off passes its own Task as parent.
+   */
+  handOff(
+    projectId: string,
+    messageId: string,
+    duckId: string,
+    o: { text?: string; parentTaskId?: string; reason?: string } = {},
+  ): RoomTask {
+    const post = this.o.store.roomPostById(messageId);
+    if (!post || post.projectId !== projectId || post.kind !== "message") {
+      throw new TaskError("That isn't a message in this pond's room.", 404);
+    }
+    if (this.o.store.roomJobRowByMessage(messageId)) throw new TaskError("That message is already a task.", 409);
+    const duck = this.o.store.duckRow(duckId);
+    if (!duck || duck.projectId !== projectId) throw new TaskError("That duck isn't in this pond.", 409);
+    if (o.parentTaskId) {
+      const parent = this.get(o.parentTaskId);
+      if (!parent || parent.projectId !== projectId) throw new TaskError("That parent Task isn't in this pond.", 404);
+    }
+    return this.create(projectId, messageId, o.text ?? post.text, {
+      ...(o.parentTaskId ? { parentTaskId: o.parentTaskId } : {}),
+      direct: { duckId, reason: o.reason ?? "it was @mentioned" },
+    });
+  }
+
+  /** The Task `sessionId`'s chat is working on now (the parent of what that Duck hands on). */
+  currentFor(sessionId: string): RoomTask | null {
+    return this.activeFor(sessionId)[0]?.[1] ?? null;
+  }
+
   /** The person said "make it a task": a Task from the discussion, never throwing into the post. */
   private fromPhrase(post: RoomPostRow): void {
     try {
@@ -458,7 +527,13 @@ export class RoomTasks extends EventEmitter {
     projectId: string,
     messageId: string,
     rawText: string,
-    o: { reopen?: RoomTask; proposed?: boolean; parentTaskId?: string } = {},
+    o: {
+      reopen?: RoomTask;
+      proposed?: boolean;
+      parentTaskId?: string;
+      /** Routed straight to this Duck (an @mention): the decider does not run. */
+      direct?: { duckId: string; reason: string };
+    } = {},
   ): RoomTask {
     const post = this.o.store.roomPostById(messageId);
     const discussion = post ? this.discussionFor(projectId, post, o.reopen?.id) : [];
@@ -494,6 +569,7 @@ export class RoomTasks extends EventEmitter {
       updatedAt: at,
     };
     this.save(projectId, task);
+    if (o.direct) return this.reroute(projectId, task, o.direct.duckId, o.direct.reason);
     this.route(projectId, task.id, !o.proposed, !o.proposed);
     return task;
   }
@@ -777,7 +853,8 @@ export class RoomTasks extends EventEmitter {
         "How to work this task:",
         quiet
           ? "- Nobody else reads this pond's room right now, so skip Room status lines (they are dropped); post again if that changes."
-          : "- Post one short line to the room when you take this (post_to_room kind working), if you get blocked (needs), hand off (handoff, @mention the duck) and when you finish (done); detail holds the longer story. Never post once per turn.",
+          : "- Post one short line to the room when you take this (post_to_room kind working), if you get blocked (needs), hand off (handoff) and when you finish (done); detail holds the longer story. Never post once per turn.",
+        "- To give work to another duck, call hand_off: with toDuck it goes straight to that duck (shown as an @mention), without it Squeak decides who takes it and may hatch a new duck. A plain @mention only nudges.",
         "- Judge the size first. A small task: just do it. More than small (several steps, files or decisions): post a spec and plan card first (post_to_room kind plan, the title as text and the spec and plan as detail) and keep going; comments on it reach you at your next turn.",
       ].join("\n"),
     );
@@ -1173,7 +1250,7 @@ export class RoomTasks extends EventEmitter {
    * The person's one tap on the routing line: give the waiting Task to another Duck, or (no `duckId`) to a new one.
    * Nothing starts; Go does that. The person's choice is final, the decider does not overrule it.
    */
-  private reroute(projectId: string, job: RoomTask, duckId: string | undefined): RoomTask {
+  private reroute(projectId: string, job: RoomTask, duckId: string | undefined, why = "you chose it"): RoomTask {
     const at = this.now();
     delete job.suggestion;
     delete job.place;
@@ -1187,7 +1264,7 @@ export class RoomTasks extends EventEmitter {
     if (!duck || duck.projectId !== projectId) throw new TaskError("That duck isn't in this pond.", 409);
     const session = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
     const live = session && !session.archivedAt ? session : null;
-    const reason = "you chose it";
+    const reason = why;
     const state = this.o.room.duckView(duck).state;
     job.suggestion = ref({ duck, session: live, state, score: 0, reason, pitch: reason });
     job.routing = { kind: "duck", duckId: duck.id, name: duck.name ?? live?.title ?? "Duck", reason, by: "person", at };
