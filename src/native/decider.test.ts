@@ -159,11 +159,11 @@ describe("decider model", () => {
     });
     await d.decide(
       SMALL,
-      ["a", "b", "c", "d", "e"].map((id) => duck(id, { touched: ["/x/Icon.swift"] })),
+      ["a", "b", "c", "d", "e"].map((id) => duck(id, { touched: ["/x/Toolbar.swift"] })),
     );
     expect(seen!.ducks.map((x) => x.duckId)).toEqual(["a", "b", "c"]);
     expect(seen!.ducks[0]!.summary).toContain("a work");
-    expect(seen!.ducks[0]!.summary).toContain("Icon.swift");
+    expect(seen!.ducks[0]!.summary).toContain("Toolbar.swift");
   });
 });
 

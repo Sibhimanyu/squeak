@@ -103,6 +103,12 @@ export function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
+/**
+ * Short texts that are plainly about the same thing share a few words and score a cosine near 0.3; the bands below read
+ * 0.5 as "clearly related", so the local cosine is stretched to that scale (no shared word still scores 0).
+ */
+const COSINE_STRETCH = 2;
+
 /** The local similarity: TF-IDF cosine over the Task and the Duck's texts (the Task is one document of the corpus). */
 export class LocalSimilarity implements SimilarityPort {
   async similarities(task: string, texts: string[]): Promise<number[]> {
@@ -126,7 +132,7 @@ export class LocalSimilarity implements SimilarityPort {
       if (!tn || !vn) return 0;
       let dot = 0;
       for (const [w, x] of t) dot += x * (v.get(w) ?? 0);
-      return clamp01(dot / (tn * vn));
+      return clamp01((dot / (tn * vn)) * COSINE_STRETCH);
     });
   }
 }
@@ -213,7 +219,7 @@ export class Decider {
     return out.sort((a, b) => b.score - a.score || a.duckId.localeCompare(b.duckId));
   }
 
-  async decide(task: string, ducks: DeciderDuck[]): Promise<DeciderResult> {
+  async decide(task: string, ducks: DeciderDuck[], opts: { useModel?: boolean } = {}): Promise<DeciderResult> {
     const W = DECIDER_WEIGHTS;
     if (words(task).length === 0 && !task.trim()) {
       return { kind: "wait", reason: "the task has no words yet", ranked: [] };
@@ -224,7 +230,7 @@ export class Decider {
     if (top.score >= W.give) return { kind: "duck", duckId: top.duckId, reason: top.reason, ranked };
     if (top.score < W.hatch) return { kind: "hatch", reason: "nothing here is related", ranked };
     // Unsure: the nearest few go to the model, which may still say it is not sure.
-    if (!this.model) return { kind: "hatch", reason: "not sure who fits, so a fresh Duck", ranked };
+    if (!this.model || opts.useModel === false) return { kind: "hatch", reason: "not sure who fits, so a fresh Duck", ranked };
     const near = ranked.filter((r) => r.score >= W.hatch).slice(0, 3);
     const byId = new Map(ducks.map((d) => [d.id, d]));
     let choice: ModelChoice | null = null;

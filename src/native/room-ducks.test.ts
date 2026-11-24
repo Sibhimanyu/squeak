@@ -128,7 +128,9 @@ describe("ducks", () => {
     const a = h.chat("Layout builder");
     const b = h.chat("Other work");
     const post = h.srv.room.personPost(h.project.id, "fix the layout builder spacing");
-    const job = h.srv.jobs.fromMessage(h.project.id, post.id);
+    const made = h.srv.jobs.fromMessage(h.project.id, post.id);
+    await h.srv.jobs.routed(made.id);
+    const job = h.srv.jobs.get(made.id)!.job;
     expect(job.suggestion?.sessionId).toBe(a.id);
     h.srv.room.setDuty(a.id, false);
     expect(h.srv.room.candidates(h.project.id, Infinity).map((c) => c.session.id)).not.toContain(a.id);
@@ -185,9 +187,12 @@ describe("ducks", () => {
     expect(top.session!.id).toBe(t.id);
     expect(top.pitch).toMatch(/^worked on .*(control|bar).* (1 h|60 min) ago$/);
     const post = h.srv.room.personPost(h.project.id, "tweak the control bar");
-    const job = h.srv.jobs.fromMessage(h.project.id, post.id);
-    expect(job.suggestion!.pitch).toBe(top.pitch);
-    expect(job.suggestion!.reason).toMatch(/^worked on/);
+    const made = h.srv.jobs.fromMessage(h.project.id, post.id);
+    await h.srv.jobs.routed(made.id);
+    const job = h.srv.jobs.get(made.id)!.job;
+    expect(job.suggestion!.pitch).toMatch(/^have worked on /);
+    expect(job.suggestion!.reason).toMatch(/^related to .* work$/);
+    expect(job.routing).toMatchObject({ kind: "duck", duckId: top.duck.id, by: "decider" });
   });
 
   it("a working duck pitches in the present tense", async () => {

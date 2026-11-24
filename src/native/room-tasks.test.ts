@@ -9,7 +9,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { handleMcpMessage } from "./agent-tools.js";
 import { SessionHost } from "./host.js";
 import { Room } from "./room.js";
-import { asksForTask, parseJobCheck, RoomTasks, stripTaskPhrase, TaskError, type RoomTask } from "./room-tasks.js";
+import { Decider, type DeciderModelPort } from "./decider.js";
+import {
+  asksForTask,
+  parseJobCheck,
+  RoomTasks,
+  stripTaskPhrase,
+  TaskError,
+  type RoomTask,
+  type RoomTasksOptions,
+} from "./room-tasks.js";
 import { NativeServer } from "./server.js";
 import { NativeStore, taskFromJobData } from "./store.js";
 import { TimelineLog } from "./timeline-log.js";
@@ -21,6 +30,12 @@ afterEach(async () => {
   while (open.length) await open.pop()!();
 });
 
+/** The Task once its routing has landed (the decider runs after the Task is made). */
+async function settled(r: { jobs: RoomTasks }, t: RoomTask): Promise<RoomTask> {
+  await r.jobs.routed(t.id);
+  return r.jobs.get(t.id)!.job;
+}
+
 const iso = (minAgo: number): string => new Date(Date.now() - minAgo * 60_000).toISOString();
 
 function rig(
@@ -29,6 +44,7 @@ function rig(
     enabled?: () => boolean;
     timeoutMs?: number;
     rules?: { askBeforeStarting: boolean; maxWorkingDucks: number };
+    extra?: Partial<RoomTasksOptions>;
   } = {},
 ) {
   // The Pond's start rules; most tests below are about Go, so they ask before starting.
@@ -56,6 +72,7 @@ function rig(
     call: opts.call ?? (async () => '{"job":false,"text":""}'),
     ...(opts.enabled ? { enabled: opts.enabled } : {}),
     ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+    ...opts.extra,
   });
   const log = new TimelineLog(store.db);
   const turn = (
@@ -100,7 +117,8 @@ describe("job check", () => {
     expect(yes.jobs.list(yes.pid)).toMatchObject([
       { messageId: post.id, text: "Fix the spacing in the layout builder", state: "waiting" },
     ]);
-    expect(seen).toHaveLength(1);
+    // One event when the Task is made, one when the decider has routed it.
+    expect(seen).toHaveLength(2);
 
     for (const call of [
       async () => '{"job":false,"text":""}',
@@ -150,27 +168,27 @@ describe("job check", () => {
 });
 
 describe("matching", () => {
-  it("ranks the related thread first with a reason; a weak match suggests nothing", () => {
+  it("ranks the related thread first with a reason; a weak match suggests nothing", async () => {
     const r = rig();
     const layout = r.chat("Layout builder");
     const billing = r.chat("Billing webhook");
     r.turn(layout, "t1", "refactor the layout builder grid", 30, { minAgo: 10, reply: "Grid refactored. Done." });
     r.turn(billing, "t2", "retry failed stripe events", 50, { minAgo: 40, reply: "Retries added." });
     const post = r.say("make the layout builder spacing consistent");
-    const job = r.jobs.fromMessage(r.pid, post.id);
+    const job = await settled(r, r.jobs.fromMessage(r.pid, post.id));
     expect(job.suggestion).toMatchObject({ sessionId: layout.id, title: "Layout builder", state: "idle" });
-    expect(job.suggestion!.reason).toMatch(/^worked on .*layout.* 10 min ago$/);
+    expect(job.suggestion!.reason).toMatch(/^related to .*layout.* work$/);
     expect(job.candidates ?? []).not.toContainEqual(expect.objectContaining({ sessionId: layout.id }));
 
-    const weak = r.jobs.fromMessage(r.pid, r.say("rename the onboarding screen copy").id);
+    const weak = await settled(r, r.jobs.fromMessage(r.pid, r.say("rename the onboarding screen copy").id));
     expect(weak.suggestion).toBeUndefined();
   });
 
-  it("marks a working thread", () => {
+  it("marks a working thread", async () => {
     const r = rig();
     const s = r.chat("Webcam view");
     r.store.setStatus(s.id, "working");
-    const job = r.jobs.fromMessage(r.pid, r.say("polish the webcam view framing").id);
+    const job = await settled(r, r.jobs.fromMessage(r.pid, r.say("polish the webcam view framing").id));
     expect(job.suggestion).toMatchObject({ sessionId: s.id, state: "working" });
     expect(job.suggestion!.reason).toContain("webcam");
   });
@@ -190,7 +208,7 @@ describe("actions", () => {
     const r = rig();
     const s = r.chat("Layout builder");
     const job = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
-    const done = await act(r, job.id, { action: "go" });
+    const done = await act(r, job.id, { action: "go" }); // waits for the routing
     expect(done).toMatchObject({ state: "working", handedTo: { sessionId: s.id, newThread: false } });
     expect(r.sent).toEqual([{ id: s.id, text: "fix the layout builder spacing" }]);
     expect(await code(act(r, job.id, { action: "go" }))).toBe(409);
@@ -320,7 +338,9 @@ describe("tools and routes", () => {
     const made = await h.call("POST", `${base}/tasks`, { messageId: post.id });
     expect(made.status).toBe(201);
     const job = ((await made.json()) as any).task;
-    expect(job.suggestion.sessionId).toBe(s.id);
+    await h.srv.jobs.routed(job.id);
+    const routed = h.srv.jobs.get(job.id)!.job;
+    expect(routed.suggestion!.sessionId).toBe(s.id);
     expect(((await (await h.call("GET", base)).json()) as any).tasks).toHaveLength(1);
     const dis = await h.call("POST", `${base}/tasks/${encodeURIComponent(job.id)}`, { action: "drop" });
     expect(((await dis.json()) as any).task.state).toBe("dropped");
@@ -488,11 +508,13 @@ describe("tasks", () => {
     r.say("add a dark mode toggle to settings, make this a task");
     const tasks = r.jobs.list(r.pid);
     expect(tasks).toHaveLength(2);
-    expect(tasks[1]).toMatchObject({
+    // Made in the same millisecond, the list order is by id: pick the second by its text.
+    const second = tasks.find((t) => t.id !== t1!.id)!;
+    expect(second).toMatchObject({
       text: "add a dark mode toggle to settings",
       title: "add a dark mode toggle to settings",
     });
-    expect(tasks[1]!.discussion.map((m) => m.text)).toEqual([
+    expect(second.discussion.map((m) => m.text)).toEqual([
       "now the settings page needs a dark mode toggle",
       "add a dark mode toggle to settings, make this a task",
     ]);
@@ -722,5 +744,190 @@ describe("start at once, with limits", () => {
     expect(state(r, second.id)).toBe("working");
     expect(r.sent.map((x) => x.id)).toEqual([a!.id, a!.id]);
     expect(state(r, first.id)).toBe("working");
+  });
+});
+
+describe("the decider routes a new Task", () => {
+  const layoutRig = (extra: Partial<RoomTasksOptions> = {}) => {
+    const r = rig({ extra });
+    const layout = r.chat("Layout builder");
+    r.turn(layout, "t1", "refactor the layout builder grid", 30, { minAgo: 10, reply: "Grid refactored." });
+    return { r, layout };
+  };
+  const SPACING = "make the layout builder spacing consistent";
+
+  it("records who it went to and why, hatches for unrelated work, and never runs on ordinary chat", async () => {
+    let runs = 0;
+    const inner = new Decider();
+    const counting = {
+      decide: (...a: Parameters<Decider["decide"]>) => {
+        runs++;
+        return inner.decide(...a);
+      },
+    } as Decider;
+    const { r, layout } = layoutRig({ decider: counting });
+    r.say("hello, how is everyone doing today");
+    r.say("the layout builder spacing looks off, thoughts?");
+    await r.jobs.idle();
+    expect(runs).toBe(0);
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
+    expect(runs).toBe(1);
+    expect(t.routing).toMatchObject({ kind: "duck", duckId: t.suggestion!.duckId, by: "decider" });
+    expect(t.routing!.reason).toMatch(/^related to .*layout.* work$/);
+    expect(t.suggestion!.sessionId).toBe(layout.id);
+    const none = await settled(r, r.jobs.fromMessage(r.pid, r.say("translate the onboarding strings to french").id));
+    expect(none.routing).toMatchObject({ kind: "hatch" });
+    expect(none.suggestion).toBeUndefined();
+    expect(runs).toBe(2);
+  });
+
+  it("keeps the decider's reasoning out of what the Duck is sent", async () => {
+    const { r, layout } = layoutRig();
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
+    expect(t.routing!.reason).not.toBe("");
+    await r.jobs.act(r.pid, t.id, { action: "go" });
+    expect(r.sent).toEqual([{ id: layout.id, text: SPACING }]);
+    expect(r.jobs.promptOf(r.jobs.get(t.id)!.job)).not.toContain(t.routing!.reason);
+  });
+
+  it("a Duck past half full loses a big Task to a fresh Duck; the host's context meter feeds it", async () => {
+    const big = `${SPACING} ${Array.from({ length: 70 }, (_, i) => `x${i}`).join(" ")}`;
+    const { r, layout } = layoutRig({ contextPercent: () => 92 });
+    const full = await settled(r, r.jobs.fromMessage(r.pid, r.say(big).id));
+    expect(full.routing).toMatchObject({ kind: "hatch" });
+    expect(full.candidates?.map((c) => c.sessionId)).toContain(layout.id);
+    const calm = layoutRig({ contextPercent: () => 20 });
+    const ok = await settled(calm.r, calm.r.jobs.fromMessage(calm.r.pid, calm.r.say(SPACING).id));
+    expect(ok.routing).toMatchObject({ kind: "duck" });
+  });
+
+  it("the files a Duck changed count toward the Task", async () => {
+    const r = rig();
+    const s = r.chat("Pixel");
+    r.turn(s, "t1", "adjust things", 30, { minAgo: 10, reply: "Done." });
+    r.log.append(s.id, {
+      type: "step.added",
+      turnId: "t1",
+      stepId: "e1",
+      kind: "tool",
+      label: "Edit ToolbarBadge.swift",
+      status: "done",
+      at: iso(20),
+    });
+    expect(r.room.touchedFiles(r.store.duckForSession(s.id, r.pid).id)).toEqual(["ToolbarBadge.swift"]);
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say("fix the toolbar badge colours").id));
+    expect(t.routing).toMatchObject({ kind: "duck", name: "Pixel" });
+    expect(t.routing!.reason).toBe("knows ToolbarBadge.swift");
+  });
+
+  it("an Off-duty Duck can come back for related work", async () => {
+    const { r, layout } = layoutRig();
+    r.room.setDuty(layout.id, false);
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
+    expect(t.routing).toMatchObject({ kind: "duck" });
+    await r.jobs.act(r.pid, t.id, { action: "go" });
+    expect(r.store.duckBySession(layout.id)!.duty).toBe("on");
+  });
+
+  it("an unsure score asks the model, and a model that is unsure hatches", async () => {
+    const asked: string[] = [];
+    let answer: "pick" | null = null;
+    const model: DeciderModelPort = {
+      choose: async (i) => {
+        asked.push(i.task);
+        return answer ? { kind: "duck", duckId: i.ducks[0]!.duckId } : null;
+      },
+    };
+    const unsureDecider = new Decider({
+      similarity: { similarities: async (_t, texts) => texts.map(() => 0.35) },
+      model,
+    });
+    const { r, layout } = layoutRig({ decider: unsureDecider });
+    const first = await settled(r, r.jobs.fromMessage(r.pid, r.say("layout rules for the export dialog").id));
+    expect(asked).toEqual(["layout rules for the export dialog"]);
+    expect(first.routing).toMatchObject({ kind: "hatch" });
+    answer = "pick";
+    const second = await settled(r, r.jobs.fromMessage(r.pid, r.say("spacing rules for the footer links").id));
+    expect(second.suggestion!.sessionId).toBe(layout.id);
+    expect(second.routing).toMatchObject({ kind: "duck" });
+  });
+
+  it("a suggestion routes without the model, and again with it when it is taken up", async () => {
+    const asked: string[] = [];
+    const model: DeciderModelPort = {
+      choose: async (i) => {
+        asked.push(i.task);
+        return null;
+      },
+    };
+    const unsureDecider = new Decider({
+      similarity: { similarities: async (_t, texts) => texts.map(() => 0.35) },
+      model,
+    });
+    const r = rig({
+      call: async () => '{"job":true,"text":"layout rules for the export dialog"}',
+      extra: { decider: unsureDecider },
+    });
+    const layout = r.chat("Layout builder");
+    r.turn(layout, "t1", "refactor the layout builder grid", 30, { minAgo: 10, reply: "Grid refactored." });
+    r.jobs.attach(r.room as any);
+    const sug = r.say("please sort out the layout rules for the export dialog");
+    await r.jobs.idle();
+    expect(asked).toEqual([]);
+    expect(r.jobs.list(r.pid).find((t) => t.messageId === sug.id)!.routing).toBeDefined();
+    r.jobs.fromMessage(r.pid, sug.id);
+    await r.jobs.idle();
+    expect(asked).toHaveLength(1);
+  });
+
+  it("one tap re-routes a waiting Task to another Duck, or to a new one, without starting anything", async () => {
+    const { r, layout } = layoutRig();
+    const other = r.chat("Billing webhook");
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
+    const otherDuck = r.store.duckBySession(other.id)!;
+    const moved = await r.jobs.act(r.pid, t.id, { action: "reroute", duckId: otherDuck.id });
+    expect(moved).toMatchObject({
+      state: "waiting",
+      suggestion: { duckId: otherDuck.id, sessionId: other.id },
+      routing: { kind: "duck", duckId: otherDuck.id, by: "person" },
+    });
+    expect(r.sent).toEqual([]);
+    const fresh = await r.jobs.act(r.pid, t.id, { action: "reroute" });
+    expect(fresh.suggestion).toBeUndefined();
+    expect(fresh.routing).toMatchObject({ kind: "hatch", by: "person" });
+    const back = await r.jobs.act(r.pid, t.id, { action: "reroute", duckId: r.store.duckBySession(layout.id)!.id });
+    await r.jobs.act(r.pid, back.id, { action: "go" });
+    expect(r.sent.map((x) => x.id)).toEqual([layout.id]);
+    await expect(r.jobs.act(r.pid, t.id, { action: "reroute" })).rejects.toThrow(/already been taken up/);
+  });
+
+  it("re-route refuses a Duck that is not in the pond, and keys that do not belong", async () => {
+    const { r } = layoutRig();
+    const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
+    await expect(r.jobs.act(r.pid, t.id, { action: "reroute", duckId: "nope" })).rejects.toThrow(/isn't in this pond/);
+    await expect(r.jobs.act(r.pid, t.id, { action: "reroute", place: { kind: "new", branch: "x" } })).rejects.toThrow(
+      /place is only/,
+    );
+  });
+
+  it("a person's re-route is not overruled by a decider that finishes later", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const slow = new Decider({
+      similarity: {
+        similarities: async (_t, texts) => {
+          await gate;
+          return texts.map(() => 0.9);
+        },
+      },
+    });
+    const { r } = layoutRig({ decider: slow });
+    const t = r.jobs.fromMessage(r.pid, r.say(SPACING).id);
+    // The tap waits for the routing to land, then wins; the routing is never rewritten after it.
+    const tap = r.jobs.act(r.pid, t.id, { action: "reroute" });
+    release();
+    await tap;
+    await r.jobs.idle();
+    expect(r.jobs.get(t.id)!.job.routing).toMatchObject({ kind: "hatch", by: "person" });
   });
 });

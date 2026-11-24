@@ -124,7 +124,11 @@ async function rig(kind: "git" | "folder" = "git") {
       log.append(s.id, { type: "turn.ended", turnId: id, outcome: "done", at: iso(minAgo) } as any);
     }
   };
-  const job = (text: string) => jobs.fromMessage(project.id, room.personPost(project.id, text).id);
+  const job = async (text: string) => {
+    const t = jobs.fromMessage(project.id, room.personPost(project.id, text).id);
+    await jobs.routed(t.id);
+    return jobs.get(t.id)!.job;
+  };
   const act = (id: string, body: Record<string, unknown>) => jobs.act(project.id, id, body);
   const code = (p: Promise<unknown>) =>
     p.then(
@@ -254,15 +258,15 @@ describe("place and go", () => {
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
-    const strong = h.job("fix the control bar spacing");
+    const strong = await h.job("fix the control bar spacing");
     expect(strong.suggestion).toMatchObject({ sessionId: s.id });
     expect(strong.place).toEqual({ kind: "stream", workspaceId: ws.id, branch: ws.branch });
     // One shared word: suggested (title) but not strong enough to stay in that stream.
-    const weak = h.job("add a control to export settings");
+    const weak = await h.job("add a control to export settings");
     expect(weak.place?.kind).toBe("new");
     expect((weak.place as any).branch).toMatch(/^[\w./-]*add-a-control-to-export-settings$/);
     // Nothing matches: a new stream, no suggestion.
-    const none = h.job("translate the onboarding strings");
+    const none = await h.job("translate the onboarding strings");
     expect(none.suggestion).toBeUndefined();
     expect(none.place).toMatchObject({ kind: "new" });
   });
@@ -272,7 +276,7 @@ describe("place and go", () => {
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
-    const j = h.job("fix the control bar spacing");
+    const j = await h.job("fix the control bar spacing");
     const done = await h.act(j.id, { action: "go" });
     expect(done.handedTo).toMatchObject({ sessionId: s.id, newThread: false });
     expect(h.sent).toEqual([{ id: s.id, text: "fix the control bar spacing" }]);
@@ -286,7 +290,7 @@ describe("place and go", () => {
     const s = h.chatIn("Control bar", ws);
     h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
     const duck = h.room.duckOfSession(s)!;
-    const j = h.job("fix the control bar spacing");
+    const j = await h.job("fix the control bar spacing");
     const done = await h.act(j.id, {
       action: "go",
       place: { kind: "stream", workspaceId: other.id, branch: other.branch },
@@ -312,7 +316,7 @@ describe("place and go", () => {
   it("go to a new place creates the stream (a worktree on the branch) and a session in it", async () => {
     const h = await rig();
     const s = h.chatIn("Layout builder");
-    const j = h.job("polish the webcam overlay");
+    const j = await h.job("polish the webcam overlay");
     expect(j.place).toMatchObject({ kind: "new" });
     const done = await h.act(j.id, {
       action: "go",
@@ -329,7 +333,7 @@ describe("place and go", () => {
   it("validates a place override: bad shape 400, taken branch or other pond's stream 409", async () => {
     const h = await rig();
     const s = h.chatIn("Layout builder");
-    const j = h.job("polish the webcam overlay");
+    const j = await h.job("polish the webcam overlay");
     const go = (place: unknown) => h.code(h.act(j.id, { action: "go", sessionId: s.id, place }));
     expect(await go("x")).toBe(400);
     expect(await go({ kind: "moon" })).toBe(400);
@@ -346,7 +350,7 @@ describe("place and go", () => {
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     const duck = h.room.duckOfSession(s)!;
-    const j1 = h.job("polish the webcam overlay");
+    const j1 = await h.job("polish the webcam overlay");
     const fresh = await h.act(j1.id, { action: "new" });
     const made = h.store.duckBySession(fresh.handedTo!.sessionId)!;
     expect(made.id).not.toBe(duck.id);
@@ -356,7 +360,7 @@ describe("place and go", () => {
     expect(h.store.getSession(fresh.handedTo!.sessionId)!.workspaceId).toBeTruthy();
     // A working duck can't be sent to a stream other than its own.
     h.store.db.prepare("UPDATE sessions SET status='working' WHERE id=?").run(s.id);
-    const j2 = h.job("rename the settings panel labels");
+    const j2 = await h.job("rename the settings panel labels");
     expect(
       await h.code(h.act(j2.id, { action: "go", duckId: duck.id, place: { kind: "new", branch: "sq/labels" } })),
     ).toBe(409);
@@ -371,12 +375,12 @@ describe("place and go", () => {
 
   it("a plain-folder pond has no places: the job carries none and a new duck runs in the folder", async () => {
     const h = await rig("folder");
-    const j = h.job("polish the webcam overlay");
+    const j = await h.job("polish the webcam overlay");
     expect(j.place).toBeUndefined();
     const done = await h.act(j.id, { action: "new" });
     expect(h.store.getSession(done.handedTo!.sessionId)!.workspaceId).toBeNull();
     expect(
-      await h.code(h.act(h.job("tidy the footer links").id, { action: "go", place: { kind: "new", branch: "x" } })),
+      await h.code(h.act((await h.job("tidy the footer links")).id, { action: "go", place: { kind: "new", branch: "x" } })),
     ).toBe(409);
   });
 });

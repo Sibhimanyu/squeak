@@ -581,6 +581,15 @@ export class Room extends EventEmitter {
     return this.reader.turns(sessionId);
   }
 
+  /** The files a duck's chats changed, newest first, each once (the decider's code areas). */
+  touchedFiles(duckId: string): string[] {
+    const out: string[] = [];
+    for (const id of [...this.store.duckSessionIds(duckId)].reverse()) {
+      for (const f of this.log.touchedFiles(id)) if (!out.includes(f)) out.push(f);
+    }
+    return out.slice(0, 60);
+  }
+
   /** The pond's on-duty, non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
   candidates(
     projectId: string,
