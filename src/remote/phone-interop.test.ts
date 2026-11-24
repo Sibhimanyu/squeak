@@ -67,6 +67,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   pondOrderCommand: { box: string; sig: string; device: string };
   pondLeaveCommandId: string;
   pondLeaveCommand: { box: string; sig: string; device: string };
+  pondRoomPostCommandId: string;
+  pondRoomPostCommand: { box: string; sig: string; device: string };
+  pondRoomTaskCommandId: string;
+  pondRoomTaskCommand: { box: string; sig: string; device: string };
+  pondRoomDropCommandId: string;
+  pondRoomDropCommand: { box: string; sig: string; device: string };
   pondNewestCommandId: string;
   pondNewestCommand: { box: string; sig: string; device: string };
   pondDuckPlaceCommandId: string;
@@ -212,6 +218,13 @@ function bridge(turn: string) {
       setPondHidden: async (key: string, hidden: boolean) => void pondCalls.push(["hide", key, hidden]),
       setPondOrder: async (change: unknown) => void pondCalls.push(["order", change]),
       leavePond: async (id: string) => void pondCalls.push(["leave", id]),
+      roomPost: async (pond: { id: string }, text: string) => {
+        pondCalls.push(["room-post", pond.id, text]);
+        return {};
+      },
+      roomMakeTask: async (pond: { id: string }, messageId: string) =>
+        void pondCalls.push(["room-task", pond.id, messageId]),
+      roomDropTask: async (pond: { id: string }, taskId: string) => void pondCalls.push(["room-drop", pond.id, taskId]),
       placeDuck: async (duckId: string, place: unknown, message?: string) => {
         pondCalls.push(["place", duckId, place, message]);
         return { sessionId: "n9" };
@@ -607,6 +620,22 @@ describe("a reply made on the iPhone", () => {
     } finally {
       delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
     }
+  });
+
+  it("posts to a Room, makes a Task and drops one when the phone signs them", async () => {
+    const { remote, config, pondCalls, refreshPonds } = bridge("turn-1");
+    await refreshPonds();
+    const post = await remote.handleCommand(config, fixture.pondRoomPostCommandId, fixture.pondRoomPostCommand);
+    expect(post.result).toEqual({ id: fixture.pondRoomPostCommandId, status: "sent" });
+    const task = await remote.handleCommand(config, fixture.pondRoomTaskCommandId, fixture.pondRoomTaskCommand);
+    expect(task.result).toEqual({ id: fixture.pondRoomTaskCommandId, status: "sent" });
+    const drop = await remote.handleCommand(config, fixture.pondRoomDropCommandId, fixture.pondRoomDropCommand);
+    expect(drop.result).toEqual({ id: fixture.pondRoomDropCommandId, status: "sent" });
+    expect(pondCalls).toEqual([
+      ["room-post", "proj-shop", "Make the icons crisp"],
+      ["room-task", "proj-shop", "post-1"],
+      ["room-drop", "proj-shop", "task:1"],
+    ]);
   });
 
   it("keeps the last good pond directory when the host goes down, so chats do not drop to Other", async () => {

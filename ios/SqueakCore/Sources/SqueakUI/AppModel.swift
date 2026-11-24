@@ -228,7 +228,7 @@ final class AppModel {
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk
         Task {
-            try? await channel.touchPresence(watching: watching, recent: recent, calls: open, pond: presencePond, flock: presenceFlock)
+            try? await channel.touchPresence(watching: watching, recent: recent, calls: open, pond: presencePond, flock: presenceFlock, room: presenceRoom)
             lastPresence = Date()
             if open { await refresh() }
         }
@@ -240,7 +240,7 @@ final class AppModel {
         recentWanted = min(50, recentWanted + 20)
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen
-        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: presencePond, flock: presenceFlock) }
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: presencePond, flock: presenceFlock, room: presenceRoom) }
     }
 
     /// What presence tells the Mac to stream: only in verbose mode.
@@ -633,7 +633,7 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         // Ask the Mac to stop (and delete) the live turn now rather than when presence lapses.
-        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk, calls: callsOpen, pond: presencePond, flock: presenceFlock) } }
+        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk, calls: callsOpen, pond: presencePond, flock: presenceFlock, room: presenceRoom) } }
     }
 
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
@@ -655,7 +655,7 @@ final class AppModel {
         guard !demo, loop != nil, let channel else { return }
         let key = presenceWatching, recent = recentAsk, calls = callsOpen
         liveTask = Task { [weak self] in
-            try? await channel.touchPresence(watching: key, recent: recent, calls: calls, pond: presencePond, flock: presenceFlock)
+            try? await channel.touchPresence(watching: key, recent: recent, calls: calls, pond: presencePond, flock: presenceFlock, room: presenceRoom)
             self?.lastPresence = Date()
             guard let key else { return }
             guard let turns = await channel.liveTurns(for: key) else {
@@ -1253,7 +1253,7 @@ final class AppModel {
         guard let channel else { return }
         guard phase == .paired else { await tick(); return }
         do {
-            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen, pond: presencePond, flock: presenceFlock)
+            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen, pond: presencePond, flock: presenceFlock, room: presenceRoom)
             lastPresence = Date()
             problem = nil
         } catch {
@@ -1281,7 +1281,7 @@ final class AppModel {
             let pingPresence = Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery
             let watchingNow = presenceWatching, recentNow = recentAsk
             let needsRecent = recentDoc == nil
-            async let presence: Void = pingPresence ? channel.touchPresence(watching: watchingNow, recent: recentNow, calls: callsOpen, pond: presencePond, flock: presenceFlock) : ()
+            async let presence: Void = pingPresence ? channel.touchPresence(watching: watchingNow, recent: recentNow, calls: callsOpen, pond: presencePond, flock: presenceFlock, room: presenceRoom) : ()
             async let snapshotRead = channel.snapshot()
             // Cold start has no recent list yet: ask for it speculatively (older Macs simply have none).
             async let recentRead = needsRecent ? (try? await channel.recent()) : nil
@@ -3256,6 +3256,14 @@ final class AppModel {
     var flockDocs: [String: FlockThreadDoc] = [:]
     var flockLoaded = false
     @ObservationIgnored var flockTask: Task<Void, Never>?
+    /// The pond whose Room is open on screen, the Room the Mac last wrote for each, whether the first has come, and what
+    /// this person has sent that the Room has not shown back yet.
+    var openRoomId: String?
+    var roomDocs: [String: PondRoomDoc] = [:]
+    var roomLoaded = false
+    var roomPending: [String: [PondRoomPending]] = [:]
+    @ObservationIgnored var roomTask: Task<Void, Never>?
+    @ObservationIgnored var roomCounter = 0
 
     func hideHere(_ session: PhoneSnapshot.Session) { hiddenHere[session.key] = Date().timeIntervalSince1970 }
     func showHiddenAgain() { hiddenHere = [:] }

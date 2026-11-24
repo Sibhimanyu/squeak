@@ -122,9 +122,12 @@ public struct Presence: Codable, Equatable, Sendable {
     /// The id of the pond member's thread open on screen (`PondThreads.FlockThread.id`), so the Mac publishes its rows
     /// (`FlockThreadDoc`). Absent when none is open; an older Mac ignores it.
     public var flock: String? = nil
+    /// The id of the pond whose Room is open on screen (`PhoneSnapshot.Pond.id`), so the Mac publishes it (`PondRoomDoc`).
+    /// Absent when none is open; an older Mac ignores it.
+    public var room: String? = nil
 
-    public init(at: Int64, watching: String? = nil, recent: Int? = nil, caps: [String]? = nil, pond: String? = nil, flock: String? = nil) {
-        self.at = at; self.watching = watching; self.recent = recent; self.caps = caps; self.pond = pond; self.flock = flock
+    public init(at: Int64, watching: String? = nil, recent: Int? = nil, caps: [String]? = nil, pond: String? = nil, flock: String? = nil, room: String? = nil) {
+        self.at = at; self.watching = watching; self.recent = recent; self.caps = caps; self.pond = pond; self.flock = flock; self.room = room
     }
 }
 

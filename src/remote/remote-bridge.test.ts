@@ -38,6 +38,7 @@ import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { flockThreadDoc, reduceFlockEvents, type FlockThreadDoc } from "./flock-thread.js";
 import { pondThreadsDoc, type PondThreadsDoc } from "./pond-threads.js";
+import { pondRoomDoc, type PondRoomDoc } from "./pond-room.js";
 import { historyDeltaDoc } from "./history-delta.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
@@ -7042,6 +7043,125 @@ describe("RemoteBridge open flock thread", () => {
     await presence(f, { caps, pond: "pond-x" });
     expect((await message(f, { threadId: "nope" })).status).toBe("refused");
     expect(sent).toEqual([]);
+    f.bridge.stop();
+  });
+});
+
+describe("RemoteBridge open pond Room", () => {
+  const pond = {
+    id: "proj-room",
+    name: "room",
+    shared: false,
+    members: [],
+    kind: "project",
+    projectId: "proj-room",
+    access: "owner",
+  };
+  const page = {
+    posts: [
+      {
+        seq: 1,
+        id: "p1",
+        author: { kind: "person", id: "owner", name: "Sam" },
+        kind: "message",
+        level: "room",
+        text: "fix the icon",
+        at: 1000,
+      },
+    ],
+    latestSeq: 1,
+    threads: [],
+    turns: [],
+    tasks: [],
+  };
+  const make = (calls: string[] = [], refuse?: string) => {
+    const native = {
+      projects: () => [],
+      models: () => [],
+      allowBypass: () => false,
+      ponds: async () => [pond],
+      roomPage: async () => ({ page, member: false }),
+      roomPost: async (_p: unknown, text: string) => {
+        calls.push(`post:${text}`);
+        return {};
+      },
+      roomMakeTask: async (_p: unknown, messageId: string) => {
+        if (refuse) throw new Error(refuse);
+        calls.push(`task:${messageId}`);
+      },
+      roomDropTask: async (_p: unknown, taskId: string) => {
+        calls.push(`drop:${taskId}`);
+      },
+    } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+    return fixture({ native, streaming: true });
+  };
+  const presence = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...extra }) });
+  const read = async (f: ReturnType<typeof fixture>) => {
+    const doc = await f.store.get(`${f.channel}/live/${pondRoomDoc("proj-room")}`);
+    return doc ? (open(f.payload.k, doc.box as string) as PondRoomDoc) : null;
+  };
+  const caps = ["ponds2", "pondthreads", "pondroom"];
+  let n = 0;
+  const act = async (f: ReturnType<typeof fixture>, over: Record<string, unknown>) => {
+    const id = `r${++n}`;
+    await f.bridge.tick();
+    await f.store.set(
+      `${f.channel}/commands/${id}`,
+      f.pondCommand({ pondId: "proj-room", hidden: undefined, ...over }),
+    );
+    await f.bridge.tick();
+    return f.result(id) as { status: string; reason?: string };
+  };
+
+  it("serves the Room's rows only while the phone has it open and names pondroom", async () => {
+    const f = make();
+    await f.pair();
+    await presence(f, { caps, pond: "proj-room" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    await presence(f, { caps, pond: "proj-room", room: "proj-room" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const doc = await read(f);
+    expect(doc?.items.map((i) => i.t)).toEqual(["message"]);
+    expect(doc).toMatchObject({ canPost: true, canTask: true });
+    await presence(f, { caps, pond: "proj-room" });
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    await presence(f, { caps: ["ponds2", "pondthreads"], pond: "proj-room", room: "proj-room" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(await read(f)).toBeNull();
+    f.bridge.stop();
+  });
+
+  it("posts, makes a Task and drops one through the host", async () => {
+    const calls: string[] = [];
+    const f = make(calls);
+    await f.pair();
+    await presence(f, { caps, pond: "proj-room" });
+    expect((await act(f, { op: "room-post", text: " ship it " })).status).toBe("sent");
+    expect((await act(f, { op: "room-task", messageId: "p1" })).status).toBe("sent");
+    expect((await act(f, { op: "room-drop", taskId: "task:abc" })).status).toBe("sent");
+    expect(calls).toEqual(["post:ship it", "task:p1", "drop:task:abc"]);
+    f.bridge.stop();
+  });
+
+  it("refuses an empty or long message, extra keys, an unknown pond and the host's own refusal", async () => {
+    const calls: string[] = [];
+    const f = make(calls, "nope");
+    await f.pair();
+    await presence(f, { caps, pond: "proj-room" });
+    expect((await act(f, { op: "room-post", text: "   " })).status).toBe("refused");
+    expect((await act(f, { op: "room-post", text: "x".repeat(501) })).status).toBe("refused");
+    expect((await act(f, { op: "room-post", text: "hi", messageId: "p1" })).status).toBe("refused");
+    expect((await act(f, { op: "room-task", messageId: "p1", text: "hi" })).status).toBe("refused");
+    expect((await act(f, { op: "room-post", text: "hi", pondId: "other" })).status).toBe("refused");
+    expect((await act(f, { op: "hide", pondId: "proj-room", hidden: true, messageId: "p1" })).status).toBe("refused");
+    expect((await act(f, { op: "room-task", messageId: "p1" })).status).toBe("refused");
+    expect(calls).toEqual([]);
     f.bridge.stop();
   });
 });

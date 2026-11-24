@@ -253,9 +253,9 @@ public struct Channel: Sendable {
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
     /// `pond` names the pond whose page is open (`PhoneSnapshot.Pond.id`); the Mac then sends `pondDetail` for it.
-    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, pond: String? = nil, flock: String? = nil, now: Date = Date()) async throws {
+    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, pond: String? = nil, flock: String? = nil, room: String? = nil, now: Date = Date()) async throws {
         let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent,
-                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []), pond: pond, flock: flock)
+                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []), pond: pond, flock: flock, room: room)
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
@@ -459,6 +459,13 @@ public struct Channel: Sendable {
         guard let document = try await store.get(path("live", FlockThreadDoc.doc(for: threadId))) else { return nil }
         let doc = try ChannelCrypto.open(FlockThreadDoc.self, box: document.box, key: pairing.k)
         return doc.thread == threadId ? doc : nil
+    }
+
+    /// The open pond's Room, while this phone's presence names it (`room`); nil until the Mac has written it, or for another pond.
+    public func pondRoom(pondId: String) async throws -> PondRoomDoc? {
+        guard let document = try await store.get(path("live", PondRoomDoc.doc(for: pondId))) else { return nil }
+        let doc = try ChannelCrypto.open(PondRoomDoc.self, box: document.box, key: pairing.k)
+        return doc.pond == pondId ? doc : nil
     }
 
     public func pondThreads(pondId: String) async throws -> PondThreads? {
@@ -737,6 +744,12 @@ public struct Channel: Sendable {
         case leave(pondId: String)
         /// Move a duck (`Session.duckId`) to a place, with an optional first message there (ducks own their branch).
         case duckPlace(duckId: String, place: DuckPlace, message: String?)
+        /// A message into the pond's Room (at most `PondRoomDoc.maxText` characters).
+        case roomPost(pondId: String, text: String)
+        /// Make a Task of a Room message (`PondRoomDoc.Message.id`); the Owner's own pond only.
+        case roomTask(pondId: String, messageId: String)
+        /// Drop a Task (`PondRoomDoc.TaskCard.taskId`); the Owner's own pond only.
+        case roomDrop(pondId: String, taskId: String)
     }
 
     /// The signed document for a `pond` command.
@@ -761,6 +774,16 @@ public struct Channel: Sendable {
             guard !duckId.isEmpty, (note?.count ?? 0) <= PondCommand.maxText else { throw ChannelCrypto.Failure.badBox }
             command = PondCommand(v: 1, kind: "pond", op: "duck-place", duckId: duckId, place: place,
                                   message: (note?.isEmpty ?? true) ? nil : note, nonce: nonceHex, expiresAt: expires)
+        case .roomPost(let pondId, let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed.count <= PondRoomDoc.maxText else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "room-post", pondId: pondId, text: trimmed, nonce: nonceHex, expiresAt: expires)
+        case .roomTask(let pondId, let messageId):
+            guard !messageId.isEmpty else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "room-task", pondId: pondId, messageId: messageId, nonce: nonceHex, expiresAt: expires)
+        case .roomDrop(let pondId, let taskId):
+            guard !taskId.isEmpty else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "room-drop", pondId: pondId, taskId: taskId, nonce: nonceHex, expiresAt: expires)
         case .message(let pondId, let threadId, let text):
             guard !text.isEmpty, text.count <= PondCommand.maxText else { throw ChannelCrypto.Failure.badBox }
             command = PondCommand(v: 1, kind: "pond", op: "message", pondId: pondId, threadId: threadId, text: text, nonce: nonceHex, expiresAt: expires)

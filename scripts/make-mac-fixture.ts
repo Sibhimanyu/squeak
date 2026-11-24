@@ -18,9 +18,13 @@ import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js"
 import { seal } from "../src/remote/remote-crypto.js";
 import { buildFlockThreadDoc, reduceFlockEvents } from "../src/remote/flock-thread.js";
 import { buildPondThreads } from "../src/remote/pond-threads.js";
+import { buildPondRoom } from "../src/remote/pond-room.js";
 import { realDirectorDeps } from "../addons/rasanai/director.js";
 import { FilmService } from "../addons/rasanai/films.js";
 import { RasanaiProvider } from "../addons/rasanai/provider.js";
+
+// The ordinary view is the flag off (it is on by default now); the ducks view below turns it on.
+process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
 
 const out = path.resolve("ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/mac-made.json");
 
@@ -539,6 +543,66 @@ fs.writeFileSync(
             ]),
           ),
           seq: 1790305200006,
+        },
+        z,
+      ),
+      // A pond's Room (the real builder, fed the host's page shape): a message, a Duck's state line with detail, a Task
+      // with its routing line, a person's own words, and a Duck's reply.
+      pondRoomBox: seal(
+        key,
+        {
+          ...buildPondRoom("p-green", {
+            member: false,
+            page: {
+              posts: [
+                {
+                  seq: 1,
+                  id: "post-1",
+                  author: { kind: "person", id: "owner", name: "Sam" },
+                  kind: "message",
+                  level: "room",
+                  text: "Make the menu icons crisp on retina",
+                  at: 1790305200000,
+                },
+                {
+                  seq: 2,
+                  id: "post-2",
+                  author: { kind: "agent", id: "s-pixel", name: "icon work" },
+                  sessionId: "s-pixel",
+                  kind: "working",
+                  level: "room",
+                  text: "Re-rendering the menu icons at 2x\nChecked four sizes; the 16 px one is blurry.",
+                  at: 1790305230000,
+                },
+                {
+                  seq: 3,
+                  id: "post-3",
+                  author: { kind: "person", id: "m-aarav", name: "Aarav" },
+                  kind: "message",
+                  level: "room",
+                  text: "Sounds good",
+                  at: 1790305260000,
+                },
+              ],
+              latestSeq: 3,
+              threads: [{ sessionId: "s-pixel", title: "icon work", name: "Pixel" }],
+              turns: [],
+              tasks: [
+                {
+                  id: "task:1",
+                  messageId: "post-1",
+                  title: "Make the menu icons crisp on retina",
+                  text: "Make the menu icons crisp on retina",
+                  state: "working",
+                  suggestion: { sessionId: "s-pixel", title: "Pixel", reason: "related to the icon work" },
+                  handedTo: { sessionId: "s-pixel", title: "Pixel", newThread: false },
+                  createdAt: 1790305210000,
+                  updatedAt: 1790305220000,
+                },
+              ],
+            },
+          }),
+          seq: 1790305200007,
         },
         z,
       ),

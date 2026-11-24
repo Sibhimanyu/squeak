@@ -36,6 +36,10 @@ Threat model and design: `docs/remote-channel.md` — read it before touching `s
 squeak-e2e` first, or it tests yesterday's phone. A format an older phone
   cannot read (compression, the split recent list) is written only for a
   phone whose presence `caps` names it.
+- **The Room on the phone is a sealed `live` document too** (`pond-room.ts`, `docs/ponds.md` "The Room on iPhone"): written
+  only while presence names the pond's Room (`room`) and caps name `pondroom`, rows already decided on the Mac, actions are
+  `pond` ops `room-post`/`room-task`/`room-drop` with strict keys. Never let the phone decide a Task state, a routing line or
+  who may post.
 - **The phone gets less of a working turn than the Mac window**: the newest
   six steps, each clipped to 200 characters, no timestamps, and only while
   the session works — what leaves the Mac is only what the phone renders.
