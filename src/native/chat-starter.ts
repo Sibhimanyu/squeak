@@ -1,7 +1,7 @@
 import type { SessionHost, CreateSpec } from "./host.js";
 import { ducksOwnBranch, parsePlace, placeFromAliases, PlacementError, projectOfSession } from "./placement.js";
 import type { Placement, PlaceRequest } from "./placement.js";
-import { JobError, jobTitle, type StartSpec } from "./room-jobs.js";
+import { TaskError, taskTitle, type StartSpec } from "./room-tasks.js";
 import type { Room } from "./room.js";
 import type { NativeStore } from "./store.js";
 import type { SessionRow } from "./types.js";
@@ -40,7 +40,7 @@ function optionalBranch(v: unknown): string | undefined {
  * The one way a Duck's chat starts. Every path (the host route, the Planner, Room jobs, Duck agent tools, Git
  * actions) ends in `create`, the only caller of the host's low-level create; this module owns placement (which Stream,
  * Main read-only in Git Ponds when Ducks own their branch, a folder Pond's own folder), the model a new chat
- * inherits and the Duck link. Errors: `PlacementError` for requests, `JobError` for jobs; callers map them.
+ * inherits and the Duck link. Errors: `PlacementError` for requests, `TaskError` for jobs; callers map them.
  */
 export class ChatStarter {
   constructor(private readonly o: ChatStarterOptions) {}
@@ -93,7 +93,7 @@ export class ChatStarter {
       let req = parsePlace(b.place);
       // Main is no place to start a chat in a git pond: it gets a branch of its own, like `main: true`.
       if (req.kind === "main" && store.getProject(projectId ?? "")?.kind === "git") {
-        req = { kind: "new", ...(text ? { title: jobTitle(text) } : {}) };
+        req = { kind: "new", ...(text ? { title: taskTitle(text) } : {}) };
       }
       const duck = req.kind === "join" && req.duckId ? store.duckRow(req.duckId) : null;
       const pond = projectId ?? duck?.projectId;
@@ -153,7 +153,7 @@ export class ChatStarter {
     projectId: string,
     text: string | undefined,
   ): Promise<{ cwd: string; workspaceId: string | null }> {
-    const req: PlaceRequest = { kind: "new", ...(text ? { title: jobTitle(text) } : {}) };
+    const req: PlaceRequest = { kind: "new", ...(text ? { title: taskTitle(text) } : {}) };
     try {
       const placed = await this.o.placement.resolve(projectId, req);
       return { cwd: placed.cwd, workspaceId: placed.workspaceId };
@@ -177,7 +177,7 @@ export class ChatStarter {
         (s) => !s.archivedAt && this.o.room.candidates(projectId, Infinity).some((c) => c.session.id === s.id),
       )[0] ??
       sessions[0];
-    if (!pick) throw new JobError("Squeak has no chat to take a model from yet; start a chat first.", 409);
+    if (!pick) throw new TaskError("Squeak has no chat to take a model from yet; start a chat first.", 409);
     return { agent: pick.agent, model: pick.model };
   }
 
@@ -188,13 +188,13 @@ export class ChatStarter {
   async startDuck(spec: StartSpec): Promise<SessionRow> {
     const { store, workspaces } = this.o;
     const project = store.getProject(spec.projectId);
-    if (!project) throw new JobError("No such pond.", 404);
+    if (!project) throw new TaskError("No such pond.", 404);
     let cwd = project.rootPath;
     let workspaceId: string | null = null;
     if (spec.place?.kind === "stream") {
       const ws = store.getWorkspace(spec.place.workspaceId);
       if (!ws || ws.projectId !== project.id || ws.state === "archived") {
-        throw new JobError("That stream isn't available in this pond any more.", 409);
+        throw new TaskError("That stream isn't available in this pond any more.", 409);
       }
       cwd = ws.path;
       workspaceId = ws.id;
@@ -204,7 +204,7 @@ export class ChatStarter {
         cwd = ws.path;
         workspaceId = ws.id;
       } catch (error) {
-        if (error instanceof WorkspaceError) throw new JobError(error.message, 409);
+        if (error instanceof WorkspaceError) throw new TaskError(error.message, 409);
         throw error;
       }
     }
@@ -231,7 +231,7 @@ export class ChatStarter {
     attach?: (cwd: string) => string,
   ): Promise<SessionRow> {
     const project = this.o.store.getProject(projectId);
-    if (!project) throw new JobError("No such pond.", 404);
+    if (!project) throw new TaskError("No such pond.", 404);
     const { agent, model } = this.modelFor(projectId, null);
     return this.create({
       cwd: project.rootPath,
@@ -239,7 +239,7 @@ export class ChatStarter {
       model,
       permissionMode: NEW_THREAD_PERMISSION_MODE,
       workspaceId: null,
-      title: title || jobTitle(text),
+      title: title || taskTitle(text),
       text: text + (attach?.(project.rootPath) ?? ""),
       room: true,
     });
@@ -251,7 +251,7 @@ export class ChatStarter {
     const project = store.getProject(projectId);
     if (!project || project.kind !== "git") return null;
     const prefix = workspaces.settingsFor(project).effective.branchPrefix;
-    const base = slug(jobTitle(text), 40);
+    const base = slug(taskTitle(text), 40);
     for (let n = 1; n <= 30; n++) {
       const candidate = `${prefix}${base}${n > 1 ? `-${n}` : ""}`;
       try {
@@ -263,14 +263,14 @@ export class ChatStarter {
     return null;
   }
 
-  /** A typed branch for a new stream, as git accepts it, or a JobError that says why not. */
+  /** A typed branch for a new stream, as git accepts it, or a TaskError that says why not. */
   checkBranch(projectId: string, branch: string): string {
     const project = this.o.store.getProject(projectId);
-    if (!project) throw new JobError("No such pond.", 404);
+    if (!project) throw new TaskError("No such pond.", 404);
     try {
       return this.o.workspaces.resolveNewBranch(project, branch).branch;
     } catch (error) {
-      throw new JobError(error instanceof Error ? error.message : "That branch name isn't usable.", 409);
+      throw new TaskError(error instanceof Error ? error.message : "That branch name isn't usable.", 409);
     }
   }
 }

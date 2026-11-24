@@ -563,21 +563,32 @@ a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-
 (`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it);
 that line (or an agent's own) is the running turn's `intent`.
 
-### Jobs
+### Tasks
 
-A person's room message that asks for work becomes a **job** Squeak routes to a thread (`room-jobs.ts`). Rules: Squeak
+A person's room message that asks for work becomes a **Task** Squeak routes to a Duck (`room-tasks.ts`; they were "jobs" before, the agent tools keep the names `open_jobs` and `claim_job`). Rules: Squeak
 never chats (its only words are action and status lines); nothing is taken or started without the person's Go or
-Allow; plain chat stays a note. Stored as JSON in `native.db` `room_jobs` (created lazily, like `room_backfill`).
+Allow; plain chat stays a note. Stored as JSON in `native.db` `room_tasks` (created lazily, like `room_backfill`; the old `room_jobs` table is renamed and its rows mapped once: suggested is waiting and still only proposed, handed and running are working, failed is blocked, dismissed is dropped).
 
 ```
-RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"handed"|"running"|"done"|"failed",
+RoomTask = { id: "task:<uuid>", messageId /* the message that made it */, text, title /* one line */,
+            state: "waiting"|"working"|"blocked"|"done"|"dropped", proposed? /* only suggested by the check */, parentTaskId?,
+            discussion: [{ id, author, authorKind: "person"|"agent", text, at }],  // Room messages since the previous Task, max 2 h
             suggestion?: { duckId?, name?, sessionId /* current chat, "" if none */, title, reason, pitch, state: "working"|"idle" }, candidates?: [same, up to 3],
             place?: { kind: "stream", workspaceId, branch } | { kind: "new", branch },   // see "Place"
             claim?: { sessionId, duckId?, title, eta?, at, status: "asking"|"allowed"|"denied" },
             handedTo?: { sessionId, duckId?, title, turnId? /* "<sessionId>:<turnId>", the RoomTurn id */, newThread },
-            outcomeText?, createdAt, updatedAt }
+            result? /* the Duck's first sentence */, createdAt, updatedAt }
 ```
 
+- **Making a Task**: a person's message with "make it a task" (also this/that, "into a task", "turn this into a task",
+  "make a task of it"; a plain rule, no model, works with the check off; "don't make it a task" and "should we make it a
+  task?" do not count), `POST .../room/tasks {messageId, parentTaskId?}` (the Make task action; a dropped Task is made again,
+  a suggestion is taken up), or Go / New on the check's suggestion (a `proposed` Task). A phrase-only message takes the last
+  person message before it as the text. The **discussion** is the room's person and agent messages since the previous
+  Task of the pond (suggestions nobody took up and dropped Tasks do not count), at most 2 h before the message, up to 60.
+  `go`, `allow` and `new` take `messageIds`, the trimmed list; the Duck is sent the text and the kept messages after it
+  (`promptOf`). Routing (`routeFor`) is the seam where a later decider plugs in. States: `go`/`new`/`allow` make it
+  `working`; its turn ending makes it `done` (with `result`) or `blocked`; `drop` works on waiting, working and blocked.
 - **Check**: after a person posts to the `room` level, one Haiku call (the auto-title helper, 20 s timeout) answers strict
   JSON `{job, text}`; a failure or timeout is no job. Messages under 3 words are skipped unless they start with an
   imperative verb; 30 checks an hour per pond; `SQUEAK_ROOM_JOBS=off` stops the automatic check (a manual job still works).
@@ -585,10 +596,10 @@ RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"
   the title (3), the `working` intent (2) and the last four turns' prompts and outcomes (1.5), plus a recency bonus;
   below 3 there is no suggestion (the person can start a new thread). `reason` is built from the evidence ("worked on
   layout builder 10 min ago"); a working chat has `state: "working"`.
-- Routes: `GET .../room` adds `jobs` (open ones and those updated in 24 h, newest last); `POST .../room/jobs {messageId}`
-  -> 201 `{job}`; `POST .../room/jobs/<jobId>` strict `{action: "go", sessionId?}`, `{action: "new"}` (a thread in the
-  pond's folder, owner's default permission mode, the model of its newest chat), `dismiss`, `allow`, `deny` -> `{job}`,
-  409 with a sentence when the state no longer allows it. SSE sends `event: job` (upsert by id).
+- Routes: `GET .../room` adds `tasks` (open ones and those updated in 24 h, newest last); `POST .../room/tasks {messageId}`
+  -> 201 `{task}`; `POST .../room/tasks/<taskId>` strict `{action: "go", sessionId?}`, `{action: "new"}` (a thread in the
+  pond's folder, owner's default permission mode, the model of its newest chat), `drop`, `allow`, `deny` -> `{task}`,
+  409 with a sentence when the state no longer allows it. SSE sends `event: task` (upsert by id).
 - **Place**: every job has one, chosen by the host when it is made (absent in a plain-folder pond, which has no streams): the
   matched duck's current stream when the job's words match that stream's title, branch and last four turns strongly
   (a score of 4.5: a title word 3, a turn word 1.5), else a **new stream off the default branch** on a free slug branch
@@ -603,7 +614,7 @@ RoomJob = { id: "job:<uuid>", messageId, text, status: "suggested"|"dismissed"|"
   that is working or waiting cannot start a session elsewhere (409); it can claim "after this". `new` with no `duckId`
   makes a new duck, named from a short list, and starts it in the place.
 - (Older behaviour kept) `go`/`allow` send the job text as a new turn from the person (queued when busy). The job follows the turn its text
-  starts: `handed`, then `running` while it runs, then `done` (or `failed`) with `outcomeText`, read from the chat's timeline.
+  starts: `working` while it runs, then `done` (or `blocked`) with `result`, read from the chat's timeline.
 - Agents: `open_jobs` (suggested jobs fitting this thread) and `claim_job {jobId, eta?}` (sets `claim` to `asking`; starts
   nothing; one claim at a time, a newer chat replaces it only after a deny; 10 an hour a chat).
 

@@ -48,7 +48,7 @@ struct RoomItemView: View {
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
-    let act: (String, RoomJobAction, String?) -> Void
+    let act: (String, RoomTaskAction, String?) -> Void
     @State private var visible = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -83,7 +83,7 @@ private struct RoomGroupView: View {
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
-    let act: (String, RoomJobAction, String?) -> Void
+    let act: (String, RoomTaskAction, String?) -> Void
 
     var body: some View {
         if group.author.kind == .me { mine } else { theirs }
@@ -203,13 +203,13 @@ private struct MessageBubble: View {
             .onTapGesture { open?() }
             .pointerHand(open != nil)
             .contextMenu {
-                if message.canMakeJob, let id = message.postId { Button("Make this a job") { makeJob(id) } }
+                if message.canMakeTask, let id = message.postId { Button("Make task") { makeJob(id) } }
                 Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
             }
             if message.failed { Button("Not sent. Retry") { retry(message.id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.negative) }
-            if message.canMakeJob, let id = message.postId {
+            if message.canMakeTask, let id = message.postId {
                 // Hover affordance; its height is reserved so the row never jumps.
-                Button("Make this a job") { makeJob(id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                Button("Make task") { makeJob(id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
                     .opacity(hover ? 1 : 0).allowsHitTesting(hover)
             }
         }
@@ -370,7 +370,7 @@ private struct OptionRow: View {
 private struct OfferView: View {
     let offer: RoomOffer
     let ducks: [RoomThread]
-    let act: (String, RoomJobAction, String?) -> Void
+    let act: (String, RoomTaskAction, String?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -418,12 +418,14 @@ private struct OfferView: View {
 /// Squeak never speaks as a person: a quiet centred line with its buttons.
 private struct RoomSystemView: View {
     let line: RoomSystemLine
-    let act: (String, RoomJobAction, String?) -> Void
+    let act: (String, RoomTaskAction, String?) -> Void
     /// A handoff line opens the duck it went to.
     var open: (() -> Void)?
 
     var body: some View {
-        if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) } else { quiet }
+        if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) }
+        else if let t = line.task { RoomTaskCardView(card: t, act: act, open: open) }
+        else { quiet }
     }
 
     private var quiet: some View {

@@ -12,17 +12,31 @@ import type { DuckRow, NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
 
 /**
- * Room jobs: a person's message that asks for work becomes a job Squeak routes to a thread. Squeak never chats (its
+ * Room Tasks: a person's message that asks for work becomes a Task Squeak routes to a Duck. Squeak never chats (its
  * only words are action and status lines) and never takes or starts anything without the person's Go / Allow.
  * Matching is rules first (word overlap with the pond's recent threads); the only model call is the yes/no check.
  */
 
-export type RoomJobStatus = "suggested" | "dismissed" | "handed" | "running" | "done" | "failed";
+/** A Task's state: waiting (not taken up yet), working (a Duck has it), blocked (its turn did not finish), done, dropped. */
+export type TaskState = "waiting" | "working" | "blocked" | "done" | "dropped";
+
+/** The Room discussion a Task carries is never older than this before the message that made it. */
+export const TASK_DISCUSSION_WINDOW_MS = 2 * 3_600_000;
+const DISCUSSION_MAX_MESSAGES = 60;
+
+/** One Room message a Task carries. */
+export interface TaskDiscussionMessage {
+  id: string;
+  author: string;
+  authorKind: "person" | "agent";
+  text: string;
+  at: number;
+}
 
 /** Where a job runs: an existing stream, or a new stream (a worktree off the default branch) on this branch. */
-export type JobPlace = { kind: "stream"; workspaceId: string; branch: string } | { kind: "new"; branch: string };
+export type TaskPlace = { kind: "stream"; workspaceId: string; branch: string } | { kind: "new"; branch: string };
 
-export interface JobThreadRef {
+export interface TaskThreadRef {
   /** The duck (a pond-level identity); `sessionId` is its current chat, empty when it has not worked yet. */
   duckId?: string;
   name?: string;
@@ -34,15 +48,25 @@ export interface JobThreadRef {
   state: "working" | "idle";
 }
 
-export interface RoomJob {
+export interface RoomTask {
   id: string;
+  /** The Room message that made this Task. */
   messageId: string;
   text: string;
-  status: RoomJobStatus;
-  suggestion?: JobThreadRef;
-  candidates?: JobThreadRef[];
+  /** One line: the Task's first clause. */
+  title: string;
+  state: TaskState;
+  /** Only suggested by the check so far: the person has not taken it up, and it does not cut the discussion. */
+  proposed?: boolean;
+  parentTaskId?: string;
+  /** The Room messages since the previous Task (at most 2 h), as the person trimmed them. */
+  discussion: TaskDiscussionMessage[];
+  /** How it ended: the Duck's first sentence. */
+  result?: string;
+  suggestion?: TaskThreadRef;
+  candidates?: TaskThreadRef[];
   /** Chosen by the host when the job is made; the person can override it on Go. Absent in a plain-folder pond. */
-  place?: JobPlace;
+  place?: TaskPlace;
   claim?: {
     sessionId: string;
     duckId?: string;
@@ -52,12 +76,11 @@ export interface RoomJob {
     status: "asking" | "allowed" | "denied";
   };
   handedTo?: { sessionId: string; duckId?: string; title: string; turnId?: string; newThread: boolean };
-  outcomeText?: string;
   createdAt: number;
   updatedAt: number;
 }
 
-export class JobError extends Error {
+export class TaskError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -155,7 +178,7 @@ interface Scored {
 export interface StartSpec {
   projectId: string;
   duck: DuckRow;
-  place?: JobPlace;
+  place?: TaskPlace;
   text: string;
   title: string;
   /** The lines for the job's message's attachments, written under the session's folder once that is known. */
@@ -165,7 +188,7 @@ export interface StartSpec {
 /** A stream's recent turns must match the job this strongly (a title word is 3, a turn word 1.5) to continue there. */
 export const JOB_CONTINUE_SCORE = 4.5;
 
-export interface RoomJobsOptions {
+export interface RoomTasksOptions {
   store: NativeStore;
   room: Room;
   /** A new turn for an existing chat, from the person (queued if busy). */
@@ -176,7 +199,7 @@ export interface RoomJobsOptions {
   start?: (spec: StartSpec) => Promise<SessionRow>;
   /** A free, valid branch name for a new stream slugged from the job text; null when the pond has no streams. */
   newBranch?: (projectId: string, text: string) => string | null;
-  /** The typed branch as git accepts it for a new stream, or a JobError saying why not. */
+  /** The typed branch as git accepts it for a new stream, or a TaskError saying why not. */
   checkBranch?: (projectId: string, branch: string) => string;
   call?: TitleModelCall;
   /** Defaults to the SQUEAK_ROOM_JOBS switch. */
@@ -186,7 +209,7 @@ export interface RoomJobsOptions {
 }
 
 /** Emits `job` `{ projectId, job }` for every create or change. */
-export class RoomJobs extends EventEmitter {
+export class RoomTasks extends EventEmitter {
   private readonly now: () => number;
   private readonly checks = new Map<string, number[]>();
   private readonly claims = new Map<string, number[]>();
@@ -194,7 +217,7 @@ export class RoomJobs extends EventEmitter {
   private readonly inflight = new Set<Promise<void>>();
   private call: TitleModelCall | null;
 
-  constructor(private readonly o: RoomJobsOptions) {
+  constructor(private readonly o: RoomTasksOptions) {
     super();
     this.setMaxListeners(0);
     this.now = o.now ?? Date.now;
@@ -203,27 +226,25 @@ export class RoomJobs extends EventEmitter {
 
   // ---- reading ----
 
-  /** Open jobs plus those updated in the last 24 h, oldest first (newest last). */
-  list(projectId: string): RoomJob[] {
+  /** Open Tasks (waiting, working, blocked) plus those updated in the last 24 h, oldest first (newest last). */
+  list(projectId: string): RoomTask[] {
     const cutoff = this.now() - JOB_LISTED_MS;
     return this.o.store
       .roomJobRows(projectId)
-      .map((r) => JSON.parse(r.data) as RoomJob)
-      .filter(
-        (j) => j.status === "suggested" || j.status === "handed" || j.status === "running" || j.updatedAt >= cutoff,
-      )
+      .map((r) => JSON.parse(r.data) as RoomTask)
+      .filter((j) => j.state === "waiting" || j.state === "working" || j.state === "blocked" || j.updatedAt >= cutoff)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
       .slice(-50);
   }
 
-  get(id: string): { job: RoomJob; projectId: string } | null {
+  get(id: string): { job: RoomTask; projectId: string } | null {
     const r = this.o.store.roomJobRow(id);
-    return r ? { job: JSON.parse(r.data) as RoomJob, projectId: r.projectId } : null;
+    return r ? { job: JSON.parse(r.data) as RoomTask, projectId: r.projectId } : null;
   }
 
-  private save(projectId: string, job: RoomJob): RoomJob {
+  private save(projectId: string, job: RoomTask): RoomTask {
     job.updatedAt = Math.max(this.now(), job.updatedAt);
-    this.o.store.saveRoomJob({
+    this.o.store.saveRoomTask({
       id: job.id,
       projectId,
       messageId: job.messageId,
@@ -239,7 +260,10 @@ export class RoomJobs extends EventEmitter {
   /** Watches the room: every person message gets the background check. Returns the detach. */
   attach(host: HostEvents): () => void {
     const onPost = (p: RoomPostRow): void => {
-      if (p.authorKind === "person" && p.kind === "message" && p.level === "room") this.check(p);
+      if (p.authorKind !== "person" || p.kind !== "message" || p.level !== "room") return;
+      // "make it a task" is rules, not a model: it works with the check switched off.
+      if (asksForTask(p.text)) this.fromPhrase(p);
+      else this.check(p);
     };
     const onEvent = (e: HostEvent): void => {
       try {
@@ -316,51 +340,168 @@ export class RoomJobs extends EventEmitter {
     if (!answer?.job) return;
     // The person may have made it a job by hand while the call ran.
     if (this.o.store.roomJobRowByMessage(post.id)) return;
-    this.create(post.projectId, post.id, answer.text.trim() || post.text);
+    this.create(post.projectId, post.id, answer.text.trim() || post.text, { proposed: true });
   }
 
-  /** The person marks a message as a job (skips the check). */
-  fromMessage(projectId: string, messageId: unknown): RoomJob {
-    if (typeof messageId !== "string" || !messageId) throw new JobError("messageId is required.", 400);
+  /** The person said "make it a task": a Task from the discussion, never throwing into the post. */
+  private fromPhrase(post: RoomPostRow): void {
+    try {
+      this.fromMessage(post.projectId, post.id);
+    } catch (error) {
+      logger.warn("make it a task failed", { error: String(error) });
+    }
+  }
+
+  /**
+   * A Task from a message: the person's phrase, the Make task action, or taking up a suggestion (skips the check).
+   * A suggestion for the message becomes a plain Task; a dropped one is made again.
+   */
+  fromMessage(projectId: string, messageId: unknown, parentTaskId?: unknown): RoomTask {
+    if (typeof messageId !== "string" || !messageId) throw new TaskError("messageId is required.", 400);
     const post = this.o.store.roomPostById(messageId);
     if (!post || post.projectId !== projectId || post.kind !== "message") {
-      throw new JobError("That isn't a message in this pond's room.", 404);
+      throw new TaskError("That isn't a message in this pond's room.", 404);
+    }
+    if (parentTaskId !== undefined && (typeof parentTaskId !== "string" || !parentTaskId)) {
+      throw new TaskError("parentTaskId must be a Task id.", 400);
+    }
+    if (typeof parentTaskId === "string") {
+      const parent = this.get(parentTaskId);
+      if (!parent || parent.projectId !== projectId) throw new TaskError("That parent Task isn't in this pond.", 404);
     }
     const existing = this.o.store.roomJobRowByMessage(messageId);
     if (existing) {
-      const job = JSON.parse(existing.data) as RoomJob;
-      if (job.status !== "dismissed") throw new JobError("That message is already a job.", 409);
-      return this.create(projectId, messageId, job.text, job);
+      const task = JSON.parse(existing.data) as RoomTask;
+      if (task.state === "dropped") {
+        return this.create(projectId, messageId, task.text, {
+          reopen: task,
+          ...(typeof parentTaskId === "string"
+            ? { parentTaskId }
+            : task.parentTaskId
+              ? { parentTaskId: task.parentTaskId }
+              : {}),
+        });
+      }
+      if (task.proposed) {
+        delete task.proposed;
+        if (typeof parentTaskId === "string") task.parentTaskId = parentTaskId;
+        return this.save(projectId, task);
+      }
+      throw new TaskError("That message is already a task.", 409);
     }
-    return this.create(projectId, messageId, post.text);
+    return this.create(projectId, messageId, post.text, typeof parentTaskId === "string" ? { parentTaskId } : {});
   }
 
-  private create(projectId: string, messageId: string, rawText: string, reopen?: RoomJob): RoomJob {
+  private create(
+    projectId: string,
+    messageId: string,
+    rawText: string,
+    o: { reopen?: RoomTask; proposed?: boolean; parentTaskId?: string } = {},
+  ): RoomTask {
+    const post = this.o.store.roomPostById(messageId);
+    const discussion = post ? this.discussionFor(projectId, post, o.reopen?.id) : [];
     let text = rawText.replace(/\s+/g, " ").trim().slice(0, 500);
+    // "make it a task" alone says nothing: the work is what was being discussed.
+    if (post && asksForTask(text) && !stripTaskPhrase(text)) {
+      text = [...discussion].reverse().find((m) => m.id !== messageId && m.authorKind === "person")?.text ?? "";
+      text = text.replace(/\s+/g, " ").trim().slice(0, 500);
+    } else if (post && asksForTask(text)) {
+      text = stripTaskPhrase(text);
+    }
     // A message that is only pictures or files still says what to do.
     if (!text) {
       const c = this.o.room.attachments.counts(messageId);
       if (c.images + c.files > 0) text = c.files > 0 ? "See the attached files." : "See the attached images.";
     }
+    if (!text) text = "See the discussion in the room.";
     const at = this.now();
-    const job: RoomJob = {
-      id: reopen?.id ?? `job:${randomUUID()}`,
+    const task: RoomTask = {
+      id: o.reopen?.id ?? `task:${randomUUID()}`,
       messageId,
       text,
-      status: "suggested",
-      createdAt: reopen?.createdAt ?? at,
+      title: taskTitle(text),
+      state: "waiting",
+      ...(o.proposed ? { proposed: true } : {}),
+      ...(o.parentTaskId ? { parentTaskId: o.parentTaskId } : {}),
+      discussion,
+      createdAt: o.reopen?.createdAt ?? at,
       updatedAt: at,
     };
+    Object.assign(task, this.routeFor(projectId, text));
+    return this.save(projectId, task);
+  }
+
+  /**
+   * THE ROUTING SEAM. Who a new Task is suggested to and where it would run, today by word overlap with the pond's
+   * Ducks; the person still decides with Go / New. A later decider replaces only this method.
+   */
+  private routeFor(projectId: string, text: string): Pick<RoomTask, "suggestion" | "candidates" | "place"> {
+    const out: Pick<RoomTask, "suggestion" | "candidates" | "place"> = {};
     const ranked = this.rank(projectId, text);
     const best = ranked[0];
     if (best) {
-      job.suggestion = ref(best);
+      out.suggestion = ref(best);
       const rest = ranked.slice(1, 4).map(ref);
-      if (rest.length) job.candidates = rest;
+      if (rest.length) out.candidates = rest;
     }
     const place = this.choosePlace(projectId, text, best?.duck ?? null, best?.session ?? null);
-    if (place) job.place = place;
-    return this.save(projectId, job);
+    if (place) out.place = place;
+    return out;
+  }
+
+  // ---- the discussion a Task carries ----
+
+  /**
+   * The Room messages since the previous Task in this pond (a suggestion nobody took up does not count), no older than
+   * 2 h before `post`, up to and including `post`. `selfId` is a Task being made again, never its own boundary.
+   */
+  discussionFor(projectId: string, post: RoomPostRow, selfId?: string): TaskDiscussionMessage[] {
+    let boundary = 0;
+    for (const r of this.o.store.roomJobRows(projectId)) {
+      const t = JSON.parse(r.data) as RoomTask;
+      if (t.id === selfId || t.proposed || t.state === "dropped") continue;
+      const seq = this.o.store.roomPostById(t.messageId)?.seq ?? 0;
+      if (seq < post.seq && seq > boundary) boundary = seq;
+    }
+    const floor = post.at - TASK_DISCUSSION_WINDOW_MS;
+    return this.o.store
+      .roomPosts(projectId, { before: post.seq + 1, limit: 300 })
+      .filter(
+        (p) =>
+          p.seq > boundary &&
+          p.kind === "message" &&
+          p.level === "room" &&
+          (p.authorKind === "person" || p.authorKind === "agent") &&
+          p.at >= floor &&
+          p.text.trim() !== "",
+      )
+      .slice(-DISCUSSION_MAX_MESSAGES)
+      .map((p) => ({
+        id: p.id,
+        author: p.authorName,
+        authorKind: p.authorKind as "person" | "agent",
+        text: p.text,
+        at: p.at,
+      }));
+  }
+
+  /** What a Duck is sent: the Task, then the discussion the person kept (never the message that made the Task). */
+  promptOf(task: RoomTask): string {
+    const rest = task.discussion.filter((m) => m.id !== task.messageId);
+    if (rest.length === 0) return task.text;
+    const lines = rest.map((m) => `${m.author}: ${m.text.replace(/\s+/g, " ").trim().slice(0, 600)}`);
+    return `${task.text}\n\nRoom discussion before this, oldest first:\n${lines.join("\n")}`;
+  }
+
+  /** The person's trim: keep only these messages of the Task's discussion, in their order. */
+  private trim(task: RoomTask, raw: unknown): void {
+    if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string")) {
+      throw new TaskError("messageIds must be a list of message ids.", 400);
+    }
+    const keep = new Set(raw as string[]);
+    const known = new Set(task.discussion.map((m) => m.id));
+    for (const id of keep) if (!known.has(id)) throw new TaskError("That message isn't part of this task.", 400);
+    task.discussion = task.discussion.filter((m) => keep.has(m.id));
   }
 
   // ---- places ----
@@ -369,7 +510,12 @@ export class RoomJobs extends EventEmitter {
    * Where a job runs. A duck that already works in a stream whose recent turns match the job strongly continues
    * there; anything else goes to a new stream off the default branch (a plain-folder pond has no streams: absent).
    */
-  choosePlace(projectId: string, text: string, duck: DuckRow | null, session: SessionRow | null): JobPlace | undefined {
+  choosePlace(
+    projectId: string,
+    text: string,
+    duck: DuckRow | null,
+    session: SessionRow | null,
+  ): TaskPlace | undefined {
     const project = this.o.store.getProject(projectId);
     if (!project || project.kind === "folder") return undefined;
     const here = this.o.room.placeOf(session);
@@ -392,9 +538,9 @@ export class RoomJobs extends EventEmitter {
   }
 
   /** A place the person (or the host) names, checked: a stream of this pond that is not archived, or a free branch. */
-  private cleanPlace(projectId: string, raw: unknown): JobPlace {
+  private cleanPlace(projectId: string, raw: unknown): TaskPlace {
     const bad = (m: string): never => {
-      throw new JobError(m, 400);
+      throw new TaskError(m, 400);
     };
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return bad("place must be an object");
     const o = raw as Record<string, unknown>;
@@ -404,7 +550,7 @@ export class RoomJobs extends EventEmitter {
       if (typeof o.workspaceId !== "string" || !o.workspaceId) return bad("place.workspaceId is required");
       const ws = this.o.store.getWorkspace(o.workspaceId);
       if (!ws || ws.projectId !== projectId || ws.state === "archived") {
-        throw new JobError("That stream isn't available in this pond any more.", 409);
+        throw new TaskError("That stream isn't available in this pond any more.", 409);
       }
       return { kind: "stream", workspaceId: ws.id, branch: ws.branch };
     }
@@ -415,7 +561,7 @@ export class RoomJobs extends EventEmitter {
         return bad("place.branch must be a branch name");
       }
       const project = this.o.store.getProject(projectId);
-      if (project?.kind === "folder") throw new JobError("This pond has no streams to start in.", 409);
+      if (project?.kind === "folder") throw new TaskError("This pond has no streams to start in.", 409);
       return { kind: "new", branch: this.o.checkBranch ? this.o.checkBranch(projectId, o.branch) : o.branch.trim() };
     }
     return bad("place.kind must be stream or new");
@@ -502,14 +648,14 @@ export class RoomJobs extends EventEmitter {
   }
 
   /** Suggested jobs of this pond, best fit for `session`'s duck first (the agent's `open_jobs`). */
-  openFor(projectId: string, session: SessionRow): Array<{ job: RoomJob; why: string }> {
+  openFor(projectId: string, session: SessionRow): Array<{ job: RoomTask; why: string }> {
     const marks = this.o.store.latestRoomMarks(projectId);
     // An off-duty duck is not a candidate, so it is offered nothing.
     const me = this.o.room.duckCandidates(projectId, JOB_MATCH_WINDOW_MS).find((c) => c.session?.id === session.id);
     if (!me) return [];
-    const out: Array<{ job: RoomJob; why: string; score: number }> = [];
+    const out: Array<{ job: RoomTask; why: string; score: number }> = [];
     for (const job of this.list(projectId)) {
-      if (job.status !== "suggested") continue;
+      if (job.state !== "waiting") continue;
       if (job.claim && job.claim.status !== "denied" && job.claim.sessionId !== session.id) continue;
       if (job.claim?.status === "denied" && job.claim.sessionId === session.id) continue;
       const hit = this.score(
@@ -531,28 +677,29 @@ export class RoomJobs extends EventEmitter {
 
   // ---- claims (agents) ----
 
-  claim(session: SessionRow, projectId: string, jobId: string, eta?: string): RoomJob {
+  claim(session: SessionRow, projectId: string, jobId: string, eta?: string): RoomTask {
     const found = this.get(jobId);
-    if (!found || found.projectId !== projectId) throw new JobError("No such job in this pond.", 404);
+    if (!found || found.projectId !== projectId) throw new TaskError("No such job in this pond.", 404);
     const job = found.job;
-    if (job.status !== "suggested") throw new JobError("That job is no longer open.", 409);
+    if (job.state !== "waiting") throw new TaskError("That task is no longer open.", 409);
     if (this.o.store.duckOf(session.id).duty === "off") {
-      throw new JobError("You are off duty, so you can't take jobs; the person can put you back on duty.", 409);
+      throw new TaskError("You are off duty, so you can't take jobs; the person can put you back on duty.", 409);
     }
     const c = job.claim;
     if (c && c.sessionId === session.id) {
-      throw new JobError(
+      throw new TaskError(
         c.status === "denied"
           ? "The person said no to you taking this job."
           : "You have already asked to take this job.",
         409,
       );
     }
-    if (c && c.status !== "denied") throw new JobError("Another chat has already asked to take this job.", 409);
+    if (c && c.status !== "denied") throw new TaskError("Another chat has already asked to take this job.", 409);
     const hour = this.now() - 3_600_000;
     const recent = (this.claims.get(session.id) ?? []).filter((t) => t > hour);
     this.claims.set(session.id, recent);
-    if (recent.length >= JOB_CLAIMS_PER_HOUR) throw new JobError("This chat has asked for enough jobs this hour.", 429);
+    if (recent.length >= JOB_CLAIMS_PER_HOUR)
+      throw new TaskError("This chat has asked for enough jobs this hour.", 429);
     recent.push(this.now());
     const cleanEta = eta?.replace(/\s+/g, " ").trim().slice(0, 60);
     const duck = this.o.store.duckBySession(session.id);
@@ -569,56 +716,69 @@ export class RoomJobs extends EventEmitter {
 
   // ---- the person's actions ----
 
-  async act(projectId: string, jobId: string, body: Record<string, unknown>): Promise<RoomJob> {
-    const unknown = Object.keys(body).filter((k) => !["action", "sessionId", "duckId", "place"].includes(k));
-    if (unknown.length) throw new JobError(`unknown key: ${unknown[0]}`, 400);
+  async act(projectId: string, jobId: string, body: Record<string, unknown>): Promise<RoomTask> {
+    const unknown = Object.keys(body).filter(
+      (k) => !["action", "sessionId", "duckId", "place", "messageIds"].includes(k),
+    );
+    if (unknown.length) throw new TaskError(`unknown key: ${unknown[0]}`, 400);
     const action = body.action;
-    if (!["go", "new", "dismiss", "allow", "deny"].includes(action as string)) {
-      throw new JobError("action must be go, new, dismiss, allow or deny", 400);
+    if (!["go", "new", "drop", "allow", "deny"].includes(action as string)) {
+      throw new TaskError("action must be go, new, drop, allow or deny", 400);
+    }
+    if (body.messageIds !== undefined && !["go", "allow", "new"].includes(action as string)) {
+      throw new TaskError("messageIds is only for go, allow and new", 400);
     }
     if (body.sessionId !== undefined && (action !== "go" || typeof body.sessionId !== "string")) {
-      throw new JobError("sessionId is only for go, and must be text", 400);
+      throw new TaskError("sessionId is only for go, and must be text", 400);
     }
     if (
       body.duckId !== undefined &&
       (!["go", "allow", "new"].includes(action as string) || typeof body.duckId !== "string")
     ) {
-      throw new JobError("duckId is only for go, allow and new, and must be text", 400);
+      throw new TaskError("duckId is only for go, allow and new, and must be text", 400);
     }
     if (body.sessionId !== undefined && body.duckId !== undefined) {
-      throw new JobError("give a duckId or a sessionId, not both", 400);
+      throw new TaskError("give a duckId or a sessionId, not both", 400);
     }
     if (body.place !== undefined && !["go", "allow", "new"].includes(action as string)) {
-      throw new JobError("place is only for go, allow and new", 400);
+      throw new TaskError("place is only for go, allow and new", 400);
     }
     const found = this.get(jobId);
-    if (!found || found.projectId !== projectId) throw new JobError("No such job.", 404);
+    if (!found || found.projectId !== projectId) throw new TaskError("No such job.", 404);
     const job = found.job;
-    if (this.busy.has(jobId)) throw new JobError("That job is being handed over right now.", 409);
-    if (job.status !== "suggested") {
-      throw new JobError(
-        job.status === "dismissed" ? "That job was dismissed." : "That job has already been handed to a thread.",
+    if (this.busy.has(jobId)) throw new TaskError("That job is being handed over right now.", 409);
+    if (action === "drop") {
+      if (job.state === "dropped") throw new TaskError("That task was already dropped.", 409);
+      if (job.state === "done") throw new TaskError("That task is done.", 409);
+    } else if (job.state !== "waiting") {
+      throw new TaskError(
+        job.state === "dropped" ? "That task was dropped." : "That task has already been taken up by a Duck.",
         409,
       );
     }
     const override = body.place !== undefined ? this.cleanPlace(projectId, body.place) : undefined;
     this.busy.add(jobId);
     try {
+      if (action === "go" || action === "allow" || action === "new") {
+        // Taking a suggestion up makes it a Task; the person's trim is what the Duck is sent.
+        delete job.proposed;
+        if (body.messageIds !== undefined) this.trim(job, body.messageIds);
+      }
       switch (action) {
-        case "dismiss":
-          job.status = "dismissed";
+        case "drop":
+          job.state = "dropped";
           return this.save(projectId, job);
         case "deny":
-          if (job.claim?.status !== "asking") throw new JobError("No thread is asking to take this job.", 409);
+          if (job.claim?.status !== "asking") throw new TaskError("No Duck is asking to take this task.", 409);
           job.claim.status = "denied";
           return this.save(projectId, job);
         case "allow": {
-          if (job.claim?.status !== "asking") throw new JobError("No thread is asking to take this job.", 409);
+          if (job.claim?.status !== "asking") throw new TaskError("No Duck is asking to take this task.", 409);
           const claimer = this.o.store.getSession(job.claim.sessionId);
           const duck = claimer ? this.o.room.duckOfSession(claimer) : null;
-          if (!duck) throw new JobError("That thread isn't available in this pond any more.", 409);
+          if (!duck) throw new TaskError("That thread isn't available in this pond any more.", 409);
           if (body.duckId !== undefined && body.duckId !== duck.id) {
-            throw new JobError("Only the duck that asked can be allowed.", 409);
+            throw new TaskError("Only the duck that asked can be allowed.", 409);
           }
           const done = await this.handTo(
             projectId,
@@ -635,7 +795,7 @@ export class RoomJobs extends EventEmitter {
           let pinned = override !== undefined;
           if (typeof body.duckId === "string") {
             duck = this.o.store.duckRow(body.duckId);
-            if (!duck || duck.projectId !== projectId) throw new JobError("That duck isn't in this pond.", 409);
+            if (!duck || duck.projectId !== projectId) throw new TaskError("That duck isn't in this pond.", 409);
           } else {
             const id = (body.sessionId as string | undefined) ?? job.suggestion?.sessionId;
             if (id) {
@@ -644,7 +804,7 @@ export class RoomJobs extends EventEmitter {
                 s &&
                 !s.archivedAt &&
                 this.o.room.candidates(projectId, Infinity, { offDuty: true }).some((c) => c.session.id === s.id);
-              if (!s || !inPond) throw new JobError("That thread isn't available in this pond any more.", 409);
+              if (!s || !inPond) throw new TaskError("That thread isn't available in this pond any more.", 409);
               duck = this.o.room.duckOfSession(s);
               // The person picked that very thread: it continues there, wherever it is.
               if (!pinned && body.sessionId !== undefined) {
@@ -655,7 +815,7 @@ export class RoomJobs extends EventEmitter {
               duck = this.o.store.duckRow(job.suggestion.duckId);
             }
           }
-          if (!duck) throw new JobError("There is no thread to send this to; start a new one.", 409);
+          if (!duck) throw new TaskError("There is no thread to send this to; start a new one.", 409);
           const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
           return this.save(
             projectId,
@@ -664,11 +824,11 @@ export class RoomJobs extends EventEmitter {
         }
         default: {
           const project = this.o.store.getProject(projectId);
-          if (!project) throw new JobError("No such pond.", 404);
+          if (!project) throw new TaskError("No such pond.", 404);
           let duck: DuckRow | null = null;
           if (typeof body.duckId === "string") {
             duck = this.o.store.duckRow(body.duckId);
-            if (!duck || duck.projectId !== projectId) throw new JobError("That duck isn't in this pond.", 409);
+            if (!duck || duck.projectId !== projectId) throw new TaskError("That duck isn't in this pond.", 409);
           } else {
             duck = this.o.store.createDuck({ projectId, name: this.freshDuckName(projectId, job.text) });
           }
@@ -686,11 +846,11 @@ export class RoomJobs extends EventEmitter {
   /** The place for `duck`: the job's own when the suggested duck takes it, else chosen for this duck. */
   private placeFor(
     projectId: string,
-    job: RoomJob,
+    job: RoomTask,
     duck: DuckRow,
     cur: SessionRow | null,
     forceNew = false,
-  ): JobPlace | undefined {
+  ): TaskPlace | undefined {
     const stored = job.suggestion?.duckId === duck.id ? job.place : undefined;
     if (stored?.kind === "new" && this.o.checkBranch) {
       // The branch was free when the job was made; take another one if it is not any more.
@@ -720,53 +880,58 @@ export class RoomJobs extends EventEmitter {
   }
 
   /** Hands the job to `duck`: the next turn of its current chat when that is in the place, else a fresh session there. */
-  private async handTo(projectId: string, job: RoomJob, duck: DuckRow, place: JobPlace | undefined): Promise<RoomJob> {
+  private async handTo(
+    projectId: string,
+    job: RoomTask,
+    duck: DuckRow,
+    place: TaskPlace | undefined,
+  ): Promise<RoomTask> {
     const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
     const live = cur && !cur.archivedAt ? cur : null;
     const inPlace = live && (!place || (place.kind === "stream" && live.workspaceId === place.workspaceId));
     if (!inPlace) return this.startFor(projectId, job, duck, place, live);
     const s = live;
-    job.status = "handed";
+    job.state = "working";
     job.handedTo = { sessionId: s.id, duckId: duck.id, title: this.o.room.duckName(s), newThread: false };
     job.updatedAt = this.now();
     // The person sending a job to an off-duty duck puts it back on duty.
     this.o.room.setDutyById(duck.id, true);
     try {
-      await this.o.send(s.id, job.text + this.attachLines(projectId, job, s.cwd));
+      await this.o.send(s.id, this.promptOf(job) + this.attachLines(projectId, job, s.cwd));
     } catch (error) {
       delete job.handedTo;
-      job.status = "suggested";
-      throw new JobError(error instanceof Error ? error.message : "Could not send it.", 409);
+      job.state = "waiting";
+      throw new TaskError(error instanceof Error ? error.message : "Could not send it.", 409);
     }
     this.save(projectId, job);
     return this.reconcileJob(projectId, job);
   }
 
-  private hasAttachments(job: RoomJob): boolean {
+  private hasAttachments(job: RoomTask): boolean {
     const c = this.o.room.attachments.counts(job.messageId);
     return c.images + c.files > 0;
   }
 
   /** The attachment lines of the job's message, copied under `cwd` the way a chat's are; a failure refuses the send. */
-  private attachLines(projectId: string, job: RoomJob, cwd: string): string {
+  private attachLines(projectId: string, job: RoomTask, cwd: string): string {
     try {
       return this.o.room.attachments.forTurn(projectId, job.messageId, cwd);
     } catch (error) {
-      throw new JobError(error instanceof AttachmentError ? error.message : "Couldn't copy the attachments.", 409);
+      throw new TaskError(error instanceof AttachmentError ? error.message : "Couldn't copy the attachments.", 409);
     }
   }
 
   /** A fresh session for the duck in `place`; the old one stays as history. A duck busy elsewhere cannot start one. */
   private async startFor(
     projectId: string,
-    job: RoomJob,
+    job: RoomTask,
     duck: DuckRow,
-    place: JobPlace | undefined,
+    place: TaskPlace | undefined,
     cur: SessionRow | null,
-  ): Promise<RoomJob> {
+  ): Promise<RoomTask> {
     if (cur && !cur.archivedAt && this.o.room.duckView(duck).state !== "idle") {
       const name = duck.name ?? this.o.room.duckName(cur);
-      throw new JobError(`${name} is busy in another stream; wait for it to finish, or let it claim this after.`, 409);
+      throw new TaskError(`${name} is busy in another stream; wait for it to finish, or let it claim this after.`, 409);
     }
     this.o.room.setDutyById(duck.id, true);
     let child: SessionRow;
@@ -776,30 +941,30 @@ export class RoomJobs extends EventEmitter {
           projectId,
           duck,
           ...(place ? { place } : {}),
-          text: job.text,
-          title: jobTitle(job.text),
+          text: this.promptOf(job),
+          title: job.title,
           ...(this.hasAttachments(job) ? { attach: (cwd: string) => this.attachLines(projectId, job, cwd) } : {}),
         });
       } else {
         child = await this.o.newThread(
           projectId,
-          job.text,
-          jobTitle(job.text),
+          this.promptOf(job),
+          job.title,
           this.hasAttachments(job) ? (cwd) => this.attachLines(projectId, job, cwd) : undefined,
         );
         this.o.store.attachSessionToDuck(duck.id, child.id);
       }
     } catch (error) {
-      if (error instanceof JobError) throw error;
-      throw new JobError(error instanceof Error ? error.message : "Could not start a thread.", 409);
+      if (error instanceof TaskError) throw error;
+      throw new TaskError(error instanceof Error ? error.message : "Could not start a thread.", 409);
     }
     this.o.store.attachSessionToDuck(duck.id, child.id);
     this.o.room.emitDuck(duck.id);
-    job.status = "handed";
+    job.state = "working";
     job.handedTo = {
       sessionId: child.id,
       duckId: duck.id,
-      title: child.title ?? jobTitle(job.text),
+      title: child.title ?? job.title,
       newThread: true,
     };
     if (place) job.place = place;
@@ -815,28 +980,27 @@ export class RoomJobs extends EventEmitter {
     for (const [projectId, job] of this.activeFor(sessionId)) this.reconcileJob(projectId, job);
   }
 
-  private activeFor(sessionId: string): Array<[string, RoomJob]> {
-    const out: Array<[string, RoomJob]> = [];
+  private activeFor(sessionId: string): Array<[string, RoomTask]> {
+    const out: Array<[string, RoomTask]> = [];
     for (const p of this.o.store.listProjects()) {
       for (const r of this.o.store.roomJobRows(p.id)) {
-        const j = JSON.parse(r.data) as RoomJob;
-        if ((j.status === "handed" || j.status === "running") && j.handedTo?.sessionId === sessionId)
-          out.push([p.id, j]);
+        const j = JSON.parse(r.data) as RoomTask;
+        if (j.state === "working" && j.handedTo?.sessionId === sessionId) out.push([p.id, j]);
       }
     }
     return out;
   }
 
-  /** Binds a handed job to the turn its text started, and follows that turn to its end. Saves only on change. */
-  reconcileJob(projectId: string, job: RoomJob): RoomJob {
+  /** Binds a working Task to the turn its text started, and follows that turn to its end. Saves only on change. */
+  reconcileJob(projectId: string, job: RoomTask): RoomTask {
     const to = job.handedTo;
-    if (!to || (job.status !== "handed" && job.status !== "running")) return job;
+    if (!to || job.state !== "working") return job;
     const turns = this.o.room.sessionTurns(to.sessionId);
     const want = oneLine(job.text);
     const taken = new Set(
       this.o.store
         .roomJobRows(projectId)
-        .map((r) => (JSON.parse(r.data) as RoomJob).handedTo?.turnId)
+        .map((r) => (JSON.parse(r.data) as RoomTask).handedTo?.turnId)
         .filter((x): x is string => !!x),
     );
     const turn = to.turnId
@@ -850,12 +1014,10 @@ export class RoomJobs extends EventEmitter {
     if (!turn) return job;
     const before = JSON.stringify(job);
     to.turnId = `${to.sessionId}:${turn.turnId}`;
-    if (turn.endedAt === undefined) {
-      job.status = "running";
-    } else {
-      job.status = turn.outcome === "finished" ? "done" : "failed";
+    if (turn.endedAt !== undefined) {
+      job.state = turn.outcome === "finished" ? "done" : "blocked";
       const outcome = turn.reply ? firstSentence(turn.reply) : "";
-      if (outcome) job.outcomeText = outcome;
+      if (outcome) job.result = outcome;
     }
     return JSON.stringify(job) === before ? job : this.save(projectId, job);
   }
@@ -885,7 +1047,7 @@ const DUCK_NAMES = [
   "Clover",
 ];
 
-function ref(s: Scored): JobThreadRef {
+function ref(s: Scored): TaskThreadRef {
   return {
     duckId: s.duck.id,
     name: s.duck.name ?? s.session?.title ?? "Duck",
@@ -898,7 +1060,54 @@ function ref(s: Scored): JobThreadRef {
 }
 
 /** A new thread's title from the job: its first clause, at most 60 characters. */
-export function jobTitle(text: string): string {
+export function taskTitle(text: string): string {
   const t = oneLine(text, 60).replace(/[.!?]+$/, "");
-  return t || "New job";
+  return t || "New task";
+}
+
+/**
+ * A person saying to make a Task of the recent discussion: "make it a task", "make this a task", "make that into a task",
+ * "turn this into a task", "make a task of it". Rules only; a negation ("don't make it a task") or a question about it
+ * is not a request.
+ */
+const TASK_PHRASES = [
+  /\bmake (?:it|this|that|these|them) (?:into )?(?:a )?tasks?\b/,
+  /\b(?:turn|convert) (?:it|this|that|these|them) into (?:a )?tasks?\b/,
+  /\bmake (?:a )?tasks? (?:of|from|out of) (?:it|this|that|these|them)\b/,
+];
+
+function plain(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function asksForTask(text: string): boolean {
+  const t = plain(text);
+  const hit = TASK_PHRASES.map((re) => re.exec(t)).find((m) => m);
+  if (!hit) return false;
+  const before = t.slice(0, hit.index);
+  if (
+    /\b(?:don't|dont|do not|not|never|no need to|shouldn't|should not|won't|can't|cannot|without)\s+(?:\w+\s+){0,2}$/.test(
+      before,
+    )
+  ) {
+    return false;
+  }
+  // "Should we make it a task?" asks; "can you make this a task?" requests.
+  const lead = before.split(/[.!?]/).pop()!.trim();
+  return !/^(?:should|shall|do|does|did|is|are|why|how|what|when|whether|if)\b/.test(lead);
+}
+
+const FILLER = "please|pls|let's|lets|can you|could you|would you|just|ok|okay|then|and|so";
+
+/** The message with the "make it a task" phrase and the filler around it taken out ("please make this a task" is empty). */
+export function stripTaskPhrase(text: string): string {
+  let t = text.replace(/\s+/g, " ").trim();
+  for (const re of TASK_PHRASES) t = t.replace(new RegExp(re.source, "i"), " ");
+  const edge = new RegExp(`^(?:(?:${FILLER})\\b|[\\s,.;:!?-])+|(?:(?:\\b(?:${FILLER}))|[\\s,.;:!?-])+$`, "gi");
+  t = t.replace(edge, "").trim();
+  return /[a-z0-9]/i.test(t) ? t : "";
 }

@@ -1326,13 +1326,24 @@ export class NativeStore {
 
   private jobsTable(): void {
     if (this.jobsReady) return;
-    // Created here, not as a migration (like room_backfill): a job is JSON the room-jobs module owns.
+    // Created here, not as a migration (like room_backfill): a Task is JSON the room-tasks module owns. The table was
+    // `room_jobs` before Tasks: it is renamed once and its rows are mapped to the Task states.
+    const hasOld = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_jobs'").get();
+    const hasNew = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='room_tasks'").get();
+    if (hasOld && !hasNew) {
+      this.db.exec("DROP INDEX IF EXISTS room_jobs_project");
+      this.db.exec("ALTER TABLE room_jobs RENAME TO room_tasks");
+    }
     this.db.exec(
-      `CREATE TABLE IF NOT EXISTS room_jobs (
+      `CREATE TABLE IF NOT EXISTS room_tasks (
          id TEXT PRIMARY KEY, project_id TEXT NOT NULL, message_id TEXT NOT NULL,
          data TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
     );
-    this.db.exec("CREATE INDEX IF NOT EXISTS room_jobs_project ON room_jobs(project_id, updated_at)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS room_tasks_project ON room_tasks(project_id, updated_at)");
+    for (const r of this.db.prepare("SELECT id, data FROM room_tasks").all() as Row[]) {
+      const next = taskFromJobData(r.data as string);
+      if (next) this.db.prepare("UPDATE room_tasks SET data=? WHERE id=?").run(next, r.id as string);
+    }
     this.jobsReady = true;
   }
 
@@ -1397,11 +1408,11 @@ export class NativeStore {
     return r ? { ...attachmentRow(r), projectId: r.project_id as string, postId: r.post_id as string } : null;
   }
 
-  saveRoomJob(row: { id: string; projectId: string; messageId: string; data: string; updatedAt: number }): void {
+  saveRoomTask(row: { id: string; projectId: string; messageId: string; data: string; updatedAt: number }): void {
     this.jobsTable();
     this.db
       .prepare(
-        `INSERT INTO room_jobs (id, project_id, message_id, data, updated_at) VALUES (?,?,?,?,?)
+        `INSERT INTO room_tasks (id, project_id, message_id, data, updated_at) VALUES (?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
       )
       .run(row.id, row.projectId, row.messageId, row.data, row.updatedAt);
@@ -1410,19 +1421,19 @@ export class NativeStore {
   roomJobRows(projectId: string): Array<{ id: string; projectId: string; messageId: string; data: string }> {
     this.jobsTable();
     return (
-      this.db.prepare("SELECT * FROM room_jobs WHERE project_id=? ORDER BY updated_at ASC").all(projectId) as Row[]
+      this.db.prepare("SELECT * FROM room_tasks WHERE project_id=? ORDER BY updated_at ASC").all(projectId) as Row[]
     ).map(jobRow);
   }
 
   roomJobRow(id: string): { id: string; projectId: string; messageId: string; data: string } | null {
     this.jobsTable();
-    const r = this.db.prepare("SELECT * FROM room_jobs WHERE id=?").get(id) as Row | undefined;
+    const r = this.db.prepare("SELECT * FROM room_tasks WHERE id=?").get(id) as Row | undefined;
     return r ? jobRow(r) : null;
   }
 
   roomJobRowByMessage(messageId: string): { id: string; projectId: string; messageId: string; data: string } | null {
     this.jobsTable();
-    const r = this.db.prepare("SELECT * FROM room_jobs WHERE message_id=?").get(messageId) as Row | undefined;
+    const r = this.db.prepare("SELECT * FROM room_tasks WHERE message_id=?").get(messageId) as Row | undefined;
     return r ? jobRow(r) : null;
   }
 
@@ -1739,6 +1750,42 @@ function duckRow(r: Row): DuckRow {
     workspaceId: (r.workspace_id as string | null) ?? null,
     branch: (r.branch as string | null) ?? null,
   };
+}
+
+const JOB_STATUS_TO_STATE: Record<string, string> = {
+  suggested: "waiting",
+  handed: "working",
+  running: "working",
+  done: "done",
+  failed: "blocked",
+  dismissed: "dropped",
+};
+
+/**
+ * A pre-Task job row's JSON as a Task's (status becomes state, outcomeText becomes result, a title and no discussion);
+ * null when the row already is a Task. A suggested job stays a proposal until the person acts on it.
+ */
+export function taskFromJobData(data: string): string | null {
+  let o: Record<string, unknown>;
+  try {
+    o = JSON.parse(data) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (typeof o.status !== "string" || typeof o.state === "string") return null;
+  const { status, outcomeText, ...rest } = o;
+  const text = typeof rest.text === "string" ? rest.text : "";
+  const title = [...(text.split(/\r?\n/).find((l) => l.trim()) ?? "").trim().replace(/[.!?]+$/, "")]
+    .slice(0, 60)
+    .join("");
+  return JSON.stringify({
+    ...rest,
+    state: JOB_STATUS_TO_STATE[status as string] ?? "waiting",
+    title: title || "New task",
+    ...(status === "suggested" ? { proposed: true } : {}),
+    ...(typeof outcomeText === "string" && outcomeText ? { result: outcomeText } : {}),
+    discussion: [],
+  });
 }
 
 function jobRow(r: Row): { id: string; projectId: string; messageId: string; data: string } {

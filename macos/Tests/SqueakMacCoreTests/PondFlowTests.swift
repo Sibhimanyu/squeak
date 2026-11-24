@@ -147,7 +147,7 @@ struct PondFlowTests {
         let line = RoomSystemLine(id: "x", at: 0, text: "a handed off to b", jobId: nil, buttons: [], opens: "s2")
         #expect(PondClick.target(line: line) == .duck("s2"))
         #expect(PondClick.target(line: RoomSystemLine(id: "y", at: 0, text: "quiet", jobId: nil, buttons: [])) == nil)
-        let job = RoomJob(id: "j", messageId: "p1", text: "t", status: .handed, handedTo: RoomJobHandedTo(sessionId: "s4", title: "T"))
+        let job = RoomTask(id: "j", messageId: "p1", text: "t", state: .working, handedTo: RoomTaskHandedTo(sessionId: "s4", title: "T"))
         #expect(PondClick.target(job: job) == .duck("s4"))
     }
 
@@ -155,7 +155,7 @@ struct PondFlowTests {
         var f = RoomFeed()
         let turn = RoomTurn(id: "s1:1", sessionId: "s1", threadTitle: "T", agent: "claude", startedAt: 1_780_000_000_000, endedAt: 1_780_000_100_000, outcome: .finished,
                             prompt: "fix it", author: RoomTurnAuthor(name: "Sibhi", me: true), outcomeText: "ok")
-        f.apply(page: RoomPage(posts: [], latestSeq: 0, threads: [], turns: [turn], jobs: []))
+        f.apply(page: RoomPage(posts: [], latestSeq: 0, threads: [], turns: [turn], tasks: []))
         let items = RoomMessages.build(feed: f)
         let mine = items.compactMap { if case .group(let g) = $0 { g } else { nil } }.flatMap(\.messages).first { $0.author.kind == .me }
         #expect(mine?.goesTo == "s1")

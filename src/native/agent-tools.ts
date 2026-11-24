@@ -17,7 +17,7 @@ import {
   type ProjectPrefs,
 } from "./project-prefs.js";
 import { addArtboard, CanvasError, createCanvas, readCanvas, resolveCanvasDir, updateArtboard } from "./canvases.js";
-import { JobError, type RoomJobs } from "./room-jobs.js";
+import { TaskError, type RoomTasks } from "./room-tasks.js";
 import { ducksOwnBranch, Placement, PlacementError, type PlaceRequest } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
@@ -92,7 +92,7 @@ export interface AgentToolDeps {
   /** The pond's room (`post_to_room`, `read_room`, and `send_to_chat` mirrored into it). Absent: those tools say so. */
   room?: Room;
   /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
-  jobs?: RoomJobs;
+  jobs?: RoomTasks;
   /** Placement for `branch_off`, `join_branch` (flag `ducksOwnBranch`). Absent: those tools say so. */
   placement?: Placement;
   now?: () => number;
@@ -846,7 +846,7 @@ export class AgentTools {
     return level === "agents" ? "Posted to the agents level of the room." : "Posted to the room.";
   }
 
-  private jobsOf(s: SessionRow): { jobs: RoomJobs; pond: { id: string; name: string } } {
+  private jobsOf(s: SessionRow): { jobs: RoomTasks; pond: { id: string; name: string } } {
     if (!this.deps.jobs) throw new ToolError("Jobs aren't available here.");
     const pond = projectOfSession(this.deps.store, s);
     if (!pond) throw new ToolError("This chat isn't in a pond, so it has no jobs.");
@@ -867,7 +867,7 @@ export class AgentTools {
     try {
       jobs.claim(s, pond.id, args.jobId, args.eta as string | undefined);
     } catch (error) {
-      if (error instanceof JobError) throw new ToolError(error.message);
+      if (error instanceof TaskError) throw new ToolError(error.message);
       throw error;
     }
     return "Asked the person. Do not start this job unless they send it to you.";

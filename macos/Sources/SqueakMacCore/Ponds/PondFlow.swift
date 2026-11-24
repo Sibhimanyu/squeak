@@ -138,7 +138,7 @@ public enum PondClick {
     public static func target(line: RoomSystemLine) -> PondOpenTarget? { line.opens.map(PondOpenTarget.duck) }
 
     /// A job's handed duck.
-    public static func target(job: RoomJob) -> PondOpenTarget? { job.handedTo.map { .duck($0.sessionId) } }
+    public static func target(job: RoomTask) -> PondOpenTarget? { job.handedTo.map { .duck($0.sessionId) } }
 }
 
 /// Where a tab opened from a pond came from, so closing the last of them comes back. One pond at a time: opening from
