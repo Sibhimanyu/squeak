@@ -15,9 +15,11 @@ struct PondRouteView: View {
 
     /// A pond opens on its Dashboard; the Room is the other page beside it (`PondSpace`), swapped by the switch or a
     /// two-finger swipe. A pond with no native project (or still waiting to join) has no room, so it keeps the dashboard.
-    private func roomProject(_ key: String) -> String? {
+    private func roomProject(_ key: String) -> (id: String, member: Bool)? {
         if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
-        return PondsModel.shared.native(key: key)?.id
+        // Someone else's pond: its Room is the Owner's, read through the cloud by the pond's id.
+        if let pond = PondsModel.shared.pond(key: key), pond.role != .owner, !pond.id.isEmpty { return (pond.id, true) }
+        return PondsModel.shared.native(key: key).map { ($0.id, false) }
     }
 
     private var sidebarClearance: CGFloat {
@@ -36,8 +38,8 @@ struct PondRouteView: View {
         if goneKey != nil {
             // Never an empty owner pond: the location is pruned to the Dashboard; nothing draws meanwhile.
             Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
-        } else if case .home(let project) = route, let projectId = roomProject(project) {
-            PondSpace(key: project, projectId: projectId, leadingInset: sidebarClearance) { standard }
+        } else if case .home(let project) = route, let room = roomProject(project) {
+            PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard }
         } else {
             standard
         }
@@ -50,7 +52,7 @@ struct PondRouteView: View {
                 if sidebarHidden { Color.clear.frame(width: sidebarClearance) }
                 Spacer(minLength: 0)
                 if case .home(let project) = route {
-                    if PondsModel.shared.native(key: project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
+                    if PondsModel.shared.native(key: project) != nil || roomProject(project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
                     else if PondsModel.shared.chrome(key: project).showsLeave { PondHeaderMenu(key: project).padding(.trailing, Space.xl) }
                 }
             }

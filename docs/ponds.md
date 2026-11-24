@@ -75,18 +75,21 @@ Catalyst, SSE on Firebase); a stream event never carries data and the reader re-
 
 One channel per pond: `channels/<pondChannelId>/<kind>/<doc>`. New kinds, added to the relay's `kinds.json` and the RTDB rules:
 
-| kind       | doc              | contents                                                                |
-| ---------- | ---------------- | ----------------------------------------------------------------------- |
-| `pond`     | `meta`           | name, owner, gitRemote?, created                                        |
-| `members`  | member id        | name, public key, role, nest name, owner's signature                    |
-| `joins`    | request id       | name, public key, one-time secret proof                                 |
-| `threads`  | thread id        | title, starter, nest, agent, model, state, private, mode, updated       |
-| `tevents`  | `<thread>-<seq>` | a batch of normalized thread events                                     |
-| `presence` | member id        | online, viewing thread, typing, `at`; lives 4 min (older writers: 60 s) |
-| `holds`    | request id       | who is answering, expires in 30 s                                       |
-| `tcmds`    | command id       | a signed message, steer or answer                                       |
-| `ripples`  | time-ordered id  | one activity line                                                       |
-| `keys`     | member id        | the rotated pond key sealed to that member                              |
+| kind       | doc                  | contents                                                                        |
+| ---------- | -------------------- | ------------------------------------------------------------------------------- |
+| `pond`     | `meta`               | name, owner, gitRemote?, created                                                |
+| `members`  | member id            | name, public key, role, nest name, owner's signature                            |
+| `joins`    | request id           | name, public key, one-time secret proof                                         |
+| `threads`  | thread id            | title, starter, nest, agent, model, state, private, mode, updated               |
+| `tevents`  | `<thread>-<seq>`     | a batch of normalized thread events                                             |
+| `presence` | member id            | online, viewing thread, typing, `at`; lives 4 min (older writers: 60 s)         |
+| `holds`    | request id           | who is answering, expires in 30 s                                               |
+| `tcmds`    | command id           | a signed message, steer or answer                                               |
+| `ripples`  | time-ordered id      | one activity line                                                               |
+| `keys`     | member id            | the rotated pond key sealed to that member                                      |
+| `room`     | post id              | one Room post, written only by the Owner's Mac (see "The Room reaches Members") |
+| `rposts`   | time-ordered id      | a Member's Room message waiting for the Owner's Mac                             |
+| `rtasks`   | task id (`:` as `-`) | a Task as Members see it, written only by the Owner's Mac                       |
 
 Live output is batched at 250 ms, never token by token. Each event has a per-thread `seq`; a client resumes from its last `seq`.
 `tevents` keeps the newest 500 per thread; the starter's Mac remains the source of history.
@@ -218,8 +221,8 @@ assumes a Mac.
    relay for a pond-scoped token (`POST /pond-token { pondId, memberId, ttlSec }`, relay key required), which the guest receives
    sealed to their member key. `cloud/catalyst-relay/functions/squeak_relay/scoped.js` + `handler.js` implement it:
    - `pt.<pondId>.<memberId>.<expiry>.<mac>`, HMAC under the relay key; sent as `x-squeak-pond-token` instead of `x-squeak-relay`.
-   - Valid only for `/doc` and `/list` inside that pond's channel; writes only to `presence`, `tcmds`, `joins`, `holds`, `ripples`
-     (never `members`, `keys`, `threads`, `tevents`, `pond`). Reads are of sealed documents only.
+   - Valid only for `/doc` and `/list` inside that pond's channel; writes only to `presence`, `tcmds`, `joins`, `holds`, `ripples`,
+     `rposts` (never `room`, `rtasks`, `members`, `keys`, `threads`, `tevents`, `pond`). Reads are of sealed documents only.
    - Revoked on removal (`POST /pond-revoke`, a record in the store the relay checks on every request); a new token lifts it.
    - Data Streams: a guest may subscribe only to its pond's own channel (`POST /pond-stream { name }`, channel name derived from a hash
      of the pond id), which the relay also notifies on every write in that pond; it never gets the store-wide `/token`.
@@ -562,6 +565,43 @@ mirrored as an `agents` message. While a chat works and its room was viewed in t
 a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-written `working` line posted for it
 (`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it);
 that line (or an agent's own) is the running turn's `intent`.
+
+### The Room reaches Members (`src/flotilla/room-sync.ts`)
+
+A shared (published) pond carries its Room to its Members through the same sealed channel as threads. The Flotilla `tasks`
+documents (claims and locks stay) are not used for this: the Room's Tasks are `rtasks`.
+
+- **Kinds.** `room`/<post id> = `{ v:1, seq, id, author:{kind person|agent, id?, name}, kind, level:"room", text, at }`, written
+  only by the Owner's Mac (a Member's document of that kind is ignored); `seq` is the Owner's own, so every Mac orders alike. A
+  Duck's author has no id (its chat's id never leaves the Owner's Mac); a person's is their member id (the Owner's own posts
+  carry the Owner's member id, not `owner`). Only `level: room` posts by people and Ducks go: no `agents` level, no Squeak
+  lines, no attachments yet. The newest 200 are kept in the cloud (`ROOM_CLOUD_POSTS`); older ones stay on the Mac.
+  `rtasks`/<task id with `:` made `-`> = `{ v:1, id, messageId, title, text, state, parentTaskId?, result?, createdAt, updatedAt }`
+  (no discussion, place or Duck chat; a suggestion nobody took up is never published). `rposts`/<time-ordered id> =
+  `{ v:1, id, text, at }`, written and signed by the Member.
+- **Publishing.** On a Room post or Task change the Owner's Mac writes what is new (a burst waits 400 ms; posts never change, so
+  a post already in the cloud is not written again; the first publish after a start learns what the cloud holds). A key
+  rotation (a Member removed) rewrites everything under the new key (`service` event `rotated`).
+- **Member posts, offline or not.** A Member's `POST /native/ponds/<id>/room { text }` writes an `rposts` document and answers
+  202 `{ queued, id, offline, line? }`. The Owner's Mac, on every pond pass, applies waiting documents oldest first (by the
+  Member's own time, ties by id), each through the Room's own post path as post `m-<doc id>` (so a replay can never post twice),
+  then deletes them. Dropped quietly, whatever the document says: not a member, a viewer, `message` switched off by the Owner,
+  older than a week (`ROOM_INBOX_LIFE_MS`), over 60 an hour per Member, empty or over 500 characters. A post "Make it a task"
+  made this way is an ordinary Room message to the Owner's Task rules.
+- **Permissions.** `see` off: the Member's page is a 403 and nothing is read. `message` off, or a viewer: `POST` is a 403 with
+  the usual sentence, `canPost` is false on the page, and the Mac shows the reason instead of the composer.
+- **Offline.** `ownerOffline.line` is "<Owner's first name>'s Mac is offline; Ducks will pick this up when it's back" while the
+  Owner's presence is not live (`PRESENCE_TTL_MS`, the same presence the thread lines use). Members still read what was
+  published and post; their posts wait and apply in order when the Owner's Mac returns.
+- **Member routes** (`FlotillaRoutes`, strict bodies): `GET /ponds/<id>/room?since&before&limit` answers the Owner's Room page
+  shape (`posts` with `v`, `latestSeq`, `threads: []`, `turns: []`, `tasks`) plus `ownerOffline? { line }` and `canPost`;
+  `POST` as above; `GET .../room/stream` (server-sent events `hello { latestSeq }`, `owner { offline, line? }`, `post`, `task`;
+  a ping and a re-read every 25 s, because the Owner's Mac going quiet is not a notice). An owner's own pond answers 400: it
+  reads its Room from `/projects/<id>/room`.
+- **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task and Drop are not
+  offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
+  Mac is away stays a pending row until its post arrives. Fixtures: `npx tsx scripts/make-room-member-fixtures.ts`
+  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. iPhone and web do not read the Room yet.
 
 ### Tasks
 

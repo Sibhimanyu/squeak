@@ -258,6 +258,8 @@ private struct PanPage: ViewModifier {
 struct PondSpace<Dashboard: View>: View {
     let key: String
     let projectId: String
+    /// A Member's pond: the Room is the Owner's, read through the cloud (`projectId` is then the pond's id).
+    var member = false
     var leadingInset: CGFloat = 0
     @ViewBuilder let dashboard: () -> Dashboard
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -268,8 +270,8 @@ struct PondSpace<Dashboard: View>: View {
     @State private var width = 0.0
     @State private var haptic = SwipeHapticLatch()
 
-    init(key: String, projectId: String, leadingInset: CGFloat = 0, @ViewBuilder dashboard: @escaping () -> Dashboard) {
-        self.key = key; self.projectId = projectId; self.leadingInset = leadingInset; self.dashboard = dashboard
+    init(key: String, projectId: String, member: Bool = false, leadingInset: CGFloat = 0, @ViewBuilder dashboard: @escaping () -> Dashboard) {
+        self.key = key; self.projectId = projectId; self.member = member; self.leadingInset = leadingInset; self.dashboard = dashboard
         _pan = State(initialValue: PondPanStore.shared.state(for: key))
     }
 
@@ -282,7 +284,7 @@ struct PondSpace<Dashboard: View>: View {
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .dashboard, width: w))
                     .allowsHitTesting(page == .dashboard).accessibilityHidden(page != .dashboard)
-                PondRoomView(projectId: projectId, key: key, leadingInset: leadingInset).id(key).screen("Pond room")
+                PondRoomView(projectId: projectId, member: member, key: key, leadingInset: leadingInset).id(key).screen("Pond room")
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .room, width: w))
                     .allowsHitTesting(page == .room).accessibilityHidden(page != .room)

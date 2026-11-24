@@ -322,12 +322,18 @@ public struct RoomPage: Sendable, Equatable, Decodable {
     public var turns: [RoomTurn]?
     /// Room jobs: nil when the host does not serve them (the room then shows nothing new).
     public var tasks: [RoomTask]?
+    /// A Member's page only: the one sentence shown while the Owner's Mac is not running ("Sam's Mac is offline; ...").
+    public var ownerOffline: String?
+    /// A Member's page only: false when the Owner turned off messaging for this Member (the Room is read-only).
+    public var canPost: Bool
 
-    public init(posts: [RoomPost] = [], latestSeq: Int = 0, threads: [RoomThread] = [], turns: [RoomTurn]? = nil, tasks: [RoomTask]? = nil) {
+    public init(posts: [RoomPost] = [], latestSeq: Int = 0, threads: [RoomThread] = [], turns: [RoomTurn]? = nil, tasks: [RoomTask]? = nil, ownerOffline: String? = nil, canPost: Bool = true) {
         self.posts = posts; self.latestSeq = latestSeq; self.threads = threads; self.turns = turns; self.tasks = tasks
+        self.ownerOffline = ownerOffline; self.canPost = canPost
     }
 
-    private enum CodingKeys: String, CodingKey { case posts, latestSeq, threads, turns, tasks }
+    private enum CodingKeys: String, CodingKey { case posts, latestSeq, threads, turns, tasks, ownerOffline, canPost }
+    private struct OfflineLine: Decodable { var line: String? }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         posts = ((try? c.decode([Failable<RoomPost>].self, forKey: .posts)) ?? []).compactMap(\.value)
@@ -335,5 +341,7 @@ public struct RoomPage: Sendable, Equatable, Decodable {
         latestSeq = (try? c.decode(Int.self, forKey: .latestSeq)) ?? posts.map(\.seq).max() ?? 0
         turns = (try? c.decode([Failable<RoomTurn>].self, forKey: .turns)).map { $0.compactMap(\.value) }
         tasks = (try? c.decode([Failable<RoomTask>].self, forKey: .tasks)).map { $0.compactMap(\.value) }
+        ownerOffline = (try? c.decode(OfflineLine.self, forKey: .ownerOffline))?.line
+        canPost = (try? c.decode(Bool.self, forKey: .canPost)) ?? true
     }
 }

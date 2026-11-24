@@ -1,0 +1,64 @@
+{
+  "posts": [
+    {
+      "v": 1,
+      "seq": 2,
+      "id": "556d5b64-110b-406a-a752-7826f098d166",
+      "author": {
+        "kind": "agent",
+        "name": "Maple"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "On it: reading the timer first.",
+      "at": 1795548552478
+    },
+    {
+      "v": 1,
+      "seq": 3,
+      "id": "5907553d-51e5-454c-a388-b4bdd17ae07a",
+      "author": {
+        "kind": "person",
+        "id": "srLZvhzfsHbCzK0K",
+        "name": "Sibhi"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "Please make the timer respect the weather",
+      "at": 1795548552478
+    },
+    {
+      "v": 1,
+      "seq": 4,
+      "id": "m-0mwv38xzy-c8gLCopc",
+      "author": {
+        "kind": "person",
+        "id": "XQ7DOARNpT9xEub9",
+        "name": "Aarav"
+      },
+      "kind": "message",
+      "level": "room",
+      "text": "Fine by me.",
+      "at": 1795548552478
+    }
+  ],
+  "latestSeq": 4,
+  "threads": [],
+  "turns": [],
+  "tasks": [
+    {
+      "v": 1,
+      "id": "task:1058cc32-b660-430a-b79f-6450824b2c03",
+      "messageId": "5907553d-51e5-454c-a388-b4bdd17ae07a",
+      "title": "Please make the timer respect the weather",
+      "text": "Please make the timer respect the weather",
+      "state": "waiting",
+      "createdAt": 1795548552478,
+      "updatedAt": 1795548552478
+    }
+  ],
+  "ownerOffline": {
+    "line": "Sibhi's Mac is offline; Ducks will pick this up when it's back"
+  },
+  "canPost": true
+}
