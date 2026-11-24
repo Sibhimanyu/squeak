@@ -49,6 +49,14 @@ target/
 .next/
 .cache/
 
+# Secrets (this first commit may be pushed to GitHub)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
 # Editors and logs
 .idea/
 .vscode/

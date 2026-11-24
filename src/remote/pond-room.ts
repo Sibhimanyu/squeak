@@ -315,6 +315,15 @@ function idOf(item: PondRoomItem): string {
 function routingLine(task: Rec): string | undefined {
   const own = clip(str(task.routing), LINE_MAX);
   if (own) return own;
+  const routing = rec(task.routing);
+  if (routing) {
+    const why = clip(str(routing.reason), 80);
+    const tail = why ? ` (${why})` : "";
+    const kind = str(routing.kind);
+    if (kind === "duck") return `→ given to ${clip(str(routing.name), 60) || "a duck"}${tail}`;
+    if (kind === "wait") return `→ waiting${tail}`;
+    return `→ new duck${tail}`;
+  }
   const state = str(task.state);
   const handed = rec(task.handedTo);
   const suggestion = rec(task.suggestion);

@@ -208,6 +208,21 @@ describe("turning on version history", () => {
     expect(git(h.folder, "ls-files").split("\n").sort()).toEqual([".gitignore", "node_modules/big.js", "todo.txt"]);
   });
 
+  it("never takes secrets (.env, keys) into the first commit that Make it a Git Pond pushes", async () => {
+    const h = await start();
+    fs.writeFileSync(path.join(h.folder, ".env"), "TOKEN=x\n");
+    fs.writeFileSync(path.join(h.folder, ".env.local"), "TOKEN=y\n");
+    fs.writeFileSync(path.join(h.folder, ".env.example"), "TOKEN=\n");
+    fs.writeFileSync(path.join(h.folder, "id.pem"), "key\n");
+    const r = await h.call("POST", `/native/projects/${h.pond.id}/history`, { commit: true });
+    expect(r.status).toBe(200);
+    const files = git(h.folder, "ls-files").split("\n");
+    expect(files).toContain(".env.example");
+    expect(files).not.toContain(".env");
+    expect(files).not.toContain(".env.local");
+    expect(files).not.toContain("id.pem");
+  });
+
   it("refuses a first commit over the file or size limit, with a sentence, and changes nothing", async () => {
     const h = await start();
     const fake = new VersionHistory(h.store, async (args, cwd, env) => {

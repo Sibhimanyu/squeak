@@ -140,6 +140,36 @@ describe("buildPondRoom", () => {
     expect(doc.items[0]).toMatchObject({ routing: "→ hatched a new Duck" });
   });
 
+  it("draws the host's routing record (name and reason), not the chat title the Task opened", () => {
+    const doc = buildPondRoom("p", {
+      member: false,
+      page: {
+        posts: [],
+        tasks: [
+          {
+            id: "t1",
+            messageId: "a",
+            title: "Make the icons crisp",
+            state: "working",
+            routing: { kind: "duck", name: "Pixel", reason: "related to icon work", by: "decider" },
+            handedTo: { sessionId: "s1", title: "Make the icons crisp", newThread: true },
+            createdAt: 1,
+          },
+          {
+            id: "t2",
+            messageId: "b",
+            title: "Fix billing",
+            state: "waiting",
+            routing: { kind: "hatch", reason: "nothing fits", by: "decider" },
+            createdAt: 2,
+          },
+        ],
+      },
+    });
+    const lines = doc.items.filter((i) => i.t === "task").map((i) => (i as { routing?: string }).routing);
+    expect(lines).toEqual(["→ given to Pixel (related to icon work)", "→ new duck (nothing fits)"]);
+  });
+
   it("a Member's Room is theirs by member id, read-only for Tasks, with the offline line and the reason", () => {
     const doc = buildPondRoom("p", {
       member: true,
