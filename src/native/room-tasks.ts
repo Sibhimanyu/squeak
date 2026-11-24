@@ -5,7 +5,7 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import { Decider, haikuDecider, type DeciderDuck, type DeciderModelPort, type ScoredDuck } from "./decider.js";
-import type { HostEvents, Room, RoomThread } from "./room.js";
+import { mentions, type HostEvents, type Room, type RoomThread } from "./room.js";
 import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { firstSentence, oneLine } from "./room-turns.js";
@@ -225,6 +225,11 @@ export interface RoomTasksOptions {
   checkBranch?: (projectId: string, branch: string) => string;
   /** The Pond's start rules; absent means the defaults (start at once, 4 working Ducks). */
   settings?: (projectId: string) => StartRules;
+  /**
+   * The Pond's Notebook as text for a Duck's briefing (the Notebook ticket fills this in); absent or empty: the
+   * briefing has no Notebook section yet.
+   */
+  notebook?: (projectId: string) => string | null | undefined;
   call?: TitleModelCall;
   /** The decider that routes a new Task; default: local similarity plus `deciderModel`. */
   decider?: Decider;
@@ -735,6 +740,54 @@ export class RoomTasks extends EventEmitter {
     return `${task.text}\n\nRoom discussion before this, oldest first:\n${lines.join("\n")}`;
   }
 
+  /**
+   * What a Duck is sent when it takes a Task: the Task and its discussion (`promptOf`), then the hand-off note a
+   * previous Duck left for it, the Pond's Notebook, and how to work: post only state changes, a spec+plan card only
+   * for more than a small Task, and (in a solo pond) skip Room status lines. The first line is always the Task's own
+   * text: the turn is matched to the Task by it.
+   */
+  briefingOf(projectId: string, task: RoomTask, duck: DuckRow): string {
+    const parts = [this.promptOf(task)];
+    const note = this.handoffNoteFor(projectId, duck);
+    if (note) {
+      parts.push(`Hand-off note from ${note.from}, who worked on this before you:\n${note.text}`);
+    }
+    let notebook: string | null | undefined;
+    try {
+      notebook = this.o.notebook?.(projectId);
+    } catch (error) {
+      logger.warn("notebook hook failed", { error: String(error) });
+    }
+    if (notebook?.trim()) parts.push(`Pond Notebook (lessons earlier ducks left for everyone):\n${notebook.trim()}`);
+    const quiet = this.o.room.quietFor(projectId);
+    parts.push(
+      [
+        "How to work this task:",
+        quiet
+          ? "- Nobody else reads this pond's room right now, so skip Room status lines (they are dropped); post again if that changes."
+          : "- Post one short line to the room when you take this (post_to_room kind working), if you get blocked (needs), hand off (handoff, @mention the duck) and when you finish (done); detail holds the longer story. Never post once per turn.",
+        "- Judge the size first. A small task: just do it. More than small (several steps, files or decisions): post a spec and plan card first (post_to_room kind plan, the title as text and the spec and plan as detail) and keep going; comments on it reach you at your next turn.",
+      ].join("\n"),
+    );
+    return parts.join("\n\n");
+  }
+
+  /** The newest hand-off note addressed to `duck` (to one of its chats, or @mentioning it) in the last 24 h. */
+  private handoffNoteFor(projectId: string, duck: DuckRow): { from: string; text: string } | null {
+    const mine = new Set(this.o.store.duckSessionIds(duck.id));
+    const floor = this.now() - 24 * 3_600_000;
+    const posts = this.o.store.roomPosts(projectId, { limit: 200 });
+    for (let i = posts.length - 1; i >= 0; i--) {
+      const p = posts[i]!;
+      if (p.kind !== "handoff" || p.at < floor || (p.sessionId && mine.has(p.sessionId))) continue;
+      const to = p.toSessionId ? mine.has(p.toSessionId) : false;
+      if (to || (duck.name ? mentions(p.text, duck.name) : false)) {
+        return { from: p.authorName, text: [p.text, p.detail].filter(Boolean).join("\n\n") };
+      }
+    }
+    return null;
+  }
+
   /** The person's trim: keep only these messages of the Task's discussion, in their order. */
   private trim(task: RoomTask, raw: unknown): void {
     if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string")) {
@@ -1012,11 +1065,18 @@ export class RoomTasks extends EventEmitter {
         case "reroute":
           return this.reroute(projectId, job, body.duckId as string | undefined);
         case "drop": {
+          const was = job.state;
+          const sid = job.handedTo?.sessionId;
           job.state = "dropped";
           delete job.inLine;
           const dropped = this.save(projectId, job);
-          // A dropped working Task frees its Duck.
+          // A dropped working Task frees its Duck, and the Duck is told (it stops at its next turn).
           this.startWaiting(projectId);
+          if (was === "working" && sid) {
+            void this.o
+              .send(sid, `[Room] The task "${job.title}" was dropped. Stop work on it unless you are asked to continue.`)
+              .catch((error) => logger.warn("task drop notice failed", { error: String(error) }));
+          }
           return dropped;
         }
         case "deny":
@@ -1183,7 +1243,7 @@ export class RoomTasks extends EventEmitter {
     // The person sending a job to an off-duty duck puts it back on duty.
     this.o.room.setDutyById(duck.id, true);
     try {
-      await this.o.send(s.id, this.promptOf(job) + this.attachLines(projectId, job, s.cwd));
+      await this.o.send(s.id, this.briefingOf(projectId, job, duck) + this.attachLines(projectId, job, s.cwd));
     } catch (error) {
       delete job.handedTo;
       job.state = "waiting";
@@ -1227,14 +1287,14 @@ export class RoomTasks extends EventEmitter {
           projectId,
           duck,
           ...(place ? { place } : {}),
-          text: this.promptOf(job),
+          text: this.briefingOf(projectId, job, duck),
           title: job.title,
           ...(this.hasAttachments(job) ? { attach: (cwd: string) => this.attachLines(projectId, job, cwd) } : {}),
         });
       } else {
         child = await this.o.newThread(
           projectId,
-          this.promptOf(job),
+          this.briefingOf(projectId, job, duck),
           job.title,
           this.hasAttachments(job) ? (cwd) => this.attachLines(projectId, job, cwd) : undefined,
         );

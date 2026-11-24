@@ -298,11 +298,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: "post_to_room",
     description:
-      'Post one short line to this pond\'s room, the shared stream the person and the other chats read. kind: working (you are starting a distinct piece of work: say what, e.g. "Wiring retry into the uploader"), done (that work is finished), needs (you are blocked on the person), handoff (you are passing work on; name the chat in toChatId), message (anything else). level: room (default, what the person sees) or agents (coordination the person need not see). At most 500 characters; 30 posts per chat per hour.',
+      'Post one short line to this pond\'s room, the shared stream the person and the other chats read. Post only when your state changes, never once per turn: working (you took the task: say what, e.g. "Wiring retry into the uploader"), needs (you are blocked), handoff (you are passing work on; name the chat in toChatId), done (the task is finished); one line each, with the longer story in `detail` (shown when someone expands the line). plan: a spec and plan card, only for a task that is more than small (text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). message: anything else (a reply when someone @mentions you). level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
     inputSchema: obj(
       {
         text: { type: "string" },
-        kind: { type: "string", enum: ["working", "done", "needs", "handoff", "message"] },
+        kind: { type: "string", enum: ["working", "done", "needs", "handoff", "message", "plan"] },
+        detail: { type: "string" },
         level: { type: "string", enum: ["room", "agents"] },
         toChatId: { type: "string" },
       },
@@ -824,9 +825,17 @@ export class AgentTools {
     const mine = this.pondOf(s);
     if (!mine) throw new ToolError("This chat isn't in a pond, so it has no room to post to.");
     const kind = args.kind;
-    if (kind !== "working" && kind !== "done" && kind !== "needs" && kind !== "handoff" && kind !== "message") {
-      throw new ToolError("kind must be working, done, needs, handoff or message.");
+    if (
+      kind !== "working" &&
+      kind !== "done" &&
+      kind !== "needs" &&
+      kind !== "handoff" &&
+      kind !== "message" &&
+      kind !== "plan"
+    ) {
+      throw new ToolError("kind must be working, done, needs, handoff, plan or message.");
     }
+    if (args.detail !== undefined && typeof args.detail !== "string") throw new ToolError("detail must be text.");
     const level = args.level === undefined ? "room" : args.level;
     if (level !== "room" && level !== "agents") throw new ToolError("level must be room or agents.");
     let toSessionId: string | undefined;
@@ -837,11 +846,21 @@ export class AgentTools {
       if (!target || there?.id !== mine.id) throw new ToolError("toChatId must be a chat in this pond.");
       toSessionId = target.id;
     }
+    let row: ReturnType<Room["agentPost"]>;
     try {
-      room.agentPost(s, { kind, level, text: args.text as string, ...(toSessionId ? { toSessionId } : {}) });
+      row = room.agentPost(s, {
+        kind,
+        level,
+        text: args.text as string,
+        ...(typeof args.detail === "string" ? { detail: args.detail } : {}),
+        ...(toSessionId ? { toSessionId } : {}),
+      });
     } catch (error) {
       if (error instanceof RoomError) throw new ToolError(error.message);
       throw error;
+    }
+    if (!row) {
+      return "Not posted: nobody else reads this pond's room right now (it isn't shared and no other duck is working), so status lines are skipped. Carry on; post when that changes.";
     }
     return level === "agents" ? "Posted to the agents level of the room." : "Posted to the room.";
   }
@@ -1305,7 +1324,7 @@ export async function handleMcpMessage(
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: MCP_SERVER_NAME, version: "1" },
         instructions:
-          "Squeak runs this chat. Use these tools to see the stream's diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac. This pond has a room: post a short `working` line (post_to_room) when you start a distinct piece of work and `done` when it is finished, read_room before touching an area another chat may be in, and use level `agents` for coordination the person doesn't need to see.",
+          "Squeak runs this chat. Use these tools to see the stream's diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac. This pond has a room: post to it (post_to_room) only when your state changes (took a task, blocked, handing off, done), one short line each and never once per turn; read_room before touching an area another chat may be in, and use level `agents` for coordination the person doesn't need to see.",
       });
     case "ping":
       return ok({});

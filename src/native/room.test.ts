@@ -108,7 +108,7 @@ describe("Room", () => {
     for (let i = 0; i < ROOM_AGENT_POSTS_PER_HOUR; i++) room.agentPost(s, { kind: "working", text: `w${i}` });
     expect(() => room.agentPost(s, { kind: "working", text: "more" })).toThrow(/enough/);
     now += 3_600_001;
-    expect(room.agentPost(s, { kind: "working", text: "again" }).authorId).toBe(s.id);
+    expect(room.agentPost(s, { kind: "working", text: "again" })!.authorId).toBe(s.id);
     const stray = store.createSession({ cwd: os.tmpdir(), agent: "claude", model: "m", permissionMode: "default" });
     expect(() => room.agentPost(stray, { kind: "working", text: "x" })).toThrow(/isn't in a pond/);
   });

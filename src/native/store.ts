@@ -217,13 +217,18 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE project_settings ADD COLUMN ask_before_starting INTEGER;
   ALTER TABLE project_settings ADD COLUMN max_working_ducks INTEGER;
   `,
+  // Ducks in the Room: a status line's expandable detail (a spec+plan card's body), and the card a comment is on.
+  `
+  ALTER TABLE room_posts ADD COLUMN detail TEXT;
+  ALTER TABLE room_posts ADD COLUMN reply_to TEXT;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
 export const ROOM_KEEP_POSTS = 2000;
 
 export type RoomAuthorKind = "person" | "agent" | "squeak";
-export type RoomPostKind = "working" | "done" | "needs" | "message" | "handoff";
+export type RoomPostKind = "working" | "done" | "needs" | "message" | "handoff" | "plan";
 export type RoomLevel = "room" | "agents";
 
 /** One `show` tool call kept for the Artifacts tab (`GET /native/projects/<id>/artifacts`). */
@@ -276,6 +281,10 @@ export interface RoomPostRow {
   level: RoomLevel;
   text: string;
   toSessionId: string | null;
+  /** The expandable detail behind a one-line status post, or a spec+plan card's body. */
+  detail: string | null;
+  /** The card (a `plan` post) a person's comment is on. */
+  replyTo: string | null;
   at: number;
 }
 
@@ -1227,12 +1236,18 @@ export class NativeStore {
     return first;
   }
 
-  addRoomPost(input: Omit<RoomPostRow, "seq" | "id"> & { id?: string }): RoomPostRow {
+  addRoomPost(
+    input: Omit<RoomPostRow, "seq" | "id" | "detail" | "replyTo"> & {
+      id?: string;
+      detail?: string | null;
+      replyTo?: string | null;
+    },
+  ): RoomPostRow {
     const id = input.id ?? randomUUID();
     const info = this.db
       .prepare(
-        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, detail, reply_to, at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -1245,6 +1260,8 @@ export class NativeStore {
         input.level,
         input.text,
         input.toSessionId,
+        input.detail ?? null,
+        input.replyTo ?? null,
         input.at,
       );
     const seq = Number(info.lastInsertRowid);
@@ -1254,7 +1271,7 @@ export class NativeStore {
            (SELECT seq FROM room_posts WHERE project_id=? ORDER BY seq DESC LIMIT 1 OFFSET ?), 0)`,
       )
       .run(input.projectId, input.projectId, ROOM_KEEP_POSTS);
-    return { ...input, id, seq };
+    return { ...input, id, seq, detail: input.detail ?? null, replyTo: input.replyTo ?? null };
   }
 
   /** `since`: the first `limit` posts after it; `before`: the newest `limit` before it; neither: the newest. Oldest first. */
@@ -1297,6 +1314,17 @@ export class NativeStore {
     return this.db
       .prepare("DELETE FROM room_posts WHERE author_kind='squeak' AND (id LIKE 'sq:%' OR kind='needs')")
       .run().changes;
+  }
+
+  /** The `working` and `done` posts about a chat since an instant (ms), oldest first. */
+  roomPostsBySession(sessionId: string, since: number): RoomPostRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM room_posts WHERE session_id=? AND kind IN ('working','done') AND at>=? ORDER BY seq ASC",
+        )
+        .all(sessionId, since) as Row[]
+    ).map(roomPostRow);
   }
 
   /** A chat's newest `working` post at or between two instants (ms): the turn's intent. */
@@ -1697,7 +1725,10 @@ export class NativeStore {
   }
 
   /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
-  replaceRoomPosts(projectId: string, rows: Array<Omit<RoomPostRow, "seq">>): void {
+  replaceRoomPosts(
+    projectId: string,
+    rows: Array<Omit<RoomPostRow, "seq" | "detail" | "replyTo"> & { detail?: string | null; replyTo?: string | null }>,
+  ): void {
     this.db.transaction(() => {
       this.db.prepare("DELETE FROM room_posts WHERE project_id=?").run(projectId);
       for (const r of rows) this.addRoomPost(r);
@@ -1742,6 +1773,8 @@ function roomPostRow(r: Row): RoomPostRow {
     level: r.level as RoomLevel,
     text: r.text as string,
     toSessionId: (r.to_session_id as string | null) ?? null,
+    detail: (r.detail as string | null) ?? null,
+    replyTo: (r.reply_to as string | null) ?? null,
     at: r.at as number,
   };
 }
