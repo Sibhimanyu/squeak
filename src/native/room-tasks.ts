@@ -279,6 +279,18 @@ export class RoomTasks extends EventEmitter {
       .slice(-50);
   }
 
+  /** Ducks holding an open Task (waiting on them or being worked): never put off duty for being quiet. */
+  busyDuckIds(): Set<string> {
+    const out = new Set<string>();
+    for (const p of this.o.store.listProjects()) {
+      for (const t of this.list(p.id)) {
+        if ((t.state === "working" || t.state === "waiting") && t.handedTo?.duckId) out.add(t.handedTo.duckId);
+        if (t.state === "waiting" && t.routing?.kind === "duck" && t.routing.duckId) out.add(t.routing.duckId);
+      }
+    }
+    return out;
+  }
+
   get(id: string): { job: RoomTask; projectId: string } | null {
     const r = this.o.store.roomJobRow(id);
     return r ? { job: JSON.parse(r.data) as RoomTask, projectId: r.projectId } : null;

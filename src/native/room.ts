@@ -563,6 +563,36 @@ export class Room extends EventEmitter {
     return off;
   }
 
+  /** When a duck was last put on duty in this run (a duck put back on duty gets a fresh hour). */
+  private readonly onDutyAt = new Map<string, number>();
+
+  /**
+   * Puts every on-duty duck with no new work for `idleMs` off duty (history stays). Busy means a running or waiting turn,
+   * or a Task it holds (`busyDuckIds`, from the Tasks); a new message in any of its chats counts as work.
+   */
+  retireIdleDucks(busyDuckIds: ReadonlySet<string> = new Set(), idleMs = 3_600_000): number {
+    const cutoff = this.now() - idleMs;
+    let off = 0;
+    for (const p of this.store.listProjects()) {
+      this.sessionsOf(p.id);
+      for (const d of this.store.listDucks(p.id)) {
+        if (d.duty !== "on" || busyDuckIds.has(d.id)) continue;
+        let last = Math.max(Date.parse(d.createdAt) || 0, this.onDutyAt.get(d.id) ?? 0);
+        let busy = false;
+        for (const sid of this.store.duckSessionIds(d.id)) {
+          const s = this.store.getSession(sid);
+          if (!s) continue;
+          if (s.status === "working" || /^(awaiting_|needs_)/.test(s.status)) busy = true;
+          last = Math.max(last, Date.parse(s.updatedAt) || 0);
+        }
+        if (busy || last > cutoff) continue;
+        this.setDutyById(d.id, false);
+        off += 1;
+      }
+    }
+    return off;
+  }
+
   private sessionsOf(projectId: string): SessionRow[] {
     const project = this.store.getProject(projectId);
     if (!project) return [];
@@ -798,6 +828,7 @@ export class Room extends EventEmitter {
     if (!duck) throw new RoomError("No such duck.");
     if (duck.duty !== (on ? "on" : "off")) {
       this.store.updateDuck(duckId, { duty: on ? "on" : "off" });
+      if (on) this.onDutyAt.set(duckId, this.now());
       this.emitDuck(duckId);
     }
     return on ? "on" : "off";
