@@ -161,7 +161,7 @@ private struct MessageBubble: View {
                 .textSelection(.enabled)
             if let makeTask {
                 Button(action: makeTask) { Label("Make task", systemImage: "checklist").font(.footnote) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.info).disabled(busy).frame(minHeight: 32)
+                    .buttonStyle(.press).foregroundStyle(Theme.info).disabled(busy).frame(minHeight: 32)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
@@ -224,7 +224,7 @@ private struct DuckLineRow: View {
             .frame(minHeight: 28, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityElement(children: .combine)
         .accessibilityHint(canOpen ? (open ? "Collapses the detail" : "Shows the detail") : "")
     }
@@ -255,7 +255,7 @@ private struct TaskCardView: View {
             if let result = card.result { Text(result).font(.footnote) }
             if let drop {
                 Button(role: .destructive, action: drop) { Text("Drop").font(.footnote) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.muted).disabled(busy).frame(minHeight: 32)
+                    .buttonStyle(.press).foregroundStyle(Theme.muted).disabled(busy).frame(minHeight: 32)
             }
         }
         .padding(12)
@@ -284,7 +284,7 @@ private struct PendingBubble: View {
                 HStack(spacing: 14) {
                     Button("Retry", action: retry)
                     Button("Dismiss", role: .cancel, action: dismiss)
-                }.font(.footnote).buttonStyle(.plain).foregroundStyle(Theme.info)
+                }.font(.footnote).buttonStyle(.press).foregroundStyle(Theme.info)
             } else {
                 Text("Sending").font(.caption2).foregroundStyle(Theme.subtle)
             }
