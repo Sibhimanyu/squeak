@@ -22,8 +22,10 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     /// When the agent took this helper's report in (host-side: its next assistant row after the notification); nil
     /// from a host that does not say, or while it has not yet.
     public var reportedAt: Date?
+    /// A background command's exit code once it ended; nil for subagents, for a host that does not say, and while running.
+    public var exitCode: Int?
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, lastSeenAt, summary, reportedAt }
+    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, lastSeenAt, summary, reportedAt, exitCode }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -37,12 +39,14 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         lastSeenAt = date(.lastSeenAt)
         summary = c.lenient(String.self, .summary)
         reportedAt = date(.reportedAt)
+        exitCode = c.lenient(Int.self, .exitCode)
     }
 
     public init(id: String, kind: Kind = .agent, title: String, model: String? = nil, status: Status = .running,
-                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil, lastSeenAt: Date? = nil) {
+                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil, lastSeenAt: Date? = nil, exitCode: Int? = nil) {
         self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
         self.startedAt = startedAt; self.endedAt = endedAt; self.lastSeenAt = lastSeenAt; self.summary = summary; self.reportedAt = reportedAt
+        self.exitCode = exitCode
     }
 
     /// Seconds after it ended that a finished chip is kept when the host cannot say its report was taken in.
@@ -168,7 +172,25 @@ public enum DucklingRules {
 
 /// A duckling opened in the side panel: `GET /native/sessions/:id/ducklings/:taskId`.
 public struct DucklingDetail: Decodable, Sendable, Equatable {
+    /// The tail of a background command's output, from the host; nil for a subagent and from a host that predates it.
+    public struct Output: Decodable, Sendable, Equatable {
+        public var text: String
+        public var truncated: Bool
+        public var exists: Bool
+        public init(text: String = "", truncated: Bool = false, exists: Bool = true) { self.text = text; self.truncated = truncated; self.exists = exists }
+        enum CodingKeys: String, CodingKey { case text, truncated, exists }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            text = c.lenient(String.self, .text) ?? ""
+            truncated = c.lenient(Bool.self, .truncated) ?? false
+            exists = c.lenient(Bool.self, .exists) ?? true
+        }
+    }
+
     public var id: String
+    public var kind: Duckling.Kind?
+    public var exitCode: Int?
+    public var output: Output?
     public var title: String?
     public var model: String?
     public var status: String?
@@ -178,10 +200,13 @@ public struct DucklingDetail: Decodable, Sendable, Equatable {
     public var steps: [DaemonActivity.Step]
     public var report: String?
 
-    enum CodingKeys: String, CodingKey { case id, title, model, status, startedAt, endedAt, brief, steps, report }
+    enum CodingKeys: String, CodingKey { case id, kind, exitCode, output, title, model, status, startedAt, endedAt, brief, steps, report }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.lenient(String.self, .id) ?? ""
+        kind = c.lenient(Duckling.Kind.self, .kind)
+        exitCode = c.lenient(Int.self, .exitCode)
+        output = c.lenient(Output.self, .output)
         title = c.lenient(String.self, .title)
         model = c.lenient(String.self, .model)
         status = c.lenient(String.self, .status)
@@ -192,7 +217,9 @@ public struct DucklingDetail: Decodable, Sendable, Equatable {
         report = c.lenient(String.self, .report)
     }
     public init(id: String, title: String? = nil, model: String? = nil, status: String? = nil, startedAt: Date? = nil,
-                endedAt: Date? = nil, brief: String? = nil, steps: [DaemonActivity.Step] = [], report: String? = nil) {
+                endedAt: Date? = nil, brief: String? = nil, steps: [DaemonActivity.Step] = [], report: String? = nil,
+                kind: Duckling.Kind? = nil, exitCode: Int? = nil, output: Output? = nil) {
+        self.kind = kind; self.exitCode = exitCode; self.output = output
         self.id = id; self.title = title; self.model = model; self.status = status; self.startedAt = startedAt
         self.endedAt = endedAt; self.brief = brief; self.steps = steps; self.report = report
     }
@@ -202,8 +229,12 @@ public struct DucklingDetail: Decodable, Sendable, Equatable {
 public struct DucklingPanelModel: Equatable, Sendable {
     public enum Body: Equatable, Sendable { case loading, unavailable, unreachable, ready }
     /// The panel's parts, top to bottom: steps first, the report once there is one, what it was asked last.
-    public enum Part: Equatable, Sendable { case steps, report, brief }
+    public enum Part: Equatable, Sendable { case steps, report, brief, output, command }
     public var body: Body
+    /// A background command is not a subagent: it has output, never steps, and its brief is a command, not a prompt.
+    public var kind: Duckling.Kind = .agent
+    public var exitCode: Int?
+    public var output: DucklingDetail.Output?
     public var title: String
     public var model: String?
     public var status: Duckling.Status
@@ -221,7 +252,7 @@ public struct DucklingPanelModel: Equatable, Sendable {
 
     /// `chip` is the duckling's row (title, status) from the session, shown before the route answers.
     public static func make(result: Result<DucklingDetail?, any Error>?, chip: Duckling?, previous: DucklingPanelModel? = nil) -> DucklingPanelModel {
-        let base = DucklingPanelModel(body: .loading, title: chip?.title ?? "Duckling", model: chip?.model, status: chip?.status ?? .running,
+        let base = DucklingPanelModel(body: .loading, kind: chip?.kind ?? .agent, exitCode: chip?.exitCode, title: chip?.title ?? "Duckling", model: chip?.model, status: chip?.status ?? .running,
                                       startedAt: chip?.startedAt, endedAt: chip?.endedAt, brief: nil, steps: [], report: chip?.summary)
         guard let result else { return previous ?? base }
         switch result {
@@ -233,7 +264,7 @@ public struct DucklingPanelModel: Equatable, Sendable {
             guard let detail else { var m = base; m.body = .unavailable; return m }
             let status = (detail.status.flatMap(Duckling.Status.init)) ?? chip?.status ?? .running
             return DucklingPanelModel(
-                body: .ready, title: detail.title ?? base.title, model: detail.model ?? base.model, status: status,
+                body: .ready, kind: detail.kind ?? chip?.kind ?? .agent, exitCode: detail.exitCode ?? chip?.exitCode, output: detail.output, title: detail.title ?? base.title, model: detail.model ?? base.model, status: status,
                 startedAt: detail.startedAt ?? base.startedAt, endedAt: detail.endedAt ?? base.endedAt,
                 brief: detail.brief.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 },
                 steps: detail.steps.map { ActivityStep(kind: $0.kind, text: $0.text, at: $0.at) },
@@ -244,6 +275,10 @@ public struct DucklingPanelModel: Equatable, Sendable {
     /// The parts to draw, in order. Steps are always there (they say why they are empty); the report only when there is
     /// one; the brief last, folded.
     public var parts: [Part] {
+        if kind == .shell {
+            guard body == .ready else { return [.output] }
+            return brief == nil ? [.output] : [.output, .command]
+        }
         guard body == .ready else { return [.steps] }
         var p: [Part] = [.steps]
         if report != nil { p.append(.report) }
@@ -258,8 +293,26 @@ public struct DucklingPanelModel: Equatable, Sendable {
 
     /// The sentence under an empty steps list; nil when steps are listed (or the panel has its own message).
     public var stepsEmptyText: String? {
-        guard body == .ready, steps.isEmpty else { return nil }
-        return status == .running ? "Steps will appear here as it works" : "No steps were recorded"
+        guard kind == .agent, body == .ready, steps.isEmpty else { return nil }
+        return status == .running ? "Waiting for its first step…" : "No steps were recorded"
+    }
+
+    /// What a command's output area says when there is nothing to show; nil when there are lines (or for a subagent).
+    public var outputEmptyText: String? {
+        guard kind == .shell, output?.text.isEmpty ?? true else { return nil }
+        return status == .running || status == .unknown ? "No output yet" : "No output"
+    }
+
+    /// The status a command's header reads: "Running", "Exited with code 0", "Killed"; a subagent keeps the chip's word.
+    public var statusLine: String {
+        let word = Duckling(id: "", title: "", status: status).statusWord
+        guard kind == .shell else { return word }
+        switch status {
+        case .done: return exitCode.map { "Exited with code \($0)" } ?? "Exited"
+        case .failed: return exitCode.map { "Exited with code \($0)" } ?? "Failed"
+        case .stopped: return "Killed"
+        default: return word
+        }
     }
 
     /// The brief folded to a few lines (markdown source, cut at a line or word); `isCut` says there is more to open.

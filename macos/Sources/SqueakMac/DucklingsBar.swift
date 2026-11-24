@@ -161,7 +161,7 @@ struct DucklingPanel: View {
             Text(verbatim: p.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(3).textSelection(.enabled)
             TimelineView(.periodic(from: .now, by: 15)) { context in
                 HStack(spacing: 6) {
-                    StatusChip(text: Duckling(id: "", title: "", status: p.status).statusWord, status: p.status.rawValue)
+                    StatusChip(text: p.statusLine, status: p.status.rawValue)
                     ForEach([p.model, p.elapsed(now: context.date)].compactMap { $0 }, id: \.self) {
                         Text(verbatim: $0).font(Typo.meta).foregroundStyle(Theme.muted)
                     }
@@ -175,6 +175,8 @@ struct DucklingPanel: View {
         case .steps: stepsSection(p)
         case .report: reportSection(p)
         case .brief: briefSection(p)
+        case .output: outputSection(p)
+        case .command: commandSection(p)
         }
     }
 
@@ -191,6 +193,32 @@ struct DucklingPanel: View {
                 TurnBlockView(block: TurnBlock(folded: [], shown: b.folded + b.shown), filesLine: nil)
             }
         }
+    }
+
+    /// A background command's live output: monospace, the host's last lines, never rendered as Markdown.
+    @ViewBuilder private func outputSection(_ p: DucklingPanelModel) -> some View {
+        section("Output") {
+            if let empty = p.outputEmptyText {
+                Text(verbatim: empty).font(Typo.body).foregroundStyle(Theme.muted)
+            } else if let out = p.output {
+                VStack(alignment: .leading, spacing: 4) {
+                    if out.truncated { Text(verbatim: "Earlier output not shown").font(Typo.meta).foregroundStyle(Theme.subtle) }
+                    codeBlock(out.text)
+                }
+            }
+        }
+    }
+
+    /// The command itself, as code, whole (it is a program, not prose).
+    @ViewBuilder private func commandSection(_ p: DucklingPanelModel) -> some View {
+        if let command = p.brief { section("Command") { codeBlock(command) } }
+    }
+
+    private func codeBlock(_ text: String) -> some View {
+        Text(verbatim: text).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Space.s)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func briefSection(_ p: DucklingPanelModel) -> some View {

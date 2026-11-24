@@ -28,6 +28,8 @@ export interface Duckling {
   summary?: string;
   /** When the agent took the report in: its next assistant row after the task-notification. Optional, absent until then. */
   reportedAt?: string;
+  /** A shell's exit code, from its task notification ("(exit code 0)"). Optional; absent for agents and until it ends. */
+  exitCode?: number;
 }
 
 export interface Ducklings {
@@ -38,9 +40,63 @@ export interface Ducklings {
 }
 
 export interface DucklingDetail extends Duckling {
+  /** An agent's prompt (Markdown); a shell's command (always shown as code). */
   brief: string;
   steps: ActivityStep[];
   report?: string;
+  /** Shells only: the tail of the command's output, set by the host from its recorded output file. */
+  output?: DucklingOutput;
+}
+
+export interface DucklingOutput {
+  /** The last lines of the output (at most `OUTPUT_LINES`), text only. */
+  text: string;
+  /** Earlier output was cut. */
+  truncated: boolean;
+  /** False while the output file does not exist (yet). */
+  exists: boolean;
+}
+
+export const OUTPUT_LINES = 200;
+export const OUTPUT_BYTES = 64 * 1024;
+
+/**
+ * The output file Claude Code names for a background task: under its own temp tree, a `tasks/<id>.output`. Anything
+ * else (a path the agent's text made up, `..`) is refused, so the route can never be pointed at another file.
+ */
+export function isTaskOutputPath(path: string | undefined): path is string {
+  return (
+    !!path &&
+    !path.split("/").includes("..") &&
+    /^\/(?:private\/)?tmp\/claude-\d+\/[^\0]+\/tasks\/[A-Za-z0-9_-]+\.output$/.test(path)
+  );
+}
+
+/** The last `lines` lines of `raw` (a tail read of the file, which starts mid-line when `cut`), escapes stripped. */
+export function tailOutput(raw: string, cut: boolean, lines = OUTPUT_LINES): DucklingOutput {
+  // eslint-disable-next-line no-control-regex
+  const clean = raw.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n");
+  let all = clean.split("\n");
+  if (all.at(-1) === "") all.pop();
+  let truncated = cut;
+  if (cut && all.length > 0) all = all.slice(1); // the first line is a fragment of a longer one
+  if (all.length > lines) {
+    all = all.slice(-lines);
+    truncated = true;
+  }
+  return { text: all.join("\n"), truncated, exists: true };
+}
+
+/** "Background command "x" completed (exit code 0)" gives 0. */
+export function exitCodeOf(summary: string | undefined): number | undefined {
+  const m = summary ? /\(exit code (-?\d+)\)/.exec(summary) : null;
+  return m ? Number(m[1]) : undefined;
+}
+
+/** The output path in a background launch's result text: "Output is being written to: <path>." or "output_file: <path>". */
+export function outputPathOf(text: string): string | undefined {
+  const m = /Output is being written to: (\S+?\.output)/.exec(text) ?? /\boutput_file: (\S+?\.output)/.exec(text);
+  return isTaskOutputPath(m?.[1]) ? m![1] : undefined;
 }
 
 /** A finished helper stays listed this long (the same rule as the transcript's background work). */
@@ -68,6 +124,9 @@ interface Tracked extends Duckling {
   modelAlias?: string;
   /** The subagent's own id, from its launch (or resume) result. */
   agentId?: string;
+  /** Where Claude Code writes the task's output (validated by `isTaskOutputPath`). */
+  outputFile?: string;
+  exitCode?: number;
 }
 
 const rec = (v: unknown): Record<string, unknown> | undefined =>
@@ -186,6 +245,8 @@ export class DucklingTracker {
       }
       const task = this.tasks.get(str(block.tool_use_id) ?? "");
       if (!task) continue;
+      const written = outputPathOf(text);
+      if (written && !task.outputFile) task.outputFile = written;
       if (task.kind === "agent" && !task.agentId) {
         const agentId = str(launched?.agentId) ?? /\bagentId: ([A-Za-z0-9]+)/.exec(text)?.[1];
         if (agentId) task.agentId = agentId;
@@ -215,6 +276,10 @@ export class DucklingTracker {
       const task = this.tasks.get(this.resolve(tag("tool-use-id")) ?? "");
       if (!task) continue;
       task.notified = true;
+      const file = tag("output-file");
+      if (isTaskOutputPath(file)) task.outputFile = file;
+      const code = exitCodeOf(tag("summary"));
+      if (code !== undefined && task.kind === "shell") task.exitCode = code;
       const status = tag("status");
       this.end(
         task,
@@ -300,6 +365,10 @@ export class DucklingTracker {
     task.lastSeenAt = at;
     if (subtype === "task_notification") {
       task.notified = true;
+      const file = str(p.output_file);
+      if (isTaskOutputPath(file)) task.outputFile = file;
+      const code = exitCodeOf(str(p.summary));
+      if (code !== undefined && task.kind === "shell") task.exitCode = code;
       const status = str(p.status);
       this.end(
         task,
@@ -372,9 +441,15 @@ export class DucklingTracker {
           ...(t.status === "unknown" && t.lastSeenAt ? { lastSeenAt: t.lastSeenAt } : {}),
           ...(t.summary && t.status !== "running" ? { summary: t.summary } : {}),
           ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
+          ...(t.exitCode !== undefined ? { exitCode: t.exitCode } : {}),
         }),
       );
     return { running: items.filter((i) => i.status === "running").length, items };
+  }
+
+  /** The recorded output file of a helper (a shell's output, an agent's transcript), or undefined. */
+  outputFileOf(id: string): string | undefined {
+    return this.tasks.get(id)?.outputFile;
   }
 
   /** The seq of the helper's launching call, or null when this id is not one. */
@@ -394,6 +469,7 @@ export class DucklingTracker {
       startedAt: t.startedAt,
       ...(t.endedAt ? { endedAt: t.endedAt } : {}),
       ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
+      ...(t.exitCode !== undefined ? { exitCode: t.exitCode } : {}),
     };
     const entries = rowsAfterLaunch
       .filter((r) => {

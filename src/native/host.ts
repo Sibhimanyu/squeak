@@ -6,6 +6,7 @@ import {
   type DucklingDetail,
   type Ducklings,
 } from "./ducklings.js";
+import { readAgentSteps, readShellOutput } from "./ducklings-output.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -609,7 +610,16 @@ export class SessionHost extends EventEmitter {
     const seq = tracker?.launchSeq(taskId);
     if (!tracker || seq === null || seq === undefined) return null;
     tracker.settle(this.runners.has(id));
-    return tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
+    const detail = tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
+    if (!detail) return null;
+    const file = tracker.outputFileOf(taskId);
+    // A shell produces output, never steps; a subagent whose rows we hold none of is read from its own transcript.
+    if (detail.kind === "shell") return { ...detail, output: readShellOutput(file) };
+    if (detail.steps.length === 0) {
+      const steps = readAgentSteps(file);
+      if (steps.length > 0) return { ...detail, steps };
+    }
+    return detail;
   }
 
   /** Tells watchers when what the helpers list says changed (a start, an end, a report). */
