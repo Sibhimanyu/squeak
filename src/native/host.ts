@@ -442,7 +442,6 @@ export class SessionHost extends EventEmitter {
       duck: {
         name: this.store.duckOf(s.id).name ?? (s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude")),
         role: this.store.duckOf(s.id).role,
-        notebook: this.store.duckBySession(s.id)?.notebook ?? "",
       },
     });
   }

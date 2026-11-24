@@ -354,6 +354,8 @@ struct PondSettingsView: View {
                 RoutinesSection(project: p)
                 Divider().overlay(Theme.line)
                 BacklogSection(project: p)
+                Divider().overlay(Theme.line)
+                PondNotebookSection(project: p)
             } else { loading }
         }
     }

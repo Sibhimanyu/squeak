@@ -1,5 +1,6 @@
 import { prettifyName } from "./stream-names.js";
 import { randomUUID } from "node:crypto";
+import { NOTEBOOK_ENTRY_MAX, overCap } from "./pond-notebook.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -222,6 +223,15 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE room_posts ADD COLUMN detail TEXT;
   ALTER TABLE room_posts ADD COLUMN reply_to TEXT;
   `,
+  // The Pond Notebook: one shared list of lasting lessons per pond (docs/ponds.md). Rows are short lessons; the
+  // cap and the trimming of unused ones live in pond-notebook.ts.
+  `
+  CREATE TABLE IF NOT EXISTS pond_notebook (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, project_id TEXT NOT NULL,
+    text TEXT NOT NULL, by TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS pond_notebook_project ON pond_notebook(project_id, seq);
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -239,6 +249,16 @@ export interface ShownArtifactRow {
   sessionId: string;
   branch: string | null;
   at: number;
+}
+
+export interface NotebookRow {
+  id: string;
+  projectId: string;
+  text: string;
+  /** Who added it: a duck's name, "earlier ducks" (migrated) or "owner". */
+  by: string | null;
+  createdAt: number;
+  lastUsedAt: number;
 }
 
 export interface DuckRow {
@@ -439,6 +459,82 @@ export class NativeStore {
     this.db.pragma("journal_mode = WAL");
     this.migrate();
     this.setupSearch();
+    this.migrateDuckNotebooks();
+  }
+
+  /** One lesson of a pond's Notebook. */
+  notebookEntries(projectId: string): NotebookRow[] {
+    return (this.db.prepare("SELECT * FROM pond_notebook WHERE project_id=? ORDER BY seq").all(projectId) as Row[]).map(
+      (r) => ({
+        id: r.id as string,
+        projectId: r.project_id as string,
+        text: r.text as string,
+        by: (r.by as string | null) ?? null,
+        createdAt: r.created_at as number,
+        lastUsedAt: r.last_used_at as number,
+      }),
+    );
+  }
+
+  addNotebookEntry(projectId: string, text: string, by: string | null, at: number): NotebookRow {
+    const id = `nb_${randomUUID()}`;
+    this.db
+      .prepare("INSERT INTO pond_notebook (id, project_id, text, by, created_at, last_used_at) VALUES (?,?,?,?,?,?)")
+      .run(id, projectId, text, by, at, at);
+    return { id, projectId, text, by, createdAt: at, lastUsedAt: at };
+  }
+
+  /** Puts back an entry with its history (an Owner's edit that kept it). */
+  restoreNotebookEntry(e: NotebookRow): void {
+    this.db
+      .prepare("INSERT INTO pond_notebook (id, project_id, text, by, created_at, last_used_at) VALUES (?,?,?,?,?,?)")
+      .run(e.id, e.projectId, e.text, e.by, e.createdAt, e.lastUsedAt);
+  }
+
+  removeNotebookEntries(ids: string[]): void {
+    const del = this.db.prepare("DELETE FROM pond_notebook WHERE id=?");
+    this.db.transaction(() => ids.forEach((id) => del.run(id)))();
+  }
+
+  touchNotebookEntries(ids: string[], at: number): void {
+    const up = this.db.prepare("UPDATE pond_notebook SET last_used_at=? WHERE id=?");
+    this.db.transaction(() => ids.forEach((id) => up.run(at, id)))();
+  }
+
+  /**
+   * Once: each duck's own notebook (the old per-duck lines) moves into its pond's Notebook, oldest duck first, then
+   * the duck's copy is cleared; nothing writes a duck's notebook any more. Resumable: the flag is set last.
+   */
+  /**
+   * Each duck's own notebook (the old per-duck lines) moves into its pond's Notebook, oldest duck first, then the
+   * duck's copy is cleared: nothing writes a duck's notebook any more, so this finds nothing after the first run.
+   */
+  private migrateDuckNotebooks(): void {
+    this.ducksTable();
+    const rows = this.db
+      .prepare("SELECT id, project_id, notebook FROM ducks WHERE notebook <> '' ORDER BY created_at, rowid")
+      .all() as Row[];
+    if (rows.length === 0) return;
+    const now = Date.now();
+    this.db.transaction(() => {
+      const touched = new Set<string>();
+      for (const r of rows) {
+        const projectId = r.project_id as string;
+        const have = new Set(this.notebookEntries(projectId).map((e) => e.text));
+        for (const raw of (r.notebook as string).split("\n")) {
+          const text = raw
+            .replace(/^\s*-\s*/, "")
+            .trim()
+            .slice(0, NOTEBOOK_ENTRY_MAX);
+          if (!text || have.has(text)) continue;
+          have.add(text);
+          this.addNotebookEntry(projectId, text, "earlier ducks", now);
+        }
+        touched.add(projectId);
+        this.db.prepare("UPDATE ducks SET notebook='' WHERE id=?").run(r.id);
+      }
+      for (const projectId of touched) this.removeNotebookEntries(overCap(this.notebookEntries(projectId)));
+    })();
   }
 
   /** FTS5 over user and assistant text, rowid = message seq. Absent when this SQLite lacks FTS5 (search then scans). */

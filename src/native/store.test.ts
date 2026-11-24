@@ -105,7 +105,8 @@ describe("NativeStore", () => {
       "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
     ); // the Task start rules are the newest
     old.db.exec("ALTER TABLE room_posts DROP COLUMN detail; ALTER TABLE room_posts DROP COLUMN reply_to;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 18}`);
+    old.db.exec("DROP TABLE pond_notebook;"); // the Pond Notebook is the newest
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 19}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -152,7 +153,8 @@ describe("NativeStore", () => {
       "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
     ); // the Task start rules are the newest
     old.db.exec("ALTER TABLE room_posts DROP COLUMN detail; ALTER TABLE room_posts DROP COLUMN reply_to;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 14}`);
+    old.db.exec("DROP TABLE pond_notebook;"); // the Pond Notebook is the newest
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 15}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -274,7 +276,8 @@ describe("NativeStore", () => {
         "ALTER TABLE project_settings DROP COLUMN ask_before_starting; ALTER TABLE project_settings DROP COLUMN max_working_ducks;",
       ); // the Task start rules are the newest
       old.db.exec("ALTER TABLE room_posts DROP COLUMN detail; ALTER TABLE room_posts DROP COLUMN reply_to;");
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 6}`);
+      old.db.exec("DROP TABLE pond_notebook;"); // the Pond Notebook is the newest
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 7}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };

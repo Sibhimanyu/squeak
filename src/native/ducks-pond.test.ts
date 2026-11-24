@@ -6,7 +6,6 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { appendNotebook, NOTEBOOK_MAX, notebookLine } from "./duck-notebook.js";
 import { SessionHost } from "./host.js";
 import { Room } from "./room.js";
 import { TaskError, RoomTasks, type StartSpec } from "./room-tasks.js";
@@ -391,60 +390,21 @@ describe("place and go", () => {
 });
 
 describe("notebook", () => {
-  it("lines are compact and the notebook keeps its newest lines under the cap", () => {
-    const line = notebookLine({
-      at: Date.UTC(2026, 10, 17),
-      job: "Fix the bar",
-      outcome: "Fixed it.",
-      branch: "sq/bar",
-    });
-    expect(line).toBe("- 2026-11-17 Fix the bar -> Fixed it. [sq/bar]");
-    let nb = "";
-    for (let i = 0; i < 80; i++)
-      nb = appendNotebook(nb, notebookLine({ at: 0, job: `job ${i}`, outcome: "x".repeat(150) }));
-    expect(nb.length).toBeLessThanOrEqual(NOTEBOOK_MAX);
-    expect(nb).toContain("job 79");
-    expect(nb).not.toContain("job 0 ");
-    expect(appendNotebook("", "y".repeat(5000)).length).toBe(NOTEBOOK_MAX);
-  });
-
-  it("a turn ending writes the duck's notebook; the next agent note carries it", async () => {
+  it("a turn ending no longer writes the duck's own notebook (the Pond Notebook replaced it)", async () => {
     const h = await rig();
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     h.room.setDuck(s.id, { name: "Pip", role: "control bar" });
     h.turn(s, "t1", "tweak the control bar spacing", 5, "Adjusted the control bar spacing. More detail follows.");
     h.room.noteTimeline(s.id, { type: "turn.ended", turnId: "t1" } as any);
-    h.room.noteTimeline(s.id, { type: "turn.ended", turnId: "t1" } as any); // a replay writes nothing
-    await h.room.notebookIdle();
-    const duck = h.store.duckBySession(s.id)!;
-    expect(duck.notebook.split("\n")).toHaveLength(1);
-    expect(duck.notebook).toContain("tweak the control bar spacing -> Adjusted the control bar spacing.");
-    expect(duck.notebook).toContain(`[${ws.branch}]`);
+    expect(h.store.duckBySession(s.id)!.notebook).toBe("");
     const note = buildThreadContext({
       agent: "claude",
       pond: "app",
       cwd: "/x",
-      duck: { name: "Pip", role: "control bar", notebook: duck.notebook },
+      duck: { name: "Pip", role: "control bar" },
     });
     expect(note).toContain("You are Pip, a duck in app; your role: control bar");
-    expect(note).toContain("Your notebook");
-    expect(note).toContain("Adjusted the control bar spacing.");
-  });
-
-  it("a failing or slow summary falls back to the plain line", async () => {
-    const h = await rig();
-    const room = new Room({
-      store: h.store,
-      notebookSummary: async () => {
-        throw new Error("offline");
-      },
-    });
-    const s = h.chatIn("Chat");
-    const long = "Wired the retry path. " + "More words here. ".repeat(20);
-    h.turn(s, "t1", "wire the retry path", 5, long);
-    room.noteTimeline(s.id, { type: "turn.ended", turnId: "t1" } as any);
-    await room.notebookIdle();
-    expect(h.store.duckBySession(s.id)!.notebook).toContain("-> Wired the retry path.");
+    expect(note).not.toContain("Your notebook");
   });
 });

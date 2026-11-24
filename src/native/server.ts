@@ -34,6 +34,7 @@ import { HostError, logHostError, type HostEvent, type SessionHost } from "./hos
 import type { NativeStore, RoomPostRow } from "./store.js";
 import { Room, RoomError } from "./room.js";
 import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
+import { NotebookError, PondNotebook } from "./pond-notebook.js";
 import { TaskError, taskTitle, RoomTasks, type RoomTask } from "./room-tasks.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
@@ -184,12 +185,14 @@ export class NativeServer {
   private readonly artifacts: Artifacts;
   private readonly showRelay: ShowRelay;
   private readonly canvasWatcher = new CanvasWatcher();
+  private readonly notebook: PondNotebook;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
     this.gitPond = new GitPond(options.store, this.history, options.github ?? ghAdapter);
     this.artifacts = new Artifacts({ store: options.store });
+    this.notebook = new PondNotebook(options.store);
     this.showRelay = new ShowRelay();
     this.room =
       options.room ??
@@ -211,6 +214,7 @@ export class NativeServer {
         room: this.room,
         send: (id, text) => host.send(id, text, { room: true }),
         newThread: (projectId, text, title, attach) => this.starter.jobThread(projectId, text, title, attach),
+        notebook: (projectId) => this.notebook.forBriefing(projectId),
         start: (spec) => this.starter.startDuck(spec),
         newBranch: (projectId, text) => this.starter.newBranch(projectId, text),
         checkBranch: (projectId, branch) => this.starter.checkBranch(projectId, branch),
@@ -264,6 +268,7 @@ export class NativeServer {
         post: (id, kind, payload) => host.post(id, kind, payload),
         room: this.room,
         jobs: this.jobs,
+        notebook: this.notebook,
         placement: this.placement,
         artifactShown: (projectId) => this.artifacts.changed(projectId),
         openShown: (req) => this.showRelay.request(req),
@@ -1274,6 +1279,20 @@ export class NativeServer {
       // What this pond's ducks made for the person to look at: files they showed, plus design files found in its folders.
       if (!store.getProject(id)) throw new HttpError(404, "no such project");
       return this.json(res, 200, this.artifacts.list(id));
+    }
+    if (area === "projects" && id && sub === "notebook" && parts.length === 4) {
+      // The pond's shared Notebook: the owner reads and edits it (a duck adds through the note_to_notebook tool).
+      if (!store.getProject(id)) throw new HttpError(404, "no such project");
+      if (method === "GET") return this.json(res, 200, this.notebook.view(id));
+      if (method === "PUT") {
+        const body = await this.body(req);
+        try {
+          return this.json(res, 200, this.notebook.replace(id, body.entries));
+        } catch (error) {
+          if (error instanceof NotebookError) throw new HttpError(error.status, error.message);
+          throw error;
+        }
+      }
     }
     if (area === "projects" && id && sub === "canvases" && parts.length === 4) {
       const project = store.getProject(id);

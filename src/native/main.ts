@@ -1,4 +1,4 @@
-import { flag, initFlags } from "../squeak/flags.js";
+import { initFlags } from "../squeak/flags.js";
 import path from "node:path";
 
 import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
@@ -19,6 +19,7 @@ import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import type { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
+import { PondNotebook } from "./pond-notebook.js";
 import { RoomTasks } from "./room-tasks.js";
 import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
 import { haikuDecider } from "./decider.js";
@@ -66,7 +67,6 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     ownerName: () => flotilla?.service?.identity.name ?? null,
     attachmentsDir: path.join(supportDir, "room-attachments"),
-    ...(flag("roomSummary") ? { notebookSummary: "default" as const } : {}),
     members: (id) => server?.pondMembers(id) ?? 0,
     deliver: (id, text) => host.send(id, text, { room: true }),
   });
@@ -98,11 +98,13 @@ export async function runHost(supportDir: string): Promise<void> {
     haiku: haikuDecider(() => (titleCall ??= defaultTitleCall())),
     onModelError: (error) => logger.warn("decider model failed", { error: String(error) }),
   });
+  const notebook = new PondNotebook(store);
   const jobs = new RoomTasks({
     store,
     room,
     send: (id, text) => host.send(id, text, { room: true }),
     newThread: (projectId, text, title, attach) => starter.jobThread(projectId, text, title, attach),
+    notebook: (projectId) => notebook.forBriefing(projectId),
     start: (spec) => starter.startDuck(spec),
     newBranch: (projectId, text) => starter.newBranch(projectId, text),
     checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),

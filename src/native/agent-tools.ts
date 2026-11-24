@@ -17,6 +17,7 @@ import {
   type ProjectPrefs,
 } from "./project-prefs.js";
 import { addArtboard, CanvasError, createCanvas, readCanvas, resolveCanvasDir, updateArtboard } from "./canvases.js";
+import { NOTEBOOK_PER_TASK, NotebookError, PondNotebook } from "./pond-notebook.js";
 import { TaskError, type RoomTasks } from "./room-tasks.js";
 import { ducksOwnBranch, Placement, PlacementError, type PlaceRequest } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
@@ -91,6 +92,8 @@ export interface AgentToolDeps {
   };
   /** The pond's room (`post_to_room`, `read_room`, and `send_to_chat` mirrored into it). Absent: those tools say so. */
   room?: Room;
+  /** The Pond Notebook (`note_to_notebook`); default: one over the store. */
+  notebook?: PondNotebook;
   /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
   jobs?: RoomTasks;
   /** Placement for `branch_off`, `join_branch` (flag `ducksOwnBranch`). Absent: those tools say so. */
@@ -327,6 +330,13 @@ export const TOOLS: ToolDef[] = [
       level: { type: "string", enum: ["room", "agents", "all"] },
     }),
     readOnly: true,
+  },
+  {
+    name: "note_to_notebook",
+    description:
+      "Add a lesson to the pond's shared Notebook, which every duck reads when it takes a task. Only at the very end of the task you took from the room, and only a lesson that will last (a command that must run, a trap, a convention); never a log of what you did. Pass taskDone true to say the task is finished. Refused when you have no task from the room, mid-task, or past a few lessons per task. One short sentence each, 300 characters at most.",
+    inputSchema: obj({ lesson: { type: "string" }, taskDone: { type: "boolean" } }, ["lesson", "taskDone"]),
+    readOnly: false,
   },
   {
     name: "open_jobs",
@@ -729,6 +739,8 @@ export class AgentTools {
         return this.handOff(s, args);
       case "read_room":
         return this.readRoom(s, args);
+      case "note_to_notebook":
+        return this.noteToNotebook(s, args);
       case "open_jobs":
         return this.openJobs(s);
       case "claim_job":
@@ -922,6 +934,37 @@ export class AgentTools {
     const pond = projectOfSession(this.deps.store, s);
     if (!pond) throw new ToolError("This chat isn't in a pond, so it has no jobs.");
     return { jobs: this.deps.jobs, pond };
+  }
+
+  /**
+   * A lesson for the pond's Notebook. The rule, enforced here: only a chat that holds a working Task from the Room,
+   * only when it says the Task is done (`taskDone`), and at most NOTEBOOK_PER_TASK lessons per Task.
+   */
+  private noteToNotebook(s: SessionRow, args: Record<string, unknown>): string {
+    const { jobs, pond } = this.jobsOf(s);
+    const notebook = this.deps.notebook ?? new PondNotebook(this.deps.store, this.now);
+    if (typeof args.lesson !== "string" || !args.lesson.trim()) throw new ToolError("lesson is required.");
+    const working = jobs.workingTaskOf(s.id);
+    if (!working) {
+      throw new ToolError("The Notebook is written only at the end of a task you took from the room; you have none.");
+    }
+    if (args.taskDone !== true) {
+      throw new ToolError("Not yet: add to the Notebook only when you are finishing the task (taskDone true).");
+    }
+    const { store } = this.deps;
+    let slot = 0;
+    for (let n = 1; n <= NOTEBOOK_PER_TASK && !slot; n++) {
+      if (store.markOnce(`notebook:${working.task.id}:${n}`, this.now())) slot = n;
+    }
+    if (!slot) throw new ToolError(`This task has already added ${NOTEBOOK_PER_TASK} lessons; that is enough.`);
+    const by = store.duckBySession(s.id)?.name ?? s.title ?? null;
+    try {
+      const r = notebook.add(pond.id, args.lesson, by);
+      return r.added ? "Added to the Pond Notebook." : "That lesson was already in the Notebook.";
+    } catch (error) {
+      if (error instanceof NotebookError) throw new ToolError(error.message);
+      throw error;
+    }
   }
 
   private openJobs(s: SessionRow): string {

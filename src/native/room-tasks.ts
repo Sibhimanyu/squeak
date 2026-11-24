@@ -250,8 +250,8 @@ export interface RoomTasksOptions {
   /** The Pond's start rules; absent means the defaults (start at once, 4 working Ducks). */
   settings?: (projectId: string) => StartRules;
   /**
-   * The Pond's Notebook as text for a Duck's briefing (the Notebook ticket fills this in); absent or empty: the
-   * briefing has no Notebook section yet.
+   * The Pond's Notebook as text for a Duck's briefing (`PondNotebook.forBriefing`); absent or empty: the briefing
+   * has no Notebook section.
    */
   notebook?: (projectId: string) => string | null | undefined;
   call?: TitleModelCall;
@@ -898,6 +898,7 @@ export class RoomTasks extends EventEmitter {
           ? "- Nobody else reads this pond's room right now, so skip Room status lines (they are dropped); post again if that changes."
           : "- Post one short line to the room when you take this (post_to_room kind working), if you get blocked (needs), hand off (handoff) and when you finish (done); detail holds the longer story. Never post once per turn.",
         "- To give work to another duck, call hand_off: with toDuck it goes straight to that duck (shown as an @mention), without it Squeak decides who takes it and may hatch a new duck. A plain @mention only nudges.",
+        "- The shared notebook is for lessons that will last past this task (a command that must run, a trap, a convention), never a log of what you did. Only when you are finishing this task, add at most a few with note_to_notebook (taskDone true); the host refuses it before then.",
         "- Judge the size first. A small task: just do it. More than small (several steps, files or decisions): post a spec and plan card first (post_to_room kind plan, the title as text and the spec and plan as detail) and keep going; comments on it reach you at your next turn.",
       ].join("\n"),
     );
@@ -1477,6 +1478,12 @@ export class RoomTasks extends EventEmitter {
     const s = this.o.store.getSession(sessionId);
     if (!s) return;
     for (const [projectId, job] of this.activeFor(sessionId)) this.reconcileJob(projectId, job);
+  }
+
+  /** The Task this chat is working now (the one it took from the Room), with its pond; null when it has none. */
+  workingTaskOf(sessionId: string): { projectId: string; task: RoomTask } | null {
+    const [hit] = this.activeFor(sessionId);
+    return hit ? { projectId: hit[0], task: hit[1] } : null;
   }
 
   private activeFor(sessionId: string): Array<[string, RoomTask]> {
