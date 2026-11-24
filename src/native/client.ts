@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import type { JoinBrief, PondBrief } from "../fleet/pond-invites.js";
+import type { RoomMoments } from "./room-moments.js";
 import type { Resolution, SessionRow } from "./types.js";
 
 export const NATIVE_HOST_DOWN = "Squeak's session host is not running.";
@@ -103,6 +104,34 @@ export class NativeHostClient {
       approve,
       wait: true,
     });
+  }
+
+  /** Every pond's id and name (`/native/projects`): what the Room moment cards watch. */
+  async listProjects(): Promise<Array<{ id: string; name: string }>> {
+    const body = await this.call("GET", "/native/projects");
+    const rows = Array.isArray(body.projects) ? (body.projects as Array<{ id?: unknown; name?: unknown }>) : [];
+    return rows.flatMap((p) =>
+      typeof p.id === "string" ? [{ id: p.id, name: typeof p.name === "string" ? p.name : p.id }] : [],
+    );
+  }
+
+  /** The Room moments that need a person since a post (`room-moments.ts`); read-only. */
+  async roomMoments(projectId: string, since: number): Promise<RoomMoments> {
+    return (await this.call(
+      "GET",
+      `/native/projects/${encodeURIComponent(projectId)}/room/moments?since=${since}`,
+    )) as unknown as RoomMoments;
+  }
+
+  /** The host's own Task action (approve or drop); the host re-checks the Task and its state. */
+  async actTask(projectId: string, taskId: string, action: "approve" | "drop"): Promise<void> {
+    await this.call(
+      "POST",
+      `/native/projects/${encodeURIComponent(projectId)}/room/tasks/${encodeURIComponent(taskId)}`,
+      {
+        action,
+      },
+    );
   }
 
   private async call(method: string, path: string, body?: unknown): Promise<Record<string, unknown>> {

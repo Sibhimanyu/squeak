@@ -80,6 +80,7 @@ async function fixture(
     canReply?: (session: FleetSession) => boolean;
     notify?: FleetControllerDependencies["notify"];
     nativeResponder?: FleetControllerDependencies["nativeResponder"];
+    roomMoments?: FleetControllerDependencies["roomMoments"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-controller-"));
@@ -139,6 +140,7 @@ async function fixture(
     phoneLink: options.phoneLink ?? null,
     notify: options.notify ?? null,
     nativeResponder: options.nativeResponder ?? null,
+    roomMoments: options.roomMoments ?? null,
     fallbackChatIds: [42],
   });
   await controller.start();
@@ -485,5 +487,29 @@ describe("FleetController native approvals", () => {
     expect((await f.controller.handleCallback(location, callbackData(deny), 100)).notice).toBe(
       "Squeak's session host is not running.",
     );
+  });
+});
+
+describe("FleetController Room moment cards", () => {
+  it("draws a card with Approve and Drop whose button runs the Task decision and clears the buttons", async () => {
+    const decide = vi.fn(async (_handle: number, approve: boolean) => (approve ? "Approved: Add" : "Dropped: Add"));
+    const f = await fixture({ roomMoments: { decide } });
+    await f.controller.pushRoomCard("**Shop** · Aarav's task needs your OK\nAdd", [
+      { label: "Approve", action: "approve", handle: 7 },
+      { label: "Drop", action: "drop", handle: 7 },
+    ]);
+    const buttons = f.sent[0]!.keyboard!.flat();
+    expect(buttons.map((b) => callbackData(b))).toEqual(["fleet:room:a:7", "fleet:room:d:7"]);
+    const result = await f.controller.handleCallback(location, "fleet:room:d:7", 100);
+    expect(decide).toHaveBeenCalledWith(7, false);
+    expect(result).toEqual({ handled: true, notice: "Dropped: Add" });
+    expect(f.telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, []);
+    expect((await f.controller.handleCallback(location, "fleet:room:x:7", 100)).notice).toMatch(/no longer/);
+  });
+
+  it("a card with no buttons has no keyboard", async () => {
+    const f = await fixture();
+    await f.controller.pushRoomCard("**Shop** · Maple asks\nWhich?", []);
+    expect(f.sent[0]!.keyboard).toBeNull();
   });
 });

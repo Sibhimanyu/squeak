@@ -210,6 +210,31 @@ export function shouldPushInviteTo(channel: NotifyChannel, settings: NotifySetti
   return !mine.muted && mine.invites;
 }
 
+/**
+ * Whether a Room moment (`fleet/room-moments.ts`) goes to this channel, now. It rides the rules that already exist:
+ * a mute stops all of it; a Duck asking a person is a question (`question` switch, held back in quiet hours); a blocked
+ * Task is a stall (`stalled` switch, held back in quiet hours); a Member's Task waiting for the Owner waits on a person
+ * like a blocked approval (`approval` switch, quiet hours do not hold it).
+ */
+export function shouldPushRoomMomentTo(
+  channel: NotifyChannel,
+  kind: "ask" | "blocked" | "approval",
+  settings: NotifySettings,
+  now: Date | number,
+): boolean {
+  const mine = settings[channel];
+  if (mine.muted) return false;
+  const quiet = inQuietHours(mine.quiet, typeof now === "number" ? new Date(now) : now);
+  switch (kind) {
+    case "ask":
+      return mine.question && !quiet;
+    case "blocked":
+      return mine.stalled && !quiet;
+    case "approval":
+      return mine.approval;
+  }
+}
+
 /** What a channel's push path asks: may this card go, may the quota alert go, may a pond invite card go. */
 export interface NotifyFilter {
   item(item: { kind: AttentionKind; session: FleetSession }): boolean;
