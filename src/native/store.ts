@@ -232,6 +232,10 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS pond_notebook_project ON pond_notebook(project_id, seq);
   `,
+  // Canvas cards in the Room: the canvases a Duck's Task made or changed, as JSON on its done line.
+  `
+  ALTER TABLE room_posts ADD COLUMN canvases TEXT;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -305,6 +309,8 @@ export interface RoomPostRow {
   detail: string | null;
   /** The card (a `plan` post) a person's comment is on. */
   replyTo: string | null;
+  /** The canvases the Task made or changed (a `done` line only), JSON: `RoomCanvasCard[]`. */
+  canvases: string | null;
   at: number;
 }
 
@@ -1333,17 +1339,18 @@ export class NativeStore {
   }
 
   addRoomPost(
-    input: Omit<RoomPostRow, "seq" | "id" | "detail" | "replyTo"> & {
+    input: Omit<RoomPostRow, "seq" | "id" | "detail" | "replyTo" | "canvases"> & {
       id?: string;
       detail?: string | null;
       replyTo?: string | null;
+      canvases?: string | null;
     },
   ): RoomPostRow {
     const id = input.id ?? randomUUID();
     const info = this.db
       .prepare(
-        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, detail, reply_to, at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, detail, reply_to, canvases, at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -1358,6 +1365,7 @@ export class NativeStore {
         input.toSessionId,
         input.detail ?? null,
         input.replyTo ?? null,
+        input.canvases ?? null,
         input.at,
       );
     const seq = Number(info.lastInsertRowid);
@@ -1367,7 +1375,14 @@ export class NativeStore {
            (SELECT seq FROM room_posts WHERE project_id=? ORDER BY seq DESC LIMIT 1 OFFSET ?), 0)`,
       )
       .run(input.projectId, input.projectId, ROOM_KEEP_POSTS);
-    return { ...input, id, seq, detail: input.detail ?? null, replyTo: input.replyTo ?? null };
+    return {
+      ...input,
+      id,
+      seq,
+      detail: input.detail ?? null,
+      replyTo: input.replyTo ?? null,
+      canvases: input.canvases ?? null,
+    };
   }
 
   /** `since`: the first `limit` posts after it; `before`: the newest `limit` before it; neither: the newest. Oldest first. */
@@ -1823,7 +1838,13 @@ export class NativeStore {
   /** Replaces every post of a pond by `rows` (kept in the order given, ids kept, new seqs): the backfill's merge. */
   replaceRoomPosts(
     projectId: string,
-    rows: Array<Omit<RoomPostRow, "seq" | "detail" | "replyTo"> & { detail?: string | null; replyTo?: string | null }>,
+    rows: Array<
+      Omit<RoomPostRow, "seq" | "detail" | "replyTo" | "canvases"> & {
+        detail?: string | null;
+        replyTo?: string | null;
+        canvases?: string | null;
+      }
+    >,
   ): void {
     this.db.transaction(() => {
       this.db.prepare("DELETE FROM room_posts WHERE project_id=?").run(projectId);
@@ -1871,6 +1892,7 @@ function roomPostRow(r: Row): RoomPostRow {
     toSessionId: (r.to_session_id as string | null) ?? null,
     detail: (r.detail as string | null) ?? null,
     replyTo: (r.reply_to as string | null) ?? null,
+    canvases: (r.canvases as string | null) ?? null,
     at: r.at as number,
   };
 }

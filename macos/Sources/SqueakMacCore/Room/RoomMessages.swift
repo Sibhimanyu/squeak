@@ -119,6 +119,8 @@ public struct RoomStatusLine: Sendable, Equatable {
     public var detail: String?
     /// The post a comment on this card goes to (`replyTo`); set for a plan card only.
     public var commentTarget: String?
+    /// The canvases a done line carries, each a card that opens it.
+    public var canvases: [RoomCanvasCard] = []
     public var isExpandable: Bool { !(detail ?? "").isEmpty }
     /// Always closed at first.
     public var disclosure: RoomDisclosure { RoomDisclosure(startsOpen: false) }
@@ -262,7 +264,7 @@ public enum RoomMessages {
                 let name = sid.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
                 let status = RoomStatusLine(
                     kind: kind, sessionId: sid, name: name, agent: sid.flatMap { threads[$0]?.agent }, summary: p.text,
-                    detail: p.detail, commentTarget: kind == .plan ? p.id : nil)
+                    detail: p.detail, commentTarget: kind == .plan ? p.id : nil, canvases: kind == .done ? p.canvases : [])
                 entries.append(Entry(at: p.at, order: 1, content: .system(RoomSystemLine(
                     id: r.id, at: p.at, text: "\(name) \(status.verb): \(p.text)", jobId: nil, buttons: [], opens: sid, status: status))))
             } else if p.author.kind == .person, p.level == .room {

@@ -522,6 +522,41 @@ private struct RoomHandoffCard: View {
     }
 }
 
+extension EnvironmentValues {
+    /// The Room is a Member's (a view-only copy of the Owner's).
+    @Entry var roomMemberView = false
+    /// Opens a canvas card from the Room: the canvas for the Owner, its view-only bundle for a Member.
+    @Entry var roomOpenCanvas: (RoomCanvasCard) -> Void = { _ in }
+}
+
+/// A canvas the Task made, under the done line: title, kind and artboard count; a tap opens it.
+private struct RoomCanvasCardView: View {
+    let card: RoomCanvasCard
+    let memberView: Bool
+    @Environment(\.roomOpenCanvas) private var openCanvas
+    @State private var hovering = false
+
+    var body: some View {
+        Button { openCanvas(card) } label: {
+            HStack(spacing: 10) {
+                Lucide(.layers, size: 16, color: Theme.muted).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: card.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: card.subtitle + (memberView ? " \u{00B7} View only" : "")).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8).frame(maxWidth: 360, alignment: .leading)
+            .background(hovering ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerHand().onHover { hovering = $0 }
+        .accessibilityLabel("Open canvas \(card.title)\(memberView ? ", view only" : "")")
+    }
+}
+
 /// A duck's state change in one line ("Pip took it: Redo settings"); a chevron opens its detail (a plan card's spec).
 private struct RoomStatusLineView: View {
     let status: RoomStatusLine
@@ -532,6 +567,7 @@ private struct RoomStatusLineView: View {
     @State private var draft = ""
     @State private var sent = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.roomMemberView) private var memberView
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -551,6 +587,7 @@ private struct RoomStatusLineView: View {
                     .buttonStyle(.plain).pointerHand().accessibilityLabel(disclosure.isOpen ? "Hide detail" : "Show detail")
                 }
             }
+            ForEach(status.canvases) { RoomCanvasCardView(card: $0, memberView: memberView).padding(.leading, 26) }
             if disclosure.isOpen, let d = status.detail {
                 MessageText(markdown: d, style: .reading)
                     .padding(.horizontal, 13).padding(.vertical, 8).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

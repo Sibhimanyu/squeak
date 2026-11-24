@@ -28,6 +28,8 @@ import type { SessionRow } from "./types.js";
  * where the person talks too. Two levels: `room` (what a person sees) and `agents` (coordination). This Mac only.
  */
 
+import { artifactWireId } from "./artifacts.js";
+import { summarize as summarizeCanvas, type CanvasKind } from "./canvases.js";
 import { AttachmentError, checkAttachments, RoomAttachments, type RoomAttachment } from "./room-attachments.js";
 
 export const ROOM_MAX_TEXT = 500;
@@ -59,7 +61,33 @@ export interface RoomPost {
   replyTo?: string;
   /** Pictures and files the person attached (a person's message only). */
   attachments?: RoomAttachment[];
+  /** The canvases the Task made or changed, on a Duck's `done` line (the host attaches them, not the Duck). */
+  canvases?: RoomCanvasCard[];
   at: number;
+}
+
+/** A canvas card on a done line. `path` is the canvas folder on the Owner's Mac; a Member opens its view-only bundle. */
+export interface RoomCanvasCard {
+  /** The wire id a Member's Mac asks the Owner for the canvas bundle by (`artifactWireId` of the path). */
+  id: string;
+  path: string;
+  slug: string;
+  title: string;
+  kind: CanvasKind;
+  artboards: number;
+}
+
+/** Most canvas cards one done line carries. */
+export const ROOM_CANVAS_CARDS_MAX = 6;
+
+function parseCanvases(raw: string | null): RoomCanvasCard[] {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw) as unknown;
+    return Array.isArray(list) ? (list as RoomCanvasCard[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Where a duck works: a stream (a git worktree on its own branch). Absent for Main or a plain-folder pond. */
@@ -157,6 +185,7 @@ export function toRoomPost(r: RoomPostRow): RoomPost {
     ...(r.toSessionId ? { toSessionId: r.toSessionId } : {}),
     ...(r.detail ? { detail: r.detail } : {}),
     ...(r.replyTo ? { replyTo: r.replyTo } : {}),
+    ...(parseCanvases(r.canvases).length > 0 ? { canvases: parseCanvases(r.canvases) } : {}),
     at: r.at,
   };
 }
@@ -183,6 +212,8 @@ export interface NewRoomPost {
   replyTo?: string;
   /** A person's pictures and files, as the Mac sent them (checked here: PNG/JPEG by bytes, size and count limits). */
   attachments?: unknown;
+  /** Host-set only (a done line's canvas cards); never read from a request. */
+  canvases?: RoomCanvasCard[];
   /** Squeak's own start/end lines: a fixed id makes a replayed event a no-op. */
   id?: string;
   at?: number;
@@ -311,6 +342,7 @@ export class Room extends EventEmitter {
       toSessionId: input.toSessionId ?? null,
       detail,
       replyTo: replyTo?.id ?? null,
+      canvases: input.canvases?.length ? JSON.stringify(input.canvases.slice(0, ROOM_CANVAS_CARDS_MAX)) : null,
       at: input.at ?? this.now(),
     });
     if (checked.length > 0) {
@@ -457,15 +489,48 @@ export class Room extends EventEmitter {
       this.sent.set(s.id, recent);
       throw new RoomError("This chat has posted enough to the room this hour; keep to what matters.");
     }
+    const cards = input.kind === "done" && (input.level ?? "room") === "room" ? this.touchedCanvasCards(s.id) : [];
     const row = this.post({
       projectId: pond.id,
       author: { kind: "agent", id: s.id, name: agentName(s) },
       sessionId: s.id,
       ...input,
+      ...(cards.length > 0 ? { canvases: cards } : {}),
     });
+    if (cards.length > 0) this.touched.delete(s.id);
     recent.push(this.now());
     this.sent.set(s.id, recent);
     return row;
+  }
+
+  /** Canvas folders each chat made or changed since its last done line: newest touch last. */
+  private readonly touched = new Map<string, Map<string, number>>();
+
+  /** A Duck's canvas tool changed this canvas: its next done line carries a card for it. */
+  noteCanvasTouched(sessionId: string, dir: string): void {
+    const mine = this.touched.get(sessionId) ?? new Map<string, number>();
+    mine.delete(dir);
+    mine.set(dir, this.now());
+    this.touched.set(sessionId, mine);
+  }
+
+  /** Cards for the canvases the chat touched that still exist, newest first. */
+  private touchedCanvasCards(sessionId: string): RoomCanvasCard[] {
+    const cards: RoomCanvasCard[] = [];
+    for (const dir of [...(this.touched.get(sessionId)?.keys() ?? [])].reverse()) {
+      const sum = summarizeCanvas(dir);
+      if (sum) {
+        cards.push({
+          id: artifactWireId(sum.path),
+          path: sum.path,
+          slug: sum.slug,
+          title: sum.title,
+          kind: sum.kind,
+          artboards: sum.artboards,
+        });
+      }
+    }
+    return cards.slice(0, ROOM_CANVAS_CARDS_MAX);
   }
 
   /** The chat already posted a line of this kind since its current turn began. */
