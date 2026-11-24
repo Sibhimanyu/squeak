@@ -12,7 +12,8 @@ import type { MessageRow } from "./types.js";
  */
 
 export type DucklingKind = "agent" | "shell";
-export type DucklingStatus = "running" | "done" | "failed" | "stopped";
+/** `unknown`: it was running and nothing says how it ended (no live agent process to ask: a restart); never dropped. */
+export type DucklingStatus = "running" | "done" | "failed" | "stopped" | "unknown";
 
 export interface Duckling {
   id: string;
@@ -22,6 +23,8 @@ export interface Duckling {
   status: DucklingStatus;
   startedAt: string;
   endedAt?: string;
+  /** For `unknown`: the last time anything about it was seen. */
+  lastSeenAt?: string;
   summary?: string;
   /** When the agent took the report in: its next assistant row after the task-notification. Optional, absent until then. */
   reportedAt?: string;
@@ -42,6 +45,10 @@ export interface DucklingDetail extends Duckling {
 
 /** A finished helper stays listed this long (the same rule as the transcript's background work). */
 export const FINISHED_SHOWN_MS = 10 * 60_000;
+/** One whose state is unknown stays listed this long after it was last seen. */
+export const UNKNOWN_SHOWN_MS = 24 * 60 * 60_000;
+/** How far back a restarted host reads a chat's rows to rebuild its helpers. */
+export const REBUILD_WINDOW_MS = UNKNOWN_SHOWN_MS;
 const MAX_ITEMS = 12;
 const REPORT_CHARS = 20_000;
 const SUMMARY_CHARS = 200;
@@ -55,12 +62,12 @@ interface Tracked extends Duckling {
   background: boolean;
   /** A task-notification for it arrived; the agent's next assistant row sets `reportedAt`. */
   notified?: boolean;
+  /** The latest row seen about it (its own rows, task events, a follow-up message). */
+  lastSeenAt?: string;
   /** The Agent tool's `model` input (an alias such as "sonnet"), before a sidechain row names the real one. */
   modelAlias?: string;
   /** The subagent's own id, from its launch (or resume) result. */
   agentId?: string;
-  /** For a run woken with SendMessage: the tool-use id of the launch it continues (its own rows may name either). */
-  resumedFrom?: string;
 }
 
 const rec = (v: unknown): Record<string, unknown> | undefined =>
@@ -97,6 +104,8 @@ export class DucklingTracker {
   private readonly byTask = new Map<string, string>();
   /** SendMessage calls waiting for their result: tool-use id → the call's `to` and `message`. */
   private readonly sends = new Map<string, { to: string; message: string }>();
+  /** A SendMessage tool-use id that reached a subagent → the id of that subagent's one entry. */
+  private readonly aliases = new Map<string, string>();
 
   feed(row: MessageRow): void {
     const p = rec(row.payload);
@@ -115,7 +124,11 @@ export class DucklingTracker {
     }
     if (typeof p.parent_tool_use_id === "string") {
       // a helper's own row: its model names the helper's model
-      const owner = this.tasks.get(p.parent_tool_use_id);
+      const owner = this.tasks.get(this.resolve(p.parent_tool_use_id) ?? "");
+      if (owner) {
+        owner.lastSeenAt = row.createdAt;
+        if (owner.status === "unknown") owner.status = "running"; // its own rows are still arriving: it is alive
+      }
       const model = str(rec(p.message)?.model);
       if (owner && model && !owner.model) owner.model = modelLabel(model);
       return;
@@ -199,7 +212,7 @@ export class DucklingTracker {
     for (const match of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
       const body = match[1] ?? "";
       const tag = (n: string) => new RegExp(`<${n}>([\\s\\S]*?)</${n}>`).exec(body)?.[1]?.trim();
-      const task = this.tasks.get(tag("tool-use-id") ?? "");
+      const task = this.tasks.get(this.resolve(tag("tool-use-id")) ?? "");
       if (!task) continue;
       task.notified = true;
       const status = tag("status");
@@ -213,7 +226,16 @@ export class DucklingTracker {
     }
   }
 
-  /** A successful SendMessage that resumed a known subagent starts a new running duckling, ended by its notification. */
+  /** The launch a tool-use id belongs to: a SendMessage id that woke a subagent stands for that subagent's entry. */
+  private resolve(id: string | undefined): string | undefined {
+    return id === undefined ? undefined : (this.aliases.get(id) ?? id);
+  }
+
+  /**
+   * A successful SendMessage to a known subagent is the same subagent, not a new one: its entry stays the one keyed by
+   * its launch. A message queued to a running subagent changes nothing; one that woke a finished subagent puts the
+   * entry back to running (ended again by its notification). The SendMessage's id becomes an alias of the entry.
+   */
   private resume(
     id: string,
     sent: { to: string; message: string },
@@ -222,7 +244,7 @@ export class DucklingTracker {
     text: string,
     row: MessageRow,
   ): void {
-    if (block.is_error === true || this.tasks.has(id)) return;
+    if (block.is_error === true || this.aliases.has(id)) return;
     let body: Record<string, unknown> | undefined;
     try {
       body = rec(JSON.parse(text));
@@ -237,26 +259,27 @@ export class DucklingTracker {
       str(body?.revivedAgentId),
     ].filter((v): v is string => !!v);
     const candidates = ids.length > 0 ? ids : sent.to ? [sent.to] : [];
+    if (ids.length === 0) {
+      const pin = str(rec(launched?.pin)?.id) ?? str(rec(body?.pin)?.id);
+      if (pin && !candidates.includes(pin)) candidates.push(pin);
+    }
     let origin: Tracked | undefined;
     for (const t of this.tasks.values()) {
       if (t.kind !== "agent" || !t.agentId) continue;
       if (candidates.includes(t.agentId)) origin = t;
     }
     if (!origin) return;
-    this.tasks.set(id, {
-      id,
-      kind: "agent",
-      title: origin.title,
-      status: "running",
-      startedAt: row.createdAt,
-      brief: sent.message,
-      seq: row.seq,
-      background: true,
-      agentId: origin.agentId!,
-      resumedFrom: origin.resumedFrom ?? origin.id,
-      ...(origin.model ? { model: origin.model } : {}),
-      ...(origin.modelAlias ? { modelAlias: origin.modelAlias } : {}),
-    });
+    this.aliases.set(id, origin.id);
+    origin.lastSeenAt = row.createdAt;
+    if (origin.status === "running") return;
+    origin.status = "running";
+    delete origin.endedAt;
+    delete origin.summary;
+    delete origin.report;
+    delete origin.reportedAt;
+    delete origin.notified;
+    delete origin.lastSeenAt;
+    origin.startedAt = row.createdAt;
   }
 
   private feedTask(subtype: string, p: Record<string, unknown>, at: string): void {
@@ -267,12 +290,14 @@ export class DucklingTracker {
         this.byTask.set(taskId, toolUseId);
         const t = this.tasks.get(toolUseId);
         if (t && !t.agentId) t.agentId = taskId;
+        if (t) t.lastSeenAt = at;
       }
       return;
     }
-    const id = toolUseId ?? (taskId ? this.byTask.get(taskId) : undefined);
+    const id = this.resolve(toolUseId ?? (taskId ? this.byTask.get(taskId) : undefined));
     const task = id ? this.tasks.get(id) : undefined;
     if (!task) return;
+    task.lastSeenAt = at;
     if (subtype === "task_notification") {
       task.notified = true;
       const status = str(p.status);
@@ -292,7 +317,8 @@ export class DucklingTracker {
   }
 
   private end(task: Tracked, status: DucklingStatus, at: string, report?: string, summary?: string): void {
-    if (task.status === "running") {
+    if (task.status === "running" || task.status === "unknown") {
+      delete task.lastSeenAt;
       task.status = status;
       task.endedAt = at;
     }
@@ -310,15 +336,30 @@ export class DucklingTracker {
   }
 
   /** No live agent process any more (the host restarted, the runner closed): nothing is running. */
-  settle(live: boolean, at: string): void {
-    if (!live) this.stopRunning(at);
+  settle(live: boolean): void {
+    if (live) return;
+    for (const t of this.tasks.values()) {
+      if (t.status !== "running" && t.status !== "unknown") continue;
+      t.status = "unknown";
+      t.lastSeenAt ??= t.startedAt;
+    }
   }
 
   list(nowMs: number): Ducklings {
-    const items = [...this.tasks.values()]
-      .filter((t) => t.status === "running" || nowMs - Date.parse(t.endedAt ?? t.startedAt) < FINISHED_SHOWN_MS)
-      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-      .slice(0, MAX_ITEMS)
+    const active = (t: Tracked) => t.status === "running" || t.status === "unknown";
+    const sorted = [...this.tasks.values()]
+      .filter((t) =>
+        t.status === "running"
+          ? true
+          : t.status === "unknown"
+            ? nowMs - Date.parse(t.lastSeenAt ?? t.startedAt) < UNKNOWN_SHOWN_MS
+            : nowMs - Date.parse(t.endedAt ?? t.startedAt) < FINISHED_SHOWN_MS,
+      )
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    // a helper that may still be at work is never the one cut off: only finished ones make room
+    let room = Math.max(0, MAX_ITEMS - sorted.filter(active).length);
+    const items = sorted
+      .filter((t) => active(t) || room-- > 0)
       .map(
         (t): Duckling => ({
           id: t.id,
@@ -328,6 +369,7 @@ export class DucklingTracker {
           status: t.status,
           startedAt: t.startedAt,
           ...(t.endedAt ? { endedAt: t.endedAt } : {}),
+          ...(t.status === "unknown" && t.lastSeenAt ? { lastSeenAt: t.lastSeenAt } : {}),
           ...(t.summary && t.status !== "running" ? { summary: t.summary } : {}),
           ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
         }),
@@ -357,7 +399,7 @@ export class DucklingTracker {
       .filter((r) => {
         if (r.role !== "agent") return false;
         const parent = rec(r.payload)?.parent_tool_use_id;
-        return parent === id || (t.resumedFrom !== undefined && parent === t.resumedFrom && r.seq > t.seq);
+        return typeof parent === "string" && this.resolve(parent) === id;
       })
       .map((r) => ({ ...(rec(r.payload) as Record<string, unknown>), isSidechain: true, timestamp: r.createdAt }));
     const steps = claudeSteps(entries, 40, { sidechain: true });

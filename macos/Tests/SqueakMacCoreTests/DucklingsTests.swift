@@ -22,6 +22,30 @@ struct DucklingsTests {
         #expect(NativeAdapter.started(NativeSession(id: "x", ducklings: d.ducklings)).ducklings?.running == 2)
     }
 
+    /// Live 2026-11-24: one subagent sent two follow-up messages used to arrive as three running entries; the host now keeps one.
+    @Test func oneSubagentWithFollowUpsIsOneChipAndOneRunning() throws {
+        let json = #"""
+        {"id":"s1","ducklings":{"running":1,"items":[
+          {"id":"toolu_011Q","kind":"agent","title":"Rebuild popup panel natively, verified","model":"Opus","status":"running","startedAt":"2026-11-24T07:05:20.903Z"}]}}
+        """#
+        let s = try JSONDecoder().decode(NativeSession.self, from: Data(json.utf8))
+        #expect(s.ducklings?.items.count == 1 && s.ducklings?.running == 1)
+        #expect(DucklingWords.readyLine(running: s.ducklings?.running ?? 0) == "Ready · 1 duckling running")
+    }
+
+    @Test func unknownDucklingIsListedWithLastSeenAndNeverCounted() throws {
+        let json = #"""
+        {"id":"s1","ducklings":{"running":0,"items":[
+          {"id":"t1","kind":"agent","title":"Scan","status":"unknown","startedAt":"2026-11-24T07:00:00Z","lastSeenAt":"2026-11-24T07:05:00Z"}]}}
+        """#
+        let s = try JSONDecoder().decode(NativeSession.self, from: Data(json.utf8))
+        let d = try #require(s.ducklings?.items.first)
+        #expect(d.status == .unknown && d.chipMark == "?" && d.elapsed() == "5m")
+        #expect(d.statusWord.hasPrefix("Unknown, last seen"))
+        #expect(d.isShownInBar(now: Date().addingTimeInterval(86_400)))
+        #expect(s.ducklings?.running == 0)
+    }
+
     @Test func finishedChipsLeaveTheBarOnceReported() {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
         func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }

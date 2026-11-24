@@ -201,18 +201,28 @@ describe("backgroundTasks", () => {
       { ...result("S", 4), toolUseResult: body },
     ];
 
-    it("a resumed agent runs again until its notification", () => {
+    it("a resumed agent is the same entry, running again until its notification", () => {
       const ok = { success: true, resumedAgentId: AID, revivedAgentId: AID };
       const running = backgroundTasks([...base(), ...send(AID, ok)], NOW);
-      expect(running.find((t) => t.id === "S")).toMatchObject({
-        kind: "agent",
-        label: "menu bug",
-        status: "running",
-        background: true,
-        agentId: AID,
-      });
+      expect(running.filter((t) => t.kind === "agent")).toHaveLength(1);
+      expect(running.find((t) => t.id === "L")).toMatchObject({ label: "menu bug", status: "running", agentId: AID });
       const done = backgroundTasks([...base(), ...send(AID, ok), note(AID, "S", 1)], NOW);
-      expect(done.find((t) => t.id === "S")?.status).toBe("done");
+      expect(done.filter((t) => t.kind === "agent")).toHaveLength(1);
+      expect(done.find((t) => t.id === "L")?.status).toBe("done");
+    });
+
+    it("messages queued to a running subagent add no entries (live shape: pin.id)", () => {
+      const queued = { success: true, message: "Message queued", pin: { id: AID, name: AID } };
+      const entries = [
+        use("L", "Agent", { description: "menu bug", run_in_background: true }, 9),
+        { ...result("L", 9), toolUseResult: { isAsync: true, status: "async_launched", agentId: AID } },
+        ...send(AID, queued),
+        use("S2", "SendMessage", { to: AID, message: "more" }, 3),
+        { ...result("S2", 3), toolUseResult: queued },
+      ];
+      const tasks = backgroundTasks(entries, NOW);
+      expect(tasks.filter((t) => t.kind === "agent")).toHaveLength(1);
+      expect(tasks.filter((t) => t.status === "running")).toHaveLength(1);
     });
 
     it("a failed or unknown resume adds nothing", () => {

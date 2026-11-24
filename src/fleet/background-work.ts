@@ -61,6 +61,8 @@ export function readBackgroundWork(transcriptPath: string, nowMs: number): Backg
 export function backgroundTasks(entries: Record<string, unknown>[], nowMs: number): BackgroundTask[] {
   const tasks = new Map<string, BackgroundTask>();
   const sends = new Map<string, string>();
+  /** A SendMessage id that reached a subagent → the id of that subagent's one entry. */
+  const aliases = new Map<string, string>();
   for (const entry of entries) {
     if (entry.isSidechain === true) continue;
     const at = asString(entry.timestamp);
@@ -96,7 +98,7 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
       const sentTo = sends.get(sendId);
       if (sentTo !== undefined) {
         sends.delete(sendId);
-        resumeTask(tasks, sendId, sentTo, block, launched, at ?? null);
+        resumeTask(tasks, aliases, sendId, sentTo, block, launched, at ?? null);
         continue;
       }
       const task = tasks.get(sendId);
@@ -135,7 +137,7 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
     for (const match of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
       const body = match[1] ?? "";
       const tag = (name: string) => new RegExp(`<${name}>([^<]*)</${name}>`).exec(body)?.[1]?.trim();
-      const task = tasks.get(tag("tool-use-id") ?? "");
+      const task = tasks.get(aliases.get(tag("tool-use-id") ?? "") ?? tag("tool-use-id") ?? "");
       if (!task || (task.status !== "running" && !task.interrupted)) continue;
       task.interrupted = false;
       const status = tag("status");
@@ -153,16 +155,21 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
     .slice(-MAX_TASKS);
 }
 
-/** A successful SendMessage that resumed a known subagent is a new running task, ended by its own notification. */
+/**
+ * A successful SendMessage to a known subagent is the same subagent, not a new one: its entry stays the one keyed by its
+ * launch. A message queued to a running subagent changes nothing; one that woke a finished subagent puts the entry back
+ * to running, ended by its notification. The SendMessage's id becomes an alias of the entry.
+ */
 function resumeTask(
   tasks: Map<string, BackgroundTask>,
+  aliases: Map<string, string>,
   id: string,
   to: string,
   block: Record<string, unknown>,
   launched: Record<string, unknown> | null,
   at: string | null,
 ): void {
-  if (block.is_error === true || tasks.has(id)) return;
+  if (block.is_error === true || aliases.has(id)) return;
   let body: Record<string, unknown> | null;
   try {
     body = asRecord(JSON.parse(resultText(block)));
@@ -174,18 +181,20 @@ function resumeTask(
     .map(asString)
     .filter((v): v is string => !!v);
   const candidates = ids.length > 0 ? ids : to ? [to] : [];
+  if (ids.length === 0) {
+    const pin = asString(asRecord(launched?.pin)?.id) ?? asString(asRecord(body?.pin)?.id);
+    if (pin && !candidates.includes(pin)) candidates.push(pin);
+  }
   let origin: BackgroundTask | undefined;
   for (const t of tasks.values()) if (t.kind === "agent" && t.agentId && candidates.includes(t.agentId)) origin = t;
   if (!origin) return;
-  tasks.set(id, {
-    id,
-    kind: "agent",
-    label: origin.label,
-    background: true,
-    status: "running",
-    startedAt: at,
-    agentId: origin.agentId!,
-  });
+  aliases.set(id, origin.id);
+  if (origin.status === "running") return;
+  origin.status = "running";
+  origin.startedAt = at;
+  origin.endedAt = null;
+  delete origin.summary;
+  delete origin.interrupted;
 }
 
 function resultText(block: Record<string, unknown>): string {

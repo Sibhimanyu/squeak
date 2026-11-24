@@ -5912,7 +5912,7 @@ export class RemoteBridge {
       // A Squeak chat's background helpers (the chat is ready while they run), only for a phone that names
       // `ducklings` in its caps; `background` above stays for older phones.
       ...(session.ducklings && session.ducklings.items.length > 0 && this.phoneCaps.includes(PHONE_DUCKLINGS_CAP)
-        ? { ducklings: session.ducklings }
+        ? { ducklings: phoneDucklings(session.ducklings) }
         : {}),
       // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
@@ -6326,4 +6326,17 @@ export function stepsSignature(snapshot: FleetSnapshot): string {
       .filter((session) => session.state === "working")
       .map((session) => [session.key, session.lastActivityAt]),
   );
+}
+
+/** The phone's contract has no `unknown` yet: a helper whose end nobody saw reads as stopped there, still listed. */
+export function phoneDucklings(set: NonNullable<FleetSession["ducklings"]>): NonNullable<FleetSession["ducklings"]> {
+  if (!set.items.some((i) => i.status === "unknown")) return set;
+  return {
+    ...set,
+    items: set.items.map((i) => {
+      if (i.status !== "unknown") return i;
+      const { lastSeenAt, ...rest } = i;
+      return { ...rest, status: "stopped" as const, endedAt: lastSeenAt ?? i.startedAt };
+    }),
+  };
 }

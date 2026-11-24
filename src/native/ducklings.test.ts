@@ -162,17 +162,40 @@ describe("DucklingTracker", () => {
       t.feed(result("toolu_S", JSON.stringify(payload), 11, { toolUseResult: tr }));
     };
 
-    it("a resumed agent shows as running again, then done at its notification", () => {
+    it("a resumed agent is the same duckling, running again, then done at its notification", () => {
       const t = launched();
       const ok = { success: true, resumedAgentId: AID };
       send(t, AID, ok, { ...ok, revivedAgentId: AID });
       const items = t.list(Date.parse(at(12))).items;
-      expect(items.filter((i) => i.status === "running")).toEqual([
-        expect.objectContaining({ id: "toolu_S", kind: "agent", title: "menu bug", model: "Sonnet" }),
-      ]);
-      expect(t.detail("toolu_S", Date.parse(at(12)), [])?.brief).toBe("go again");
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        id: "toolu_L",
+        kind: "agent",
+        title: "menu bug",
+        model: "Sonnet",
+        status: "running",
+      });
+      expect(items[0]?.endedAt).toBeUndefined();
       t.feed(note(AID, "toolu_S", 20));
-      expect(t.list(Date.parse(at(21))).items.find((i) => i.id === "toolu_S")?.status).toBe("done");
+      expect(t.list(Date.parse(at(21))).items).toMatchObject([{ id: "toolu_L", status: "done" }]);
+    });
+
+    it("messages queued to a running subagent add nothing (live shape: pin.id, two follow-ups)", () => {
+      const t = new DucklingTracker();
+      t.feed(call("toolu_L", { description: "popup panel", prompt: "p", model: "opus" }, 0));
+      t.feed(
+        result("toolu_L", `Async agent launched successfully.\nagentId: ${AID}`, 1, {
+          toolUseResult: { isAsync: true, status: "async_launched", agentId: AID },
+        }),
+      );
+      const queued = { success: true, message: "Message queued", pin: { id: AID, name: AID, ref: "12f217" } };
+      for (const [i, id] of ["toolu_S1", "toolu_S2"].entries()) {
+        t.feed(call(id, { to: AID, summary: "s", message: "more" }, 10 + i * 5, "SendMessage"));
+        t.feed(result(id, JSON.stringify(queued), 11 + i * 5, { toolUseResult: queued }));
+      }
+      expect(t.list(Date.parse(at(30)))).toMatchObject({ running: 1, items: [{ id: "toolu_L", status: "running" }] });
+      t.feed(note(AID, "toolu_L", 40));
+      expect(t.list(Date.parse(at(41)))).toMatchObject({ running: 0, items: [{ id: "toolu_L", status: "done" }] });
     });
 
     it("resumes by name through `to` when the result names no id", () => {
@@ -188,6 +211,46 @@ describe("DucklingTracker", () => {
       const u = launched();
       send(u, "zzzzzz", { success: true, resumedAgentId: "zzzzzz" }, { success: true, resumedAgentId: "zzzzzz" });
       expect(u.list(Date.parse(at(12))).running).toBe(0);
+    });
+  });
+
+  describe("never losing a started subagent", () => {
+    const launchedBg = (t: DucklingTracker) => {
+      t.feed(call("toolu_a", { description: "scan", prompt: "p", run_in_background: true }, 0));
+    };
+
+    it("is listed from its tool call alone, before any result or progress event", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      expect(t.list(Date.parse(at(1)))).toMatchObject({ running: 1, items: [{ id: "toolu_a", status: "running" }] });
+    });
+
+    it("with no live agent process it is unknown with its last-seen time, still listed a day later, never dropped", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.feed(row("agent", "system/task_started", { task_id: "t1", tool_use_id: "toolu_a" }, 3));
+      t.settle(false);
+      const l = t.list(Date.parse(at(60)));
+      expect(l.running).toBe(0);
+      expect(l.items).toMatchObject([{ id: "toolu_a", status: "unknown", lastSeenAt: at(3) }]);
+      expect(t.list(Date.parse(at(60 * 60 * 20))).items).toHaveLength(1);
+    });
+
+    it("an unknown one still ends at its notification, and shows done", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.settle(false);
+      t.feed(
+        row("agent", "system/task_notification", { tool_use_id: "toolu_a", status: "completed", summary: "ok" }, 9),
+      );
+      expect(t.list(Date.parse(at(10))).items).toMatchObject([{ id: "toolu_a", status: "done" }]);
+    });
+
+    it("running ones are never the ones cut off by the list limit", () => {
+      const t = new DucklingTracker();
+      for (let i = 0; i < 15; i++)
+        t.feed(call(`toolu_${i}`, { description: `d${i}`, prompt: "p", run_in_background: true }, i));
+      expect(t.list(Date.parse(at(20))).items).toHaveLength(15);
     });
   });
 });

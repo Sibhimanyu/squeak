@@ -1,5 +1,11 @@
 import { DucklingOnlyTracker, helpersKeepWorking } from "../fleet/ducklings.js";
-import { DucklingTracker, DUCKLING_STEP_ROWS, type DucklingDetail, type Ducklings } from "./ducklings.js";
+import {
+  DucklingTracker,
+  DUCKLING_STEP_ROWS,
+  REBUILD_WINDOW_MS,
+  type DucklingDetail,
+  type Ducklings,
+} from "./ducklings.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -565,11 +571,28 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
+  /**
+   * A chat's helper tracker. After a host restart nothing is in memory: it is rebuilt once from the stored rows, so a
+   * helper that was started is still listed (running ones as unknown, with no live process to ask), whatever
+   * the surface loaded and however far back its launch row is.
+   */
+  private trackerOf(id: string): DucklingTracker | undefined {
+    const known = this.ducklings.get(id);
+    if (known) return known;
+    if (!this.store.getSession(id)) return undefined;
+    const tracker = new DucklingTracker();
+    for (const row of this.store.helperRows(id, new Date(Date.now() - REBUILD_WINDOW_MS).toISOString())) {
+      tracker.feed(row);
+    }
+    this.ducklings.set(id, tracker);
+    return tracker;
+  }
+
   /** The chat's helpers now; with no live agent process nothing runs (a restart or a closed runner). */
   private ducklingsOf(id: string): Ducklings | null {
-    const tracker = this.ducklings.get(id);
+    const tracker = this.trackerOf(id);
     if (!tracker) return null;
-    tracker.settle(this.runners.has(id), new Date().toISOString());
+    tracker.settle(this.runners.has(id));
     const list = tracker.list(Date.now());
     // Claude waits on a foreground duckling and does nothing itself: surfaces show the ducklings, not "Working".
     const status = this.store.getSession(id)?.status;
@@ -582,10 +605,10 @@ export class SessionHost extends EventEmitter {
 
   /** One helper's panel: its brief, its own steps from the stored rows, its report. Null when the chat has no such helper. */
   ducklingDetail(id: string, taskId: string): DucklingDetail | null {
-    const tracker = this.ducklings.get(id);
+    const tracker = this.trackerOf(id);
     const seq = tracker?.launchSeq(taskId);
     if (!tracker || seq === null || seq === undefined) return null;
-    tracker.settle(this.runners.has(id), new Date().toISOString());
+    tracker.settle(this.runners.has(id));
     return tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
   }
 
@@ -1485,9 +1508,10 @@ export class SessionHost extends EventEmitter {
         const stored = this.store.appendMessage(id, role, kind, payload);
         this.emitMessage(stored);
         if (role === "agent") {
-          let tracker = this.ducklings.get(id);
-          if (!tracker) this.ducklings.set(id, (tracker = new DucklingTracker()));
-          tracker.feed(stored);
+          // a tracker rebuilt just now already read this row from the store
+          const fresh = !this.ducklings.has(id);
+          const tracker = this.trackerOf(id);
+          if (tracker && !fresh) tracker.feed(stored);
           this.noteDucklings(id);
         }
         const cur = this.store.getSession(id);

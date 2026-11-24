@@ -317,9 +317,12 @@ export interface FleetDuckling {
   kind: "agent" | "shell";
   title: string;
   model?: string;
-  status: "running" | "done" | "failed" | "stopped";
+  /** `unknown`: it was running and nothing says how it ended (the host restarted); listed, never dropped. */
+  status: "running" | "done" | "failed" | "stopped" | "unknown";
   startedAt: string;
   endedAt?: string;
+  /** For `unknown`: the last time anything about it was seen. */
+  lastSeenAt?: string;
   summary?: string;
   /** When the agent took the report in; absent until then. */
   reportedAt?: string;

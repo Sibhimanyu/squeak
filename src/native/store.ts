@@ -979,6 +979,29 @@ export class NativeStore {
       ...authorOf(r),
     }));
   }
+  /**
+   * The rows a restarted host rebuilds a chat's helpers from: the agent's own launch, result, task and notification
+   * rows since `sinceIso`, oldest first (a helper's own sidechain rows are left out: they are the bulk).
+   */
+  helperRows(sessionId: string, sinceIso: string, limit = 20_000): MessageRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM messages WHERE session_id=? AND role='agent' AND created_at>=?
+           AND (kind='assistant' OR kind='user' OR kind LIKE 'system/task_%')
+           AND payload NOT LIKE '%"parent_tool_use_id":"%'
+         ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, sinceIso, limit) as Row[];
+    return rows.reverse().map((r) => ({
+      seq: r.seq as number,
+      sessionId: r.session_id as string,
+      role: r.role as MessageRow["role"],
+      kind: r.kind as string,
+      payload: JSON.parse(r.payload as string),
+      createdAt: r.created_at as string,
+      ...authorOf(r),
+    }));
+  }
   /** The newest `limit` rows with seq < `before` (no bound when null), oldest first: a chat's tail, and the page before a cursor. */
   messagesBefore(sessionId: string, before: number | null, limit = 500): MessageRow[] {
     const rows = this.db

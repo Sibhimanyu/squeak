@@ -96,6 +96,7 @@ struct DucklingStatusMark: View {
         case .done: Lucide(.circleCheck, size: 11, color: Theme.subtle).accessibilityLabel("Finished")
         case .failed: Lucide(.circleX, size: 11, color: Theme.negative).accessibilityLabel("Failed")
         case .stopped: Text(verbatim: "–").font(Typo.meta).foregroundStyle(Theme.muted).accessibilityLabel("Stopped")
+        case .unknown: Text(verbatim: "?").font(Typo.meta).foregroundStyle(Theme.muted).accessibilityLabel(duckling.statusWord)
         }
     }
 }

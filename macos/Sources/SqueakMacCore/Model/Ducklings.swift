@@ -4,7 +4,10 @@ import Foundation
 /// daemon. It never makes a chat "working": a chat whose turn ended with helpers running is Ready.
 public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     public enum Kind: String, Codable, Sendable { case agent, shell }
-    public enum Status: String, Codable, Sendable { case running, done, failed, stopped }
+    public enum Status: String, Codable, Sendable { case running, done, failed, stopped
+        /// It was running and nothing says how it ended (the host restarted): listed with its last-seen time, never dropped.
+        case unknown
+    }
 
     public var id: String
     public var kind: Kind
@@ -13,12 +16,14 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     public var status: Status
     public var startedAt: Date?
     public var endedAt: Date?
+    /// For `unknown`: the last time anything about it was seen.
+    public var lastSeenAt: Date?
     public var summary: String?
     /// When the agent took this helper's report in (host-side: its next assistant row after the notification); nil
     /// from a host that does not say, or while it has not yet.
     public var reportedAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, summary, reportedAt }
+    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, lastSeenAt, summary, reportedAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -29,14 +34,15 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         func date(_ k: CodingKeys) -> Date? { c.lenient(String.self, k).flatMap(DaemonDate.parse) ?? c.lenient(Date.self, k) }
         startedAt = date(.startedAt)
         endedAt = date(.endedAt)
+        lastSeenAt = date(.lastSeenAt)
         summary = c.lenient(String.self, .summary)
         reportedAt = date(.reportedAt)
     }
 
     public init(id: String, kind: Kind = .agent, title: String, model: String? = nil, status: Status = .running,
-                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil) {
+                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil, lastSeenAt: Date? = nil) {
         self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
-        self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary; self.reportedAt = reportedAt
+        self.startedAt = startedAt; self.endedAt = endedAt; self.lastSeenAt = lastSeenAt; self.summary = summary; self.reportedAt = reportedAt
     }
 
     /// Seconds after it ended that a finished chip is kept when the host cannot say its report was taken in.
@@ -46,7 +52,7 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     /// (`reportedAt`); with no `reportedAt`, until `unreportedKeepSeconds` after it ended. A failed one waits for the
     /// report alone (the host drops it after 10 minutes). The stream's own duckling row is not governed by this.
     public func isShownInBar(now: Date) -> Bool {
-        if status == .running { return true }
+        if status == .running || status == .unknown { return true }
         if let reportedAt { return reportedAt > now }
         if status == .failed { return true }
         guard let endedAt else { return true }
@@ -56,7 +62,7 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     /// "4m", "1h 5m", "12s": how long it has run (or ran).
     public func elapsed(now: Date = Date()) -> String? {
         guard let startedAt else { return nil }
-        let seconds = max(0, Int((endedAt ?? now).timeIntervalSince(startedAt)))
+        let seconds = max(0, Int((endedAt ?? (status == .unknown ? lastSeenAt : nil) ?? now).timeIntervalSince(startedAt)))
         if seconds < 60 { return "\(seconds)s" }
         if seconds < 3600 { return "\(seconds / 60)m" }
         return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
@@ -74,8 +80,11 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         case .done: "✓"
         case .failed: "✕"
         case .stopped: "–"
+        case .unknown: "?"
         }
     }
+
+    private static let clock: DateFormatter = { let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f }()
 
     public var statusWord: String {
         switch status {
@@ -83,6 +92,7 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         case .done: "Finished"
         case .failed: "Failed"
         case .stopped: "Stopped"
+        case .unknown: "Unknown, last seen \(lastSeenAt.map { Self.clock.string(from: $0) } ?? "earlier")"
         }
     }
 }

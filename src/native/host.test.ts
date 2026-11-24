@@ -836,6 +836,40 @@ describe("a chat whose helpers still run when its turn ends", () => {
     expect(statuses.filter((x, i) => x !== statuses[i - 1])).toEqual(["working", "idle", "working", "idle"]);
   });
 
+  it("a restarted host still lists a started subagent (as unknown), a follow-up adds no second entry", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const h = runners[0]!.hooks;
+    launch(h);
+    h.onMessage("agent", "assistant", {
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "toolu_S", name: "SendMessage", input: { to: "agent77", message: "more" } }],
+      },
+    });
+    h.onMessage("agent", "user", {
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_S",
+            content: JSON.stringify({ success: true, pin: { id: "agent77" } }),
+          },
+        ],
+      },
+      tool_use_result: { success: true, pin: { id: "agent77" } },
+    });
+    expect(host.list().find((x) => x.id === s.id)?.ducklings?.items).toHaveLength(1);
+    // a new host over the same store: nothing in memory, no live agent process
+    const restarted = new SessionHost({ store, idleMs: 60_000, runnerFactory: () => runners[0]! });
+    const row = restarted.list().find((x) => x.id === s.id)!;
+    expect(row.ducklings?.items).toHaveLength(1);
+    expect(row.ducklings?.items[0]).toMatchObject({ id: "toolu_1", title: "Editor page", status: "unknown" });
+    expect(row.ducklings?.items[0]?.lastSeenAt).toBeTruthy();
+    expect(row.ducklings?.running).toBe(0);
+  });
+
   it("a foreground duckling Claude waits on is 'only ducklings' while the chat is working, and ends with its result", async () => {
     const { host, runners, events } = setup();
     const s = await host.create({ ...spec, text: "go" });
