@@ -33,13 +33,15 @@ public struct RoomFeed: Sendable, Equatable {
     /// A host that serves turns says so once (even an empty list); until then the ripples fall back to posts.
     public private(set) var servesTurns = false
     /// Room jobs, oldest first by creation (id breaks a tie); an update replaces in place, so a line never moves.
-    public private(set) var jobs: [RoomJob] = []
-    /// Actions in flight and refusals, by job id (a failed "Make this a job" is keyed `msg:<message id>`).
-    public private(set) var jobLocal: [String: RoomJobLocal] = [:]
+    public private(set) var jobs: [RoomTask] = []
+    /// Actions in flight and refusals, by job id (a failed "Make task" is keyed `msg:<message id>`).
+    public private(set) var jobLocal: [String: RoomTaskLocal] = [:]
     /// Every question seen waiting, by `<sessionId>|<question>`, so a later "A — <option text>" can say what A was.
     public private(set) var askOptions: [String: [RoomAskOption]] = [:]
     /// A stream or branch the person picked for a job (not yet sent), by job id.
-    public private(set) var jobPlace: [String: RoomJobPlace] = [:]
+    public private(set) var jobPlace: [String: RoomTaskPlace] = [:]
+    /// The Room messages the person left out of a Task (not yet sent), by Task id.
+    public private(set) var taskExcluded: [String: Set<String>] = [:]
     private var seen: Set<Int> = []
     private var localCounter = 0
 
@@ -56,7 +58,7 @@ public struct RoomFeed: Sendable, Equatable {
         loaded = true
         setThreads(page.threads)
         if let t = page.turns { servesTurns = true; for turn in t { upsert(turn: turn) } }
-        if let j = page.jobs { for job in j { upsert(job: job) } }
+        if let j = page.tasks { for job in j { upsert(job: job) } }
         for p in page.posts.sorted(by: { $0.seq < $1.seq }) { appendReal(p) }
         latestSeq = max(latestSeq, page.latestSeq)
         if first, let pageSize { hasMoreBefore = page.posts.count >= pageSize }
@@ -101,11 +103,11 @@ public struct RoomFeed: Sendable, Equatable {
 
     /// A job from the stream, a page or an action's answer: new ones take their place by creation, known ones change in
     /// place. An older copy never overwrites a newer one; any copy that lands ends the pending action and its refusal.
-    public mutating func upsert(job: RoomJob) {
+    public mutating func upsert(job: RoomTask) {
         if let i = jobs.firstIndex(where: { $0.id == job.id }) {
             if job.updatedAt >= jobs[i].updatedAt {
                 jobs[i] = job; jobLocal[job.id] = nil
-                if job.status != .suggested { jobPlace[job.id] = nil }
+                if job.state != .waiting { jobPlace[job.id] = nil; taskExcluded[job.id] = nil }
             }
             return
         }
@@ -116,39 +118,57 @@ public struct RoomFeed: Sendable, Equatable {
     }
 
     /// "Change" on a job's place: kept until the job is handed over, sent with Go / Allow / a new duck.
-    public mutating func setJobPlace(_ id: String, _ place: RoomJobPlace?) {
+    public mutating func setJobPlace(_ id: String, _ place: RoomTaskPlace?) {
         jobPlace[id] = place
         jobLocal[id]?.error = nil
     }
 
+    /// Leaves a Room message out of a Task's discussion, or puts it back; nothing is sent until Go, Allow or a new duck.
+    public mutating func setIncluded(_ messageId: String, _ included: Bool, task id: String) {
+        var set = taskExcluded[id] ?? []
+        if included { set.remove(messageId) } else { set.insert(messageId) }
+        taskExcluded[id] = set.isEmpty ? nil : set
+        jobLocal[id]?.error = nil
+    }
+
+    /// The trim that goes with Go, a new duck or Allow; nil when the person trimmed nothing.
+    public func includeToSend(taskId: String, action: RoomTaskAction) -> [String]? {
+        switch action {
+        case .go, .newThread, .allow:
+            guard let t = jobs.first(where: { $0.id == taskId }) else { return nil }
+            return RoomTasks.messageIdsToSend(for: t, excluded: taskExcluded[taskId] ?? [])
+        case .drop, .deny: return nil
+        }
+    }
+
     /// What goes with an action: the person's pick, else the job's own place (the chip shows it, so it is what happens).
-    public func placeToSend(jobId: String, action: RoomJobAction) -> RoomJobPlace? {
+    public func placeToSend(jobId: String, action: RoomTaskAction) -> RoomTaskPlace? {
         switch action {
         case .go, .newThread, .allow: return jobPlace[jobId] ?? jobs.first { $0.id == jobId }?.place
-        case .dismiss, .deny: return nil
+        case .drop, .deny: return nil
         }
     }
 
     /// The person pressed something: the line shows it at once.
-    public mutating func beginJob(_ id: String, action: RoomJobAction, title: String? = nil) {
-        jobLocal[id] = RoomJobLocal(pending: action, pendingTitle: title, error: nil)
+    public mutating func beginJob(_ id: String, action: RoomTaskAction, title: String? = nil) {
+        jobLocal[id] = RoomTaskLocal(pending: action, pendingTitle: title, error: nil)
     }
 
     /// The host refused or could not be reached: the pending state goes and the sentence shows inline.
     public mutating func failJob(_ id: String, message: String) {
-        jobLocal[id] = RoomJobLocal(pending: nil, pendingTitle: nil, error: message)
+        jobLocal[id] = RoomTaskLocal(pending: nil, pendingTitle: nil, error: message)
     }
 
     public mutating func clearJobLocal(_ id: String) { jobLocal[id] = nil }
 
     /// The jobs' lines, keyed by the message they sit under.
-    public func jobLine(forMessage id: String) -> RoomJobLine? {
-        if let j = RoomJobs.job(for: id, in: jobs) { return RoomJobs.line(for: j, local: jobLocal[j.id]) }
-        if let e = jobLocal["msg:" + id]?.error { return RoomJobs.makeFailedLine(messageId: id, error: e) }
+    public func jobLine(forMessage id: String) -> RoomTaskLine? {
+        if let j = RoomTasks.job(for: id, in: jobs) { return RoomTasks.line(for: j, local: jobLocal[j.id]) }
+        if let e = jobLocal["msg:" + id]?.error { return RoomTasks.makeFailedLine(messageId: id, error: e) }
         return nil
     }
 
-    public var claims: [RoomJobs.ClaimCard] { RoomJobs.claims(jobs: jobs, local: jobLocal, threads: threads) }
+    public var claims: [RoomTasks.ClaimCard] { RoomTasks.claims(jobs: jobs, local: jobLocal, threads: threads) }
 
     public mutating func setThreads(_ t: [RoomThread]) {
         threads = t

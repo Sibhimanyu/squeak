@@ -5,8 +5,8 @@ public enum RoomStreamEvent: Sendable, Equatable {
     case post(RoomPost)
     /// A turn started or changed (room v2): upsert by id.
     case turn(RoomTurn)
-    /// A job appeared or changed (room jobs): upsert by id.
-    case job(RoomJob)
+    /// A Task appeared or changed: upsert by id.
+    case task(RoomTask)
     /// A duck's name, role or duty changed (`thread` frame): upsert by session id.
     case thread(RoomThread)
     /// The stream (re)connected after a drop: read `since` what is held.
@@ -51,16 +51,16 @@ public struct RoomClient: Sendable {
         return try await host.call("GET", a.url, timeout: 60)
     }
 
-    /// "Make this a job": `POST .../room/jobs { messageId }` answers 201 `{ job }`.
-    public func makeJob(project: String, messageId: String) async throws -> RoomJob {
+    /// "Make task": `POST .../room/tasks { messageId }` answers 201 `{ task }`.
+    public func makeJob(project: String, messageId: String) async throws -> RoomTask {
         let body: NativeJSON = .object(["messageId": .string(messageId)])
-        return try Self.job(try await host.call("POST", Self.path(project) + "/jobs", body: body, timeout: 20))
+        return try Self.job(try await host.call("POST", Self.path(project) + "/tasks", body: body, timeout: 20))
     }
 
-    /// Go / New thread / Just a note / Allow / No: `POST .../room/jobs/<id>`. A 409 carries its own sentence.
-    public func act(project: String, jobId: String, action: RoomJobAction, place: RoomJobPlace? = nil) async throws -> RoomJob {
-        let path = Self.path(project) + "/jobs/" + NativeHostClient.id(jobId)
-        return try Self.job(try await host.call("POST", path, body: action.body(place: place), timeout: 20))
+    /// Go / New thread / Just a note / Allow / No: `POST .../room/tasks/<id>`. A 409 carries its own sentence.
+    public func act(project: String, jobId: String, action: RoomTaskAction, place: RoomTaskPlace? = nil, include: [String]? = nil) async throws -> RoomTask {
+        let path = Self.path(project) + "/tasks/" + NativeHostClient.id(jobId)
+        return try Self.job(try await host.call("POST", path, body: action.body(place: place, include: include), timeout: 20))
     }
 
     /// Rename a duck or set its role: `PATCH /native/sessions/<id>/duck { name?, role? }` (null clears). Answers the chosen pair.
@@ -79,16 +79,16 @@ public struct RoomClient: Sendable {
         _ = try await host.call("POST", "/native/sessions/\(NativeHostClient.id(sessionId))/duty", body: .object(["on": .bool(on)]), timeout: 15)
     }
 
-    /// The stream sends the bare job; a wrapped `{ job }` is read too.
-    static func streamedJob(_ data: Data) -> RoomJob? {
-        struct W: Decodable { var job: RoomJob }
-        if let j = try? JSONDecoder().decode(RoomJob.self, from: data) { return j }
-        return (try? JSONDecoder().decode(W.self, from: data))?.job
+    /// The stream sends the bare Task; a wrapped `{ task }` is read too.
+    static func streamedJob(_ data: Data) -> RoomTask? {
+        struct W: Decodable { var task: RoomTask }
+        if let j = try? JSONDecoder().decode(RoomTask.self, from: data) { return j }
+        return (try? JSONDecoder().decode(W.self, from: data))?.task
     }
 
-    static func job(_ data: Data) throws -> RoomJob {
-        struct R: Decodable { var job: RoomJob }
-        do { return try JSONDecoder().decode(R.self, from: data).job } catch { throw NativeHostError.badResponse }
+    static func job(_ data: Data) throws -> RoomTask {
+        struct R: Decodable { var task: RoomTask }
+        do { return try JSONDecoder().decode(R.self, from: data).task } catch { throw NativeHostError.badResponse }
     }
 
     /// `GET .../room/stream`: `hello`, then a `post` per new post. Reconnects until iteration stops; a reconnect
@@ -127,8 +127,8 @@ public struct RoomClient: Sendable {
                                 if let data = frame.data.data(using: .utf8), let t = try? JSONDecoder().decode(RoomTurn.self, from: data) {
                                     continuation.yield(.turn(t))
                                 }
-                            case "job":
-                                if let data = frame.data.data(using: .utf8), let j = Self.streamedJob(data) { continuation.yield(.job(j)) }
+                            case "task":
+                                if let data = frame.data.data(using: .utf8), let j = Self.streamedJob(data) { continuation.yield(.task(j)) }
                             case "thread":
                                 if let data = frame.data.data(using: .utf8), let t = try? JSONDecoder().decode(RoomThread.self, from: data) {
                                     continuation.yield(.thread(t))

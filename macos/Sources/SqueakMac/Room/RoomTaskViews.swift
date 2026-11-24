@@ -2,11 +2,11 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// Room jobs (CONTRACT-jobs.md): the buttons of a duck's offer or claim and of Squeak's one quiet line. Nothing is taken or
+// Room Tasks: the buttons of a duck's offer or claim and of Squeak's one quiet line. Nothing is taken or
 // started until the person presses Go or Allow.
 
 struct SmallButtonStyle: ButtonStyle {
-    let role: RoomJobButton.Role
+    let role: RoomTaskButton.Role
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -31,7 +31,9 @@ struct SmallButtonStyle: ButtonStyle {
 struct RoomPlaceContext: Sendable {
     var streams: [RoomStreamChoice] = []
     var taken: [String] = []
-    var choose: @MainActor @Sendable (String, RoomJobPlace) -> Void = { _, _ in }
+    var choose: @MainActor @Sendable (String, RoomTaskPlace) -> Void = { _, _ in }
+    /// A Room message of a Task's discussion in or out: (task id, message id, included).
+    var include: @MainActor @Sendable (String, String, Bool) -> Void = { _, _, _ in }
 }
 
 private struct RoomPlaceContextKey: EnvironmentKey { static let defaultValue = RoomPlaceContext() }
@@ -99,5 +101,71 @@ struct RoomPlaceChipView: View {
         guard problem == nil else { return }
         context.choose(jobId, .new(branch: draft.trimmingCharacters(in: .whitespacesAndNewlines)))
         naming = false
+    }
+}
+
+// MARK: - A Task with its state
+
+/// One Task in the Room: its title and state, the Room messages it carries (trimmable before it is sent) and Drop.
+struct RoomTaskCardView: View {
+    let card: RoomTaskCard
+    let act: (String, RoomTaskAction, String?) -> Void
+    var open: (() -> Void)?
+    @Environment(\.roomPlaceContext) private var context
+    @State private var trimming = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Text(verbatim: card.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    .onTapGesture { open?() }.pointerHand(open != nil)
+                stateBadge
+                if card.trimmable {
+                    Button { trimming = true } label: {
+                        Text(verbatim: card.discussionSummary).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Choose the messages this task carries")
+                    .popover(isPresented: $trimming, arrowEdge: .bottom) { trimList }
+                }
+                if card.canDrop { Button("Drop") { act(card.taskId, .drop, nil) }.buttonStyle(SmallButtonStyle(role: .quiet)) }
+            }
+            if let p = card.parentTitle { Text(verbatim: "Part of \(p)").font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1) }
+            if let r = card.result { Text(verbatim: r).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.center) }
+            if let e = card.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative) }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 2)
+        .accessibilityElement(children: .combine).accessibilityLabel(card.spoken)
+    }
+
+    private var stateBadge: some View {
+        Text(verbatim: card.stateLabel).font(.system(size: 11, weight: .medium))
+            .foregroundStyle(card.state == .blocked ? Theme.negative : Theme.muted)
+            .padding(.horizontal, 8).frame(minHeight: 20)
+            .background(Theme.surfaceRaised, in: Capsule()).overlay(Capsule().strokeBorder(Theme.line))
+    }
+
+    private var trimList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Messages this task carries").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text("Untick what the duck does not need. It gets the rest with the task.").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(card.discussion) { m in
+                        Toggle(isOn: Binding(
+                            get: { !card.excluded.contains(m.id) },
+                            set: { context.include(card.taskId, m.id, $0) })
+                        ) {
+                            (Text(verbatim: m.author + ": ").fontWeight(.semibold).foregroundStyle(Theme.ink)
+                                + Text(verbatim: m.text).foregroundStyle(Theme.muted))
+                                .font(.system(size: 12)).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(12).frame(width: 320)
     }
 }

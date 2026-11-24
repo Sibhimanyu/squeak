@@ -41,7 +41,7 @@ final class RoomRosterModel {
             await refresh(host: host)   // the daemon's counts follow the change
         } catch {
             ducks = before
-            self.error = RoomJobs.refusal(error)
+            self.error = RoomTasks.refusal(error)
         }
     }
 
@@ -54,7 +54,7 @@ final class RoomRosterModel {
             ducks = RoomRoster.upserting(duck, into: ducks ?? [])
             return duck
         } catch {
-            self.error = RoomJobs.refusal(error)
+            self.error = RoomTasks.refusal(error)
             return nil
         }
     }

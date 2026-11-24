@@ -20,9 +20,9 @@ struct RoomMessagesTests {
         RoomThread(sessionId: s, title: "T-\(s)", agent: s == "s2" ? "codex" : "claude", state: state, workingOn: workingOn, progress: progress, ask: ask, turnStartedAt: started,
                    name: name, role: role, duty: duty, lastActiveAt: lastActive)
     }
-    private func feed(turns: [RoomTurn] = [], posts: [RoomPost] = [], threads: [RoomThread] = [], jobs: [RoomJob]? = nil, serves: Bool = true) -> RoomFeed {
+    private func feed(turns: [RoomTurn] = [], posts: [RoomPost] = [], threads: [RoomThread] = [], jobs: [RoomTask]? = nil, serves: Bool = true) -> RoomFeed {
         var f = RoomFeed()
-        f.apply(page: RoomPage(posts: posts, latestSeq: posts.map(\.seq).max() ?? 0, threads: threads, turns: serves ? turns : nil, jobs: jobs))
+        f.apply(page: RoomPage(posts: posts, latestSeq: posts.map(\.seq).max() ?? 0, threads: threads, turns: serves ? turns : nil, tasks: jobs))
         return f
     }
     private func post(_ seq: Int, _ text: String, by: RoomAuthor, at: Int64, kind: RoomPostKind = .message, level: RoomLevel = .room, sid: String? = nil, to: String? = nil) -> RoomPost {
@@ -123,7 +123,7 @@ struct RoomMessagesTests {
         let f = feed(turns: [turn("s1:1", at: base, outcome: .error, text: nil)], threads: [thread("s1")])
         let m = groups(RoomMessages.build(feed: f, now: now, calendar: cal)).flatMap(\.messages).last!
         #expect(m.parts.first == .text("Hit an error", .failed))
-        let job = RoomJob(id: "job:1", messageId: "p1", text: "do it", status: .running, handedTo: RoomJobHandedTo(sessionId: "s1", title: "T", turnId: "1"), createdAt: base, updatedAt: base)
+        let job = RoomTask(id: "job:1", messageId: "p1", text: "do it", state: .working, handedTo: RoomTaskHandedTo(sessionId: "s1", title: "T", turnId: "1"), createdAt: base, updatedAt: base)
         let me = RoomAuthor(kind: .person, id: "me", name: "Sibhi")
         let g = feed(turns: [turn("s1:1", at: base + min)], posts: [post(1, "do it", by: me, at: base)], threads: [thread("s1")], jobs: [job])
         let ids = groups(RoomMessages.build(feed: g, now: now, calendar: cal)).flatMap(\.messages).map(\.id)
@@ -165,7 +165,7 @@ struct RoomMessagesTests {
         #expect(m.pending && m.author.kind == .me)
         f.reconcile(pendingId: id, with: post(1, "hello", by: RoomAuthor(kind: .person, id: "u1", name: "Sibhi Raj"), at: base))
         m = groups(RoomMessages.build(feed: f, now: now, calendar: cal))[0].messages[0]
-        #expect(m.id == id && !m.pending && m.author.kind == .me && m.canMakeJob)
+        #expect(m.id == id && !m.pending && m.author.kind == .me && m.canMakeTask)
     }
 
     @Test func handoffsAreQuietLinesAndSqueakNeverSpeaks() {
@@ -202,9 +202,9 @@ struct RoomMessagesTests {
 
     // MARK: Jobs
 
-    private func offerJob(_ id: String = "job:1", status: RoomJobStatus = .suggested, pitch: String? = "worked on the control bar an hour ago", claim: RoomJobClaim? = nil, noSuggestion: Bool = false) -> RoomJob {
-        RoomJob(id: id, messageId: "p1", text: "Check the control bar on a second desktop", status: status,
-                suggestion: noSuggestion ? nil : RoomJobTarget(sessionId: "s2", title: "T-s2", reason: "r", pitch: pitch), claim: claim, createdAt: base + min, updatedAt: base + min)
+    private func offerJob(_ id: String = "job:1", state: RoomTaskState = .waiting, pitch: String? = "worked on the control bar an hour ago", claim: RoomTaskClaim? = nil, noSuggestion: Bool = false) -> RoomTask {
+        RoomTask(id: id, messageId: "p1", text: "Check the control bar on a second desktop", state: state,
+                suggestion: noSuggestion ? nil : RoomTaskTarget(sessionId: "s2", title: "T-s2", reason: "r", pitch: pitch), claim: claim, createdAt: base + min, updatedAt: base + min)
     }
     private var mePost: RoomPost { post(1, "Check the control bar", by: RoomAuthor(kind: .person, id: "me", name: "Sibhi"), at: base) }
 
@@ -214,7 +214,7 @@ struct RoomMessagesTests {
         #expect(g.count == 2 && g[1].author.name == "Nibs" && g[1].author.agentLabel == "Codex")
         guard case .offer(let o) = g[1].messages[0].parts[0] else { Issue.record("no offer"); return }
         #expect(o.text == "I can take this \u{2014} I worked on the control bar an hour ago.")
-        #expect(o.buttons.map(\.title) == ["Go", "Not now"] && o.buttons[0].role == .primary && o.buttons[1].action == .dismiss)
+        #expect(o.buttons.map(\.title) == ["Go", "Not now"] && o.buttons[0].role == .primary && o.buttons[1].action == .drop)
         #expect(o.buttons[0].action == .go(sessionId: "s2"))
         // No pitch from an older host: still polite, no invented reason.
         let g2 = groups(RoomMessages.build(feed: feed(posts: [mePost], threads: [thread("s2")], jobs: [offerJob(pitch: nil)]), now: now, calendar: cal))
@@ -227,10 +227,10 @@ struct RoomMessagesTests {
         f.beginJob("job:1", action: .go(sessionId: "s2"), title: "Nibs")
         guard case .offer(let o) = groups(RoomMessages.build(feed: f, now: now, calendar: cal))[1].messages[0].parts[0] else { Issue.record("no offer"); return }
         #expect(o.note == "Handing over\u{2026}" && o.buttons.isEmpty)
-        f.upsert(job: RoomJob(id: "job:1", messageId: "p1", text: "t", status: .running, handedTo: RoomJobHandedTo(sessionId: "s2", title: "T-s2", turnId: "x"), createdAt: base + min, updatedAt: base + 2 * min))
+        f.upsert(job: RoomTask(id: "job:1", messageId: "p1", text: "t", state: .working, handedTo: RoomTaskHandedTo(sessionId: "s2", title: "T-s2", turnId: "x"), createdAt: base + min, updatedAt: base + 2 * min))
         #expect(groups(RoomMessages.build(feed: f, now: now, calendar: cal)).count == 1)
         f.failJob("job:1", message: "Nope")
-        f.upsert(job: offerJob(status: .suggested))  // a copy that lands ends the refusal
+        f.upsert(job: offerJob(state: .waiting))  // a copy that lands ends the refusal
     }
 
     @Test func notNowDismissesInPlaceAndRefusalsShowUnderTheOffer() {
@@ -238,20 +238,22 @@ struct RoomMessagesTests {
         f.failJob("job:1", message: "Already handed over.")
         guard case .offer(let o) = groups(RoomMessages.build(feed: f, now: now, calendar: cal))[1].messages[0].parts[0] else { Issue.record("no offer"); return }
         #expect(o.error == "Already handed over.")
-        f.upsert(job: RoomJob(id: "job:1", messageId: "p1", text: "t", status: .dismissed, createdAt: base + min, updatedAt: base + 3 * min))
+        f.upsert(job: RoomTask(id: "job:1", messageId: "p1", text: "t", state: .dropped, createdAt: base + min, updatedAt: base + 3 * min))
         #expect(groups(RoomMessages.build(feed: f, now: now, calendar: cal)).count == 1)
     }
 
     @Test func noFittingDuckIsAQuietSystemLine() {
         let f = feed(posts: [mePost], jobs: [offerJob(noSuggestion: true)])
-        let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
-        #expect(lines.count == 1 && lines[0].text == "No duck fits this \u{2014}")
-        #expect(lines[0].buttons.map(\.title) == ["Start a new duck", "Just a note"])
-        #expect(lines[0].buttons.map(\.action) == [.newThread, .dismiss])
+        let all = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
+        #expect(all.filter { $0.task != nil }.count == 1)  // the Task itself, with its state
+        let lines = all.filter { $0.task == nil }
+        #expect(lines.count == 1 && lines[0].text == "No duck fits this task \u{2014}")
+        #expect(lines[0].buttons.map(\.title) == ["Start a new duck", "Drop"])
+        #expect(lines[0].buttons.map(\.action) == [.newThread, .drop])
     }
 
     @Test func aClaimIsTheClaimingDucksMessageWithAllowAndNo() {
-        let claim = RoomJobClaim(sessionId: "s2", title: "T-s2", eta: "~5 min", at: base + 5 * min, status: .asking)
+        let claim = RoomTaskClaim(sessionId: "s2", title: "T-s2", eta: "~5 min", at: base + 5 * min, status: .asking)
         var f = feed(posts: [mePost], threads: [thread("s2", name: "Nibs")], jobs: [offerJob(claim: claim)])
         let g = groups(RoomMessages.build(feed: f, now: now, calendar: cal))
         #expect(g.count == 2)  // only the claim speaks, not the suggestion as well
@@ -262,7 +264,7 @@ struct RoomMessagesTests {
         guard case .offer(let p) = groups(RoomMessages.build(feed: f, now: now, calendar: cal))[1].messages[0].parts[0] else { Issue.record("no claim"); return }
         #expect(p.buttons.isEmpty && p.note == "Allowed")
         // Denied: the claim goes and the suggestion speaks again.
-        f.upsert(job: offerJob(claim: RoomJobClaim(sessionId: "s2", title: "", at: 1, status: .denied)))
+        f.upsert(job: offerJob(claim: RoomTaskClaim(sessionId: "s2", title: "", at: 1, status: .denied)))
         _ = f
     }
 
@@ -270,10 +272,11 @@ struct RoomMessagesTests {
         var f = feed(posts: [mePost])
         f.failJob("msg:p1", message: "Not now.")
         let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
-        #expect(lines.map(\.text) == ["Not made a job"] && lines[0].error == "Not now.")
-        let failed = RoomJob(id: "job:9", messageId: "p1", text: "t", status: .failed, handedTo: RoomJobHandedTo(sessionId: "s2", title: "Nibs"), createdAt: base + min, updatedAt: base + 2 * min)
+        #expect(lines.map(\.text) == ["Not made a task"] && lines[0].error == "Not now.")
+        let failed = RoomTask(id: "job:9", messageId: "p1", text: "t", state: .blocked, handedTo: RoomTaskHandedTo(sessionId: "s2", title: "Nibs"), createdAt: base + min, updatedAt: base + 2 * min)
         let f2 = feed(posts: [mePost], jobs: [failed])
-        #expect(RoomMessages.build(feed: f2, now: now, calendar: cal).contains { if case .system(let s) = $0 { s.text == "Nibs didn\u{2019}t finish this" } else { false } })
+        let card = RoomMessages.build(feed: f2, now: now, calendar: cal).compactMap { item -> RoomTaskCard? in if case .system(let s) = item { s.task } else { nil } }
+        #expect(card.count == 1 && card[0].stateLabel == "Blocked" && card[0].opens == "s2" && card[0].canDrop)
     }
 
     // MARK: Working, ducks, presence
@@ -333,7 +336,7 @@ struct RoomMessagesTests {
           {"sessionId":"c","title":"T","state":"idle","duty":"sideways","name":""}],
          "turns":[{"id":"b:1","sessionId":"b","threadTitle":"T","startedAt":1,"ducklings":{"count":2,"done":1,"items":[{"label":"x","state":"done"},{"label":"y","state":"weird"},{"nope":1}]}},
                   {"id":"b:2","sessionId":"b","threadTitle":"T","startedAt":2,"ducklings":{"count":0}}],
-         "jobs":[{"id":"job:1","messageId":"p","status":"suggested","suggestion":{"sessionId":"b","title":"Pip","pitch":"did it"}}]}
+         "tasks":[{"id":"job:1","messageId":"p","state":"waiting","suggestion":{"sessionId":"b","title":"Pip","pitch":"did it"}}]}
         """
         let page = try JSONDecoder().decode(RoomPage.self, from: Data(json.utf8))
         let t = page.threads
@@ -343,7 +346,7 @@ struct RoomMessagesTests {
         let d = page.turns?[0].ducklings
         #expect(d?.count == 2 && d?.done == 1 && d?.items.map(\.state) == [.done, .running])
         #expect(page.turns?[1].ducklings == nil)
-        #expect(page.jobs?[0].suggestion?.pitch == "did it")
+        #expect(page.tasks?[0].suggestion?.pitch == "did it")
     }
 
     @Test func aThreadFrameReplacesTheDuckInPlace() {

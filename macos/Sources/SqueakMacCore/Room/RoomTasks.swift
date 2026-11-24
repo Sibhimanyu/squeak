@@ -1,13 +1,46 @@
 import Foundation
 
-// Room jobs (host contract CONTRACT-jobs.md): a person's room message that is work. Squeak never chats: its only words are
+// Room Tasks: a person's room message that is work. Squeak never chats: its only words are
 // one quiet action line under the message and, when a running thread asks to take a job, a card in Now. Nothing is taken
 // or started without the person's explicit OK (Go / Allow). Everything here is read leniently: a host without `jobs`
 // sends none and the room shows nothing new.
 
-public enum RoomJobStatus: String, Sendable, Equatable { case suggested, dismissed, handed, running, done, failed }
+/// A Task's state: waiting (not taken up), working (a Duck has it), blocked (its turn did not finish), done, dropped.
+public enum RoomTaskState: String, Sendable, Equatable {
+    case waiting, working, blocked, done, dropped
 
-public struct RoomJobTarget: Sendable, Equatable, Decodable {
+    /// The word a Task shows.
+    public var label: String {
+        switch self {
+        case .waiting: "Waiting"
+        case .working: "Working"
+        case .blocked: "Blocked"
+        case .done: "Done"
+        case .dropped: "Dropped"
+        }
+    }
+}
+
+/// One Room message a Task carries (the person can trim these before the Task is sent).
+public struct RoomTaskMessage: Sendable, Equatable, Decodable, Identifiable {
+    public var id: String
+    public var author: String
+    public var text: String
+    public var at: Int64
+    public init(id: String, author: String, text: String, at: Int64 = 0) {
+        self.id = id; self.author = author; self.text = text; self.at = at
+    }
+    private enum CodingKeys: String, CodingKey { case id, author, text, at }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        author = (try? c.decode(String.self, forKey: .author)) ?? ""
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        at = c.ms(.at) ?? 0
+    }
+}
+
+public struct RoomTaskTarget: Sendable, Equatable, Decodable {
     public var sessionId: String
     public var title: String
     public var reason: String
@@ -31,7 +64,7 @@ public struct RoomJobTarget: Sendable, Equatable, Decodable {
 
 public enum RoomClaimStatus: String, Sendable, Equatable { case asking, allowed, denied }
 
-public struct RoomJobClaim: Sendable, Equatable, Decodable {
+public struct RoomTaskClaim: Sendable, Equatable, Decodable {
     public var sessionId: String
     public var title: String
     public var eta: String?
@@ -52,7 +85,7 @@ public struct RoomJobClaim: Sendable, Equatable, Decodable {
     }
 }
 
-public struct RoomJobHandedTo: Sendable, Equatable, Decodable {
+public struct RoomTaskHandedTo: Sendable, Equatable, Decodable {
     public var sessionId: String
     public var title: String
     public var turnId: String?
@@ -71,7 +104,7 @@ public struct RoomJobHandedTo: Sendable, Equatable, Decodable {
 }
 
 /// Where a job's work happens: an existing stream of the pond, or a new one on a branch the host will make.
-public enum RoomJobPlace: Sendable, Equatable, Decodable {
+public enum RoomTaskPlace: Sendable, Equatable, Decodable {
     case stream(workspaceId: String, branch: String)
     case new(branch: String)
 
@@ -99,51 +132,67 @@ public enum RoomJobPlace: Sendable, Equatable, Decodable {
     }
 }
 
-public struct RoomJob: Sendable, Equatable, Decodable, Identifiable {
+public struct RoomTask: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var messageId: String
     public var text: String
-    public var status: RoomJobStatus
-    public var suggestion: RoomJobTarget?
-    public var candidates: [RoomJobTarget]
+    /// One line.
+    public var title: String
+    public var state: RoomTaskState
+    /// Only suggested so far: the person has not taken it up.
+    public var proposed: Bool
+    public var parentTaskId: String?
+    /// The Room messages since the previous Task (at most 2 h) the Task carries.
+    public var discussion: [RoomTaskMessage]
+    public var suggestion: RoomTaskTarget?
+    public var candidates: [RoomTaskTarget]
     /// Chosen by the host; absent in a plain-folder pond (no streams) and from an older host.
-    public var place: RoomJobPlace?
-    public var claim: RoomJobClaim?
-    public var handedTo: RoomJobHandedTo?
-    public var outcomeText: String?
+    public var place: RoomTaskPlace?
+    public var claim: RoomTaskClaim?
+    public var handedTo: RoomTaskHandedTo?
+    /// How it ended: the Duck's first sentence.
+    public var result: String?
     public var createdAt: Int64
     public var updatedAt: Int64
 
     public init(
-        id: String, messageId: String, text: String = "", status: RoomJobStatus = .suggested, suggestion: RoomJobTarget? = nil,
-        candidates: [RoomJobTarget] = [], claim: RoomJobClaim? = nil, handedTo: RoomJobHandedTo? = nil, outcomeText: String? = nil,
-        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomJobPlace? = nil
+        id: String, messageId: String, text: String = "", title: String? = nil, state: RoomTaskState = .waiting, proposed: Bool = false,
+        parentTaskId: String? = nil, discussion: [RoomTaskMessage] = [], suggestion: RoomTaskTarget? = nil,
+        candidates: [RoomTaskTarget] = [], claim: RoomTaskClaim? = nil, handedTo: RoomTaskHandedTo? = nil, result: String? = nil,
+        createdAt: Int64 = 0, updatedAt: Int64 = 0, place: RoomTaskPlace? = nil
     ) {
         self.place = place
-        self.id = id; self.messageId = messageId; self.text = text; self.status = status; self.suggestion = suggestion
-        self.candidates = candidates; self.claim = claim; self.handedTo = handedTo; self.outcomeText = outcomeText
+        self.id = id; self.messageId = messageId; self.text = text; self.title = title ?? RoomTasks.title(of: text)
+        self.state = state; self.proposed = proposed; self.parentTaskId = parentTaskId; self.discussion = discussion
+        self.suggestion = suggestion
+        self.candidates = candidates; self.claim = claim; self.handedTo = handedTo; self.result = result
         self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, messageId, text, status, suggestion, candidates, place, claim, handedTo, outcomeText, createdAt, updatedAt
+        case id, messageId, text, title, state, proposed, parentTaskId, discussion, suggestion, candidates, place, claim, handedTo, result
+        case createdAt, updatedAt
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // A job with no id, message or readable status cannot be placed or acted on; the page drops it.
+        // A Task with no id, message or readable state cannot be placed or acted on; the page drops it.
         id = try c.decode(String.self, forKey: .id)
         messageId = try c.decode(String.self, forKey: .messageId)
-        guard let s = (try? c.decode(String.self, forKey: .status)).flatMap(RoomJobStatus.init(rawValue:)) else {
-            throw DecodingError.dataCorruptedError(forKey: .status, in: c, debugDescription: "status")
+        guard let s = (try? c.decode(String.self, forKey: .state)).flatMap(RoomTaskState.init(rawValue:)) else {
+            throw DecodingError.dataCorruptedError(forKey: .state, in: c, debugDescription: "state")
         }
-        status = s
+        state = s
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
-        suggestion = try? c.decode(RoomJobTarget.self, forKey: .suggestion)
-        candidates = ((try? c.decode([Failable<RoomJobTarget>].self, forKey: .candidates)) ?? []).compactMap(\.value)
-        place = try? c.decode(RoomJobPlace.self, forKey: .place)
-        claim = try? c.decode(RoomJobClaim.self, forKey: .claim)
-        handedTo = try? c.decode(RoomJobHandedTo.self, forKey: .handedTo)
-        outcomeText = (try? c.decode(String.self, forKey: .outcomeText)).flatMap { $0.isEmpty ? nil : $0 }
+        title = (try? c.decode(String.self, forKey: .title)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? RoomTasks.title(of: text)
+        proposed = (try? c.decode(Bool.self, forKey: .proposed)) ?? false
+        parentTaskId = (try? c.decode(String.self, forKey: .parentTaskId)).flatMap { $0.isEmpty ? nil : $0 }
+        discussion = ((try? c.decode([Failable<RoomTaskMessage>].self, forKey: .discussion)) ?? []).compactMap(\.value)
+        suggestion = try? c.decode(RoomTaskTarget.self, forKey: .suggestion)
+        candidates = ((try? c.decode([Failable<RoomTaskTarget>].self, forKey: .candidates)) ?? []).compactMap(\.value)
+        place = try? c.decode(RoomTaskPlace.self, forKey: .place)
+        claim = try? c.decode(RoomTaskClaim.self, forKey: .claim)
+        handedTo = try? c.decode(RoomTaskHandedTo.self, forKey: .handedTo)
+        result = (try? c.decode(String.self, forKey: .result)).flatMap { $0.isEmpty ? nil : $0 }
         createdAt = c.ms(.createdAt) ?? 0
         updatedAt = c.ms(.updatedAt) ?? createdAt
     }
@@ -159,33 +208,44 @@ extension KeyedDecodingContainer {
 }
 
 /// What the person pressed. The body is strict: exactly `action` and, for Go, an optional `sessionId`.
-public enum RoomJobAction: Sendable, Equatable {
+public enum RoomTaskAction: Sendable, Equatable {
     case go(sessionId: String?)
     case newThread
-    case dismiss
+    case drop
     case allow
     case deny
 
     public var body: NativeJSON { body(place: nil) }
 
-    /// The request body; `place` rides only on Go, a new duck and Allow (the host refuses it elsewhere).
-    public func body(place: RoomJobPlace?) -> NativeJSON {
+    /// The request body; `place` and `include` (the Room messages kept after the person's trim) ride only on Go, a new duck and
+    /// Allow (the host refuses them elsewhere).
+    public func body(place: RoomTaskPlace?, include: [String]? = nil) -> NativeJSON {
         var o: [String: NativeJSON]
         switch self {
         case .go(let id):
             o = ["action": .string("go")]
             if let id { o["sessionId"] = .string(id) }
         case .newThread: o = ["action": .string("new")]
-        case .dismiss: return .object(["action": .string("dismiss")])
+        case .drop: return .object(["action": .string("drop")])
         case .allow: o = ["action": .string("allow")]
         case .deny: return .object(["action": .string("deny")])
         }
         if let place { o["place"] = place.json }
+        if let include { o["messageIds"] = .array(include.map { .string($0) }) }
         return .object(o)
     }
 }
 
-public enum RoomJobs {
+public enum RoomTasks {
+    /// A Task's one-line title from its text: the first line, at most 60 characters, no closing full stop.
+    public static func title(of text: String) -> String {
+        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        var t = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let l = t.last, ".!?".contains(l) { t.removeLast() }
+        if t.count > 60 { t = String(t.prefix(59)) + "\u{2026}" }
+        return t.isEmpty ? "New task" : t
+    }
+
     /// The sentence to show when the host refuses (a 409 carries its own) or cannot be reached.
     public static func refusal(_ error: Error) -> String {
         if let e = error as? NativeHostError {
@@ -196,7 +256,7 @@ public enum RoomJobs {
     }
 
     /// Turn row ids are `<sessionId>:<turnId>`; a host may send either spelling.
-    public static func turnRowId(_ h: RoomJobHandedTo) -> String? {
+    public static func turnRowId(_ h: RoomTaskHandedTo) -> String? {
         guard let t = h.turnId else { return nil }
         return t.contains(":") ? t : "\(h.sessionId):\(t)"
     }
@@ -204,35 +264,35 @@ public enum RoomJobs {
 
 // MARK: - Local state (optimistic, reconciled by the job's id)
 
-public struct RoomJobLocal: Sendable, Equatable {
+public struct RoomTaskLocal: Sendable, Equatable {
     /// An action sent and not yet answered: the line shows it at once.
-    public var pending: RoomJobAction?
+    public var pending: RoomTaskAction?
     /// The target's title when the pending action is Go, so the line can say "Handing to X".
     public var pendingTitle: String?
     /// A refusal or failure, shown inline under the line until the job next changes.
     public var error: String?
-    public init(pending: RoomJobAction? = nil, pendingTitle: String? = nil, error: String? = nil) {
+    public init(pending: RoomTaskAction? = nil, pendingTitle: String? = nil, error: String? = nil) {
         self.pending = pending; self.pendingTitle = pendingTitle; self.error = error
     }
 }
 
 // MARK: - The action line
 
-public struct RoomJobButton: Sendable, Equatable, Identifiable {
+public struct RoomTaskButton: Sendable, Equatable, Identifiable {
     public enum Role: Sendable, Equatable { case primary, secondary, quiet }
     public var id: String
     public var title: String
     public var role: Role
-    public var action: RoomJobAction
+    public var action: RoomTaskAction
 }
 
 /// The one quiet line under a person's message. Pure: the view only draws it.
-public struct RoomJobLine: Sendable, Equatable, Identifiable {
+public struct RoomTaskLine: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Equatable {
-        case suggestion, newThread, handing, handed, running, done, failed
+        case suggestion, newThread, handing, running, done, blocked
         /// Dismissed: the line collapses in place (the row stays in the list at zero height, so nothing jumps).
         case collapsed
-        /// "Make this a job" was refused or did not go; there is no job yet.
+        /// "Make task" was refused or did not go; there is no job yet.
         case makeFailed
     }
     public enum Mark: Sendable, Equatable { case none, working, failed }
@@ -242,12 +302,12 @@ public struct RoomJobLine: Sendable, Equatable, Identifiable {
     public var jobId: String?
     public var kind: Kind
     public var mark: Mark
-    /// "Looks like a job →", "Handed to", "Done ·": the words before the target.
+    /// "Looks like a task →", "Handed to", "Done ·": the words before the target.
     public var lead: String
-    public var target: RoomJobTarget?
+    public var target: RoomTaskTarget?
     public var targetTitle: String?
-    public var candidates: [RoomJobTarget]
-    public var buttons: [RoomJobButton]
+    public var candidates: [RoomTaskTarget]
+    public var buttons: [RoomTaskButton]
     /// Done: the outcome sentence, which links to `turnRowId`.
     public var detail: String?
     public var turnRowId: String?
@@ -265,19 +325,20 @@ public struct RoomJobLine: Sendable, Equatable, Identifiable {
     }
 }
 
-extension RoomJobs {
-    public static let suggestionLead = "Looks like a job \u{2192}"
+extension RoomTasks {
+    public static let suggestionLead = "Looks like a task \u{2192}"
+    public static let taskLead = "Task \u{2192}"
 
-    public static func line(for job: RoomJob, local: RoomJobLocal? = nil) -> RoomJobLine {
-        func base(_ kind: RoomJobLine.Kind, mark: RoomJobLine.Mark = .none, lead: String) -> RoomJobLine {
-            RoomJobLine(
+    public static func line(for job: RoomTask, local: RoomTaskLocal? = nil) -> RoomTaskLine {
+        func base(_ kind: RoomTaskLine.Kind, mark: RoomTaskLine.Mark = .none, lead: String) -> RoomTaskLine {
+            RoomTaskLine(
                 id: "job:" + job.id, messageId: job.messageId, jobId: job.id, kind: kind, mark: mark, lead: lead, target: nil,
                 targetTitle: nil, candidates: [], buttons: [], detail: nil, turnRowId: nil, error: local?.error)
         }
-        // An action in flight: shown at once, reconciled when the host's job arrives.
-        if let p = local?.pending, job.status == .suggested {
+        // An action in flight: shown at once, reconciled when the host's Task arrives.
+        if let p = local?.pending, job.state == .waiting {
             switch p {
-            case .dismiss: return base(.collapsed, lead: "")
+            case .drop: return base(.collapsed, lead: "")
             case .go:
                 var l = base(.handing, mark: .working, lead: "Handing to")
                 l.targetTitle = local?.pendingTitle ?? job.suggestion?.title
@@ -286,35 +347,31 @@ extension RoomJobs {
             case .allow, .deny: break  // a claim's answer shows on the claim card; the line keeps its words
             }
         }
-        switch job.status {
-        case .dismissed: return base(.collapsed, lead: "")
-        case .suggested:
+        switch job.state {
+        case .dropped: return base(.collapsed, lead: "")
+        case .waiting:
+            let lead = job.proposed ? suggestionLead : taskLead
             if let s = job.suggestion {
-                var l = base(.suggestion, lead: suggestionLead)
+                var l = base(.suggestion, lead: lead)
                 l.target = s; l.targetTitle = s.title
                 // Other threads the person may pick instead (never the suggestion twice).
                 l.candidates = job.candidates.filter { $0.sessionId != s.sessionId }
                 l.buttons = [
-                    RoomJobButton(id: "go", title: "Go", role: .primary, action: .go(sessionId: s.sessionId)),
-                    RoomJobButton(id: "new", title: "New duck", role: .secondary, action: .newThread),
-                    RoomJobButton(id: "note", title: "Just a note", role: .quiet, action: .dismiss),
+                    RoomTaskButton(id: "go", title: "Go", role: .primary, action: .go(sessionId: s.sessionId)),
+                    RoomTaskButton(id: "new", title: "New duck", role: .secondary, action: .newThread),
+                    RoomTaskButton(id: "note", title: "Drop", role: .quiet, action: .drop),
                 ]
                 return l
             }
-            var l = base(.newThread, lead: suggestionLead)
+            var l = base(.newThread, lead: lead)
             l.targetTitle = "new duck"
             l.candidates = job.candidates
             l.buttons = [
-                RoomJobButton(id: "start", title: "Start", role: .primary, action: .newThread),
-                RoomJobButton(id: "note", title: "Just a note", role: .quiet, action: .dismiss),
+                RoomTaskButton(id: "start", title: "Start", role: .primary, action: .newThread),
+                RoomTaskButton(id: "note", title: "Drop", role: .quiet, action: .drop),
             ]
             return l
-        case .handed:
-            var l = base(.handed, lead: "Handed to")
-            l.targetTitle = job.handedTo?.title
-            if job.handedTo == nil { l.lead = "Handed over" }
-            return l
-        case .running:
+        case .working:
             var l = base(.running, mark: .working, lead: "")
             let t = job.handedTo?.title ?? ""
             l.targetTitle = t.isEmpty ? "A duck" : t
@@ -322,33 +379,33 @@ extension RoomJobs {
             return l
         case .done:
             var l = base(.done, lead: "Done")
-            l.detail = job.outcomeText
+            l.detail = job.result
             l.turnRowId = job.handedTo.flatMap(turnRowId)
             return l
-        case .failed:
-            var l = base(.failed, mark: .failed, lead: "Didn\u{2019}t finish")
+        case .blocked:
+            var l = base(.blocked, mark: .failed, lead: "Didn\u{2019}t finish")
             l.turnRowId = job.handedTo.flatMap(turnRowId)
             return l
         }
     }
 
-    /// The line for a message that has no job but whose "Make this a job" did not go.
-    public static func makeFailedLine(messageId: String, error: String) -> RoomJobLine {
-        RoomJobLine(
-            id: "jobmsg:" + messageId, messageId: messageId, jobId: nil, kind: .makeFailed, mark: .failed, lead: "Not made a job", target: nil,
+    /// The line for a message that has no job but whose "Make task" did not go.
+    public static func makeFailedLine(messageId: String, error: String) -> RoomTaskLine {
+        RoomTaskLine(
+            id: "jobmsg:" + messageId, messageId: messageId, jobId: nil, kind: .makeFailed, mark: .failed, lead: "Not made a task", target: nil,
             targetTitle: nil, candidates: [], buttons: [], detail: nil, turnRowId: nil, error: error)
     }
 
     /// The job a message carries (the newest one by creation, then id).
-    public static func job(for messageId: String, in jobs: [RoomJob]) -> RoomJob? {
+    public static func job(for messageId: String, in jobs: [RoomTask]) -> RoomTask? {
         jobs.last { $0.messageId == messageId }
     }
 
-    /// "Make this a job" is offered on a person's room message that has no live job (a dismissed one may be remade).
-    public static func canMakeJob(_ row: RoomRow, jobs: [RoomJob]) -> Bool {
+    /// "Make task" is offered on a person's room message that has no live Task (a dropped one may be made again, a suggestion taken up).
+    public static func canMakeTask(_ row: RoomRow, jobs: [RoomTask]) -> Bool {
         guard row.post.author.kind == .person, row.post.level == .room, !row.pending, !row.failed, row.post.seq > 0 else { return false }
         guard let j = job(for: row.post.id, in: jobs) else { return true }
-        return j.status == .dismissed
+        return j.state == .dropped || j.proposed
     }
 
     // MARK: Claims (Now)
@@ -366,9 +423,9 @@ extension RoomJobs {
         public var at: Int64
     }
 
-    public static func claims(jobs: [RoomJob], local: [String: RoomJobLocal] = [:], threads: [RoomThread] = []) -> [ClaimCard] {
+    public static func claims(jobs: [RoomTask], local: [String: RoomTaskLocal] = [:], threads: [RoomThread] = []) -> [ClaimCard] {
         var out: [ClaimCard] = []
-        for j in jobs where j.status == .suggested {
+        for j in jobs where j.state == .waiting {
             guard let c = j.claim, c.status == .asking else { continue }
             if let p = local[j.id]?.pending, p == .allow || p == .deny { continue }
             let title = c.title.isEmpty ? (threads.first { $0.sessionId == c.sessionId }?.title ?? "A duck") : c.title
@@ -392,7 +449,7 @@ extension RoomJobs {
 /// The chip under an offer: "\u{2192} on <branch>" or "\u{2192} new stream <branch>", with what Change may pick.
 public struct RoomPlaceChip: Sendable, Equatable {
     public var text: String
-    public var place: RoomJobPlace
+    public var place: RoomTaskPlace
     /// The person picked it here (it differs from what the host chose).
     public var changed: Bool
     /// What "New stream\u{2026}" starts with.
@@ -418,16 +475,16 @@ public enum RoomPlaceMenuItem: Sendable, Equatable {
 
 public enum RoomPlaces {
     /// The place that will be sent: the person's pick, else the host's. Nil hides the chip (a folder pond has no streams).
-    public static func effective(_ job: RoomJob, chosen: RoomJobPlace?) -> RoomJobPlace? { chosen ?? job.place }
+    public static func effective(_ job: RoomTask, chosen: RoomTaskPlace?) -> RoomTaskPlace? { chosen ?? job.place }
 
-    public static func chipText(_ place: RoomJobPlace) -> String {
+    public static func chipText(_ place: RoomTaskPlace) -> String {
         switch place {
         case .stream(_, let b): "\u{2192} on \(b)"
         case .new(let b): "\u{2192} new stream \(b)"
         }
     }
 
-    public static func chip(for job: RoomJob, chosen: RoomJobPlace?) -> RoomPlaceChip? {
+    public static func chip(for job: RoomTask, chosen: RoomTaskPlace?) -> RoomPlaceChip? {
         guard let p = effective(job, chosen: chosen) else { return nil }
         return RoomPlaceChip(text: chipText(p), place: p, changed: chosen != nil && chosen != job.place,
             prefill: suggestedBranch(job: job, chosen: chosen))
@@ -448,7 +505,7 @@ public enum RoomPlaces {
     }
 
     /// The streams, then "New stream\u{2026}". There is no "Main": a pond with no streams has no place at all.
-    public static func menu(streams: [RoomStreamChoice], current: RoomJobPlace?, prefill: String) -> [RoomPlaceMenuItem] {
+    public static func menu(streams: [RoomStreamChoice], current: RoomTaskPlace?, prefill: String) -> [RoomPlaceMenuItem] {
         var items: [RoomPlaceMenuItem] = streams.map { s in
             var on = false
             if case .stream(let w, _)? = current, w == s.workspaceId { on = true }
@@ -461,7 +518,7 @@ public enum RoomPlaces {
     }
 
     /// The new-stream field's starting text: a new branch already chosen, else the host's suggestion, else one from the job's words.
-    public static func suggestedBranch(job: RoomJob, chosen: RoomJobPlace?) -> String {
+    public static func suggestedBranch(job: RoomTask, chosen: RoomTaskPlace?) -> String {
         if case .new(let b)? = chosen { return b }
         if case .new(let b)? = job.place { return b }
         return slug(job.text)
@@ -486,5 +543,65 @@ public enum RoomPlaces {
         for part in name.split(separator: "/") where part.hasPrefix(".") || part.hasSuffix(".lock") { return bad }
         if taken.contains(name) { return "A stream is already on \(name)." }
         return nil
+    }
+}
+
+// MARK: - The Task in the Room
+
+/// One Task as the Room draws it: its title, its state, the Room messages it carries and what the person can do.
+public struct RoomTaskCard: Sendable, Equatable, Identifiable {
+    public var id: String { "task:" + taskId }
+    public var taskId: String
+    public var title: String
+    public var state: RoomTaskState
+    /// "Waiting", "Working", ... (a suggestion nobody took up says "Suggested").
+    public var stateLabel: String
+    /// "Part of <parent title>" when the Task has a parent the Room knows.
+    public var parentTitle: String?
+    /// Done: the Duck's one sentence.
+    public var result: String?
+    /// The duck's tab the card opens (the Duck that has the Task).
+    public var opens: String?
+    /// The messages the person may include or leave out (never the one that made the Task); empty once it is sent.
+    public var discussion: [RoomTaskMessage]
+    public var excluded: Set<String>
+    public var canDrop: Bool
+    public var error: String?
+
+    public var trimmable: Bool { !discussion.isEmpty }
+    /// "3 of 5 messages".
+    public var discussionSummary: String {
+        let n = discussion.count
+        let kept = discussion.filter { !excluded.contains($0.id) }.count
+        if kept == n { return n == 1 ? "1 message" : "\(n) messages" }
+        return kept == 0 ? "no messages" : "\(kept) of \(n) messages"
+    }
+    public var spoken: String { "Task: \(title). \(stateLabel)" + (result.map { ". \($0)" } ?? "") }
+}
+
+extension RoomTasks {
+    /// The card for a Task; nil for a dropped one (it leaves the Room, the row stays put).
+    public static func card(
+        for task: RoomTask, among tasks: [RoomTask], local: RoomTaskLocal? = nil, excluded: Set<String> = []
+    ) -> RoomTaskCard? {
+        if task.state == .dropped { return nil }
+        if local?.pending == .drop { return nil }
+        let carried = task.state == .waiting ? task.discussion.filter { $0.id != task.messageId } : []
+        return RoomTaskCard(
+            taskId: task.id, title: task.title, state: task.state,
+            stateLabel: task.proposed && task.state == .waiting ? "Suggested" : task.state.label,
+            parentTitle: task.parentTaskId.flatMap { p in tasks.first { $0.id == p }?.title },
+            result: task.state == .done ? task.result : nil,
+            opens: task.handedTo?.sessionId,
+            discussion: carried, excluded: excluded.intersection(carried.map(\.id)),
+            canDrop: task.state != .done, error: local?.error)
+    }
+
+    /// The messages to send with Go, a new duck or Allow: all the Task carries minus the person's trim; nil when nothing
+    /// was trimmed (the host then sends what it carries).
+    public static func messageIdsToSend(for task: RoomTask, excluded: Set<String>) -> [String]? {
+        let out = excluded.intersection(task.discussion.map(\.id))
+        if out.isEmpty { return nil }
+        return task.discussion.map(\.id).filter { !out.contains($0) }
     }
 }

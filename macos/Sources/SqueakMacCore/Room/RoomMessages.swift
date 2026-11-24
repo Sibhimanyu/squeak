@@ -34,9 +34,9 @@ public struct RoomAskCard: Sendable, Equatable {
 public struct RoomOffer: Sendable, Equatable {
     public var jobId: String
     public var text: String
-    public var buttons: [RoomJobButton]
+    public var buttons: [RoomTaskButton]
     /// Other ducks the person may pick instead of the suggested one (a menu beside Go).
-    public var candidates: [RoomJobTarget]
+    public var candidates: [RoomTaskTarget]
     /// Words that replace the buttons while an action is in flight or after it was taken ("Handing over\u{2026}", "Allowed").
     public var note: String?
     public var error: String?
@@ -62,9 +62,9 @@ public struct RoomMessage: Sendable, Equatable, Identifiable {
     public var parts: [RoomPart]
     public var pending = false
     public var failed = false
-    /// The room post a person's text came from: "Make this a job" and Retry act on it.
+    /// The room post a person's text came from: "Make task" and Retry act on it.
     public var postId: String?
-    public var canMakeJob = false
+    public var canMakeTask = false
     /// The duck this person's message went to (its turn's duck, or the job's handed duck); nil when it went to none.
     public var goesTo: String?
     /// A person's pictures and files (drawn under the words).
@@ -86,12 +86,14 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     public var at: Int64
     public var text: String
     public var jobId: String?
-    public var buttons: [RoomJobButton]
+    public var buttons: [RoomTaskButton]
     public var error: String?
     public var note: String?
     /// The duck whose tab the line opens (a handoff opens the duck it went to); nil for a line about no duck.
     public var opens: String?
     public var place: RoomPlaceChip? = nil
+    /// A Task drawn with its state (title, Waiting / Working / ..., the messages it carries); `text` is its title then.
+    public var task: RoomTaskCard? = nil
     /// A duck's note to another duck: drawn as a card (avatar, name, "to", time, Markdown), not as a quiet line.
     public var handoff: RoomHandoff? = nil
 }
@@ -162,7 +164,7 @@ public enum RoomMessages {
         func add(_ m: RoomMessage, order: Int) { entries.append(Entry(at: m.at, order: order, content: .message(m))) }
 
         // A turn handed over by a job already has its prompt in the room: the person's message above it.
-        let jobTurns = Set(feed.jobs.compactMap { $0.handedTo.flatMap(RoomJobs.turnRowId) })
+        let jobTurns = Set(feed.jobs.compactMap { $0.handedTo.flatMap(RoomTasks.turnRowId) })
         // The newest turn of each thread: the one a waiting question belongs to, and the one the app's own file count fits.
         var newest: [String: RoomTurn] = [:]
         for t in feed.turns where (newest[t.sessionId]?.startedAt ?? Int64.min) <= t.startedAt { newest[t.sessionId] = t }
@@ -220,7 +222,7 @@ public enum RoomMessages {
                     author: mine ? .me : .person(RoomPresentation.authorName(p.author)), parts: p.text.isEmpty && !p.attachments.isEmpty ? [] : [.text(p.text, .normal)])
                 m.attachments = p.attachments
                 m.pending = r.pending; m.failed = r.failed; m.postId = p.id
-                m.canMakeJob = RoomJobs.canMakeJob(r, jobs: feed.jobs)
+                m.canMakeTask = RoomTasks.canMakeTask(r, jobs: feed.jobs)
                 m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId
                 add(m, order: 0)
             } else if p.level == .room, p.author.kind == .agent, p.kind == .message || !feed.servesTurns {
@@ -236,31 +238,30 @@ public enum RoomMessages {
             let postAt = postsById[job.messageId]?.post.at ?? 0
             let at = max(job.createdAt, postAt)
             let local = feed.jobLocal[job.id]
-            if let claim = job.claim, claim.status != .denied, job.status == .suggested || job.status == .handed || job.status == .running {
+            // Every Task shows with its state; a dropped one leaves.
+            if let card = RoomTasks.card(for: job, among: feed.jobs, local: local, excluded: feed.taskExcluded[job.id] ?? []) {
+                entries.append(Entry(at: at, order: 1, content: .system(RoomSystemLine(
+                    id: "task:\(job.id)", at: at, text: card.title, jobId: nil, buttons: [], opens: card.opens, task: card))))
+            }
+            if let claim = job.claim, claim.status != .denied, job.state == .waiting || job.state == .working {
                 if let m = claimMessage(job, claim: claim, local: local, threads: threads, at: max(at, claim.at), place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])) { add(m, order: 2) }
                 if claim.status == .asking { continue }
             }
-            switch job.status {
-            case .suggested:
-                if let pend = local?.pending, pend == .dismiss { continue }
+            if job.state == .waiting {
+                if let pend = local?.pending, pend == .drop { continue }
                 if let s = job.suggestion {
                     add(offerMessage(job, target: s, local: local, threads: threads, at: at, place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])), order: 2)
                 } else {
                     entries.append(Entry(at: at, order: 2, content: .system(noDuckLine(job, local: local, at: at, place: RoomPlaces.chip(for: job, chosen: feed.jobPlace[job.id])))))
                 }
-            case .failed:
-                let who = job.handedTo.flatMap { h in threads[h.sessionId]?.duckName ?? (h.title.isEmpty ? nil : h.title) } ?? "A duck"
-                entries.append(Entry(at: max(at, job.updatedAt), order: 2, content: .system(RoomSystemLine(
-                    id: "job:\(job.id):sys", at: max(at, job.updatedAt), text: "\(who) didn\u{2019}t finish this", jobId: job.id, buttons: [], opens: job.handedTo?.sessionId))))
-            case .dismissed, .handed, .running, .done: break
             }
         }
-        // "Make this a job" refused: no job exists yet, so the line hangs off the message.
+        // "Make task" refused: no job exists yet, so the line hangs off the message.
         for (key, l) in feed.jobLocal where key.hasPrefix("msg:") {
             guard let e = l.error else { continue }
             let id = String(key.dropFirst(4))
             let at = postsById[id]?.post.at ?? 0
-            entries.append(Entry(at: at, order: 2, content: .system(RoomSystemLine(id: "jobmsg:" + id, at: at, text: "Not made a job", jobId: nil, buttons: [], error: e))))
+            entries.append(Entry(at: at, order: 2, content: .system(RoomSystemLine(id: "jobmsg:" + id, at: at, text: "Not made a task", jobId: nil, buttons: [], error: e))))
         }
 
         entries.sort { ($0.at, $0.order, $0.id) < ($1.at, $1.order, $1.id) }
@@ -309,19 +310,19 @@ public enum RoomMessages {
         return t.count <= n ? t : String(t.prefix(n - 1)) + "\u{2026}"
     }
 
-    static func offerMessage(_ job: RoomJob, target s: RoomJobTarget, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage {
+    static func offerMessage(_ job: RoomTask, target s: RoomTaskTarget, local: RoomTaskLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage {
         let a = RoomMessageAuthor.duck(threads[s.sessionId], sessionId: s.sessionId, fallbackName: s.title, agent: nil)
         let words = s.pitch.map { "I can take this \u{2014} I \($0)." } ?? "I can take this."
         var note: String?
         var buttons = [
-            RoomJobButton(id: "go", title: "Go", role: .primary, action: .go(sessionId: s.sessionId)),
-            RoomJobButton(id: "note", title: "Not now", role: .secondary, action: .dismiss),
+            RoomTaskButton(id: "go", title: "Go", role: .primary, action: .go(sessionId: s.sessionId)),
+            RoomTaskButton(id: "note", title: "Not now", role: .secondary, action: .drop),
         ]
         if let p = local?.pending {
             switch p {
             case .go: note = "Handing over\u{2026}"; buttons = []
             case .newThread: note = "Starting a new duck\u{2026}"; buttons = []
-            case .dismiss, .allow, .deny: break
+            case .drop, .allow, .deny: break
             }
         }
         let others = job.candidates.filter { $0.sessionId != s.sessionId }
@@ -330,7 +331,7 @@ public enum RoomMessages {
             parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: others, note: note, error: local?.error, isClaim: false, place: place))])
     }
 
-    static func claimMessage(_ job: RoomJob, claim: RoomJobClaim, local: RoomJobLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage? {
+    static func claimMessage(_ job: RoomTask, claim: RoomTaskClaim, local: RoomTaskLocal?, threads: [String: RoomThread], at: Int64, place: RoomPlaceChip? = nil) -> RoomMessage? {
         let a = RoomMessageAuthor.duck(threads[claim.sessionId], sessionId: claim.sessionId, fallbackName: claim.title, agent: nil)
         var words = "I\u{2019}d like to take \u{201C}\(shorten(job.text, 80))\u{201D} after this"
         if var e = claim.eta?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
@@ -339,8 +340,8 @@ public enum RoomMessages {
         }
         words += "."
         var buttons = [
-            RoomJobButton(id: "allow", title: "Allow", role: .primary, action: .allow),
-            RoomJobButton(id: "deny", title: "No", role: .secondary, action: .deny),
+            RoomTaskButton(id: "allow", title: "Allow", role: .primary, action: .allow),
+            RoomTaskButton(id: "deny", title: "No", role: .secondary, action: .deny),
         ]
         var note: String?
         if claim.status == .allowed { buttons = []; note = "Allowed" }
@@ -350,14 +351,14 @@ public enum RoomMessages {
             parts: [.offer(RoomOffer(jobId: job.id, text: words, buttons: buttons, candidates: [], note: note, error: local?.error, isClaim: true, place: place))])
     }
 
-    static func noDuckLine(_ job: RoomJob, local: RoomJobLocal?, at: Int64, place: RoomPlaceChip? = nil) -> RoomSystemLine {
+    static func noDuckLine(_ job: RoomTask, local: RoomTaskLocal?, at: Int64, place: RoomPlaceChip? = nil) -> RoomSystemLine {
         var buttons = [
-            RoomJobButton(id: "start", title: "Start a new duck", role: .secondary, action: .newThread),
-            RoomJobButton(id: "note", title: "Just a note", role: .quiet, action: .dismiss),
+            RoomTaskButton(id: "start", title: "Start a new duck", role: .secondary, action: .newThread),
+            RoomTaskButton(id: "note", title: "Drop", role: .quiet, action: .drop),
         ]
         var note: String?
         if local?.pending == .newThread { buttons = []; note = "Starting a new duck\u{2026}" }
-        return RoomSystemLine(id: "job:\(job.id):sys", at: at, text: "No duck fits this \u{2014}", jobId: job.id, buttons: buttons, error: local?.error, note: note, place: place)
+        return RoomSystemLine(id: "job:\(job.id):sys", at: at, text: "No duck fits this task \u{2014}", jobId: job.id, buttons: buttons, error: local?.error, note: note, place: place)
     }
 
     private static func assemble(_ entries: [Entry], now: Date, calendar: Calendar) -> [RoomItem] {

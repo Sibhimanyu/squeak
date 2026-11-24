@@ -42,7 +42,7 @@ final class PondRoomModel {
                 feed = f
                 await react(effect, client)
             case .turn(let t): feed.upsert(turn: t)
-            case .job(let j): feed.upsert(job: j)
+            case .task(let j): feed.upsert(job: j)
             case .thread(let t): feed.upsert(thread: t)
             case .reconnected: await catchUp(client)
             }
@@ -103,27 +103,31 @@ final class PondRoomModel {
         await deliver(pendingId: id, text: row.post.text, level: row.post.level, host: host)
     }
 
-    /// "Make this a job" on a person's message; a refusal shows inline under it.
+    /// "Make task" on a person's message; a refusal shows inline under it.
     func makeJob(messageId: String, host: NativeHostClient) async {
         let key = "msg:" + messageId
         feed.clearJobLocal(key)
         do { feed.upsert(job: try await RoomClient(host: host).makeJob(project: projectId, messageId: messageId)) }
-        catch { feed.failJob(key, message: RoomJobs.refusal(error)) }
+        catch { feed.failJob(key, message: RoomTasks.refusal(error)) }
     }
 
     /// Go, Not now, Start a new duck, Allow, No: shown at once, reconciled by the job the host answers with.
-    func act(jobId: String, _ action: RoomJobAction, title: String? = nil, host: NativeHostClient) async {
+    func act(jobId: String, _ action: RoomTaskAction, title: String? = nil, host: NativeHostClient) async {
         let place = feed.placeToSend(jobId: jobId, action: action)
+        let include = feed.includeToSend(taskId: jobId, action: action)
         feed.beginJob(jobId, action: action, title: title)
-        await perform(jobId, action, place: place, host: host)
+        await perform(jobId, action, place: place, include: include, host: host)
     }
 
-    /// "Change" on a job's place: nothing is sent until Go, Allow or Start.
-    func choosePlace(jobId: String, _ place: RoomJobPlace) { feed.setJobPlace(jobId, place) }
+    /// A Room message in or out of a Task's discussion: nothing is sent until Go, Allow or Start.
+    func setIncluded(taskId: String, messageId: String, _ included: Bool) { feed.setIncluded(messageId, included, task: taskId) }
 
-    private func perform(_ id: String, _ action: RoomJobAction, place: RoomJobPlace?, host: NativeHostClient) async {
-        do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action, place: place)) }
-        catch { feed.failJob(id, message: RoomJobs.refusal(error)) }
+    /// "Change" on a Task's place: nothing is sent until Go, Allow or Start.
+    func choosePlace(jobId: String, _ place: RoomTaskPlace) { feed.setJobPlace(jobId, place) }
+
+    private func perform(_ id: String, _ action: RoomTaskAction, place: RoomTaskPlace?, include: [String]? = nil, host: NativeHostClient) async {
+        do { feed.upsert(job: try await RoomClient(host: host).act(project: projectId, jobId: id, action: action, place: place, include: include)) }
+        catch { feed.failJob(id, message: RoomTasks.refusal(error)) }
     }
 
     // MARK: Ducks
@@ -139,7 +143,7 @@ final class PondRoomModel {
                 feed.upsert(thread: t)
             }
             return nil
-        } catch { return RoomJobs.refusal(error) }
+        } catch { return RoomTasks.refusal(error) }
     }
 
     /// Put a duck on or off duty (`POST .../duty`): shown at once, put back if the host refuses.
@@ -216,7 +220,7 @@ struct PondRoomView: View {
         // Files dropped anywhere in the room are attached to the next message.
         .dropDestination(for: URL.self) { urls, _ in room.tray.add(urls); return !urls.isEmpty }
         .task(id: projectId) { await room.run(host: model.nativeHost) }
-        .environment(\.roomPlaceContext, RoomPlaceContext(streams: streams, taken: taken, choose: { id, p in room.choosePlace(jobId: id, p) }))
+        .environment(\.roomPlaceContext, RoomPlaceContext(streams: streams, taken: taken, choose: { id, p in room.choosePlace(jobId: id, p) }, include: { id, m, on in room.setIncluded(taskId: id, messageId: m, on) }))
     }
 
     @ViewBuilder private func content(_ room: PondRoomModel) -> some View {
