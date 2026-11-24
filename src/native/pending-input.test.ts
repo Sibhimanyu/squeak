@@ -98,8 +98,8 @@ describe("PendingInput through the host", () => {
     expect(cards[0]!.id).not.toBe(q.id);
     runners[0]!.hooks.onConsumed?.(["uuid-1"]);
     expect(host.pendingItems(s.id)).toEqual([]);
-    const taken = host.timelinePage(s.id, { since: 0 }).events.filter((e) => e.type === "message.steer.taken");
-    expect(taken.length).toBeLessThanOrEqual(1);
+    const log = host.timelinePage(s.id, { since: 0 }).events;
+    expect(log.filter((e) => e.type === "prompt.dequeued")).toHaveLength(1);
   });
 
   it("a removed queued id and a steer's id answer 404 and 409", async () => {

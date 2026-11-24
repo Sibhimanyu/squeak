@@ -8,7 +8,6 @@ import {
 } from "./ducklings.js";
 import { readAgentSteps, readShellOutput } from "./ducklings-output.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
-import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
@@ -71,7 +70,6 @@ import {
   type TurnRow,
   type MessageAuthor,
   type PendingItem,
-  type QueueRow,
 } from "./types.js";
 
 export type HostEvent =
