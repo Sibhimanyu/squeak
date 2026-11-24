@@ -452,3 +452,54 @@ small {
   text-decoration: none;
   display: inline-block;
 }
+
+/* The Room: bubbles for people, one collapsed line per duck post, a small card per Task. */
+.g-room-card {
+  width: 100%;
+}
+.g-duck {
+  color: var(--sq-muted);
+  font-size: 15px;
+}
+.g-duck summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.g-duck strong {
+  color: var(--sq-ink);
+}
+.g-duck p {
+  margin: 6px 0 2px;
+  white-space: pre-wrap;
+  color: var(--sq-ink);
+}
+.g-kind {
+  font-size: 13px;
+}
+.g-kind.attention,
+.g-msg.attention small {
+  color: var(--g-warning);
+}
+.g-task {
+  display: grid;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--sq-surface);
+  border-radius: var(--sq-radius-card);
+  border-left: 3px solid var(--g-accent);
+}
+.g-task.blocked {
+  border-left-color: var(--g-warning);
+}
+.g-task.done,
+.g-task.dropped {
+  border-left-color: transparent;
+  opacity: 0.7;
+}
+.g-task p {
+  margin: 4px 0 0;
+}
+.g-task-state {
+  color: var(--sq-muted);
+  font-size: 14px;
+}

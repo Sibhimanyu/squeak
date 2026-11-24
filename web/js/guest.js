@@ -15,6 +15,8 @@ import {
 } from "./guest-model.js";
 import { loadAccountPonds, syncAccountPonds } from "./guest-account.js";
 import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
+import { stillPending } from "./guest-room-model.js";
+import { createRoomScreen } from "./guest-room-view.js";
 import { fetchMe, redeemShortCode, watchPond } from "./guest-relay.js";
 import {
   codeScreen,
@@ -68,6 +70,9 @@ export function startGuest({
     note: null,
     thread: null,
     threadUi: null,
+    /** The Room, while it is open: what was last read, and what this browser sent that the owner's Mac has not applied. */
+    room: null,
+    roomUi: null,
     extraHolds: [],
     sig: "",
     user: null,
@@ -89,7 +94,7 @@ export function startGuest({
   /** Heresay (heresay.js): the screen's name, the one-time introduction at the pond, a nudge when a failure shows. */
   let nudgedFor = null;
   function tellHeresay() {
-    const inPond = ui.screen === "pond" || ui.screen === "thread";
+    const inPond = ui.screen === "pond" || ui.screen === "thread" || ui.screen === "room";
     setScreen(inPond ? "Guest pond" : "Join");
     if (inPond) introduce();
     const failure = ui.error ?? ui.note ?? null;
@@ -101,6 +106,8 @@ export function startGuest({
   function showEnd(title, body, action) {
     stopLive();
     ui.threadUi = null;
+    ui.room = null;
+    ui.roomUi = null;
     mount(endScreen({ title, body, action }));
   }
 
@@ -401,7 +408,21 @@ export function startGuest({
       (x) => x.until > Date.now() && !ui.view.holds.some((hold) => hold.requestId === x.requestId),
     );
     if (ui.thread) await readThread();
+    if (ui.room) await readRoom();
     paint();
+  }
+
+  async function readRoom() {
+    const r = ui.room;
+    try {
+      r.data = await ui.pond.room();
+      r.error = null;
+      r.pending = stillPending(r.pending, r.data);
+    } catch (error) {
+      // A refusal (the owner hid the pond from this guest) is said in the Room; out of reach is the pass's own note.
+      if (error instanceof GuestError && error.status !== 503) r.error = error.message;
+      else throw error;
+    }
   }
 
   async function readThread() {
@@ -462,7 +483,8 @@ export function startGuest({
       mount(page(h("p", { class: "g-lead" }, "Opening the pond…")));
       return;
     }
-    if (ui.thread && !ui.thread.gone) paintThread();
+    if (ui.room) paintRoom();
+    else if (ui.thread && !ui.thread.gone) paintThread();
     else paintPond();
   }
 
@@ -475,6 +497,7 @@ export function startGuest({
       view: ui.view,
       now: Date.now(),
       onOpen: openThread,
+      onOpenRoom: openRoom,
       onLeave: leave,
       macPrompt: ui.macCardDismissed ? null : { onDismiss: dismissMacCard },
     });
@@ -526,6 +549,74 @@ export function startGuest({
       answered: t.answered,
       pending: pendingSends(t.sends, t.events, Date.now()),
     });
+  }
+
+  function paintRoom() {
+    const r = ui.room;
+    if (!r.data) {
+      ui.screen = "loading";
+      mount(
+        page(
+          h("p", { class: "g-lead" }, r.error ?? "Opening the Room\u2026"),
+          r.error ? h("button", { class: "g-btn", type: "button", onclick: () => win.history.back() }, "Back") : null,
+        ),
+      );
+      return;
+    }
+    if (!ui.roomUi || ui.screen !== "room") {
+      ui.roomUi = createRoomScreen({
+        onBack: () => (win.history.state?.r ? win.history.back() : closeRoom()),
+        onSend: sendToRoom,
+        onTakeBack: takeBackFromRoom,
+      });
+      ui.screen = "room";
+      mount(ui.roomUi.node);
+    }
+    ui.roomUi.update({
+      room: r.data,
+      meId: ui.view.me.id,
+      pending: r.pending,
+      note: r.error ?? ui.note,
+      now: Date.now(),
+    });
+  }
+
+  function openRoom() {
+    ui.room = { data: null, pending: [], error: null };
+    win.history.pushState({ r: 1 }, "");
+    ui.screen = "pond";
+    paint();
+    schedule();
+  }
+
+  function closeRoom() {
+    ui.room = null;
+    ui.roomUi = null;
+    ui.screen = "loading";
+    paint();
+  }
+
+  async function sendToRoom(text) {
+    const r = ui.room;
+    try {
+      const { id, at } = await ui.pond.postToRoom(text);
+      r.pending.push({ id, text, at, failed: false });
+      r.error = null;
+      paint();
+      schedule();
+    } catch (error) {
+      // Nothing is known to have arrived (a refusal writes nothing): the words go back in the box.
+      r.error = error instanceof GuestError ? error.message : "I couldn't confirm that arrived. Try sending it again.";
+      paint();
+      ui.roomUi?.setDraft(text);
+    }
+  }
+
+  function takeBackFromRoom(item) {
+    const r = ui.room;
+    r.pending = r.pending.filter((p) => p !== item);
+    paint();
+    ui.roomUi?.setDraft(item.text);
   }
 
   // doing
@@ -619,7 +710,8 @@ export function startGuest({
   }
 
   win.addEventListener?.("popstate", () => {
-    if (ui.thread && !win.history.state?.t) closeThread();
+    if (ui.room && !win.history.state?.r) closeRoom();
+    else if (ui.thread && !win.history.state?.t) closeThread();
   });
   win.document?.addEventListener?.("visibilitychange", () => {
     if (!ui.pond || ui.pond.status !== "active") return;
