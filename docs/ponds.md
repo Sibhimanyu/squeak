@@ -624,10 +624,10 @@ Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessio
 Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
 ```
 
-#### Ducks own their branch (flag `ducksOwnBranch`, `SQUEAK_DUCKS_OWN_BRANCH`, off)
+#### Ducks own their branch (flag `ducksOwnBranch`, `SQUEAK_DUCKS_OWN_BRANCH`, on by default)
 
-Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-branch.md`). Off, nothing below applies
-(the columns exist and fill; behaviour is as before).
+Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-branch.md`). On by default since v1; turn it off with `SQUEAK_DUCKS_OWN_BRANCH=off` or `flags.json`, and nothing below
+applies (the columns exist and fill; behaviour is as before).
 
 - **Model.** `sessions.branch` (from the workspace) and `ducks.workspace_id` / `ducks.branch` (the duck's working copy,
   followed from its current session); a `WorkspaceRow` stays the internal worktree. `SessionRow` carries optional `branch`

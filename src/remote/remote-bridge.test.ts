@@ -7,7 +7,7 @@ import path from "node:path";
 import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { awakeRules } from "../fleet/power-monitor.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
@@ -6397,6 +6397,7 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
     });
 
     it("flag off: no ducksOwnBranch, branches, duckId; a duck-place is refused", async () => {
+      process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
       const f = await setupDucks();
       const v = viewOf(f);
       expect(v.ducksOwnBranch).toBeUndefined();
@@ -6731,6 +6732,13 @@ describe("RemoteBridge generic chats (add-on split)", () => {
 });
 
 describe("RemoteBridge pond threads (the open pond's whole list)", () => {
+  // Stream-mode lists; the ducks-own-branch view is covered by its own describe.
+  beforeEach(() => {
+    process.env.SQUEAK_DUCKS_OWN_BRANCH = "off";
+  });
+  afterEach(() => {
+    delete process.env.SQUEAK_DUCKS_OWN_BRANCH;
+  });
   const pond = {
     id: "proj-green",
     name: "greenroom",
