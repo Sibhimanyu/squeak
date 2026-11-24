@@ -40,6 +40,9 @@ let (pondOrderId, pondOrderDocument) = try channel.pondDocument(.orderManual(ids
 let (pondNewestId, pondNewestDocument) = try channel.pondDocument(.orderNewest, signer: signer, now: madeAt)
 let (pondLeaveId, pondLeaveDocument) = try channel.pondDocument(.leave(pondId: "p-theirs"), signer: signer, now: madeAt)
 let (duckPlaceId, duckPlaceDocument) = try channel.pondDocument(.duckPlace(duckId: "duck-1", place: .new(branch: "try-two"), message: "plan it"), signer: signer, now: madeAt)
+let (roomPostId, roomPostDocument) = try channel.pondDocument(.roomPost(pondId: "proj-shop", text: "Make the icons crisp"), signer: signer, now: madeAt)
+let (roomTaskId, roomTaskDocument) = try channel.pondDocument(.roomTask(pondId: "proj-shop", messageId: "post-1"), signer: signer, now: madeAt)
+let (roomDropId, roomDropDocument) = try channel.pondDocument(.roomDrop(pondId: "proj-shop", taskId: "task:1"), signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
@@ -190,6 +193,12 @@ var fixture: [String: Any] = [
     "pondLeaveCommand": ["box": pondLeaveDocument.box, "sig": pondLeaveDocument.sig!, "device": pondLeaveDocument.device!],
     "pondDuckPlaceCommandId": duckPlaceId,
     "pondDuckPlaceCommand": ["box": duckPlaceDocument.box, "sig": duckPlaceDocument.sig!, "device": duckPlaceDocument.device!],
+    "pondRoomPostCommandId": roomPostId,
+    "pondRoomPostCommand": ["box": roomPostDocument.box, "sig": roomPostDocument.sig!, "device": roomPostDocument.device!],
+    "pondRoomTaskCommandId": roomTaskId,
+    "pondRoomTaskCommand": ["box": roomTaskDocument.box, "sig": roomTaskDocument.sig!, "device": roomTaskDocument.device!],
+    "pondRoomDropCommandId": roomDropId,
+    "pondRoomDropCommand": ["box": roomDropDocument.box, "sig": roomDropDocument.sig!, "device": roomDropDocument.device!],
     "pondNewestCommandId": pondNewestId,
     "pondNewestCommand": ["box": pondNewestDocument.box, "sig": pondNewestDocument.sig!, "device": pondNewestDocument.device!],
     "nativeStartCommandId": nativeStartId,

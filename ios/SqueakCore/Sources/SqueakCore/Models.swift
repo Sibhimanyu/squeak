@@ -1581,7 +1581,8 @@ public struct DuckPlace: Codable, Equatable, Sendable {
 public struct PondCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
-    /// "hide", "order", "message", "leave" (a pond someone else owns; exactly `pondId`) or "duck-place".
+    /// "hide", "order", "message", "leave" (a pond someone else owns; exactly `pondId`), "duck-place", or a Room action:
+    /// "room-post", "room-task", "room-drop".
     public let op: String
     public var pondId: String? = nil
     public var hidden: Bool? = nil
@@ -1595,6 +1596,9 @@ public struct PondCommand: Codable, Equatable, Sendable {
     public var duckId: String? = nil
     public var place: DuckPlace? = nil
     public var message: String? = nil
+    /// "room-task": the Room message to make a Task of. "room-drop": the Task to drop. ("room-post" carries `text`.)
+    public var messageId: String? = nil
+    public var taskId: String? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
