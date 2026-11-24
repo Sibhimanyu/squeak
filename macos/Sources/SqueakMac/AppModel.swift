@@ -288,6 +288,8 @@ final class AppModel {
         let t = ImageTray(); imageTrays[key] = t; return t
     }
     @ObservationIgnored var queueStores: [String: QueueStore] = [:]
+    /// Presses the host has not answered yet: the only "just pressed, not confirmed" state the Mac keeps.
+    @ObservationIgnored var pressLedger = PressLedger()
     @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
     /// One file browser and its open files per workspace folder (`FilesModel.swift`).
     @ObservationIgnored var filesModels: [String: FilesModel] = [:]
@@ -1991,50 +1993,41 @@ final class AppModel {
             native.firstEventLogged = false
             AppLog.timing("send pressed")
         }
-        // A Squeak chat drawn from its timeline: every press is a row of the timeline at once (a prompt, a queued
-        // line, or a steer step at the end of the running turn), named in place by the nonce the host echoes.
+        // What this press draws is decided in the core (PressLedger): a timeline row, a local card or an add-on's queue
+        // card, each only "just pressed, not confirmed" until the host answers.
         let onTimeline = usesTimeline(key) && native.key == key
-        // An older host's chat: a message sent while it works is a card in the queue stack.
-        var localCard: String?
-        if midTurn, !onTimeline, target?.source == .squeak, native.key == key {
-            localCard = UUID().uuidString
-            native.pending.beginLocal(id: localCard!, text: trimmed, steer: mode == .steer, at: Date())
-        }
-        // A queued message to a working chat an add-on's host owns shows in its queue at once, before the daemon answers.
+        let addonWorking = session(key).map { hostProviders.contains($0.key.provider) && $0.state == .working } ?? false
+        let plan = pressLedger.press(
+            PressLedger.Context(
+                mode: mode, midTurn: midTurn, isOpenSqueakChat: target?.source == .squeak && native.key == key,
+                onTimeline: onTimeline, addonHostWorking: addonWorking, clearsDraft: clearsDraft))
+        let clientId = plan.nonce
+        let localCard: String? = plan.localCard ? UUID().uuidString : nil
+        if let localCard { native.pending.beginLocal(id: localCard, text: trimmed, steer: mode == .steer, at: Date()) }
         var card: (store: QueueStore, id: String)?
-        if mode == .queue, let s = session(key), hostProviders.contains(s.key.provider), s.state == .working {
+        if plan.queueCard {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
-        // An idle Squeak chat's press is a row of the timeline at once, named by the nonce the host echoes on its turn.
-        let clientId = UUID()
         if onTimeline { timelineSendPressed(key, nonce: clientId, text: trimmed, midTurn: midTurn, steer: mode == .steer) }
-        let result = await broker.send(trimmed, to: key, clientId: clientId, mode: mode, answersTurn: turn, echoes: localCard == nil && !onTimeline, keepsDraft: !clearsDraft)
-        if let localCard {
-            switch result {
-            case .accepted(_, let delivery, _): native.pending.settleLocal(id: localCard, accepted: true, queued: delivery == .queued)
-            case .uncertain: native.pending.settleLocal(id: localCard, accepted: true, queued: true)
-            case .refused, .notSent: native.pending.settleLocal(id: localCard, accepted: false, queued: false)
-            }
-            if let s = target, case .accepted = result { await refreshNativePending(s) }
+        let result = await broker.send(trimmed, to: key, clientId: clientId, mode: mode, answersTurn: turn, echoes: plan.echoes, keepsDraft: !clearsDraft)
+        let settled = pressLedger.settle(clientId, result)
+        if let localCard, case .settle(let accepted, let queued) = settled.localCard {
+            native.pending.settleLocal(id: localCard, accepted: accepted, queued: queued)
+            if settled.refreshPending, let s = target { await refreshNativePending(s) }
         }
         // A chat that sat in Main moved to its own branch with this message: open the new chat.
         if case .accepted = result, let to = nativeAdapter.moved.take(from: key.hostSessionId.replacingOccurrences(of: NativeAdapter.keyPrefix, with: "")) {
             await openMovedChat(from: key, to: to)
         }
         // A send that did not go: the chat is not working after all.
-        switch result {
-        case .refused(let why), .notSent(let why):
-            if !midTurn { optimistic[key] = nil }
-            if onTimeline { timelineSendFailed(key, nonce: clientId, reason: why) }
-        default: break
-        }
+        if settled.endsWorking { optimistic[key] = nil }
+        if let why = settled.timelineFailure { timelineSendFailed(key, nonce: clientId, reason: why) }
         if let card {
-            switch result {
-            case .accepted:
-                Task { await card.store.accepted(card.id, sessionId: key.hostSessionId) }
-            case .uncertain(let reason): card.store.failed(card.id, reason: reason, unclear: true)
-            case .refused(let reason), .notSent(let reason): card.store.failed(card.id, reason: reason, unclear: false)
+            switch settled.queueCard {
+            case .accepted: Task { await card.store.accepted(card.id, sessionId: key.hostSessionId) }
+            case .failed(let reason, let unclear): card.store.failed(card.id, reason: reason, unclear: unclear)
+            case .none: break
             }
         }
         switch result {
@@ -2049,13 +2042,9 @@ final class AppModel {
         case .uncertain: AppLog.info("send uncertain"); HeresayBridge.trouble()
         case .notSent: AppLog.info("send not sent"); HeresayBridge.trouble()
         }
-        // Nothing left our hands: the words go back to the draft so they are never lost.
-        switch result {
-        case .refused, .notSent:
-            // With a card in the queue, its Retry and Edit hold the words.
-            if card == nil, clearsDraft, key == lastChat, draft.isEmpty { setDraft(text) }
-        default: break
-        }
+        // Nothing left our hands: the words go back to the draft so they are never lost. With a card in the queue,
+        // its Retry and Edit hold the words.
+        if settled.restoresDraft, key == lastChat, draft.isEmpty { setDraft(text) }
         return result
     }
 
