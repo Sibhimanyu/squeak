@@ -67,6 +67,11 @@ export interface RunnerHooks {
   onExit(error?: Error): void;
   /** The agent took in these pushed messages (by the uuid `steer` reported); a steer's card leaves the pending stack. */
   onConsumed?(uuids: string[]): void;
+  /**
+   * Before an edit tool touches these files (paths as the agent gave them): a reason to refuse, or null to go ahead.
+   * Folder Ponds use it for per-file locks between Ducks.
+   */
+  guardEdit?(files: string[]): string | null;
 }
 
 /** The process exited before it started, while it was meant to resume an agent session. */

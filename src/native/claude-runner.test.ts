@@ -985,3 +985,48 @@ describe("a read-only root (Main of a git pond for a duck)", () => {
     expect(f.state.modes.at(-1)).toBe("acceptEdits");
   });
 });
+
+describe("per-file guard (folder Pond locks)", () => {
+  it("asks guardEdit before an edit tool in the hook and in canUseTool, even when approvals are skipped", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const seen: string[][] = [];
+    h.guardEdit = (files) => {
+      seen.push(files);
+      return files[0] === "locked.md" ? "locked.md is locked: Sage is editing it" : null;
+    };
+    const r = new ClaudeRunner({
+      cwd: "/dir",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+    });
+    await r.send("go");
+    await tick();
+    const options = f.calls[0]!;
+    const hook = (
+      options.hooks as {
+        PreToolUse: { hooks: ((i: unknown) => Promise<{ hookSpecificOutput?: Record<string, unknown> }>)[] }[];
+      }
+    ).PreToolUse[0]!.hooks[0]!;
+    expect(
+      (await hook({ tool_name: "Write", tool_input: { file_path: "locked.md" } })).hookSpecificOutput,
+    ).toMatchObject({
+      permissionDecision: "deny",
+      permissionDecisionReason: expect.stringContaining("Sage"),
+    });
+    expect(
+      (await hook({ tool_name: "Write", tool_input: { file_path: "free.md" } })).hookSpecificOutput,
+    ).toBeUndefined();
+    expect((await hook({ tool_name: "Bash", tool_input: { command: "ls" } })).hookSpecificOutput).toBeUndefined();
+    const can = options.canUseTool as (
+      n: string,
+      i: Record<string, unknown>,
+      c: Record<string, unknown>,
+    ) => Promise<{ behavior: string }>;
+    expect(await can("Edit", { file_path: "locked.md" }, {})).toMatchObject({ behavior: "deny" });
+    expect((await can("Edit", { file_path: "free.md" }, {})).behavior).toBe("allow");
+  });
+});

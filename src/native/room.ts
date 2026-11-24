@@ -8,6 +8,7 @@ import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
 import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
 import { appendNotebook, notebookLine, summariseOutcome } from "./duck-notebook.js";
+import type { FileClash } from "./file-locks.js";
 import type { DuckRow, NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
 import {
@@ -1135,6 +1136,8 @@ function threadState(status: string, lastTurnEndedAt: string | null): RoomThread
 export interface HostEvents {
   on(event: "event", listener: (e: HostEvent) => void): unknown;
   off(event: "event", listener: (e: HostEvent) => void): unknown;
+  on(event: "file-clash", listener: (c: FileClash) => void): unknown;
+  off(event: "file-clash", listener: (c: FileClash) => void): unknown;
 }
 
 /** The per-turn lines and `needs` posts Squeak used to make (the room derives turns from timelines now). */
@@ -1146,7 +1149,7 @@ export function isSqueakLine(r: RoomPostRow): boolean {
  * Feeds the room's `turn` frames from the host: a turn starting, ending, closing with a reply or moving its progress
  * strip, and a new `working` line (intent). Squeak no longer posts a line per turn. Never throws.
  */
-export function attachSqueakPosts(host: HostEvents, _store: NativeStore, room: Room): () => void {
+export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Room): () => void {
   const onEvent = (e: HostEvent): void => {
     try {
       if (e.type === "timeline") room.noteTimeline(e.sessionId, e.event);
@@ -1158,10 +1161,26 @@ export function attachSqueakPosts(host: HostEvents, _store: NativeStore, room: R
   const onPost = (p: RoomPostRow): void => {
     if (p.kind === "working" && p.sessionId) room.noteWorking(p.sessionId);
   };
+  // A Duck refused a file another Duck is editing (folder Pond): one short line, expandable, no @mention wake.
+  const onClash = (c: FileClash): void => {
+    try {
+      const s = store.getSession(c.sessionId);
+      if (!s) return;
+      room.agentPost(s, {
+        kind: "needs",
+        text: `${c.name} is waiting on ${c.file}, which ${c.holder.name} is editing`,
+        detail: `${c.name} tried to edit ${c.file} while ${c.holder.name} held it. ${c.name} was told to @mention ${c.holder.name} here to agree who goes first; the lock frees when ${c.holder.name}'s turn ends or after ten idle minutes.`,
+      });
+    } catch (error) {
+      logger.warn("room clash post failed", { error: String(error) });
+    }
+  };
   host.on("event", onEvent);
+  host.on("file-clash", onClash);
   room.on("post", onPost);
   return () => {
     host.off("event", onEvent);
+    host.off("file-clash", onClash);
     room.off("post", onPost);
   };
 }

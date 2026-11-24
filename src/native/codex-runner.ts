@@ -210,6 +210,19 @@ export class CodexRunner implements Runner {
       method: r.method,
       ...(kind === "file_change" && itemId ? { item: this.fileChanges.get(itemId) ?? null } : {}),
     };
+    // A folder Pond's per-file lock: a patch touching a file another Duck is editing is declined.
+    if (kind === "file_change") {
+      const changes = (payload.item as { changes?: unknown } | null | undefined)?.changes;
+      const files = (Array.isArray(changes) ? changes : []).flatMap((c) =>
+        typeof (c as { path?: unknown })?.path === "string" ? [(c as { path: string }).path] : [],
+      );
+      const locked = files.length > 0 ? hooks.guardEdit?.(files) : null;
+      if (locked) {
+        hooks.onMessage("system", "system/note", { text: locked });
+        await client.respond(r.id, { decision: "decline" });
+        return;
+      }
+    }
     if (hooks.tryAutoAllow?.(kind, payload)) {
       await client.respond(r.id, { decision: "accept" });
       return;
