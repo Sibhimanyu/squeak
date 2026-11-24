@@ -20,7 +20,7 @@ export interface ThreadContextInput {
   /** Someone other than the owner has already written in this thread. */
   shared?: boolean;
   /** This chat's duck: its name (the person's, else the chat title) and the role the person gave it. */
-  duck?: { name: string; role?: string | null; notebook?: string | null };
+  duck?: { name: string; role?: string | null };
   /**
    * Ducks own their branch (flag `ducksOwnBranch`): where this chat is and the pond's active branches, so the duck
    * can place itself. Absent with the flag off, and in a plain-folder pond.
@@ -123,11 +123,6 @@ export function buildThreadContext(input: ThreadContextInput): string {
     ...(input.duck
       ? [
           `You are ${input.duck.name}, a duck in ${input.pond ?? "this pond"}${input.duck.role ? `; your role: ${input.duck.role}` : ""}. A duck belongs to the pond and moves between streams per job; you work in the stream named above, and the person may later start you in another one with a fresh chat.`,
-          ...(input.duck.notebook?.trim()
-            ? [
-                `Your notebook (what you did in earlier jobs, oldest first; trust it as your own memory, check the code before relying on details):\n${input.duck.notebook.trim()}`,
-              ]
-            : []),
         ]
       : []),
     input.agent === "claude"

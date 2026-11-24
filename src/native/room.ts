@@ -6,8 +6,6 @@ import path from "node:path";
 import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
-import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
-import { appendNotebook, notebookLine, summariseOutcome } from "./duck-notebook.js";
 import type { DuckRow, NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
 import {
@@ -194,8 +192,6 @@ export interface RoomOptions {
   /** The pond member name for the owner, when there is one (else the macOS full name, else "owner"). */
   ownerName?: () => string | null;
   now?: () => number;
-  /** A model call that writes a notebook line's outcome (Haiku); absent or failing = the plain line. */
-  notebookSummary?: TitleModelCall | "default";
   /** Where attachments' bytes are kept (the support dir's `room-attachments`); a temp folder when absent (tests). */
   attachmentsDir?: string;
   /** How many other people are members of the pond (0 = not shared). Absent: the solo-pond silence is off. */
@@ -596,13 +592,6 @@ export class Room extends EventEmitter {
       // A duckling (Agent/Task step) starting or ending changes the turn's ducklings.
       ((t === "step.added" || t === "step.updated") && isDucklingStep(event));
     if (!relevant || !turnId) return;
-    if (t === "turn.ended") {
-      try {
-        this.noteTurnEnded(sessionId, turnId);
-      } catch (error) {
-        logger.warn("duck notebook failed", { error: String(error) });
-      }
-    }
     this.scheduleTurn(sessionId, turnId);
   }
 
@@ -971,59 +960,6 @@ export class Room extends EventEmitter {
       logger.warn("room thread frame failed", { error: String(error) });
     }
   }
-
-  // ---- the notebook ----
-
-  private readonly notebookChain = new Map<string, Promise<void>>();
-  private readonly notebooked = new Set<string>();
-
-  /** Resolves when the notebook writes so far are done (tests). */
-  notebookIdle(): Promise<void> {
-    return Promise.all([...this.notebookChain.values()]).then(() => undefined);
-  }
-
-  /** A turn of a duck's chat ended: one compact line in its notebook (a model sentence when one answers in time). */
-  private noteTurnEnded(sessionId: string, turnId: string): void {
-    const key = `${sessionId}:${turnId}`;
-    if (this.notebooked.has(key)) return;
-    const s = this.store.getSession(sessionId);
-    const duck = s ? this.duckOfSession(s) : null;
-    if (!s || !duck) return;
-    this.notebooked.add(key);
-    const prev = this.notebookChain.get(duck.id) ?? Promise.resolve();
-    const run = prev
-      .then(() => this.writeNotebook(duck.id, s, turnId))
-      .catch((error) => logger.warn("duck notebook failed", { error: String(error) }))
-      .finally(() => {
-        if (this.notebookChain.get(duck.id) === run) this.notebookChain.delete(duck.id);
-      });
-    this.notebookChain.set(duck.id, run);
-  }
-
-  private async writeNotebook(duckId: string, s: SessionRow, turnId: string): Promise<void> {
-    const t = this.reader.turns(s.id).find((x) => x.turnId === turnId);
-    if (!t || t.endedAt === undefined) return;
-    const plain = t.reply ? firstSentence(t.reply) : "";
-    let outcome = plain;
-    const opt = this.options.notebookSummary;
-    if (opt && t.reply && t.reply.length > 200) {
-      const call = opt === "default" ? (this.summaryCall ??= defaultTitleCall()) : opt;
-      outcome = (await summariseOutcome(call, t.prompt, t.reply)) ?? plain;
-    }
-    const duck = this.store.duckRow(duckId);
-    if (!duck) return;
-    const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
-    const line = notebookLine({
-      at: t.endedAt,
-      job: t.prompt,
-      outcome,
-      ...(t.outcome ? { ended: t.outcome } : {}),
-      branch: ws?.branch ?? null,
-    });
-    this.store.updateDuck(duckId, { notebook: appendNotebook(duck.notebook, line) });
-  }
-
-  private summaryCall: TitleModelCall | null = null;
 
   /** A person (or a stream) looked at the room. */
   markViewed(projectId: string): void {
