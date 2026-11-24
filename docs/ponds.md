@@ -805,3 +805,7 @@ and `assets/` (images, by relative path). Starting sizes: deck 1920x1080, poster
 - Remote ponds: a canvas is an output (`SHAREABLE_KINDS` has `canvas`); the owner's Mac sends the folder as one
   `<slug>.canvasbundle` (`packCanvasBundle`: canvas.json, artboard HTML, assets as base64, 25 MB at most, no links), the
   member's Mac unpacks it (`CanvasBundle.unpack`, every name checked) and draws it view-only with PDF/PNG export. No remote editing.
+- Room cards: the host remembers which canvases a chat's canvas tools made or changed (`Room.noteCanvasTouched`); the next
+  `done` post of that chat in the room carries them as `canvases: [{id, path, slug, title, kind, artboards}]` (stored in
+  `room_posts.canvases`; the Duck never writes it, a request body cannot set it). The Mac draws a card under the done line:
+  the Owner's tap opens `path` like the Canvases list, a Member's opens the view-only bundle by `id` (the artifact wire id).

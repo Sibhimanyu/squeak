@@ -647,7 +647,7 @@ export class AgentTools {
         const title = str("title")?.trim();
         if (!title) throw new ToolError("title is required.");
         const made = this.canvasOp(() => createCanvas(s.cwd, title, str("kind")));
-        this.noteCanvasChanged(s);
+        this.noteCanvasChanged(s, made.path);
         return `Created canvas "${made.canvas.title}" (${made.canvas.kind}) at ${made.path}. Its artboard ids: ${made.artboards.map((a) => a.id).join(", ")}. Files: artboards/<id>.html. Open it with canvas_open.`;
       }
       case "canvas_add_artboard": {
@@ -656,7 +656,7 @@ export class AgentTools {
         const html = str("html");
         if (!name || html === undefined) throw new ToolError("name and html are required.");
         const board = this.canvasOp(() => addArtboard(dir, { name, html, ...numberArgs(args, ["width", "height"]) }));
-        this.noteCanvasChanged(s);
+        this.noteCanvasChanged(s, dir);
         return `Added artboard ${board.id} (${board.width}x${board.height}) to the canvas.`;
       }
       case "canvas_update_artboard": {
@@ -672,6 +672,7 @@ export class AgentTools {
             ...numberArgs(args, ["width", "height"]),
           }),
         );
+        this.noteCanvasChanged(s, dir);
         return `Updated artboard ${board.id} (${board.width}x${board.height}).`;
       }
       case "canvas_open": {
@@ -1205,8 +1206,10 @@ export class AgentTools {
     }
   }
 
-  private noteCanvasChanged(s: SessionRow): void {
+  private noteCanvasChanged(s: SessionRow, dir: string): void {
     const pond = this.pondOf(s);
+    // The Task's done line will carry a card for it (the host attaches it, the Duck says nothing).
+    this.deps.room?.noteCanvasTouched(s.id, dir);
     if (pond) this.deps.artifactShown?.(pond.id);
   }
 

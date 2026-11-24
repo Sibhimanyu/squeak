@@ -338,6 +338,10 @@ struct PondRoomView: View {
                         .onAppear { atBottom = true; unseen = 0 }
                         .onDisappear { atBottom = false }
                 }
+                .environment(\.roomMemberView, member)
+                .environment(\.roomOpenCanvas, { card in
+                    if let key { model.openCanvas(pond: key, path: card.openPath(memberView: member)) }
+                })
                 .padding(.horizontal, Metrics.readingInset).padding(.vertical, Space.m)
                 .frame(maxWidth: 740 + 2 * Metrics.readingInset).frame(maxWidth: .infinity)
                 .background(ScrollMemory(

@@ -23,6 +23,30 @@ public struct RoomAuthor: Sendable, Equatable, Decodable {
     }
 }
 
+/// A canvas the Task made or changed, on a duck's done line. The host attaches it; the duck says nothing about it.
+public struct RoomCanvasCard: Sendable, Equatable, Decodable, Identifiable {
+    /// The wire id a Member's Mac asks for the view-only bundle by.
+    public var id: String
+    /// The canvas folder on the Owner's Mac.
+    public var path: String
+    public var title: String
+    public var kind: String
+    public var artboards: Int
+
+    public init(id: String, path: String, title: String, kind: String, artboards: Int) {
+        self.id = id; self.path = path; self.title = title; self.kind = kind; self.artboards = artboards
+    }
+
+    /// "Deck \u{00B7} 3 artboards".
+    public var subtitle: String {
+        let name = kind.isEmpty ? "Canvas" : kind.prefix(1).uppercased() + kind.dropFirst()
+        return "\(name) \u{00B7} \(artboards) \(artboards == 1 ? "artboard" : "artboards")"
+    }
+
+    /// What the canvas opens by: the Owner's own folder, or (for a Member) the id of the Owner's view-only bundle.
+    public func openPath(memberView: Bool) -> String { memberView ? id : path }
+}
+
 public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var seq: Int
     public var id: String
@@ -38,6 +62,8 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var replyTo: String?
     /// Pictures and files a person attached; empty for a host that does not send them.
     public var attachments: [RoomAttachment] = []
+    /// The canvases the Task made or changed (a done line); empty for a host that sends none.
+    public var canvases: [RoomCanvasCard] = []
     /// Milliseconds since 1970.
     public var at: Int64
 
@@ -51,7 +77,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         self.level = level; self.text = text; self.toSessionId = toSessionId; self.attachments = attachments; self.at = at
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, detail, replyTo, attachments, at }
+    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, detail, replyTo, attachments, canvases, at }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A post with no seq or id cannot be placed; the page drops it (see `Failable`).
@@ -66,6 +92,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         detail = try? c.decode(String.self, forKey: .detail)
         replyTo = try? c.decode(String.self, forKey: .replyTo)
         attachments = ((try? c.decode([Failable<RoomAttachment>].self, forKey: .attachments)) ?? []).compactMap(\.value)
+        canvases = ((try? c.decode([Failable<RoomCanvasCard>].self, forKey: .canvases)) ?? []).compactMap(\.value)
         at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
     }
 }
