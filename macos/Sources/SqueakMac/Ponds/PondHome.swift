@@ -249,7 +249,19 @@ struct PondHomeView: View {
         }
     }
 
-    private var settingsAction: some View {
+    /// Pond settings is in the header's ⋯ menu whenever that menu is there; the gear only stands in for it when it is not.
+    @ViewBuilder private var settingsAction: some View {
+        if !hasHeaderMenu { settingsButton }
+    }
+
+    /// The same test the page's header applies to show its ⋯ menu (a room, or a pond that can be left).
+    private var hasHeaderMenu: Bool {
+        if PondsModel.shared.native(key: key) != nil || PondsModel.shared.chrome(key: key).showsLeave { return true }
+        guard let p = pond, !PondStates.isGreyedRow(p) else { return false }
+        return p.role != .owner && !p.id.isEmpty
+    }
+
+    private var settingsButton: some View {
         Button { model.openSettings(.pond(key)) } label: {
             Lucide(.settings, size: 16, color: Theme.muted).frame(width: 32, height: 32).contentShape(Rectangle())
         }

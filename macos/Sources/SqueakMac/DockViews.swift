@@ -54,10 +54,13 @@ private struct DockDropModifier: ViewModifier {
     @State private var targeted = false
     @Environment(AppModel.self) private var model
 
+    /// A tab dragged over its own place opens no gap: dropping it there changes nothing.
+    private var overSelf: Bool { before != nil && DockStore.shared.dragging == before }
+
     func body(content: Content) -> some View {
         content
-            // A tab opens a gap before itself while a tab hovers it; a strip or zone washes instead.
-            .padding(.leading, before != nil && targeted ? 16 : 0)
+            // A tab opens a gap before itself while another tab hovers it; a strip or zone washes instead.
+            .padding(.leading, before != nil && targeted && !overSelf ? TabInsertionLine.gap : 0)
             .scopedDrop(.strip(zone), isTargeted: { targeted = $0 }) { text in
                 guard let item = DockItemPayload.decode(text) else { return false }
                 return performDockDrop(item, to: zone, before: before, model: model)
@@ -65,9 +68,7 @@ private struct DockDropModifier: ViewModifier {
             .overlay {
                 if targeted {
                     if before != nil {
-                        Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .allowsHitTesting(false).transition(.opacity)
+                        if !overSelf { TabInsertionLine() }
                     } else {
                         ZStack {
                             if wash { Theme.selected.opacity(0.5) }
@@ -78,6 +79,21 @@ private struct DockDropModifier: ViewModifier {
                 }
             }
             .animation(Motion.standard, value: targeted)
+    }
+}
+
+/// Where a dragged tab will land: the neighbours part by `gap` and this line sits centred between them, in the pond's
+/// accent. One look for every strip (centre chats, and the dock's side and bottom zones).
+struct TabInsertionLine: View {
+    static let gap: CGFloat = 16
+    static let width: CGFloat = 2
+
+    var body: some View {
+        Capsule().fill(PondColour.accent).frame(width: Self.width).padding(.vertical, 8)
+            .padding(.leading, (Self.gap - Self.width) / 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .allowsHitTesting(false).transition(.opacity)
+            .accessibilityHidden(true)
     }
 }
 
@@ -719,7 +735,7 @@ struct DockBottomZone: View {
 
 // MARK: Workspaces
 
-/// The workspace picker's items: the View menu and the window's picker share them.
+/// The workspace layouts' items: the Window menu's Workspace submenu.
 struct DockWorkspaceMenuItems: View {
     var body: some View {
         let dock = DockStore.shared
@@ -768,19 +784,6 @@ struct WindowPanelMenuItems: View {
 extension View {
     @ViewBuilder func registryShortcutIfAny(_ id: ShortcutID?) -> some View {
         if let id { registryShortcut(id) } else { self }
-    }
-}
-
-/// The window's quiet picker, at the centre strip's trailing edge.
-struct DockWorkspacePicker: View {
-    var body: some View {
-        Menu { DockWorkspaceMenuItems() } label: {
-            Image(systemName: "rectangle.3.group").font(.system(size: 14)).foregroundStyle(Theme.muted)
-                .frame(width: 28, height: 28).contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .help("Workspace layout: \(DockStore.shared.workspaces.active.name)")
-        .accessibilityLabel("Workspace layout")
     }
 }
 
