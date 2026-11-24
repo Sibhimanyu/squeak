@@ -66,6 +66,35 @@ describe("what the Room says", () => {
     expect(rows[0].mine).toBe(false);
   });
 
+  it("draws a plan card with its detail and a comment box, a done line's canvas cards view only, and a reply under its card", () => {
+    const room = {
+      canPost: true,
+      posts: [
+        { ...post("pl", 1, duck, "Plan: redo the footer", "plan"), detail: "Spec: links.\nPlan: 1. fix hrefs" },
+        {
+          ...post("dn", 2, duck, "Footer done", "done"),
+          canvases: [{ id: "c1", title: "Footer deck", kind: "deck", artboards: 3 }],
+        },
+        { ...post("rp", 3, person("me1", "Webby"), "Keep the old logo"), replyTo: "pl" },
+      ],
+      tasks: [],
+    };
+    const rows = roomRows(room, "me1");
+    expect(rows[0]).toMatchObject({
+      label: "plan",
+      plan: true,
+      canComment: true,
+      detail: "Spec: links.\nPlan: 1. fix hrefs",
+      more: true,
+    });
+    expect(rows[1].canvases).toEqual([
+      { id: "c1", title: "Footer deck", kind: "deck", artboards: 3, subtitle: "Deck \u00B7 3 artboards" },
+    ]);
+    expect(rows[2].replyLine).toBe("On the plan: Plan: redo the footer");
+    // Messaging switched off (or a viewer): the card is read-only.
+    expect(roomRows({ ...room, canPost: false }, "me1")[0].canComment).toBe(false);
+  });
+
   it("cuts a long Duck line at 90 characters and says there is nothing more for a short one", () => {
     expect(duckLine("x".repeat(200)).summary).toHaveLength(90);
     expect(duckLine("Short.")).toEqual({ summary: "Short.", more: false });

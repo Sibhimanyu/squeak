@@ -80,6 +80,36 @@ describe("buildPondRoom", () => {
     ]);
   });
 
+  it("marks a plan card and draws a done line's canvas cards without the Owner's folder", () => {
+    const duck = { kind: "agent", id: "s1", name: "Pixel" };
+    const doc = buildPondRoom("p", {
+      member: true,
+      page: {
+        posts: [
+          { ...post(1, "p", "Plan: crisp icons", duck), kind: "plan" },
+          {
+            ...post(2, "d", "Done: icons", duck),
+            kind: "done",
+            canvases: [
+              { id: "c1", title: "Icon deck", kind: "deck", artboards: 3 },
+              { id: "c2", title: "Mark", kind: "logo", artboards: 1 },
+              { title: "no id" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(doc.items[0]).toMatchObject({ t: "duck", plan: true });
+    expect(doc.items[1]).toMatchObject({
+      t: "duck",
+      canvases: [
+        { id: "c1", title: "Icon deck", subtitle: "Deck \u00B7 3 artboards" },
+        { id: "c2", title: "Mark", subtitle: "Logo \u00B7 1 artboard" },
+      ],
+    });
+    expect(JSON.stringify(doc)).not.toContain("path");
+  });
+
   it("draws a Task with its state and the routing line, and leaves dropped ones out", () => {
     const doc = buildPondRoom("p", {
       member: false,

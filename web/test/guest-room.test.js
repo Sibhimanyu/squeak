@@ -84,6 +84,42 @@ describe("the Room in a browser", () => {
     expect(page.blockedLine).toBeNull();
   });
 
+  it("reads a plan card's detail and a canvas card, and comments on the plan through rposts like the Owner would", async () => {
+    const delivered = [];
+    const w = await world();
+    w.room.options.deliver = (sid, text) => void delivered.push({ sid, text });
+    const plan = w.room.post({
+      projectId: w.project.id,
+      author: { kind: "agent", id: "sess-1", name: "Maple" },
+      sessionId: "sess-1",
+      kind: "plan",
+      text: "Plan: redo the footer",
+      detail: "Spec: links.",
+    });
+    w.room.post({
+      projectId: w.project.id,
+      author: { kind: "agent", id: "sess-1", name: "Maple" },
+      sessionId: "sess-1",
+      kind: "done",
+      text: "Footer done",
+      canvases: [{ id: "abc", path: "/Users/owner/x", slug: "f", title: "Footer deck", kind: "deck", artboards: 2 }],
+    });
+    await w.sync.idle();
+    const page = await w.guest.room();
+    expect(page.posts.map((p) => p.kind)).toEqual(["plan", "done"]);
+    expect(page.posts[0].detail).toBe("Spec: links.");
+    expect(page.posts[1].canvases).toEqual([{ id: "abc", title: "Footer deck", kind: "deck", artboards: 2 }]);
+    expect(JSON.stringify(page)).not.toContain("/Users/owner");
+    await w.guest.postToRoom("Keep the old logo.", plan.id);
+    await w.owner.pass(w.pondId);
+    await w.sync.idle();
+    expect((await w.guest.room()).posts.at(-1)).toMatchObject({ text: "Keep the old logo.", replyTo: plan.id });
+    expect(delivered).toEqual([
+      { sid: "sess-1", text: `[Room] Webby commented on your plan "Plan: redo the footer":\nKeep the old logo.` },
+    ]);
+    await expect(w.guest.postToRoom("x", "not a card id")).rejects.toMatchObject({ status: 400 });
+  });
+
   it("posts through rposts: the Owner's Mac applies it as the guest's own words, and it comes back in the Room", async () => {
     const w = await world();
     const sent = await w.guest.postToRoom("  Footer is fine by me.  ");

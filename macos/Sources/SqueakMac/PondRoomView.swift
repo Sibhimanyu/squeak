@@ -137,7 +137,13 @@ final class PondRoomModel {
 
     /// A comment on a duck's plan card: the host delivers it to that duck at its next turn; it also shows in the Room.
     func comment(cardId: String, text: String, host: NativeHostClient) async {
-        guard !member else { return }
+        if member {
+            // Queued for the Owner's Mac like any Member message; the reply shows when it has applied it.
+            if let queued = try? await client(host).queue(pond: projectId, text: text, replyTo: cardId), queued.offline {
+                ownerOffline = queued.line ?? Self.ownerAwayLine
+            }
+            return
+        }
         if let post = try? await RoomClient(host: host).comment(project: projectId, on: cardId, text: text) {
             _ = feed.receive(post)
         }

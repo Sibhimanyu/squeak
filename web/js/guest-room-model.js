@@ -2,7 +2,13 @@
 // page so tests can run it, as guest-model.js does for threads; guest-room-view.js only draws.
 
 /** The kind labels the Mac's Room uses (`RoomPresentation.kindLabel`); a plain message has none. */
-export const ROOM_KIND_LABEL = { working: "working on", done: "done", needs: "needs you", handoff: "handoff" };
+export const ROOM_KIND_LABEL = {
+  working: "working on",
+  done: "done",
+  needs: "needs you",
+  handoff: "handoff",
+  plan: "plan",
+};
 
 /** What a Task's state says (the Mac's Task card words). */
 export const TASK_WORDS = {
@@ -16,6 +22,12 @@ export const TASK_WORDS = {
 /** Shown while the Owner's Mac is not running (the sentence the Mac and the host use, word for word). */
 export const ownerOfflineLine = (name) =>
   `${String(name).trim().split(/\s+/)[0] || "Owner"}'s Mac is offline; Ducks will pick this up when it's back`;
+
+/** "Deck · 3 artboards": the same words the Mac and the phone put under a canvas card. */
+export function canvasSubtitle(c) {
+  const name = c.kind ? c.kind.charAt(0).toUpperCase() + c.kind.slice(1) : "Canvas";
+  return `${name} \u00B7 ${c.artboards} ${c.artboards === 1 ? "artboard" : "artboards"}`;
+}
 
 /** A duck's line, collapsed: the first sentence (or 90 characters), with whether there is more to expand. */
 export function duckLine(text, max = 90) {
@@ -39,6 +51,7 @@ export function roomRows(room, meId, pending = []) {
     bySource.get(t.messageId).push(t);
   }
   const ids = new Set(room.posts.map((p) => p.id));
+  const byId = new Map(room.posts.map((p) => [p.id, p]));
   const rows = [];
   const card = (t) => ({ kind: "task", id: `task-${t.id}`, task: t, words: TASK_WORDS[t.state], at: t.createdAt });
   for (const p of room.posts) {
@@ -53,7 +66,13 @@ export function roomRows(room, meId, pending = []) {
         attention: p.kind === "needs",
         summary: line.summary,
         text: p.text,
-        more: line.more,
+        // The expandable detail (a plan card's spec and plan, a status line's rest); absent when the line says it all.
+        ...(p.detail ? { detail: p.detail } : {}),
+        more: line.more || Boolean(p.detail),
+        // A spec+plan card takes comments from a Member who may post; a comment goes to the Duck at its next turn.
+        ...(p.kind === "plan" ? { plan: true, canComment: Boolean(room.canPost) } : {}),
+        // The canvases a done line made or changed: view only for a Member.
+        ...(p.canvases?.length ? { canvases: p.canvases.map((c) => ({ ...c, subtitle: canvasSubtitle(c) })) } : {}),
         at: p.at,
       });
     } else {
@@ -65,6 +84,9 @@ export function roomRows(room, meId, pending = []) {
         label,
         attention: p.kind === "needs",
         text: p.text,
+        ...(p.replyTo && byId.has(p.replyTo)
+          ? { replyLine: `On the plan: ${duckLine(byId.get(p.replyTo).text).summary}` }
+          : {}),
         at: p.at,
       });
     }

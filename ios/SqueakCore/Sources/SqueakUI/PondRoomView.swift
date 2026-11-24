@@ -189,7 +189,12 @@ private struct DuckLineRow: View {
         Button(action: { if canOpen { toggle() } }) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Circle().fill(tint).frame(width: 7, height: 7).offset(y: -1)
+                    if line.plan == true {
+                        Image(systemName: "doc.text").font(.caption2).foregroundStyle(tint).offset(y: -1)
+                            .accessibilityLabel("Plan")
+                    } else {
+                        Circle().fill(tint).frame(width: 7, height: 7).offset(y: -1)
+                    }
                     Text(line.who).font(.footnote.weight(.semibold))
                     Text(line.line).font(.footnote).foregroundStyle(Theme.muted).lineLimit(open ? nil : 1)
                     Spacer(minLength: 0)
@@ -201,6 +206,19 @@ private struct DuckLineRow: View {
                 if open, let detail = line.detail {
                     Text(detail).font(.footnote).foregroundStyle(Theme.muted).padding(.leading, 15)
                         .frame(maxWidth: .infinity, alignment: .leading).transition(.opacity)
+                }
+                ForEach(line.canvases ?? []) { canvas in
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.on.rectangle").font(.footnote).foregroundStyle(Theme.muted)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(canvas.title).font(.footnote.weight(.semibold)).lineLimit(1)
+                            Text(canvas.subtitle + " \u{00B7} View only").font(.caption).foregroundStyle(Theme.subtle).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 15).frame(minHeight: 32)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Canvas \(canvas.title), \(canvas.subtitle), view only")
                 }
             }
             .frame(minHeight: 28, alignment: .leading)

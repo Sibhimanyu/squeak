@@ -181,9 +181,24 @@ export function readPresence(v) {
 
 // The Room (docs/ponds.md, "The Room reaches Members"): ports of `readRoomDoc`, `readRoomTaskDoc` in src/flotilla/room-sync.ts.
 export const ROOM_MAX_TEXT = 500;
-const POST_KINDS = ["working", "done", "needs", "message", "handoff"];
+const POST_KINDS = ["working", "done", "needs", "message", "handoff", "plan"];
+const ROOM_DETAIL_MAX = 4000;
+const ROOM_CANVAS_CARDS_MAX = 6;
 const TASK_STATES = ["waiting", "working", "blocked", "done", "dropped"];
 const DOC_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** A canvas card on a done line, as a Member sees it: no folder, just what the card draws and its wire id. */
+function readCanvasDocs(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const c of v) {
+    if (!rec(c) || !s(c.id, 80) || !c.id || !s(c.title, 200) || !s(c.kind, 40)) continue;
+    if (!n(c.artboards) || !Number.isInteger(c.artboards) || c.artboards < 0) continue;
+    out.push({ id: c.id, title: c.title, kind: c.kind, artboards: c.artboards });
+    if (out.length >= ROOM_CANVAS_CARDS_MAX) break;
+  }
+  return out;
+}
 
 /** `room`/<post id>: a post the Owner's Mac wrote. */
 export function readRoomDoc(v) {
@@ -193,6 +208,11 @@ export function readRoomDoc(v) {
   const a = v.author;
   if (!rec(a) || (a.kind !== "person" && a.kind !== "agent") || !s(a.name, 100) || !a.name) return null;
   if (a.id !== undefined && !s(a.id, 80)) return null;
+  // The newer fields are optional, and a wrong one drops only itself: the post still reads.
+  const detail =
+    typeof v.detail === "string" && v.detail.trim() && v.detail.length <= ROOM_DETAIL_MAX * 2 ? v.detail : "";
+  const replyTo = typeof v.replyTo === "string" && DOC_ID.test(v.replyTo) ? v.replyTo : "";
+  const canvases = readCanvasDocs(v.canvases);
   return {
     v: 1,
     seq: v.seq,
@@ -201,6 +221,9 @@ export function readRoomDoc(v) {
     kind: v.kind,
     level: "room",
     text: v.text,
+    ...(detail ? { detail } : {}),
+    ...(canvases.length > 0 ? { canvases } : {}),
+    ...(replyTo ? { replyTo } : {}),
     at: v.at,
   };
 }

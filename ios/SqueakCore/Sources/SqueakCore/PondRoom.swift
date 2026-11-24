@@ -69,6 +69,15 @@ public struct PondRoomDoc: Codable, Equatable, Sendable {
         }
     }
 
+    /// A canvas a Duck's Task made or changed. Drawn view only: the phone never edits a canvas.
+    public struct Canvas: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let title: String
+        /// "Deck \u{00B7} 3 artboards", worded by the Mac.
+        public let subtitle: String
+        public init(id: String, title: String, subtitle: String) { self.id = id; self.title = title; self.subtitle = subtitle }
+    }
+
     public struct DuckLine: Codable, Equatable, Sendable, Identifiable {
         public var t: String = "duck"
         public let id: String
@@ -78,10 +87,16 @@ public struct PondRoomDoc: Codable, Equatable, Sendable {
         public let line: String
         /// What a tap shows beneath it; absent when the line says it all.
         public var detail: String? = nil
+        /// A spec+plan card rather than a status line.
+        public var plan: Bool? = nil
+        /// The canvases a done line made or changed; absent from an older Mac.
+        public var canvases: [Canvas]? = nil
         public let at: Int64
 
-        public init(id: String, who: String, tone: Tone, line: String, detail: String? = nil, at: Int64) {
-            self.id = id; self.who = who; self.tone = tone; self.line = line; self.detail = detail; self.at = at
+        public init(id: String, who: String, tone: Tone, line: String, detail: String? = nil, plan: Bool? = nil,
+                    canvases: [Canvas]? = nil, at: Int64) {
+            self.id = id; self.who = who; self.tone = tone; self.line = line; self.detail = detail; self.plan = plan
+            self.canvases = canvases; self.at = at
         }
     }
 
