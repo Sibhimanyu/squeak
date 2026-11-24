@@ -72,6 +72,7 @@ function ownerHost(service: FlotillaService) {
     newThread: async () => ({}) as SessionRow,
     call: async () => '{"job":false,"text":""}',
     enabled: () => false,
+    settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }),
     now: () => clock.now,
   });
   const sync = new RoomSync({ service, room, jobs, store, now: () => clock.now, debounceMs: 1 });
@@ -418,11 +419,11 @@ describe("a Member's Tasks need the Owner's approval", () => {
 
   it("a Member has no start permission by default; the Collaborator preset turns it on", async () => {
     const view = async () => (await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)!;
-    expect((await view()).caps.start).toBe(false);
+    expect((await view()).caps?.start).toBe(false);
     await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
-    expect((await view()).caps.start).toBe(true);
+    expect((await view()).caps?.start).toBe(true);
     await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
-    expect((await view()).caps.start).toBe(false);
+    expect((await view()).caps?.start).toBe(false);
     await B.service.refresh(pondId);
   });
 

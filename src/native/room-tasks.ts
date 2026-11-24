@@ -1182,7 +1182,8 @@ export class RoomTasks extends EventEmitter {
 
   /** A re-routed Task that is not waiting for the person starts the way a routed one does. */
   private enterLine(projectId: string, job: RoomTask): RoomTask {
-    if (!job.proposed && !job.approval && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting) job.inLine = true;
+    if (!job.proposed && !job.approval && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting)
+      job.inLine = true;
     const saved = this.save(projectId, job);
     if (saved.inLine) this.startSoon(projectId);
     return saved;

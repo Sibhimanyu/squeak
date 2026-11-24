@@ -54,6 +54,7 @@ const jobs = new RoomTasks({
   newThread: async () => ({}) as SessionRow,
   call: async () => '{"job":false,"text":""}',
   enabled: () => false,
+  settings: () => ({ askBeforeStarting: true, maxWorkingDucks: 4 }),
   now: () => clock.now,
 });
 const A = service("Sibhi", "Sibhi's Mac");
