@@ -338,7 +338,7 @@ describe("the Room reaches Members", () => {
       roomSync: sync,
     });
     const call = async (method: string, parts: string[], body: Record<string, unknown> = {}, query = "") => {
-      let out: { status: number; body: any } | null = null;
+      let out: { status: number; body: Record<string, unknown> & { posts: unknown[] } } | null = null;
       await routes.handle({
         req: {} as never,
         res: {} as never,
@@ -346,9 +346,9 @@ describe("the Room reaches Members", () => {
         parts,
         url: new URL(`http://x/native/${parts.join("/")}${query}`),
         body: async () => body,
-        json: (status: number, b: unknown) => void (out = { status, body: b }),
+        json: (status: number, b: unknown) => void (out = { status, body: b as { posts: unknown[] } }),
       });
-      return out as unknown as { status: number; body: any };
+      return out as unknown as { status: number; body: Record<string, unknown> & { posts: unknown[] } };
     };
     const got = await call("GET", ["ponds", pondId, "room"], {}, "?limit=3");
     expect(got.status).toBe(200);
