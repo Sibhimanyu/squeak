@@ -1138,6 +1138,22 @@ public struct NativeHostClient: Sendable {
         catch NativeHostError.http(404, _) { return false }
     }
 
+    /// `GET /native/agent-settings`: who settles an unsure Task routing, "on-device" or "haiku"; nil when the host is older.
+    public func deciderModel() async throws -> String? {
+        do {
+            let data = try await call("GET", "/native/agent-settings")
+            return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["deciderModel"] as? String
+        } catch NativeHostError.http(404, _) { return nil }
+    }
+
+    /// `PUT /native/agent-settings` with `deciderModel` ("on-device" or "haiku"): false when the host cannot take it.
+    @discardableResult
+    public func setDeciderModel(_ value: String) async throws -> Bool {
+        do { _ = try await call("PUT", "/native/agent-settings", body: .object(["deciderModel": .string(value)])); return true }
+        catch NativeHostError.http(404, _) { return false }
+        catch NativeHostError.http(400, _) { return false }
+    }
+
     /// The pond's own icon (PNG bytes), nil when it has none.
     public func projectIcon(key: String) async throws -> Data? {
         do { return try await call("GET", "/native/projects/\(Self.id(key))/icon") }

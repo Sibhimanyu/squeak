@@ -660,6 +660,7 @@ private struct ModelsSettings: View {
 private struct MessagesSettings: View {
     @Environment(AppModel.self) private var model
     @State private var connectors: Bool?
+    @State private var decider: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -678,8 +679,26 @@ private struct MessagesSettings: View {
                     SectionFootnote("Connectors from your claude.ai account (like Google Drive or Figma). Off keeps chats to Squeak's own tools and your project's.")
                 }
             }
+            if let choice = decider {
+                SettingsCard(title: "Routing", subtitle: "How Squeak picks a Duck for a new Task.", symbol: "arrow.triangle.branch") {
+                    SqueakPicker("When it is a close call, ask", selection: Binding(
+                        get: { choice },
+                        set: { v in
+                            decider = v
+                            Task { if (try? await model.nativeHost.setDeciderModel(v)) != true { decider = await (try? model.nativeHost.deciderModel()) ?? choice } }
+                        }
+                    )) {
+                        SqueakChoice(title: "This Mac", value: "on-device")
+                        SqueakChoice(title: "Haiku", value: "haiku")
+                    }
+                    SectionFootnote("This Mac uses Apple Intelligence on the device, so nothing leaves it. When it is off or can't answer, Squeak asks Haiku instead.")
+                }
+            }
         }
-        .task { connectors = (try? await model.nativeHost.claudeAiConnectors()) ?? nil }
+        .task {
+            connectors = (try? await model.nativeHost.claudeAiConnectors()) ?? nil
+            decider = (try? await model.nativeHost.deciderModel()) ?? nil
+        }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
     }
