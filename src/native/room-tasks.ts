@@ -265,7 +265,17 @@ export interface RoomTasksOptions {
   enabled?: () => boolean;
   now?: () => number;
   timeoutMs?: number;
+  /** Runs `fn` after `ms` (default: an unref'd timer); tests inject a manual clock. */
+  schedule?: (fn: () => void, ms: number) => void;
+  /** Waits before each retry of a start that failed for a transient reason; its length is the attempt cap. */
+  retryDelaysMs?: number[];
 }
+
+/** Why a start can work a moment later: the Task or its Duck was momentarily taken. */
+const isTransientStart = (error: unknown): boolean =>
+  error instanceof TaskError && /being handed over|busy in another stream/.test(error.message);
+
+const DEFAULT_RETRY_DELAYS_MS = [2_000, 5_000, 15_000];
 
 /** Emits `job` `{ projectId, job }` for every create or change. */
 export class RoomTasks extends EventEmitter {
@@ -276,6 +286,9 @@ export class RoomTasks extends EventEmitter {
   private readonly inflight = new Set<Promise<void>>();
   private readonly lining = new Set<string>();
   private readonly lineAgain = new Set<string>();
+  /** Start retries so far per Task, and the Tasks with a retry already scheduled. */
+  private readonly retries = new Map<string, number>();
+  private readonly retryPending = new Set<string>();
   /** Tasks whose routing is still being decided; an action on one waits for it. */
   private readonly routings = new Map<string, Promise<void>>();
   private readonly decider: Decider;
@@ -449,9 +462,13 @@ export class RoomTasks extends EventEmitter {
     }
   }
 
-  /** The first Duck of the pond @mentioned in `text`. */
+  /** The Duck of the pond @mentioned in `text`; the longest matching name wins ("@Pip Squeak" is not "Pip"). */
   mentionedDuck(projectId: string, text: string): DuckRow | null {
-    return this.o.store.listDucks(projectId).find((d) => d.name && mentions(text, d.name)) ?? null;
+    let best: DuckRow | null = null;
+    for (const d of this.o.store.listDucks(projectId)) {
+      if (d.name && mentions(text, d.name) && (!best || d.name.length > best.name!.length)) best = d;
+    }
+    return best;
   }
 
   /**
@@ -689,29 +706,68 @@ export class RoomTasks extends EventEmitter {
       .map((r) => JSON.parse(r.data) as RoomTask)
       .filter((t) => t.inLine && t.state === "waiting" && !t.proposed && t.claim?.status !== "asking")
       .sort((a, b) => a.createdAt - b.createdAt);
+    // Once a Task that needs a slot is stuck, later slot-takers wait behind it; Tasks that only queue still pass.
+    let slotsFull = false;
     for (const t of line) {
       const duck = t.suggestion?.duckId ? this.o.store.duckRow(t.suggestion.duckId) : null;
       if (!duck) {
         // The decider chose a new Duck: it hatches (through ChatStarter) once the pond has a free slot.
         if (t.routing?.kind !== "hatch") continue;
-        if (this.workingDucks(projectId).size >= rules.maxWorkingDucks) break;
-        try {
-          await this.act(projectId, t.id, { action: "new" });
-        } catch (error) {
-          logger.warn("could not hatch a duck for a waiting task", { error: String(error) });
+        if (slotsFull || this.workingDucks(projectId).size >= rules.maxWorkingDucks) {
+          slotsFull = true;
+          continue;
         }
+        await this.startFromLine(projectId, t.id, { action: "new" }, "could not hatch a duck for a waiting task");
         continue;
       }
       const working = this.workingDucks(projectId);
       const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
       const queues = working.has(duck.id) && cur && !cur.archivedAt;
-      if (!queues && working.size >= rules.maxWorkingDucks) break;
-      try {
-        await this.act(projectId, t.id, queues ? { action: "go", sessionId: cur.id } : { action: "go" });
-      } catch (error) {
-        logger.warn("could not start a waiting task", { error: String(error) });
+      if (!queues && (slotsFull || working.size >= rules.maxWorkingDucks)) {
+        slotsFull = true;
+        continue;
       }
+      await this.startFromLine(
+        projectId,
+        t.id,
+        queues ? { action: "go", sessionId: cur.id } : { action: "go" },
+        "could not start a waiting task",
+      );
     }
+  }
+
+  /** One start from the line; a transient refusal is retried after a short backoff instead of waiting for a turn end. */
+  private async startFromLine(
+    projectId: string,
+    taskId: string,
+    body: Record<string, unknown>,
+    warning: string,
+  ): Promise<void> {
+    try {
+      await this.act(projectId, taskId, body);
+      this.retries.delete(taskId);
+    } catch (error) {
+      logger.warn(warning, { error: String(error) });
+      if (isTransientStart(error)) this.retryLater(projectId, taskId);
+    }
+  }
+
+  private retryLater(projectId: string, taskId: string): void {
+    const delays = this.o.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+    const attempt = this.retries.get(taskId) ?? 0;
+    if (attempt >= delays.length || this.retryPending.has(taskId)) return;
+    this.retries.set(taskId, attempt + 1);
+    this.retryPending.add(taskId);
+    const run = () => {
+      this.retryPending.delete(taskId);
+      this.startWaiting(projectId);
+    };
+    const schedule =
+      this.o.schedule ??
+      ((fn: () => void, ms: number) => {
+        setTimeout(fn, ms).unref();
+      });
+    schedule(run, delays[attempt]!);
   }
 
   // ---- routing (the decider) ----

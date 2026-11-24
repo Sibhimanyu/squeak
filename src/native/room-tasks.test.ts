@@ -724,6 +724,62 @@ describe("start at once, with limits", () => {
     expect(r.sent.map((x) => x.id)).toEqual([a!.id, b!.id, c!.id]);
   });
 
+  it("a Task that only queues behind a busy Duck passes a hatch waiting for a free slot", async () => {
+    const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 1 } });
+    const [a] = ducks(r);
+    const first = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    const hatch = r.jobs.fromMessage(r.pid, r.say("translate the onboarding strings to french").id);
+    await r.jobs.idle();
+    expect(r.jobs.get(hatch.id)!.job).toMatchObject({ state: "waiting", routing: { kind: "hatch" } });
+    const queued = r.jobs.fromMessage(r.pid, r.say("also fix the layout builder grid spacing on mobile").id);
+    await r.jobs.idle();
+    expect(state(r, queued.id)).toBe("working");
+    expect(state(r, hatch.id)).toBe("waiting");
+    expect(r.sent.map((x) => x.id)).toEqual([a!.id, a!.id]);
+    expect(state(r, first.id)).toBe("working");
+  });
+
+  it("a Task whose start failed for a transient reason is retried after a backoff, a few times at most", async () => {
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    let fails = 1;
+    const r = rig({
+      rules: { askBeforeStarting: false, maxWorkingDucks: 4 },
+      extra: {
+        send: async () => {
+          if (fails-- > 0) throw new Error("Pip is busy in another stream; wait for it to finish.");
+        },
+        schedule: (fn, ms) => void timers.push({ fn, ms }),
+        retryDelaysMs: [10, 20, 30],
+      },
+    });
+    ducks(r);
+    const t = r.jobs.fromMessage(r.pid, r.say(topics[0][2]).id);
+    await r.jobs.idle();
+    await r.jobs.idle();
+    expect(state(r, t.id)).toBe("waiting");
+    expect(timers.map((x) => x.ms)).toEqual([10]);
+    timers.shift()!.fn();
+    await r.jobs.idle();
+    expect(state(r, t.id)).toBe("working");
+    expect(timers).toEqual([]);
+
+    // A start that never works gives up after the attempts.
+    fails = Infinity;
+    const u = r.jobs.fromMessage(r.pid, r.say(topics[1][2]).id);
+    await r.jobs.idle();
+    await r.jobs.idle();
+    let runs = 0;
+    while (timers.length && runs < 10) {
+      timers.shift()!.fn();
+      runs++;
+      await r.jobs.idle();
+    }
+    expect(runs).toBe(3);
+    expect(state(r, u.id)).toBe("waiting");
+    expect(timers).toEqual([]);
+  });
+
   it("raising the limit starts the Tasks waiting in line", async () => {
     const r = rig({ rules: { askBeforeStarting: false, maxWorkingDucks: 1 } });
     ducks(r);
@@ -1003,6 +1059,17 @@ describe("the decider routes a new Task", () => {
     await tap;
     await r.jobs.idle();
     expect(r.jobs.get(t.id)!.job.routing).toMatchObject({ kind: "hatch", by: "person" });
+  });
+});
+
+describe("@mentioning a Duck by name", () => {
+  it("prefers the longest matching name, so @Pip Squeak is not Pip", () => {
+    const r = rig();
+    const pip = r.store.createDuck({ projectId: r.pid, name: "Pip" });
+    const squeak = r.store.createDuck({ projectId: r.pid, name: "Pip Squeak" });
+    expect(r.jobs.mentionedDuck(r.pid, "@Pip Squeak fix the login")?.id).toBe(squeak.id);
+    expect(r.jobs.mentionedDuck(r.pid, "@Pip fix the login")?.id).toBe(pip.id);
+    expect(r.jobs.mentionedDuck(r.pid, "@Pip Squeak and @Pip")?.id).toBe(squeak.id);
   });
 });
 

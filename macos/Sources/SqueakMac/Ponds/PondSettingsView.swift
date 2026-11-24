@@ -299,8 +299,8 @@ struct PondSettingsView: View {
         Task {
             defer { gitPondBusy = false }
             do {
-                let url = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
-                gitPondResult = FolderPond.gitPondResult(url: url)
+                let made = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
+                gitPondResult = FolderPond.gitPondResult(url: made.url, note: made.note)
                 await model.refreshNativeProjects()
             } catch let e as NativeHostError { gitPondProblem = e.reason } catch { gitPondProblem = "Squeak couldn\u{2019}t make this pond a Git Pond." }
         }

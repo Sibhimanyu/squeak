@@ -1119,7 +1119,7 @@ export class NativeServer {
         const b = await this.body(req);
         if (b.commit !== undefined && typeof b.commit !== "boolean")
           throw new HttpError(400, "commit must be true or false");
-        return this.json(res, 200, { project: await this.history.enable(id, { commit: b.commit === true }) });
+        return this.json(res, 200, await this.history.enableWithNote(id, { commit: b.commit === true }));
       } catch (error) {
         if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
         throw error;

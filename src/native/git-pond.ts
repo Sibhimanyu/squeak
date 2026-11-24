@@ -92,7 +92,10 @@ export class GitPond {
     private readonly github: GitHubAdapter,
   ) {}
 
-  async make(projectId: string, visibility: RepoVisibility): Promise<{ project: ProjectRow; url: string }> {
+  async make(
+    projectId: string,
+    visibility: RepoVisibility,
+  ): Promise<{ project: ProjectRow; url: string; note?: string }> {
     const project = this.store.getProject(projectId);
     if (!project) throw new HistoryError("No such pond.", 404);
     if (project.kind === "git" && (await this.hasOrigin(project.rootPath))) {
@@ -103,13 +106,13 @@ export class GitPond {
       throw new HistoryError(status.reason === "not-installed" ? GH_NOT_INSTALLED : GH_NOT_SIGNED_IN, 409);
     }
     // Version history with a first commit (idempotent when it is already on); a retry after a GitHub failure lands here.
-    const enabled = await this.history.enable(projectId, { commit: true });
+    const { project: enabled, note } = await this.history.enableWithNote(projectId, { commit: true });
     const { url } = await this.github.createAndPush({
       name: repoNameFor(enabled.rootPath),
       visibility,
       dir: enabled.rootPath,
     });
-    return { project: this.store.getProject(projectId)!, url };
+    return { project: this.store.getProject(projectId)!, url, ...(note ? { note } : {}) };
   }
 
   private async hasOrigin(dir: string): Promise<boolean> {

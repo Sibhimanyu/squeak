@@ -63,8 +63,8 @@ struct PondHeaderMenu: View {
         Task {
             defer { gitPondBusy = false }
             do {
-                let url = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
-                gitPondOutcome = (FirstPondJourney.gitPondDoneTitle, FolderPond.gitPondResult(url: url))
+                let made = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
+                gitPondOutcome = (FirstPondJourney.gitPondDoneTitle, FolderPond.gitPondResult(url: made.url, note: made.note))
                 await model.refreshNativeProjects()
             } catch let e as NativeHostError {
                 gitPondOutcome = (FirstPondJourney.gitPondFailedTitle, e.reason)

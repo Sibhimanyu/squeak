@@ -178,6 +178,20 @@ describe("the briefing and the owner", () => {
     expect(text).toMatch(/will last/);
   });
 
+  it("a replace that fails part way changes nothing", () => {
+    const r = rig();
+    r.notebook.add(r.pid, "one", "Pip");
+    r.notebook.add(r.pid, "two", "Pip");
+    const add = r.store.addNotebookEntry.bind(r.store);
+    let calls = 0;
+    r.store.addNotebookEntry = (...args: Parameters<typeof add>) => {
+      if (++calls === 2) throw new Error("disk full");
+      return add(...args);
+    };
+    expect(() => r.notebook.replace(r.pid, ["new a", "new b", "new c"])).toThrow("disk full");
+    expect(r.notebook.view(r.pid).entries.map((e) => e.text)).toEqual(["one", "two"]);
+  });
+
   it("the owner replaces the list: order kept, unchanged lines keep history, edits are the owner's", () => {
     const r = rig();
     r.notebook.add(r.pid, "keep me", "Pip");
