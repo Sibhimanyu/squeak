@@ -127,6 +127,14 @@ final class PondRoomModel {
         catch { feed.failJob(key, message: RoomTasks.refusal(error)) }
     }
 
+    /// A comment on a duck's plan card: the host delivers it to that duck at its next turn; it also shows in the Room.
+    func comment(cardId: String, text: String, host: NativeHostClient) async {
+        guard !member else { return }
+        if let post = try? await RoomClient(host: host).comment(project: projectId, on: cardId, text: text) {
+            _ = feed.receive(post)
+        }
+    }
+
     /// Go, Not now, Start a new duck, Allow, No: shown at once, reconciled by the job the host answers with.
     func act(jobId: String, _ action: RoomTaskAction, title: String? = nil, host: NativeHostClient) async {
         let place = feed.placeToSend(jobId: jobId, action: action)
@@ -309,7 +317,8 @@ struct PondRoomView: View {
                             item: item, ducks: room.feed.threads, ledger: ledger, open: openThread, openTarget: openTarget, answer: answer,
                             retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
                             makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
-                            act: { jobId, a, title in Task { await room.act(jobId: jobId, a, title: title, host: model.nativeHost) } })
+                            act: { jobId, a, title in Task { await room.act(jobId: jobId, a, title: title, host: model.nativeHost) } },
+                            comment: { card, text in Task { await room.comment(cardId: card, text: text, host: model.nativeHost) } })
                     }
                     if !working.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {

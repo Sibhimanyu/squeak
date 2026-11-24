@@ -49,6 +49,7 @@ struct RoomItemView: View {
     let retry: (String) -> Void
     let makeJob: (String) -> Void
     let act: (String, RoomTaskAction, String?) -> Void
+    let comment: (String, String) -> Void
     @State private var visible = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -68,7 +69,7 @@ struct RoomItemView: View {
             Text(verbatim: label).font(.system(size: 11)).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity)
                 .padding(.vertical, 2).accessibilityAddTraits(.isHeader)
         case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, openTarget: openTarget, answer: answer, retry: retry, makeJob: makeJob, act: act)
-        case .system(let s): RoomSystemView(line: s, act: act, open: PondClick.target(line: s).map { t in { openTarget(t) } })
+        case .system(let s): RoomSystemView(line: s, act: act, comment: comment, open: PondClick.target(line: s).map { t in { openTarget(t) } })
         }
     }
 }
@@ -419,12 +420,13 @@ private struct OfferView: View {
 private struct RoomSystemView: View {
     let line: RoomSystemLine
     let act: (String, RoomTaskAction, String?) -> Void
+    let comment: (String, String) -> Void
     /// A handoff line opens the duck it went to.
     var open: (() -> Void)?
 
     var body: some View {
         if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) }
-        else if let st = line.status { RoomStatusLineView(status: st, at: line.at, open: open) }
+        else if let st = line.status { RoomStatusLineView(status: st, at: line.at, comment: comment, open: open) }
         else if let t = line.task { RoomTaskCardView(card: t, act: act, open: open) }
         else { quiet }
     }
@@ -524,8 +526,11 @@ private struct RoomHandoffCard: View {
 private struct RoomStatusLineView: View {
     let status: RoomStatusLine
     let at: Int64
+    let comment: (String, String) -> Void
     var open: (() -> Void)?
     @State private var disclosure = RoomDisclosure()
+    @State private var draft = ""
+    @State private var sent = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -551,10 +556,34 @@ private struct RoomStatusLineView: View {
                     .padding(.horizontal, 13).padding(.vertical, 8).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
                     .frame(maxWidth: 640, alignment: .leading)
+                if let card = status.commentTarget { commentBox(card) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 2)
         .accessibilityElement(children: .contain)
+    }
+}
+
+extension RoomStatusLineView {
+    /// Steer the duck before it goes far: the host hands the comment to it at its next turn.
+    fileprivate func commentBox(_ card: String) -> some View {
+        HStack(spacing: 8) {
+            TextField("Comment on this plan", text: $draft).textFieldStyle(.plain).font(.system(size: 13))
+                .padding(.horizontal, 10).frame(height: 30)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line))
+                .onSubmit { submit(card) }
+            Button(sent ? "Sent" : "Comment") { submit(card) }
+                .buttonStyle(SmallButtonStyle(role: .secondary))
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .frame(maxWidth: 640, alignment: .leading)
+    }
+
+    fileprivate func submit(_ card: String) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        comment(card, text); draft = ""; sent = true
     }
 }
 
