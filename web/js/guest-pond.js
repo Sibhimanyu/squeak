@@ -34,6 +34,10 @@ import {
   readMember,
   readMeta,
   readPresence,
+  readRoomDoc,
+  readRoomTaskDoc,
+  ROOM_MAX_TEXT,
+  taskDocId,
   readThread,
   readThreadEvent,
   memberOfDevice,
@@ -57,6 +61,8 @@ export class GuestError extends Error {
 
 /** What a person is told when a thread cannot be messaged (the Mac's sentences, word for word). */
 export const VIEWERS_READ = "Viewers can read but not send.";
+export const ROOM_NO_MESSAGE = "The owner has turned off messaging for you in this pond.";
+export const ROOM_HIDDEN = "The owner has hidden this pond's threads from you.";
 export const noMessageWithoutAsking = (starter) =>
   `Only ${starter} can message this duck while it runs without asking.`;
 
@@ -475,10 +481,17 @@ export class GuestPond {
     for (const { id, doc } of await this.store.list(`channels/${r.pondId}/presence`)) {
       const read = await this.readSigned("presence", id, doc, memberKey);
       const p = read ? readPresence(read.value) : null;
-      if (p && p.memberId === read.device && p.until > now) presence.push({ ...p, beat: p.until - PRESENCE_MS });
+      if (p && p.memberId === read.device && p.until > now) {
+        presence.push({ ...p, beat: p.at ?? p.until - PRESENCE_MS });
+      }
     }
     const beatOf = new Map(presence.map((p) => [p.memberId, p.beat]));
-    const online = new Set(presence.filter((p) => p.online && now - p.beat < ONLINE_MS).map((p) => p.memberId));
+    // The same rule as the Mac: a writer that stamps `at` is live until `until`; an older one by its beats.
+    const online = new Set(
+      presence
+        .filter((p) => p.online && (p.at !== undefined ? now < p.until : now - p.beat < ONLINE_MS))
+        .map((p) => p.memberId),
+    );
     online.add(r.memberId);
     const holds = await this.holds(members);
     const meta = await this.meta();
@@ -554,6 +567,94 @@ export class GuestPond {
       lastSeq: events.length ? events[events.length - 1].seq : after,
       gap: events.length > 0 && events[0].seq > after + 1 && after > 0,
     };
+  }
+
+  // the Room
+
+  /**
+   * The Room as the Owner's Mac last published it (`room` and `rtasks`, written and signed only by the Owner), plus whether
+   * that Mac is running and whether this member may post. Posts oldest first by the Owner's own `seq`.
+   */
+  async room() {
+    try {
+      return await this.readRoom();
+    } catch (error) {
+      throw plainRelayError(error);
+    }
+  }
+
+  async readRoom() {
+    const r = this.record;
+    if (r.status !== "active") throw new GuestError("You are not in this pond yet.", 409);
+    const members = await this.members();
+    const me = members.get(r.memberId);
+    if (!me) throw new GuestError("Can't read the pond right now. I'll try again.", 503);
+    const caps = effectiveCaps(me.role, me.caps);
+    if (!caps.see) throw new GuestError(ROOM_HIDDEN, 403);
+    const owner = members.get(r.ownerId);
+    const ownerKeys = owner ? keysOfMember(owner) : [r.ownerKey];
+    const fromOwner = (d) => (d === r.ownerId ? ownerKeys : null);
+    const base = `channels/${r.pondId}`;
+    const posts = [];
+    for (const { id, doc } of await this.store.list(`${base}/room`)) {
+      const read = await this.readSigned("room", id, doc, fromOwner);
+      const post = read ? readRoomDoc(read.value) : null;
+      if (post && post.id === id) posts.push(post);
+    }
+    posts.sort((a, b) => a.seq - b.seq);
+    const tasks = [];
+    for (const { id, doc } of await this.store.list(`${base}/rtasks`)) {
+      const read = await this.readSigned("rtasks", id, doc, fromOwner);
+      const task = read ? readRoomTaskDoc(read.value) : null;
+      if (task && taskDocId(task.id) === id) tasks.push(task);
+    }
+    tasks.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    return {
+      posts,
+      tasks,
+      latestSeq: posts.length ? posts[posts.length - 1].seq : 0,
+      ownerName: owner?.name ?? r.ownerName ?? "The owner",
+      ownerOnline: await this.ownerOnline(members),
+      canPost: caps.message && me.role !== "viewer",
+      blockedLine: me.role === "viewer" ? VIEWERS_READ : caps.message ? null : ROOM_NO_MESSAGE,
+      me: { id: r.memberId, name: r.displayName },
+    };
+  }
+
+  /** Whether the Owner's Mac has shown itself lately (the same presence rule the Mac reads). */
+  async ownerOnline(members) {
+    const r = this.record;
+    const now = this.now();
+    for (const { id, doc } of await this.store.list(`channels/${r.pondId}/presence`)) {
+      if (id !== r.ownerId) continue;
+      const read = await this.readSigned("presence", id, doc, (d) => keysOfMember(members.get(d)));
+      const p = read ? readPresence(read.value) : null;
+      if (!p || p.memberId !== read.device || p.until <= now) continue;
+      const at = p.at ?? p.until - PRESENCE_MS;
+      if (p.online && (p.at !== undefined ? now < p.until : now - at < ONLINE_MS)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A message for the Room: signed and written to `rposts`, which only the Owner's Mac applies (at once when it runs, in
+   * order when it is back). Refused here, before anything is written, for a viewer or when the Owner turned messaging off.
+   */
+  async postToRoom(text) {
+    const r = this.record;
+    if (r.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
+    const members = await this.members();
+    const me = members.get(r.memberId);
+    if (!me) throw new GuestError("Can't read the pond right now. I'll try again.", 503);
+    if (me.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
+    if (!effectiveCaps(me.role, me.caps).message) throw new GuestError(ROOM_NO_MESSAGE, 403);
+    const clean = typeof text === "string" ? text.trim() : "";
+    if (!clean) throw new GuestError("A post can't be empty.", 400);
+    if ([...clean].length > ROOM_MAX_TEXT) throw new GuestError(`Keep a post under ${ROOM_MAX_TEXT} characters.`, 400);
+    const at = this.now();
+    const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
+    await this.put("rposts", id, { v: 1, id, text: clean, at });
+    return { id, at };
   }
 
   // doing

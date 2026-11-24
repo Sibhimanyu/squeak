@@ -196,6 +196,17 @@ member with no Nest (`client: "web"`) and sees its shared threads. They open `ht
   typing); someone else's hold shows "<name> is answering" and disables answering. An approval is shown read-only ("Waiting for <starter>
   to approve"). There is no stop and no approve, and no code pane or file tree. A message stays on screen as "Sent. Waiting for the
   duck's starter" until the duck's own `user` event arrives; an ambiguous send is never resent, it can be put back in the box.
+- **The Room on the web.** A "Room" card on the pond screen opens the pond's group chat (`guest-room-view.js`, `guest-room-model.js`;
+  engine `GuestPond.room()` and `postToRoom(text)`). It reads the Owner's sealed `room` and `rtasks` documents, accepted only when
+  the Owner's key signed them (a Member's document of that kind is ignored), and draws what the Mac's Room draws: people as bubbles
+  (the guest's own on the right), each Duck post as one collapsed line (name, kind, first sentence) that opens to its full words,
+  a Task card with its state under the message that made it, and the line "<Owner>'s Mac is offline; Ducks will pick this up when
+  it's back" while the Owner's presence is not live (the Mac's rule: `at` and `until`, else 45 s of beats). Posting signs an
+  `rposts`/<time-ordered id> `{ v:1, id, text, at }` (1 to 500 characters) with the guest's pond-scoped token (its scope already
+  allows `rposts` and no other Room kind); the Owner's Mac applies it as post `m-<id>`, and until then the page shows "Sent. It
+  shows here once the owner's Mac has it." as a pending row. A viewer, or a Member the Owner turned `message` off for, gets the reason
+  instead of a composer and nothing is written; `see` off is a refusal and no Room. No relay or rules change was needed. The paired
+  owner app (`app.js`) has no Room; account-synced ponds open in this same page, so Members on the web get it there.
 - **Tests** (`web/test/guest-*.test.js`, with the real relay handler over a fake store, `FlotillaService` as the owner and the engine's
   real crypto): vectors, browser/Node seal-sign-unseal agreement, join -> approve -> read -> message -> the Mac runs it, the fragment and
   secret never in a request, same-origin relative URLs, removal, the stream protocol, the screens driven end to end on a fake DOM, and the

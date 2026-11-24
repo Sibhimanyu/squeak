@@ -601,7 +601,7 @@ documents (claims and locks stay) are not used for this: the Room's Tasks are `r
 - **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task and Drop are not
   offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
   Mac is away stays a pending row until its post arrives. Fixtures: `npx tsx scripts/make-room-member-fixtures.ts`
-  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. iPhone and web do not read the Room yet.
+  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. The web reads and posts it too (docs/web-app.md, "The Room on the web"); iPhone does not yet.
 
 ### Tasks
 

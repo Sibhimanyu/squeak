@@ -257,7 +257,7 @@ export function macCard({ pondName, onDismiss }) {
   );
 }
 
-export function pondScreen({ view, now, onOpen, onLeave, macPrompt = null }) {
+export function pondScreen({ view, now, onOpen, onLeave, onOpenRoom = null, macPrompt = null }) {
   const groups = groupThreads(view.threads);
   let leaving = false;
   const leave = button(
@@ -277,6 +277,22 @@ export function pondScreen({ view, now, onOpen, onLeave, macPrompt = null }) {
     h("h1", null, view.pond.name),
     h("p", { class: "g-lead" }, pondLine(view)),
     h("p", { class: "g-quiet" }, limitsLine(view.me.role)),
+    onOpenRoom
+      ? h(
+          "section",
+          { class: "g-section", "aria-label": "Room" },
+          h(
+            "button",
+            { class: "g-card g-room-card", type: "button", onclick: onOpenRoom },
+            h(
+              "span",
+              { class: "g-card-main" },
+              h("strong", null, "Room"),
+              h("small", null, "Talk with the flock and see what the ducks are doing"),
+            ),
+          ),
+        )
+      : null,
     h(
       "section",
       { class: "g-section", "aria-label": "People in this pond" },

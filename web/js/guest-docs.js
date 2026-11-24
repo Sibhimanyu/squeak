@@ -174,7 +174,59 @@ export function readPresence(v) {
     memberId: v.memberId,
     online: v.online,
     until: v.until,
+    at: n(v.at) ? v.at : undefined,
     viewing: s(v.viewing, 80) && v.viewing ? v.viewing : undefined,
+  };
+}
+
+// The Room (docs/ponds.md, "The Room reaches Members"): ports of `readRoomDoc`, `readRoomTaskDoc` in src/flotilla/room-sync.ts.
+export const ROOM_MAX_TEXT = 500;
+const POST_KINDS = ["working", "done", "needs", "message", "handoff"];
+const TASK_STATES = ["waiting", "working", "blocked", "done", "dropped"];
+const DOC_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** `room`/<post id>: a post the Owner's Mac wrote. */
+export function readRoomDoc(v) {
+  if (!rec(v) || v.v !== 1 || !n(v.seq) || !Number.isInteger(v.seq) || v.seq < 1) return null;
+  if (!s(v.id, 80) || !DOC_ID.test(v.id) || !s(v.text, ROOM_MAX_TEXT * 4) || !n(v.at)) return null;
+  if (typeof v.kind !== "string" || !POST_KINDS.includes(v.kind) || v.level !== "room") return null;
+  const a = v.author;
+  if (!rec(a) || (a.kind !== "person" && a.kind !== "agent") || !s(a.name, 100) || !a.name) return null;
+  if (a.id !== undefined && !s(a.id, 80)) return null;
+  return {
+    v: 1,
+    seq: v.seq,
+    id: v.id,
+    author: { kind: a.kind, ...(typeof a.id === "string" ? { id: a.id } : {}), name: a.name },
+    kind: v.kind,
+    level: "room",
+    text: v.text,
+    at: v.at,
+  };
+}
+
+/** A Task's document id: its id with every character a path cannot hold made a dash. */
+export const taskDocId = (id) => id.replace(/[^A-Za-z0-9_-]/g, "-");
+
+/** `rtasks`/<task id>: a Task as Members see it. */
+export function readRoomTaskDoc(v) {
+  if (!rec(v) || v.v !== 1 || !s(v.id, 80) || !v.id || !s(v.messageId, 80)) return null;
+  if (!s(v.title, 300) || !s(v.text, 4000) || typeof v.state !== "string" || !TASK_STATES.includes(v.state))
+    return null;
+  if (!n(v.createdAt) || !n(v.updatedAt)) return null;
+  if (v.parentTaskId !== undefined && !s(v.parentTaskId, 80)) return null;
+  if (v.result !== undefined && !s(v.result, 1000)) return null;
+  return {
+    v: 1,
+    id: v.id,
+    messageId: v.messageId,
+    title: v.title,
+    text: v.text,
+    state: v.state,
+    ...(typeof v.parentTaskId === "string" && v.parentTaskId ? { parentTaskId: v.parentTaskId } : {}),
+    ...(typeof v.result === "string" && v.result ? { result: v.result } : {}),
+    createdAt: v.createdAt,
+    updatedAt: v.updatedAt,
   };
 }
 
