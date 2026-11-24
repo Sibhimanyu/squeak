@@ -333,6 +333,7 @@ private final class CanvasDocumentView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     deinit {
+        fitTimer?.invalidate()
         if let obs = boundsObserver { NotificationCenter.default.removeObserver(obs) }
     }
 
@@ -464,6 +465,7 @@ private final class CanvasDocumentView: NSView {
     }
 
     func zoomStep(in zoomIn: Bool) {
+        cancelFit()
         let current = Double(scrollView.magnification)
         let next = CanvasZoom.step(current, in: zoomIn)
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -477,6 +479,7 @@ private final class CanvasDocumentView: NSView {
     }
 
     func zoomTo(_ z: Double) {
+        cancelFit()
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         let inScrollView = convert(centre, to: scrollView)
         NSAnimationContext.runAnimationGroup { ctx in
@@ -487,16 +490,53 @@ private final class CanvasDocumentView: NSView {
         }
     }
 
+    /// Fit: zoom and scroll glide to the fitted view over `CanvasFitMotion.duration` (ease-out), together so the
+    /// artboards never jump; instant under Reduce Motion. Any zoom or pan of the user's own stops it where it is.
     func fitAll() {
         guard bounds.width > 0, artboardBounds.width > 0 else { return }
+        cancelFit()
         let visibleSize = scrollView.contentView.bounds.size
         let docOrigin = CanvasDocumentSize.documentOrigin(artboardBounds: artboardBounds, viewportSize: visibleSize)
         let mag = CanvasDocumentSize.fitMagnification(rect: artboardBounds, viewportSize: visibleSize)
-        scrollView.magnification = CGFloat(mag)
         let pt = CanvasDocumentSize.centredScrollPoint(
             worldRect: artboardBounds, magnification: mag, viewportSize: visibleSize, docOrigin: docOrigin)
-        scrollView.contentView.setBoundsOrigin(pt)
-        documentView.updateLabels(magnification: mag)
+        let target = CanvasFitMotion.Pose(magnification: mag, originX: Double(pt.x), originY: Double(pt.y))
+        let from = currentPose()
+        if Motion.reduceMotion || from == target { apply(target); return }
+        let start = CACurrentMediaTime()
+        fitTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // Moved by someone else since the last step (a scroll, a pinch): leave it be.
+                if self.currentPose() != self.lastFitPose, self.lastFitPose != nil { self.cancelFit(); return }
+                let p = CanvasFitMotion.progress(elapsed: CACurrentMediaTime() - start, reduceMotion: Motion.reduceMotion)
+                let pose = CanvasFitMotion.frame(from: from, to: target, progress: p)
+                self.apply(pose)
+                self.lastFitPose = self.currentPose()
+                if p >= 1 { self.cancelFit() }
+            }
+        }
+        RunLoop.main.add(fitTimer!, forMode: .common)
+    }
+
+    nonisolated(unsafe) private var fitTimer: Timer?
+    private var lastFitPose: CanvasFitMotion.Pose?
+
+    private func cancelFit() {
+        fitTimer?.invalidate()
+        fitTimer = nil
+        lastFitPose = nil
+    }
+
+    private func currentPose() -> CanvasFitMotion.Pose {
+        let o = scrollView.contentView.bounds.origin
+        return CanvasFitMotion.Pose(magnification: Double(scrollView.magnification), originX: Double(o.x), originY: Double(o.y))
+    }
+
+    private func apply(_ pose: CanvasFitMotion.Pose) {
+        scrollView.magnification = CGFloat(pose.magnification)
+        scrollView.contentView.setBoundsOrigin(CGPoint(x: pose.originX, y: pose.originY))
+        documentView.updateLabels(magnification: pose.magnification)
         publish()
     }
 

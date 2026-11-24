@@ -343,9 +343,10 @@ private struct WorkbenchTabs: View {
     private var chats: [HostSession] { model.streamThreads(workspace).filter { !dock.threads.isDocked($0.key.stringValue) } }
 
     private enum StripItem: Identifiable {
-        case chat(HostSession), file(OpenFile), duckling(DucklingRef), placeholder
+        case chat(HostSession), file(OpenFile), duckling(DucklingRef), artifact(pond: String, path: String), placeholder
         var id: String {
             switch self {
+            case .artifact(let pond, let path): "artifact-\(ArtifactTabID.make(pond: pond, path: path))"
             case .placeholder: "placeholder"
             case .duckling(let r): "duckling-\(r.session.stringValue)-\(r.taskId)"
             case .chat(let s): "chat-\(s.key.stringValue)"
@@ -394,21 +395,40 @@ private struct WorkbenchTabs: View {
         guard model.streamTabs.hasStrip(workspace.id) else { return chats.map(StripItem.chat) + open.map(StripItem.file) }
         let byKey = Dictionary(chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { a, _ in a })
         let byPath = Dictionary(open.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        let order = model.streamTabs.strip(workspace.id, hasThread: { byKey[$0] != nil }, isOpen: { byPath[$0] != nil }, openFiles: open.map(\.path))
+        let order = model.streamTabs.strip(workspace.id, hasThread: { byKey[$0] != nil }, isOpen: { byPath[$0] != nil }, openFiles: open.map(\.path),
+                                           withArtifacts: true)
         var out = order.compactMap { t -> StripItem? in
-            t.kind == .thread ? byKey[t.id].map(StripItem.chat) : byPath[t.id].map(StripItem.file)
+            switch t.kind {
+            case .thread: byKey[t.id].map(StripItem.chat)
+            case .file: byPath[t.id].map(StripItem.file)
+            case .artifact: ArtifactTabID.parse(t.id).map { StripItem.artifact(pond: $0.pond, path: $0.path) }
+            }
         }
         // A listing tab is not saved: it sits at the end.
         out += (files?.open ?? []).filter(\.isListing).map(StripItem.file)
         return out
     }
 
+    /// The saved tabs as drawn, left to right: what a drop or a keyboard move is decided among (ducklings, panels and
+    /// shells are not in it).
+    private var streamOrder: [StreamTab] {
+        stripItems.compactMap { item in
+            switch item {
+            case .chat(let s): .thread(s.key.stringValue)
+            case .file(let f): dock.files.zone(of: f.path) == .centre ? .file(f.path) : nil
+            case .artifact(let pond, let path): .artifact(pond: pond, path: path)
+            case .duckling, .placeholder: nil
+            }
+        }
+    }
+
+    private var streamContext: CentreStreamContext { CentreStreamContext(workspace: workspace, order: streamOrder) }
+
     private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
     @State private var stripWidth: Double = 0
     @State private var capMemo = TabCapMemo()
     @State private var hoveredTab: SessionKey?
-    @State private var chatDropTarget: SessionKey?
     @Namespace private var tabIndicator
     /// The widest any tab may be: infinity while every tab fits at its natural width (see `ChatTabWidth.cap`).
     private var tabCap: CGFloat {
@@ -432,6 +452,7 @@ private struct WorkbenchTabs: View {
                         switch item {
                         case .chat(let s): tab(s).transition(.opacity)
                         case .placeholder: placeholderTab.transition(.opacity)
+                        case .artifact(let pond, let path): artifactTab(pond: pond, path: path)
                         case .duckling(let ref):
                             if let parent = model.session(ref.session) {
                                 DockDucklingTab(session: parent, ref: ref, zone: .centre, selected: !composing && dock.ducklings.selected[.centre] == ref,
@@ -450,15 +471,6 @@ private struct WorkbenchTabs: View {
                                 }
                             }
                         }
-                    }
-                    ForEach(artifactTabs, id: \.path) { a in
-                        ArtifactStripTab(pond: a.pond, path: a.path, selected: artifact?.pond == a.pond && artifact?.path == a.path,
-                                         height: Metrics.tabStrip, indicator: tabIndicator,
-                                         preview: model.streamTabs.isPreview(.artifact(pond: a.pond, path: a.path), in: workspace.id),
-                                         pin: { model.pinTab(.artifact(pond: a.pond, path: a.path), in: workspace) },
-                                         open: { model.openArtifact(pond: a.pond, path: a.path) },
-                                         close: { model.closeArtifactTab(pond: a.pond, path: a.path, in: workspace) })
-                            .transition(.opacity)
                     }
                     ForEach(dock.layout.centre.panels.filter { $0 != .terminal }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: .centre, selected: !composing && dock.layout.centre.selected == p, height: Metrics.tabStrip, indicator: tabIndicator) {
@@ -495,6 +507,7 @@ private struct WorkbenchTabs: View {
                     .accessibilityLabel("New duck").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New duck")
                 }
                 .environment(\.tabMaxWidth, tabCap)
+                .environment(\.centreStream, streamContext)
                 .padding(.horizontal, Space.l)
             }
             Button { showHistory.toggle() } label: {
@@ -541,6 +554,9 @@ private struct WorkbenchTabs: View {
             else if let files, let path = files.activePath { files.close(path); box?.handled = true }
             else if let s = chats.first(where: { $0.key == model.lastChat }), ChatTabs.canClose(shown: chats.count) { closeTab(s); box?.handled = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakMoveTab)) { note in
+            if visible { moveShownTab(by: (note.object as? Int) ?? 1) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .squeakStepTab)) { note in
             guard visible else { return }
             let delta = (note.object as? Int) ?? 1
@@ -553,6 +569,27 @@ private struct WorkbenchTabs: View {
         .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .animation(Motion.standard, value: model.lastChat)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    private func artifactTab(pond: String, path: String) -> some View {
+        let tab = StreamTab.artifact(pond: pond, path: path)
+        return ArtifactStripTab(pond: pond, path: path, selected: artifact?.pond == pond && artifact?.path == path,
+                                height: Metrics.tabStrip, indicator: tabIndicator, preview: model.streamTabs.isPreview(tab, in: workspace.id),
+                                pin: { model.pinTab(tab, in: workspace) }, open: { model.openArtifact(pond: pond, path: path) },
+                                close: { model.closeArtifactTab(pond: pond, path: path, in: workspace) })
+            .transition(.opacity)
+    }
+
+    /// The keyboard reorder: the tab on screen (a chat, file or canvas) moves one place along the strip.
+    private func moveShownTab(by delta: Int) {
+        guard !composing, dock.layout.centre.selected == nil, dock.ducklings.selected[.centre] == nil,
+              dock.activeTerminals.shown(in: .centre) == nil else { return }
+        var shown: StreamTab?
+        if let artifact { shown = .artifact(pond: artifact.pond, path: artifact.path) }
+        else if let path = files?.activePath { shown = .file(path) }
+        else if let chat = model.focus.chat { shown = .thread(chat.stringValue) }
+        guard let shown, let landing = TabDrop.step(in: streamOrder, tab: shown, by: delta) else { return }
+        model.moveStreamTab(shown, to: landing, workspace: workspace)
     }
 
     /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
@@ -634,7 +671,6 @@ private struct WorkbenchTabs: View {
     private func tab(_ s: HostSession) -> some View {
         let selected = !composing && artifact == nil && model.focus.chat == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
         let running = s.state == .working
-        let draggingSelf = dock.dragging == .thread(s.key.stringValue)
         let mark = selected || running ? nil : model.mark(for: s)
         let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
@@ -666,22 +702,7 @@ private struct WorkbenchTabs: View {
         .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
         .onDrag { dragProvider(DockItemPayload.encode(.thread(s.key.stringValue)), kind: .thread) } preview: { DockTabDragPreview(title: model.workbenchTitle(s)) }
-        .padding(.leading, chatDropTarget == s.key && !draggingSelf ? TabInsertionLine.gap : 0)
-        .overlay { if chatDropTarget == s.key && !draggingSelf { TabInsertionLine() } }
-        .animation(Motion.standard, value: chatDropTarget == s.key && !draggingSelf)
-        .scopedDrop(.centreStrip, isTargeted: { on in
-            if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
-        }) { source in
-            if case .thread(let moving)? = DockItemPayload.decode(source) {
-                // From a side zone the thread comes home first, then sits before this tab.
-                if dock.threads.isDocked(moving) { dock.moveThread(moving, to: .centre) }
-                dock.dragging = nil
-                return moving == s.key.stringValue || model.moveChatTab(moving, before: s.key, workspace: workspace)
-            }
-            // Any other dock tab dropped on a chat tab goes to the centre.
-            if let item = DockItemPayload.decode(source) { return performDockDrop(item, to: .centre, before: nil, model: model) }
-            return false
-        }
+        .modifier(CentreTabDrop(tab: .thread(s.key.stringValue)))
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -750,6 +771,7 @@ private struct ArtifactStripTab: View {
 
     var body: some View {
         let item = ArtifactViewerPage.item(pond: pond, path: path, remote: ArtifactViewerPage.isRemote(pond: pond))
+        let tab = StreamTab.artifact(pond: pond, path: path)
         StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(item.name)",
                  titleWidth: TabTitleMeasure.width(item.name, semibold: false), close: close,
                  icon: { Lucide(item.kind.lucide, size: 13, color: selected ? Theme.ink : Theme.muted) },
@@ -760,6 +782,13 @@ private struct ArtifactStripTab: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: open)
             .simultaneousGesture(TapGesture(count: 2).onEnded { if preview { pin() } })
+            .opacity(DockStore.shared.draggingArtifact == tab ? 0.35 : 1)
+            .animation(Motion.quick, value: DockStore.shared.draggingArtifact == tab)
+            .onDrag {
+                DockStore.shared.draggingArtifact = tab
+                return dragProvider(ArtifactDragPayload.encode(pond: pond, path: path), kind: .artifact)
+            } preview: { DockTabDragPreview(title: item.name) }
+            .modifier(CentreTabDrop(tab: tab))
             .squeakContextMenu {
                 if preview { Button("Keep open", action: pin) }
                 Button("Close tab", action: close)
@@ -769,6 +798,21 @@ private struct ArtifactStripTab: View {
     }
 }
 
+
+/// A chat or canvas tab in the centre strip takes drops on its halves: before it on the left, after it on the right.
+private struct CentreTabDrop: ViewModifier {
+    let tab: StreamTab
+    @Environment(AppModel.self) private var model
+    @Environment(\.centreStream) private var centre
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let centre {
+            content.modifier(TabReorderDrop(target: .centreStrip, item: tab, order: centre.order, dragged: centre.dragged) { text, landing in
+                performCentreStreamDrop(text, landing: landing, in: centre, model: model)
+            })
+        } else { content }
+    }
+}
 
 /// Any other tab becoming the shown one (a file, a panel, a shell, a duckling) takes the centre from an open artifact.
 private struct ArtifactLeaveSync: ViewModifier {

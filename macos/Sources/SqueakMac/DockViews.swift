@@ -35,8 +35,9 @@ import UniformTypeIdentifiers
                 let dock = DockStore.shared
                 if event.type == .leftMouseDragged {
                     if dock.dragging == nil, let p = dock.hoveredTab { dock.dragging = p }
-                } else if dock.dragging != nil {
-                    dock.dragging = nil
+                } else {
+                    if dock.dragging != nil { dock.dragging = nil }
+                    if dock.draggingArtifact != nil { dock.draggingArtifact = nil }
                 }
             }
             return event
@@ -48,34 +49,24 @@ import UniformTypeIdentifiers
 
 private struct DockDropModifier: ViewModifier {
     let zone: DockZone
-    var before: DockItem?
-    /// A whole zone washes; a strip or a tab only draws its drop line.
+    /// A whole zone washes; a strip only draws its drop outline.
     var wash = true
     @State private var targeted = false
     @Environment(AppModel.self) private var model
 
-    /// A tab dragged over its own place opens no gap: dropping it there changes nothing.
-    private var overSelf: Bool { before != nil && DockStore.shared.dragging == before }
-
     func body(content: Content) -> some View {
         content
-            // A tab opens a gap before itself while another tab hovers it; a strip or zone washes instead.
-            .padding(.leading, before != nil && targeted && !overSelf ? TabInsertionLine.gap : 0)
             .scopedDrop(.strip(zone), isTargeted: { targeted = $0 }) { text in
                 guard let item = DockItemPayload.decode(text) else { return false }
-                return performDockDrop(item, to: zone, before: before, model: model)
+                return performDockDrop(item, to: zone, before: nil, model: model)
             }
             .overlay {
                 if targeted {
-                    if before != nil {
-                        if !overSelf { TabInsertionLine() }
-                    } else {
-                        ZStack {
-                            if wash { Theme.selected.opacity(0.5) }
-                            RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 2).padding(wash ? 4 : 1)
-                        }
-                        .allowsHitTesting(false).transition(.opacity)
+                    ZStack {
+                        if wash { Theme.selected.opacity(0.5) }
+                        RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 2).padding(wash ? 4 : 1)
                     }
+                    .allowsHitTesting(false).transition(.opacity)
                 }
             }
             .animation(Motion.standard, value: targeted)
@@ -83,17 +74,53 @@ private struct DockDropModifier: ViewModifier {
 }
 
 /// Where a dragged tab will land: the neighbours part by `gap` and this line sits centred between them, in the pond's
-/// accent. One look for every strip (centre chats, and the dock's side and bottom zones).
+/// accent. One look for every strip (centre chats, and the dock's side and bottom zones). `side` is the tab edge the
+/// gap opens on: before the tab it is hovered over (its left half) or after it (its right half).
 struct TabInsertionLine: View {
     static let gap: CGFloat = 16
     static let width: CGFloat = 2
+    var side: TabDrop.Side = .before
 
     var body: some View {
         Capsule().fill(PondColour.accent).frame(width: Self.width).padding(.vertical, 8)
-            .padding(.leading, (Self.gap - Self.width) / 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(side == .before ? .leading : .trailing, (Self.gap - Self.width) / 2)
+            .frame(maxWidth: .infinity, alignment: side == .before ? .leading : .trailing)
             .allowsHitTesting(false).transition(.opacity)
             .accessibilityHidden(true)
+    }
+}
+
+/// Drop target for a tab on a strip, deciding where the dragged tab lands from which half of this tab the pointer is
+/// over (`TabDrop`): the neighbours part on that side and the insertion line sits in the gap. The pointer is read
+/// against the tab itself, not the gap, so opening the gap never moves the halves. `perform` gets the dragged payload
+/// and the landing (nil: it would land where it already is).
+struct TabReorderDrop<Item: Hashable>: ViewModifier {
+    let target: DragTarget
+    let item: Item
+    /// The strip's tabs left to right, among which the landing is decided.
+    let order: [Item]
+    /// The tab being dragged, when it is one of ours.
+    let dragged: Item?
+    let perform: @MainActor (String, TabDrop.Landing<Item>?) -> Bool
+
+    private final class Pending { var landing: TabDrop.Landing<Item>? }
+    @State private var shown: TabDrop.Side?
+    @State private var width: Double = 0
+    @State private var pending = Pending()
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { width = $0 }
+            .padding(.leading, shown == .before ? TabInsertionLine.gap : 0)
+            .padding(.trailing, shown == .after ? TabInsertionLine.gap : 0)
+            .overlay { if let shown { TabInsertionLine(side: shown) } }
+            .scopedDrop(target, isTargeted: { on in if !on { shown = nil } }, moved: { point in
+                let lead = shown == .before ? TabInsertionLine.gap : 0
+                let landing = TabDrop.landing(in: order, dragged: dragged, over: item, x: Double(point.x) - lead, width: width)
+                pending.landing = landing
+                shown = landing?.side
+            }) { text in perform(text, pending.landing) }
+            .animation(Motion.standard, value: shown)
     }
 }
 
@@ -117,8 +144,8 @@ struct TabInsertionLine: View {
 }
 
 extension View {
-    func dockDrop(_ zone: DockZone, before: DockItem? = nil, wash: Bool = true) -> some View {
-        modifier(DockDropModifier(zone: zone, before: before, wash: wash))
+    func dockDrop(_ zone: DockZone, wash: Bool = true) -> some View {
+        modifier(DockDropModifier(zone: zone, wash: wash))
     }
 }
 
@@ -287,7 +314,7 @@ struct DockItemTab<Icon: View>: View {
         .opacity(dock.dragging == item ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == item)
         .onDrag { dragProvider(DockItemPayload.encode(item), kind: .of(item)) } preview: { DockTabDragPreview(title: title) }
-        .dockDrop(zone, before: item, wash: false)
+        .modifier(DockTabDrop(item: item, zone: zone))
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help(title)
@@ -308,6 +335,73 @@ struct DockItemTab<Icon: View>: View {
             Button("Close tab", action: close)
         }
     }
+}
+
+/// A dock tab takes drops on its halves. A centre file sits in the stream's saved strip with the chats and canvases, so
+/// it is ordered there; any other tab is ordered among the tabs of its kind in its zone.
+private struct DockTabDrop: ViewModifier {
+    let item: DockItem
+    let zone: DockZone
+    @Environment(AppModel.self) private var model
+    @Environment(\.centreStream) private var centre
+
+    @ViewBuilder func body(content: Content) -> some View {
+        let dock = DockStore.shared
+        if zone == .centre, let centre, let tab = StreamTab.of(item), tab.kind == .file {
+            content.modifier(TabReorderDrop(target: .centreStrip, item: tab, order: centre.order, dragged: centre.dragged) { text, landing in
+                performCentreStreamDrop(text, landing: landing, in: centre, model: model)
+            })
+        } else {
+            let siblings = dock.siblings(of: item, in: zone)
+            content.modifier(TabReorderDrop(target: .strip(zone), item: item, order: siblings, dragged: dock.dragging) { text, landing in
+                guard let moving = DockItemPayload.decode(text) else { return false }
+                guard let landing else { dock.dragging = nil; return true }
+                return performDockDrop(moving, to: zone, before: TabDrop.insertBefore(in: siblings, dragged: moving, landing: landing), model: model)
+            })
+        }
+    }
+}
+
+/// The centre strip's saved tabs (chats, files, canvases) in the order drawn, for the drop and keyboard decisions.
+@MainActor struct CentreStreamContext {
+    var workspace: SidebarWorkspace
+    var order: [StreamTab]
+    /// The stream tab being dragged along the strip right now, if there is one.
+    var dragged: StreamTab? { StreamTab.of(DockStore.shared.dragging) ?? DockStore.shared.draggingArtifact }
+}
+
+private struct CentreStreamKey: EnvironmentKey { static let defaultValue: CentreStreamContext? = nil }
+extension EnvironmentValues {
+    var centreStream: CentreStreamContext? {
+        get { self[CentreStreamKey.self] }
+        set { self[CentreStreamKey.self] = newValue }
+    }
+}
+
+/// A tab dropped on a centre-strip tab: a chat, file or canvas lands before or after it (a chat or file from a side
+/// zone comes home first); any other tab goes to the centre as before.
+@MainActor func performCentreStreamDrop(_ text: String, landing: TabDrop.Landing<StreamTab>?, in ctx: CentreStreamContext, model: AppModel) -> Bool {
+    let dock = DockStore.shared
+    var moving: StreamTab?
+    if let artifact = ArtifactDragPayload.decode(text) {
+        moving = artifact
+    } else if let item = DockItemPayload.decode(text) {
+        switch item {
+        case .thread(let key):
+            if dock.threads.isDocked(key) { dock.moveThread(key, to: .centre) }
+            moving = .thread(key)
+        case .file(let path):
+            if dock.files.zone(of: path) != .centre { dockMoveFile(path, to: .centre, model: model) }
+            moving = .file(path)
+        default:
+            return performDockDrop(item, to: .centre, before: nil, model: model)
+        }
+    }
+    dock.dragging = nil
+    dock.draggingArtifact = nil
+    guard let moving else { return false }
+    if let landing { model.moveStreamTab(moving, to: landing, workspace: ctx.workspace) }
+    return true
 }
 
 /// What follows the pointer while a tab is dragged: its title on a raised surface with a soft shadow.

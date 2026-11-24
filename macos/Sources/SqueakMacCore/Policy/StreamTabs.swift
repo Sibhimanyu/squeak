@@ -53,9 +53,11 @@ public struct StreamTabs: Codable, Equatable, Sendable {
 
     /// The strip as it is drawn: saved order, threads where `hasThread` says they resolve, files where `isOpen` says
     /// they are open; a file open but not saved yet goes last. Threads that are not saved are the caller's. Artifact
-    /// tabs are not here: they are kept (`artifactTabs`) and drawn last.
-    public func strip(_ workspace: String, hasThread: (String) -> Bool, isOpen: (String) -> Bool, openFiles: [String]) -> [StreamTab] {
-        var out = tabs(workspace).filter { $0.kind == .artifact ? false : $0.kind == .thread ? hasThread($0.id) : isOpen($0.id) }
+    /// tabs are here only with `withArtifacts` (they sit where the user put them); otherwise they are kept
+    /// (`artifactTabs`) and drawn last.
+    public func strip(_ workspace: String, hasThread: (String) -> Bool, isOpen: (String) -> Bool, openFiles: [String],
+                      withArtifacts: Bool = false) -> [StreamTab] {
+        var out = tabs(workspace).filter { $0.kind == .artifact ? withArtifacts : $0.kind == .thread ? hasThread($0.id) : isOpen($0.id) }
         let seen = Set(out.filter { $0.kind == .file }.map(\.id))
         out += openFiles.filter { !seen.contains($0) }.map(StreamTab.file)
         return out
@@ -173,6 +175,19 @@ public struct StreamTabs: Codable, Equatable, Sendable {
         return true
     }
 
+    /// Moves `source` to the landing (just before or just after its anchor). False when either tab is not in the strip
+    /// or the move would change nothing.
+    @discardableResult
+    public mutating func move(_ source: StreamTab, to landing: TabDrop.Landing<StreamTab>, in workspace: String) -> Bool {
+        guard var strip = strips[workspace], source != landing.anchor,
+              strip.tabs.contains(source), strip.tabs.contains(landing.anchor) else { return false }
+        let moved = TabDrop.applying(landing, moving: source, in: strip.tabs)
+        guard moved != strip.tabs else { return false }
+        strip.tabs = moved
+        strips[workspace] = strip
+        return true
+    }
+
     /// Drops tabs whose thread is archived or deleted, or whose file is gone (`exists` says which still are). Run on
     /// restore; returns whether anything changed.
     @discardableResult
@@ -196,5 +211,17 @@ public struct StreamTabs: Codable, Equatable, Sendable {
     private static func unique(_ tabs: [StreamTab]) -> [StreamTab] {
         var seen = Set<StreamTab>()
         return tabs.filter { seen.insert($0).inserted }
+    }
+}
+
+public extension StreamTab {
+    /// The stream tab a dragged dock item is (a thread or a file); nil for panels, shells and ducklings, which are not
+    /// in the saved strip.
+    static func of(_ item: DockItem?) -> StreamTab? {
+        switch item {
+        case .thread(let k)?: return .thread(k)
+        case .file(let p)?: return .file(p)
+        default: return nil
+        }
     }
 }
