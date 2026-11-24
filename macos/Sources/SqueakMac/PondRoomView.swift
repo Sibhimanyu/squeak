@@ -122,7 +122,15 @@ final class PondRoomModel {
     func makeJob(messageId: String, host: NativeHostClient) async {
         let key = "msg:" + messageId
         feed.clearJobLocal(key)
-        guard !member else { return }
+        if member {
+            // Queued for the Owner's Mac: the Task shows when it has made it (waiting for approval unless this Member may start).
+            do {
+                let queued = try await client(host).queueTask(pond: projectId, messageId: messageId)
+                feed.queueJob(key)
+                if queued.offline { ownerOffline = queued.line ?? Self.ownerAwayLine }
+            } catch { feed.failJob(key, message: RoomTasks.refusal(error)) }
+            return
+        }
         do { feed.upsert(job: try await RoomClient(host: host).makeJob(project: projectId, messageId: messageId)) }
         catch { feed.failJob(key, message: RoomTasks.refusal(error)) }
     }
@@ -266,7 +274,7 @@ struct PondRoomView: View {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
-            let items = RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId)
+            let items = RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)

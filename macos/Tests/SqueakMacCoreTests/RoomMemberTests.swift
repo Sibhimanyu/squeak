@@ -58,9 +58,14 @@ struct RoomMemberTests {
             if case .system(let s) = item, let c = s.task { cards.append(c) }
         }
         #expect(messages.count == 3)
-        // Nothing to make a Task from, and nothing to drop: Tasks are made and dropped on the Owner's Mac.
-        #expect(messages.allSatisfy { !$0.canMakeTask })
+        // A Member may make a Task from a person's message (the one that already is a Task excepted), but never drops one.
+        #expect(messages.filter(\.canMakeTask).map(\.postId) == [page.posts[0].id])
         #expect(cards.count == 1 && cards[0].canDrop == false)
+        // Messaging switched off: nothing to make a Task from.
+        let muted = RoomMessages.build(feed: feed, memberView: true, selfId: me, canMakeMemberTask: false)
+        var mutedMessages: [RoomMessage] = []
+        for item in muted { if case .group(let g) = item { mutedMessages += g.messages } }
+        #expect(mutedMessages.allSatisfy { !$0.canMakeTask })
         // The Owner's posts are somebody else's words here, not "mine".
         #expect(messages[0].author != .me)
     }
@@ -118,5 +123,69 @@ struct RoomMemberTests {
         #expect(feed.rows.filter { $0.post.text == "Anyone there?" }.count == 1)
         let row = try #require(feed.rows.first { $0.id == id })
         #expect(!row.pending && row.mine && row.post.seq == 5)
+    }
+
+    // MARK: Tasks that need the Owner's approval
+
+    @Test func makeTaskFromAMemberIsQueuedForTheOwnersMac() async throws {
+        let t = try Replay().serve("room-member-task-queued", status: 202)
+        let queued = try await member(t).queueTask(pond: "pond-1", messageId: "p-1")
+        #expect(t.requests.first?.method == "POST" && t.requests.first?.url.path == "/native/ponds/pond-1/room/tasks")
+        let sent = String(decoding: t.requests.first?.body ?? Data(), as: UTF8.self)
+        #expect(sent.contains("\"messageId\":\"p-1\""))
+        #expect(queued.offline == false)
+    }
+
+    @Test func aMembersTaskWaitingForTheOwnerSaysSoToBoth() async throws {
+        let page = try #require(try await member(try Replay().serve("room-member-page-approval")).page(project: "pond-1"))
+        var feed = RoomFeed()
+        feed.apply(page: page)
+        let waiting = try #require(page.tasks?.first { $0.approvalName != nil })
+        #expect(waiting.approvalName == "Aarav" && waiting.state == .waiting)
+        // The Member sees whose turn it is and has nothing to press.
+        let mine = RoomMessages.build(feed: feed, memberView: true, selfId: "someone-else")
+        var memberCards: [RoomTaskCard] = []
+        var memberButtons = 0
+        for item in mine {
+            if case .system(let s) = item {
+                memberButtons += s.buttons.count
+                if let c = s.task, c.taskId == waiting.id { memberCards.append(c) }
+            }
+        }
+        #expect(memberCards.first?.stateLabel == "Waiting for the Owner\u{2019}s approval" && memberCards.first?.canDrop == false)
+        #expect(memberButtons == 0)
+        // The Owner's Mac reads the same Task from its own host (`approval`) and gets Approve and Drop.
+        let json = #"{"id":"t","messageId":"m","state":"waiting","approval":{"by":"x","name":"Aarav"},"title":"Log each run"}"#
+        let hosted = try JSONDecoder().decode(RoomTask.self, from: Data(json.utf8))
+        #expect(hosted.approvalName == "Aarav")
+        var ownerFeed = RoomFeed()
+        ownerFeed.upsert(job: hosted)
+        let items = RoomMessages.build(feed: ownerFeed)
+        let lines = items.compactMap { item -> RoomSystemLine? in if case .system(let s) = item, s.jobId == "t" { return s }; return nil }
+        let line = try #require(lines.first)
+        #expect(line.text.hasPrefix("Aarav asked for this task") && line.buttons.map(\.title) == ["Approve", "Drop"])
+        #expect(line.buttons.first?.action.body == .object(["action": .string("approve")]))
+        // Nothing offers Go or a new duck before the Owner decides, and the card says it needs them.
+        #expect(lines.count == 1)
+        let card = items.compactMap { item -> RoomTaskCard? in if case .system(let s) = item { return s.task }; return nil }.first
+        #expect(card?.stateLabel == "Needs your approval")
+    }
+
+    @Test func approvingShowsAtOnceAndAQueuedMakeTaskIsRemembered() throws {
+        let hosted = RoomTask(id: "t", messageId: "m", text: "Log each run", approvalName: "Aarav")
+        var feed = RoomFeed()
+        feed.upsert(job: hosted)
+        feed.beginJob("t", action: .approve)
+        let items = RoomMessages.build(feed: feed)
+        let line = try #require(items.compactMap { item -> RoomSystemLine? in if case .system(let s) = item, s.jobId == "t" { return s }; return nil }.first)
+        #expect(line.buttons.isEmpty && line.note == "Approving\u{2026}")
+        // The host's answer clears the waiting words.
+        var approved = hosted
+        approved.approvalName = nil
+        approved.updatedAt = 5
+        feed.upsert(job: approved)
+        #expect(feed.jobLocal["t"] == nil)
+        feed.queueJob("msg:p")
+        #expect(feed.jobLocal["msg:p"]?.queued == true)
     }
 }

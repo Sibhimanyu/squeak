@@ -137,7 +137,7 @@ public struct RoomFeed: Sendable, Equatable {
         case .go, .newThread, .allow:
             guard let t = jobs.first(where: { $0.id == taskId }) else { return nil }
             return RoomTasks.messageIdsToSend(for: t, excluded: taskExcluded[taskId] ?? [])
-        case .drop, .deny, .reroute: return nil
+        case .drop, .deny, .reroute, .approve: return nil
         }
     }
 
@@ -145,7 +145,7 @@ public struct RoomFeed: Sendable, Equatable {
     public func placeToSend(jobId: String, action: RoomTaskAction) -> RoomTaskPlace? {
         switch action {
         case .go, .newThread, .allow: return jobPlace[jobId] ?? jobs.first { $0.id == jobId }?.place
-        case .drop, .deny, .reroute: return nil
+        case .drop, .deny, .reroute, .approve: return nil
         }
     }
 
@@ -160,6 +160,9 @@ public struct RoomFeed: Sendable, Equatable {
     }
 
     public mutating func clearJobLocal(_ id: String) { jobLocal[id] = nil }
+
+    /// A Member's "Make task" is waiting at the Owner's Mac: the message stops offering it until the Task arrives.
+    public mutating func queueJob(_ key: String) { jobLocal[key] = RoomTaskLocal(queued: true) }
 
     /// The jobs' lines, keyed by the message they sit under.
     public func jobLine(forMessage id: String) -> RoomTaskLine? {
