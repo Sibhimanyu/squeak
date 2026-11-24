@@ -37,7 +37,7 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
     case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen, minimize, closeWindow
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
-    case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
+    case newTab, reopenTab, closeTab, nextTab, previousTab, moveTabLeft, moveTabRight, diffView
     case nextAttention, expandTools, focusComposer
     case forkChat, archiveThread
     case send, newline, steer, cyclePermission, modelPicker, effortPicker, attach, dictate
@@ -117,6 +117,9 @@ public enum ShortcutRegistry {
         e(.closeTab, "Chat tabs", "Close tab", KeyChord("W", c)),
         e(.nextTab, "Chat tabs", "Next tab", KeyChord("Tab", .control)),
         e(.previousTab, "Chat tabs", "Previous tab", KeyChord("Tab", [.control, s])),
+        // ⌃⇧←/→ moves the open tab along the strip (⌃⇧⇥ steps, so the same modifiers reorder).
+        e(.moveTabLeft, "Chat tabs", "Move tab left", KeyChord("←", [.control, s])),
+        e(.moveTabRight, "Chat tabs", "Move tab right", KeyChord("→", [.control, s])),
         // ⇧⌘D is dictation and ⇧⌘/ is macOS's Help search, so the diff view and effort take ⇧⌘G and ⇧⌘E.
         e(.diffView, "Chat tabs", "View all changes (review)", KeyChord("G", [c, s])),
         e(.nextAttention, "Chat", "Next chat that needs you", KeyChord("L", [c, o])),

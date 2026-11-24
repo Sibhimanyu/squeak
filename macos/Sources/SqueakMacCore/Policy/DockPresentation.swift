@@ -116,6 +116,8 @@ public final class DockStore {
     public var activeTerminals: DockTerminals { activeFolder.flatMap { terminals[$0] } ?? DockTerminals() }
     /// A panel being dragged right now (not saved): zones that could take it show their drop strips.
     public var dragging: DockItem?
+    /// An artifact tab being dragged along the centre strip (not saved); cleared with `dragging`.
+    public var draggingArtifact: StreamTab?
     /// The panel tab under the pointer (not observed): a drag that starts there is a panel drag.
     @ObservationIgnored public var hoveredTab: DockItem?
     /// Set by the window: a Pond panel dropped on the centre opens the pond dashboard instead of docking.
@@ -401,6 +403,18 @@ public final class DockStore {
         guard w != workspaces else { return }
         workspaces = w
         save()
+    }
+
+    /// The tabs `item` is ordered among in `zone`: its own kind, in the order the strip draws them (tabs of one kind
+    /// sit together). Drop positions are decided over this list.
+    public func siblings(of item: DockItem, in zone: DockZone) -> [DockItem] {
+        switch item {
+        case .panel: return layout[zone].panels.map { .panel($0) }
+        case .file: return files.files(in: zone).map { .file($0) }
+        case .thread: return threads.threads(in: zone).map { .thread($0) }
+        case .duckling: return ducklings.ducklings(in: zone).map { .duckling($0) }
+        case .terminal: return activeTerminals.terminals(in: zone).map { .terminal($0) }
+        }
     }
 
     /// Takes a drop: moves the tab into `zone`, before `before` when that is the same kind of tab (else at the end).

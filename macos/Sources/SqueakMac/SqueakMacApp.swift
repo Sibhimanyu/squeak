@@ -112,6 +112,10 @@ struct SqueakCommands: Commands {
                 .registryShortcut(.nextTab)
             Button("Previous Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: -1) }
                 .registryShortcut(.previousTab)
+            Button("Move Tab Left") { NotificationCenter.default.post(name: .squeakMoveTab, object: -1) }
+                .registryShortcut(.moveTabLeft)
+            Button("Move Tab Right") { NotificationCenter.default.post(name: .squeakMoveTab, object: 1) }
+                .registryShortcut(.moveTabRight)
             Divider()
             Button("View All Changes") { NotificationCenter.default.post(name: .squeakShowAllChanges, object: nil) }
                 .registryShortcut(.diffView)

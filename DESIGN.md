@@ -1188,6 +1188,7 @@ A pond someone shared with you works exactly like your own: the same sidebar tre
 | Chat tabs | New chat tab · reopen closed tab                                                         | ⌘T · ⇧⌘T            |
 | Chat tabs | Close tab (⌘W closes the window)                                                         | ⇧⌘W                 |
 | Chat tabs | Next · previous tab                                                                      | ⌃Tab · ⌃⇧Tab        |
+| Chat tabs | Move the open tab left · right along the strip                                           | ⌃⇧← · ⌃⇧→           |
 | Chat tabs | View all changes (diff tab)                                                              | ⇧⌘G                 |
 | Composer  | Send (idle) · queue (working) · newline                                                  | ↵ · ↵ · ⇧↵          |
 | Composer  | Steer into the running turn                                                              | ⌘↵                  |

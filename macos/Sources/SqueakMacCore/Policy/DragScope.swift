@@ -4,6 +4,8 @@ import Foundation
 /// (`identifier`), so a target can say "acceptable" synchronously, before the drop, without reading the payload.
 public enum DragKind: String, CaseIterable, Sendable {
     case pond, thread, panel, terminal, file, duckling
+    /// A canvas or other artifact tab in the centre strip: it reorders there and goes nowhere else.
+    case artifact
     /// A file-tree row dragged inside the Files browser (move/copy), not a tab.
     case fileToken
 
@@ -15,7 +17,7 @@ public enum DragKind: String, CaseIterable, Sendable {
         let prefixes: [(String, DragKind)] = [
             (PondDragPayload.prefix, .pond), (DockItemPayload.threadPrefix, .thread), (DockPanelPayload.prefix, .panel),
             (DockItemPayload.terminalPrefix, .terminal), (DockItemPayload.filePrefix, .file),
-            (DockItemPayload.ducklingPrefix, .duckling), ("squeak-file:", .fileToken),
+            (DockItemPayload.ducklingPrefix, .duckling), ("squeak-file:", .fileToken), (ArtifactDragPayload.prefix, .artifact),
         ]
         return prefixes.first { text.hasPrefix($0.0) }?.1
     }
@@ -61,7 +63,7 @@ public enum DragScope {
 
     public static func allows(_ kind: DragKind, on target: DragTarget) -> Bool {
         switch target {
-        case .centreStrip: return tabKinds.contains(kind)
+        case .centreStrip: return tabKinds.contains(kind) || kind == .artifact
         case .rightStrip, .bottomStrip: return tabKinds.contains(kind)
         case .edgeStrip(let zone): return tabKinds.contains(kind)
         case .pondList: return kind == .pond
@@ -83,5 +85,15 @@ public enum DragScope {
     /// The kinds a target takes: what its `onDrop` lists, so nothing else ever highlights it.
     public static func accepted(by target: DragTarget) -> [DragKind] {
         DragKind.allCases.filter { allows($0, on: target) }
+    }
+}
+
+/// An artifact tab dragged along the centre strip: its stream tab id on the pasteboard (prefixed, like every tab).
+public enum ArtifactDragPayload {
+    public static let prefix = "squeak-dock-artifact:"
+    public static func encode(pond: String, path: String) -> String { prefix + ArtifactTabID.make(pond: pond, path: path) }
+    public static func decode(_ text: String) -> StreamTab? {
+        guard text.hasPrefix(prefix), ArtifactTabID.parse(String(text.dropFirst(prefix.count))) != nil else { return nil }
+        return StreamTab(.artifact, String(text.dropFirst(prefix.count)))
     }
 }

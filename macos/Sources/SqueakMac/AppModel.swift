@@ -461,8 +461,10 @@ final class AppModel {
         if streamTabs.replace(old, with: new, in: workspace) { saveStreamTabs() }
     }
 
-    func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {
-        let moved = streamTabs.move(.thread(source), before: .thread(target.stringValue), in: workspace.id)
+    /// Puts a chat, file or artifact tab where a drop (or the keyboard) landed it in the stream's strip.
+    @discardableResult
+    func moveStreamTab(_ source: StreamTab, to landing: TabDrop.Landing<StreamTab>, workspace: SidebarWorkspace) -> Bool {
+        let moved = streamTabs.move(source, to: landing, in: workspace.id)
         if moved { saveStreamTabs() }
         return moved
     }

@@ -22,6 +22,8 @@ extension KeyChord {
         case "Tab": equivalent = .tab
         case "↑": equivalent = .upArrow
         case "↓": equivalent = .downArrow
+        case "←": equivalent = .leftArrow
+        case "→": equivalent = .rightArrow
         default:
             guard key.count == 1, let c = key.lowercased().first else { return nil }
             equivalent = KeyEquivalent(c)
@@ -137,6 +139,7 @@ extension Notification.Name {
     /// `object`: the step, +1 or −1.
     static let squeakMovePond = Notification.Name("SqueakMovePond")
     static let squeakStepTab = Notification.Name("SqueakStepTab")
+    static let squeakMoveTab = Notification.Name("SqueakMoveTab")
     static let squeakShowAllChanges = Notification.Name("SqueakShowAllChanges")
     static let squeakModelPicker = Notification.Name("SqueakModelPicker")
     static let squeakNextEffort = Notification.Name("SqueakNextEffort")

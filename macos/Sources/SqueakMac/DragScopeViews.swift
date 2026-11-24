@@ -50,13 +50,20 @@ struct ScopedDropDelegate: DropDelegate {
     let target: DragTarget
     let targeted: (Bool) -> Void
     let perform: @MainActor (String) -> Bool
+    /// Where the pointer is over the target, in its own coordinates: told on entry, on every move and at the drop.
+    var moved: ((CGPoint) -> Void)?
 
     private var types: [UTType] { DragScope.types(for: target) }
     func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: types) }
-    func dropEntered(info: DropInfo) { if validateDrop(info: info) { targeted(true) } }
+    func dropEntered(info: DropInfo) { if validateDrop(info: info) { moved?(info.location); targeted(true) } }
     func dropExited(info: DropInfo) { targeted(false) }
-    func dropUpdated(info: DropInfo) -> DropProposal? { validateDrop(info: info) ? DropProposal(operation: .move) : nil }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else { return nil }
+        moved?(info.location)
+        return DropProposal(operation: .move)
+    }
     func performDrop(info: DropInfo) -> Bool {
+        moved?(info.location)
         targeted(false)
         return MainActor.assumeIsolated {
             loadDragString(info, target: target) { text in _ = perform(text) }
@@ -66,7 +73,8 @@ struct ScopedDropDelegate: DropDelegate {
 
 extension View {
     /// Drop target for tabs on a strip (or zone edge); `perform` gets the dragged string once it is read.
-    func scopedDrop(_ target: DragTarget, isTargeted: @escaping (Bool) -> Void, perform: @escaping @MainActor (String) -> Bool) -> some View {
-        onDrop(of: DragScope.types(for: target), delegate: ScopedDropDelegate(target: target, targeted: isTargeted, perform: perform))
+    func scopedDrop(_ target: DragTarget, isTargeted: @escaping (Bool) -> Void, moved: ((CGPoint) -> Void)? = nil,
+                    perform: @escaping @MainActor (String) -> Bool) -> some View {
+        onDrop(of: DragScope.types(for: target), delegate: ScopedDropDelegate(target: target, targeted: isTargeted, perform: perform, moved: moved))
     }
 }
