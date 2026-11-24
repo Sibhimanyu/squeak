@@ -392,6 +392,129 @@ describe("the Room reaches Members", () => {
   });
 });
 
+describe("a Member's Tasks need the Owner's approval", () => {
+  let A: Mac;
+  let B: Mac;
+  let pondId = "";
+  let host: ReturnType<typeof ownerHost>;
+  let bSync: RoomSync;
+
+  const apply = async () => {
+    await A.service.pass(pondId);
+    await host.sync.idle();
+  };
+
+  beforeAll(async () => {
+    A = mac("Sibhi");
+    B = mac("Aarav");
+    host = ownerHost(A.service);
+    pondId = (await A.service.createPond({ name: "Site", projectId: host.project.id })).id;
+    await admit(A, pondId, B);
+    bSync = memberSync(B);
+    // The Owner's Mac watches its Room for "make it a task", as the host does.
+    host.jobs.attach(host.room as never);
+    await A.service.setPresence(pondId, {});
+  });
+
+  it("a Member has no start permission by default; the Collaborator preset turns it on", async () => {
+    const view = async () => (await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)!;
+    expect((await view()).caps.start).toBe(false);
+    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
+    expect((await view()).caps.start).toBe(true);
+    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
+    expect((await view()).caps.start).toBe(false);
+    await B.service.refresh(pondId);
+  });
+
+  it("Make task from a Member's Mac waits for the Owner, who approves it from the Room; the Member sees it wait", async () => {
+    const said = await bSync.post(pondId, "The footer links point nowhere");
+    await apply();
+    const postId = `m-${said.id}`;
+    const queued = await bSync.makeTask(pondId, postId);
+    expect(queued.offline).toBe(false);
+    // Not a Task until the Owner's Mac applies it.
+    expect((await bSync.page(pondId)).tasks).toEqual([]);
+    await apply();
+    expect(await new RtdbRest(url).list(`channels/${pondId}/rposts`)).toEqual([]);
+    const made = host.jobs.list(host.project.id).find((t) => t.messageId === postId)!;
+    expect(made).toMatchObject({ state: "waiting", approval: { name: "Aarav" } });
+    expect(made.inLine).toBeUndefined();
+    // The Member sees that their Task waits for the Owner.
+    let mine = (await bSync.page(pondId)).tasks.find((t) => t.id === made.id)!;
+    expect(mine).toMatchObject({ state: "waiting", needsApproval: { name: "Aarav" } });
+    // The Owner approves: the waiting reason is gone for everyone.
+    await host.jobs.act(host.project.id, made.id, { action: "approve" });
+    await host.sync.idle();
+    mine = (await bSync.page(pondId)).tasks.find((t) => t.id === made.id)!;
+    expect(mine.state).toBe("waiting");
+    expect(mine.needsApproval).toBeUndefined();
+  });
+
+  it("a Member's 'make it a task' words wait the same way, and the Owner can drop it", async () => {
+    const said = await bSync.post(pondId, "make it a task: fix the footer links");
+    await apply();
+    const made = host.jobs.list(host.project.id).find((t) => t.messageId === `m-${said.id}`)!;
+    expect(made.approval).toMatchObject({ name: "Aarav" });
+    expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)?.needsApproval).toBeTruthy();
+    await host.jobs.act(host.project.id, made.id, { action: "drop" });
+    await host.sync.idle();
+    expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)).toMatchObject({ state: "dropped" });
+  });
+
+  it("with the start permission the Task is the Owner's kind: nothing waits", async () => {
+    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { start: true } });
+    await B.service.refresh(pondId);
+    const said = await bSync.post(pondId, "make it a task: tidy the header spacing");
+    await apply();
+    const made = host.jobs.list(host.project.id).find((t) => t.messageId === `m-${said.id}`)!;
+    expect(made.approval).toBeUndefined();
+    expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)?.needsApproval).toBeUndefined();
+    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { start: false } });
+    await B.service.refresh(pondId);
+  });
+
+  it("a viewer cannot make a Task, and a Make task written past the check is dropped", async () => {
+    const V = mac("Vera");
+    await admit(A, pondId, V, "viewer");
+    const vSync = memberSync(V);
+    await expect(vSync.makeTask(pondId, "anything")).rejects.toThrow(/viewer can only watch/);
+    const target = host.room.personPost(host.project.id, "Please check the sitemap");
+    const id = `${clock.now.toString(36).padStart(9, "0")}-${randomId(6)}`;
+    await rawDoc(V, pondId, "rposts", id, { v: 1, id, text: "", at: clock.now, task: { messageId: target.id } });
+    await apply();
+    expect(host.jobs.list(host.project.id).some((t) => t.messageId === target.id)).toBe(false);
+    expect(await new RtdbRest(url).list(`channels/${pondId}/rposts`)).toEqual([]);
+  });
+
+  it("answers over the host route with a strict body, and refuses a bad message id", async () => {
+    const routes = new FlotillaRoutes({
+      service: B.service,
+      bridge: {} as FlotillaBridge,
+      remoteOf: async () => null,
+      startOwn: async () => ({ sessionId: "x" }),
+      roomSync: bSync,
+    });
+    const call = async (body: Record<string, unknown>) => {
+      let out: { status: number; body: Record<string, unknown> } | null = null;
+      await routes.handle({
+        req: {} as never,
+        res: {} as never,
+        method: "POST",
+        parts: ["ponds", pondId, "room", "tasks"],
+        url: new URL(`http://x/native/ponds/${pondId}/room/tasks`),
+        body: async () => body,
+        json: (status: number, b: unknown) => void (out = { status, body: b as Record<string, unknown> }),
+      });
+      return out as unknown as { status: number; body: Record<string, unknown> };
+    };
+    const ok = await call({ messageId: "p1" });
+    expect(ok.status).toBe(202);
+    expect(ok.body).toMatchObject({ queued: true });
+    expect((await call({ messageId: "p1", extra: 1 })).status).toBe(400);
+    expect((await call({ messageId: 7 })).status).toBe(400);
+  });
+});
+
 describe("Room documents are checked as they are read", () => {
   it("rejects anything but the shapes Swift and Node share", () => {
     const post = {
@@ -412,6 +535,14 @@ describe("Room documents are checked as they are read", () => {
     expect(readRoomDoc({ ...post, id: "bad id" })).toBeNull();
     expect(readInboxDoc({ v: 1, id: "p1", text: "hi", at: 5 })).toEqual({ v: 1, id: "p1", text: "hi", at: 5 });
     expect(readInboxDoc({ v: 1, id: "p1", text: 7, at: 5 })).toBeNull();
+    expect(readInboxDoc({ v: 1, id: "p1", text: "", at: 5, task: { messageId: "p0" } })).toEqual({
+      v: 1,
+      id: "p1",
+      text: "",
+      at: 5,
+      task: { messageId: "p0" },
+    });
+    expect(readInboxDoc({ v: 1, id: "p1", text: "", at: 5, task: { messageId: 4 } })).toBeNull();
     const task = {
       v: 1,
       id: "t1",
@@ -423,6 +554,11 @@ describe("Room documents are checked as they are read", () => {
       updatedAt: 2,
     };
     expect(readRoomTaskDoc(task)).toEqual(task);
+    expect(readRoomTaskDoc({ ...task, needsApproval: { name: "Aarav" } })).toEqual({
+      ...task,
+      needsApproval: { name: "Aarav" },
+    });
+    expect(readRoomTaskDoc({ ...task, needsApproval: "yes" })).toBeNull();
     expect(readRoomTaskDoc({ ...task, state: "open" })).toBeNull();
     expect(readRoomTaskDoc({ ...task, updatedAt: "x" })).toBeNull();
   });

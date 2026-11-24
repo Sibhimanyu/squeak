@@ -209,10 +209,14 @@ export type Cap = (typeof CAPS)[number];
 export type Caps = Record<Cap, boolean>;
 export type CapsPatch = Partial<Caps> & { muted?: boolean };
 
-/** Role defaults: a member does everything but approve and stop (those are never grantable); a viewer only reads. */
+/**
+ * Role defaults: a member sees, reads diffs, messages and answers but does not start (a Member's Task waits for the
+ * Owner's approval until the Owner turns `start` on, or picks the Collaborator preset); a viewer only reads. Approving
+ * and stopping are never grantable.
+ */
 export const ROLE_CAPS: Record<Role, Caps> = {
   owner: { see: true, diffs: true, message: true, answer: true, start: true },
-  member: { see: true, diffs: true, message: true, answer: true, start: true },
+  member: { see: true, diffs: true, message: true, answer: true, start: false },
   viewer: { see: true, diffs: true, message: false, answer: false, start: false },
 };
 

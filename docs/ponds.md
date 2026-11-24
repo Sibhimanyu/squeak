@@ -33,8 +33,8 @@ the pond shows it with the mark "Powered by <their Mac> · Flotilla", everyone r
 approvals and Stop stay with its starter). The owner can restrict any of it at any time, with no rejoin.
 
 - **Member switches** (`MemberDoc.caps`, owner-signed, in the member's own document): `see`, `diffs`, `message`, `answer`,
-  `start`, and `muted` (read-only). Absent = the role's default (`ROLE_CAPS`: a member has all five, a viewer `see` and
-  `diffs`). Presets: **Viewer** (role viewer), **Member** (`start` off), **Collaborator** (`start` on).
+  `start`, and `muted` (read-only). Absent = the role's default (`ROLE_CAPS`: a member has `see`, `diffs`, `message` and `answer` but **`start` is off by default** (ticket 15: a Member's
+  Task waits for the Owner's approval until the Owner turns `start` on); a viewer `see` and `diffs`). Presets: **Viewer** (role viewer), **Member** (`start` off, the default), **Collaborator** (`start` on: the one preset whose Tasks go ahead without the Owner).
   `POST /ponds/<id>/members/<memberId>/caps { preset?, caps? }` (owner). Every change is a Ripple ("restricted Aarav from
   messaging").
 - **Per-thread switches** (the starter's, in the thread document and the starter's `ponds.json`): `locked` (read-only for everyone
@@ -587,7 +587,20 @@ documents (claims and locks stay) are not used for this: the Room's Tasks are `r
   Member's own time, ties by id), each through the Room's own post path as post `m-<doc id>` (so a replay can never post twice),
   then deletes them. Dropped quietly, whatever the document says: not a member, a viewer, `message` switched off by the Owner,
   older than a week (`ROOM_INBOX_LIFE_MS`), over 60 an hour per Member, empty or over 500 characters. A post "Make it a task"
-  made this way is an ordinary Room message to the Owner's Task rules.
+  made this way is an ordinary Room message to the Owner's Task rules, plus the approval gate below.
+- **Make task from a Member** (`POST /native/ponds/<id>/room/tasks { messageId }`, 202 `{ queued, id, offline, line? }`). An `rposts` document
+  `{ v:1, id, text:"", at, task:{ messageId } }`, applied by the Owner's Mac in the same pass and under the same rules as a message
+  (not a viewer, `message` on, the hourly limit, under a week old), through `RoomTasks.fromMessage(..., origin)`. A viewer or muted
+  Member gets the usual 403 sentence; a task the Owner's rules refuse (already a Task, no such message) is dropped quietly.
+- **Needs the Owner's approval (`start` permission).** The Owner's Mac reads the Member's current `start` when it applies their
+  post or Make task (the signed member document, so a change is live). With `start` on, the Task is the Owner's kind: routed, and
+  started at once when it has a destination and the pond does not ask before starting. With `start` off (the default for a
+  Member) the Task is `waiting` with `approval: { by, name }`: never in the start line, never offered to a Duck (`open_jobs`) and
+  a Duck's `claim_job` is refused, until the Owner acts. The Owner's Room shows "<name> asked for this task" with **Approve** and
+  **Drop** (`POST .../tasks/<id> { action: "approve" }`, which clears the reason and then starts it like any Owner's Task; Go,
+  New and Allow approve too). Members read the reason in the published Task as `needsApproval: { name }` and see "Waiting for
+  the Owner's approval"; it has no buttons for them. Taking a Member's message up as the Owner's own Make task is approval by
+  itself. A Member's "make it a task" words follow the same gate (their post id is `m-<doc id>`).
 - **Permissions.** `see` off: the Member's page is a 403 and nothing is read. `message` off, or a viewer: `POST` is a 403 with
   the usual sentence, `canPost` is false on the page, and the Mac shows the reason instead of the composer.
 - **Offline.** `ownerOffline.line` is "<Owner's first name>'s Mac is offline; Ducks will pick this up when it's back" while the
@@ -598,8 +611,8 @@ documents (claims and locks stay) are not used for this: the Room's Tasks are `r
   `POST` as above; `GET .../room/stream` (server-sent events `hello { latestSeq }`, `owner { offline, line? }`, `post`, `task`;
   a ping and a re-read every 25 s, because the Owner's Mac going quiet is not a notice). An owner's own pond answers 400: it
   reads its Room from `/projects/<id>/room`.
-- **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task and Drop are not
-  offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
+- **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task is offered, queued as above and remembered locally until the Task comes back; Drop and
+  Approve are not offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
   Mac is away stays a pending row until its post arrives. Fixtures: `npx tsx scripts/make-room-member-fixtures.ts`
   (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. The web reads and posts it too (docs/web-app.md, "The Room on the web"); iPhone does not yet.
 
