@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { NativeHostError } from "../native/client.js";
-import { checkAnswers, describeRequest, NativePhone } from "./native-phone.js";
+import { checkAnswers, describeRequest, NativePhone, type PhonePond } from "./native-phone.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -307,5 +307,65 @@ describe("NativePhone project icons", () => {
     const list = Array.from({ length: 60 }, (_, i) => proj(`p${i}`, `N${i}`));
     const icons = await make(list).phone.projectIcons();
     expect(Object.keys(icons ?? {})).toHaveLength(80);
+  });
+});
+
+describe("NativePhone Room routes", () => {
+  const make = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "token"), "tok\n");
+    const calls: Array<[string, string, unknown]> = [];
+    const phone = new NativePhone({
+      dbPath: path.join(dir, "none.db"),
+      baseUrl: "http://h",
+      tokenPath: path.join(dir, "token"),
+      models: () => [],
+      fetch: (async (url: string, init?: RequestInit) => {
+        const u = String(url).replace("http://h", "");
+        calls.push([init?.method ?? "GET", u, init?.body ? JSON.parse(String(init.body)) : undefined]);
+        if (u.startsWith("/native/ponds/pp") && !u.includes("/room"))
+          return new Response(JSON.stringify({ me: { id: "m2" } }), { status: 200 });
+        return new Response(JSON.stringify({ posts: [], line: "waits" }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    return { phone, calls };
+  };
+  const mine: PhonePond = { id: "proj-1", name: "n", shared: false, members: [], kind: "project", projectId: "proj-1" };
+  const theirs: PhonePond = {
+    id: "pp",
+    name: "n",
+    shared: true,
+    members: [],
+    kind: "joined",
+    pondId: "pp",
+    access: "remote",
+  };
+
+  it("an Owner's pond uses the project's routes for reading, posting, making and dropping", async () => {
+    const { phone, calls } = make();
+    expect(await phone.roomPage(mine)).toMatchObject({ member: false });
+    await phone.roomPost(mine, "hi");
+    await phone.roomMakeTask(mine, "p1");
+    await phone.roomDropTask(mine, "task:1");
+    expect(calls).toEqual([
+      ["GET", "/native/projects/proj-1/room?limit=100", undefined],
+      ["POST", "/native/projects/proj-1/room", { text: "hi" }],
+      ["POST", "/native/projects/proj-1/room/tasks", { messageId: "p1" }],
+      ["POST", "/native/projects/proj-1/room/tasks/task%3A1", { action: "drop" }],
+    ]);
+  });
+
+  it("a Member's pond reads the pond's route with their member id, queues a post, and cannot make or drop", async () => {
+    const { phone, calls } = make();
+    expect(await phone.roomPage(theirs)).toMatchObject({ member: true, selfId: "m2" });
+    expect(await phone.roomPost(theirs, "hi")).toEqual({ line: "waits" });
+    await expect(phone.roomMakeTask(theirs, "p1")).rejects.toThrow();
+    await expect(phone.roomDropTask(theirs, "t")).rejects.toThrow();
+    expect(calls.map((c) => c[1])).toEqual([
+      "/native/ponds/pp/room?limit=100",
+      "/native/ponds/pp",
+      "/native/ponds/pp/room",
+    ]);
   });
 });

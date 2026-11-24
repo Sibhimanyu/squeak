@@ -280,6 +280,14 @@ export interface RemoteNative {
   flockEvents?(pondId: string, threadId: string, after: number): Promise<{ events: unknown[]; lastSeq: number } | null>;
   /** Sends a message to a member's thread through the pond; the starter's host enforces. `ok: false` carries the reason. */
   flockMessage?(pondId: string, threadId: string, text: string): Promise<{ ok: boolean; line: string }>;
+  /** A pond's Room page for the phone (`GET .../room`); null when unknown. An Owner's pond reads its project, a Member's the pond. */
+  roomPage?(pond: PhonePond): Promise<{ page: Record<string, unknown>; member: boolean; selfId?: string } | null>;
+  /** Posts a message into the pond's Room as this person; a Member's waits for the Owner's Mac (`line` says so). */
+  roomPost?(pond: PhonePond, text: string): Promise<{ line?: string }>;
+  /** The Make task action on a Room message (the Owner's own pond only). */
+  roomMakeTask?(pond: PhonePond, messageId: string): Promise<void>;
+  /** Drop a Task (the Owner's own pond only). */
+  roomDropTask?(pond: PhonePond, taskId: string): Promise<void>;
   /** Hide or show a pond's project in the sidebar (`PATCH /native/projects/<key>/prefs`, what the Mac's Hide does). */
   setPondHidden?(key: string, hidden: boolean): Promise<void>;
   /** `PUT /native/pond-order`: manual with these keys, or back to newest first. */
@@ -705,6 +713,48 @@ export class NativePhone implements RemoteNative {
         .slice(0, POND_RIPPLES_MAX);
     }
     return out;
+  }
+
+  /** Someone else's pond: no project here, the Room is what its Owner's Mac published. */
+  private roomMember(pond: PhonePond): boolean {
+    return pond.kind === "joined" && pond.access !== "owner";
+  }
+
+  private roomBase(pond: PhonePond): string {
+    if (this.roomMember(pond)) return `/native/ponds/${encodeURIComponent(pond.pondId ?? pond.id)}/room`;
+    if (!pond.projectId) throw new NativeHostError("That pond has no Room on this Mac.", "http", 404);
+    return `/native/projects/${encodeURIComponent(pond.projectId)}/room`;
+  }
+
+  async roomPage(pond: PhonePond): Promise<{ page: Record<string, unknown>; member: boolean; selfId?: string } | null> {
+    const member = this.roomMember(pond);
+    try {
+      const page = await this.call("GET", `${this.roomBase(pond)}?limit=100`);
+      if (!Array.isArray(page.posts)) return null;
+      if (!member) return { page, member };
+      const view = await this.call("GET", `/native/ponds/${encodeURIComponent(pond.pondId ?? pond.id)}`).catch(
+        () => null,
+      );
+      const me = view && typeof view.me === "object" && view.me !== null ? (view.me as Record<string, unknown>) : null;
+      return { page, member, ...(typeof me?.id === "string" ? { selfId: me.id } : {}) };
+    } catch {
+      return null;
+    }
+  }
+
+  async roomPost(pond: PhonePond, text: string): Promise<{ line?: string }> {
+    const body = await this.call("POST", this.roomBase(pond), { text });
+    return typeof body.line === "string" ? { line: body.line } : {};
+  }
+
+  async roomMakeTask(pond: PhonePond, messageId: string): Promise<void> {
+    if (this.roomMember(pond)) throw new NativeHostError("Only the Owner makes a Task from here.", "http", 403);
+    await this.call("POST", `${this.roomBase(pond)}/tasks`, { messageId });
+  }
+
+  async roomDropTask(pond: PhonePond, taskId: string): Promise<void> {
+    if (this.roomMember(pond)) throw new NativeHostError("Only the Owner drops a Task from here.", "http", 403);
+    await this.call("POST", `${this.roomBase(pond)}/tasks/${encodeURIComponent(taskId)}`, { action: "drop" });
   }
 
   async setPondHidden(key: string, hidden: boolean): Promise<void> {

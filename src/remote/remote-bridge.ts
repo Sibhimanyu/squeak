@@ -106,6 +106,7 @@ import {
   type FlockReduction,
 } from "./flock-thread.js";
 import { flag } from "../squeak/flags.js";
+import { buildPondRoom, PHONE_POND_ROOM_CAP, pondRoomDoc, ROOM_MESSAGE_MAX } from "./pond-room.js";
 import { buildPondThreads, onMainFolder, PHONE_POND_THREADS_CAP, pondThreadsDoc } from "./pond-threads.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
@@ -530,12 +531,17 @@ export interface PhoneViewPond {
 export interface PondCommand {
   v: 1;
   kind: "pond";
-  op: "hide" | "order" | "leave" | "duck-place";
+  op: "hide" | "order" | "leave" | "duck-place" | "message" | "room-post" | "room-task" | "room-drop";
   pondId?: string;
   /** `duck-place`: the duck (a `duckId` of a chat in the phone's view), where it goes, and an optional first message. */
   duckId?: string;
   place?: PhoneDuckPlace;
   message?: string;
+  /** `room-task`: the Room message to make a Task of. `room-drop`: the Task to drop. `room-post` carries `text`. */
+  messageId?: string;
+  taskId?: string;
+  text?: string;
+  threadId?: string;
   hidden?: boolean;
   ids?: string[];
   mode?: "newest";
@@ -1271,6 +1277,9 @@ export class RemoteBridge {
   private pondThreadKeys = new Set<string>();
   /** The member's thread the phone has open (`flock` in its presence), and the rows reduced from the pond's events. */
   private presenceFlock: string | null = null;
+  /** The pond whose Room the phone has open (`room` in its presence), and what was last written for it. */
+  private presenceRoom: string | null = null;
+  private roomOut: { pond: string; readAt: number; last: string } | null = null;
   private flockOut: { pond: string; thread: string; reduced: FlockReduction; readAt: number; last: string } | null =
     null;
   /** Host-listed chats the fleet snapshot lacks (older than its newest 100), so they can be opened from the pond page. */
@@ -1503,6 +1512,7 @@ export class RemoteBridge {
     this.subagentFeed?.stop();
     this.dropPondThreads(this.config);
     this.dropFlockThread(this.config);
+    this.dropPondRoom(this.config);
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -1695,6 +1705,7 @@ export class RemoteBridge {
     this.subagentFeed?.stop();
     this.dropPondThreads(this.config);
     this.dropFlockThread(this.config);
+    this.dropPondRoom(this.config);
     void this.purgeHistoryCloud();
     // The old channel id must not stay linked on the relay.
     if (this.config?.account)
@@ -1746,6 +1757,9 @@ export class RemoteBridge {
         );
         await this.updateFlockThread(config).catch((error: unknown) =>
           logger.debug("flock thread failed", { error: error instanceof Error ? error.message : String(error) }),
+        );
+        await this.updatePondRoom(config).catch((error: unknown) =>
+          logger.debug("pond room failed", { error: error instanceof Error ? error.message : String(error) }),
         );
         // Its own task: a first upload takes seconds and must never hold up a pass (it never throws).
         void this.syncHistoryCloud(config);
@@ -1902,6 +1916,130 @@ export class RemoteBridge {
       box: this.sealForPhone(config, { ...doc, seq: this.nextSeq() }),
       at: this.now(),
     });
+  }
+
+  /** The Room is read from the host at most this often while a phone has it open. */
+  private static readonly ROOM_READ_MS = 2_000;
+
+  /**
+   * The Room of the pond a phone has open (`pond-room.ts`): read from the host (an Owner's own) or from what the
+   * Owner's Mac published (a Member's), reduced to the rows the phone draws, written sealed into `live` when it
+   * changes and deleted the moment the phone leaves. Posting and Tasks are signed `pond` commands; nothing here writes.
+   */
+  private async updatePondRoom(config: RemoteConfig): Promise<void> {
+    const pond = this.presenceRoom
+      ? this.pondsCache.value?.find((candidate) => candidate.id === this.presenceRoom)
+      : undefined;
+    const native = this.deps.native;
+    const allowed =
+      Boolean(this.deps.store.watch) &&
+      pond !== undefined &&
+      Boolean(native?.roomPage) &&
+      this.phoneCaps.includes(PHONE_POND_ROOM_CAP) &&
+      this.phoneOpen() &&
+      this.hasPairedPhone();
+    const out = this.roomOut;
+    if (!allowed || !pond || !native?.roomPage) {
+      if (out) {
+        this.roomOut = null;
+        await this.deps.store.delete(this.channel(config, "live", pondRoomDoc(out.pond)));
+      }
+      return;
+    }
+    if (out && out.pond !== pond.id) {
+      await this.deps.store.delete(this.channel(config, "live", pondRoomDoc(out.pond)));
+    }
+    const current = out && out.pond === pond.id ? out : null;
+    if (current && this.now() - current.readAt < RemoteBridge.ROOM_READ_MS) return;
+    const read = await Promise.race([
+      native.roomPage(pond).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+    ]);
+    if (!read) {
+      // The host cannot say: keep what the phone has, and look again later.
+      if (current) this.roomOut = { ...current, readAt: this.now() };
+      return;
+    }
+    const doc = buildPondRoom(pond.id, read);
+    const body = JSON.stringify(doc);
+    this.roomOut = { pond: pond.id, readAt: this.now(), last: body };
+    if (current && current.last === body) return;
+    await this.deps.store.set(this.channel(config, "live", pondRoomDoc(pond.id)), {
+      box: this.sealForPhone(config, { ...doc, seq: this.nextSeq() }),
+      at: this.now(),
+    });
+  }
+
+  /** Delete a published Room (stop, reset); best effort. */
+  private dropPondRoom(config: RemoteConfig | null): void {
+    const out = this.roomOut;
+    this.roomOut = null;
+    if (out && config)
+      void this.deps.store.delete(this.channel(config, "live", pondRoomDoc(out.pond))).catch(() => undefined);
+  }
+
+  /**
+   * A Room action from the phone: `room-post { pondId, text }`, `room-task { pondId, messageId }` (Make task) or
+   * `room-drop { pondId, taskId }`, exactly those keys plus the envelope. The pond must be one this Mac shows; the
+   * host enforces who may post, make or drop, and its sentence comes back as the reason.
+   */
+  private async handleRoomAction(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+    refuse: (reason: string) => { write: boolean; result: Record<string, unknown> },
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const op = command.op as "room-post" | "room-task" | "room-drop";
+    const strict: Record<string, readonly string[]> = {
+      "room-post": ["v", "kind", "op", "pondId", "text", "nonce", "expiresAt"],
+      "room-task": ["v", "kind", "op", "pondId", "messageId", "nonce", "expiresAt"],
+      "room-drop": ["v", "kind", "op", "pondId", "taskId", "nonce", "expiresAt"],
+    };
+    if (Object.keys(command).some((key) => !strict[op]!.includes(key)) || typeof command.pondId !== "string") {
+      return refuse("Not a request this Mac understands.");
+    }
+    const native = this.deps.native;
+    const pond = this.pondsCache.value?.find((candidate) => candidate.id === command.pondId);
+    if (!pond) return refuse("That pond isn't on your phone any more.");
+    const field = (value: unknown, max: number): string | null =>
+      typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
+    try {
+      if (op === "room-post") {
+        const text = field(command.text, ROOM_MESSAGE_MAX);
+        if (!text) return refuse(`A message is 1 to ${ROOM_MESSAGE_MAX} characters.`);
+        if (!native?.roomPost) return refuse("This Mac can't post to a Room from a phone.");
+        const sent = await native.roomPost(pond, text);
+        this.log(device.name, "sent", `message to the ${pond.name.slice(0, 24)} Room`);
+        this.roomOut = this.roomOut ? { ...this.roomOut, readAt: 0 } : null;
+        this.nudgePublish(0);
+        return { write: true, result: { id, status: "sent", ...(sent.line ? { reason: sent.line } : {}) } };
+      }
+      if (op === "room-task") {
+        const messageId = field(command.messageId, 200);
+        if (!messageId) return refuse("Not a request this Mac understands.");
+        if (!native?.roomMakeTask) return refuse("This Mac can't make a Task from a phone.");
+        await native.roomMakeTask(pond, messageId);
+        this.log(device.name, "sent", `made a Task in the ${pond.name.slice(0, 24)} Room`);
+      } else {
+        const taskId = field(command.taskId, 200);
+        if (!taskId) return refuse("Not a request this Mac understands.");
+        if (!native?.roomDropTask) return refuse("This Mac can't drop a Task from a phone.");
+        await native.roomDropTask(pond, taskId);
+        this.log(device.name, "sent", `dropped a Task in the ${pond.name.slice(0, 24)} Room`);
+      }
+    } catch (error) {
+      logger.debug("could not act in a Room", { error: error instanceof Error ? error.message : String(error) });
+      return refuse(
+        error instanceof NativeHostError && error.kind === "down"
+          ? "Squeak's session host isn't running."
+          : error instanceof NativeHostError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500
+            ? error.message
+            : "The Mac didn't take that.",
+      );
+    }
+    this.roomOut = this.roomOut ? { ...this.roomOut, readAt: 0 } : null;
+    this.nudgePublish(0);
+    return { write: true, result: { id, status: "sent" } };
   }
 
   /** Events of an open member thread are read at most this often. */
@@ -2316,6 +2454,9 @@ export class RemoteBridge {
       const openFlock = (presence as { flock?: unknown }).flock;
       this.presenceFlock =
         typeof openFlock === "string" && openFlock.length > 0 && openFlock.length <= 200 ? openFlock : null;
+      const openRoom = (presence as { room?: unknown }).room;
+      this.presenceRoom =
+        typeof openRoom === "string" && openRoom.length > 0 && openRoom.length <= 200 ? openRoom : null;
       this.presenceWatching =
         typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
       const wanted =
@@ -3361,10 +3502,18 @@ export class RemoteBridge {
       "duckId",
       "place",
       "message",
+      "messageId",
+      "taskId",
       "nonce",
       "expiresAt",
     ]);
     if (command.v !== 1 || Object.keys(command).some((key) => !allowed.has(key))) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.op === "room-post" || command.op === "room-task" || command.op === "room-drop") {
+      return this.handleRoomAction(device, id, command, refuse);
+    }
+    if (command.messageId !== undefined || command.taskId !== undefined) {
       return refuse("Not a request this Mac understands.");
     }
     if (command.op === "message") return this.handleFlockMessage(device, id, command, refuse);
