@@ -217,6 +217,7 @@ export class NativeServer {
           const e = project ? workspaces.settingsFor(project).effective : null;
           return { askBeforeStarting: e?.askBeforeStarting ?? false, maxWorkingDucks: e?.maxWorkingDucks ?? 4 };
         },
+        contextPercent: (s) => host.contextOf(s)?.percent ?? null,
       });
     this.cleanup =
       options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });

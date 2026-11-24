@@ -118,6 +118,28 @@ export class TimelineLog {
     ) as Array<Extract<TimelineEvent, { type: "step.added" | "step.updated" }>>;
   }
 
+  /**
+   * The file names the chat changed (its "Edit <file>" and "Write <file>" tool steps), newest first, each once: the
+   * code areas the decider matches a new Task against. Names only: the timeline keeps the label, not the path.
+   */
+  touchedFiles(sessionId: string, limit = 40): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT body FROM timeline_events WHERE session_id=? AND type IN ('step.added','step.updated')
+           AND body LIKE '%"kind":"tool"%' AND (body LIKE '%"label":"Edit %' OR body LIKE '%"label":"Write %')
+           ORDER BY seq DESC LIMIT 400`,
+      )
+      .all(sessionId) as Row[];
+    const out: string[] = [];
+    for (const r of rows) {
+      const label = (JSON.parse(r.body as string) as { label?: unknown }).label;
+      const m = typeof label === "string" ? label.match(/^(?:Edit|Write) (\S.*)$/) : null;
+      if (m && !out.includes(m[1]!)) out.push(m[1]!);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   /** The newest progress-strip update after a seq (the strip is one step, id `progress`), if any. */
   latestProgress(
     sessionId: string,

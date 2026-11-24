@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
+import { Decider, haikuDecider, type DeciderDuck, type DeciderModelPort, type ScoredDuck } from "./decider.js";
 import type { HostEvents, Room, RoomThread } from "./room.js";
 import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
@@ -49,6 +50,17 @@ export interface TaskThreadRef {
   state: "working" | "idle";
 }
 
+/** What the decider chose when the Task was made (or the person chose after): shown as the Room's one routing line. */
+export interface TaskRouting {
+  kind: "duck" | "hatch" | "wait";
+  duckId?: string;
+  name?: string;
+  /** "related to icon work": the words in the line. Never part of any Duck's prompt. */
+  reason: string;
+  by: "decider" | "person";
+  at: number;
+}
+
 export interface RoomTask {
   id: string;
   /** The Room message that made this Task. */
@@ -66,6 +78,7 @@ export interface RoomTask {
   result?: string;
   suggestion?: TaskThreadRef;
   candidates?: TaskThreadRef[];
+  routing?: TaskRouting;
   /** Chosen by the host when the job is made; the person can override it on Go. Absent in a plain-folder pond. */
   place?: TaskPlace;
   /** Squeak starts this Task itself, in order, once a Duck is free: set when it is made with a destination. */
@@ -213,6 +226,12 @@ export interface RoomTasksOptions {
   /** The Pond's start rules; absent means the defaults (start at once, 4 working Ducks). */
   settings?: (projectId: string) => StartRules;
   call?: TitleModelCall;
+  /** The decider that routes a new Task; default: local similarity plus `deciderModel`. */
+  decider?: Decider;
+  /** Settles an unsure routing: a port, or "haiku" (the same small-model call as the job check); absent = never asked. */
+  deciderModel?: DeciderModelPort | "haiku";
+  /** How full a chat's context is, 0..100 (the host's context meter); null/absent = unknown. */
+  contextPercent?: (session: SessionRow) => number | null;
   /** Defaults to the SQUEAK_ROOM_JOBS switch. */
   enabled?: () => boolean;
   now?: () => number;
@@ -228,6 +247,9 @@ export class RoomTasks extends EventEmitter {
   private readonly inflight = new Set<Promise<void>>();
   private readonly lining = new Set<string>();
   private readonly lineAgain = new Set<string>();
+  /** Tasks whose routing is still being decided; an action on one waits for it. */
+  private readonly routings = new Map<string, Promise<void>>();
+  private readonly decider: Decider;
   private call: TitleModelCall | null;
 
   constructor(private readonly o: RoomTasksOptions) {
@@ -235,6 +257,13 @@ export class RoomTasks extends EventEmitter {
     this.setMaxListeners(0);
     this.now = o.now ?? Date.now;
     this.call = o.call ?? null;
+    const dm = o.deciderModel;
+    this.decider =
+      o.decider ??
+      new Decider({
+        model: dm === "haiku" ? haikuDecider(() => (this.call ??= defaultTitleCall())) : (dm ?? null),
+        onModelError: (error) => logger.warn("decider model failed", { error: String(error) }),
+      });
   }
 
   // ---- reading ----
@@ -399,10 +428,9 @@ export class RoomTasks extends EventEmitter {
       if (task.proposed) {
         delete task.proposed;
         if (typeof parentTaskId === "string") task.parentTaskId = parentTaskId;
-        if (this.hasDestination(task) && !this.rules(projectId).askBeforeStarting) task.inLine = true;
-        const taken = this.save(projectId, task);
-        if (taken.inLine) this.startSoon(projectId);
-        return taken;
+        this.save(projectId, task);
+        this.route(projectId, task.id, true, !this.rules(projectId).askBeforeStarting);
+        return task;
       }
       throw new TaskError("That message is already a task.", 409);
     }
@@ -448,11 +476,9 @@ export class RoomTasks extends EventEmitter {
       createdAt: o.reopen?.createdAt ?? at,
       updatedAt: at,
     };
-    Object.assign(task, this.routeFor(projectId, text));
-    if (!o.proposed && this.hasDestination(task) && !this.rules(projectId).askBeforeStarting) task.inLine = true;
-    const saved = this.save(projectId, task);
-    if (saved.inLine) this.startSoon(projectId);
-    return saved;
+    this.save(projectId, task);
+    this.route(projectId, task.id, !o.proposed, !o.proposed);
+    return task;
   }
 
   // ---- starting at once, with limits ----
@@ -466,6 +492,7 @@ export class RoomTasks extends EventEmitter {
    * Anything that sets `suggestion` before this point plugs in; the person's own Go/New never reaches here.
    */
   private hasDestination(task: RoomTask): boolean {
+    if (task.routing?.kind === "hatch" && !task.suggestion) return true;
     return !!task.suggestion?.duckId && !!this.o.store.duckRow(task.suggestion.duckId);
   }
 
@@ -527,7 +554,17 @@ export class RoomTasks extends EventEmitter {
       .sort((a, b) => a.createdAt - b.createdAt);
     for (const t of line) {
       const duck = t.suggestion?.duckId ? this.o.store.duckRow(t.suggestion.duckId) : null;
-      if (!duck) continue;
+      if (!duck) {
+        // The decider chose a new Duck: it hatches (through ChatStarter) once the pond has a free slot.
+        if (t.routing?.kind !== "hatch") continue;
+        if (this.workingDucks(projectId).size >= rules.maxWorkingDucks) break;
+        try {
+          await this.act(projectId, t.id, { action: "new" });
+        } catch (error) {
+          logger.warn("could not hatch a duck for a waiting task", { error: String(error) });
+        }
+        continue;
+      }
       const working = this.workingDucks(projectId);
       const cur = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
       const queues = working.has(duck.id) && cur && !cur.archivedAt;
@@ -540,22 +577,118 @@ export class RoomTasks extends EventEmitter {
     }
   }
 
+  // ---- routing (the decider) ----
+
+  /** Resolves when `taskId`'s routing is decided (immediately when none is running). */
+  routed(taskId: string): Promise<void> {
+    return this.routings.get(taskId) ?? Promise.resolve();
+  }
+
   /**
-   * THE ROUTING SEAM. Who a new Task is suggested to and where it would run, today by word overlap with the pond's
-   * Ducks; the person still decides with Go / New. A later decider replaces only this method.
+   * THE ROUTING SEAM. Runs the decider once for a Task that was just made (never on ordinary chat) and records its
+   * choice: the suggestion Go sends to, the other Ducks to re-route to, the place, and the one routing line. A suggestion
+   * nobody took up routes without the model (`useModel` false) and routes again, with it, when it is taken up.
+   * `start`: the Task starts at once on that destination (the line, with its limits) unless the Pond asks first.
    */
-  private routeFor(projectId: string, text: string): Pick<RoomTask, "suggestion" | "candidates" | "place"> {
-    const out: Pick<RoomTask, "suggestion" | "candidates" | "place"> = {};
-    const ranked = this.rank(projectId, text);
-    const best = ranked[0];
-    if (best) {
-      out.suggestion = ref(best);
-      const rest = ranked.slice(1, 4).map(ref);
-      if (rest.length) out.candidates = rest;
-    }
-    const place = this.choosePlace(projectId, text, best?.duck ?? null, best?.session ?? null);
-    if (place) out.place = place;
-    return out;
+  private route(projectId: string, taskId: string, useModel: boolean, start: boolean): void {
+    const run: Promise<void> = this.decideRoute(projectId, taskId, useModel, start)
+      .catch((error) => logger.warn("task routing failed", { error: String(error) }))
+      .finally(() => {
+        this.routings.delete(taskId);
+        this.inflight.delete(run);
+      });
+    this.routings.set(taskId, run);
+    this.inflight.add(run);
+  }
+
+  private async decideRoute(projectId: string, taskId: string, useModel: boolean, start: boolean): Promise<void> {
+    const found = this.get(taskId);
+    if (!found) return;
+    const pool = this.deciderPool(projectId);
+    const result = await this.decider.decide(
+      found.job.text,
+      pool.map((p) => p.duck),
+      { useModel },
+    );
+    // The person may have acted or re-routed while it ran: theirs stands.
+    const now = this.get(taskId);
+    if (!now || now.job.state !== "waiting" || now.job.routing?.by === "person") return;
+    const job = now.job;
+    const byId = new Map(pool.map((p) => [p.duck.id, p]));
+    const refOf = (r: ScoredDuck, reason = r.reason): TaskThreadRef | null => {
+      const p = byId.get(r.duckId);
+      return p
+        ? ref({ duck: p.row, session: p.session, state: p.state, score: r.score, reason, pitch: pitchOf(reason) })
+        : null;
+    };
+    delete job.suggestion;
+    delete job.candidates;
+    const chosen = result.kind === "duck" ? byId.get(result.duckId) : undefined;
+    const top = result.ranked.find((r) => r.duckId === chosen?.duck.id);
+    const pick = top ? refOf(top, result.reason) : null;
+    if (pick) job.suggestion = pick;
+    const rest = result.ranked
+      .filter((r) => r.duckId !== chosen?.duck.id && r.score >= 0.1)
+      .slice(0, 3)
+      .map((r) => refOf(r))
+      .filter((r): r is TaskThreadRef => r !== null);
+    if (rest.length) job.candidates = rest;
+    job.routing = {
+      kind: result.kind === "duck" && !pick ? "hatch" : result.kind,
+      ...(pick && chosen ? { duckId: chosen.duck.id, name: chosen.duck.name } : {}),
+      reason: result.reason,
+      by: "decider",
+      at: this.now(),
+    };
+    const place = this.choosePlace(projectId, job.text, pick ? chosen!.row : null, pick ? chosen!.session : null);
+    if (place) job.place = place;
+    else delete job.place;
+    // The destination is set: a Task that starts at once joins the line now.
+    if (start && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting) job.inLine = true;
+    const saved = this.save(projectId, job);
+    if (saved.inLine) this.startSoon(projectId);
+  }
+
+  /** The pond's ducks as the decider reads them: Off-duty ones too (they can come back for related work). */
+  private deciderPool(projectId: string): Array<{
+    duck: DeciderDuck;
+    row: DuckRow;
+    session: SessionRow | null;
+    state: RoomThread["state"];
+  }> {
+    const tasks = this.o.store.roomJobRows(projectId).map((r) => JSON.parse(r.data) as RoomTask);
+    return this.o.room.duckCandidates(projectId, 30 * 24 * 3_600_000, { offDuty: true }).map((c) => {
+      const texts: string[] = [];
+      const add = (t: string | null | undefined): void => {
+        const clean = (t ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+        if (clean && !texts.includes(clean)) texts.push(clean);
+      };
+      for (const t of tasks.filter((t) => t.handedTo?.duckId === c.duck.id && t.state !== "dropped").reverse()) {
+        add(t.text);
+      }
+      for (const id of [...this.o.store.duckSessionIds(c.duck.id)].reverse()) {
+        add(this.o.store.getSession(id)?.title);
+        for (const turn of this.o.room.sessionTurns(id).slice(-4).reverse()) add(stripAttachmentLines(turn.prompt));
+      }
+      add(c.duck.role);
+      for (const line of c.duck.notebook.split("\n").reverse().slice(0, 4)) {
+        add(line.replace(/^- \d{4}-\d{2}-\d{2} /, ""));
+      }
+      return {
+        row: c.duck,
+        session: c.session,
+        state: c.state,
+        duck: {
+          id: c.duck.id,
+          name: c.duck.name ?? c.session?.title ?? "Duck",
+          duty: c.duck.duty,
+          busy: c.state === "working",
+          contextPercent: c.session ? (this.o.contextPercent?.(c.session) ?? null) : null,
+          tasks: texts.slice(0, 10),
+          touched: this.o.room.touchedFiles(c.duck.id),
+        },
+      };
+    });
   }
 
   // ---- the discussion a Task carries ----
@@ -831,8 +964,8 @@ export class RoomTasks extends EventEmitter {
     );
     if (unknown.length) throw new TaskError(`unknown key: ${unknown[0]}`, 400);
     const action = body.action;
-    if (!["go", "new", "drop", "allow", "deny"].includes(action as string)) {
-      throw new TaskError("action must be go, new, drop, allow or deny", 400);
+    if (!["go", "new", "drop", "allow", "deny", "reroute"].includes(action as string)) {
+      throw new TaskError("action must be go, new, drop, allow, deny or reroute", 400);
     }
     if (body.messageIds !== undefined && !["go", "allow", "new"].includes(action as string)) {
       throw new TaskError("messageIds is only for go, allow and new", 400);
@@ -842,9 +975,9 @@ export class RoomTasks extends EventEmitter {
     }
     if (
       body.duckId !== undefined &&
-      (!["go", "allow", "new"].includes(action as string) || typeof body.duckId !== "string")
+      (!["go", "allow", "new", "reroute"].includes(action as string) || typeof body.duckId !== "string")
     ) {
-      throw new TaskError("duckId is only for go, allow and new, and must be text", 400);
+      throw new TaskError("duckId is only for go, allow, new and reroute, and must be text", 400);
     }
     if (body.sessionId !== undefined && body.duckId !== undefined) {
       throw new TaskError("give a duckId or a sessionId, not both", 400);
@@ -852,6 +985,8 @@ export class RoomTasks extends EventEmitter {
     if (body.place !== undefined && !["go", "allow", "new"].includes(action as string)) {
       throw new TaskError("place is only for go, allow and new", 400);
     }
+    // A Task still being routed is acted on once its routing has landed (Go needs the suggestion).
+    await this.routed(jobId);
     const found = this.get(jobId);
     if (!found || found.projectId !== projectId) throw new TaskError("No such job.", 404);
     const job = found.job;
@@ -874,6 +1009,8 @@ export class RoomTasks extends EventEmitter {
         if (body.messageIds !== undefined) this.trim(job, body.messageIds);
       }
       switch (action) {
+        case "reroute":
+          return this.reroute(projectId, job, body.duckId as string | undefined);
         case "drop": {
           job.state = "dropped";
           delete job.inLine;
@@ -955,6 +1092,41 @@ export class RoomTasks extends EventEmitter {
     } finally {
       this.busy.delete(jobId);
     }
+  }
+
+  /**
+   * The person's one tap on the routing line: give the waiting Task to another Duck, or (no `duckId`) to a new one.
+   * Nothing starts; Go does that. The person's choice is final, the decider does not overrule it.
+   */
+  private reroute(projectId: string, job: RoomTask, duckId: string | undefined): RoomTask {
+    const at = this.now();
+    delete job.suggestion;
+    delete job.place;
+    if (duckId === undefined) {
+      job.routing = { kind: "hatch", reason: "you chose a new Duck", by: "person", at };
+      const branch = this.o.newBranch?.(projectId, job.text);
+      if (branch && this.o.store.getProject(projectId)?.kind !== "folder") job.place = { kind: "new", branch };
+      return this.enterLine(projectId, job);
+    }
+    const duck = this.o.store.duckRow(duckId);
+    if (!duck || duck.projectId !== projectId) throw new TaskError("That duck isn't in this pond.", 409);
+    const session = duck.currentSessionId ? this.o.store.getSession(duck.currentSessionId) : null;
+    const live = session && !session.archivedAt ? session : null;
+    const reason = "you chose it";
+    const state = this.o.room.duckView(duck).state;
+    job.suggestion = ref({ duck, session: live, state, score: 0, reason, pitch: reason });
+    job.routing = { kind: "duck", duckId: duck.id, name: duck.name ?? live?.title ?? "Duck", reason, by: "person", at };
+    const place = this.choosePlace(projectId, job.text, duck, live);
+    if (place) job.place = place;
+    return this.enterLine(projectId, job);
+  }
+
+  /** A re-routed Task that is not waiting for the person starts the way a routed one does. */
+  private enterLine(projectId: string, job: RoomTask): RoomTask {
+    if (!job.proposed && this.hasDestination(job) && !this.rules(projectId).askBeforeStarting) job.inLine = true;
+    const saved = this.save(projectId, job);
+    if (saved.inLine) this.startSoon(projectId);
+    return saved;
   }
 
   /** The place for `duck`: the job's own when the suggested duck takes it, else chosen for this duck. */
@@ -1160,6 +1332,14 @@ const DUCK_NAMES = [
   "Wren",
   "Clover",
 ];
+
+/** The decider's reason in the first person, for the Duck to say "I <pitch>". */
+function pitchOf(reason: string): string {
+  const related = reason.match(/^related to (.+) work$/);
+  if (related) return `have worked on ${related[1]}`;
+  const knows = reason.match(/^knows (.+)$/);
+  return knows ? `know ${knows[1]}` : reason;
+}
 
 function ref(s: Scored): TaskThreadRef {
   return {

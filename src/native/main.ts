@@ -90,6 +90,8 @@ export async function runHost(supportDir: string): Promise<void> {
     start: (spec) => starter.startDuck(spec),
     newBranch: (projectId, text) => starter.newBranch(projectId, text),
     checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),
+    deciderModel: "haiku",
+    contextPercent: (s) => host.contextOf(s)?.percent ?? null,
   });
   jobs.attach(host);
   workspaces.recover();

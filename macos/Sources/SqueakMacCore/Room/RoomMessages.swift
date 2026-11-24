@@ -327,7 +327,7 @@ public enum RoomMessages {
             switch p {
             case .go: note = "Handing over\u{2026}"; buttons = []
             case .newThread: note = "Starting a new duck\u{2026}"; buttons = []
-            case .drop, .allow, .deny: break
+            case .drop, .allow, .deny, .reroute: break
             }
         }
         let others = job.candidates.filter { $0.sessionId != s.sessionId }

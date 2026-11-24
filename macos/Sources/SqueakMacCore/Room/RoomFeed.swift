@@ -137,7 +137,7 @@ public struct RoomFeed: Sendable, Equatable {
         case .go, .newThread, .allow:
             guard let t = jobs.first(where: { $0.id == taskId }) else { return nil }
             return RoomTasks.messageIdsToSend(for: t, excluded: taskExcluded[taskId] ?? [])
-        case .drop, .deny: return nil
+        case .drop, .deny, .reroute: return nil
         }
     }
 
@@ -145,7 +145,7 @@ public struct RoomFeed: Sendable, Equatable {
     public func placeToSend(jobId: String, action: RoomTaskAction) -> RoomTaskPlace? {
         switch action {
         case .go, .newThread, .allow: return jobPlace[jobId] ?? jobs.first { $0.id == jobId }?.place
-        case .drop, .deny: return nil
+        case .drop, .deny, .reroute: return nil
         }
     }
 
