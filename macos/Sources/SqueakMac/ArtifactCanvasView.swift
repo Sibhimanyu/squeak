@@ -469,8 +469,9 @@ private final class CanvasDocumentView: NSView {
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         let inScrollView = convert(centre, to: scrollView)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // DESIGN.md §7: motion-standard, ease-out; nothing travels under Reduce Motion.
+            ctx.duration = Motion.reduceMotion ? 0 : 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             scrollView.animator().setMagnification(CGFloat(next), centeredAt: inScrollView)
         }
     }
@@ -479,8 +480,9 @@ private final class CanvasDocumentView: NSView {
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         let inScrollView = convert(centre, to: scrollView)
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // DESIGN.md §7: motion-standard, ease-out; nothing travels under Reduce Motion.
+            ctx.duration = Motion.reduceMotion ? 0 : 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             scrollView.animator().setMagnification(CGFloat(CanvasZoom.clamp(z)), centeredAt: inScrollView)
         }
     }

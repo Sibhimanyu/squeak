@@ -70,11 +70,7 @@ struct CanvasViewerPage: View {
         let board = canvas?.pasteboard
         let url = URL(fileURLWithPath: path)
         return HStack(spacing: Space.s) {
-            if let board, let sw = board.switcher, ArtifactSwitcher.shown(count: sw.count) {
-                ToolIcon(.chevronLeft, help: "Previous artboard") { board.step(-1) }.disabled(sw.index == 0)
-                Text(verbatim: ArtifactSwitcher.text(index: sw.index, count: sw.count)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                ToolIcon(.chevronRight, help: "Next artboard") { board.step(1) }.disabled(sw.index >= sw.count - 1)
-            }
+            // No previous/next here: the artboard list beside the pasteboard is always shown and does the same.
             if let canvas, !canvas.readOnly { EditTools(editor: canvas.editor, pickImage: pickImage) }
             if canvas?.readOnly == true { Text("View only").font(Typo.meta).foregroundStyle(Theme.subtle) }
             if embedded { Text(verbatim: meta).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.tail).layoutPriority(-1) }
@@ -310,6 +306,9 @@ private struct ArtboardList: View {
     let boards: [CanvasArtboardInfo]
     @State private var renaming: CanvasArtboardInfo?
     @State private var newName = ""
+    /// The row being dragged, and the row the pointer is over: the drop line says which edge the row will land on.
+    @State private var draggingID: String?
+    @State private var dropTarget: String?
 
     var body: some View {
         let current = canvas.pasteboard.index
@@ -376,11 +375,26 @@ private struct ArtboardList: View {
             button
         } else {
             button
-                .draggable(b.id)
+                .opacity(draggingID == b.id && dropTarget != nil ? 0.4 : 1)
+                .onDrag {
+                    draggingID = b.id
+                    return NSItemProvider(object: b.id as NSString)
+                }
+                .overlay(alignment: dropEdge(for: b.id, index: i)) {
+                    if dropTarget == b.id, draggingID != b.id {
+                        Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, Space.xs)
+                            .offset(y: dropEdge(for: b.id, index: i) == .top ? -(Space.xs / 2 + 1) : Space.xs / 2 + 1)
+                            .allowsHitTesting(false).transition(.opacity)
+                    }
+                }
+                .animation(Motion.quick, value: dropTarget == b.id)
                 .dropDestination(for: String.self) { ids, _ in
+                    defer { draggingID = nil; dropTarget = nil }
                     guard let from = ids.first.flatMap({ id in boards.firstIndex { $0.id == id } }), from != i else { return false }
                     canvas.reorder(CanvasOrder.moved(boards.map(\.id), from: from, to: from < i ? i + 1 : i))
                     return true
+                } isTargeted: { on in
+                    if on { dropTarget = b.id } else if dropTarget == b.id { dropTarget = nil; if draggingID == b.id { draggingID = nil } }
                 }
                 .contextMenu {
                     Button(ArtboardMenu.rename) { newName = b.name; renaming = b }
@@ -390,6 +404,12 @@ private struct ArtboardList: View {
                         .disabled(!ArtboardMenu.canDelete(count: boards.count))
                 }
         }
+    }
+
+    /// A row dragged down lands after the row under it, one dragged up lands before it (as `CanvasOrder.moved` does).
+    private func dropEdge(for id: String, index i: Int) -> Alignment {
+        guard let dragged = draggingID, let from = boards.firstIndex(where: { $0.id == dragged }) else { return .top }
+        return from < i ? .bottom : .top
     }
 
     private func row(_ b: CanvasArtboardInfo, index: Int, selected: Bool) -> some View {
@@ -410,7 +430,21 @@ private struct ArtboardList: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(Space.xs)
-        .background(selected ? Theme.selected : Color.clear, in: RoundedRectangle(cornerRadius: Radius.row))
+        .modifier(ArtboardRowFill(selected: selected))
         .contentShape(Rectangle())
+    }
+}
+
+/// An artboard row's fill: `selected` when it is the board on screen, a lighter one under the pointer, easing at `quick`.
+private struct ArtboardRowFill: ViewModifier {
+    let selected: Bool
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : Color.clear), in: RoundedRectangle(cornerRadius: Radius.row))
+            .onHover { hovering = $0 }
+            .animation(Motion.quick, value: selected)
+            .animation(Motion.quick, value: hovering)
     }
 }

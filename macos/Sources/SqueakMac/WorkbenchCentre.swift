@@ -272,10 +272,6 @@ private struct WorkbenchHeader: View {
             Button("Reveal folder in Finder") {
                 if let p = session.cwd, FileManager.default.fileExists(atPath: p) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
             }.disabled(session.cwd == nil)
-            if session.capabilities.openInHost.isSupported {
-                Divider()
-                Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
-            }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
         }
@@ -501,7 +497,6 @@ private struct WorkbenchTabs: View {
                 .environment(\.tabMaxWidth, tabCap)
                 .padding(.horizontal, Space.l)
             }
-            DockWorkspacePicker()
             Button { showHistory.toggle() } label: {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -639,6 +634,7 @@ private struct WorkbenchTabs: View {
     private func tab(_ s: HostSession) -> some View {
         let selected = !composing && artifact == nil && model.focus.chat == s.key && files?.activePath == nil && files?.review.isOpen != true && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil
         let running = s.state == .working
+        let draggingSelf = dock.dragging == .thread(s.key.stringValue)
         let mark = selected || running ? nil : model.mark(for: s)
         let open = { files?.showChat(); dock.deselectTerminals(.centre); dock.deselectDucklings(.centre); dock.update { $0.selectChats() }; model.select(s.key) }
         return Group {
@@ -670,11 +666,9 @@ private struct WorkbenchTabs: View {
         .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
         .onDrag { dragProvider(DockItemPayload.encode(.thread(s.key.stringValue)), kind: .thread) } preview: { DockTabDragPreview(title: model.workbenchTitle(s)) }
-        .padding(.leading, chatDropTarget == s.key ? 16 : 0)
-        .overlay(alignment: .leading) {
-            if chatDropTarget == s.key { Capsule().fill(PondColour.accent).frame(width: 2).padding(.vertical, 8).allowsHitTesting(false).transition(.opacity) }
-        }
-        .animation(Motion.standard, value: chatDropTarget == s.key)
+        .padding(.leading, chatDropTarget == s.key && !draggingSelf ? TabInsertionLine.gap : 0)
+        .overlay { if chatDropTarget == s.key && !draggingSelf { TabInsertionLine() } }
+        .animation(Motion.standard, value: chatDropTarget == s.key && !draggingSelf)
         .scopedDrop(.centreStrip, isTargeted: { on in
             if on { chatDropTarget = s.key } else if chatDropTarget == s.key { chatDropTarget = nil }
         }) { source in

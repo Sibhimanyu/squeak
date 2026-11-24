@@ -449,6 +449,9 @@
       ".sq-group{position:absolute;box-sizing:border-box;outline:1px dashed " + INK + ";box-shadow:0 0 0 1px #fff}" +
       ".sq-h{position:absolute;box-sizing:border-box;background:#fff;border:1.5px solid " + INK + "}" +
       ".sq-rot{border-radius:50%}" +
+      // A bigger target than the 9 px square, and a filled square under the pointer, so a handle is easy to find and grab.
+      ".sq-h::after{content:'';position:absolute;left:-6px;top:-6px;right:-6px;bottom:-6px}" +
+      ".sq-h:hover{background:" + INK + "}" +
       ".sq-guide{position:absolute;background:" + INK + ";box-shadow:0 0 0 .5px #fff}" +
       ".sq-marquee{position:absolute;box-sizing:border-box;border:1px dashed " + INK + ";background:rgba(255,255,255,.18)}"
     );
