@@ -2,8 +2,8 @@
 
 **Claude Code and Codex started outside Squeak are two add-ons, off for everyone** (`addons/claude-external`, `addons/codex-external`, ids `claude-external` / `codex-external`, distributed, no migration). Core reads Claude transcripts and Codex rollouts in _claimed mode_ only (`observe({ ids })`: the sessions a native or host row names by `agentSessionId`, for `transcriptPath`, `waitingOn`, `looping`); the full scan, Cowork and process liveness (`AddonHandle.liveness`) are the add-ons'. Their watch folders exist only while enabled (`AddonHost.watchSpecs` checks `isEnabled`; `FleetMonitor.rewatch()` on a toggle). Enabling installs that agent's hooks and ask format, disabling removes only Squeak's entries (`fleet/external-hooks.ts`, also reconciled by each add-on's `maintenance` at every start); `fleet-notify.sh` does nothing unless `<support>/hooks/enabled` exists; `/hook` answers 200 and drops events while neither is on; `/control/hooks*` answer 404. A reply to an external session refuses with `EXTERNAL_NOT_ENABLED`. The terminal replier itself has not moved into the add-on yet.
 
-`src/fleet/` sees far more than the sessions Conductor spawned: it widens
-that to every Claude Code and Codex session on the machine by reading their
+`src/fleet/` watches Squeak's own chats. With the external add-ons enabled it
+also reads every Claude Code and Codex session on the machine from their
 transcripts, and ranks them by what is blocked on the human.
 
 - **Refreshes are event-driven; the poll is only the safety net.** The monitor

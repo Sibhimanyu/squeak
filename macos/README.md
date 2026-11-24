@@ -10,7 +10,7 @@ Electron app (since removed). The Node daemon is still its backend.
 A native Mac app for your coding agents. It runs Claude Code and Codex chats itself (through the
 daemon's session host), lists the other agent sessions on your Mac, shows a chat's messages, and sends a message
 from the menu-bar popover, a conversation window, or a global quick-composer hot key. It also notifies you when a
-session needs you or finishes. Conductor chats appear once the optional Conductor add-on is added (Settings › Add-ons).
+session needs you or finishes. Conductor chats appear once the optional Conductor add-on is added (Settings › Extensions).
 
 Squeak does not generate text itself: every reply you read was written by an agent (Claude Code or Codex).
 
@@ -64,8 +64,10 @@ Untested:
   owner, along with the other owner steps in section 7 (relaunch, restart,
   sleep/wake, disconnect).
 
-Settings is a mode of the main window (sidebar: General, Connections, Telegram, Zoho Cliq, iPhone, Privacy, About; ⌘, and the menu-bar panel open it; Esc or Back returns to sessions). Telegram bot token and allowed chats, Zoho Cliq
-webhook and owner, and iPhone pairing (QR, approve, disconnect). They write the daemon's
+Settings is a mode of the main window (⌘, and the menu-bar panel open it; Esc or Back returns to sessions). Its sidebar
+groups are You (Account, Ponds, Notifications, Privacy), Agents (Models & presets, Messages), This Mac (General, Keep
+awake, Background service), Devices (Devices, Connections), Extensions and About (`SettingsSection`). Telegram bot token
+and allowed chats and the Zoho Cliq webhook and owner live on their own extension pages. They write the daemon's
 `.env` (0600, `EnvFile`), restart the service with `launchctl kickstart`, and need the
 daemon's `/control/channels` and `/control/telegram/*` routes (older daemons read as "update
 the Squeak service"). Only smoke-run with demo data; no real token was entered, no test
@@ -73,11 +75,11 @@ message sent, no phone paired.
 
 Add-ons: core knows no host app. `Addons/Conductor/` (a SwiftPM target, linked in every build) is the Conductor
 add-on: it reads conductor.db, lists Conductor's workspaces for the picker and opens a chat in Conductor, and it is inert
-until the person adds it in Settings › Add-ons (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
+until the person adds it in Settings › Extensions (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
 it live, sources and file watcher included). Core's side is `AppAddon` (`SqueakMacCore/Addons`): session sources, a
 settings page (`AddonPage`, with switch lists), Connections rows, file watching, project icons, uninstall note.
-Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The dev-only Conductor relay add-on is deleted. Sparkle updates have
-not yet been exercised end to end against a published appcast (see Updates).
+Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The dev-only Conductor relay add-on is deleted. Updates ship through Sparkle and a
+published appcast (see Updates).
 
 The release is signed with the Apple Development identity (not notarized), so macOS keeps its
 permission grants across updates.
@@ -150,10 +152,10 @@ macos/Sources/
   only after the daemon is shipped (`./scripts/ship.sh`, the owner's call); an
   older daemon answers 404 and the app reports no transcript.
 
-Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Extensions (one group: an overview with every extension as the same card, status and Add/Remove, the daemon's
-add-ons (Conductor, RasanAI) and the built-ins Telegram, Zoho Cliq and Phone calls; each added one also gets its own
-sidebar row and page: Conductor's workspace picker),
-Connections, iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
+Settings pages are in `SettingsSection`. Setup is not a page: a "Finish setting up" card at the top of the sidebar
+lists the first-run steps still to do and leaves when none is left. Extensions is one group: an overview with every
+extension as the same card (status, Add/Remove), covering the daemon's add-ons (Conductor, RasanAI) and the built-ins
+Telegram, Zoho Cliq and Phone calls; each added one also gets its own sidebar row and page. Settings has a Connections page with one row per source: each enabled add-on's (Conductor database:
 readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
 (no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and
@@ -167,20 +169,20 @@ app's life; the bookkeeping that decides things is in `SqueakMacCore/Terminal` w
 why there is none, `TerminalShell` login-shell launch and the close-asks rule from the pty's foreground group).
 Palette is `Tokens.Terminal` (contrast pinned by a test). SwiftTerm is pinned `exact: "1.99.3"` (MIT; notice in
 `THIRD-PARTY-NOTICES.md`, copied into the app by `build-app.sh` with JetBrains Mono in `Resources/fonts`); it links
-statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. Not yet seen
-on screen: written and built only, no window was opened.
+statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. The panel is live:
+it opens in the bottom dock zone (⌘J), and each shell is a tab that can sit in any zone.
 
 ### Right zone: Thread, Pond, Code
 
 The right zone's tabs are **Thread · Pond · Code** (`DockPanel`, `DockLayout.standard`; Thread selected by default).
-The pond *dashboard* (centre page) manages a pond; the **Pond tab** (`PondPanel.swift`, view-model `PondGlance` in
+The pond _dashboard_ (centre page) manages a pond; the **Pond tab** (`PondPanel.swift`, view-model `PondGlance` in
 `SqueakMacCore/Ponds`) is a live glance at the pond of the thread on screen: people with what they work on (from
 `PondDetail` members/presence/threads, else this Mac's chats), Now (working/waiting threads, click opens), Recent
 (last six pond ripples), and Invite / Open dashboard. The **Thread tab** (`ThreadPanel.swift`, `ThreadGlance`) covers
 the open thread (a duckling opens as a tab in the centre strip after its thread; drag it to a side strip if you like): who (pond thread participants and presence), running (ducklings, shells, queue), changed files (open
 in Code) and controls (mode, model, private/share). The Pond panel never docks in the centre: a drop there calls
 `DockStore.openPondDashboard`, and `DockLayout.normalized()` moves an old centre Pond to the right. Old saved layouts
-gain Thread before Pond on decode. Built and unit-tested only; not seen on screen (no window was opened).
+gain Thread before Pond on decode.
 
 ### Dock icon and menus
 
@@ -201,7 +203,7 @@ popover and menus opens the conversation. Nothing here quits the app.
 
 ### Menu-bar panel
 
-New chat presets can be renamed and configured in **Settings › Mac › New chat presets**.
+New chat presets can be renamed and configured in **Settings › Models & presets**.
 Choose Claude or Codex to edit that agent's model and thinking choices; Claude also
 offers worker choices. Changes save on this Mac and apply to the New chat window,
 quick composer and menu-bar popup. Restore defaults resets the selected preset.
@@ -403,22 +405,15 @@ Gatekeeper will warn the first time.
 4. Squeak has no Dock icon; look for it in the menu bar.
 5. The first launch opens Welcome. One press of **Set up Squeak** installs the background service through
    `DaemonManager` and starts the guided Setup walkthrough. Nothing needs the terminal. Each screen has a progress
-   count and handles one step; optional steps can be skipped. The summary and **Settings › Setup** show completed,
-   skipped and unfinished steps, and let the person reopen them. The menu-bar panel's `…` menu shows **Finish setting
+   count and handles one step; optional steps can be skipped. The **Finish setting up** card in the Settings sidebar
+   lists the steps still to do and lets the person reopen them. The menu-bar panel's `…` menu shows **Finish setting
    up…** while a required step remains.
 
-   | walkthrough step                             | what it does                                                                                                                                | required |
-   | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-   | Background service                           | installs/repairs through `DaemonManager`; done when the daemon answers                                                                      | Yes      |
-   | Agent hooks                                  | `GET /control/hooks`, `POST /control/hooks/install` (and Remove… as `/uninstall`); the daemon edits `~/.claude/settings.json` with a backup | Yes      |
-   | Reply into Terminal or Conductor's window    | opens Privacy › Accessibility with instructions for Squeak Hands; macOS does not expose its permission status to Squeak                     | No       |
-   | Notifications                                | asks macOS (`UNUserNotificationCenter`), reads status, and opens System Settings when permission is denied                                  | No       |
-   | Quick-message shortcut                       | reads `CGPreflightListenEventAccess`; the button asks and opens Privacy › Input Monitoring                                                  | No       |
-   | iPhone                                       | sets up your Firebase or Squeak's limited shared server, then opens phone pairing                                                           | No       |
-   | Telegram, Zoho Cliq, phone calls, Keep awake | opens the settings screen for each feature                                                                                                  | No       |
+   The steps are `SetupStage`: Start Squeak (installs or repairs the background service; done when the daemon
+   answers), Your agents (finds Claude Code and Codex and connects them), Account (sign in with Zoho, Google or email,
+   optional) and Your phone (sign in on the iPhone with the same account, optional). The first two are required.
 
-   `SetupWalkthrough` (SqueakMacCore, UI-free) derives order, progress, skip state and completion from
-   `SetupFacts` and the configured channels. The screens reuse the relevant settings and checklist actions.
+   `SetupFlow` (SqueakMacCore, UI-free) derives order, progress, skip state and completion from the setup facts.
 
 Reading Conductor chats (add-on) needs nothing else. Sending, and terminal and desktop
 sessions, need the Squeak daemon running on the same Mac (step 1 above).
@@ -491,7 +486,7 @@ opens, and ~6,300 files made a managed Mac's first start take minutes. While sta
 
 At launch `DaemonManager` (`DaemonInstaller` plans, `LiveDaemonEffects` acts) decides:
 a launch agent that does not run from `~/Library/Application Support/squeak/daemon/` is a dev checkout and is never touched;
-no agent waits for the person's press: **Welcome › Set up Squeak** (the guided setup installs it) or **Settings › About › Background service › Install** (nothing is installed without one of those clicks); an agent we
+no agent waits for the person's press: **Welcome › Set up Squeak** (the guided setup installs it) or **Settings › Background service › Install** (nothing is installed without one of those clicks); an agent we
 own on an older build gets the new version copied beside it, the `current` symlink switched atomically,
 `launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
 (remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.

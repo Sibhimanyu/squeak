@@ -30,9 +30,33 @@ the daemon. A missing file is fine. An invalid file, an unknown name or a non-bo
 | `pondOwnThreads` | `SQUEAK_POND_OWN_THREADS` | off     | on for `on`, `1`, `true`, `yes` (stashed: a member's own-Mac threads in a joined pond)                                                                    |
 | `ducksOwnBranch` | `SQUEAK_DUCKS_OWN_BRANCH` | off     | on for `on`, `1`, `true`, `yes` (every new chat in a git pond gets its own branch and worktree, Main read-only; `docs/ponds.md` "Ducks own their branch") |
 
-Values are trimmed and case-insensitive. Other switches (`SQUEAK_FLOTILLA`, `SQUEAK_ADDONS`,
-`SQUEAK_CLOUD_URL`) still read their own variables; move them here one at a time, with a test that the old values give
-the same result.
+Values are trimmed and case-insensitive.
+
+## Environment switches outside the registry
+
+These are read where they are used, not through `flag()`. They are not in `GET /control/flags`. Put them in the
+daemon's `.env` (the host reads the same file) or the launchd environment.
+
+- `SQUEAK_FLOTILLA`: ponds are on; `off` constructs nothing from `src/flotilla`.
+- `SQUEAK_ADDONS`: comma-separated names of development add-ons (not `distributed`) to load. Shipped add-ons load
+  always and stay off until enabled in Settings › Extensions.
+- `SQUEAK_NATIVE_COMPACT`: on; `off` skips the compaction of `native.db` at start.
+- `SQUEAK_AGENT_SDK_PREFETCH`: on; `off` skips fetching the Claude Agent SDK at start.
+- `SQUEAK_API_STALL_MIN`: minutes without a stream event before the host gives up on a request (default 10, `0` = never).
+- `SQUEAK_REMOTE_NATIVE_BYPASS`: off; `1` lets a phone start a native chat that skips approvals.
+- `SQUEAK_CLOUD_URL`: use another Catalyst relay than Squeak's hosted one.
+- `SQUEAK_CLOUD_DEFER_MOVE`: off; `on`, `1`, `true` or `yes` (or a `cloud-defer-move` file in the support dir) holds an
+  existing install's move to the hosted relay until `POST /control/cloud/move-now`.
+- `SQUEAK_HOST_PORT`: the session host's port (default 8479).
+- `SQUEAK_ENV_PATH`: where the daemon's `.env` lives; Squeak's support folder follows it.
+- `SQUEAK_DB_PATH`: Squeak's own `squeak.db`, when it is not in the support folder.
+- `SQUEAK_HANDS_APP`: path of Squeak Hands, or `off`.
+- `SQUEAK_RASANAI_ENGINE_DIRS`: extra folders, colon-separated, where the RasanAI add-on looks for its engine.
+
+Channel and voice settings (`SQUEAK_BOT_TOKEN`, `SQUEAK_ALLOWED_CHAT_IDS`, `SQUEAK_CLIQ_*`, `SQUEAK_VOICE_*`) are
+described with their features: `docs/cliq.md` and `docs/voice.md`. `SQUEAK_REMOTE_DATABASE_URL` and
+`SQUEAK_REMOTE_PROJECT` belong to the old Firebase setup, which a Mac keeps until it signs in. When a new
+switch is added, add it to the registry, not here.
 
 ## Reading them
 

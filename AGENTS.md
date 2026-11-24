@@ -1,9 +1,9 @@
 # Squeak
 
-A pager for coding agents: a daemon (`src/`) that watches every Claude Code and Codex session on the Mac, plus the
-surfaces that show them and answer them: Squeak for Mac (`macos/`, native SwiftUI), Squeak for iPhone (`ios/`),
-Telegram and Cliq cards. Squeak also runs its own Claude/Codex chats in the session host (`src/native/`). Conductor
-support is an add-on (`addons/conductor/`), off until enabled. Design system: `DESIGN.md`.
+A pager for coding agents: a daemon (`src/`) that runs Squeak's own Claude/Codex chats in the session host
+(`src/native/`), plus the surfaces that show them and answer them: Squeak for Mac (`macos/`, native SwiftUI), Squeak
+for iPhone (`ios/`), Telegram and Cliq cards. Claude Code and Codex sessions started outside Squeak, and Conductor
+support, are add-ons (`addons/`), off until enabled. Design system: `DESIGN.md`.
 
 **You are very likely running inside something this repo deploys.** Read `docs/agents/deployment.md` before changing
 anything under `src/`.

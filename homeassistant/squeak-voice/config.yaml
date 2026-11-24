@@ -2,7 +2,7 @@ name: Squeak Voice
 version: "0.21.0"
 slug: squeak_voice
 image: ghcr.io/sibhimanyu/squeak-voice-{arch}
-description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Firebase.
+description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Squeak's cloud relay.
 arch:
   - aarch64
   - amd64

@@ -44,8 +44,11 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
 
 Not built yet:
 
-- [ ] **Answering Codex questions** — the answer service's `readAsk` only reads
-      Claude transcripts.
+- [ ] **Codex's structured questions.** A Codex chat's command and file-change
+      approvals and its lettered questions (the ask format) are answered from every
+      surface already. Not handled: any other Codex server request, which
+      `codex-runner.ts` refuses ("Squeak does not handle ..."), and the Conductor
+      add-on's answer service, whose `readAsk` reads only Claude transcripts.
 - [ ] **New chat in a new workspace (phase 2)** — relay `POST /workspaces` body is
       unknown; reverse-engineer it from Conductor's bundle first (`.context/re/`).
 - [ ] **Turn on the iPhone channel from Settings** (`SQUEAK_REMOTE_PROJECT`) — the

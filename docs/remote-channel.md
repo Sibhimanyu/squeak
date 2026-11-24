@@ -1,7 +1,8 @@
 # Step 4 — The remote channel (design, before any code)
 
 > Status: **built** · 2026-09-25 · Roadmap steps 4–5 in `DESIGN.md` §13.
-> Firebase project `squeak-5c9gvo` (Firestore in asia-south1), iOS via SideStore.
+> iOS via SideStore. There is no push notification (no FCM, no APNs): see "As built". The Firebase design below is the
+> original one; Squeak's hosted cloud replaced it (see "Squeak hosts the cloud" near the end).
 >
 > This is the first step where a device that is not your Mac can make agents
 > on your Mac _do things_. That is remote code execution with extra steps: an
@@ -13,7 +14,7 @@
 1. **See** — the phone shows what the Squeak window shows: sessions by state,
    the agent's last message, the parsed decision.
 2. **Be told** — a push notification when something needs you or a Conductor
-   chat finishes (the same events Telegram gets today).
+   chat finishes. Not built for the phone (a free Apple ID cannot use APNs); Telegram and Cliq do this.
 3. **Answer** — tap a letter or send text to one specific chat.
 4. **Work when the Mac is not reachable directly** — the phone is on cellular,
    the Mac is behind home NAT. The Mac only ever makes _outbound_ connections.
@@ -40,13 +41,12 @@ threat model there.
 
 ## Options
 
-### A. Firebase (Firestore + Cloud Messaging + Auth) — recommended
+### A. Firebase (Firestore) — what was built first
 
 The Mac writes an encrypted snapshot and events to Firestore under your user;
-the phone reads it and gets FCM pushes; replies go the other way as signed,
+the phone reads it; replies go the other way as signed,
 encrypted command documents the Mac listens for.
 
-- ✅ Push notifications on iOS and Android out of the box (FCM → APNs).
 - ✅ Works from anywhere; the Mac only makes outbound HTTPS connections.
 - ✅ Real-time listeners on both sides; offline caching on the phone.
 - ✅ Free at this scale (a few thousand small documents a day).
@@ -116,21 +116,9 @@ app's device list ("iPhone answered B in orchard · irrigation, 14:02").
 ### The phone
 
 Home is the attention-ordered list from `DESIGN.md` §8.2; a tap opens the
-decision card (§8.4) or the reply composer (§8.5). Sending requires Face ID /
-fingerprint. Push notifications use the §8.6 three-line card. Built with the
-same tokens (`DESIGN.md` §11); React Native (Expo) is the pragmatic choice for
-one codebase on both platforms and first-class FCM support.
-
-## Decisions needed from you
-
-1. **Transport:** Firebase (A, recommended), Telegram (B), or direct (C)?
-2. **If Firebase:** create a project at console.firebase.google.com (free
-   Spark plan is enough) and share its project id — or tell me to write the
-   exact setup steps for you to follow.
-3. **Phones:** iPhone, Android, or both? (Changes what gets tested first,
-   not the codebase.)
-4. **Scope check:** step 4 lets a paired phone _reply to existing Conductor
-   chats_ and nothing else. Anything you want in or out?
+decision card (§8.4) or the reply composer (§8.5). Sending requires Face ID.
+The app is native SwiftUI, built with the same tokens (`DESIGN.md` §11). It sends no push notifications: Telegram and
+Cliq carry them.
 
 ## As built (2026-09-25)
 
