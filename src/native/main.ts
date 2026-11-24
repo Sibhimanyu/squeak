@@ -6,6 +6,7 @@ import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { AgentSettings } from "./agent-settings.js";
 import { ProjectPrefs } from "./project-prefs.js";
+import { DutyKeeper } from "./duty-keeper.js";
 import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
 import { startSystemProxy } from "../squeak/system-proxy.js";
@@ -109,6 +110,7 @@ export async function runHost(supportDir: string): Promise<void> {
     contextPercent: (s) => host.contextOf(s)?.percent ?? null,
   });
   jobs.attach(host);
+  new DutyKeeper({ room, busy: () => jobs.busyDuckIds() }).start();
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
   host.start();
