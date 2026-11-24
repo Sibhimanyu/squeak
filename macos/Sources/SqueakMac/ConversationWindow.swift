@@ -125,7 +125,8 @@ struct ConversationView: View {
         // The right zone belongs to the page: a chat's dock column, or a pond home's room inspector.
         let chatOpen = focus.page == .chat && model.selectedSession != nil
         // The Dashboard keeps its right zone too (its shells and "+"), open or closed by the same dock toggle as a chat's.
-        let homeCtx = focus.page == .home && roomCtx == nil
+        // The Dashboard has no right zone (owner, 2026-11-24): it is a full-width board.
+        let homeCtx = false
         let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
