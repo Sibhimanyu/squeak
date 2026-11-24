@@ -13,6 +13,8 @@ import type { SessionHost } from "../native/host.js";
 import type { ChatStarter } from "../native/chat-starter.js";
 import type { AgentTools } from "../native/agent-tools.js";
 import type { NativeStore } from "../native/store.js";
+import type { Room } from "../native/room.js";
+import type { RoomTasks } from "../native/room-tasks.js";
 import type { WorkspaceSources } from "../native/workspace-sources.js";
 import type { WorkspaceManager } from "../native/workspaces.js";
 import { MainRepoFinder } from "../fleet/repo-identity.js";
@@ -20,6 +22,7 @@ import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
 import { computerName, oldDefaults, personName } from "./person.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
+import { RoomSync } from "./room-sync.js";
 import { FlotillaService, type AccountPort } from "./service.js";
 import { FlotillaError, type ChangedFiles } from "./types.js";
 
@@ -32,6 +35,8 @@ export const flotillaEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =
 
 export interface Flotilla {
   service: FlotillaService | null;
+  /** The Room's sync with Members, when the host has a Room. */
+  roomSync?: RoomSync | null;
   bridge: FlotillaBridge | null;
   /** Handles `/native/ponds/*`. */
   handle(ctx: RouteContext): Promise<boolean>;
@@ -56,6 +61,9 @@ export interface FlotillaDeps {
   sources: WorkspaceSources;
   tools: AgentTools;
   supportDir: string;
+  /** The Room and its Tasks, carried to Members of a shared pond (`room-sync.ts`); without them nothing is published. */
+  room?: Room;
+  jobs?: RoomTasks;
 }
 
 const git = (cwd: string, args: string[]): Promise<string> =>
@@ -250,9 +258,12 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
         ...(a.branch ? { branch: a.branch } : {}),
       })),
   });
+  const roomSync =
+    deps.room && deps.jobs ? new RoomSync({ service, room: deps.room, jobs: deps.jobs, store: deps.store }) : null;
   const routes = new FlotillaRoutes({
     service,
     bridge,
+    ...(roomSync ? { roomSync } : {}),
     projects: () => deps.store.listProjects(),
     remoteOf: async (projectId, rootPath) => {
       const root = (projectId ? deps.store.getProject(projectId)?.rootPath : null) ?? rootPath;
@@ -309,14 +320,17 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   // An install made before real names kept the login name and hostname: bring them up to date (and republish).
   void service.updateOwnProfile({ name: personName(), nest: computerName() }, oldDefaults()).catch(() => undefined);
   bridge.start();
+  roomSync?.start();
   return {
     service,
     bridge,
+    roomSync,
     handle: (ctx) => routes.handle(ctx),
     projectRemovalBlock: (projectId) => service.projectRemovalBlock(projectId),
     projectRemoved: (projectId) => service.projectRemoved(projectId),
     records: () => service.directoryRecords(),
     stop: () => {
+      roomSync?.stop();
       bridge.stop();
       service.stop();
     },

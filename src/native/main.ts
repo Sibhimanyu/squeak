@@ -141,7 +141,7 @@ export async function runHost(supportDir: string): Promise<void> {
         },
       },
     });
-    flotilla = createFlotilla({ host, starter, store, workspaces, ...shared, supportDir });
+    flotilla = createFlotilla({ host, starter, store, workspaces, ...shared, supportDir, room, jobs });
   }
   server = new NativeServer({
     host,
