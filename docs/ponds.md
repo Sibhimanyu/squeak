@@ -692,7 +692,7 @@ A canvas is a folder `canvases/<slug>.canvas/` in a pond (Main or a duck's worki
 `canvas.json` (`{version: 1, title, kind: deck|poster|logo|social|blank, artboards: [{id, name, width, height,
 background?}]}` in order), `artboards/<id>.html` (self-contained HTML/CSS, inline SVG ok, body exactly width x height px)
 and `assets/` (images, by relative path). Starting sizes: deck 1920x1080, poster 1080x1350, logo 1024x1024, social
-1080x1080. Phase 1 has no hand editing; system and web-safe fonts only.
+1080x1080. System and web-safe fonts only.
 
 - Host: `src/native/canvases.ts` (format, templates, path safety, watcher). Routes (token-gated, no CORS):
   `GET /native/projects/<id>/canvases`, `POST /native/projects/<id>/canvases {title, kind}`,
@@ -700,3 +700,18 @@ and `assets/` (images, by relative path). Starting sizes: deck 1920x1080, poster
   A canvas also lists in Artifacts as kind `canvas`.
 - Agent tools: `canvas_create`, `canvas_add_artboard`, `canvas_update_artboard`, `canvas_open`; the format note is
   `CANVAS_LINE` in `src/native/thread-context.ts`.
+- Hand editing (Mac, phase 2): clicking a board swaps it from its picture to a live WKWebView over it on the pasteboard
+  (scaled with the zoom, scroll and pinch handed to the pasteboard); Esc or a click outside draws it back into a picture.
+  The editing script is `macos/Sources/SqueakMac/Resources/canvas-edit.js` (no network; page scripts stay off, it runs in
+  its own content world; the build scripts copy it into the app; `src/native/canvas-edit.test.ts` runs it under jsdom).
+  It gives elements stable `data-sq-id` attributes, selects, moves, resizes, rotates, edits text in place, snaps to artboard
+  and sibling edges and centres, and reports each change as the artboard's whole HTML. `CanvasEditor.swift` keeps the undo
+  history per artboard (`EditHistory`, ⌘Z / ⇧⌘Z), saves 400 ms after a change, and merges a duck's write by element id
+  (`EditMerge`; the same element changed by both keeps the person's and shows "A duck changed this artboard", Reload).
+  The Design tab of the right zone (`CanvasDesignView.swift`) edits position, size, rotation, opacity, text, fill, radius
+  and border. Routes: `PUT /native/canvases/artboard?path=&id=` `{html}` (atomic write, answers `{modifiedAt}`) and
+  `POST /native/canvases/manage?path=` `{op: add|rename|duplicate|delete|reorder|resize, ...}` (canvas.json only). The
+  artboard list drags to reorder, "+" adds at the kind's size presets, right-click renames, duplicates, deletes.
+- Remote ponds: a canvas is an output (`SHAREABLE_KINDS` has `canvas`); the owner's Mac sends the folder as one
+  `<slug>.canvasbundle` (`packCanvasBundle`: canvas.json, artboard HTML, assets as base64, 25 MB at most, no links), the
+  member's Mac unpacks it (`CanvasBundle.unpack`, every name checked) and draws it view-only with PDF/PNG export. No remote editing.

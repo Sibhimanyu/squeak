@@ -66,8 +66,16 @@ final class CanvasModel {
     @ObservationIgnored private var stopped = false
     @ObservationIgnored private var follow: Task<Void, Never>?
     @ObservationIgnored private var exporting: Task<Void, Never>?
+    /// Set when a change to the artboard list did not go through; cleared by the next one that does.
+    private(set) var notice: String?
+    /// A canvas that is only looked at: a remote pond's (its folder is a copy of the owner's, unpacked here).
+    let readOnly: Bool
+    @ObservationIgnored private let fixed: CanvasDetail?
+    @ObservationIgnored lazy var editor = CanvasEditor(canvas: self, enabled: !readOnly)
 
-    init(path: String, host: NativeHostClient) { self.path = path; self.host = host }
+    init(path: String, host: NativeHostClient, readOnly: Bool = false, fixed: CanvasDetail? = nil) {
+        self.path = path; self.host = host; self.readOnly = readOnly; self.fixed = fixed
+    }
 
     var root: URL { URL(fileURLWithPath: path) }
     var title: String { detail?.title ?? ((path as NSString).lastPathComponent as NSString).deletingPathExtension }
@@ -76,6 +84,16 @@ final class CanvasModel {
     func start() {
         stopped = false
         follow?.cancel()
+        if !readOnly {
+            pasteboard.view.onBoardClick = { [weak self] i in self?.editor.begin(index: i) }
+            pasteboard.view.onBackgroundClick = { [weak self] in self?.editor.end() }
+        }
+        if let fixed {
+            detail = fixed
+            present()
+            pump()
+            return
+        }
         follow = Task { [weak self] in
             await self?.reload()
             guard let host = self?.host, let path = self?.path else { return }
@@ -87,6 +105,7 @@ final class CanvasModel {
     }
 
     func stop() {
+        editor.end()
         stopped = true
         follow?.cancel(); follow = nil
         exporting?.cancel(); exporting = nil
@@ -97,14 +116,21 @@ final class CanvasModel {
             let d = try await host.canvasDetail(path: path)
             guard !stopped else { return }
             failure = nil
-            if d != detail { detail = d }
-            drawn = CanvasBoards.pruned(drawn: drawn, detail: d)
-            images = images.filter { id, _ in d.artboards.contains { $0.id == id } }
-            present()
-            pump()
+            take(d)
         } catch {
             if detail == nil { failure = "Squeak couldn\u{2019}t open this canvas." }
         }
+    }
+
+    /// A new detail of the canvas (the host's read, or the answer to an edit of the list).
+    private func take(_ d: CanvasDetail) {
+        if d != detail { detail = d }
+        drawn = CanvasBoards.pruned(drawn: drawn, detail: d)
+        images = images.filter { id, _ in d.artboards.contains { $0.id == id } }
+        present()
+        editor.boardsChanged()
+        editor.detailChanged()
+        pump()
     }
 
     /// The pasteboard from what is known: each artboard's picture, or "Rendering…" until it has one.
@@ -124,8 +150,9 @@ final class CanvasModel {
         guard !pumping else { return }
         pumping = true
         Task { [weak self] in
+            // The board being edited is drawn by its live page; its picture is taken when editing ends.
             while let self, !self.stopped, let d = self.detail,
-                let id = CanvasBoards.needingRender(drawn: self.drawn, detail: d).first,
+                let id = CanvasBoards.needingRender(drawn: self.drawn, detail: d).first(where: { $0 != self.editor.boardID }),
                 let board = d.artboards.first(where: { $0.id == id }) {
                 let stamp = CanvasBoards.Stamp(board, assetsModifiedAt: d.assetsModifiedAt)
                 do {
@@ -138,6 +165,57 @@ final class CanvasModel {
             }
             self?.pumping = false
         }
+    }
+
+    // MARK: Editing
+
+    func saveArtboard(id: String, html: String) async throws -> Int64 { try await host.saveArtboard(path: path, id: id, html: html) }
+
+    /// The picture of a board taken from its live page when editing ended: shown at once, and not drawn again until the
+    /// file changes under someone else.
+    func adopt(image: NSImage, id: String, stamp: Int64) {
+        images[id] = image
+        if var board = detail?.artboards.first(where: { $0.id == id }) {
+            board.modifiedAt = stamp
+            drawn[id] = CanvasBoards.Stamp(board, assetsModifiedAt: detail?.assetsModifiedAt ?? 0)
+        }
+        present()
+    }
+
+    /// Copies a picture into the canvas's `assets/` and returns its name there.
+    func copyAsset(_ source: URL) async throws -> String {
+        let dir = root.appending(path: "assets")
+        return try await Task.detached {
+            let fm = FileManager.default
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let existing = Set((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+            let name = CanvasAsset.assetName(for: source.lastPathComponent, existing: existing)
+            try fm.copyItem(at: source, to: dir.appending(path: name))
+            return name
+        }.value
+    }
+
+    /// An edit of the artboard list (add, rename, duplicate, delete, reorder). Returns whether the host did it.
+    @discardableResult
+    func manage(_ op: CanvasOp) async -> Bool {
+        guard !readOnly else { return false }
+        do {
+            take(try await host.manageCanvas(path: path, op))
+            notice = nil
+            return true
+        } catch {
+            notice = "Squeak couldn\u{2019}t change the artboards. Try again."
+            return false
+        }
+    }
+
+    /// Drag-reorder: the list and the pasteboard follow at once, then the host is told.
+    func reorder(_ ids: [String]) {
+        guard var d = detail, !readOnly, ids.count == d.artboards.count, Set(ids) == Set(d.artboards.map(\.id)) else { return }
+        let byID = Dictionary(uniqueKeysWithValues: d.artboards.map { ($0.id, $0) })
+        d.artboards = ids.compactMap { byID[$0] }
+        take(d)
+        Task { await manage(.reorder(ids)) }
     }
 
     // MARK: Export

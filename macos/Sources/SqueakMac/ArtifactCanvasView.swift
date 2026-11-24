@@ -276,6 +276,17 @@ private final class CanvasDocumentView: NSView {
     private var dragging = false
     nonisolated(unsafe) private var boundsObserver: NSObjectProtocol?
     var onChange: ((Double, Int?) -> Void)?
+    /// A canvas being edited: the live page sits over one board; clicks on a board or on the bare pasteboard, and the
+    /// keys the page does not take, are told to the editor.
+    var onBoardClick: ((Int) -> Void)?
+    var onBackgroundClick: (() -> Void)?
+    var onKeyCommand: ((NSEvent) -> Bool)?
+    /// The live page's scale on screen (its size over the board's), told whenever it moves or zooms.
+    var onLiveScale: ((Double) -> Void)?
+    private weak var live: NSView?
+    private var liveIndex: Int?
+    /// The world point the document view's top-left shows, as the tiled layer was last set up with.
+    private var appliedOrigin = CGPoint.zero
 
     init(boards: [CanvasBoard], frames: [CGRect]) {
         self.boards = boards
@@ -284,6 +295,7 @@ private final class CanvasDocumentView: NSView {
         documentView = CanvasDocumentView(boards: boards, frames: frames)
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.masksToBounds = true
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.drawsBackground = true
@@ -348,6 +360,7 @@ private final class CanvasDocumentView: NSView {
             laidOut = true
             fitAll()
         }
+        syncLive()
     }
 
     override func viewDidMoveToWindow() {
@@ -372,7 +385,48 @@ private final class CanvasDocumentView: NSView {
         documentView.set(boards: boards, frames: frames, alwaysLabel: alwaysLabel)
         updateDocumentSize(force: true)
         if refit { fitAll() } else { publish() }
+        syncLive()
     }
+
+    // MARK: The live page
+
+    /// Puts `view` exactly over the board at `index` (nil removes it). It follows pan and zoom from then on.
+    func setLive(_ view: NSView?, boardIndex index: Int?) {
+        if live !== view {
+            live?.removeFromSuperview()
+            live = view
+            if let view { addSubview(view, positioned: .above, relativeTo: scrollView) }
+        }
+        liveIndex = view == nil ? nil : index
+        syncLive()
+    }
+
+    /// The live page's frame: the board's rectangle as the scroll view shows it now (the clip view's bounds carry pan and
+    /// magnification, so converting the document-space rectangle is all it takes).
+    private func syncLive() {
+        guard let live, let i = liveIndex, frames.indices.contains(i), bounds.width > 0 else { return }
+        let docOrigin = appliedOrigin
+        let world = frames[i]
+        let rect = documentView.convert(world.offsetBy(dx: -docOrigin.x, dy: -docOrigin.y), to: self).standardized
+        guard rect.width > 0, rect.height > 0 else { return }
+        if live.frame != rect {
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            live.frame = rect
+            CATransaction.commit()
+        }
+        onLiveScale?(Double(rect.width / max(world.width, 1)))
+    }
+
+    /// The board under a mouse event, by its place on the pasteboard.
+    private func boardIndex(at event: NSEvent) -> Int? {
+        let p = documentView.convert(event.locationInWindow, from: nil)
+        let world = CGPoint(x: p.x + appliedOrigin.x, y: p.y + appliedOrigin.y)
+        return frames.firstIndex { $0.contains(world) }
+    }
+
+    /// The live page hands over what it cannot scroll or pinch itself, so panning and zooming never stop over a board.
+    func forwardScroll(_ event: NSEvent) { scrollView.scrollWheel(with: event) }
+    func forwardMagnify(_ event: NSEvent) { scrollView.magnify(with: event) }
 
     private func updateDocumentSize(force: Bool = false) {
         let visibleSize = scrollView.contentView.bounds.size
@@ -390,6 +444,7 @@ private final class CanvasDocumentView: NSView {
             documentView.labelLayer.bounds = CGRect(origin: CGPoint(x: docOrigin.x, y: docOrigin.y), size: docSize)
             documentView.labelLayer.position = .zero
             CATransaction.commit()
+            appliedOrigin = docOrigin
         }
     }
 
@@ -449,6 +504,7 @@ private final class CanvasDocumentView: NSView {
         let mag = Double(scrollView.magnification)
         documentView.updateLabels(magnification: mag)
         publish()
+        syncLive()
     }
 
     private func publish() {
@@ -473,7 +529,8 @@ private final class CanvasDocumentView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         dragging = spaceDown
-        if dragging { NSCursor.closedHand.set() }
+        if dragging { NSCursor.closedHand.set(); return }
+        if let i = boardIndex(at: event) { onBoardClick?(i) } else { onBackgroundClick?() }
     }
     override func mouseDragged(with event: NSEvent) {
         guard dragging else { return }
@@ -492,7 +549,9 @@ private final class CanvasDocumentView: NSView {
         guard event.modifierFlags.intersection([.command, .control, .option]) == .command,
             let w = window, w.isKeyWindow, let ch = event.charactersIgnoringModifiers,
             bounds.contains(convert(w.mouseLocationOutsideOfEventStream, from: nil)) || w.firstResponder === self
+                || ((w.firstResponder as? NSView).map { live != nil && $0.isDescendant(of: live!) } ?? false)
         else { return false }
+        if live != nil, onKeyCommand?(event) == true { return true }
         switch ch {
         case "+", "=": zoomStep(in: true)
         case "-": zoomStep(in: false)

@@ -11,6 +11,8 @@ import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
 import { Artifacts } from "./artifacts.js";
 import {
+  applyCanvasOp,
+  CANVAS_MAX_HTML_BYTES,
   CanvasError,
   CanvasWatcher,
   createCanvas,
@@ -18,6 +20,7 @@ import {
   listCanvasesIn,
   readCanvas,
   resolveCanvasDir,
+  saveArtboardHtml,
   summarize,
   type CanvasSummary,
 } from "./canvases.js";
@@ -1248,6 +1251,29 @@ export class NativeServer {
     if (area === "canvases" && id === "stream" && parts.length === 3 && method === "GET") {
       const dir = this.canvasDir(url.searchParams.get("path"));
       return this.canvasStream(req, res, dir);
+    }
+    if (area === "canvases" && id === "artboard" && parts.length === 3 && method === "PUT") {
+      // A hand edit: the whole artboard HTML, written atomically (the JSON wrapper is a little over the HTML's own cap).
+      const dir = this.canvasDir(url.searchParams.get("path"));
+      const board = url.searchParams.get("id") ?? "";
+      const body = await this.body(req, CANVAS_MAX_HTML_BYTES * 2 + 4096);
+      try {
+        return this.json(res, 200, { ok: true, modifiedAt: saveArtboardHtml(dir, board, body.html) });
+      } catch (err) {
+        if (err instanceof CanvasError) throw new HttpError(400, err.message);
+        throw err;
+      }
+    }
+    if (area === "canvases" && id === "manage" && parts.length === 3 && method === "POST") {
+      // The artboard list's edits (add, rename, duplicate, delete, reorder, resize): canvas.json only.
+      const dir = this.canvasDir(url.searchParams.get("path"));
+      const body = await this.body(req);
+      try {
+        return this.json(res, 200, applyCanvasOp(dir, body));
+      } catch (err) {
+        if (err instanceof CanvasError) throw new HttpError(400, err.message);
+        throw err;
+      }
     }
     if (area === "canvases" && !id && method === "GET") {
       const dir = this.canvasDir(url.searchParams.get("path"));

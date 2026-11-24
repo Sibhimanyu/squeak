@@ -460,6 +460,130 @@ export function reorderArtboards(dir: string, order: string[]): CanvasArtboard[]
   return doc.artboards;
 }
 
+/** Writes one artboard's HTML only (a hand edit); canvas.json is untouched. Returns the file's new mtime (ms). */
+export function saveArtboardHtml(dir: string, id: string, html: unknown): number {
+  const doc = readCanvasDoc(dir);
+  if (!doc.artboards.some((a) => a.id === id)) throw new CanvasError(`No artboard ${id} in this canvas.`);
+  writeHtml(dir, id, html as string);
+  return mtime(artboardPath(dir, id));
+}
+
+/** A copy of an artboard right after it, named "<name> copy"; returns the new artboard. */
+export function duplicateArtboard(dir: string, id: string): CanvasArtboard {
+  const doc = readCanvasDoc(dir);
+  const at = doc.artboards.findIndex((a) => a.id === id);
+  if (at < 0) throw new CanvasError(`No artboard ${id} in this canvas.`);
+  if (doc.artboards.length >= CANVAS_MAX_ARTBOARDS) throw new CanvasError("Too many artboards.");
+  const cur = doc.artboards[at]!;
+  let html: string;
+  try {
+    html = fs.readFileSync(artboardPath(dir, id), "utf8");
+  } catch {
+    html = artboardHtml(cur.width, cur.height, "", cur.background);
+  }
+  const name = `${cur.name} copy`.slice(0, 120);
+  const copy: CanvasArtboard = { ...cur, id: freshId(doc, name), name };
+  writeHtml(dir, copy.id, html);
+  doc.artboards.splice(at + 1, 0, copy);
+  writeDoc(dir, doc);
+  return copy;
+}
+
+export type CanvasOp =
+  | { op: "add"; name?: string; width?: number; height?: number }
+  | { op: "rename"; id: string; name: string }
+  | { op: "duplicate"; id: string }
+  | { op: "delete"; id: string }
+  | { op: "reorder"; order: string[] }
+  | { op: "resize"; id: string; width: number; height: number };
+
+/** The structure edits a person makes in the artboard list; every one rewrites canvas.json atomically. */
+export function applyCanvasOp(dir: string, raw: Record<string, unknown>): CanvasDetail {
+  const id = typeof raw.id === "string" ? raw.id : "";
+  switch (raw.op) {
+    case "add": {
+      const doc = readCanvasDoc(dir);
+      const name =
+        typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : `Artboard ${doc.artboards.length + 1}`;
+      const last = doc.artboards[doc.artboards.length - 1];
+      const w = sideOrDefault(raw.width, last?.width ?? KIND_SIZES[doc.kind].width, "width");
+      const h = sideOrDefault(raw.height, last?.height ?? KIND_SIZES[doc.kind].height, "height");
+      addArtboard(dir, { name, width: w, height: h, html: artboardHtml(w, h, "") });
+      break;
+    }
+    case "rename":
+      updateArtboard(dir, id, { name: raw.name as string });
+      break;
+    case "duplicate":
+      duplicateArtboard(dir, id);
+      break;
+    case "delete":
+      deleteArtboard(dir, id);
+      break;
+    case "reorder":
+      if (!Array.isArray(raw.order) || !raw.order.every((x) => typeof x === "string"))
+        throw new CanvasError("order must be a list of artboard ids.");
+      reorderArtboards(dir, raw.order as string[]);
+      break;
+    case "resize":
+      updateArtboard(dir, id, { width: raw.width as number, height: raw.height as number });
+      break;
+    default:
+      throw new CanvasError("Unknown canvas operation.");
+  }
+  return readCanvas(dir);
+}
+
+// ---------------------------------------------------------------------------------------------------- sharing
+
+export const CANVAS_BUNDLE_FORMAT = "squeak-canvas-bundle";
+export const CANVAS_BUNDLE_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
+ * A canvas folder as one file, for a pond member's Mac (view only): canvas.json, every artboard's HTML and the images
+ * under assets/ (base64). Only regular files inside the folder go in (no symlinks); over `maxBytes` is refused.
+ */
+export function packCanvasBundle(dir: string, maxBytes = CANVAS_BUNDLE_MAX_BYTES): Buffer {
+  const canvas = readCanvasDoc(dir);
+  let total = 0;
+  const count = (n: number): void => {
+    total += n;
+    if (total > maxBytes) throw new CanvasError("This canvas is too large to share (25 MB at most).");
+  };
+  const artboards: Record<string, string> = {};
+  for (const a of canvas.artboards) {
+    try {
+      artboards[a.id] = fs.readFileSync(artboardPath(dir, a.id), "utf8");
+    } catch {
+      artboards[a.id] = artboardHtml(a.width, a.height, "", a.background);
+    }
+    count(Buffer.byteLength(artboards[a.id]!));
+  }
+  const assets: Record<string, string> = {};
+  const walk = (rel: string, depth: number): void => {
+    const here = path.join(dir, "assets", rel);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(here, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!plainName(e.name) || e.name.startsWith(".")) continue;
+      const relName = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (depth < 3) walk(relName, depth + 1);
+      } else if (e.isFile()) {
+        const bytes = fs.readFileSync(path.join(here, e.name));
+        count(Math.ceil((bytes.length * 4) / 3));
+        assets[relName] = bytes.toString("base64");
+      }
+    }
+  };
+  walk("", 0);
+  return Buffer.from(JSON.stringify({ format: CANVAS_BUNDLE_FORMAT, version: 1, canvas, artboards, assets }));
+}
+
 // ---------------------------------------------------------------------------------------------------- watching
 
 /**

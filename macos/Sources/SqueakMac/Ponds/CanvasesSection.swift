@@ -113,3 +113,63 @@ private struct CanvasRow: View {
         .accessibilityLabel("Open canvas \(canvas.title)")
     }
 }
+
+/// A remote pond's canvases: the owner's, listed from the same remote artifacts the Artifacts tab asks for (a canvas folder
+/// is an output there), opened view-only. Nothing shows until the owner's Mac has listed one.
+struct RemoteCanvasesSection: View {
+    let pondKey: String
+    @Environment(AppModel.self) private var model
+
+    private var feed: RemoteArtifactsModel { RemoteArtifactsStore.shared.model(for: pondKey) }
+
+    var body: some View {
+        let canvases = feed.items.filter { $0.kind == .canvas }
+        VStack(alignment: .leading, spacing: Space.s) {
+            if !canvases.isEmpty {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Canvases").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                    Text("View only").font(Typo.footnote).foregroundStyle(Theme.subtle)
+                    Spacer()
+                }
+                VStack(spacing: 2) {
+                    ForEach(canvases) { c in
+                        RemoteCanvasRow(item: c) { model.openCanvas(pond: pondKey, path: c.path) } pin: { model.openCanvas(pond: pondKey, path: c.path, pin: true) }
+                    }
+                }
+                .padding(Space.xs).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            }
+        }
+        .task(id: pondKey) {
+            guard let id = PondsModel.shared.pond(key: pondKey)?.id else { return }
+            feed.load(pondId: id, host: model.nativeHost)
+        }
+    }
+}
+
+private struct RemoteCanvasRow: View {
+    let item: ArtifactItem
+    let open: () -> Void
+    let pin: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: Space.s) {
+                Lucide(.layers, size: 16, color: Theme.muted).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: (item.name as NSString).deletingPathExtension).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    Text(verbatim: Artifacts.meta(item)).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.tail)
+                }
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, Space.s).padding(.vertical, 5)
+            .background(hovering ? Theme.selected : Color.clear, in: RoundedRectangle(cornerRadius: Radius.row))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { pin() })
+        .accessibilityLabel("Open canvas \((item.name as NSString).deletingPathExtension), view only")
+    }
+}

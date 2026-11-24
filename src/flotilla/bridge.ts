@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import type { HostEvent } from "../native/host.js";
+import { CanvasError, isCanvasDir, packCanvasBundle } from "../native/canvases.js";
 import type {
   MessageRow,
   RequestRow,
@@ -556,19 +557,28 @@ export class FlotillaBridge {
     };
     if (!row) return refuse("That file is no longer shared.");
     let bytes: Buffer;
+    let name = row.name;
     try {
       const st = fs.statSync(row.absPath);
-      if (!st.isFile()) return refuse("That file is no longer shared.");
-      if (st.size > MAX_ARTIFACT_BYTES) return refuse("That file is too large to send (25 MB at most).");
-      bytes = fs.readFileSync(row.absPath);
-    } catch {
+      if (st.isDirectory() && isCanvasDir(row.absPath)) {
+        // A canvas folder travels as one bundle file the member's Mac unpacks and draws (view only).
+        bytes = packCanvasBundle(row.absPath, MAX_ARTIFACT_BYTES);
+        name = `${row.name}bundle`;
+      } else {
+        if (!st.isFile()) return refuse("That file is no longer shared.");
+        if (st.size > MAX_ARTIFACT_BYTES) return refuse("That file is too large to send (25 MB at most).");
+        bytes = fs.readFileSync(row.absPath);
+      }
+    } catch (err) {
+      if (err instanceof CanvasError) return refuse(err.message);
       return refuse("That file is no longer shared.");
     }
+    if (bytes.length > MAX_ARTIFACT_BYTES) return refuse("That file is too large to send (25 MB at most).");
     await this.service.publishArtifactsResult(pondId, {
       id: cmd.id,
       to: from.id,
       items: [],
-      file: { path: row.id, name: row.name, kind: row.kind, bytes },
+      file: { path: row.id, name, kind: row.kind, bytes },
     });
   }
 

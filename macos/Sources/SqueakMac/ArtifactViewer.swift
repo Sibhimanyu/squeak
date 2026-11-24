@@ -86,6 +86,9 @@ struct ArtifactViewerPage: View {
         if path.hasSuffix(".canvas"), !remote {
             // A canvas is a folder of artboards: its own viewer, with its own toolbar line.
             CanvasViewerPage(pond: pond, path: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded)
+        } else if remote, item.kind == .canvas {
+            // A remote pond's canvas arrives as one bundle file and is shown view-only.
+            RemoteCanvasViewer(pond: pond, id: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded)
         } else {
             fileBody
         }

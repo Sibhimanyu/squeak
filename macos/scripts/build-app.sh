@@ -68,6 +68,8 @@ mkdir -p "$APP/Contents/Resources/fonts"
 cp "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf \
    "$REPO"/brand/fonts/JetBrainsMono/OFL.txt "$APP/Contents/Resources/fonts/"
 cp "$HERE/THIRD-PARTY-NOTICES.md" "$APP/Contents/Resources/"
+# The canvas hand-editing script (CanvasEditScript loads it from the bundle).
+cp "$HERE/Sources/SqueakMac/Resources/canvas-edit.js" "$APP/Contents/Resources/"
 
 ICON=""
 for c in "$REPO/macos/assets/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done

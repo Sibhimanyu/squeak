@@ -86,9 +86,11 @@ struct PondInspectorZone: View {
         }
         // A remote pond has no code on this Mac: People and Recent only, no terminals, Files, Code or "+".
         let peopleOnly = PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly
+        let design = CanvasDesignTab.shared
         let strip = InspectorStrip.make(
             context: .pond, record: record, terminals: shells?.tabs.map(\.id) ?? [],
-            selectedTerminal: dock.activeFolder == folder ? dock.activeTerminals.shown(in: .right) : nil, peopleOnly: peopleOnly)
+            selectedTerminal: dock.activeFolder == folder ? dock.activeTerminals.shown(in: .right) : nil, peopleOnly: peopleOnly,
+            designAvailable: design.available && !peopleOnly, designSelected: design.shown)
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Color.clear.frame(width: Space.m + PaneToggle.size)
@@ -154,7 +156,15 @@ struct PondInspectorZone: View {
         } title: {
             Text(verbatim: tab.title).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
         }
-        .onTapGesture { InspectorActions.open(tab.kind, key: key) }
+        .onTapGesture {
+            if tab == .design {
+                DockStore.shared.deselectTerminals(.right)
+                CanvasDesignTab.shared.shown = true
+            } else {
+                CanvasDesignTab.shared.shown = false
+                InspectorActions.open(tab.kind, key: key)
+            }
+        }
         .accessibilityLabel(tab.title).accessibilityAddTraits(.isButton).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -168,6 +178,8 @@ struct PondInspectorZone: View {
             CodePanelView(session: model.selectedSession, fixedTab: .files)
         case .artifacts:
             if PondsModel.shared.chrome(key: key).inspectorPeopleRecentOnly { RemoteArtifactsTab(key: key) } else { ArtifactsTab(projectId: projectId) }
+        case .design:
+            if let editor = CanvasDesignTab.shared.editor { CanvasDesignView(editor: editor) } else { Color.clear }
         case .terminal(let id):
             TerminalPanelView(session: nil, shell: id, cwd: folder).id(id)
         }

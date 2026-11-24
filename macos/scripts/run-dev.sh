@@ -67,6 +67,7 @@ done
 for f in "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf \
          "$REPO"/brand/fonts/JetBrainsMono/OFL.txt; do sync "$f" "$APP/Contents/Resources/fonts/$(basename "$f")"; done
 sync "$HERE/THIRD-PARTY-NOTICES.md" "$APP/Contents/Resources/THIRD-PARTY-NOTICES.md"
+sync "$HERE/Sources/SqueakMac/Resources/canvas-edit.js" "$APP/Contents/Resources/canvas-edit.js"
 sync "$HERE/assets/squeak.icns" "$APP/Contents/Resources/Squeak.icns"
 
 PLIST="$(mktemp)"

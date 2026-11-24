@@ -160,4 +160,24 @@ import Testing
         #expect(InspectorStrip.make(context: .stream(panels: [.code])).tabs == [.panel(.code), .artifacts])
         #expect(InspectorStrip.make(context: .stream(panels: [.code])).pinned == .panel(.code))
     }
+
+    @Test func designTabAppearsOnlyWhileACanvasBoardIsLive() {
+        #expect(!InspectorStrip.make(context: .pond).tabs.contains(.design))
+        let pond = InspectorStrip.make(context: .pond, designAvailable: true)
+        #expect(pond.tabs == [.pond, .artifacts, .design] && pond.selected == .pond)
+        #expect(pond.isPinned(.design) && !pond.isClosable(.design) && !pond.isDraggable(.design))
+        #expect(InspectorStrip.make(context: .pond, designAvailable: true, designSelected: true).selected == .design)
+        // Asked for but not available: nothing changes.
+        #expect(InspectorStrip.make(context: .pond, designSelected: true).selected == .pond)
+        let stream = InspectorStrip.make(context: .stream(panels: [.code]), designAvailable: true, designSelected: true)
+        #expect(stream.tabs == [.panel(.code), .artifacts, .design] && stream.selected == .design)
+        // A shell the person picked keeps the selection.
+        let t = UUID()
+        #expect(InspectorStrip.make(context: .pond, terminals: [t], selectedTerminal: t, designAvailable: true, designSelected: true).selected == .terminal(t))
+        #expect(RightTab.design.title == "Design" && RightTab.design.kind == .design)
+        // It is never saved with the pond's open tabs.
+        var r = InspectorTabsRecord(); r.open(.design)
+        #expect(r.open.isEmpty)
+        #expect(InspectorStrip.make(context: .pond, record: InspectorTabsRecord(open: [.files], selected: .design), designAvailable: true).selected == .pond)
+    }
 }

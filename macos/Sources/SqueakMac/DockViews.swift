@@ -453,9 +453,15 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         // Beside a chat the pond's Artifacts tab sits right after the first panel, pinned (policy in `InspectorStrip`).
         let showsArtifacts = artifactsProject != nil && InspectorStrip.make(
             context: .stream(panels: state.panels), peopleOnly: StreamArtifactsPin.peopleOnly(for: session)).tabs.contains(.artifacts)
-        let artifactsShown = showsArtifacts && pin.shown
+        // A canvas being edited adds a Design tab right after Artifacts (never in a remote pond: view only there).
+        let design = CanvasDesignTab.shared
+        let showsDesign = zone == .right && design.available && StreamArtifactsPin.remoteKey(for: session) == nil
+        let designShown = showsDesign && design.shown
+        let artifactsOnly = showsArtifacts && pin.shown && !designShown
+        // Whichever of the two the zone shows instead of a panel, file, thread or shell.
+        let artifactsShown = artifactsOnly || designShown
         let duckRefs = session.map { s in dock.ducklings.ducklings(in: zone).filter { $0.session == s.key } } ?? []
-        let titles: [String] = state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.map(\.title) + (showsArtifacts ? [RightTab.artifacts.title] : [])
+        let titles: [String] = state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }.map(\.title) + (showsArtifacts ? [RightTab.artifacts.title] : []) + (showsDesign ? [RightTab.design.title] : [])
             + duckRefs.map { ref in session.flatMap { model.ducklings(for: $0)?.items.first { $0.id == ref.taskId }?.title } ?? "Duckling" }
             + dock.threads.threads(in: zone).compactMap { k in model.allSessions.first { $0.key.stringValue == k }.map { model.workbenchTitle($0) } }
             + placed.map(\.name) + (shells?.tabs.map { TerminalHost.shared.tabTitle(of: $0) } ?? [])
@@ -467,19 +473,30 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                     ForEach(state.panels.filter { $0 != .terminal && !InspectorStash.hides($0) }, id: \.self) { p in
                         DockPanelTab(panel: p, zone: zone, selected: state.selected == p && !state.collapsed && !artifactsShown && shownFile == nil && dock.ducklings.selected[zone] == nil && shownTerminal == nil, height: height, indicator: indicator,
                                      pinned: zone == .right && p == state.panels.first(where: { $0 != .terminal && !InspectorStash.hides($0) })) {
-                            pin.shown = false
+                            pin.shown = false; design.shown = false
                             dock.selectPanel(p, in: zone)
                         }
                         if showsArtifacts, p == firstPanel {
-                            StripTab(selected: artifactsShown && !state.collapsed, height: height, indicator: indicator, closeLabel: "Close Artifacts", showsClose: false,
+                            StripTab(selected: artifactsOnly && !state.collapsed, height: height, indicator: indicator, closeLabel: "Close Artifacts", showsClose: false,
                                      titleWidth: TabTitleMeasure.width(RightTab.artifacts.title), close: {}) {
-                                Image(systemName: RightTab.artifacts.symbol).font(.system(size: 13)).foregroundStyle(artifactsShown ? Theme.ink : Theme.muted)
+                                Image(systemName: RightTab.artifacts.symbol).font(.system(size: 13)).foregroundStyle(artifactsOnly ? Theme.ink : Theme.muted)
                             } title: {
-                                Text(verbatim: RightTab.artifacts.title).font(Typo.body).foregroundStyle(artifactsShown ? Theme.ink : Theme.muted).lineLimit(1)
+                                Text(verbatim: RightTab.artifacts.title).font(Typo.body).foregroundStyle(artifactsOnly ? Theme.ink : Theme.muted).lineLimit(1)
                             }
-                            .onTapGesture { pin.shown = true; if state.collapsed { dock.update { $0.setCollapsed(false, for: zone) } } }
+                            .onTapGesture { design.shown = false; pin.shown = true; if state.collapsed { dock.update { $0.setCollapsed(false, for: zone) } } }
                             .accessibilityLabel(RightTab.artifacts.title).accessibilityAddTraits(.isButton)
-                            .accessibilityAddTraits(artifactsShown ? .isSelected : [])
+                            .accessibilityAddTraits(artifactsOnly ? .isSelected : [])
+                        }
+                        if showsDesign, p == firstPanel {
+                            StripTab(selected: designShown && !state.collapsed, height: height, indicator: indicator, closeLabel: "Close Design", showsClose: false,
+                                     titleWidth: TabTitleMeasure.width(RightTab.design.title), close: {}) {
+                                Image(systemName: RightTab.design.symbol).font(.system(size: 13)).foregroundStyle(designShown ? Theme.ink : Theme.muted)
+                            } title: {
+                                Text(verbatim: RightTab.design.title).font(Typo.body).foregroundStyle(designShown ? Theme.ink : Theme.muted).lineLimit(1)
+                            }
+                            .onTapGesture { design.shown = true; if state.collapsed { dock.update { $0.setCollapsed(false, for: zone) } } }
+                            .accessibilityLabel(RightTab.design.title).accessibilityAddTraits(.isButton)
+                            .accessibilityAddTraits(designShown ? .isSelected : [])
                         }
                     }
                     if let session {
@@ -495,7 +512,7 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
                     if let fileModel {
                         ForEach(placed) { f in
                             DockFileTab(files: fileModel, file: f, zone: zone, selected: shownFile == f.path && !state.collapsed && !artifactsShown, height: height, indicator: indicator) {
-                                pin.shown = false
+                                pin.shown = false; design.shown = false
                                 dock.selectFile(f.path)
                             }
                         }
@@ -529,9 +546,9 @@ struct DockZoneStrip<Leading: View, Trailing: View>: View {
         .animation(Motion.standard, value: shownTerminal)
         .animation(Motion.standard, value: artifactsShown)
         // Any other tab becoming the shown one (a new shell, a thread, a duckling) takes the selection from Artifacts.
-        .onChange(of: shownTerminal) { _, new in if new != nil { pin.shown = false } }
-        .onChange(of: dock.threads.selected[zone]) { _, new in if new != nil { pin.shown = false } }
-        .onChange(of: dock.ducklings.selected[zone]) { _, new in if new != nil { pin.shown = false } }
+        .onChange(of: shownTerminal) { _, new in if new != nil { pin.shown = false; design.shown = false } }
+        .onChange(of: dock.threads.selected[zone]) { _, new in if new != nil { pin.shown = false; design.shown = false } }
+        .onChange(of: dock.ducklings.selected[zone]) { _, new in if new != nil { pin.shown = false; design.shown = false } }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
         .contextMenu { WindowPanelMenuItems(includeReset: true) }
     }
@@ -582,9 +599,13 @@ struct DockZoneBody: View {
         let fileModel = session?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         let file = DockStore.shared.files.selected[zone].flatMap { path in fileModel?.open.first { $0.path == path } }
         let shell = DockStore.shared.activeTerminals.shown(in: zone)
+        let design = CanvasDesignTab.shared
+        let designEditor = zone == .right && design.shown && StreamArtifactsPin.remoteKey(for: session) == nil ? design.editor : nil
         let artifactsProject = zone == .right && StreamArtifactsPin.shared.shown ? (StreamArtifactsPin.projectId(for: session) ?? StreamArtifactsPin.remoteKey(for: session)) : nil
         Group {
-            if artifactsProject != nil, let remote = StreamArtifactsPin.remoteKey(for: session) {
+            if let designEditor {
+                CanvasDesignView(editor: designEditor)
+            } else if artifactsProject != nil, let remote = StreamArtifactsPin.remoteKey(for: session) {
                 RemoteArtifactsTab(key: remote)
             } else if let artifactsProject {
                 ArtifactsTab(projectId: artifactsProject)

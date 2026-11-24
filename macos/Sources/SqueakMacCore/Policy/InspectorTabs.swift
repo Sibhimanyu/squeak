@@ -8,6 +8,8 @@ import Foundation
 /// only its being the shown tab is saved.
 public enum InspectorTabKind: String, Codable, CaseIterable, Sendable {
     case pond, code, files, artifacts, terminal
+    /// The Design inspector of a canvas being edited; never saved (it exists only while a board is live).
+    case design
 }
 
 /// One tab in the right zone's strip.
@@ -18,6 +20,8 @@ public enum RightTab: Hashable, Sendable {
     case files
     /// What the pond's ducks made to look at (shown files and design files); opened from the "+".
     case artifacts
+    /// The inspector of the canvas board being edited: only while one is live, right after Artifacts.
+    case design
     case terminal(UUID)
     /// A dockable panel the stream's zone already holds (Code, Thread, ...).
     case panel(DockPanel)
@@ -28,6 +32,7 @@ public enum RightTab: Hashable, Sendable {
         case .code, .panel: return .code
         case .files: return .files
         case .artifacts: return .artifacts
+        case .design: return .design
         case .terminal: return .terminal
         }
     }
@@ -38,6 +43,7 @@ public enum RightTab: Hashable, Sendable {
         case .code: return "Code"
         case .files: return "Files"
         case .artifacts: return "Artifacts"
+        case .design: return "Design"
         case .terminal: return "Terminal"
         case .panel(let p): return p.title
         }
@@ -50,6 +56,7 @@ public enum RightTab: Hashable, Sendable {
         case .code: return DockPanel.code.symbol
         case .files: return "folder"
         case .artifacts: return "photo.on.rectangle"
+        case .design: return "slider.horizontal.3"
         case .terminal: return "terminal"
         case .panel(let p): return p.symbol
         }
@@ -139,7 +146,8 @@ public struct InspectorStrip: Equatable, Sendable {
     /// is (Code when it holds none), with the pinned Artifacts tab right after it.
     public static func make(
         context: InspectorContext, record: InspectorTabsRecord = InspectorTabsRecord(), terminals: [UUID] = [],
-        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, artifactsSelected: Bool = false, peopleOnly: Bool = false
+        selectedTerminal: UUID? = nil, selectedPanel: DockPanel? = nil, artifactsSelected: Bool = false, peopleOnly: Bool = false,
+        designAvailable: Bool = false, designSelected: Bool = false
     ) -> InspectorStrip {
         // A remote pond has no code on this Mac: the Pond tab (People, Recent) and Artifacts (the owner's outputs, fetched on
         // request), whatever else was saved.
@@ -158,6 +166,7 @@ public struct InspectorStrip: Equatable, Sendable {
             // Artifacts always sits beside Pond (top right), never behind the "+" menu.
             tabs.append(.pond)
             tabs.append(.artifacts)
+            if designAvailable { tabs.append(.design) }
             for k in record.open {
                 switch k {
                 case .files: tabs.append(.files)
@@ -171,6 +180,7 @@ public struct InspectorStrip: Equatable, Sendable {
             // Artifacts sits right after the first panel, pinned, as it does beside a pond page (a remote pond's lists the
             // owner's outputs).
             tabs.insert(.artifacts, at: 1)
+            if designAvailable { tabs.insert(.design, at: 2) }
         }
         tabs += terminals.map { .terminal($0) }
         let pinned = tabs[0]
@@ -184,6 +194,7 @@ public struct InspectorStrip: Equatable, Sendable {
             case .code: selected = tabs.contains(.code) ? .code : .pond
             case .files: selected = tabs.contains(.files) ? .files : .pond
             case .artifacts: selected = tabs.contains(.artifacts) ? .artifacts : .pond
+            case .design: selected = .pond
             case .terminal:
                 if let t = selectedTerminal, terminals.contains(t) { selected = .terminal(t) } else if let f = terminals.first { selected = .terminal(f) }
             }
@@ -192,11 +203,13 @@ public struct InspectorStrip: Equatable, Sendable {
             else if artifactsSelected, tabs.contains(.artifacts) { selected = .artifacts }
             else if let p = selectedPanel, tabs.contains(.panel(p)) { selected = .panel(p) }
         }
+        // The Design tab, while a canvas board is live, is the shown one until another tab is picked (a shell keeps its pick).
+        if designAvailable, designSelected, selectedTerminal.map({ terminals.contains($0) }) != true { selected = .design }
         return InspectorStrip(tabs: tabs, selected: selected, pinned: pinned)
     }
 
     /// Pinned: no close button, and it cannot be dragged out of the strip.
-    public func isPinned(_ tab: RightTab) -> Bool { pinned != nil && (tab == pinned || tab == .artifacts) }
+    public func isPinned(_ tab: RightTab) -> Bool { pinned != nil && (tab == pinned || tab == .artifacts || tab == .design) }
     public func isClosable(_ tab: RightTab) -> Bool { !isPinned(tab) }
     public func isDraggable(_ tab: RightTab) -> Bool { !isPinned(tab) }
 

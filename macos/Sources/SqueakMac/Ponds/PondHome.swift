@@ -113,6 +113,7 @@ struct PondHomeView: View {
                     // The people, invites and pond controls live in the inspector beside this page (`PondInspector`).
                     threads(layout).frame(maxWidth: .infinity, alignment: .leading)
                     if let native, !chrome.isRemote { CanvasesSection(pondKey: key, projectId: native.id) }
+                    if chrome.isRemote { RemoteCanvasesSection(pondKey: key) }
                     ripples
                 }
                 .padding(geometry.size.width < 600 ? 20 : 32)

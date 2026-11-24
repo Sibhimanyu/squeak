@@ -271,6 +271,8 @@ export const SHAREABLE_KINDS: ReadonlySet<ArtifactKind> = new Set([
   "svg",
   "video",
   "audio",
+  // A canvas travels as one bundle file (view only on the member's Mac).
+  "canvas",
 ]);
 
 /** The wire id of an artifact: a hash of its absolute path, so a member never sees where it sits on the owner's Mac. */

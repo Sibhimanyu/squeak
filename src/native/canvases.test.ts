@@ -8,19 +8,23 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CANVAS_LINE, buildThreadContext } from "./thread-context.js";
 import { TOOLS } from "./agent-tools.js";
-import { artifactKindFromPath, scanArtifactFolder } from "./artifacts.js";
+import { Artifacts, artifactKindFromPath, scanArtifactFolder } from "./artifacts.js";
 import {
   addArtboard,
+  applyCanvasOp,
   artboardPath,
   CanvasError,
   CanvasWatcher,
   createCanvas,
   deleteArtboard,
+  duplicateArtboard,
   isCanvasDir,
   listCanvasesIn,
+  packCanvasBundle,
   readCanvas,
   reorderArtboards,
   resolveCanvasDir,
+  saveArtboardHtml,
   slugify,
   updateArtboard,
   validateCanvas,
@@ -185,6 +189,98 @@ describe("canvas files", () => {
   });
 });
 
+describe("canvas hand edits and structure", () => {
+  it("saves one artboard's HTML without touching canvas.json, and refuses what is not an artboard", () => {
+    const root = tmp("canvas-save-");
+    const { path: dir } = createCanvas(root, "Deck", "deck");
+    const before = fs.readFileSync(path.join(dir, "canvas.json"), "utf8");
+    const at = saveArtboardHtml(dir, "title", "<p data-sq-id='a'>hi</p>");
+    expect(at).toBeGreaterThan(0);
+    expect(fs.readFileSync(artboardPath(dir, "title"), "utf8")).toBe("<p data-sq-id='a'>hi</p>");
+    expect(fs.readFileSync(path.join(dir, "canvas.json"), "utf8")).toBe(before);
+    expect(fs.readdirSync(path.join(dir, "artboards")).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+    expect(() => saveArtboardHtml(dir, "ghost", "x")).toThrow(/No artboard/);
+    expect(() => saveArtboardHtml(dir, "../x", "x")).toThrow(CanvasError);
+    expect(() => saveArtboardHtml(dir, "title", 5)).toThrow(/html/);
+    expect(() => saveArtboardHtml(dir, "title", "x".repeat(1024 * 1024 + 1))).toThrow(/1 MB/);
+  });
+
+  it("duplicates an artboard right after itself with its HTML", () => {
+    const root = tmp("canvas-dup-");
+    const { path: dir } = createCanvas(root, "Deck", "deck");
+    saveArtboardHtml(dir, "title", "<p>one</p>");
+    const copy = duplicateArtboard(dir, "title");
+    expect(copy).toMatchObject({ id: "title-copy", name: "Title copy", width: 1920 });
+    expect(fs.readFileSync(artboardPath(dir, copy.id), "utf8")).toBe("<p>one</p>");
+    expect(readCanvas(dir).canvas.artboards.map((a) => a.id)).toEqual(["title", "title-copy"]);
+    expect(() => duplicateArtboard(dir, "ghost")).toThrow(/No artboard/);
+  });
+
+  it("applies list operations: add, rename, duplicate, reorder, resize, delete", () => {
+    const root = tmp("canvas-op-");
+    const { path: dir } = createCanvas(root, "Poster", "poster");
+    let d = applyCanvasOp(dir, { op: "add", name: "Wide", width: 1600, height: 900 });
+    expect(d.canvas.artboards.map((a) => [a.id, a.width, a.height])).toEqual([
+      ["poster", 1080, 1350],
+      ["wide", 1600, 900],
+    ]);
+    // A new artboard is a blank page of its own size.
+    expect(fs.readFileSync(artboardPath(dir, "wide"), "utf8")).toContain("width: 1600px");
+    d = applyCanvasOp(dir, { op: "add" });
+    expect(d.canvas.artboards[2]).toMatchObject({ name: "Artboard 3", width: 1600 });
+    d = applyCanvasOp(dir, { op: "rename", id: "wide", name: "Banner" });
+    expect(d.canvas.artboards[1]!.name).toBe("Banner");
+    d = applyCanvasOp(dir, { op: "resize", id: "wide", width: 1200, height: 628 });
+    expect(d.canvas.artboards[1]).toMatchObject({ width: 1200, height: 628 });
+    d = applyCanvasOp(dir, { op: "duplicate", id: "poster" });
+    expect(d.canvas.artboards.map((a) => a.id)).toEqual(["poster", "poster-copy", "wide", "artboard-3"]);
+    d = applyCanvasOp(dir, { op: "reorder", order: ["wide", "poster"] });
+    expect(d.canvas.artboards.map((a) => a.id)).toEqual(["wide", "poster", "poster-copy", "artboard-3"]);
+    d = applyCanvasOp(dir, { op: "delete", id: "poster-copy" });
+    expect(d.canvas.artboards.map((a) => a.id)).toEqual(["wide", "poster", "artboard-3"]);
+    expect(() => applyCanvasOp(dir, { op: "explode" })).toThrow(/Unknown/);
+    expect(() => applyCanvasOp(dir, { op: "reorder", order: "x" })).toThrow(/order/);
+    expect(() => applyCanvasOp(dir, { op: "rename", id: "ghost", name: "x" })).toThrow(/No artboard/);
+    expect(() => applyCanvasOp(dir, { op: "resize", id: "wide", width: 1, height: 1 })).toThrow(/width/);
+  });
+
+  it("packs a canvas into one bundle: artboards and images, never links, dot files or past the cap", () => {
+    const root = tmp("canvas-bundle-");
+    const { path: dir } = createCanvas(root, "Deck", "deck");
+    saveArtboardHtml(dir, "title", "<img src='../assets/a.png'>");
+    fs.writeFileSync(path.join(dir, "assets", "a.png"), Buffer.from([1, 2, 3]));
+    fs.writeFileSync(path.join(dir, "assets", ".secret"), "no");
+    const outside = tmp("canvas-bundle-out-");
+    fs.writeFileSync(path.join(outside, "x.png"), "private");
+    fs.symlinkSync(path.join(outside, "x.png"), path.join(dir, "assets", "link.png"));
+    const bundle = JSON.parse(packCanvasBundle(dir).toString("utf8"));
+    expect(bundle).toMatchObject({ format: "squeak-canvas-bundle", version: 1 });
+    expect(bundle.canvas.artboards[0].id).toBe("title");
+    expect(bundle.artboards.title).toContain("a.png");
+    expect(Object.keys(bundle.assets)).toEqual(["a.png"]);
+    expect(Buffer.from(bundle.assets["a.png"], "base64")).toEqual(Buffer.from([1, 2, 3]));
+    expect(() => packCanvasBundle(dir, 20)).toThrow(/too large/);
+  });
+});
+
+describe("canvases a remote member may be handed", () => {
+  it("shares a canvas folder as an output, never one a private chat showed or outside the pond", () => {
+    const store = new NativeStore(":memory:");
+    const root = tmp("canvas-share-");
+    const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind: "folder" });
+    const made = createCanvas(root, "Launch", "deck");
+    const svc = new Artifacts({ store });
+    const got = svc.shareable(project.id, new Set());
+    expect(got.map((a) => `${a.name}:${a.kind}`)).toEqual(["launch.canvas:canvas"]);
+    expect(got[0]!.path).toBe(path.resolve(made.path));
+    expect(got[0]!.id).toMatch(/^[a-f0-9]{16}$/);
+    // shown from outside the pond folders: not handed over
+    const stray = createCanvas(tmp("canvas-share-out-"), "Stray", "blank");
+    store.recordShownArtifact({ projectId: project.id, path: stray.path, sessionId: "s", duckId: null, at: 9 });
+    expect(svc.shareable(project.id, new Set()).map((a) => a.name)).toEqual(["launch.canvas"]);
+  });
+});
+
 describe("canvas watcher", () => {
   const waitFor = async (ok: () => boolean, ms = 4000): Promise<void> => {
     const end = Date.now() + ms;
@@ -342,6 +438,37 @@ describe("canvas routes", () => {
     const stray = createCanvas(tmp("canvas-stray-"), "Stray", "blank");
     expect((await call(h, "GET", `/native/canvases?path=${encodeURIComponent(stray.path)}`)).status).toBe(404);
     expect((await call(h, "GET", "/native/canvases")).status).toBe(400);
+  });
+
+  it("saves an artboard by PUT and applies list operations by POST; token-gated, no CORS, inside ponds only", async () => {
+    const h = await start();
+    const { project } = pond(h);
+    const made = await call(h, "POST", `/native/projects/${project.id}/canvases`, { title: "Edit", kind: "deck" });
+    const dir = made.json.canvas.path as string;
+    const q = (extra = "") => `?path=${encodeURIComponent(dir)}${extra}`;
+    const put = `/native/canvases/artboard${q("&id=title")}`;
+    expect((await call(h, "PUT", put, { html: "<p>x</p>" }, null)).status).toBe(401);
+    const saved = await call(h, "PUT", put, { html: "<p>by hand</p>" });
+    expect(saved.status).toBe(200);
+    expect(saved.json.modifiedAt).toBeGreaterThan(0);
+    expect(saved.headers.get("access-control-allow-origin")).toBeNull();
+    expect(fs.readFileSync(path.join(dir, "artboards", "title.html"), "utf8")).toBe("<p>by hand</p>");
+    expect((await call(h, "PUT", `/native/canvases/artboard${q("&id=ghost")}`, { html: "x" })).status).toBe(400);
+    expect((await call(h, "PUT", `/native/canvases/artboard${q("&id=..%2Fx")}`, { html: "x" })).status).toBe(400);
+    expect((await call(h, "PUT", put, { html: "x".repeat(1024 * 1024 + 1) })).status).toBe(400);
+    const stray = createCanvas(tmp("canvas-stray-"), "Stray", "blank");
+    expect(
+      (
+        await call(h, "PUT", `/native/canvases/artboard?path=${encodeURIComponent(stray.path)}&id=artboard-1`, {
+          html: "x",
+        })
+      ).status,
+    ).toBe(404);
+    const added = await call(h, "POST", `/native/canvases/manage${q()}`, { op: "add", name: "Two" });
+    expect(added.status).toBe(200);
+    expect(added.json.canvas.artboards.map((a: any) => a.id)).toEqual(["title", "two"]);
+    expect((await call(h, "POST", `/native/canvases/manage${q()}`, { op: "nope" })).status).toBe(400);
+    expect((await call(h, "POST", `/native/canvases/manage${q()}`, { op: "add" }, null)).status).toBe(401);
   });
 
   it("streams hello, then changed when an artboard is written", async () => {

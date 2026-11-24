@@ -46,7 +46,9 @@ let package = Package(
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "SqueakIcons", package: "icons"),
                 .product(name: "SqueakMarkup", package: "markup"),
-            ]),
+            ],
+            // Resources/ holds the canvas editing script: copied into the app bundle by the build scripts, not a SwiftPM resource.
+            exclude: ["Resources"]),
         .testTarget(
             name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore", .product(name: "SqueakIcons", package: "icons")],
             resources: [.copy("Fixtures/native"), .copy("Fixtures/ponds"), .copy("Fixtures/icons")]),
