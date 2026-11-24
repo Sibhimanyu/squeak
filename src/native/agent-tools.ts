@@ -312,6 +312,13 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
+    name: "hand_off",
+    description:
+      'Give a piece of work to another duck in this pond, as a sub-task of the one you are on, visible in the room. toDuck: the duck\'s name; Squeak posts "@Name <text>" and gives it straight to that duck (it is woken, nothing decides). Leave toDuck out for a task nobody in particular should take: Squeak decides who does it, and may hatch a new duck. text: what to do, in one self-contained paragraph (at most 500 characters). A plain @mention in post_to_room only nudges a duck; hand_off gives it work.',
+    inputSchema: obj({ text: { type: "string" }, toDuck: { type: "string" } }, ["text"]),
+    readOnly: false,
+  },
+  {
     name: "read_room",
     description:
       "The newest posts in this pond's room (what each chat is working on, what the person said) and who is working on what now. Read it before touching an area another chat may be in. last: 1 to 50 posts (20 by default); level: room, agents or all (default).",
@@ -718,6 +725,8 @@ export class AgentTools {
         return this.startChat(s, args);
       case "post_to_room":
         return this.postToRoom(s, args);
+      case "hand_off":
+        return this.handOff(s, args);
       case "read_room":
         return this.readRoom(s, args);
       case "open_jobs":
@@ -863,6 +872,49 @@ export class AgentTools {
       return "Not posted: nobody else reads this pond's room right now (it isn't shared and no other duck is working), so status lines are skipped. Carry on; post when that changes.";
     }
     return level === "agents" ? "Posted to the agents level of the room." : "Posted to the room.";
+  }
+
+  private handOff(s: SessionRow, args: Record<string, unknown>): string {
+    const { jobs, pond } = this.jobsOf(s);
+    const room = this.roomOf();
+    if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError("text is required.");
+    if (args.toDuck !== undefined && (typeof args.toDuck !== "string" || !args.toDuck.trim())) {
+      throw new ToolError("toDuck must be a duck's name.");
+    }
+    let target: ReturnType<typeof this.deps.store.listDucks>[number] | undefined;
+    if (typeof args.toDuck === "string") {
+      const want = args.toDuck.trim().replace(/^@/, "").toLowerCase();
+      target = this.deps.store.listDucks(pond.id).find((d) => d.name?.toLowerCase() === want);
+      if (!target?.name) throw new ToolError(`No duck named ${args.toDuck.trim()} in this pond.`);
+      if (target.currentSessionId === s.id) throw new ToolError("That is you: do the work yourself.");
+      if (target.duty === "off") throw new ToolError(`${target.name} is off duty; hand the work to someone else.`);
+    }
+    const body = args.text.trim();
+    const parent = jobs.currentFor(s.id);
+    let row: ReturnType<Room["agentPost"]>;
+    try {
+      row = room.agentPost(s, {
+        kind: "message",
+        text: target ? `@${target.name} ${body}` : body,
+        noWake: true,
+      });
+      if (!row) throw new ToolError("Could not post the hand-off.");
+      if (target) {
+        jobs.handOff(pond.id, row.id, target.id, {
+          text: body,
+          ...(parent ? { parentTaskId: parent.id } : {}),
+          reason: `${agentName(s)} handed it over`,
+        });
+      } else {
+        jobs.fromMessage(pond.id, row.id, parent?.id);
+      }
+    } catch (error) {
+      if (error instanceof RoomError || error instanceof TaskError) throw new ToolError(error.message);
+      throw error;
+    }
+    return target
+      ? `Gave the task to ${target.name}; it is in the room.`
+      : "Posted the task to the room; Squeak is choosing who takes it (it may start a new duck).";
   }
 
   private jobsOf(s: SessionRow): { jobs: RoomTasks; pond: { id: string; name: string } } {
