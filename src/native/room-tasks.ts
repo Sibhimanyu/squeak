@@ -1074,7 +1074,10 @@ export class RoomTasks extends EventEmitter {
           this.startWaiting(projectId);
           if (was === "working" && sid) {
             void this.o
-              .send(sid, `[Room] The task "${job.title}" was dropped. Stop work on it unless you are asked to continue.`)
+              .send(
+                sid,
+                `[Room] The task "${job.title}" was dropped. Stop work on it unless you are asked to continue.`,
+              )
               .catch((error) => logger.warn("task drop notice failed", { error: String(error) }));
           }
           return dropped;

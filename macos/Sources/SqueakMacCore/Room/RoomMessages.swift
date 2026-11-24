@@ -96,6 +96,38 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     public var task: RoomTaskCard? = nil
     /// A duck's note to another duck: drawn as a card (avatar, name, "to", time, Markdown), not as a quiet line.
     public var handoff: RoomHandoff? = nil
+    /// A duck's state-change line, or its plan card.
+    public var status: RoomStatusLine? = nil
+}
+
+/// A line that opens and closes: closed by default, one tap opens it. Pure state so the drawing is testable.
+public struct RoomDisclosure: Sendable, Equatable {
+    public var isOpen: Bool
+    public init(startsOpen: Bool = false) { isOpen = startsOpen }
+    public mutating func toggle() { isOpen.toggle() }
+}
+
+/// A duck's state change as one short line (took it, blocked, finished) or its spec+plan card. The detail shows only
+/// when the line is opened; a line with no detail has nothing to open.
+public struct RoomStatusLine: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable { case took, blocked, done, plan }
+    public var kind: Kind
+    public var sessionId: String?
+    public var name: String
+    public var agent: String?
+    public var summary: String
+    public var detail: String?
+    /// The post a comment on this card goes to (`replyTo`); set for a plan card only.
+    public var commentTarget: String?
+    public var isExpandable: Bool { !(detail ?? "").isEmpty }
+    /// Always closed at first.
+    public var disclosure: RoomDisclosure { RoomDisclosure(startsOpen: false) }
+    public var verb: String {
+        switch kind { case .took: "took it"; case .blocked: "is blocked"; case .done: "finished"; case .plan: "posted a plan" }
+    }
+    public static func kind(of post: RoomPostKind) -> Kind? {
+        switch post { case .working: .took; case .needs: .blocked; case .done: .done; case .plan: .plan; case .message, .handoff: nil }
+    }
 }
 
 /// A duck-to-duck note. `body` is the whole note, never cut: the view clamps it and offers Show more.
@@ -106,6 +138,14 @@ public struct RoomHandoff: Sendable, Equatable {
     /// The receiving duck's name; nil when the post names none ("to another duck").
     public var to: String?
     public var body: String
+    /// Duck-to-duck talk is closed by default: its header and first line show, the rest on a tap.
+    public var disclosure: RoomDisclosure { RoomDisclosure(startsOpen: false) }
+    /// The first line of the note, at most 100 characters.
+    public var summary: String {
+        let first = body.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        let t = first.trimmingCharacters(in: .whitespaces)
+        return t.count <= 100 ? t : String(t.prefix(99)) + "\u{2026}"
+    }
 
     /// "Pip \u{2192} Sage" or "Pip \u{2192} another duck".
     public var title: String { "\(from) \u{2192} \(to ?? "another duck")" }
@@ -216,6 +256,15 @@ public enum RoomMessages {
                         id: r.id, at: p.at, text: "\(note.title): \(note.body)", jobId: nil, buttons: [],
                         opens: p.toSessionId ?? p.sessionId, handoff: note))))
                 }
+            } else if feed.servesTurns, p.level == .room, p.author.kind == .agent, let kind = RoomStatusLine.kind(of: p.kind) {
+                // A duck's state change (took it, blocked, finished) or plan card: one line, detail on a tap.
+                let sid = p.sessionId
+                let name = sid.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
+                let status = RoomStatusLine(
+                    kind: kind, sessionId: sid, name: name, agent: sid.flatMap { threads[$0]?.agent }, summary: p.text,
+                    detail: p.detail, commentTarget: kind == .plan ? p.id : nil)
+                entries.append(Entry(at: p.at, order: 1, content: .system(RoomSystemLine(
+                    id: r.id, at: p.at, text: "\(name) \(status.verb): \(p.text)", jobId: nil, buttons: [], opens: sid, status: status))))
             } else if p.author.kind == .person, p.level == .room {
                 // A Member's own messages (from any of their Macs) are theirs by member id; the Owner's are "owner" only on the Owner's Mac.
                 let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me"

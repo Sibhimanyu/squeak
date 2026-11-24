@@ -123,8 +123,16 @@ describe("state-change lines", () => {
   it("keeps detail beside a one-line status and refuses it on a plain message", () => {
     const r = rig({ members: 1 });
     const a = r.duck("Pip").s;
-    const row = r.room.agentPost(a, { kind: "done", text: "Settings redone", detail: "Moved to a grid.\nTests added." })!;
-    expect(toRoomPost(row)).toMatchObject({ kind: "done", text: "Settings redone", detail: "Moved to a grid.\nTests added." });
+    const row = r.room.agentPost(a, {
+      kind: "done",
+      text: "Settings redone",
+      detail: "Moved to a grid.\nTests added.",
+    })!;
+    expect(toRoomPost(row)).toMatchObject({
+      kind: "done",
+      text: "Settings redone",
+      detail: "Moved to a grid.\nTests added.",
+    });
     expect(() => r.room.agentPost(a, { kind: "message", text: "hi", detail: "no" })).toThrow(/no detail/);
     expect(() => r.room.agentPost(a, { kind: "done", text: "x", detail: "y".repeat(4001) })).toThrow(/4000/);
   });
@@ -178,23 +186,25 @@ describe("spec+plan card and its comments", () => {
     expect(() => r.room.personPost(r.pid, "hm", "room", undefined, done.id)).toThrow(/card/);
     const card = r.room.agentPost(pip.s, { kind: "plan", text: "Plan" })!;
     expect(() =>
-      r.room.post({ projectId: r.pid, author: { kind: "agent", name: "x" }, kind: "message", text: "y", replyTo: card.id }),
+      r.room.post({
+        projectId: r.pid,
+        author: { kind: "agent", name: "x" },
+        kind: "message",
+        text: "y",
+        replyTo: card.id,
+      }),
     ).toThrow(/person/);
   });
 
   it("is posted through post_to_room with kind plan and detail", async () => {
     const r = rig({ members: 1 });
     const pip = r.duck("Pip").s;
-    const out = await handleMcpMessage(
-      toolsOf(r),
-      pip.id,
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "post_to_room", arguments: { kind: "plan", text: "Redo settings", detail: "Spec and plan" } },
-      },
-    );
+    const out = await handleMcpMessage(toolsOf(r), pip.id, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "post_to_room", arguments: { kind: "plan", text: "Redo settings", detail: "Spec and plan" } },
+    });
     expect(JSON.stringify(out)).toContain("Posted to the room");
     expect(r.store.roomPosts(r.pid, { limit: 5 })[0]).toMatchObject({ kind: "plan", detail: "Spec and plan" });
   });
@@ -210,16 +220,12 @@ describe("solo Pond silence", () => {
     expect(r.store.roomPosts(r.pid, { limit: 5 })).toHaveLength(0);
     // Needing the person still posts.
     expect(r.room.agentPost(pip, { kind: "needs", text: "Stuck" })).not.toBeNull();
-    const out = await handleMcpMessage(
-      toolsOf(r),
-      pip.id,
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "post_to_room", arguments: { kind: "working", text: "Again" } },
-      },
-    );
+    const out = await handleMcpMessage(toolsOf(r), pip.id, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "post_to_room", arguments: { kind: "working", text: "Again" } },
+    });
     expect(JSON.stringify(out)).toContain("Not posted");
   });
 
@@ -305,7 +311,16 @@ describe("working summaries", () => {
     const ev = (event: unknown) => host.emit("event", { type: "timeline", sessionId: s.id, event });
     ev({ type: "turn.started", seq: 0, turnId: "t", promptMessageId: "m", text: "go", at: "" });
     for (let i = 0; i < 4; i++) {
-      ev({ type: "step.added", seq: i, turnId: "t", stepId: `s${i}`, kind: "tool", label: `step ${i}`, status: "done", at: "" });
+      ev({
+        type: "step.added",
+        seq: i,
+        turnId: "t",
+        stepId: `s${i}`,
+        kind: "tool",
+        label: `step ${i}`,
+        status: "done",
+        at: "",
+      });
     }
     await sum.idle();
     expect(calls).toBe(0);

@@ -1049,7 +1049,10 @@ export function cleanDuckPatch(patch: { name?: unknown; role?: unknown }): {
 
 /** `@Name` in text, as a whole word (case-insensitive); a name may hold spaces. */
 export function mentions(text: string, name: string): boolean {
-  const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  const escaped = name
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
   return escaped !== "" && new RegExp(`(?:^|[^\\w@])@${escaped}(?![\\w])`, "i").test(text);
 }
 

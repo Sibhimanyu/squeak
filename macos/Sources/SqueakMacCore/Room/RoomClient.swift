@@ -68,6 +68,14 @@ public struct RoomClient: Sendable {
         return RoomQueued(id: id, offline: j["offline"]?.bool ?? false, line: j["line"]?.string)
     }
 
+    /// A comment on a duck's spec+plan card: `POST .../room { text, replyTo }`. The host delivers it to that duck at its next turn.
+    public func comment(project: String, on cardId: String, text: String) async throws -> RoomPost {
+        struct R: Decodable { var post: RoomPost }
+        let fields: [String: NativeJSON] = ["text": .string(text), "replyTo": .string(cardId)]
+        let data = try await host.call("POST", path(project), body: .object(fields), timeout: 20, maybeSent: true)
+        do { return try JSONDecoder().decode(R.self, from: data).post } catch { throw NativeHostError.badResponse }
+    }
+
     /// An attachment's bytes (`GET` its `url`, token-gated).
     public func attachment(_ a: RoomAttachment) async throws -> Data {
         guard a.url.hasPrefix("/native/") else { throw NativeHostError.badResponse }

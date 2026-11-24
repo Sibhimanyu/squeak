@@ -424,6 +424,7 @@ private struct RoomSystemView: View {
 
     var body: some View {
         if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) }
+        else if let st = line.status { RoomStatusLineView(status: st, at: line.at, open: open) }
         else if let t = line.task { RoomTaskCardView(card: t, act: act, open: open) }
         else { quiet }
     }
@@ -451,8 +452,13 @@ private struct RoomHandoffCard: View {
     let note: RoomHandoff
     let at: Int64
     var open: (() -> Void)?
-    @State private var expanded = false
+    @State private var disclosure: RoomDisclosure
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(note: RoomHandoff, at: Int64, open: (() -> Void)?) {
+        self.note = note; self.at = at; self.open = open
+        _disclosure = State(initialValue: note.disclosure)
+    }
 
     private var style: MessageStyle {
         var s = MessageStyle.reading
@@ -465,7 +471,7 @@ private struct RoomHandoffCard: View {
     }
 
     var body: some View {
-        let collapsed = note.isLong && !expanded
+        let collapsed = note.isLong && !disclosure.isOpen
         HStack(alignment: .top, spacing: 11) {
             if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) }
             VStack(alignment: .leading, spacing: 3) {
@@ -478,6 +484,16 @@ private struct RoomHandoffCard: View {
                     Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
                 }
                 VStack(alignment: .leading, spacing: 0) {
+                    if !disclosure.isOpen {
+                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
+                            HStack(spacing: 6) {
+                                Text(verbatim: note.summary).font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1)
+                                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted)
+                            }
+                            .frame(minHeight: 24).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).pointerHand().accessibilityLabel("Show this note")
+                    } else {
                     MessageText(markdown: note.body, style: style)
                         .frame(maxHeight: collapsed ? 6 * 22 : nil, alignment: .top).clipped()
                         .mask(alignment: .top) {
@@ -486,13 +502,11 @@ private struct RoomHandoffCard: View {
                                 LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: collapsed ? 24 : 0)
                             }
                         }
-                    if note.isLong {
-                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { expanded.toggle() } } label: {
-                            Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                                .frame(minHeight: 24).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).pointerHand()
-                        .accessibilityLabel(expanded ? "Show less of this note" : "Show more of this note")
+                    Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
+                        Text("Show less").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                            .frame(minHeight: 24).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Show less of this note")
                     }
                 }
                 .padding(.horizontal, 13).padding(.vertical, 8)
@@ -502,6 +516,44 @@ private struct RoomHandoffCard: View {
             }
             Spacer(minLength: 60)
         }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A duck's state change in one line ("Pip took it: Redo settings"); a chevron opens its detail (a plan card's spec).
+private struct RoomStatusLineView: View {
+    let status: RoomStatusLine
+    let at: Int64
+    var open: (() -> Void)?
+    @State private var disclosure = RoomDisclosure()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let id = status.sessionId { DuckAvatar(sessionId: id, agent: status.agent).scaleEffect(0.7).frame(width: 20, height: 20) }
+                (Text(verbatim: status.name).fontWeight(.semibold).foregroundStyle(Theme.ink)
+                    + Text(verbatim: " \(status.verb): ").foregroundStyle(status.kind == .blocked ? Theme.negative : Theme.muted)
+                    + Text(verbatim: status.summary).foregroundStyle(Theme.ink))
+                    .font(.system(size: 12)).lineLimit(disclosure.isOpen ? nil : 1)
+                    .onTapGesture { open?() }.pointerHand(open != nil)
+                Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
+                if status.isExpandable {
+                    Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
+                        Image(systemName: disclosure.isOpen ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted).frame(width: 20, height: 20).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointerHand().accessibilityLabel(disclosure.isOpen ? "Hide detail" : "Show detail")
+                }
+            }
+            if disclosure.isOpen, let d = status.detail {
+                MessageText(markdown: d, style: .reading)
+                    .padding(.horizontal, 13).padding(.vertical, 8).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                    .frame(maxWidth: 640, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 2)
         .accessibilityElement(children: .contain)
     }
 }
