@@ -126,7 +126,7 @@ extension AppModel {
         watchPondThreads(id)
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond
-        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: presenceFlock); await refresh() }
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: presenceFlock, room: presenceRoom); await refresh() }
     }
 
     /// The open pond's whole thread list: the Mac writes it only while this pond is open here, so ask on open and read it
@@ -190,7 +190,7 @@ extension AppModel {
         flockTask = nil
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond
-        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: id) }
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: id, room: presenceRoom) }
         guard let id else { return }
         flockLoaded = flockDocs[id] != nil
         flockTask = Task { @MainActor [weak self] in
@@ -219,6 +219,88 @@ extension AppModel {
         let result = try? await channel.sendPond(.message(pondId: pondId, threadId: threadId, text: text), signer: signer)
         guard let result else { return "Your Mac didn't answer in time." }
         return result.sent ? nil : (result.reason ?? "The Mac didn't take that message.")
+    }
+
+    /// The pond whose Room is open on screen, for presence: the Mac then publishes its rows.
+    var presenceRoom: String? { openRoomId }
+
+    /// Opens (or, with nil, leaves) a pond's Room: presence names it so the Mac writes the Room, which is read while it
+    /// stays open (sooner while the first has not come). An older Mac never writes one; the page then says so.
+    func openRoom(_ id: String?) {
+        guard openRoomId != id else { return }
+        openRoomId = id
+        roomTask?.cancel()
+        roomTask = nil
+        guard !demo, let channel else { return }
+        let watching = presenceWatching, recent = recentAsk, calls = callsOpen, pond = presencePond, flock = presenceFlock
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: pond, flock: flock, room: id) }
+        guard let id else { return }
+        roomLoaded = roomDocs[id] != nil
+        roomTask = Task { @MainActor [weak self] in
+            var misses = 0
+            while !Task.isCancelled {
+                if let doc = try? await channel.pondRoom(pondId: id), !Task.isCancelled {
+                    if self?.roomDocs[id] != doc { self?.roomDocs[id] = doc }
+                    self?.roomLoaded = true
+                    misses = 0
+                } else {
+                    misses += 1
+                    if misses >= 8 { self?.roomLoaded = true }
+                }
+                let wait: UInt64 = self?.roomDocs[id] == nil ? 1_500_000_000 : 2_000_000_000
+                try? await Task.sleep(nanoseconds: wait)
+            }
+        }
+    }
+
+    func roomDoc(_ id: String) -> PondRoomDoc? { roomDocs[id] }
+
+    /// What this person sent that the Room has not shown back, newest last.
+    func roomSent(_ id: String) -> [PondRoomPending] { PondRoomFeed.remaining(roomPending[id] ?? [], in: roomDocs[id]) }
+
+    /// Posts a message into the Room. It shows at once as sent and stays until the Room shows it back; a refusal marks it
+    /// failed with the Mac's sentence. Returns the pending id, or nil for an empty message.
+    @discardableResult
+    func postToRoom(pondId: String, text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        roomCounter += 1
+        let id = "local-\(roomCounter)"
+        roomPending[pondId, default: []].append(PondRoomPending(id: id, text: text, at: Int64(Date().timeIntervalSince1970 * 1000)))
+        sendRoomPost(pondId: pondId, id: id, text: text)
+        return id
+    }
+
+    func retryRoomPost(pondId: String, id: String) {
+        guard let i = roomPending[pondId]?.firstIndex(where: { $0.id == id }), let text = roomPending[pondId]?[i].text else { return }
+        roomPending[pondId]?[i].failed = nil
+        sendRoomPost(pondId: pondId, id: id, text: text)
+    }
+
+    func dismissRoomPost(pondId: String, id: String) { roomPending[pondId]?.removeAll { $0.id == id } }
+
+    private func sendRoomPost(pondId: String, id: String, text: String) {
+        func fail(_ reason: String) {
+            if let i = roomPending[pondId]?.firstIndex(where: { $0.id == id }) { roomPending[pondId]?[i].failed = reason }
+            Haptics.play(.refused)
+        }
+        if demo { fail("Not available in the demo."); return }
+        guard let channel else { fail("Not connected to your Mac."); return }
+        Task {
+            let result = try? await channel.sendPond(.roomPost(pondId: pondId, text: text), signer: signer)
+            guard let result else { fail("Your Mac didn't answer in time."); return }
+            if result.sent { Haptics.play(.confirmed) } else { fail(result.reason ?? "The Mac didn't take that message.") }
+        }
+    }
+
+    /// Make task on a Room message, or Drop on a Task. Returns nil when the Mac took it, else its sentence.
+    func roomAction(pondId: String, _ change: Channel.PondChange) async -> String? {
+        if demo { return "Not available in the demo." }
+        guard let channel else { return "Not connected to your Mac." }
+        let result = try? await channel.sendPond(change, signer: signer)
+        guard let result else { return "Your Mac didn't answer in time." }
+        Haptics.play(result.sent ? .confirmed : .refused)
+        return result.sent ? nil : (result.reason ?? "The Mac didn't take that.")
     }
 
     func sendPondHidden(_ id: String, _ hidden: Bool) {

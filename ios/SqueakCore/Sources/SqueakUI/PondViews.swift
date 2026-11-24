@@ -279,6 +279,14 @@ struct PondDashboard: View {
                 .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
             Section { tiles(item) }
                 .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+            if item.pond?.projectId != nil || item.joined {
+                Section {
+                    NavigationLink { PondRoomView(pondId: item.id) } label: {
+                        Label { Text("Room") } icon: { Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Theme.muted) }
+                            .frame(minHeight: 44)
+                    }.tapHaptic(.navigate)
+                } footer: { Text("Talk with the people and ducks here, and turn a message into a task.") }
+            }
             if let waiting = detail?.waiting, !waiting.isEmpty {
                 Section {
                     ForEach(waiting, id: \.self) { name in

@@ -601,7 +601,25 @@ documents (claims and locks stay) are not used for this: the Room's Tasks are `r
 - **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task and Drop are not
   offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
   Mac is away stays a pending row until its post arrives. Fixtures: `npx tsx scripts/make-room-member-fixtures.ts`
-  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. The web reads and posts it too (docs/web-app.md, "The Room on the web"); iPhone does not yet.
+  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. The web reads and posts it too (docs/web-app.md, "The Room on the web"); the iPhone does too ("The Room on iPhone", below).
+
+### The Room on iPhone (`src/remote/pond-room.ts`)
+
+The phone reads the Room through the phone channel, never the host. While a phone has a pond's Room open (`room` in its
+presence, `pondroom` in its caps) the Owner's Mac reads the Room (an Owner's own pond: `GET /native/projects/<id>/room`; a
+joined one: the Member route above) at most every 2 s and writes one sealed `live` document (`pondRoomDoc`, hashed `room:<pond id>`
+plus `-r`), only when it changes, deleted when the phone leaves. It holds the rows already decided: `message` (people and
+Ducks, `mine`, `canTask`), `duck` (a Duck's state line, collapsed `line` with an optional `detail` a tap expands), `task` (title,
+state, `stateLabel`, the routing line `routing`, `result`, `canDrop`), the switches `canPost`/`canTask`, a Member's `reason` and
+the Owner-offline `offline` line, newest 80 rows. `agents`-level talk never goes. The routing line is the Task's own `routing`
+when the host sends one, else made from what it routed ("→ given to Pixel (related to the icon work)").
+
+Actions are signed `pond` commands: `room-post { pondId, text }` (at most 500), `room-task { pondId, messageId }` (Make task) and
+`room-drop { pondId, taskId }`, exactly those keys. A Member's post goes the Member route (queued for the Owner's Mac); Make task
+and Drop are the Owner's own pond only. The phone's "Make it a task" chip posts that phrase, which the host's plain rule reads.
+The phone draws a sent message at once and keeps it until the Room shows it back (`PondRoomFeed`). Entry: the "Room" row of
+the Pond screen. Fixtures: `pondRoomBox` in `mac-made.json` (`scripts/make-mac-fixture.ts`) and the three `pondRoom*Command`s in
+`swift-command.json`.
 
 ### Tasks
 
