@@ -46,7 +46,7 @@ struct DuckTopBar: View {
             Text(verbatim: model.workbenchTitle(session)).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.ink)
                 .lineLimit(1).truncationMode(.tail).frame(maxWidth: 320, alignment: .leading).fixedSize(horizontal: true, vertical: false)
                 .help(model.workbenchTitle(session))
-            DuckBranchChip(chrome: duckChrome).fixedSize().layoutPriority(-1)
+            streamChips
             // Reads the Duck's changes now and then so the rail's badge and review-all stay current; draws nothing.
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count).hidden().frame(width: 0)
             if !strip.isEmpty { Rectangle().fill(Theme.line).frame(width: 1, height: 22).accessibilityHidden(true) }
@@ -57,6 +57,25 @@ struct DuckTopBar: View {
         }
         .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    /// The Streams this Duck is in, from the host's roster (join order).
+    private var duckStreams: [RoomStream] { workspace.roster.ducks?.first { $0.id == session.duckId }?.streams ?? [] }
+
+    /// One chip per Stream (its branch), or "Pond" for a Duck in none. A chat begun before Streams that still sits on a branch
+    /// keeps its plain branch chip.
+    @ViewBuilder private var streamChips: some View {
+        let streams = duckStreams
+        if !model.focus.access.showsCode {
+            EmptyView() // a remote Pond keeps no code chrome
+        } else if streams.isEmpty, duckChrome.chip != nil, !duckChrome.readOnly {
+            DuckBranchChip(chrome: duckChrome).fixedSize().layoutPriority(-1)
+        } else {
+            HStack(spacing: Space.xs) {
+                ForEach(DuckStreams.chips(streams)) { chip in StreamChip(chip: chip) }
+            }
+            .fixedSize().layoutPriority(-1)
+        }
     }
 
     /// ⋯: the Duck's own actions. Items appear only when they serve a flow here.
@@ -92,5 +111,33 @@ struct DuckTopBar: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .accessibilityLabel("More for this duck").help("Copy the branch, reveal the folder, share the chat")
+    }
+}
+
+/// One Stream chip in a Duck's top bar. Flow: the person sees which Stream the Duck works in and clicks the chip to read what
+/// changed there: the rail's Changes list opens narrowed to that Stream ("Pond": the Pond's own folder). The label is never cut.
+private struct StreamChip: View {
+    let chip: DuckStreamChip
+    @Environment(AppModel.self) private var model
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            if WorkPaneActions.showRail(.changes, model: model) {
+                RailPopoverState.shared.showChanges(chip.workspaceId.map(RailChangeFilter.stream) ?? .pond)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if !chip.isPond { Lucide(.gitBranch, size: 11, color: Theme.muted) }
+                Text(verbatim: chip.label).font(Typo.code).foregroundStyle(Theme.muted).fixedSize()
+            }
+            .padding(.horizontal, 7).frame(height: 22)
+            .background(hovering ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.chip))
+            .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointerHand().onHover { hovering = $0 }
+        .help(DuckStreams.chipHelp(chip))
+        .accessibilityLabel(chip.isPond ? "Pond. Shows its changes" : "Stream \(chip.label). Shows its changes")
     }
 }

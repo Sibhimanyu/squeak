@@ -9,14 +9,20 @@ import SqueakMacCore
 final class RailPopoverState {
     static let shared = RailPopoverState()
     private(set) var open: RailTool?
+    /// Set by a Duck's Stream chip: the Changes list shows that Stream only. Cleared whenever the list closes, so the rail's own
+    /// Changes button always opens the whole list.
+    var changesFilter: RailChangeFilter?
 
-    func toggle(_ tool: RailTool) { open = open == tool ? nil : tool }
-    func close() { open = nil }
+    func toggle(_ tool: RailTool) { changesFilter = nil; open = open == tool ? nil : tool }
+    func close() { changesFilter = nil; open = nil }
 
     func isOpen(_ tool: RailTool) -> Bool { open == tool }
     func set(_ tool: RailTool, open on: Bool) {
-        if on { open = tool } else if open == tool { open = nil }
+        if on { open = tool } else if open == tool { open = nil; changesFilter = nil }
     }
+
+    /// A chip was clicked: opens Changes narrowed to its Stream (or the Pond's own folder).
+    func showChanges(_ filter: RailChangeFilter) { changesFilter = filter; open = .changes }
 }
 
 /// Every Duck's changed files in a Pond, from the host (`GET /native/projects/<id>/changes`). Read when a list opens and now

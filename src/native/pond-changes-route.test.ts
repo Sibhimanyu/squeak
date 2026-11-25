@@ -78,7 +78,15 @@ function rig(kind: "git" | "folder" = "git", maxFiles?: number) {
     store.updateDuck(duck.id, { name });
     return { duck, wt, ws };
   };
-  return { root, project, get, call, duckOnStream, git, tokenPath };
+  /** A second Stream (a new worktree) the Duck also joins. */
+  const joinSecondStream = (duckId: string, name: string, branch: string) => {
+    const wt = path.join(dir, "ws", name);
+    git(root, "worktree", "add", "-b", branch, wt, "main");
+    const ws = store.createWorkspace({ projectId: project.id, name, path: wt, branch });
+    store.joinDuckStream(duckId, ws.id);
+    return { wt, ws };
+  };
+  return { root, project, store, get, call, duckOnStream, joinSecondStream, git, tokenPath };
 }
 
 describe("GET /native/projects/:id/changes", () => {
@@ -116,6 +124,20 @@ describe("GET /native/projects/:id/changes", () => {
     ]);
     expect(byName.Moss).toMatchObject({ duckId: moss.duck.id, branch: "sq/moss", files: [] });
     expect(body.ducksTruncated).toBe(false);
+  });
+
+  it("lists a Duck in several Streams once per Stream, in join order", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    r.store.joinDuckStream(pip.duck.id, pip.ws.id);
+    const login = r.joinSecondStream(pip.duck.id, "login", "sq/login");
+    fs.writeFileSync(path.join(pip.wt, "one.txt"), "1\n");
+    fs.writeFileSync(path.join(login.wt, "two.txt"), "2\n");
+    const body: any = await (await r.get(`/native/projects/${r.project.id}/changes`)).json();
+    const mine = body.ducks.filter((d: any) => d.duckId === pip.duck.id);
+    expect(mine.map((d: any) => d.branch)).toEqual(["sq/pip", "sq/login"]);
+    expect(mine[0].files).toMatchObject([{ path: "one.txt" }]);
+    expect(mine[1]).toMatchObject({ workspaceId: login.ws.id, files: [{ path: "two.txt" }] });
   });
 
   it("sees a change as soon as the index moves", async () => {

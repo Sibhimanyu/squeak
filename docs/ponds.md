@@ -722,7 +722,10 @@ applies.
 - **Room.** Creating, joining or leaving posts one line from Squeak under the Duck's name: `created Stream <title>`,
   `joined Stream <title>`, `left Stream <title>`. Opening a Stream the Duck is already in posts nothing.
 - **State.** `DuckView` and `RoomThread` carry `streams?: {workspaceId, branch, title?}[]` (join order; absent when none).
-  A `thread` frame is sent on join and leave.
+  A `thread` frame is sent on join and leave. `GET /native/projects/<id>/changes` lists a Duck once per Stream it is in
+  (join order). The Mac draws one chip per Stream in the Duck's top bar ("Pond" when none; a click opens Changes narrowed
+  to it), lists the Streams in the Duck circle's tooltip, groups Changes per Stream, and shows Squeak's `created/joined/left
+  Stream` Room lines as compact moment lines (`DuckStreams.swift`, `RailLists.swift`, `RoomMessages.swift`).
 - **Clean-up.** A working copy with no Duck in it (any Duck that joined it, or whose chat runs there), no busy chat, a
   clean folder and a branch pushed or merged is removed; the branch stays. After a leave, and every 15 min while the host
   runs.

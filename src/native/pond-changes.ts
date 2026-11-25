@@ -35,7 +35,7 @@ export interface PondDuckChanges extends PondChangeGroup {
   duckName: string;
   colourSeed: string;
   duty: "on" | "off";
-  /** The Duck's Stream: its branch and id. */
+  /** One of the Duck's Streams (a Duck in several has one entry each): its branch and id. */
   branch: string;
   workspaceId: string;
 }
@@ -44,7 +44,7 @@ export interface PondChangesReply {
   projectId: string;
   /** The Pond's main checkout: what is uncommitted there. Absent for a plain-folder Pond (no repository). */
   main?: PondChangeGroup & { branch: string | null };
-  /** One entry per Duck that works in a Stream, most recently active first; a Duck with nothing changed has no files. */
+  /** One entry per Duck and per Stream it is in, most recently active Duck first; a Duck with nothing changed has no files. */
   ducks: PondDuckChanges[];
   /** More Ducks work in Streams than were read. */
   ducksTruncated: boolean;
@@ -85,7 +85,13 @@ export class PondChangesReader {
     const project = store.getProject(projectId);
     if (!project) return null;
     const isGit = project.kind === "git";
-    const streams = room.listDucks(projectId).filter((d) => d.place?.kind === "stream");
+    // A Duck may be in several Streams: one entry per (Duck, Stream), a Duck's entries together in join order. An
+    // old Duck with only a `place` counts as being in that one Stream.
+    const streamsOf = (d: ReturnType<Room["listDucks"]>[number]): Array<{ workspaceId: string; branch: string }> => {
+      if (d.streams?.length) return d.streams;
+      return d.place?.kind === "stream" ? [{ workspaceId: d.place.workspaceId, branch: d.place.branch }] : [];
+    };
+    const streams = room.listDucks(projectId).filter((d) => streamsOf(d).length > 0);
     const picked = streams.slice(0, POND_CHANGES_MAX_DUCKS);
 
     const jobs: Array<() => Promise<void>> = [];
@@ -97,8 +103,7 @@ export class PondChangesReader {
         const branch = (await this.branchOf(project.rootPath)) ?? project.defaultBranch ?? null;
         main = { ...(group ?? emptyGroup()), branch };
       });
-      for (const duck of picked) {
-        const place = duck.place!;
+      for (const [duck, place] of picked.flatMap((d) => streamsOf(d).map((p) => [d, p] as const))) {
         const ws = store.getWorkspace(place.workspaceId);
         if (!ws) continue;
         const slot = out.length;

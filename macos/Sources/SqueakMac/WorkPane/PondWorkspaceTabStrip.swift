@@ -302,8 +302,9 @@ private struct PondDuckCircle: View {
         }
         .buttonStyle(.plain)
         .disabled(!duck.opensChat)
-        .help(duck.opensChat ? "\(duck.name) · \(duck.presenceLine)" : "\(duck.name) has no chat yet")
-        .accessibilityLabel("\(duck.name), \(duck.presenceLine)")
+        // The tooltip lists the Streams the Duck is in (or says it is in the Pond).
+        .help(duck.opensChat ? DuckStreams.tooltip(name: duck.name, presenceLine: duck.presenceLine, streams: duck.streams) : "\(duck.name) has no chat yet")
+        .accessibilityLabel(duck.opensChat ? DuckStreams.accessibilityLabel(name: duck.name, presenceLine: duck.presenceLine, streams: duck.streams) : "\(duck.name), \(duck.presenceLine)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

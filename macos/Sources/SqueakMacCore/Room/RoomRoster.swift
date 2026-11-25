@@ -13,19 +13,23 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
     public var duty: RoomDuty
     public var currentSessionId: String?
     public var place: RoomPlace?
+    /// The Streams it has joined, in join order; empty when none.
+    public var streams: [RoomStream] = []
     public var state: RoomThreadState
     public var lastActiveAt: Int64?
     public var createdAt: Int64?
 
     public init(
         id: String, name: String, role: String? = nil, colourSeed: String? = nil, duty: RoomDuty = .on, currentSessionId: String? = nil,
-        place: RoomPlace? = nil, state: RoomThreadState = .idle, lastActiveAt: Int64? = nil, createdAt: Int64? = nil
+        place: RoomPlace? = nil, state: RoomThreadState = .idle, lastActiveAt: Int64? = nil, createdAt: Int64? = nil,
+        streams: [RoomStream] = []
     ) {
+        self.streams = streams
         self.id = id; self.name = name; self.role = role; self.colourSeed = colourSeed ?? id; self.duty = duty
         self.currentSessionId = currentSessionId; self.place = place; self.state = state; self.lastActiveAt = lastActiveAt; self.createdAt = createdAt
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, state, lastActiveAt, createdAt }
+    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, streams, state, lastActiveAt, createdAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -35,6 +39,7 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         duty = (try? c.decode(String.self, forKey: .duty)).flatMap(RoomDuty.init(rawValue:)) ?? .on
         currentSessionId = (try? c.decode(String.self, forKey: .currentSessionId)).flatMap { $0.isEmpty ? nil : $0 }
         place = try? c.decode(RoomPlace.self, forKey: .place)
+        streams = c.streams(forKey: .streams)
         state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomThreadState.init(rawValue:)) ?? .idle
         lastActiveAt = try? c.decode(Int64.self, forKey: .lastActiveAt)
         createdAt = try? c.decode(Int64.self, forKey: .createdAt)
@@ -45,7 +50,7 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         self.init(
             id: t.duckId ?? t.sessionId, name: t.duckName, role: t.role, colourSeed: t.colourSeed ?? t.sessionId, duty: t.duty,
             currentSessionId: t.sessionId.isEmpty ? nil : t.sessionId, place: t.place, state: t.state,
-            lastActiveAt: t.lastActiveAt ?? t.turnStartedAt ?? t.lastAt)
+            lastActiveAt: t.lastActiveAt ?? t.turnStartedAt ?? t.lastAt, streams: t.streams)
     }
 }
 
@@ -63,6 +68,8 @@ public struct RosterDuck: Sendable, Equatable, Identifiable {
     public var presenceLine: String
     /// The duck's current chat: nil until it has had a job.
     public var sessionId: String?
+    /// The Streams it is in (join order); empty when it works in the Pond itself.
+    public var streams: [RoomStream] = []
     public var onDuty: Bool { presence != .off }
     public var hasJob: Bool { sessionId != nil }
 }
@@ -101,7 +108,7 @@ public enum RoomRoster {
         return RosterDuck(
             id: d.id, name: d.name, colourSeed: d.colourSeed, agent: thread?.agent, agentLabel: RoomDucks.agentLabel(thread?.agent), role: d.role,
             placeChip: placeChip(d.place), presence: presence, presenceLine: presenceLine(d, thread: thread, presence: presence, now: now),
-            sessionId: d.currentSessionId)
+            sessionId: d.currentSessionId, streams: d.streams)
     }
 
     /// "Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Off duty", "Ready for a job" (no session yet).
