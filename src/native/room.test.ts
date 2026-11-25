@@ -476,7 +476,8 @@ describe("Squeak's own lines are gone", () => {
     room.post({ ...sq, kind: "needs", text: "Wire retry needs you" });
     room.post({ ...sq, kind: "working", text: "Summariser line" });
     room.agentPost(s, { kind: "working", text: "agent line" });
-    expect(room.page(p.project.id, {}).posts.map((x) => x.text)).toEqual(["Summariser line", "agent line"]);
+    // "Took it" lines and Squeak's own lines are stored but never served as Room items.
+    expect(room.page(p.project.id, {}).posts).toEqual([]);
     expect(store.dropSqueakTurnPosts()).toBe(3);
     expect(store.roomPosts(p.project.id, { limit: 50 }).map((x) => x.text)).toEqual(["Summariser line", "agent line"]);
   });

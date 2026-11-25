@@ -92,7 +92,7 @@ describe("catch-up briefing", () => {
     expect(text).toContain("Pond Notebook");
     expect(text).toContain("Run npm run ci before pushing.");
     expect(text).toMatch(/spec and plan card/);
-    expect(text).toMatch(/never post once per turn/i);
+    expect(text).toMatch(/two or three plain sentences/i);
   });
 
   it("has no hand-off or Notebook section when there is none, and tells a solo Duck to skip status lines", () => {
@@ -103,9 +103,9 @@ describe("catch-up briefing", () => {
     const text = r.jobs.briefingOf(r.pid, task, sage.d);
     expect(text).not.toContain("Hand-off note");
     expect(text).not.toContain("Pond Notebook");
-    expect(text).toMatch(/skip Room status lines/);
+    expect(text).toMatch(/no greeting or preamble/);
     r.setMembers(1);
-    expect(r.jobs.briefingOf(r.pid, task, sage.d)).toMatch(/Post one short line/);
+    expect(r.jobs.briefingOf(r.pid, task, sage.d)).toMatch(/two or three plain sentences/);
   });
 
   it("is what a Duck is sent when it takes the Task", async () => {

@@ -8,7 +8,8 @@ import { Decider, haikuDecider, type DeciderDuck, type DeciderModelPort, type Sc
 import { duckMentionTokens, mentionedToken, mentions, type HostEvents, type Room, type RoomThread } from "./room.js";
 import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
-import { firstSentence, oneLine } from "./room-turns.js";
+import { FINISH_ID_PREFIX, writeFinish, type FinishWriterPort } from "./room-finish.js";
+import { firstSentence, oneLine, type TurnBase } from "./room-turns.js";
 import type { HostEvent } from "./host.js";
 import type { DuckRow, NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
@@ -37,6 +38,16 @@ export interface TaskDiscussionMessage {
 
 /** Where a job runs: an existing stream, or a new stream (a worktree off the default branch) on this branch. */
 export type TaskPlace = { kind: "stream"; workspaceId: string; branch: string } | { kind: "new"; branch: string };
+
+/**
+ * The Task as the Room feed serves it: one live item per Task (its `id` never changes; it updates in place as the state
+ * moves waiting, working, blocked or done). `owner` is the Duck that holds it; `open` is the Duck's chat and turn to open
+ * (the turn's `RoomTurn.id` is `${sessionId}:${turnId}`), present once the Duck has started the turn.
+ */
+export interface RoomTaskItem extends RoomTask {
+  owner?: { duckId?: string; name: string; sessionId: string };
+  open?: { sessionId: string; turnId?: string };
+}
 
 export interface TaskThreadRef {
   /** The duck (a pond-level identity); `sessionId` is its current chat, empty when it has not worked yet. */
@@ -76,6 +87,11 @@ export interface RoomTask {
   discussion: TaskDiscussionMessage[];
   /** How it ended: the Duck's first sentence. */
   result?: string;
+  /**
+   * On done: the Duck's own Room message for the Task (what it did, found and needs), else the one Squeak wrote for it
+   * from the turn's result. Fills in place, so the feed's Task item never changes id.
+   */
+  summary?: string;
   suggestion?: TaskThreadRef;
   candidates?: TaskThreadRef[];
   routing?: TaskRouting;
@@ -271,6 +287,12 @@ export interface RoomTasksOptions {
   schedule?: (fn: () => void, ms: number) => void;
   /** Waits before each retry of a start that failed for a transient reason; its length is the attempt cap. */
   retryDelaysMs?: number[];
+  /**
+   * Writers of the Room message for a Task whose Duck finished without posting one (the on-device model, then Haiku).
+   * Absent: no message is written (the Task still shows the Duck's first sentence).
+   */
+  finishWriters?: FinishWriterPort[];
+  finishTimeoutMs?: number;
 }
 
 /** Why a start can work a moment later: the Task or its Duck was momentarily taken. */
@@ -315,14 +337,31 @@ export class RoomTasks extends EventEmitter {
   // ---- reading ----
 
   /** Open Tasks (waiting, working, blocked) plus those updated in the last 24 h, oldest first (newest last). */
-  list(projectId: string): RoomTask[] {
+  list(projectId: string): RoomTaskItem[] {
     const cutoff = this.now() - JOB_LISTED_MS;
     return this.o.store
       .roomJobRows(projectId)
       .map((r) => JSON.parse(r.data) as RoomTask)
       .filter((j) => j.state === "waiting" || j.state === "working" || j.state === "blocked" || j.updatedAt >= cutoff)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-      .slice(-50);
+      .slice(-50)
+      .map((j) => this.item(j));
+  }
+
+  /** The feed item of a Task: the Task, its owner Duck by its current name, where to open it, and on done its summary. */
+  item(job: RoomTask): RoomTaskItem {
+    const to = job.handedTo;
+    if (!to) return job;
+    const name = (
+      to.duckId ? this.o.store.duckRow(to.duckId)?.name : this.o.store.duckBySession(to.sessionId)?.name
+    )?.trim();
+    const bare = to.turnId?.startsWith(`${to.sessionId}:`) ? to.turnId.slice(to.sessionId.length + 1) : to.turnId;
+    return {
+      ...job,
+      ...(job.state === "done" && !job.summary && job.result ? { summary: job.result } : {}),
+      owner: { ...(to.duckId ? { duckId: to.duckId } : {}), name: name || to.title, sessionId: to.sessionId },
+      open: { sessionId: to.sessionId, ...(bare ? { turnId: bare } : {}) },
+    };
   }
 
   /** Ducks holding an open Task (waiting on them or being worked): never put off duty for being quiet. */
@@ -351,7 +390,7 @@ export class RoomTasks extends EventEmitter {
       data: JSON.stringify(job),
       updatedAt: job.updatedAt,
     });
-    this.emit("job", { projectId, job });
+    this.emit("job", { projectId, job: this.item(job) });
     return job;
   }
 
@@ -959,13 +998,10 @@ export class RoomTasks extends EventEmitter {
       logger.warn("notebook hook failed", { error: String(error) });
     }
     if (notebook?.trim()) parts.push(`Pond Notebook (lessons earlier ducks left for everyone):\n${notebook.trim()}`);
-    const quiet = this.o.room.quietFor(projectId);
     parts.push(
       [
         "How to work this task:",
-        quiet
-          ? "- Nobody else reads this pond's room right now, so skip Room status lines (they are dropped); post again if that changes."
-          : "- Post one short line to the room when you take this (post_to_room kind working), if you get blocked (needs), hand off (handoff) and when you finish (done); detail holds the longer story. Never post once per turn.",
+        '- When you finish this task, write one message in the room (post_to_room kind message): two or three plain sentences saying what you did, what you found and what you need from the reader, starting with the substance, with no greeting or preamble and no copied tool output; the details stay in your own thread. Skip "took it" and "finished" lines. If you get blocked, post kind needs saying what you need; to pass work on, handoff.',
         "- To give work to another duck, call hand_off: with toDuck it goes straight to that duck (shown as an @mention), without it Squeak decides who takes it and may hatch a new duck. A plain @mention only nudges.",
         "- The shared notebook is for lessons that will last past this task (a command that must run, a trap, a convention), never a log of what you did. Only when you are finishing this task, add at most a few with note_to_notebook (taskDone true); the host refuses it before then.",
         "- Judge the size first. A small task: just do it. More than small (several steps, files or decisions): post a spec and plan card first (post_to_room kind plan, the title as text and the spec and plan as detail) and keep going; comments on it reach you at your next turn.",
@@ -1601,8 +1637,67 @@ export class RoomTasks extends EventEmitter {
       }
       const outcome = turn.reply ? firstSentence(turn.reply) : "";
       if (outcome) job.result = outcome;
+      if (job.state === "done") this.settleFinish(projectId, job, turn);
     }
     return JSON.stringify(job) === before ? job : this.save(projectId, job);
+  }
+
+  /**
+   * A finished Task's one Room message. The Duck's own (posted during the turn) is the Task's summary; when it posted
+   * none, the host writes one from the turn's result on the Duck's behalf, once, and the Task's summary fills in place.
+   */
+  private settleFinish(projectId: string, job: RoomTask, turn: TurnBase): void {
+    const to = job.handedTo;
+    if (!to || turn.endedAt === undefined) return;
+    const own = this.o.store.duckRoomPosts(to.sessionId, turn.startedAt, turn.endedAt + 5_000).at(-1);
+    if (own) {
+      job.summary = own.text;
+      return;
+    }
+    const reply = turn.reply?.trim();
+    const writers = this.o.finishWriters;
+    if (!reply || !writers?.length) return;
+    const run = this.writeFinishFor(projectId, job.id, to.sessionId, job.text, reply, writers).finally(() =>
+      this.inflight.delete(run),
+    );
+    this.inflight.add(run);
+  }
+
+  private async writeFinishFor(
+    projectId: string,
+    taskId: string,
+    sessionId: string,
+    task: string,
+    reply: string,
+    writers: FinishWriterPort[],
+  ): Promise<void> {
+    try {
+      const id = `${FINISH_ID_PREFIX}${taskId}`;
+      if (this.o.store.roomPostById(id)) return;
+      const text = await writeFinish(writers, { task, reply }, this.o.finishTimeoutMs ?? 12_000, (error) =>
+        logger.warn("finish message failed", { error: error instanceof Error ? error.message : String(error) }),
+      );
+      if (!text) return;
+      const s = this.o.store.getSession(sessionId);
+      if (!s) return;
+      this.o.room.post({
+        id,
+        projectId,
+        author: { kind: "agent", id: s.id, name: this.o.room.duckName(s) },
+        sessionId: s.id,
+        kind: "message",
+        text,
+        // Squeak wrote it for the Duck: it must not wake anyone it names.
+        noWake: true,
+      });
+      const fresh = this.get(taskId);
+      if (fresh && !fresh.job.summary) {
+        fresh.job.summary = text;
+        this.save(projectId, fresh.job);
+      }
+    } catch (error) {
+      logger.warn("finish message skipped", { error: String(error) });
+    }
   }
 }
 

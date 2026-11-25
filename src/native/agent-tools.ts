@@ -303,7 +303,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "post_to_room",
     description:
-      'Post one short line to this pond\'s room, the shared stream the person and the other chats read. Post only when your state changes, never once per turn: working (you took the task: say what, e.g. "Wiring retry into the uploader"), needs (you are blocked), handoff (you are passing work on; name the chat in toChatId), done (the task is finished); one line each, with the longer story in `detail` (shown when someone expands the line). plan: a spec and plan card, only for a task that is more than small (text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). message: anything else (a reply when someone @mentions you). level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
+      'Write a message in this pond\'s room, the shared chat the person and the other chats read. Use kind message. Write one when you finish a task from the room, and when someone in the room asked you something: two or three plain sentences saying what you did, what you found, and what you need from the reader (leave that out if nothing). Start with the substance, with no greeting or preamble, and never paste tool output, logs or code; the details are in your chat, which the reader can open from your message. A "took it" or "finished" line is not needed: the room already shows the task moving. Other kinds: needs (you are blocked and need the person; say what you need), handoff (you are passing work on; name the chat in toChatId), plan (a spec and plan card, only for a task that is more than small: text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). done and working still post, but the room shows only what a person would read, so prefer a message. level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
     inputSchema: obj(
       {
         text: { type: "string" },
@@ -1021,7 +1021,7 @@ export class AgentTools {
     const rows: ReturnType<Room["page"]>["posts"] = [];
     let before: number | undefined;
     for (let page = 0; page < 20 && rows.length < last; page++) {
-      const got = room.page(mine.id, { ...(before !== undefined ? { before } : {}), limit: 200 }).posts;
+      const got = room.page(mine.id, { ...(before !== undefined ? { before } : {}), limit: 200, all: true }).posts;
       if (got.length === 0) break;
       for (let i = got.length - 1; i >= 0 && rows.length < last; i--) {
         if (level === "all" || got[i]!.level === level) rows.push(got[i]!);

@@ -25,7 +25,14 @@ import { ShowRelay } from "./show-relay.js";
 import { RoomTasks } from "./room-tasks.js";
 import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
 import { haikuDecider } from "./decider.js";
-import { createDecider, deciderHelperDirs, onDeviceTitleCall, resolveDeciderHelper } from "./on-device.js";
+import {
+  createDecider,
+  createFinishWriters,
+  deciderHelperDirs,
+  onDeviceTitleCall,
+  resolveDeciderHelper,
+} from "./on-device.js";
+import { haikuFinishWriter } from "./room-finish.js";
 import { RoomSummariser } from "./room-summary.js";
 import { Placement } from "./placement.js";
 import { ChatStarter } from "./chat-starter.js";
@@ -120,6 +127,12 @@ export async function runHost(supportDir: string): Promise<void> {
     checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),
     decider,
     onTaskDone: (id) => host.titleTaskDone(id),
+    // A Duck that finishes a Task without posting gets its Room message written: on-device, else Haiku.
+    finishWriters: createFinishWriters({
+      setting: () => agentSettings.get().deciderModel,
+      helper: () => resolveDeciderHelper({ dirs: deciderHelperDirs(supportDir) }),
+      haiku: haikuFinishWriter(() => (titleCall ??= defaultTitleCall())),
+    }),
     contextPercent: (s) => host.contextOf(s)?.percent ?? null,
   });
   jobs.attach(host);
