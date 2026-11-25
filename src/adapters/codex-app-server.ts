@@ -21,7 +21,23 @@ export interface ServerRequestEnvelope {
   params: Record<string, unknown>;
 }
 
-export type CodexApprovalPolicy = "untrusted" | "on-request" | "never";
+/**
+ * Codex's AskForApproval. `granular` picks per kind: true asks the client, false rejects without asking (Codex 0.172
+ * schema: mcp_elicitations, rules, sandbox_approval required; request_permissions, skill_approval optional).
+ */
+export type CodexApprovalPolicy =
+  | "untrusted"
+  | "on-request"
+  | "never"
+  | {
+      granular: {
+        mcp_elicitations: boolean;
+        rules: boolean;
+        sandbox_approval: boolean;
+        request_permissions?: boolean;
+        skill_approval?: boolean;
+      };
+    };
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 
 interface StartThreadOptions {

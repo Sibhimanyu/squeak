@@ -58,10 +58,29 @@ export interface CodexPolicy {
   sandboxPolicy: Record<string, unknown>;
 }
 
+/**
+ * Skip approvals. Plain "never" also rejects every MCP tool call that needs approval ("MCP tool call requires approval,
+ * but approval policy is never"), so a connector's writes (GitHub) failed. Codex asks for those as an MCP elicitation;
+ * the runner accepts them itself in this mode, and nothing else asks.
+ */
+export const SKIP_APPROVALS: CodexApprovalPolicy = {
+  granular: {
+    mcp_elicitations: true,
+    rules: false,
+    sandbox_approval: false,
+    request_permissions: false,
+    skill_approval: false,
+  },
+};
+
 /** Squeak's permission modes onto Codex's approval policy and sandbox. */
 export function codexPolicyFor(mode: string): CodexPolicy {
   if (mode === "bypassPermissions") {
-    return { approvalPolicy: "never", sandbox: "danger-full-access", sandboxPolicy: { type: "dangerFullAccess" } };
+    return {
+      approvalPolicy: SKIP_APPROVALS,
+      sandbox: "danger-full-access",
+      sandboxPolicy: { type: "dangerFullAccess" },
+    };
   }
   if (mode === "plan") {
     return { approvalPolicy: "untrusted", sandbox: "read-only", sandboxPolicy: { type: "readOnly" } };
@@ -101,6 +120,12 @@ const APPROVALS: Record<string, RequestKind> = {
   "item/commandExecution/requestApproval": "command",
   "item/fileChange/requestApproval": "file_change",
 };
+
+/** Codex's own approval for an MCP tool call, sent as an elicitation (`_meta.codex_approval_kind`), not a form for a person. */
+function isToolCallApproval(params: Record<string, unknown>): boolean {
+  const meta = params._meta as { codex_approval_kind?: unknown } | null | undefined;
+  return meta?.codex_approval_kind === "mcp_tool_call";
+}
 
 /** A line for an item Codex reported after its turn ended. */
 function lateItemNote(item: Record<string, unknown>): string {
@@ -226,7 +251,11 @@ export class CodexRunner implements Runner {
     const { client, hooks } = this.options;
     const kind = APPROVALS[r.method];
     // Codex asks before an MCP tool runs; Squeak's own server acts only inside Squeak, as this chat.
-    if (r.method === "mcpServer/elicitation/request" && r.params.serverName === MCP_SERVER_NAME && this.options.mcp) {
+    if (
+      r.method === "mcpServer/elicitation/request" &&
+      ((r.params.serverName === MCP_SERVER_NAME && this.options.mcp) ||
+        (this.mode === "bypassPermissions" && isToolCallApproval(r.params)))
+    ) {
       await client.respond(r.id, { action: "accept", content: {} });
       return;
     }

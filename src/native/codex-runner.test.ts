@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexRunner, codexPolicyFor, type CodexClient } from "./codex-runner.js";
+import { CodexRunner, SKIP_APPROVALS, codexPolicyFor, type CodexClient } from "./codex-runner.js";
 import type { RequestKind, Resolution, RunnerHooks, SessionStatus } from "./types.js";
 
 class FakeClient extends EventEmitter {
@@ -82,7 +82,7 @@ describe("codexPolicyFor", () => {
     expect(codexPolicyFor("default")).toMatchObject({ approvalPolicy: "untrusted", sandbox: "workspace-write" });
     expect(codexPolicyFor("acceptEdits")).toMatchObject({ approvalPolicy: "on-request", sandbox: "workspace-write" });
     expect(codexPolicyFor("bypassPermissions")).toMatchObject({
-      approvalPolicy: "never",
+      approvalPolicy: SKIP_APPROVALS,
       sandbox: "danger-full-access",
       sandboxPolicy: { type: "dangerFullAccess" },
     });
@@ -186,7 +186,7 @@ describe("CodexRunner", () => {
     expect(client.startTurn).toHaveBeenLastCalledWith(
       expect.objectContaining({
         cwd: "/ws/a",
-        approvalPolicy: "never",
+        approvalPolicy: SKIP_APPROVALS,
         sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/ws/a", "/ws/b"] },
       }),
     );
@@ -250,7 +250,7 @@ describe("CodexRunner", () => {
     await runner.setPermissionMode("bypassPermissions");
     await runner.send("b");
     expect(client.startTurn).toHaveBeenLastCalledWith(
-      expect.objectContaining({ approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } }),
+      expect.objectContaining({ approvalPolicy: SKIP_APPROVALS, sandboxPolicy: { type: "dangerFullAccess" } }),
     );
   });
 
@@ -362,6 +362,46 @@ describe("CodexRunner", () => {
     expect(log.deltas).toHaveLength(1);
     expect(log.ends).toEqual(["idle", "idle", "error"]);
     expect(log.details[2]).toBe("failed");
+  });
+
+  it("skip approvals asks Codex only for MCP tool calls and accepts them itself; other modes and real forms are not accepted", async () => {
+    expect(SKIP_APPROVALS).toEqual({
+      granular: {
+        mcp_elicitations: true,
+        rules: false,
+        sandbox_approval: false,
+        request_permissions: false,
+        skill_approval: false,
+      },
+    });
+    const approval = (id: number) => ({
+      id,
+      method: "mcpServer/elicitation/request",
+      params: {
+        threadId: "thread-1",
+        serverName: "codex_apps",
+        mode: "form",
+        message: "Allow?",
+        requestedSchema: {},
+        _meta: { codex_approval_kind: "mcp_tool_call" },
+      },
+    });
+    const skip = setup(undefined, "bypassPermissions");
+    await skip.runner.send("go");
+    skip.client.emit("server-request", approval(1));
+    skip.client.emit("server-request", { ...approval(2), params: { ...approval(2).params, _meta: {} } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(skip.client.responses).toEqual([
+      expect.objectContaining({ id: 1, result: { action: "accept", content: {} } }),
+      expect.objectContaining({ id: 2, error: expect.objectContaining({ code: -32601 }) }),
+    ]);
+    const ask = setup(undefined, "default");
+    await ask.runner.send("go");
+    ask.client.emit("server-request", approval(3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ask.client.responses).toEqual([
+      expect.objectContaining({ id: 3, error: expect.objectContaining({ code: -32601 }) }),
+    ]);
   });
 
   it("a background command finishing after the turn ended is a note, never an agent row that opens a turn", async () => {
