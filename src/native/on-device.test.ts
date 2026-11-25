@@ -2,13 +2,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LocalSimilarity, type DeciderModelInput, type DeciderModelPort } from "./decider.js";
 import { OnDeviceDecider, OnDeviceSimilarity, createDecider, resolveDeciderHelper, runHelper } from "./on-device.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "on-device-"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+// Child I/O stays real, but only the timeout test advances the deadline.
+beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+afterEach(() => vi.useRealTimers());
 
 /** A fake helper: a shell script that logs its stdin and prints `reply` (or sleeps first). */
 function fake(name: string, body: string): string {
@@ -24,8 +27,14 @@ const unavailableHelper = fake(
 const decideHelper = fake("decide-ok", `cat >/dev/null; echo '{"ok":true,"choice":"2"}'`);
 const nullHelper = fake("decide-null", `cat >/dev/null; echo '{"ok":true,"choice":null}'`);
 const garbageHelper = fake("garbage", `cat >/dev/null; echo 'not json'`);
-const slowHelper = fake("slow", `sleep 5`);
-const echoHelper = fake("echo", `cat > "${dir}/last-request.json"; echo '{"ok":true,"choice":"hatch"}'`);
+
+function recordRequest(name: string) {
+  const request = path.join(dir, `${name}.json`);
+  return {
+    helper: fake(name, `cat > "${request}"; echo '{"ok":true,"choice":"hatch"}'`),
+    read: () => JSON.parse(fs.readFileSync(request, "utf8")) as Record<string, unknown>,
+  };
+}
 
 const input: DeciderModelInput = {
   task: "fix the toolbar icon",
@@ -46,12 +55,10 @@ class Recorder implements DeciderModelPort {
 
 describe("runHelper", () => {
   it("sends the request on stdin and reads one JSON reply", async () => {
-    const r = await runHelper(echoHelper, { op: "decide", prompt: "p", allowed: ["hatch"] }, 3000);
+    const { helper, read } = recordRequest("run-helper");
+    const r = await runHelper(helper, { op: "decide", prompt: "p", allowed: ["hatch"] }, 3000);
     expect(r).toEqual({ kind: "ok", body: { ok: true, choice: "hatch" } });
-    expect(JSON.parse(fs.readFileSync(path.join(dir, "last-request.json"), "utf8"))).toMatchObject({
-      op: "decide",
-      prompt: "p",
-    });
+    expect(read()).toEqual({ op: "decide", prompt: "p", allowed: ["hatch"] });
   });
 
   it("reports unavailable with the helper's reason", async () => {
@@ -61,12 +68,23 @@ describe("runHelper", () => {
     });
   });
 
-  it("never throws: a missing binary, garbage and a hang are plain failures", async () => {
+  it("reports a missing binary and an invalid reply as failures", async () => {
     expect((await runHelper(path.join(dir, "nope"), { op: "embed" }, 1000)).kind).toBe("failed");
-    expect((await runHelper(garbageHelper, { op: "embed" }, 1000)).kind).toBe("failed");
-    const t0 = Date.now();
-    expect((await runHelper(slowHelper, { op: "embed" }, 200)).kind).toBe("failed");
-    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(await runHelper(garbageHelper, { op: "embed" }, 1000)).toEqual({
+      kind: "failed",
+      reason: "no JSON reply",
+    });
+  });
+
+  it("times out a hung helper at the requested deadline", async () => {
+    const slow = fake("slow", `exec sleep 60`);
+    const settled = vi.fn();
+    const reply = runHelper(slow, { op: "embed" }, 200).then(settled);
+    await vi.advanceTimersByTimeAsync(199);
+    expect(settled).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await reply;
+    expect(settled).toHaveBeenCalledWith({ kind: "failed", reason: "timed out" });
   });
 });
 
@@ -145,8 +163,9 @@ describe("OnDeviceDecider", () => {
   });
 
   it("sends the prompt and only the offered answers", async () => {
-    await new OnDeviceDecider({ helper: () => echoHelper }).choose(input);
-    const sent = JSON.parse(fs.readFileSync(path.join(dir, "last-request.json"), "utf8")) as Record<string, unknown>;
+    const { helper, read } = recordRequest("decider");
+    expect(await new OnDeviceDecider({ helper: () => helper }).choose(input)).toEqual({ kind: "hatch" });
+    const sent = read();
     expect(sent).toMatchObject({ op: "decide", allowed: ["1", "2", "hatch", "wait"] });
     expect(String(sent.prompt)).toContain("Ada");
   });
