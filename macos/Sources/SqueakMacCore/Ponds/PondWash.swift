@@ -12,10 +12,10 @@ public enum PondWash {
         case selectedRow
         /// The open pond's header row in the sidebar, over `selected`.
         case pondHeader
-        /// The workbench's top edge: a gradient from this to nothing, over the window ground.
+        /// The top surface where there is no Duck subheader: the quiet tint, fading to nothing over `duckFadeHeight`.
         case workbenchTop
-        /// A Duck page: a visible gradient in the Pond's colour from behind the subheader, fading into the chat ground
-        /// (`PondWash.duckFade`). Much stronger than `workbenchTop`; the guard still keeps ink and muted AA at its densest point.
+        /// The top area's surface (bar and Duck subheader as one): the Pond's quiet tint at the top edge, fading into the chat
+        /// ground over `duckFadeHeight` (about 120 pt, `PondWash.duckFade`). Never a loud band: see `PondQuietTint`.
         case duckTop
         /// The selected tab's 2 pt underline (a line, not a wash: the accent itself, already 3:1 on the card).
         case tabIndicator
@@ -24,10 +24,11 @@ public enum PondWash {
 
         public func opacity(dark: Bool) -> Double {
             switch self {
-            case .selectedRow: dark ? 0.12 : 0.10
-            case .pondHeader: dark ? 0.10 : 0.08
-            case .workbenchTop: dark ? 0.08 : 0.06
-            case .duckTop: dark ? 0.32 : 0.26
+            // Washes lie as the Pond's quiet tint (`PondQuietTint`: chroma and lightness capped), so these are opacities of a
+            // colour that already sits next to its ground.
+            case .selectedRow: dark ? 0.5 : 0.45
+            case .pondHeader: dark ? 0.45 : 0.4
+            case .workbenchTop, .duckTop: PondQuietTint.maxOpacity(dark: dark)
             case .tabIndicator: 1.0
             case .focusRing: dark ? 0.55 : 0.45
             }
@@ -44,7 +45,7 @@ public enum PondWash {
     }
 
     /// How far down a Duck page the wash reaches, in points: it fades out over this, with no band edge.
-    public static let duckFadeHeight = 220.0
+    public static let duckFadeHeight = PondQuietTint.fadeHeight
 
     /// The wash's strength at `fraction` (0 top, 1 end) of the fade: a smooth ease-out (smootherstep), 1 at the top, exactly 0 and
     /// flat at the end, so the gradient has no visible edge where it stops.
@@ -85,10 +86,17 @@ public enum PondWash {
         return 0
     }
 
-    /// The blended colour of a wash role for a pond hue; nil when the role has no ground.
-    public static func washed(_ role: Role, hue: Double, dark: Bool) -> PondTint.RGB? {
-        guard let ground = role.ground(dark: dark) else { return nil }
-        let a = accent(hue: hue, dark: dark)
-        return blend(a, over: ground, opacity: opacity(role, accent: a, dark: dark))
+    /// The colour a wash role lays down: the Pond's quiet tint on the role's ground; nil when the role has no ground.
+    public static func quiet(_ role: Role, seed: PondSeed, dark: Bool) -> PondTint.RGB? {
+        role.ground(dark: dark).map { PondQuietTint.rgb(seed: seed, dark: dark, ground: $0) }
     }
+
+    /// The blended colour of a wash role for a pond seed; nil when the role has no ground.
+    public static func washed(_ role: Role, seed: PondSeed, dark: Bool) -> PondTint.RGB? {
+        guard let ground = role.ground(dark: dark), let q = quiet(role, seed: seed, dark: dark) else { return nil }
+        return blend(q, over: ground, opacity: opacity(role, accent: q, dark: dark))
+    }
+
+    /// The blended colour of a wash role for a pond hue; nil when the role has no ground.
+    public static func washed(_ role: Role, hue: Double, dark: Bool) -> PondTint.RGB? { washed(role, seed: .hue(hue), dark: dark) }
 }

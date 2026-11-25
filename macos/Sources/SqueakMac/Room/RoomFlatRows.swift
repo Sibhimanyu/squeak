@@ -73,7 +73,7 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
         }
         .overlay(alignment: .leading) {
             if own {
-                Capsule().fill((ownAccent ?? PondColour.pondAccent(pondId, fallback: PondColour.tint(pondId))).opacity(0.85))
+                Capsule().fill((ownAccent ?? PondColour.pondAccent(pondId, fallback: PondColour.tint(pondId))).opacity(0.55))
                     .frame(width: CGFloat(RoomRowPlan.ownLineWidth)).padding(.vertical, 3).padding(.top, first ? 4 : 0)
                     .accessibilityHidden(true)
             }

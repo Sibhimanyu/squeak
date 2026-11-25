@@ -199,6 +199,30 @@ struct PondItemLabel {
     }
 }
 
+/// The translucent fills of the one top surface (spec, "Top area as one surface"): borderless tabs and the glass switch lie on
+/// the Pond's quiet tint, so they are plain white or black veils rather than opaque `surface` colours.
+enum TopSurfaceGlass {
+    private static func veil(dark: CGFloat, light: CGFloat, darkWhite: Bool = true) -> Color {
+        Color(nsColor: NSColor(name: nil) { a in
+            a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 1, alpha: dark) : NSColor(white: 0, alpha: light)
+        })
+    }
+    /// A tab at rest: borderless, barely there.
+    static let tab = veil(dark: 0.06, light: 0.045)
+    static let tabHover = veil(dark: 0.11, light: 0.08)
+    /// The selected tab is the only raised one: a brighter veil (white in light) with a soft drop shadow, never a border.
+    static let tabSelected = Color(nsColor: NSColor(name: nil) { a in
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.17) : NSColor(white: 1, alpha: 0.85)
+    })
+    static let tabShadow = veil(dark: 0.30, light: 0.10).opacity(1)
+    /// The Dashboard | Room switch: a glass track with a brighter pill.
+    static let switchTrack = veil(dark: 0.08, light: 0.06)
+    static let switchPill = Color(nsColor: NSColor(name: nil) { a in
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.18) : NSColor(white: 1, alpha: 0.9)
+    })
+}
+
 /// One low oval tab (DESIGN.md 8.12). A Duck's has two compact lines: its chat's title, then the glyph (animated only while
 /// working; the amber triangle when it needs you) and what it is doing. An item's has an icon and its name. The selected
 /// tab is raised: `surface-raised` fill and a `lineStrong` border (no shadow inside the window). Labels may shorten, with the
@@ -231,16 +255,16 @@ struct PondOvalTab: View {
                 if tab.closable, hovering {
                     Button(action: close) {
                         Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: 22)
-                            .background(selected ? Theme.surfaceRaised : Theme.surface, in: Circle()).contentShape(Rectangle())
+                            .background(TopSurfaceGlass.tabHover, in: Circle()).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.trailing, 6)
                     .help("Close").accessibilityLabel("Close \(tab.title ?? label?.title ?? "tab")")
                 }
             }
-            // Outline as a filled capsule under an inset fill, not a stroke: strokes left a stray vertical tick at each end.
+            // Borderless translucent tabs on the top surface; only the selected one is raised (brighter veil and a soft shadow).
             .background {
-                Capsule().fill(selected ? Theme.lineStrong : Theme.line)
-                    .overlay { Capsule().inset(by: 1).fill(selected ? Theme.surfaceRaised : Theme.surface) }
+                Capsule().fill(selected ? TopSurfaceGlass.tabSelected : (hovering ? TopSurfaceGlass.tabHover : TopSurfaceGlass.tab))
+                    .shadow(color: selected ? TopSurfaceGlass.tabShadow : .clear, radius: 3, y: 1)
             }
             .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
             .onHover { hovering = $0 }

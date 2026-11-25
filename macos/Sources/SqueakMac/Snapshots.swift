@@ -73,57 +73,67 @@ private enum Fixtures {
         return out
     }
 
-    static func tile(_ name: String, hue: Double) -> some View {
+    static func tile(_ name: String, seed: PondSeed) -> some View {
         Text(String(name.prefix(1)).uppercased()).font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.ink)
             .frame(width: 32, height: 32)
-            .background(Color(hue: hue / 360, saturation: 0.35, brightness: 0.85), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(accent(seed: seed), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     /// The real top bar from fixture data. `selected` is what the centre shows.
-    static func bar(width: Double, centre: PondCentre, withPip: Bool = false, name: String = "greenroom", hue: Double = 140) -> some View {
+    static func bar(width: Double, centre: PondCentre, withPip: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
         let tabs = tabs(withPip: withPip)
         return PondTopBar(
             name: name, subtitle: "2 people, 2 ducks on duty", leadingInset: 0,
             switchSelection: .constant(centre.switchSelection), hasTabs: true,
-            tile: { tile(name, hue: hue) },
+            tile: { tile(name, seed: seed) },
             tabs: {
                 PondTabsRow(
                     tabs: tabs, selected: centre.selectedTab, label: { _ in PondItemLabel(title: "Notebook", symbol: "book.closed") },
                     overflow: .constant(PondStripOverflow(contentStart: 0, contentEnd: 0, viewport: 0)))
             },
             trailing: { if centre.showsPondMenu { Image(systemName: "ellipsis").foregroundStyle(Theme.muted).frame(width: 28, height: 28) } })
-        .frame(width: width).background(Theme.bg)
+        .frame(width: width)
     }
 
-    static func page(width: Double, height: Double, centre: PondCentre, hue: Double = 140, content: () -> some View) -> some View {
+    static func page(width: Double, height: Double, centre: PondCentre, seed: PondSeed = greenroom, dark: Bool = false, content: () -> some View) -> some View {
         VStack(spacing: 0) {
-            bar(width: width, centre: centre, hue: hue)
+            bar(width: width, centre: centre, seed: seed)
             content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: width, height: height).background(Theme.bg)
+        .frame(width: width, height: height)
+        .background(alignment: .top) { DuckPondGradient(colour: gradientColour(seed: seed, dark: dark)) }
+        .background(Theme.bg)
     }
 
-    static func accent(hue: Double) -> Color {
-        let a = PondWash.accent(hue: hue, dark: false)
+    /// The Ponds the snapshots draw: greenroom's own green, a bright yellow logo, a neon one and a deep navy.
+    static let greenroom = PondSeed.colour(PondTint.RGB(hex: 0x34A85F))
+    static let yellow = PondSeed.colour(PondTint.RGB(hex: 0xFFE600))
+    static let neon = PondSeed.colour(PondTint.RGB(hex: 0x39FF14))
+    static let navy = PondSeed.colour(PondTint.RGB(hex: 0x0A1F5C))
+
+    /// The Pond's accent (the logo tile, a thin line).
+    static func accent(seed: PondSeed) -> Color {
+        let a = PondAccent.rgb(seed: seed, dark: false)
         return Color(red: a.r, green: a.g, blue: a.b)
     }
 
-    static func gradientColour(hue: Double, dark: Bool) -> Color {
-        let a = PondWash.accent(hue: hue, dark: dark)
+    /// The quiet tint behind the top area, as the app draws it.
+    static func gradientColour(seed: PondSeed, dark: Bool) -> Color {
+        let a = PondWash.quiet(.duckTop, seed: seed, dark: dark) ?? PondTint.RGB(hex: 0)
         return Color(red: a.r, green: a.g, blue: a.b, opacity: PondWash.opacity(.duckTop, accent: a, dark: dark))
     }
 
-    static func duckPage(width: Double, hue: Double, dark: Bool) -> some View {
+    static func duckPage(width: Double, seed: PondSeed, dark: Bool) -> some View {
         let chrome = DuckHeaderChrome.of(branch: "sibhimanyu/hi", isMain: false, membership: .git)
-        return page(width: width, height: 640, centre: PondCentre(page: .room, duck: "dhol")) {
+        return page(width: width, height: 640, centre: PondCentre(page: .room, duck: "dhol"), seed: seed, dark: dark) {
             VStack(spacing: 0) {
                 HStack(spacing: Space.m) {
-                    DuckBranchChip(chrome: chrome).fixedSize()
+                    DuckBranchChip(chrome: chrome, ghost: true).fixedSize()
                     Spacer()
+                    Text("Create PR").font(Typo.label).foregroundStyle(Theme.ink).padding(.horizontal, 12).frame(height: 26)
                     Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Space.xl).frame(height: DuckSubheader.height)
-                .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.18)).frame(height: 1) }
                 VStack(alignment: .leading, spacing: Space.l) {
                     Text("hi there").padding(.horizontal, Space.m).padding(.vertical, Space.s)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -135,22 +145,21 @@ private enum Fixtures {
                 }
                 .padding(.horizontal, Space.xl).padding(.top, Space.xl)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            .background(alignment: .top) {
-                DuckPondGradient(colour: gradientColour(hue: hue, dark: dark))
+                // The chat starts below the subheader and fades in under a soft mask, as in the app.
+                .modifier(ChatTopFade(active: true))
             }
         }
     }
 
-    static func room(width: Double) -> some View {
+    static func room(width: Double, dark: Bool = false) -> some View {
         let task = RoomTask(id: "t1", messageId: "m2", title: "Greeting copy for the sign-in screen", state: .working)
         let card = RoomTasks.card(for: task, among: [task])
-        return page(width: width, height: 560, centre: PondCentre(page: .room)) {
+        return page(width: width, height: 560, centre: PondCentre(page: .room), dark: dark) {
             VStack(alignment: .leading, spacing: 0) {
-                RoomRow(first: true, avatar: { PersonAvatar(name: "Sibhi V", size: CGFloat(RoomRowPlan.avatar)) }, at: 1_700_000_000_000, own: true, ownAccent: accent(hue: 140), header: {
+                RoomRow(first: true, avatar: { PersonAvatar(name: "Sibhi V", size: CGFloat(RoomRowPlan.avatar)) }, at: 1_700_000_000_000, own: true, ownAccent: accent(seed: greenroom), header: {
                     RoomNameLine(tag: nil, at: 1_700_000_000_000) { Text("Sibhi").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink) }
                 }, content: { RoomRowBody(text: "Can someone write the greeting copy for the sign-in screen?") })
-                RoomRow(first: false, avatar: { EmptyView() }, at: 1_700_000_060_000, own: true, ownAccent: accent(hue: 140), header: { EmptyView() },
+                RoomRow(first: false, avatar: { EmptyView() }, at: 1_700_000_060_000, own: true, ownAccent: accent(seed: greenroom), header: { EmptyView() },
                         content: { RoomRowBody(text: "Keep it short, one friendly line.") })
                 RoomRow(first: true, avatar: { ThreadDuckView(id: "dhol", size: CGFloat(RoomRowPlan.avatar)) }, at: 1_700_000_120_000, header: {
                     RoomNameLine(tag: "Duck", at: 1_700_000_120_000) { Text("Dhol").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink) }
@@ -163,8 +172,8 @@ private enum Fixtures {
         }
     }
 
-    static func dashboard(width: Double) -> some View {
-        page(width: width, height: 640, centre: PondCentre(page: .dashboard)) {
+    static func dashboard(width: Double, dark: Bool = false) -> some View {
+        page(width: width, height: 640, centre: PondCentre(page: .dashboard), dark: dark) {
             VStack(alignment: .leading, spacing: Space.l) {
                 Text("Pond overview").font(Typo.heading).foregroundStyle(Theme.ink)
                 Text("2 people \u{00B7} 2 ducks \u{00B7} 1 task running").font(Typo.footnote).foregroundStyle(Theme.muted)
@@ -194,20 +203,29 @@ private enum Fixtures {
         func add(_ name: String, _ w: Double, _ h: Double, dark: Bool = false, _ v: some View) {
             out.append(Shot(name: name, width: w, height: h, dark: dark, view: AnyView(v)))
         }
+        let ponds: [(name: String, seed: PondSeed)] = [("green", greenroom), ("yellow", yellow), ("neon", neon), ("navy", navy)]
         for (label, dark) in [("light", false), ("dark", true)] {
-            add("dashboard-\(label)", 1500, 640, dark: dark, dashboard(width: 1500))
-            add("room-\(label)", 1500, 560, dark: dark, room(width: 1500))
-            add("duck-green-\(label)", 1500, 640, dark: dark, duckPage(width: 1500, hue: 140, dark: dark))
-            add("duck-violet-\(label)", 1500, 640, dark: dark, duckPage(width: 1500, hue: 285, dark: dark))
-            for w in [1500.0, 1000.0] {
+            for w in [1500.0, 1100.0] {
                 let n = Int(w)
+                add("dashboard-\(n)-\(label)", w, 640, dark: dark, dashboard(width: w, dark: dark))
+                add("room-\(n)-\(label)", w, 560, dark: dark, room(width: w, dark: dark))
+                for pond in ponds {
+                    add("duck-\(pond.name)-\(n)-\(label)", w, 640, dark: dark, duckPage(width: w, seed: pond.seed, dark: dark))
+                }
                 add("bar-duck-and-notebook-\(n)-\(label)", w, 56, dark: dark,
-                    bar(width: w, centre: PondCentre(page: .room, duck: "dhol"), withPip: true))
-                add("bar-room-selected-\(n)-\(label)", w, 56, dark: dark, bar(width: w, centre: PondCentre(page: .room)))
+                    barOnSurface(width: w, centre: PondCentre(page: .room, duck: "dhol"), withPip: true, dark: dark))
                 add("bar-notebook-selected-\(n)-\(label)", w, 56, dark: dark,
-                    bar(width: w, centre: PondCentre(page: .room, item: TabItem(.notebook, "nb"))))
+                    barOnSurface(width: w, centre: PondCentre(page: .room, item: TabItem(.notebook, "nb")), dark: dark))
             }
         }
         return out
+    }
+
+    /// The bar alone, on the top surface's tint (as it sits in the app).
+    static func barOnSurface(width: Double, centre: PondCentre, withPip: Bool = false, seed: PondSeed = greenroom, dark: Bool) -> some View {
+        bar(width: width, centre: centre, withPip: withPip, seed: seed)
+            .frame(width: width, height: 56)
+            .background(alignment: .top) { DuckPondGradient(colour: gradientColour(seed: seed, dark: dark)) }
+            .background(Theme.bg)
     }
 }

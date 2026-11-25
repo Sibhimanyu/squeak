@@ -11,7 +11,7 @@ import SwiftUI
 // the chat with a shared Pond, Off duty and Delete Duck.
 
 struct DuckSubheader: View {
-    static let height: CGFloat = 40
+    static let height = CGFloat(PondBarMetrics.subheaderHeight)
     let session: HostSession
     let workspace: PondWorkspace
     @Environment(AppModel.self) private var model
@@ -30,15 +30,13 @@ struct DuckSubheader: View {
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count).hidden().frame(width: 0)
             Spacer(minLength: Space.m)
             if session.source == .squeak, model.focus.access.showsCode, !model.ducksMode || duckChrome.showsCreatePR {
-                GitCluster(session: session, showsBranch: false)
+                GitCluster(session: session, showsBranch: false, ghost: true)
             }
             ChatRulesButton(session: session, hidesWhenEmpty: true)
             moreMenu
         }
         .padding(.horizontal, Space.xl).frame(height: Self.height)
-        // The chat starts below this row and is clipped at its edge: a hairline makes that edge read as intended, so no text
-        // shows through half-faded behind the chips.
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.18)).frame(height: 1) }
+        // No hairline: the row sits on the same quiet surface as the bar, and the chat below fades in under a soft mask.
     }
 
     /// The Streams this Duck is in, from the host's roster (join order).
@@ -51,7 +49,7 @@ struct DuckSubheader: View {
         if !model.focus.access.showsCode {
             EmptyView() // a remote Pond keeps no code chrome
         } else if streams.isEmpty, duckChrome.chip != nil, !duckChrome.readOnly {
-            DuckBranchChip(chrome: duckChrome).fixedSize().layoutPriority(-1)
+            DuckBranchChip(chrome: duckChrome, ghost: true).fixedSize().layoutPriority(-1)
         } else {
             HStack(spacing: Space.xs) {
                 ForEach(DuckStreams.chips(streams)) { chip in StreamChip(chip: chip) }
@@ -120,10 +118,10 @@ private struct StreamChip: View {
                 if !chip.isPond { Lucide(.gitBranch, size: 11, color: Theme.muted) }
                 Text(verbatim: chip.label).font(Typo.code).foregroundStyle(Theme.muted).fixedSize()
             }
-            .padding(.horizontal, 7).frame(height: 22)
-            .background(hovering ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.chip))
-            .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
-            .contentShape(Rectangle())
+            // A ghost button on the surface: no border, a soft fill only on hover.
+            .padding(.horizontal, 10).frame(height: 26)
+            .background(hovering ? Color.primary.opacity(0.09) : .clear, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain).pointerHand().onHover { hovering = $0 }
         .help(DuckStreams.chipHelp(chip))
@@ -131,7 +129,7 @@ private struct StreamChip: View {
     }
 }
 
-/// The Duck page's gradient: the Pond's colour at full wash behind the subheader, easing out over `PondWash.duckFadeHeight`
+/// The top surface's tint: the Pond's quiet tint (chroma and lightness capped, low opacity) behind the bar and the subheader, easing out over `PondWash.duckFadeHeight`
 /// into the chat ground (eased stops, so no band edge). Same treatment in light and dark; the colour resolves per appearance.
 struct DuckPondGradient: View {
     let colour: Color

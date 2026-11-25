@@ -52,7 +52,8 @@ enum PondColour {
     @MainActor static func wash(_ pondId: String?, _ role: PondWash.Role) -> Color {
         guard let seed = washSeed(pondId) else { return .clear }
         return dynamic { dark in
-            let a = PondWash.accent(seed: seed, dark: dark)
+            // A wash is the Pond's quiet tint (chroma and lightness capped); only a line or ring uses the vivid accent.
+            let a = PondWash.quiet(role, seed: seed, dark: dark) ?? PondWash.accent(seed: seed, dark: dark)
             return NSColor(srgbRed: a.r, green: a.g, blue: a.b, alpha: PondWash.opacity(role, accent: a, dark: dark))
         }
     }

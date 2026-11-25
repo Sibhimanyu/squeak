@@ -32,3 +32,13 @@ import Testing
         #expect(RoomRowPlan.readingWidth >= 680 && RoomRowPlan.readingWidth <= 720)
     }
 }
+
+@Suite struct PondSurfaceMetricsTests {
+    @Test func theTintFadesOutWithinAboutOneHundredTwentyPointsAndCoversBothRows() {
+        #expect(PondQuietTint.fadeHeight <= 120)
+        #expect(PondWash.duckFadeHeight == PondQuietTint.fadeHeight)
+        #expect(PondBarMetrics.surfaceHeight == PondBarMetrics.height + PondBarMetrics.subheaderHeight)
+        #expect(PondBarMetrics.surfaceHeight <= PondQuietTint.fadeHeight)
+        #expect(PondBarMetrics.chatFadeHeight > 0 && PondBarMetrics.chatFadeHeight <= 40)
+    }
+}

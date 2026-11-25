@@ -6,10 +6,10 @@ struct PondWashTests {
     private let hues: [Double] = stride(from: 0.0, to: 360.0, by: 5).map { PondTint.nudgeOutOfDuckBand($0) }
 
     @Test func opacitiesAreTheDocumentedOnes() {
-        #expect(PondWash.Role.selectedRow.opacity(dark: false) == 0.10)
-        #expect(PondWash.Role.selectedRow.opacity(dark: true) == 0.12)
-        #expect(PondWash.Role.pondHeader.opacity(dark: false) == 0.08)
-        #expect(PondWash.Role.workbenchTop.opacity(dark: true) == 0.08)
+        #expect(PondWash.Role.selectedRow.opacity(dark: false) == 0.45)
+        #expect(PondWash.Role.selectedRow.opacity(dark: true) == 0.5)
+        #expect(PondWash.Role.pondHeader.opacity(dark: false) == 0.4)
+        #expect(PondWash.Role.workbenchTop.opacity(dark: true) == 0.55)
         #expect(PondWash.Role.tabIndicator.opacity(dark: false) == 1)
         #expect(PondWash.Role.focusRing.opacity(dark: false) == 0.45)
     }
@@ -46,12 +46,12 @@ struct PondWashTests {
         #expect(heavy < Double.infinity)
     }
 
-    @Test func theDuckGradientIsVisibleAndFadesWithoutAnEdge() {
-        #expect(PondWash.Role.duckTop.opacity(dark: false) >= 0.2)
-        #expect(PondWash.Role.duckTop.opacity(dark: true) >= 0.2)
+    @Test func theDuckGradientIsQuietAndFadesWithoutAnEdge() {
+        #expect(PondWash.Role.duckTop.opacity(dark: false) <= 0.6)
+        #expect(PondWash.Role.duckTop.opacity(dark: true) <= 0.6)
         #expect(PondWash.duckFade(at: 0) == 1)
         #expect(PondWash.duckFade(at: 1) == 0)
-        #expect(PondWash.duckFadeHeight >= 160 && PondWash.duckFadeHeight <= 240)
+        #expect(PondWash.duckFadeHeight <= 120)
         var last = 1.0
         for i in 1...20 {
             let v = PondWash.duckFade(at: Double(i) / 20)

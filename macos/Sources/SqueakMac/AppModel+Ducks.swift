@@ -174,6 +174,7 @@ extension AppModel {
 /// The header's duck chip (ducks mode): the branch, or "main · read-only". Create PR stays in `GitCluster`.
 struct DuckBranchChip: View {
     let chrome: DuckHeaderChrome
+    var ghost = false
 
     var body: some View {
         if let chip = chrome.chip {
@@ -182,7 +183,7 @@ struct DuckBranchChip: View {
                 Text(verbatim: chip).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
             }
             .padding(.horizontal, 7).frame(height: 22)
-            .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
+            .overlay { if !ghost { RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong) } }
             .help(chrome.readOnly ? "Main is read-only for ducks: a duck that needs to edit branches off." : "This duck\u{2019}s branch")
             .accessibilityLabel(chrome.readOnly ? "On main, read only" : "Branch \(chip)")
         }

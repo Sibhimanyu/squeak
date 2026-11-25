@@ -797,7 +797,7 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
             // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
             HStack(spacing: CGFloat(PondBarMetrics.logoGap)) {
                 tile()
-                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).tracking(-0.1).foregroundStyle(Theme.ink)
                     .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
             }
             .help(subtitle)
@@ -811,8 +811,8 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
             if !hasTabs { Spacer(minLength: 0) }
             trailing().padding(.leading, CGFloat(PondBarMetrics.trailingGap))
         }
+        // No hairline under the bar: it sits on the one quiet Pond-tinted surface with the Duck subheader.
         .padding(.horizontal, CGFloat(PondBarMetrics.endInset)).frame(height: CGFloat(PondBarMetrics.height))
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 }
 

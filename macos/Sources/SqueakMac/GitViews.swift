@@ -37,6 +37,8 @@ struct GitCluster: View {
     var stream: TabStream?
     /// The branch chip; the centre's breadcrumb carries the branch now, so the header turns it off.
     var showsBranch = true
+    /// A ghost button on a tinted surface (the Duck subheader): no border, no raised fill.
+    var ghost = false
     @Environment(AppModel.self) private var model
     @State private var checksOpen = false
 
@@ -66,7 +68,7 @@ struct GitCluster: View {
                     }
                 }
                 .padding(.horizontal, 7).frame(height: 22)
-                .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
+                .overlay { if !ghost { RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong) } }
             }
         }
     }
@@ -82,9 +84,9 @@ struct GitCluster: View {
                     Text(kind.title).lineLimit(1).fixedSize()
                 }
                 .font(Typo.label).foregroundStyle(Theme.ink)
-                .padding(.horizontal, 10).frame(height: 24)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
-                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+                .padding(.horizontal, ghost ? 12 : 10).frame(height: ghost ? 26 : 24)
+                .background(ghost ? Color.clear : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+                .overlay { if !ghost { RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line) } }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

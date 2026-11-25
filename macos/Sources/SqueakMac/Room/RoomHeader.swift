@@ -35,7 +35,9 @@ struct RoomSegmented<T: Hashable>: View {
                     Text(verbatim: title(item)).font(.system(size: 13, weight: on ? .medium : .regular)).lineLimit(1).fixedSize()
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .padding(.horizontal, 12).frame(height: height - 4)
-                        .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: capsule ? 100 : 6, style: .continuous))
+                        .background(on ? (capsule ? TopSurfaceGlass.switchPill : Theme.selected) : .clear,
+                                    in: RoundedRectangle(cornerRadius: capsule ? 100 : 6, style: .continuous))
+                        .shadow(color: on && capsule ? TopSurfaceGlass.tabShadow : .clear, radius: 2, y: 1)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -45,8 +47,8 @@ struct RoomSegmented<T: Hashable>: View {
         .padding(2)
         .background {
             if capsule {
-                // A filled outline under an inset fill, not a stroke: strokes left a stray tick at the capsule's ends.
-                Capsule().fill(Theme.line).overlay { Capsule().inset(by: 1).fill(Theme.surface) }
+                // Glass: a translucent track, no outline.
+                Capsule().fill(TopSurfaceGlass.switchTrack)
             } else {
                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surface)
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))

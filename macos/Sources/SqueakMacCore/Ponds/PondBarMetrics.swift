@@ -9,6 +9,12 @@ public enum PondBarMetrics {
     public static let controlHeight = 36.0
     /// Air above and below the controls.
     public static var verticalInset: Double { (height - controlHeight) / 2 }
+    /// The Duck subheader under the bar, on the same surface.
+    public static let subheaderHeight = 40.0
+    /// The chat's soft top fade, so text never shows through behind the controls (no band edge, no hairline).
+    public static let chatFadeHeight = 28.0
+    /// The two rows together, which the quiet tint covers (its fade reaches a little past them).
+    public static var surfaceHeight: Double { height + subheaderHeight }
     /// Both ends of the bar, matching the page content's inset (`Space.xl`).
     public static let endInset = 24.0
     /// Logo to name.

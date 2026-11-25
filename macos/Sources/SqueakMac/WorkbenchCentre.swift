@@ -53,6 +53,13 @@ struct WorkbenchCentre: View {
                 }
             }
         }
+        // One quiet Pond-tinted surface behind the bar and (in a Duck) its subheader: no band edge, no hairline, fading out
+        // within ~120 pt. The tint is capped in chroma and lightness (PondQuietTint), so a bright logo never shouts.
+        .background(alignment: .top) {
+            if let bar {
+                DuckPondGradient(pond: bar.workspace.pond).allowsHitTesting(false)
+            }
+        }
     }
 
     private struct BarContext {
@@ -131,6 +138,9 @@ struct WorkbenchCentre: View {
                 // The chat layer: kept mounted under a creation page (not when there is no chat to keep).
                 if !showingCompose || bodyChat != nil {
                     chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil, newDuck: newDuck)
+                        // The chat starts below the subheader and fades in under a soft mask, so text never shows through
+                        // behind the controls.
+                        .modifier(ChatTopFade(active: newDuck && workspace != nil))
                         .workbenchLayer(hidden: showingCompose || item != nil)
                 }
                 if !showingCompose, let workspace, let item { PondItemPage(item: item, workspace: workspace) }
@@ -138,12 +148,10 @@ struct WorkbenchCentre: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Pond tint (§3.5). A Duck page carries a visible gradient in the Pond's colour from behind the subheader, easing into the
-        // chat ground over ~220pt; elsewhere the wash stays a very faint one over the header and the tab strip.
+        // Pond tint (§3.5). A Duck page's tint is the one top surface, drawn by WorkbenchCentre behind the bar and the subheader;
+        // elsewhere (classic header and strip) the same quiet wash lies over the header and the tab strip.
         .background(alignment: .top) {
-            if newDuck && workspace != nil {
-                DuckPondGradient(pond: PondColour.openPond(shell)).allowsHitTesting(false)
-            } else {
+            if !(newDuck && workspace != nil) {
                 LinearGradient(colors: [PondColour.wash(PondColour.openPond(shell), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
                     .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
             }
@@ -184,6 +192,25 @@ extension WorkbenchCentre {
             FileViewer(files: files, file: file).id(file.path)
         } else {
             DetailView()
+        }
+    }
+}
+
+/// The chat's soft top fade (`PondBarMetrics.chatFadeHeight`): transparent at the top edge, opaque below it. No band, no line.
+struct ChatTopFade: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: CGFloat(PondBarMetrics.chatFadeHeight))
+                    Rectangle()
+                }
+            }
+        } else {
+            content
         }
     }
 }
