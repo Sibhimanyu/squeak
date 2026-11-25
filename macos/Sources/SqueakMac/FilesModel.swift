@@ -182,7 +182,6 @@ final class FilesModel {
         selection = path
         if openAsPondItem(path, line: line) { return }
         if pin { if open.contains(where: { $0.path == path }) { pinRequest = PinRequest(path: path) } else { pinOnOpen.insert(path) } }
-        WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
             activePath = existing.path
             if let line { existing.jump = LineJump(line: line) }
@@ -317,7 +316,6 @@ final class FilesModel {
         let path = url.path
         selection = nil
         if openAsPondItem(path, line: line) { return }
-        WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
             activePath = path
             if let line { existing.jump = LineJump(line: line) }

@@ -52,7 +52,8 @@ extension AppModel {
         updatePondItems(in: workspace.project.id) {
             $0.openPondItem(item, in: workspace.project.id, afterDuck: afterDuck)
         }
-        if WorkPaneStore.shared.pane.shown != .terminal { WorkPaneStore.shared.close() }
+        RailRecentStore.shared.note(item, in: workspace.project.id)
+        RailPopoverState.shared.close()
         return true
     }
 

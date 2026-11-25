@@ -40,24 +40,23 @@ import Testing
         #expect(!WorkPaneScopeRule.pondScope(isNewLayout: true, onPondPage: true, hasLocalFolder: false))
     }
 
-    @Test func pondPaneRemembersItsViewPerProject() {
+    @Test func pondPaneRemembersItsStateByProjectNotByName() {
         var p = WorkPane()
-        p.open(.files, duck: scope.paneKey)
+        p.open(.terminal, duck: scope.paneKey)
         p.switched(to: "duck:a")
         p.open(.terminal, duck: "duck:a")
         p.switched(to: scope.paneKey)
-        #expect(p.memory[scope.paneKey]?.view == .files)
+        #expect(p.memory[scope.paneKey]?.view == .terminal)
     }
 }
 
 @Suite struct PondPageChromeTests {
-    @Test func headerAndRowDoNotDependOnThePage() {
+    @Test func theOneTopBarDoesNotDependOnThePage() {
         for page in PondPage.allCases { #expect(PondPageChrome.pageHasHeader(page)) }
-        #expect(PondPageChrome.headerInset(rowShown: true, sidebarClearance: 80) == 0)
-        #expect(PondPageChrome.headerInset(rowShown: false, sidebarClearance: 80) == 80)
+        #expect(PondPageChrome.headerInset(sidebarClearance: 80) == 80)
     }
 
-    @Test func rowSelectionFollowsThePageAndNothingElse() {
+    @Test func stripSelectionFollowsThePageAndNothingElse() {
         #expect(PondPageChrome.rowPlace(page: .room) == .room)
         #expect(PondPageChrome.rowPlace(page: .dashboard) == .dashboard)
     }

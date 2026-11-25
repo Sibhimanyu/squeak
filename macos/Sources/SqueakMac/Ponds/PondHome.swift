@@ -42,12 +42,10 @@ struct PondRouteView: View {
             let page = RoomViewPref.shared.mode(for: project)
             if let workspace = PondWorkspace(pond: project) {
                 let strip = workspace.strip(place: PondPageChrome.rowPlace(page: page), store: model.tabStore)
-                let inset = PondPageChrome.headerInset(rowShown: !strip.isEmpty, sidebarClearance: Double(sidebarClearance))
+                let inset = PondPageChrome.headerInset(sidebarClearance: Double(sidebarClearance))
                 VStack(spacing: 0) {
-                    PondWorkspaceTabStrip(workspace: workspace, strip: strip, leadingInset: sidebarClearance)
-                        .id(workspace.project.id)
                     PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset),
-                                     itemShowing: strip.currentItem != nil)
+                                     itemShowing: strip.currentItem != nil, workspace: workspace, strip: strip)
                     ZStack {
                         PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset), showsHeader: false) {
                             standard(header: false)
@@ -174,14 +172,15 @@ struct PondHomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 20) {
+            // The Pond's icon and name are in the top bar; the card keeps its label and its actions.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 20) {
-                    identity
+                    overviewLabel
                     Spacer(minLength: 16)
                     actions
                 }
                 VStack(alignment: .leading, spacing: 20) {
-                    identity
+                    overviewLabel
                     actions
                 }
             }
@@ -237,16 +236,8 @@ struct PondHomeView: View {
         .animation(Motion.quick, value: indicator)
     }
 
-    private var identity: some View {
-        HStack(spacing: 14) {
-            PondTile(name: project, pondId: pond?.id, projectId: native?.id, size: 52)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Pond overview").font(Typo.footnote).foregroundStyle(Theme.muted)
-                Text(verbatim: project).font(.system(size: 28, weight: .semibold))
-                    .tracking(-0.6).foregroundStyle(Theme.ink).lineLimit(2)
-                    .textSelection(.enabled).accessibilityAddTraits(.isHeader)
-            }
-        }
+    private var overviewLabel: some View {
+        Text("Pond overview").font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize().accessibilityAddTraits(.isHeader)
     }
 
     private var actions: some View {
@@ -814,27 +805,27 @@ struct PondSharedHeader: View {
     var member = false
     var leadingInset: CGFloat = 0
     var itemShowing = false
+    /// The Pond's strip (Duck circles, then item pills), drawn in this same row after the switch; nil draws no strip.
+    var workspace: PondWorkspace?
+    var strip: PondWorkspaceStrip?
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let threads = PondRoomStore.shared.model(for: projectId, member: member).feed.threads
         let name = PondsModel.shared.name(key: key)
         let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
+        let subtitle = RoomDucks.subtitle(people: people, ducks: RoomDucks.headerDucks(threads).count)
         HStack(spacing: Space.m) {
             if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
-            PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,
-                     projectId: PondsModel.shared.native(key: key)?.id, size: 28)
-            ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(verbatim: RoomDucks.subtitle(people: people, ducks: RoomDucks.headerDucks(threads).count))
-                        .font(.system(size: 11)).foregroundStyle(Theme.subtle)
-                }
-                .fixedSize()
+            // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
+            HStack(spacing: Space.s) {
+                PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,
+                         projectId: PondsModel.shared.native(key: key)?.id, size: 28)
+                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
             }
-            .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(subtitle)
+            .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
             RoomSegmented(
                 items: PondPage.allCases.map(Optional.some),
                 selection: Binding<PondPage?>(get: { itemShowing ? nil : RoomViewPref.shared.mode(for: key) },
@@ -845,6 +836,13 @@ struct PondSharedHeader: View {
                     }),
                 title: { $0?.title ?? "" }, height: 28)
                 .fixedSize().accessibilityLabel("Pond view")
+            if let workspace, let strip {
+                // Flow: the divider only separates the page switch from the Ducks and items that follow it.
+                if !strip.isEmpty { Rectangle().fill(Theme.line).frame(width: 1, height: 22).accessibilityHidden(true) }
+                PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true)
+                    .id(workspace.project.id).frame(maxWidth: .infinity)
+            }
+            if strip?.isEmpty ?? true { Spacer(minLength: 0) }
             PondHeaderMenu(key: key)
         }
         .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())

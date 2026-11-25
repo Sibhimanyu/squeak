@@ -1302,7 +1302,6 @@ final class AppModel {
             DockStore.shared.update { $0.selectChats() }
         }
         location = .artifact(pond: pond, path: path)
-        WorkPaneActions.announce(.artifacts)
     }
 
     // MARK: Files ducks show

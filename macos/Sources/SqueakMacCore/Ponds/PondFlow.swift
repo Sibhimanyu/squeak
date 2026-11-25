@@ -189,11 +189,9 @@ public enum PondPageChrome {
         page == .room ? .room : .dashboard
     }
 
-    /// The header's leading room for the sidebar toggle: none while the Duck row (which carries it) is drawn. Independent of
-    /// the page, so the header never shifts between the two.
-    public static func headerInset(rowShown: Bool, sidebarClearance: Double) -> Double {
-        rowShown ? 0 : sidebarClearance
-    }
+    /// The top bar's leading room for the sidebar toggle. The bar is one row (tile, name, switch, divider, strip), so it
+    /// always carries the clearance itself, whatever the page or whether the strip has anything in it.
+    public static func headerInset(sidebarClearance: Double) -> Double { sidebarClearance }
 
     /// Both pages have the header; only the content below it changes.
     public static func pageHasHeader(_ page: PondPage) -> Bool { true }

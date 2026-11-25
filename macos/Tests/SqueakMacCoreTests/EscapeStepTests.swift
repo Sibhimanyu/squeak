@@ -3,23 +3,16 @@ import Testing
 @testable import SqueakMacCore
 
 @Suite struct EscapeStepTests {
-    private func step(
-        new: Bool = true, overlay: Bool = false, pane: Bool = false, pinned: Bool = false, page: EscapeRule.Page, running: Bool = false
-    ) -> EscapeStep {
-        EscapeRule.step(isNewLayout: new, overlayOpen: overlay, paneOpen: pane, panePinned: pinned, page: page, turnRunning: running)
+    private func step(new: Bool = true, overlay: Bool = false, pane: Bool = false, page: EscapeRule.Page, running: Bool = false) -> EscapeStep {
+        EscapeRule.step(isNewLayout: new, overlayOpen: overlay, paneOpen: pane, page: page, turnRunning: running)
     }
 
     @Test func overlaysComeFirst() {
         #expect(step(overlay: true, pane: true, page: .duckChat) == .nothing)
     }
 
-    @Test func anUnpinnedPaneClosesBeforeAnyPageChange() {
+    @Test func anOpenPaneClosesBeforeAnyPageChange() {
         for page in [EscapeRule.Page.duckChat, .room, .dashboard] { #expect(step(pane: true, page: page) == .closePane) }
-    }
-
-    @Test func aPinnedPaneIsLeftAlone() {
-        #expect(step(pane: true, pinned: true, page: .duckChat) == .toRoom)
-        #expect(step(pane: true, pinned: true, page: .room) == .toDashboard)
     }
 
     @Test func stepsBackDuckThenRoomThenStops() {

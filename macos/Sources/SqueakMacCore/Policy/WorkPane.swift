@@ -1,42 +1,18 @@
 import Foundation
 
-// DESIGN.md 8.12, New layout stage 2: a Duck's view is the chat plus a slim icon rail; clicking a rail icon opens a work
-// pane beside the chat (Changes, Files, Artifacts or Terminal). Everything the window needs to decide about it lives here,
-// pure: which view shows, open and close, the pin, and each Duck's remembered view and width. The views only draw.
+// DESIGN.md 8.12: the side work pane beside the centre holds one thing, the Terminal. Changes, Files and Artifacts are
+// one-shot popover lists from the rail (`RailTool`) that open items as tabs. Everything the window needs to decide about
+// the pane lives here, pure: open and close, and each page's remembered width. The views only draw.
 
-/// What the work pane can show. The rail lists them in this order.
+/// What the work pane can show: the Terminal, its only use. Older saved values (changes, files, canvas, artifacts) read back as it.
 public enum WorkPaneView: String, CaseIterable, Codable, Identifiable, Sendable {
-    case changes, files, artifacts, terminal
+    case terminal
     public var id: String { rawValue }
 
-    /// A saved `canvas` (this view's old name) reads back as Artifacts; an unknown value is a decoding error as before.
-    public init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        let migrated = raw == "canvas" ? "artifacts" : raw
-        guard let v = WorkPaneView(rawValue: migrated) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown work pane view \(raw)"))
-        }
-        self = v
-    }
+    public init(from decoder: Decoder) throws { self = .terminal }
 
-    public var title: String {
-        switch self {
-        case .changes: "Changes"
-        case .files: "Files"
-        case .artifacts: "Artifacts"
-        case .terminal: "Terminal"
-        }
-    }
-
-    /// An SF Symbol for the rail and the pane header.
-    public var symbol: String {
-        switch self {
-        case .changes: "plus.forwardslash.minus"
-        case .files: "folder"
-        case .artifacts: "photo.on.rectangle"
-        case .terminal: "terminal"
-        }
-    }
+    public var title: String { "Terminal" }
+    public var symbol: String { "terminal" }
 }
 
 public enum WorkPaneMetrics {
@@ -44,7 +20,7 @@ public enum WorkPaneMetrics {
     public static let defaultWidth: Double = 420
     public static let range: ClosedRange<Double> = 300...720
 
-    /// The width to draw: the Duck's remembered one inside its range, held back so the chat keeps its minimum beside the
+    /// The width to draw: the page's remembered one inside its range, held back so the chat keeps its minimum beside the
     /// sidebar and the rail.
     public static func drawn(stored: Double?, window: Double, sidebar: Double) -> Double {
         PaneWidths.effective(stored ?? defaultWidth, range: range, fallback: defaultWidth, window: window, otherPane: sidebar + railWidth)
@@ -66,82 +42,71 @@ public enum WorkPaneMetrics {
     }
 }
 
-/// The pane's state for one window. Open or closed is session state (never saved); the pin, each Duck's last view and its
-/// width are saved. The pane opens only when a caller says so (`open`, `toggle`): `switched` and `setWidth` never open it.
+/// The pane's state for one window. Open or closed is session state (never saved); each page's width is saved. The pane
+/// opens only when a caller says so (`open`, `toggle`): `switched` and `setWidth` never open it, and switching page closes it.
 public struct WorkPane: Equatable, Codable, Sendable {
     public struct Memory: Equatable, Codable, Sendable {
         public var view: WorkPaneView
         public var width: Double?
     }
 
-    public private(set) var pinned = false
     public private(set) var memory: [String: Memory] = [:]
     public private(set) var isOpen = false
-    /// The Duck on screen.
+    /// The page on screen (a Duck or a Pond).
     public private(set) var current: String?
 
     public init() {}
 
-    private enum CodingKeys: String, CodingKey { case pinned, memory }
+    private enum CodingKeys: String, CodingKey { case memory }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        pinned = (try? c.decodeIfPresent(Bool.self, forKey: .pinned)) ?? false
         memory = (try? c.decodeIfPresent([String: Memory].self, forKey: .memory)) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(pinned, forKey: .pinned)
         try c.encode(memory, forKey: .memory)
     }
 
-    /// The view on screen for the current Duck; nil while the pane is closed.
-    public var shown: WorkPaneView? {
-        guard isOpen, let current else { return nil }
-        return memory[current]?.view ?? .changes
-    }
+    /// The view on screen for the current page; nil while the pane is closed.
+    public var shown: WorkPaneView? { isOpen && current != nil ? .terminal : nil }
 
-    /// The width stored for a Duck (nil = the default).
+    /// The width stored for a page (nil = the default).
     public func storedWidth(duck: String) -> Double? { memory[duck]?.width }
 
-    /// The window now shows `duck`. Unpinned, the pane closes (it belongs to the Duck it was opened on); pinned, it stays
-    /// open and shows this Duck's last view, or, for a Duck that never had one, the view that was showing.
+    /// The window now shows `duck`: the pane closes (it belongs to the page it was opened on).
     public mutating func switched(to duck: String) {
         guard duck != current else { return }
-        let carried = shown
         current = duck
-        if !pinned { isOpen = false; return }
-        if isOpen, memory[duck] == nil, let carried { memory[duck] = Memory(view: carried, width: nil) }
+        isOpen = false
     }
 
-    /// Opens `view` for `duck` (an icon, or a Duck opening something: a shown file, an artifact, a diff). Selects the Duck.
+    /// Opens the pane for `duck` (the Terminal icon, or a shell opened there). Selects the page.
     public mutating func open(_ view: WorkPaneView, duck: String) {
         current = duck
         isOpen = true
         memory[duck, default: Memory(view: view, width: nil)].view = view
     }
 
-    /// A rail icon: opens that view, or closes the pane when it is the one showing.
+    /// The Terminal icon: opens the pane, or closes it when it is showing.
     public mutating func toggle(_ view: WorkPaneView, duck: String) {
         if current == duck, shown == view { close() } else { open(view, duck: duck) }
     }
 
     public mutating func close() { isOpen = false }
 
-    public mutating func setPinned(_ on: Bool) { pinned = on }
-
-    /// A dragged width, kept for that Duck inside the range. Opens nothing.
+    /// A dragged width, kept for that page inside the range. Opens nothing.
     public mutating func setWidth(_ width: Double, duck: String) {
         guard width.isFinite else { return }
         let w = min(max(width, WorkPaneMetrics.range.lowerBound), WorkPaneMetrics.range.upperBound)
-        memory[duck, default: Memory(view: .changes, width: nil)].width = w
+        memory[duck, default: Memory(view: .terminal, width: nil)].width = w
     }
 
-    /// Back to the default width for that Duck.
+    /// Back to the default width for that page.
     public mutating func resetWidth(duck: String) { memory[duck]?.width = nil }
 
-    /// Drops what is remembered for Ducks no longer there.
+    /// Drops what is remembered for pages no longer there.
     public mutating func forget(keeping live: Set<String>) {
         memory = memory.filter { live.contains($0.key) }
     }

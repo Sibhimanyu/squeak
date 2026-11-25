@@ -1271,32 +1271,38 @@ The window is redesigned from Squeak's own model: a Pond is a place, Ducks are t
 produces sits beside its chat. The new layout is the default for everyone who has not chosen; the classic layout stays exactly as it was and is optional. Anyone who explicitly chose keeps their choice. The setting is read through
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
-- **Pond tab strip.** The centre top shows the Pond's on-duty Ducks as circles (`DuckAvatarRow`), followed by a divider
-  and the opened item pills. An empty strip is hidden. Each circle uses the brand thread duck (`duckThread.png`, template,
+- **Pond tab strip.** On the Dashboard and the Room the strip is part of the one top bar, never a row of its own (a
+  Duck's chat still draws it as a row under its header until that header joins the bar). The bar reads, left to right:
+  the Pond's icon and name (the "1 person · 2 ducks on duty" subtitle is their tooltip), the Dashboard | Room switch, a
+  thin divider, then the Pond's on-duty Ducks as avatar-only circles (`DuckAvatarRow`), another divider and the opened
+  item pills. An empty strip hides its divider. Each circle uses the brand thread duck (`duckThread.png`, template,
   tinted, never redrawn) in the Duck's own colour, with its name and status in the hover and VoiceOver labels. The working
   glyph and amber waiting triangle sit on the circle. The selected circle has `selected` fill and a `lineStrong` ring.
   Clicking a circle opens its Duck's chat. An Off-duty Duck appears at the end of the circles while its chat is showing.
   Circles have no close action, and opening or closing tabs never changes duty. Each item pill has an icon, name and
   a close control on hover. Diff and review pills carry a dot in their Duck's colour. The strip scrolls sideways,
-  fades at the hidden edges and offers a "⋯" list when it overflows. The Dashboard | Room switch stays in the Pond
-  header, and the two-finger swipe still works.
+  fades at the hidden edges and offers a "⋯" list when it overflows. The two-finger swipe still works. The Dashboard's
+  Pond overview card does not repeat the icon and name: it keeps its label and actions.
 - **Item tabs.** Files, diffs, review-all, artifacts and the Notebook open in the centre. A click either selects the
   existing pill or inserts one after the current tab, in the item group. A Duck showing a file adds its pill in the
   background. Order is saved by project id. ⌘W closes the selected item, ⌘1–9 select strip tabs and ⌃Tab cycles them.
 - **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: "Here now",
   Tasks and the Notebook live on the Dashboard under the overview tiles (the Ducks working are the Working tile and the
-  list). Instead the Room (and the Dashboard beside it) carries the same slim icon rail and work pane as a Duck view,
-  scoped to the Pond itself (`PondWorkScope`, `WorkPaneScope.pond`): Changes and Files read the Pond's own folder (Changes
-  needs a real chat working in that folder, else it says nothing is changing there; nothing is faked), Artifacts are the
-  Pond's by project id, and Terminal is a shell in the Pond folder. The rail is on both Pond pages so the width never
-  changes when you switch. The pane remembers its view and width per Pond, keyed by project id. The classic layout keeps
-  its Room column.
-- **One header for both pages.** The Pond header (tile, name, subtitle, Dashboard | Room switch, menu) and the Duck row sit
-  above the two pages as one view each; only the content below them slides or crossfades, at `motion-standard`
+  list). Instead the Dashboard, the Room and every Duck carry the same slim icon rail (`RailTool`): Changes, Files, Artifacts,
+  Tasks (when its list ships, #88; the rail already has room for six), Notebook and Terminal. Changes, Files and Artifacts
+  open a one-shot popover list anchored to the icon: no pin; picking a row opens a tab and closes the list; Esc or a click
+  away closes it too. Changes: on the Dashboard and in the Room every Duck's changed files grouped by Duck and branch (the
+  host's `/native/projects/<id>/changes`), then Main; in a Duck, that Duck's only; each Duck has a "Review all from <Duck>"
+  row. Artifacts: the whole Pond, the current Duck's first. Files: search, Recent (opened or shown by Ducks), then the tree
+  of the Pond's folder (a Duck's Stream in a Duck). The Notebook opens as a tab. Terminal opens the side pane, which holds
+  nothing else: no title row, no pin, no back row. The rail is on all three pages so the width never changes between them.
+  The classic layout keeps its Room column.
+- **One header for both pages.** The one top bar (tile, name, Dashboard | Room switch, strip, menu) sits
+  above the two pages as one view; only the content below them slides or crossfades, at `motion-standard`
   (`PondPageChrome`). The header has the same height and the switch the same place on both pages; the Room keeps its scroll
   position and loaded feed across switches. The swipe follows the fingers and settles on the same curve.
 - **Esc steps back one level** (`EscapeRule`): anything that owns Esc first (popover, menu, @ or / list, sheet, inline
-  editor), then an open unpinned work pane closes, then a Duck's chat goes to the Pond's Room, then the Room to the
+  editor), then an open work pane (the Terminal) closes, then a Duck's chat goes to the Pond's Room, then the Room to the
   Dashboard; on the Dashboard or anywhere else it does nothing. Esc never leaves full screen (the window's
   `cancelOperation:` swallows it); Ctrl-Cmd-F and the green button still do. Esc is not bound to stopping a turn or
   clearing the composer, and a draft is kept per Duck, so nothing is lost on the way. The classic layout keeps its behaviour
