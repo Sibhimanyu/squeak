@@ -63,9 +63,6 @@ struct ChatComposerBox<Setup: View>: View {
 
     var body: some View {
         Group { if MacLayoutPreference.shared.isNew { newBox } else { box } }
-            .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected) {
-                ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
-            }
             .zIndex(1)
             .accessibilityElement(children: .contain)
             .modifier(OptionalImageDrop(tray: tray))
@@ -84,7 +81,16 @@ struct ChatComposerBox<Setup: View>: View {
             .onDisappear { dictation.cancel() }
     }
 
+    /// Where the typed `@` or `/` sits (window x): the `@` and `/` list opens from it, above the field's own box.
+    private var triggerX: CGFloat? { pick.trigger.flatMap { fieldHandle.windowX(ofCharacterAt: $0.range.location) } }
+
     private var box: some View {
+        boxContent.suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected, triggerX: triggerX) {
+            ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
+        }
+    }
+
+    private var boxContent: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let tray { ImageStrip(tray: tray).padding(.leading, 4) }
             if dictation.state.showsMeter {
@@ -166,6 +172,9 @@ struct ChatComposerBox<Setup: View>: View {
                 }
             }
             .animation(Motion.quick, value: focused)
+            .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected, triggerX: triggerX) {
+                ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
+            }
         }
     }
 

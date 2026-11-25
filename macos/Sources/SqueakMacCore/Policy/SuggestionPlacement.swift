@@ -15,10 +15,46 @@ public struct SuggestionPlacement: Equatable, Sendable {
     /// Room kept free at the far edge (title bar, window edge).
     public static let edgeMargin: CGFloat = 8
 
-    public static func resolve(spaceAbove: CGFloat, spaceBelow: CGFloat, contentHeight: CGFloat) -> SuggestionPlacement {
+    /// The popover's width: compact, a little wider than a path, never wider than the composer it belongs to.
+    public static let preferredWidth: CGFloat = 320
+    /// Rows shown before the list scrolls.
+    public static let maxRows = 6
+
+    /// The tallest the list gets before it scrolls: `maxRows` rows of `rowHeight` plus the list's own `padding` (top and bottom).
+    public static func heightCap(rowHeight: CGFloat, padding: CGFloat) -> CGFloat {
+        CGFloat(maxRows) * rowHeight + padding
+    }
+
+    public static func width(anchorWidth: CGFloat) -> CGFloat { min(preferredWidth, max(0, anchorWidth)) }
+
+    /// The list's left edge, relative to the composer's left edge: the typed `@` or `/` is where the list starts, so it
+    /// reads as coming from that character. Clamped so the list never leaves the composer. A nil trigger (not measurable)
+    /// starts at the left edge.
+    public static func originX(triggerX: CGFloat?, anchorWidth: CGFloat, popupWidth: CGFloat) -> CGFloat {
+        let room = max(0, anchorWidth - popupWidth)
+        guard let triggerX else { return 0 }
+        return min(max(0, triggerX), room)
+    }
+
+    /// The list's top edge, relative to the composer's top edge: above it with `gap` clear of the top border (so the field and
+    /// its text stay visible), or below it with `gap` clear of the bottom border.
+    public static func originY(direction: Direction, anchorHeight: CGFloat, popupHeight: CGFloat) -> CGFloat {
+        switch direction {
+        case .up: -(popupHeight + gap)
+        case .down: anchorHeight + gap
+        }
+    }
+
+    public static func origin(direction: Direction, triggerX: CGFloat?, anchorSize: CGSize, popupSize: CGSize) -> CGPoint {
+        CGPoint(
+            x: originX(triggerX: triggerX, anchorWidth: anchorSize.width, popupWidth: popupSize.width),
+            y: originY(direction: direction, anchorHeight: anchorSize.height, popupHeight: popupSize.height))
+    }
+
+    public static func resolve(spaceAbove: CGFloat, spaceBelow: CGFloat, contentHeight: CGFloat, cap: CGFloat = .infinity) -> SuggestionPlacement {
         let up = max(0, spaceAbove - gap - edgeMargin)
         let down = max(0, spaceBelow - gap - edgeMargin)
-        let content = max(0, contentHeight)
+        let content = min(max(0, contentHeight), cap)
         // Up first: it is where the composer's own surroundings are. Down only when up cannot hold it and down can.
         if content <= up || up >= down { return SuggestionPlacement(direction: .up, maxHeight: min(content, up)) }
         return SuggestionPlacement(direction: .down, maxHeight: min(content, down))

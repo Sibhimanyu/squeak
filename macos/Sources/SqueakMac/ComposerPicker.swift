@@ -119,7 +119,7 @@ struct ComposerPickerList: View {
             }
         }
         .padding(4)
-        .frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func row(_ i: Int, _ item: ComposerPickItem) -> some View {
@@ -135,7 +135,7 @@ struct ComposerPickerList: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10).frame(height: 28)
+            .padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 28)
             .background(i == model.selected ? Theme.surfaceRaised : .clear,
                         in: RoundedRectangle(cornerRadius: Radius.chip))
             .contentShape(Rectangle())

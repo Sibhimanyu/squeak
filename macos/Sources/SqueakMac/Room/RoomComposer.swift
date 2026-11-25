@@ -21,6 +21,7 @@ struct RoomComposer: View {
     @State private var chooser = false
     @State private var focused = false
     @State private var focusToken = 0
+    @State private var fieldHandle = ComposerFieldHandle()
 
     private var people: [String] {
         let me = NSFullUserName()
@@ -33,15 +34,24 @@ struct RoomComposer: View {
     private var candidates: [RoomMention.Candidate] {
         mention.map { RoomMention.candidates(query: $0.query, threads: room.feed.threads, people: people) } ?? []
     }
+    /// Window x of the typed `@`: the list opens from it.
+    private var mentionX: CGFloat? {
+        mention.flatMap { fieldHandle.windowX(ofCharacterAt: draft.utf16.distance(from: draft.startIndex, to: $0.range.lowerBound)) }
+    }
+    /// The shared placement: above the field's own top edge, from the `@`, best match nearest it, scrolling past six rows.
+    private func withMentionList<V: View>(_ box: V) -> some View {
+        box.suggestionPopup(
+            isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted,
+            triggerX: mentionX, rowHeight: 38
+        ) {
+            picker(candidates, chrome: false)
+        }
+    }
     private var tray: RoomAttachmentTray { room.tray }
     private var canSend: Bool { tray.draft.canSend(text: draft) && !dictation.isActive }
 
     var body: some View {
         Group { if MacLayoutPreference.shared.isNew { newBox } else { oldBox } }
-        .suggestionPopup(isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted) {
-            // The shared placement: above the composer's own top edge, best match nearest it, scrolling past its room.
-            picker(candidates, chrome: false)
-        }
         .onAppear { if draft.isEmpty { draft = ContainerDrafts.shared.draft(for: draftKey) } }
         .onChange(of: draftKey) { _, key in draft = ContainerDrafts.shared.draft(for: key) }
         .onChange(of: draft) { _, text in ContainerDrafts.shared.set(text, for: draftKey) }
@@ -59,7 +69,9 @@ struct RoomComposer: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var oldBox: some View {
+    private var oldBox: some View { withMentionList(oldBoxContent) }
+
+    private var oldBoxContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             RoomAttachmentStrip(tray: tray).padding(.top, 8)
             if dictation.state.showsMeter {
@@ -69,7 +81,7 @@ struct RoomComposer: View {
                     text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
                     focusToken: focusToken,
                     onSend: submit, onContentHeight: { contentHeight = $0 },
-                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
+                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
                 )
                 .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
             }
@@ -109,7 +121,7 @@ struct RoomComposer: View {
                             text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
                             focusToken: focusToken,
                             onSend: submit, onContentHeight: { contentHeight = $0 },
-                            onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
+                            onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
                         )
                         .frame(height: min(max(contentHeight, 32), 140))
                     }
@@ -121,6 +133,12 @@ struct RoomComposer: View {
             .padding(8)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.lineStrong.opacity(0.7)))
+            .suggestionPopup(
+                isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted,
+                triggerX: mentionX, rowHeight: 38
+            ) {
+                picker(candidates, chrome: false)
+            }
         }
     }
 
@@ -198,7 +216,7 @@ struct RoomComposer: View {
             if everyone { row(.init(id: "all", addressee: .everyone, subtitle: "Everyone in the room"), index: -1) }
             ForEach(drawn, id: \.element.id) { i, c in row(c, index: everyone ? -1 : i).id(i) }
         }
-        .padding(6).frame(width: 300)
+        .padding(6).frame(width: chrome ? 300 : nil)
         if chrome {
             body
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
@@ -219,7 +237,7 @@ struct RoomComposer: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8).frame(height: 38)
+            .padding(.horizontal, 8).frame(maxWidth: .infinity).frame(height: 38)
             .background(index == highlighted ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .contentShape(Rectangle())
         }

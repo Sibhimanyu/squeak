@@ -237,6 +237,16 @@ enum ComposerPickerKey { case up, down, accept, escape }
 final class ComposerFieldHandle {
     weak var textView: NSTextView?
 
+    /// The window x (the SwiftUI global x) of the character at UTF-16 `offset`: where the typed `@` or `/` sits, which the
+    /// suggestion list anchors to. Nil when the field is not laid out yet.
+    func windowX(ofCharacterAt offset: Int) -> CGFloat? {
+        guard let tv = textView, let lm = tv.layoutManager, tv.window != nil, offset >= 0, offset <= (tv.string as NSString).length else { return nil }
+        let glyph = lm.glyphIndexForCharacter(at: min(offset, max((tv.string as NSString).length - 1, 0)))
+        let line = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let x = line.minX + lm.location(forGlyphAt: glyph).x + tv.textContainerOrigin.x
+        return tv.convert(NSPoint(x: x, y: 0), to: nil).x
+    }
+
     func replace(_ range: NSRange, with string: String) {
         guard let tv = textView, NSMaxRange(range) <= (tv.string as NSString).length else { return }
         tv.window?.makeFirstResponder(tv)

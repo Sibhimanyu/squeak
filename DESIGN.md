@@ -1056,6 +1056,11 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 - **Model picker** (⌘/): Conductor's catalogue as the Mac lists it, favourites first, filter field, "More models". **Effort** (⇧⌘E cycles): the levels the model takes. Changing either mid-turn applies next turn; the chip says so in its tooltip.
 - **Attachments:** paperclip or drop or paste; a tray of thumbnails (x on each) above the field; same `.context/attachments/<id>/` rule as the phone (§8.5). Long pasted text becomes an attachment chip.
 - `/` opens slash commands (`/clear`, `/compact`, `/restart`, plus skills), `@` mentions files.
+  **Suggestion list** (both): a compact popover, 320pt wide (never wider than the composer), `surface` with a strong hairline and
+  `card` radius, sized to its rows (28pt in chats, 38pt in the Room) and scrolling past six. It opens **above the field's box**, its
+  bottom edge 6pt clear of the box's top border, so the field and the text being typed are never covered; its left edge sits at the
+  typed `@` or `/` character, clamped inside the composer. The selected row's highlight spans the full row width. Up/Down, Return
+  or Tab to pick and Esc to close work from the field, which keeps the keyboard throughout.
 
 ##### Terminal panel (⌘J)
 

@@ -38,4 +38,39 @@ import Testing
         #expect(SuggestionPlacement.step(up: true, direction: .down) == -1)
         #expect(SuggestionPlacement.step(up: false, direction: .down) == 1)
     }
+
+    @Test func listStartsAtTheTriggerCharacter() {
+        #expect(SuggestionPlacement.originX(triggerX: 90, anchorWidth: 700, popupWidth: 320) == 90)
+    }
+
+    @Test func listIsClampedInsideTheComposer() {
+        #expect(SuggestionPlacement.originX(triggerX: -12, anchorWidth: 700, popupWidth: 320) == 0)
+        #expect(SuggestionPlacement.originX(triggerX: 650, anchorWidth: 700, popupWidth: 320) == 380)
+        #expect(SuggestionPlacement.originX(triggerX: 50, anchorWidth: 200, popupWidth: 200) == 0)
+        #expect(SuggestionPlacement.originX(triggerX: nil, anchorWidth: 700, popupWidth: 320) == 0)
+    }
+
+    @Test func listSitsAboveTheFieldNotOnIt() {
+        let gap = SuggestionPlacement.gap
+        #expect(SuggestionPlacement.originY(direction: .up, anchorHeight: 90, popupHeight: 120) == -(120 + gap))
+        #expect(SuggestionPlacement.originY(direction: .down, anchorHeight: 90, popupHeight: 120) == 90 + gap)
+        let p = SuggestionPlacement.origin(direction: .up, triggerX: 40, anchorSize: CGSize(width: 600, height: 90), popupSize: CGSize(width: 320, height: 100))
+        // bottom edge (origin + height) is `gap` above the field's top border at y = 0
+        #expect(p.y + 100 == -gap)
+        #expect(p.x == 40)
+    }
+
+    @Test func widthIsCompactAndFitsANarrowComposer() {
+        #expect(SuggestionPlacement.width(anchorWidth: 900) == 320)
+        #expect(SuggestionPlacement.width(anchorWidth: 240) == 240)
+    }
+
+    @Test func listShowsSixRowsThenScrolls() {
+        let cap = SuggestionPlacement.heightCap(rowHeight: 28, padding: 8)
+        #expect(cap == 176)
+        let p = SuggestionPlacement.resolve(spaceAbove: 900, spaceBelow: 0, contentHeight: 8 * 28 + 8, cap: cap)
+        #expect(p.maxHeight == 176)
+        let small = SuggestionPlacement.resolve(spaceAbove: 900, spaceBelow: 0, contentHeight: 2 * 28 + 8, cap: cap)
+        #expect(small.maxHeight == 64)
+    }
 }
