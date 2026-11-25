@@ -410,6 +410,8 @@ struct RoomMessagesTests {
         #expect(RoomMention.candidates(query: "t-b", threads: threads, people: []).map(\.id) == ["t:b"])
         #expect(c[0].addressee == .thread(sessionId: "a", title: "Pip") && c[0].insertion == nil)
         #expect(RoomMention.roomText("look", to: .person(name: "Priya")) == "@Priya look")
+        #expect(RoomMention.roomText("are you done?", to: .thread(sessionId: "s1", title: "Pickle")) == "@Pickle are you done?")
+        #expect(RoomMention.roomText("hello", to: .everyone) == "hello")
     }
 
     @Test func dutyAndDuckBodiesAreStrict() {

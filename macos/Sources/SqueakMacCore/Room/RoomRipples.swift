@@ -138,9 +138,13 @@ public enum RoomMention {
         return d
     }
 
-    /// What goes to the room for a person addressee: their name leads the message.
+    /// What goes to the room for an addressee: the name leads the message as an @mention. A Duck's mention is what wakes it,
+    /// so a message "To Pickle" is a Room message that names Pickle, never a send into its chat alone.
     public static func roomText(_ text: String, to: RoomAddressee) -> String {
-        if case .person(let n) = to { return "@\(n) \(text)" }
-        return text
+        switch to {
+        case .person(let n): return "@\(n) \(text)"
+        case .thread(_, let title): return "@\(title) \(text)"
+        case .everyone: return text
+        }
     }
 }

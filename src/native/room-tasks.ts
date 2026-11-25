@@ -5,7 +5,15 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import { Decider, haikuDecider, type DeciderDuck, type DeciderModelPort, type ScoredDuck } from "./decider.js";
-import { duckMentionTokens, mentionedToken, mentions, type HostEvents, type Room, type RoomThread } from "./room.js";
+import {
+  duckMentionTokens,
+  mentionedToken,
+  mentions,
+  projectOfSession,
+  type HostEvents,
+  type Room,
+  type RoomThread,
+} from "./room.js";
 import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { FINISH_ID_PREFIX, writeFinish, type FinishWriterPort } from "./room-finish.js";
@@ -409,7 +417,10 @@ export class RoomTasks extends EventEmitter {
       try {
         if (e.type === "timeline" && ["turn.started", "reply.done", "turn.ended"].includes(e.event.type)) {
           this.reconcileSession(e.sessionId);
-          if (e.event.type === "turn.ended") this.startWaiting();
+          if (e.event.type === "turn.ended") {
+            this.settleRoomTurn(e.sessionId, e.event.turnId);
+            this.startWaiting();
+          }
         }
       } catch (error) {
         logger.warn("room job watcher failed", { error: String(error) });
@@ -498,6 +509,8 @@ export class RoomTasks extends EventEmitter {
       );
       const rest = stripMention(post.text, token ?? duck.name ?? "");
       if (wordCount(rest) < MIN_WORDS && !looksImperative(rest)) return false;
+      // A question to a Duck ("are you done?") is a nudge it answers in the Room, not work to track.
+      if (/\?\s*$/.test(rest.trim()) && !looksImperative(rest)) return false;
       if (this.o.store.roomJobRowByMessage(post.id)) return true;
       this.handOff(post.projectId, post.id, duck.id, { text: rest, reason: "you @mentioned it" });
       return true;
@@ -1660,6 +1673,43 @@ export class RoomTasks extends EventEmitter {
     const run = this.writeFinishFor(projectId, job.id, to.sessionId, job.text, reply, writers).finally(() =>
       this.inflight.delete(run),
     );
+    this.inflight.add(run);
+  }
+
+  /**
+   * A finished turn that began in the Room and is no Task (an @mention, a comment on a plan): the person asked in the
+   * Room, so the answer goes back there. The Duck's own post during the turn is the answer; without one the host writes
+   * it from the turn's reply on the Duck's behalf, once. The Duck's chat keeps the full turn.
+   */
+  private settleRoomTurn(sessionId: string, turnId: string): void {
+    const writers = this.o.finishWriters;
+    if (!writers?.length) return;
+    const turn = this.o.room.sessionTurns(sessionId).find((t) => t.turnId === turnId);
+    if (!turn?.room || turn.endedAt === undefined || turn.outcome !== "finished") return;
+    const reply = turn.reply?.trim();
+    if (!reply) return;
+    const s = this.o.store.getSession(sessionId);
+    const project = s ? projectOfSession(this.o.store, s) : null;
+    if (!s || !project) return;
+    const key = `${sessionId}:${turnId}`;
+    // A Task's turn is settled with its Task.
+    for (const r of this.o.store.roomJobRows(project.id)) {
+      if ((JSON.parse(r.data) as RoomTask).handedTo?.turnId === key) return;
+    }
+    if (this.o.store.duckRoomPosts(sessionId, turn.startedAt, turn.endedAt + 5_000).length > 0) return;
+    // The asking message, not the "[Room] Name mentioned you:" line the Duck was woken with.
+    const asked = this.o.store
+      .roomPosts(project.id, { limit: 30 })
+      .filter((p) => p.authorKind === "person" && p.kind === "message" && p.at <= turn.startedAt + 2_000)
+      .at(-1);
+    const run = this.writeFinishFor(
+      project.id,
+      `t:${key}`,
+      sessionId,
+      asked?.text ?? turn.prompt,
+      reply,
+      writers,
+    ).finally(() => this.inflight.delete(run));
     this.inflight.add(run);
   }
 
