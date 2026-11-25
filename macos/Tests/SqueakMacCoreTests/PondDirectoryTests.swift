@@ -25,9 +25,6 @@ import Testing
         let e = try JSONDecoder().decode(PondDirectory.self, from: Data(sent.utf8))
         let c = e.ponds[0].dutyCounts
         #expect(c == PondCounts(onDuty: 2, working: 1, needsYou: 1, offDuty: 1, total: 3))
-        let roster = PondCounts(onDuty: 9, working: 0, needsYou: 0, offDuty: 0, total: 9)
-        #expect(PondRowCount.dutyCounts(sent: c, roster: roster) == c)
-        #expect(PondRowCount.dutyCounts(sent: nil, roster: roster) == roster)
     }
 
     @Test func decodesTheHostsShape() throws {

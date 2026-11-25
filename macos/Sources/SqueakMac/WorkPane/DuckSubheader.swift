@@ -42,16 +42,13 @@ struct DuckSubheader: View {
     }
 
     /// The Streams this Duck is in, from the host's roster (join order).
-    private var duckStreams: [RoomStream] { workspace.roster.ducks?.first { $0.id == session.duckId }?.streams ?? [] }
+    private var duckStreams: [RoomStream] { workspace.roster.list.first { $0.id == session.duckId }?.streams ?? [] }
 
-    /// One chip per Stream (its branch), or "Pond" for a Duck in none. A chat begun before Streams that still sits on a branch
-    /// keeps its plain branch chip.
+    /// One chip per Stream (its branch), or "Pond" for a Duck in none: the same words as the list, never a folder branch.
     @ViewBuilder private var streamChips: some View {
         let streams = duckStreams
         if !model.focus.access.showsCode {
             EmptyView() // a remote Pond keeps no code chrome
-        } else if streams.isEmpty, duckChrome.chip != nil, !duckChrome.readOnly {
-            DuckBranchChip(chrome: duckChrome).fixedSize().layoutPriority(-1)
         } else {
             HStack(spacing: Space.xs) {
                 ForEach(DuckStreams.chips(streams)) { chip in StreamChip(chip: chip) }

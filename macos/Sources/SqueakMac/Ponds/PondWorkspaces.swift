@@ -145,18 +145,18 @@ private struct PondChatRowView: View {
                     } else {
                         // The Duck's name is the label; the chat's title is only secondary text (never the sender or the label).
                         // An Off-duty Duck wears no name: its chat title leads.
-                        let name = row.offDuty != nil ? nil : row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) }
+                        let name = row.heading ?? (row.offDuty != nil ? nil : row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) })
                         Text(verbatim: name ?? row.title).font(Typo.label).foregroundStyle(Theme.ink)
                             .lineLimit(2).multilineTextAlignment(.leading)
-                        if let name, name != row.title {
+                        if let name, name != row.title, row.offDuty == nil {
                             Text(verbatim: row.title).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                         }
                     }
                     HStack(spacing: 6) {
                         if let m = row.mark { ChatMarkGlyph(mark: m, leading: true) } else { PondStateMark(state: row.state, leading: true) }
-                        Text(verbatim: row.offDuty?.line ?? row.mark?.words ?? PondSentence.stateWord(row.state.session))
+                        Text(verbatim: row.statusLine ?? row.offDuty?.line ?? row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
-                        if row.ducklingsRunning > 0 {
+                        if row.ducklingsRunning > 0, row.statusLine == nil {
                             HStack(spacing: 2) {
                                 DucklingView(parentId: row.local?.stringValue ?? row.id, parentSize: ThreadDuck.Size.tab)
                                 Text(verbatim: "\(row.ducklingsRunning)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
@@ -164,13 +164,13 @@ private struct PondChatRowView: View {
                             .help("\(DucklingWords.count(row.ducklingsRunning)) running")
                             .accessibilityLabel("\(DucklingWords.count(row.ducklingsRunning)) running")
                         }
-                        if row.offDuty == nil, let at = row.lastAt {
+                        if row.offDuty == nil, row.statusLine == nil, let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
-                        if let branch = row.branch {
+                        if !row.streamLabels.isEmpty {
                             Text("·").foregroundStyle(Theme.muted)
-                            Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                            Text(verbatim: row.streamLabels.joined(separator: ", ")).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                         }
                     }
                     if let summary = row.offDuty?.summary {

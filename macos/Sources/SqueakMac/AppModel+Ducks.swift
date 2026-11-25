@@ -129,18 +129,21 @@ extension AppModel {
 
     func isOnDuty(_ s: HostSession) -> Bool {
         guard let r = duckHostRef(s) else { return true }
-        return PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.onDuty != false
+        return RoomRosterStore.shared.model(for: r.project).list.first { $0.currentSessionId == r.id }?.duty != .off
     }
 
     func setDuty(_ s: HostSession, on: Bool) {
         guard let r = duckHostRef(s) else { return }
-        Task { await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: nativeHost) }
+        Task {
+            await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: nativeHost)
+            await RoomRosterStore.shared.model(for: r.project).refresh(host: nativeHost)
+        }
     }
 
     /// "Delete Duck\u{2026}": asks once, then removes the duck for good and closes its tab.
     func confirmDeleteDuck(_ s: HostSession) {
         guard let r = duckHostRef(s), let duckId = s.duckId else { return }
-        let name = PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.duckName ?? workbenchTitle(s)
+        let name = RoomRosterStore.shared.model(for: r.project).list.first { $0.currentSessionId == r.id }?.name ?? workbenchTitle(s)
         let alert = NSAlert()
         alert.messageText = "Delete \(name)?"
         alert.informativeText = "This removes the duck for good. Its chats stay in history. To rest it instead, put it off duty."

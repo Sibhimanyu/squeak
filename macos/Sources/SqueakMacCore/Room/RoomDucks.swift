@@ -45,9 +45,15 @@ public enum RoomDucks {
         }.map { duck($0, now: now) }
     }
 
-    /// The header's avatars: only ducks on duty (the host's `duty`); none when every duck is closed.
-    public static func headerDucks(_ threads: [RoomThread], now: Date = Date()) -> [RoomDuck] {
-        roster(threads.filter(\.onDuty), now: now)
+    /// The header's avatars: the roster's on-duty Ducks (the host's list), newest first; none when every duck is closed.
+    public static func headerDucks(roster ducks: [PondDuck], threads: [RoomThread] = [], now: Date = Date()) -> [RoomDuck] {
+        RoomRoster.roster(ducks, threads: threads, now: now).onDuty.map { d in
+            let title = (d.chatTitle ?? "").trimmingCharacters(in: .whitespaces)
+            return RoomDuck(
+                sessionId: d.sessionId ?? d.id, name: d.name, agent: d.agent, agentLabel: d.agentLabel,
+                roleLine: d.role ?? (title.isEmpty || title == d.name ? nil : title), presence: d.presence,
+                presenceLine: d.presenceLine, role: d.role)
+        }
     }
 
     public static func duck(_ t: RoomThread, now: Date = Date()) -> RoomDuck {
@@ -84,6 +90,9 @@ public enum RoomDucks {
     }
 
     /// "2 people \u{00B7} 5 ducks on duty": the header counts only ducks with a live chat; off duty Ducks are not counted.
+    /// The same line from the host's counts (the Dashboard's On duty tile and this subtitle are one number).
+    public static func subtitle(people: Int, counts: PondCounts?) -> String { subtitle(people: people, ducks: counts?.onDuty ?? 0) }
+
     public static func subtitle(people: Int, ducks: Int) -> String {
         let p = people == 1 ? "1 person" : "\(people) people"
         let d = ducks == 0 ? "no ducks on duty" : (ducks == 1 ? "1 duck on duty" : "\(ducks) ducks on duty")

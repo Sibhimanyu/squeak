@@ -33,7 +33,7 @@ struct PondPanel: View {
 
     private func onDuty(key: String) -> [PondOnDuty.Row] {
         let projectId = PondsModel.shared.entry(key)?.projectId
-        let off = projectId.map { RoomRosterStore.shared.model(for: $0).offDutySessions } ?? []
+        let off = projectId.map { RoomRosterStore.shared.model(for: $0).offDutySessions } ?? []  // the roster's list
         return PondOnDuty.rows(
             model.duckRows(pond: key, fromPage: true), title: { model.workbenchTitle($0) }, looping: { $0.isLoopingNow },
             offDuty: { s in model.hostId(s).map(off.contains) ?? false })

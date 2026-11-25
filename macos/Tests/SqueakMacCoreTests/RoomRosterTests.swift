@@ -66,10 +66,9 @@ import Testing
         #expect(RoomRoster.row(PondDuck(id: "a", name: "A"), now: now).presenceLine == "Ready for a job")
     }
 
-    @Test func placeChip() {
-        #expect(RoomRoster.placeChip(RoomPlace(workspaceId: "w", branch: "feat/login")) == "on feat/login")
-        #expect(RoomRoster.placeChip(nil) == nil)
-        #expect(RoomRoster.placeChip(RoomPlace(branch: " ")) == nil)
+    @Test func streamLabelsAreTheHostsOrPond() {
+        #expect(RoomRoster.row(PondDuck(id: "a", name: "A"), now: now).streamLabels == ["Pond"])
+        #expect(RoomRoster.row(PondDuck(id: "a", name: "A", streams: [RoomStream(workspaceId: "w", branch: "feat/login")]), now: now).streamLabels == ["feat/login"])
     }
 
     @Test func clickOpensOrSaysNoJob() {
@@ -100,19 +99,14 @@ import Testing
     }
 
     @Test func decodesLeniently() throws {
-        let json = #"{"id":"d1","name":"Ada","colourSeed":"seed","duty":"off","state":"working","place":{"kind":"stream","workspaceId":"w","branch":"b"},"extra":1}"#
+        let json = #"{"id":"d1","name":"Ada","colourSeed":"seed","duty":"off","state":"working","extra":1}"#
         let d = try JSONDecoder().decode(PondDuck.self, from: Data(json.utf8))
-        #expect(d.colourSeed == "seed" && d.duty == .off && d.state == .working && d.place?.branch == "b" && d.currentSessionId == nil)
+        #expect(d.colourSeed == "seed" && d.duty == .off && d.state == .working && d.activity == .working && d.currentSessionId == nil)
         let bare = try JSONDecoder().decode(PondDuck.self, from: Data(#"{"id":"x"}"#.utf8))
         #expect(bare.name == "Duck" && bare.colourSeed == "x" && bare.duty == .on)
     }
 
-    @Test func fallbackFromThreadsAndUpsert() throws {
-        let t = try JSONDecoder().decode(RoomThread.self, from: Data(#"{"sessionId":"s1","title":"T","duckId":"d9","colourSeed":"cs","place":{"kind":"stream","branch":"b"}}"#.utf8))
-        let d = PondDuck(thread: t)
-        #expect(d.id == "d9" && d.colourSeed == "cs" && d.currentSessionId == "s1" && d.place?.branch == "b")
-        let old = PondDuck(thread: RoomThread(sessionId: "s2", title: "Old", state: .idle))
-        #expect(old.id == "s2" && old.colourSeed == "s2")
+    @Test func upsertsByDuckId() throws {
         var l = [PondDuck(id: "a", name: "A")]
         l = RoomRoster.upserting(PondDuck(id: "a", name: "A2"), into: l)
         l = RoomRoster.upserting(PondDuck(id: "b", name: "B"), into: l)

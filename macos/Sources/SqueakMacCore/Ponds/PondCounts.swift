@@ -1,8 +1,7 @@
 import Foundation
 
 /// The pond dashboard's numbers. The daemon decides them (`counts` of `GET /native/projects/<id>/ducks`, from
-/// `src/fleet/pond-counts.ts`); the page only draws, and counts the listed rows itself with `fallback` when an older daemon
-/// sends none. On duty, working (on-duty ducks mid-turn), needs you (on-duty ducks waiting on the person), off duty, total.
+/// `src/fleet/pond-counts.ts`); the page only draws them, over exactly the rows the same answer lists. On duty, working (on-duty ducks mid-turn), needs you (on-duty ducks waiting on the person), off duty, total.
 public struct PondCounts: Sendable, Equatable, Decodable {
     public var onDuty: Int
     public var working: Int
@@ -14,17 +13,8 @@ public struct PondCounts: Sendable, Equatable, Decodable {
         self.onDuty = onDuty; self.working = working; self.needsYou = needsYou; self.offDuty = offDuty; self.total = total
     }
 
-    /// The same definitions over the page's rows (a row without a duty is on duty).
-    public static func fallback(rows: [PondChatRow]) -> PondCounts {
-        let on = rows.filter(\.onDuty)
-        return PondCounts(
-            onDuty: on.count, working: on.filter { PondDashboardScope.working.includes($0) }.count,
-            needsYou: on.filter { PondDashboardScope.needsYou.includes($0) }.count,
-            offDuty: rows.count - on.count, total: rows.count)
-    }
-
-    /// The daemon's numbers when it sent them, else the rows'.
-    public static func resolve(_ sent: PondCounts?, rows: [PondChatRow]) -> PondCounts { sent ?? fallback(rows: rows) }
+    /// Before the host has answered: nothing is listed, so nothing is counted.
+    public static let none = PondCounts(onDuty: 0, working: 0, needsYou: 0, offDuty: 0, total: 0)
 
     public func count(_ scope: PondDashboardScope) -> Int {
         switch scope {

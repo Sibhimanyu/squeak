@@ -337,10 +337,10 @@ struct RoomMessagesTests {
     }
 
     @Test func headerShowsOnlyDucksOnDuty() {
-        let closed = [thread("a", name: "A", duty: .off), thread("b", name: "B", duty: .off)]
-        #expect(RoomDucks.headerDucks(closed, now: now).isEmpty)
-        let mixed = closed + [thread("c", name: "C")]
-        #expect(RoomDucks.headerDucks(mixed, now: now).map(\.sessionId) == ["c"])
+        let closed = [PondDuck(id: "a", name: "A", duty: .off, currentSessionId: "a"), PondDuck(id: "b", name: "B", duty: .off, currentSessionId: "b")]
+        #expect(RoomDucks.headerDucks(roster: closed, now: now).isEmpty)
+        let mixed = closed + [PondDuck(id: "c", name: "C", currentSessionId: "c")]
+        #expect(RoomDucks.headerDucks(roster: mixed, now: now).map(\.sessionId) == ["c"])
     }
 
     @Test func presenceTextAndRosterOrder() {

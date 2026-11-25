@@ -30,8 +30,6 @@ import Testing
         #expect(roster.onDuty[0].streams.map(\.branch) == ["a"])
         let row = DuckAvatarRow.build(roster: roster, place: .dashboard)
         #expect(row.ducks[0].streams.map(\.branch) == ["a"])
-        let thread = try decode(RoomThread.self, #"{"sessionId":"s1","duckId":"d1","streams":[{"workspaceId":"w1","branch":"a"}]}"#)
-        #expect(PondDuck(thread: thread).streams.map(\.branch) == ["a"])
     }
 
     @Test func chipsAreTheBranchesInOrderOrOnePondChip() {
