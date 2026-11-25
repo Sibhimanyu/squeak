@@ -124,7 +124,7 @@ export interface ClaudeRunnerOptions {
   claudeAiConnectors?: boolean;
   /**
    * A folder this chat may not edit (a git pond's Main, for a Duck that picks its own Streams). Edit tools aimed inside it are refused
-   * in every mode, and "Skip approvals" and "Accept edits" are held at "Ask" so a shell command still asks.
+   * in every mode with a message, never turned into an approval prompt: the chosen permission mode alone decides whether to ask.
    */
   readOnlyRoot?: string | null;
   /**
@@ -259,7 +259,7 @@ export class ClaudeRunner implements Runner {
     const executable = this.options.executable ?? requireAgentBinary("claude", { env: this.options.env });
     const options: Record<string, unknown> = {
       cwd: this.options.cwd,
-      permissionMode: this.effectiveMode(),
+      permissionMode: this.mode,
       // Launched able to switch to "Skip approvals" and back later; canUseTool reads the live mode.
       allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
@@ -719,7 +719,7 @@ export class ClaudeRunner implements Runner {
     const kind = requestKindFor(toolName);
     // The chat's mode is read live on every call, so "Skip approvals" and back take effect at once.
     if (kind === "tool") {
-      const mode = this.effectiveMode();
+      const mode = this.mode;
       if (mode === "bypassPermissions") return { behavior: "allow", updatedInput: input };
       if (mode === "acceptEdits" && EDIT_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     }
@@ -852,18 +852,11 @@ export class ClaudeRunner implements Runner {
     }
   }
 
-  /** The chat's mode, except that a read-only root never skips approvals or accepts edits unasked. */
-  private effectiveMode(): string {
-    return this.options.readOnlyRoot && (this.mode === "bypassPermissions" || this.mode === "acceptEdits")
-      ? "default"
-      : this.mode;
-  }
-
   async setPermissionMode(mode: string): Promise<void> {
     this.mode = mode;
     if (!this.query) return;
     try {
-      await this.query.setPermissionMode(this.effectiveMode());
+      await this.query.setPermissionMode(mode);
     } catch (error) {
       // The live check in canUseTool already follows the new mode; the CLI itself catches up on a restart.
       logger.warn("claude setPermissionMode refused; restarting at the next idle point", {

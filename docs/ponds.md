@@ -729,8 +729,10 @@ applies.
   `open_stream` / `leave_stream` behaviour from them.
 - **Main is read-only for Ducks in a git pond** (folder ponds edit the folder). Claude's PreToolUse hook (every mode) and
   `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the Pond's root (`mainReadOnlyRoot`, a chat with no workspace
-  whose `cwd` is the root); "Skip approvals" and "Accept edits" are held at Ask there, so a shell command still asks;
-  Codex runs in its read-only sandbox (so a Codex Duck cannot yet edit a Stream; held for a later ticket). A Duck edits a
+  whose `cwd` is the root); the refusal is a message pointing at `open_stream`, never an
+  approval prompt: the chosen permission mode alone decides whether to ask (Skip approvals never asks, Bash is never escalated
+  by the Main guard). Codex keeps Main read-only through the sandbox (read-only, or workspace-write with the joined Streams as
+  writable roots) and its approval policy follows the chosen mode. A Duck edits a
   Stream by full path: `SessionHost.guardEdit` refuses a file inside a Stream's folder the Duck has not joined, and takes
   the per-file lock (`file-locks.ts`, one lock per absolute file, so per Stream) for the ones it has.
 - **Room.** Creating, joining or leaving posts one line from Squeak under the Duck's name: `created Stream <title>`,

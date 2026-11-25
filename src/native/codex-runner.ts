@@ -289,19 +289,25 @@ export class CodexRunner implements Runner {
     this.mode = mode;
   }
 
-  /** The chat's mode as a Codex policy; a read-only root is held at the read-only sandbox in every mode. */
+  /**
+   * The chat's mode as a Codex policy. A read-only root keeps Main read-only through the sandbox only (writable roots are the
+   * joined Streams, or nothing); the approval policy always follows the chosen mode.
+   */
   private policy(): CodexPolicy {
-    if (!this.options.readOnlyRoot) return codexPolicyFor(this.mode);
+    const base = codexPolicyFor(this.mode);
+    if (!this.options.readOnlyRoot) return base;
     const roots = this.streams();
-    // Asks before what it does not trust, like Ask mode; "Skip approvals" and "Accept edits" are held at Ask here.
-    if (roots.length > 0) {
-      return {
-        approvalPolicy: "untrusted",
-        sandbox: "workspace-write",
-        sandboxPolicy: { type: "workspaceWrite", writableRoots: roots },
-      };
-    }
-    return codexPolicyFor("plan");
+    const readOnly = {
+      approvalPolicy: base.approvalPolicy,
+      sandbox: "read-only" as const,
+      sandboxPolicy: { type: "readOnly" },
+    };
+    if (roots.length === 0 || this.mode === "plan") return readOnly;
+    return {
+      approvalPolicy: base.approvalPolicy,
+      sandbox: "workspace-write",
+      sandboxPolicy: { type: "workspaceWrite", writableRoots: roots },
+    };
   }
 
   private streams(): string[] {

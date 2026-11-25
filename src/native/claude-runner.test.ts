@@ -922,13 +922,20 @@ describe("a read-only root (Main of a git pond for a duck)", () => {
     expect(readOnlyDenial("/repo", "/repo", "Bash", { command: "ls" })).toBeNull();
   });
 
-  it("refuses edits in every mode (hook and canUseTool) and never skips approvals for a shell command", async () => {
-    for (const mode of ["bypassPermissions", "acceptEdits", "default"]) {
+  it("the chosen mode alone decides asking: Main edits are refused (never asked) in every mode, Bash and Stream edits follow the mode", async () => {
+    // [mode, Bash in Main asks, Edit in a joined Stream asks]
+    const table: [string, boolean, boolean][] = [
+      ["bypassPermissions", false, false],
+      ["acceptEdits", true, false],
+      ["default", true, true],
+      ["plan", true, true],
+    ];
+    for (const [mode, bashAsks, streamEditAsks] of table) {
       const f = fakeQuery();
       const asked: string[] = [];
       const { h } = hooks((kind, payload) => {
         asked.push((payload as { toolName: string }).toolName);
-        return { decision: "deny" };
+        return { decision: "allow" };
       });
       const r = new ClaudeRunner({
         cwd: "/repo",
@@ -938,28 +945,40 @@ describe("a read-only root (Main of a git pond for a duck)", () => {
         queryFn: f.queryFn,
         executable: "/bin/claude",
         readOnlyRoot: "/repo",
+        streamDirs: () => ["/ws/feat-a"],
       });
       await r.send("go");
       await tick();
       const options = f.calls[0]!;
-      expect(options.permissionMode).toBe(mode === "default" ? "default" : "default");
+      expect(options.permissionMode).toBe(mode);
       const hook = hookOf(options);
-      const out = await hook({ tool_name: "Write", tool_input: { file_path: "/repo/x.ts" } });
-      expect(out.hookSpecificOutput).toMatchObject({
-        permissionDecision: "deny",
-        permissionDecisionReason: READ_ONLY_ROOT_REASON,
-      });
       expect(
-        (await hook({ tool_name: "Write", tool_input: { file_path: "/tmp/x.ts" } })).hookSpecificOutput,
+        (await hook({ tool_name: "Write", tool_input: { file_path: "/repo/x.ts" } })).hookSpecificOutput,
+      ).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: READ_ONLY_ROOT_REASON });
+      expect(
+        (await hook({ tool_name: "Write", tool_input: { file_path: "/ws/feat-a/x.ts" } })).hookSpecificOutput,
       ).toBeUndefined();
       expect((await hook({ tool_name: "Bash", tool_input: { command: "ls" } })).hookSpecificOutput).toBeUndefined();
-      const can = options.canUseTool as Can;
-      expect((await can("Edit", { file_path: "/repo/a.ts" }, {})).behavior).toBe("deny");
+      const can = options.canUseTool as Can &
+        ((
+          n: string,
+          i: Record<string, unknown>,
+          c: Record<string, unknown>,
+        ) => Promise<{ behavior: string; message?: string }>);
+      // Edit in Main: refused with the message, never asked
+      const refused = (await can("Edit", { file_path: "/repo/a.ts" }, {})) as { behavior: string; message?: string };
+      expect(refused).toMatchObject({ behavior: "deny", message: READ_ONLY_ROOT_REASON });
       expect(asked).toEqual([]);
-      expect((await can("Bash", { command: "rm -rf x" }, {})).behavior).toBe("deny"); // asked, and the person said no
-      expect(asked).toEqual(["Bash"]);
+      // Bash in Main (the live report: Skip approvals asked for a read-only sed)
+      expect((await can("Bash", { command: "sed -n 1,5p a.swift" }, {})).behavior).toBe("allow");
+      expect(asked).toEqual(bashAsks ? ["Bash"] : []);
+      asked.length = 0;
+      // Edit in a joined Stream
+      expect((await can("Edit", { file_path: "/ws/feat-a/a.ts" }, {})).behavior).toBe("allow");
+      expect(asked).toEqual(streamEditAsks ? ["Edit"] : []);
+      // a live mode change reaches the CLI as chosen
       await r.setPermissionMode("bypassPermissions");
-      expect(f.state.modes.at(-1)).toBe("default");
+      expect(f.state.modes.at(-1)).toBe("bypassPermissions");
     }
   });
 
