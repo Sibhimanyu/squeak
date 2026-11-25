@@ -1274,14 +1274,24 @@ produces sits beside its chat. The old layout stays exactly as it is while the s
   search) shows at the end of the row while it is open and leaves with it; showing it never changes its duty (Off duty
   stays a separate action). Clicking an avatar shows that Duck's chat in the centre; clicking Room shows the Room. The
   Dashboard stays on the existing Room | Dashboard switch and shows the same row with nothing selected. Tabs are hidden
-  (the tab code stays for the old layout and for files, canvases and terminals until stage 2 moves them).
+  (the tab code stays for the old layout; in a Duck view files, canvases, diffs and terminals open in the work pane).
 - **Room = home, with the Pond panel on the right.** In the Room the right side is the Pond panel, not the generic inspector:
   who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`). It lists host
   values and decides nothing. In a Duck view the right inspector is hidden.
-- **Duck view = chat + slim icon rail + work pane (stage 2, planned).** A 52pt rail at the right of the chat holds Changes,
-  Files, Canvas and Terminal icons (selected: `selected` fill, a 3pt duck-yellow bar at its left edge, count badges
-  on Changes). Clicking one opens a 420pt work pane beside the chat with a segmented header (Changes / Files / Canvas /
-  Terminal) and the Duck's name. The Terminal opens in the same work pane: no bottom dock or drawer in this layout.
+- **Duck view = chat + slim icon rail + work pane (stage 2, built).** A 52pt rail at the right edge of the chat holds
+  Changes, Files, Canvas and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
+  edge; a duck-yellow count badge on Changes with the changed-file count, "99+" past 99). Clicking an icon opens the work
+  pane beside the chat (inside the Duck view, 420pt by default, 300 to 720, resizable); clicking the same icon closes it.
+  The pane header carries the Duck's name, a pin and a close control, then a segmented Changes / Files / Canvas / Terminal
+  picker, then the existing view hosted as it is: the changed-files list with the diff review, the Files browser with
+  the file viewer, the Pond's canvases with the canvas viewer and editor, and the Duck's shell (shell chips and "New shell"
+  appear with a second shell). A viewer inside the pane has a slim back row to its list. The pin keeps the pane open when
+  you switch Ducks (it shows that Duck's last view); unpinned, it closes on a switch. The pane remembers its last view and
+  its width per Duck. It opens only when something is opened (a rail icon, a file, diff or canvas a Duck shows, a clicked
+  path, the Code and Terminal shortcuts), never because data changed. There is no bottom dock or drawer and no right
+  inspector in a Duck view; the Terminal lives in the pane. The pane slides in at `motion-standard` (ease-out) while the
+  chat takes its final width at once, so the chat reflows once with no travel. Decisions (which view, open, close, pin,
+  per-Duck memory and width) are `WorkPane` in SqueakMacCore; the views only draw them.
 - **Composer and messages (stage 3, planned).** Tool icons (attach, mention, command, voice) sit inside the field on its
   left, a model chip floats above the field's left edge, and the send button is a round duck-yellow disc (`ink` glyph on
   `duck`, 12.9:1). A message's footer (copy, time, retry) shows only on hover.
@@ -1289,7 +1299,7 @@ produces sits beside its chat. The old layout stays exactly as it is while the s
   chats not opened yet (`PondRowMarks`), and the amber `triangle-alert` when something waits on you. No coloured state dots
   (section 3.3).
 - **Colour.** The accent is the duck's yellow plus each Pond's own colour (section 3.5). State colours keep their meaning.
-- **Stages.** 1: setting, Duck row, Pond panel, Pond rows (built). 2: icon rail and work pane (planned). 3: composer and
+- **Stages.** 1: setting, Duck row, Pond panel, Pond rows (built). 2: icon rail and work pane (built). 3: composer and
   hover-only footer (planned). The new layout becomes the default only after a debug-build pass by the owner.
 
 ## 9. Voice and copy
