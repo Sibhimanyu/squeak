@@ -387,7 +387,7 @@ describe("the thread context places the duck", () => {
     const text = note(h, main);
     expect(text).toContain("Main is read-only for ducks");
     expect(text).toContain("pond app");
-    expect(text).toMatch(/- feat\/a: .*ducks: Login/);
+    expect(text).toMatch(new RegExp(`- feat\\/a: .*ducks: ${h.store.duckBySession(a.id)!.name}`));
     for (const t of ["branch_off", "join_branch"]) expect(text).toContain(t);
   });
 

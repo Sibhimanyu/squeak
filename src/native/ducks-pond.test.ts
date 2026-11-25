@@ -159,7 +159,7 @@ describe("duck migration", () => {
     expect(ducks).toHaveLength(2);
     const da = store.duckBySession(a.id)!;
     expect(da).toMatchObject({ name: "Pip", role: "layout", duty: "off", colourSeed: a.id, currentSessionId: a.id });
-    expect(store.duckBySession(b.id)).toMatchObject({ name: null, colourSeed: b.id });
+    expect(store.duckBySession(b.id)).toMatchObject({ name: expect.any(String), colourSeed: b.id });
     expect(store.duckOf(a.id)).toEqual({ name: "Pip", role: "layout", duty: "off" });
     expect(store.offDutyIds().has(a.id)).toBe(true);
   });

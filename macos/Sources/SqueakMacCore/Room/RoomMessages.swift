@@ -252,7 +252,7 @@ public enum RoomMessages {
             if p.kind == .handoff || (p.level == .agents && p.author.kind != .person) {
                 if p.kind == .handoff || p.toSessionId != nil {
                     let from = p.sessionId.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
-                    let to = p.toSessionId.flatMap { threads[$0]?.duckName }
+                    let to = p.toName ?? p.toSessionId.flatMap { threads[$0]?.duckName }
                     let note = RoomHandoff(
                         fromSessionId: p.sessionId, from: from, agent: p.sessionId.flatMap { threads[$0]?.agent }, to: to,
                         body: p.text.trimmingCharacters(in: .whitespacesAndNewlines))

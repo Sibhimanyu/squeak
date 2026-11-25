@@ -12,7 +12,7 @@ export interface DutyKeeperOptions {
   schedule?: (fn: () => void, ms: number) => { stop: () => void };
 }
 
-/** Puts Ducks that had no new work for an hour Off duty: once at start, then on a timer. */
+/** Puts Ducks that had no new work for an hour Off duty: on a timer, never at start (the hour is watched while the host runs). */
 export class DutyKeeper {
   private timer: { stop: () => void } | null = null;
 
@@ -32,7 +32,6 @@ export class DutyKeeper {
 
   start(): void {
     if (this.timer) return;
-    this.tick();
     const every = this.o.everyMs ?? 5 * 60_000;
     this.timer =
       this.o.schedule?.(() => this.tick(), every) ??

@@ -193,6 +193,15 @@ struct RoomMessagesTests {
         #expect(RoomHandoff.isLong((1...7).map(String.init).joined(separator: "\n")))
     }
 
+    @Test func aHandoffNamesTheReceiverTheHostSent() throws {
+        let json = #"{"seq":2,"id":"p2","author":{"kind":"agent","id":"s1","name":"x"},"sessionId":"s1","kind":"message","level":"agents","text":"hi","toSessionId":"s9","toName":"Moss","at":1}"#
+        let p = try JSONDecoder().decode(RoomPost.self, from: Data(json.utf8))
+        #expect(p.toName == "Moss")
+        let f = feed(posts: [p], threads: [thread("s1", name: "Pip")])
+        let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s.text } else { nil } }
+        #expect(lines.count == 1 && lines[0].hasPrefix("Pip \u{2192} Moss"))
+    }
+
     @Test func duckToDuckNotesAreClosedByDefaultAndOpenOnATap() {
         let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
         let f = feed(posts: [post(1, "Sage, the API changed.\nSee routes.ts for the new shape.", by: agent, at: base, kind: .message, level: .agents, sid: "s1", to: "s2")],

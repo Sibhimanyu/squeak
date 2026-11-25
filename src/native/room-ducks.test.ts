@@ -64,18 +64,20 @@ async function server() {
 }
 
 describe("ducks", () => {
-  it("threads carry name (default the title), role, duty (default on) and lastActiveAt", async () => {
+  it("threads carry name (a short host-picked one by default, the title kept apart), role, duty (default on) and lastActiveAt", async () => {
     const h = await server();
     const s = h.chat("Layout builder");
     const t = h.srv.room.threads(h.project.id)[0]!;
-    expect(t).toMatchObject({ sessionId: s.id, name: "Layout builder", duty: "on", title: "Layout builder" });
+    const hostName = h.srv.room.duckName(s);
+    expect(hostName).not.toBe("Layout builder");
+    expect(t).toMatchObject({ sessionId: s.id, name: hostName, duty: "on", title: "Layout builder" });
     expect(t.role).toBeUndefined();
     expect(t.lastActiveAt).toBe(Date.parse(s.updatedAt));
     h.srv.room.setDuck(s.id, { name: "Pip", role: "Layout builder & webcam views" });
     expect(h.srv.room.threads(h.project.id)[0]).toMatchObject({ name: "Pip", role: "Layout builder & webcam views" });
     h.srv.room.setDuck(s.id, { name: null, role: null });
     const back = h.srv.room.threads(h.project.id)[0]!;
-    expect(back.name).toBe("Layout builder");
+    expect(back.name).toBeTruthy();
     expect(back.role).toBeUndefined();
   });
 
@@ -93,7 +95,7 @@ describe("ducks", () => {
     const ok = await h.call("PATCH", url, { name: "Pip", role: "Webcam views" });
     expect(await ok.json()).toEqual({ name: "Pip", role: "Webcam views" });
     const cleared = await h.call("PATCH", url, { name: null, role: null });
-    expect(await cleared.json()).toEqual({ name: "Layout builder" });
+    expect(await cleared.json()).toEqual({ name: expect.any(String) });
   });
 
   it("POST duty: strict body, toggles, and a thread frame streams on each change", async () => {

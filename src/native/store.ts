@@ -1,3 +1,4 @@
+import { pickDuckName } from "./duck-names.js";
 import { prettifyName } from "./stream-names.js";
 import { randomUUID } from "node:crypto";
 import { NOTEBOOK_ENTRY_MAX, overCap } from "./pond-notebook.js";
@@ -1664,6 +1665,8 @@ export class NativeStore {
     this.ducksTable();
     const id = randomUUID();
     const at = input.currentSessionId ? this.getSession(input.currentSessionId) : null;
+    const seed = input.colourSeed ?? id;
+    const name = input.name?.trim() ? input.name : this.freshDuckName(input.projectId, seed);
     this.db
       .prepare(
         `INSERT INTO ducks (id, project_id, name, role, colour_seed, notebook, current_session_id, created_at, duty, workspace_id, branch)
@@ -1672,9 +1675,9 @@ export class NativeStore {
       .run(
         id,
         input.projectId,
-        input.name ?? null,
+        name,
         input.role ?? null,
-        input.colourSeed ?? id,
+        seed,
         input.currentSessionId ?? null,
         input.createdAt ?? nowIso(),
         input.duty ?? "on",
@@ -1698,6 +1701,11 @@ export class NativeStore {
   ): void {
     const cur = this.duckRow(id);
     if (!cur) return;
+    // A Duck always has a name: clearing it (or never having one) hands back a host-picked one.
+    const pond = patch.projectId !== undefined ? patch.projectId : cur.projectId;
+    if (patch.name !== undefined ? !(patch.name ?? "").trim() : !cur.name?.trim()) {
+      patch = { ...patch, name: this.freshDuckName(pond, cur.colourSeed, id) };
+    }
     this.db
       .prepare("UPDATE ducks SET name=?, role=?, notebook=?, duty=?, current_session_id=?, project_id=? WHERE id=?")
       .run(
@@ -1710,6 +1718,24 @@ export class NativeStore {
         id,
       );
     if (patch.currentSessionId) this.syncDuckLinks(id);
+  }
+
+  /** A short stable name for a Duck with none: unique in its Pond, seeded by its colour seed. */
+  freshDuckName(projectId: string, seed: string, exceptId?: string): string {
+    const taken = this.listDucks(projectId)
+      .filter((d) => d.id !== exceptId && d.name)
+      .map((d) => d.name as string);
+    return pickDuckName(seed, taken);
+  }
+
+  /** Names every unnamed Duck (oldest first, so the result is the same on every host). Returns how many. */
+  nameUnnamedDucks(): number {
+    this.ducksTable();
+    const rows = this.db
+      .prepare("SELECT id FROM ducks WHERE name IS NULL OR TRIM(name)='' ORDER BY created_at, id")
+      .all() as Row[];
+    for (const r of rows) this.updateDuck(r.id as string, {});
+    return rows.length;
   }
 
   /** The duck's working copy and branch follow its current session's. */

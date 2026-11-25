@@ -934,6 +934,7 @@ describe("the decider routes a new Task", () => {
   it("the files a Duck changed count toward the Task", async () => {
     const r = rig();
     const s = r.chat("Pixel");
+    r.room.setDuck(s.id, { name: "Pixel" });
     r.turn(s, "t1", "adjust things", 30, { minAgo: 10, reply: "Done." });
     r.log.append(s.id, {
       type: "step.added",
