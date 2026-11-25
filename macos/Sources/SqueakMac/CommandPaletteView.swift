@@ -289,7 +289,7 @@ struct CommandPaletteView: View {
         case .workspace(let key):
             // The result stands for one chat of the stream: that chat's own state.
             let chat = model.session(key)
-            StreamStateMark(state: .of(marks: [chat.flatMap { model.mark(for: $0) }], ducklingsRunning: chat.map { model.withHostBackground($0).backgroundRunning } ?? 0), slotWidth: 14)
+            StreamStateMark(state: .of(marks: [chat.flatMap { model.mark(for: $0) }], ducklingsRunning: chat.map { model.withHostBackground($0).helpersKeepWorking ? 1 : 0 } ?? 0), slotWidth: 14)
         case .action(let a): actionIcon(a)
         }
     }

@@ -842,6 +842,7 @@ final class AppModel {
         var s = s
         if s.ducklings == nil { s.ducklings = info.ducklings }
         if s.backgroundCount == nil { s.backgroundCount = info.backgroundCount }
+        if s.helpersWorking == nil { s.helpersWorking = info.helpersWorking }
         return s
     }
 

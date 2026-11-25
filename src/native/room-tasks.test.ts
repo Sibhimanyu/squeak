@@ -601,6 +601,26 @@ describe("tasks", () => {
     await expect(r.jobs.act(r.pid, t.id, { action: "drop" })).rejects.toThrow(/already dropped/);
   });
 
+  it("a working Task whose turn never shows up is blocked once its chat is idle, not working for good", async () => {
+    let at = 1_000_000;
+    const r = rig({ extra: { now: () => at } });
+    const s = r.chat("Layout builder");
+    const t = r.jobs.fromMessage(r.pid, r.say("fix the layout builder spacing").id);
+    await r.jobs.act(r.pid, t.id, { action: "go" });
+    expect(r.jobs.get(t.id)!.job.state).toBe("working");
+    // too soon: the turn may still be on its way
+    at += 60_000;
+    expect(r.jobs.list(r.pid)[0]!.state).toBe("working");
+    // a chat still working keeps it, however long
+    r.store.setStatus(s.id, "working");
+    at += 600_000;
+    expect(r.jobs.list(r.pid)[0]!.state).toBe("working");
+    // the chat stopped and no turn ever matched: not working any more
+    r.store.setStatus(s.id, "idle", true);
+    expect(r.jobs.list(r.pid)[0]!.state).toBe("blocked");
+    expect(r.jobs.get(t.id)!.job.state).toBe("blocked");
+  });
+
   it("maps pre-Task rows to Task states once, at open", () => {
     const old = (status: string, extra: object = {}) =>
       JSON.stringify({

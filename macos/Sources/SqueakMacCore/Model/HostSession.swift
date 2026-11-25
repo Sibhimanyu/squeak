@@ -78,6 +78,10 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var streamMissing: StreamMissing? = nil
     /// The host says only a duckling works in this working chat (`ClaudeActivity`); nil from an older host.
     public var hostDucklingsOnly: Bool? = nil
+    /// The host's own word that this chat's helpers keep it working although its turn ended (`helpersKeepWorking`: a running
+    /// subagent, an unreported one, a shell started in the last minute; an old shell, a dev server left up, does not).
+    /// nil: the host says nothing (an older host, a daemon row), so a running helper counts as it used to.
+    public var helpersWorking: Bool? = nil
     /// Set by `ClaudeActivity.apply`: the chat reads as ready (its state) but Claude's turn is still open, waiting on a
     /// foreground duckling, so a message is queued or steered, never started as a new turn.
     public var turnOpen: Bool? = nil
@@ -93,7 +97,16 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var backgroundRunning: Int { max(ducklings?.running ?? 0, backgroundCount ?? 0) }
 
     /// Working now, or idle with background work running: the chat keeps its working look (sidebar, tabs, stream rows).
-    public var isActive: Bool { alive != false && (state == .working || backgroundRunning > 0) }
+    public var isActive: Bool { alive != false && (state == .working || helpersKeepWorking) }
+
+    /// Background work keeps this chat working: the host's rule (`helpersWorking`), never the bare count of running
+    /// helpers, which includes a shell left up for days. An errored chat stays errored (the daemon's rule: only a
+    /// finished or idle chat is held), so a stale helper never draws the working glyph over a failure.
+    public var helpersKeepWorking: Bool {
+        guard alive != false, state != .error else { return false }
+        if let helpersWorking { return helpersWorking || (backgroundCount ?? 0) > 0 }
+        return backgroundRunning > 0
+    }
 
     /// Working and repeating a failing step: the daemon's `looping` counts as the person's to act on, so it sits under
     /// Needs you (one rule for every list, count and mark). Clears with the flag, or when the chat stops working.

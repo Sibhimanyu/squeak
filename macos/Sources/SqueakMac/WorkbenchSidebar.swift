@@ -290,7 +290,7 @@ struct WorkbenchSidebar: View {
     /// A pond's status at a glance, from every thread in its streams (the daemon's rollup, same precedence).
     private func pondRollup(_ workspaces: [SidebarWorkspace]) -> StatusRollup {
         let chats = workspaces.flatMap(\.chats).map { model.withHostBackground($0) }
-        return StatusRollup.of(marks: chats.map { model.mark(for: $0) }, ducklingsRunning: chats.map(\.backgroundRunning))
+        return StatusRollup.of(marks: chats.map { model.mark(for: $0) }, ducklingsRunning: chats.map { $0.helpersKeepWorking ? 1 : 0 })
     }
 
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no

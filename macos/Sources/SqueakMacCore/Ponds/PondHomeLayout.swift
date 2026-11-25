@@ -242,7 +242,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                 if let thread { used.insert(thread.id) }
                 var made = PondChatRow(
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
-                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
+                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.helpersKeepWorking ? (s.ducklings?.running ?? 0) : 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
                 if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false; made.offDuty = offDutyNotes[id] ?? PondOffDutyNote(line: "Off duty") }
                 return made
