@@ -177,11 +177,10 @@ private struct DashboardWorkspaceCard: View {
                     Text(verbatim: preview).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
-                HStack(spacing: 5) {
-                    StreamStateMark(state: .of(chats: workspace.chats.map { model.withHostBackground($0) }, mark: { model.mark(for: $0) }), slotWidth: 14, name: workspace.branch ?? workspace.displayTitle)
-                    Text(verbatim: workspace.branch ?? workspace.displayTitle).font(Typo.meta).foregroundStyle(Theme.muted)
-                        .lineLimit(1).truncationMode(.middle)
-                }
+                // The stream line is text only: the card is about its destination chat, whose own mark sits top right. A rollup
+                // glyph here animated on a Needs-you card because a sibling Duck worked, and its slot bled past the padding.
+                Text(verbatim: DashboardBoard.streamLine(in: workspace)).font(Typo.meta).foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.middle)
                 HStack(spacing: 6) {
                     Text("\(workspace.chats.count) \(model.ducksMode ? (workspace.chats.count == 1 ? "duck" : "ducks") : (workspace.chats.count == 1 ? "chat" : "chats"))")
                         .font(Typo.meta).foregroundStyle(Theme.subtle)

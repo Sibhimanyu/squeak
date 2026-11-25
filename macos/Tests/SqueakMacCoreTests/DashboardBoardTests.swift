@@ -35,6 +35,27 @@ import Testing
         #expect(SessionGrouping.kind(of: c, now: now) == .done)
     }
 
+    // The greenroom bug: an errored Needs-you card drew an animated glyph on its stream line because sibling Ducks worked.
+    // The line is text only now; the card's state is its destination chat's own mark, which never animates here.
+    @Test func aNeedsYouCardNeverAnimatesAGlyphWhileSiblingsWork() {
+        var failed = chat("failed", workspace: "greenroom", state: .error)
+        failed.title = "Zoom SDK Video Subscription Instability"
+        var sibling = chat("sibling", workspace: "greenroom", state: .working)
+        sibling.ducklings = DucklingSet(running: 1)
+        let workspace = SidebarTreeBuilder.build([failed, sibling, chat("third", workspace: "greenroom", state: .working)], now: now).projects[0].workspaces[0]
+        #expect(DashboardBoard.lane(for: workspace, now: now) == .needsYou)
+        let dest = try? #require(DashboardBoard.destination(in: workspace, now: now))
+        #expect(dest?.key.hostSessionId == "failed")
+        // The rollup would read working (a sibling works): that is exactly what the card must not draw.
+        let rollup = StreamGlyphState.of(chats: workspace.chats, mark: { ChatMark.of($0, unread: false, now: now) })
+        #expect(rollup == .working)
+        // What the card does draw: the destination chat's own mark, failed, not animated.
+        let mark = dest.flatMap { ChatMark.of($0, unread: false, now: now) }
+        #expect(mark?.kind == .failed)
+        #expect(StreamGlyphState.failed.glyph(reduceMotion: false) == StreamGlyphState.idle.glyph(reduceMotion: false))
+        #expect(DashboardBoard.streamLine(in: workspace) == "greenroom")
+    }
+
     @Test func waitingAndFailuresSurfaceWithTheChatThatNeedsAttention() {
         let tree = SidebarTreeBuilder.build([
             chat("running", workspace: "one", state: .working),

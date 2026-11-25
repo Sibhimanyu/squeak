@@ -85,6 +85,10 @@ public enum DashboardBoard {
         }
     }
 
+    /// The card's stream line: the branch, else the workspace's title. Text only, never a glyph (DESIGN.md §3.3: a glyph
+    /// animates only on a working item, and a card's state is its destination chat's own mark).
+    public static func streamLine(in workspace: SidebarWorkspace) -> String { workspace.branch ?? workspace.displayTitle }
+
     /// Open the chat responsible for a card's lane, rather than an unrelated, newer chat.
     public static func destination(in workspace: SidebarWorkspace, now: Date = Date()) -> HostSession? {
         workspace.chats.sorted(by: HomeProjects.before).min { priority($0, now: now) < priority($1, now: now) }
