@@ -204,7 +204,6 @@ struct SessionDetail: View {
             }
             transcript
         }
-        .environment(\.agentModelContext, AgentModelContext(chatModelName: chatModelName, choices: model.chatModels))
         .onAppear { focusToken += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .squeakFocusComposer)) { _ in composerExpanded = true; focusToken += 1 }
         // The chat's model, stuck state and background work, from the daemon, while the chat is on screen.

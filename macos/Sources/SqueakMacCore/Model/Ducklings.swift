@@ -12,7 +12,10 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     public var id: String
     public var kind: Kind
     public var title: String
+    /// The helper's one model, named by the host (its own report, else the call's, else the chat's). Every surface draws this.
     public var model: String?
+    /// The host had no better evidence than the chat's own model.
+    public var modelInherited: Bool
     public var status: Status
     public var startedAt: Date?
     public var endedAt: Date?
@@ -25,13 +28,14 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     /// A background command's exit code once it ended; nil for subagents, for a host that does not say, and while running.
     public var exitCode: Int?
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, lastSeenAt, summary, reportedAt, exitCode }
+    enum CodingKeys: String, CodingKey { case id, kind, title, model, modelInherited, status, startedAt, endedAt, lastSeenAt, summary, reportedAt, exitCode }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         kind = c.lenient(Kind.self, .kind) ?? .agent
         title = c.lenient(String.self, .title) ?? "Helper"
         model = c.lenient(String.self, .model).flatMap { $0.isEmpty ? nil : $0 }
+        modelInherited = c.lenient(Bool.self, .modelInherited) ?? false
         status = c.lenient(Status.self, .status) ?? .running
         func date(_ k: CodingKeys) -> Date? { c.lenient(String.self, k).flatMap(DaemonDate.parse) ?? c.lenient(Date.self, k) }
         startedAt = date(.startedAt)
@@ -42,9 +46,9 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         exitCode = c.lenient(Int.self, .exitCode)
     }
 
-    public init(id: String, kind: Kind = .agent, title: String, model: String? = nil, status: Status = .running,
+    public init(id: String, kind: Kind = .agent, title: String, model: String? = nil, modelInherited: Bool = false, status: Status = .running,
                 startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil, lastSeenAt: Date? = nil, exitCode: Int? = nil) {
-        self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
+        self.id = id; self.kind = kind; self.title = title; self.model = model; self.modelInherited = modelInherited; self.status = status
         self.startedAt = startedAt; self.endedAt = endedAt; self.lastSeenAt = lastSeenAt; self.summary = summary; self.reportedAt = reportedAt
         self.exitCode = exitCode
     }
@@ -72,9 +76,13 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
     }
 
+    /// The model a subagent shows, wherever it is drawn (the strip chip, the stream's "Duckling" row): the host's field, never
+    /// the chat's own model as a guess. Nil for a command and for a host that named none.
+    public var shownModel: String? { kind == .agent ? model.flatMap { $0.isEmpty ? nil : $0 } : nil }
+
     /// What a chip reads: "Review the diff · Sonnet 5.5 · 4m".
     public func chipText(now: Date = Date()) -> String {
-        [title, kind == .agent ? model : nil, elapsed(now: now)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        [title, shownModel, elapsed(now: now)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// The chip's mark: a check for a finished one, a cross for a failed one; a running one shows its own loader (nil).

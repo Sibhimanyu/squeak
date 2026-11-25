@@ -19,7 +19,13 @@ export interface Duckling {
   id: string;
   kind: DucklingKind;
   title: string;
+  /**
+   * The one model of this helper, named by the host from the best evidence (the helper's own reported model, then
+   * the call's `model`, then the chat's) and drawn as it is by every surface.
+   */
   model?: string;
+  /** True when no better evidence than the chat's own model exists: it runs on the chat's model. */
+  modelInherited?: true;
   status: DucklingStatus;
   startedAt: string;
   endedAt?: string;
@@ -110,7 +116,7 @@ const REPORT_CHARS = 20_000;
 const SUMMARY_CHARS = 200;
 const STEP_ROWS = 4000;
 
-interface Tracked extends Duckling {
+interface Tracked extends Omit<Duckling, "modelInherited"> {
   brief: string;
   report?: string;
   /** Row seq of the launching call: the helper's own rows come after it. */
@@ -120,8 +126,10 @@ interface Tracked extends Duckling {
   notified?: boolean;
   /** The latest row seen about it (its own rows, task events, a follow-up message). */
   lastSeenAt?: string;
-  /** The Agent tool's `model` input (an alias such as "sonnet"), before a sidechain row names the real one. */
-  modelAlias?: string;
+  /** The model came from the chat's own (the call named none), until the call's or the helper's own says better. */
+  modelInherited?: boolean;
+  /** The helper's own rows named its model: nothing overrides it. */
+  modelReported?: boolean;
   /** The subagent's own id, from its launch (or resume) result. */
   agentId?: string;
   /** Where Claude Code writes the task's output (validated by `isTaskOutputPath`). */
@@ -165,6 +173,8 @@ export class DucklingTracker {
   private readonly sends = new Map<string, { to: string; message: string }>();
   /** A SendMessage tool-use id that reached a subagent → the id of that subagent's one entry. */
   private readonly aliases = new Map<string, string>();
+  /** The chat's own model, from its latest assistant row: what a helper that names none runs on. */
+  private parentModel: string | undefined;
 
   feed(row: MessageRow): void {
     const p = rec(row.payload);
@@ -189,10 +199,17 @@ export class DucklingTracker {
         if (owner.status === "unknown") owner.status = "running"; // its own rows are still arriving: it is alive
       }
       const model = str(rec(p.message)?.model);
-      if (owner && model && !owner.model) owner.model = modelLabel(model);
+      // the helper's own report beats the call's alias and the chat's model
+      if (owner && model && !owner.modelReported) {
+        owner.model = modelLabel(model);
+        owner.modelReported = true;
+        owner.modelInherited = false;
+      }
       return;
     }
     const message = rec(p.message);
+    const rowModel = p.type === "assistant" ? str(message?.model) : undefined;
+    if (rowModel) this.parentModel = modelLabel(rowModel);
     const content = message?.content;
     if (p.type === "assistant") {
       // the agent's next assistant row after a helper's notification is the report reaching it
@@ -213,7 +230,9 @@ export class DucklingTracker {
         const kind: DucklingKind | null =
           name === "Agent" || name === "Task" ? "agent" : name === "Bash" && background ? "shell" : null;
         if (!id || !kind || this.tasks.has(id)) continue;
-        const alias = str(input.model);
+        const alias = kind === "agent" ? str(input.model) : undefined;
+        const named = alias && alias !== "inherit" ? modelLabel(alias) : undefined;
+        const model = named ?? (kind === "agent" ? this.parentModel : undefined);
         this.tasks.set(id, {
           id,
           kind,
@@ -226,7 +245,8 @@ export class DucklingTracker {
           brief: kind === "agent" ? (str(input.prompt) ?? "") : (str(input.command) ?? ""),
           seq: row.seq,
           background,
-          ...(alias ? { modelAlias: alias, model: modelLabel(alias) } : {}),
+          ...(model ? { model } : {}),
+          ...(model && !named ? { modelInherited: true } : {}),
         });
       }
       return;
@@ -435,6 +455,7 @@ export class DucklingTracker {
           kind: t.kind,
           title: t.title,
           ...(t.model ? { model: t.model } : {}),
+          ...(t.model && t.modelInherited ? { modelInherited: true as const } : {}),
           status: t.status,
           startedAt: t.startedAt,
           ...(t.endedAt ? { endedAt: t.endedAt } : {}),
@@ -465,6 +486,7 @@ export class DucklingTracker {
       kind: t.kind,
       title: t.title,
       ...(t.model ? { model: t.model } : {}),
+      ...(t.model && t.modelInherited ? { modelInherited: true as const } : {}),
       status: t.status,
       startedAt: t.startedAt,
       ...(t.endedAt ? { endedAt: t.endedAt } : {}),
