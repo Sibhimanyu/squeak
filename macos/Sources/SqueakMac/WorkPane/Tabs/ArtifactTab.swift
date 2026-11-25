@@ -42,7 +42,7 @@ struct ArtifactTabHeader<Leading: View, Trailing: View, MenuContent: View>: View
             Menu {
                 menu
             } label: {
-                HStack(spacing: 4) { Text("Export"); Lucide(.chevronDown, size: 11, color: Theme.ink) }
+                HStack(spacing: 4) { Text("Export").lineLimit(1).fixedSize(); Lucide(.chevronDown, size: 11, color: Theme.ink) }
             }
             .menuStyle(.button).buttonStyle(CompactToolStyle()).menuIndicator(.hidden).fixedSize()
             .disabled(!menuEnabled).help("Export, reveal in Finder, copy the path").accessibilityLabel("Export")

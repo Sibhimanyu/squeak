@@ -11,14 +11,18 @@ struct ReviewView: View {
     let files: FilesModel
     let session: HostSession
     var showsBackButton = true
+    /// The review-all tab has one header row of its own (`DiffTabHeaderBar`), so it asks for no bar here.
+    var showsTopBar = true
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.changesStore(for: session.key.hostSessionId)
         let list = store.changes?.files ?? []
         VStack(spacing: 0) {
-            topBar(store, list)
-            Rectangle().fill(Theme.line).frame(height: 1)
+            if showsTopBar {
+                topBar(store, list)
+                Rectangle().fill(Theme.line).frame(height: 1)
+            }
             if list.isEmpty {
                 Text(store.phase == .loading ? "Reading the changes…" : "No changes against \(store.changes?.base ?? "HEAD") yet.")
                     .font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
@@ -78,9 +82,9 @@ struct ReviewView: View {
                 Text("−\(c.removed)").foregroundStyle(Theme.negative)
             }
             Spacer(minLength: 8)
-            Button("Fold all") { for f in list where !files.review.isFolded(f.path) { files.toggleDiffFold(f.path) } }
+            Button { for f in list where !files.review.isFolded(f.path) { files.toggleDiffFold(f.path) } } label: { Text("Fold all").lineLimit(1).fixedSize() }
                 .buttonStyle(QuietButtonStyle()).disabled(list.isEmpty)
-            Button("Unfold all") { for f in list where files.review.isFolded(f.path) { files.toggleDiffFold(f.path) } }
+            Button { for f in list where files.review.isFolded(f.path) { files.toggleDiffFold(f.path) } } label: { Text("Unfold all").lineLimit(1).fixedSize() }
                 .buttonStyle(QuietButtonStyle()).disabled(list.isEmpty)
         }
         .font(.system(size: 12, design: .monospaced)).monospacedDigit()

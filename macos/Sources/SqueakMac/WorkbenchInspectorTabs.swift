@@ -119,11 +119,13 @@ struct RunTab: View {
 /// header. Hidden for any other chat and when the host has no rules route (an older service answers 404).
 struct ChatRulesButton: View {
     let session: HostSession
+    /// The new layout shows it only when there is a rule to see or remove (the empty list serves no flow).
+    var hidesWhenEmpty = false
     @Environment(AppModel.self) private var model
     @State private var open = false
 
     var body: some View {
-        if session.source == .squeak, model.native.key == session.key, let rules = model.native.rules {
+        if session.source == .squeak, model.native.key == session.key, let rules = model.native.rules, !(hidesWhenEmpty && rules.isEmpty) {
             Button { open.toggle() } label: {
                 HStack(spacing: 4) {
                     Lucide(.shield, size: 14, color: rules.isEmpty ? Theme.muted : Theme.ink)

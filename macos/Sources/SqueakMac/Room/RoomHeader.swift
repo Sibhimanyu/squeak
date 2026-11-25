@@ -30,7 +30,7 @@ struct RoomSegmented<T: Hashable>: View {
             ForEach(items, id: \.self) { item in
                 let on = item == selection
                 Button { selection = item } label: {
-                    Text(verbatim: title(item)).font(.system(size: 13, weight: on ? .medium : .regular))
+                    Text(verbatim: title(item)).font(.system(size: 13, weight: on ? .medium : .regular)).lineLimit(1).fixedSize()
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .padding(.horizontal, 12).frame(height: height - 4)
                         .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))

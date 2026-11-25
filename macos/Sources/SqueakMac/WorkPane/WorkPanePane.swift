@@ -43,7 +43,7 @@ private struct WorkPaneTerminal: View {
                 HStack(spacing: 4) {
                     ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
                         Button { host.select(workspace: folder, tab.id) } label: {
-                            Text(verbatim: InspectorLowerTab.terminalTitle(number: index + 1)).font(Typo.label)
+                            Text(verbatim: InspectorLowerTab.terminalTitle(number: index + 1)).font(Typo.label).lineLimit(1).fixedSize()
                                 .foregroundStyle(selected == tab.id ? Theme.ink : Theme.muted)
                                 .padding(.horizontal, 8).frame(height: 24)
                                 .background(selected == tab.id ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
