@@ -12,6 +12,7 @@ struct PondWorkspaceTabStrip: View {
     var embedded = false
     @Environment(AppModel.self) private var model
     @Environment(\.workbenchVisible) private var visible
+    private var live: PondLiveTabs { PondLiveTabsModel.shared.live(workspace.project.id) }
     @State private var overflow = PondStripOverflow(contentStart: 0, contentEnd: 0, viewport: 0)
     @State private var showingList = false
     @Namespace private var viewport
@@ -40,6 +41,15 @@ struct PondWorkspaceTabStrip: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(6))
                 if !Task.isCancelled { await workspace.roster.refresh(host: model.nativeHost) }
+            }
+        }
+        // Live tabs: an open diff, file or artifact is read again every few seconds, so a pill you are not on can say
+        // "updated" and a tab whose source is gone can say so.
+        .task(id: visible ? workspace.project.id : nil) {
+            guard visible else { return }
+            while !Task.isCancelled {
+                await PondLiveTabsModel.shared.refresh(workspace: workspace, model: model)
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
@@ -78,6 +88,7 @@ struct PondWorkspaceTabStrip: View {
                         }
                         ForEach(strip.items, id: \.self) { item in
                             PondItemPill(label: label(for: item), selected: selected == item,
+                                         updated: live.isUpdated(item) && selected != item, gone: live.goneState(item) != nil,
                                          select: { select(item) }, close: { model.closePondItem(item) })
                                 .id(item)
                         }
@@ -148,7 +159,10 @@ struct PondWorkspaceTabStrip: View {
         .accessibilityAddTraits(tab == selected ? .isSelected : [])
     }
 
-    private func select(_ tab: TabItem) { model.selectPondTab(tab, in: workspace, strip: strip) }
+    private func select(_ tab: TabItem) {
+        PondLiveTabsModel.shared.visit(tab, pond: workspace.project.id)
+        model.selectPondTab(tab, in: workspace, strip: strip)
+    }
 
     private func label(for item: TabItem) -> PondItemLabel {
         PondItemLabel(item: item, workspace: workspace, model: model)
@@ -207,6 +221,9 @@ struct PondItemLabel {
 private struct PondItemPill: View {
     let label: PondItemLabel
     let selected: Bool
+    /// The tab changed since the person last looked (a quiet dot); `gone` dims the pill, its page says why.
+    let updated: Bool
+    let gone: Bool
     let select: () -> Void
     let close: () -> Void
     @Environment(\.colorScheme) private var scheme
@@ -218,6 +235,9 @@ private struct PondItemPill: View {
                 HStack(spacing: 6) {
                     label.icon
                     Text(verbatim: label.title).font(Typo.label).lineLimit(1).fixedSize()
+                    if updated {
+                        Circle().fill(Theme.info).frame(width: 6, height: 6).accessibilityHidden(true)
+                    }
                     if let seed = label.colourSeed {
                         let rgb = ThreadDuck.rgb(for: seed, dark: scheme == .dark)
                         Circle().fill(Color(red: rgb.r, green: rgb.g, blue: rgb.b))
@@ -225,11 +245,13 @@ private struct PondItemPill: View {
                     }
                 }
                 .foregroundStyle(selected ? Theme.ink : Theme.muted)
+                .opacity(gone ? 0.6 : 1)
                 .padding(.leading, 10).padding(.trailing, 4)
                 .frame(height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(label.help)
+            .accessibilityValue(updated ? "updated" : "")
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityAction(named: Text("Close tab"), close)
             Button(action: close) {

@@ -21,15 +21,19 @@ struct PondDiffTab: View {
         VStack(spacing: 0) {
             DiffTabHeaderBar(session: session, path: path, fileCount: 1, showsGit: false)
             Rectangle().fill(Theme.line).frame(height: 1)
-            // A merged, deleted or reverted file says so; the tab never closes by itself.
-            if let changes = store.changes, !changes.files.contains(where: { $0.path == path }) {
-                DiffTabGone(message: "This file no longer has a diff.", close: close)
-            } else {
-                ScrollView { DiffFileSection(store: store, session: session, path: path, collapsible: false, files: files) }.clipped()
-            }
+            // A merged, deleted or reverted file says so on the item page (`PondLiveTabs`); the tab never closes by itself.
+            // The scroll view and section stay put while the diff changes, so it updates in place.
+            ScrollView { DiffFileSection(store: store, session: session, path: path, collapsible: false, files: files) }.clipped()
             if !store.tray.isEmpty { CommentTray(store: store, session: session) }
         }
         .task(id: key) { await store.refresh(sessionKey: key, visible: true, activityChanged: true) }
+        .task(id: key) {
+            // Read again while the tab is on screen, so the diff follows the Duck's edits.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                await store.refresh(sessionKey: key, visible: true)
+            }
+        }
     }
 }
 
@@ -140,19 +144,5 @@ private struct DiffTabHeaderBar: View {
             case nil: break
             }
         }
-    }
-}
-
-private struct DiffTabGone: View {
-    let message: String
-    let close: () -> Void
-
-    var body: some View {
-        VStack(spacing: Space.s) {
-            Text(verbatim: message).font(Typo.body).foregroundStyle(Theme.muted)
-            // Flow: the source is gone (merged, reverted); the person closes the tab themselves.
-            Button("Close tab", action: close).buttonStyle(SecondaryButtonStyle()).fixedSize()
-        }
-        .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
