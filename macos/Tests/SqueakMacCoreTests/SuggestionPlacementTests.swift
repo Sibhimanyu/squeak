@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import SqueakMacCore
 
@@ -11,7 +12,8 @@ import Testing
     @Test func composerAtTheBottomNeverOpensDownward() {
         let p = SuggestionPlacement.resolve(spaceAbove: 300, spaceBelow: 20, contentHeight: 400)
         #expect(p.direction == .up)
-        #expect(p.maxHeight == 300 - SuggestionPlacement.gap - SuggestionPlacement.edgeMargin)
+        let expected: CGFloat = 286
+        #expect(p.maxHeight == expected)
     }
 
     @Test func opensDownWhenOnlyBelowHoldsIt() {
