@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.34.0
+
+**The Room works for you.**
+
+- Say "make it a task" in a pond's Room and Squeak gives it to the best duck: one already on related work, or a new duck. It starts at once; turn on "Ask before starting" in Pond settings if you'd rather tap Go.
+- Ducks post one short line when they take a task, get stuck, hand off or finish. Tap a line to read more. Bigger tasks get a plan card you can comment on.
+- @mention a duck to give it work directly. Ducks hand work to each other the same way, in the Room where you can see it.
+- Each pond has a shared Notebook of lessons its ducks have learned, readable and editable in Pond settings.
+- Ducks go off duty after an idle hour and come back when related work arrives. Pond settings set how many ducks work at once (4 by default).
+- In folder ponds, two ducks can't edit the same file at once; they sort it out in the Room.
+- "Make it a Git Pond…" in a pond's ⋯ menu puts a folder pond on GitHub (private by default). "Invite someone…" is there too.
+- Members of a shared pond can follow the Room and post in it; their tasks wait for your approval unless you give them Collaborator.
+- Tidier window: the layout picker moved to Window › Workspace, duplicate buttons are gone, tabs drop before or after by half, ⌃⇧← and ⌃⇧→ move a tab, and canvas Fit eases instead of jumping.
+
 ## 2.33.3
 
 **Quitting is quitting.**
