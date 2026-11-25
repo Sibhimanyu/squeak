@@ -6,13 +6,12 @@ import SwiftUI
 // starts a line. To a duck it is that chat's own send path (PondRoomView.sendTo); to the room it is a room message.
 
 struct RoomComposer: View {
-    let room: PondRoomModel
+    @Bindable var room: PondRoomModel
     let pondName: String
     /// Where it goes, the words and the attachments; answers a sentence when it could not be prepared (nothing sent).
     let send: (RoomAddressee, String, [OutgoingAttachment]) -> String?
     @Environment(AppModel.self) private var model
     @State private var dictation = DictationController()
-    @State private var draft = ""
     @State private var to: RoomAddressee = .everyone
     @State private var contentHeight: CGFloat = 0
     @State private var caret = 0
@@ -29,7 +28,7 @@ struct RoomComposer: View {
         return names.filter { $0 != me }
     }
 
-    private var draftKey: String { ContainerDrafts.room(room.projectId) }
+    private var draft: String { room.draft }
     private var mention: RoomMention.Active? { RoomMention.active(in: draft) }
     private var candidates: [RoomMention.Candidate] {
         mention.map { RoomMention.candidates(query: $0.query, threads: room.feed.threads, people: people) } ?? []
@@ -52,18 +51,20 @@ struct RoomComposer: View {
 
     var body: some View {
         Group { if MacLayoutPreference.shared.isNew { newBox } else { oldBox } }
-        .onAppear { if draft.isEmpty { draft = ContainerDrafts.shared.draft(for: draftKey) } }
-        .onChange(of: draftKey) { _, key in draft = ContainerDrafts.shared.draft(for: key) }
-        .onChange(of: draft) { _, text in ContainerDrafts.shared.set(text, for: draftKey) }
+        .onChange(of: room.replyFocusToken) {
+            to = .everyone
+            chooser = false
+            focusToken += 1
+        }
         .onChange(of: mention?.query) { highlighted = 0 }
-        .onAppear {
+        .onChange(of: room.projectId, initial: true) { oldID, newID in
+            if oldID != newID { dictation.cancel() }
             // Dictation is the chat composer's: the words land in the field for review, nothing is sent.
             dictation.onText = { words in
-                draft = DictationState.append(words, to: draft)
+                room.draft = DictationState.append(words, to: draft)
                 focusToken += 1
             }
         }
-        .onChange(of: room.projectId) { _, _ in dictation.cancel() }
         .onDisappear { dictation.cancel() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in tray.pick() }
         .accessibilityElement(children: .contain)
@@ -78,7 +79,7 @@ struct RoomComposer: View {
                 DictationBar(dictation: dictation).padding(.top, 8)
             } else {
                 ComposerField(
-                    text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                    text: $room.draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
                     focusToken: focusToken,
                     onSend: submit, onContentHeight: { contentHeight = $0 },
                     onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
@@ -100,6 +101,7 @@ struct RoomComposer: View {
             chipLine
             VStack(alignment: .leading, spacing: 4) {
                 RoomAttachmentStrip(tray: tray).padding(.leading, 4)
+                if let reply = room.reply { quoteBlock(reply.quote) }
                 HStack(alignment: .bottom, spacing: 4) {
                     HStack(spacing: 0) {
                         RoomAttachButton(tray: tray)
@@ -118,8 +120,9 @@ struct RoomComposer: View {
                         DictationBar(dictation: dictation).frame(minHeight: 32)
                     } else {
                         ComposerField(
-                            text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                            text: $room.draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
                             focusToken: focusToken,
+                            moveCaretToEndOnFocus: room.reply != nil,
                             onSend: submit, onContentHeight: { contentHeight = $0 },
                             onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
                         )
@@ -140,6 +143,27 @@ struct RoomComposer: View {
                 picker(candidates, chrome: false)
             }
         }
+    }
+
+    private func quoteBlock(_ quote: String) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1).fill(Theme.lineStrong).frame(width: 2, height: 16)
+                .accessibilityHidden(true)
+            Text(verbatim: quote)
+                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Quoted message: \(quote)")
+            Button {
+                room.reply = nil
+                focusToken += 1
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.muted)
+                    .frame(width: 24, height: 24).contentShape(Circle())
+            }
+            .buttonStyle(.plain).pointerHand().help("Remove quote").accessibilityLabel("Remove quote")
+        }
+        .padding(.horizontal, 6)
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
     }
 
     /// Above the field: who it goes to ("Room \u{00B7} everyone", or the duck or person picked), tappable to change.
@@ -245,7 +269,7 @@ struct RoomComposer: View {
     }
 
     private func choose(_ a: RoomAddressee) {
-        if let m = mention { draft = RoomMention.removing(m, from: draft) }
+        if let m = mention { room.draft = RoomMention.removing(m, from: draft) }
         to = a
         chooser = false
         highlighted = 0
@@ -259,18 +283,20 @@ struct RoomComposer: View {
         case .up: highlighted = (highlighted + SuggestionPlacement.step(up: true, direction: pickerDirection) + list.count) % list.count
         case .down: highlighted = (highlighted + SuggestionPlacement.step(up: false, direction: pickerDirection) + list.count) % list.count
         case .accept: choose(list[min(highlighted, list.count - 1)].addressee)
-        case .escape: if let m = mention { draft = RoomMention.removing(m, from: draft) }
+        case .escape: if let m = mention { room.draft = RoomMention.removing(m, from: draft) }
         }
         return true
     }
 
     private func submit() {
         guard canSend else { return }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reply = MacLayoutPreference.shared.isNew ? room.reply : nil
+        let text = reply?.messageText(body) ?? body
         let items = tray.items
         if let problem = send(to, text, items) { tray.fail(problem); return }
-        draft = ""
-        ContainerDrafts.shared.clear(draftKey)
+        room.draft = ""
+        room.reply = nil
         tray.clear()
     }
 }

@@ -11,6 +11,7 @@ struct ComposerField: NSViewRepresentable {
     var placeholder: String
     var isEnabled = true
     var focusToken = 0
+    var moveCaretToEndOnFocus = false
     var onSend: () -> Void
     /// ⌘↩ when the field's Return sends: the conversation composer steers with it while the agent works.
     /// Nil: ⌘↩ sends only when `sendKey` is `.commandReturnSends`.
@@ -84,7 +85,14 @@ struct ComposerField: NSViewRepresentable {
         context.coordinator.reportHeight(tv)
         if context.coordinator.lastFocusToken != focusToken {
             context.coordinator.lastFocusToken = focusToken
-            DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
+            DispatchQueue.main.async {
+                tv.window?.makeFirstResponder(tv)
+                if moveCaretToEndOnFocus {
+                    let end = NSRange(location: tv.string.utf16.count, length: 0)
+                    tv.setSelectedRange(end)
+                    tv.scrollRangeToVisible(end)
+                }
+            }
         }
     }
 

@@ -48,6 +48,7 @@ struct RoomItemView: View {
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
+    let reply: ((RoomReply) -> Void)?
     let act: (String, RoomTaskAction, String?) -> Void
     let comment: (String, String) -> Void
     @State private var visible = true
@@ -70,7 +71,7 @@ struct RoomItemView: View {
         case .day(_, let label):
             Text(verbatim: label).font(.system(size: 11)).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity)
                 .padding(.vertical, 2).accessibilityAddTraits(.isHeader)
-        case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, openTarget: openTarget, answer: answer, retry: retry, makeJob: makeJob, act: act)
+        case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, openTarget: openTarget, answer: answer, retry: retry, makeJob: makeJob, reply: reply, act: act)
         case .system(let s): RoomSystemView(line: s, act: act, comment: comment, open: PondClick.target(line: s).map { t in { openTarget(t) } })
         }
     }
@@ -86,6 +87,7 @@ private struct RoomGroupView: View {
     let answer: (String, String) -> Void
     let retry: (String) -> Void
     let makeJob: (String) -> Void
+    let reply: ((RoomReply) -> Void)?
     let act: (String, RoomTaskAction, String?) -> Void
 
     var body: some View {
@@ -186,7 +188,7 @@ private struct RoomGroupView: View {
 
     @ViewBuilder private func partView(_ m: RoomMessage, _ part: RoomPart, tail: Bool) -> some View {
         switch part {
-        case .text(let t, let tone): MessageBubble(message: m, text: t, tone: tone, mine: false, tail: tail, retry: retry, makeJob: makeJob, open: opener(PondClick.target(part: part, in: m)))
+        case .text(let t, let tone): MessageBubble(message: m, text: t, tone: tone, mine: false, tail: tail, retry: retry, makeJob: makeJob, reply: reply, open: opener(PondClick.target(part: part, in: m)))
         case .chip(let sid, let text): FilesChip(text: text) { open(sid) }.padding(.top, 5)
         case .ducklings(let d):
             DucklingsDisclosure(ducklings: d, openAll: opener(PondClick.target(part: part, in: m)),
@@ -323,6 +325,7 @@ private struct MessageBubble: View {
     let tail: Bool
     let retry: (String) -> Void
     let makeJob: (String) -> Void
+    var reply: ((RoomReply) -> Void)?
     /// Opens the tab this bubble belongs to (the duck, or the duck a person's message went to); nil opens nothing.
     var open: (() -> Void)?
     @State private var hover = false
@@ -331,6 +334,11 @@ private struct MessageBubble: View {
     @State private var expanded = false
     @State private var truncated = false
     @State private var copied = false
+
+    private var replyAction: (() -> Void)? {
+        guard let reply, let excerpt = RoomBubblePlan.reply(to: message.author, quoting: text) else { return nil }
+        return { reply(excerpt) }
+    }
 
     var body: some View {
         let taskable = message.canMakeTask && message.postId != nil
@@ -354,6 +362,7 @@ private struct MessageBubble: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mine ? "You" : message.author.name): \(text)")
         .accessibilityActions {
+            if let replyAction { Button("Reply", action: replyAction) }
             if taskable, let id = message.postId { Button("Make task") { makeJob(id) } }
         }
     }
@@ -387,6 +396,7 @@ private struct MessageBubble: View {
         .onTapGesture { open?() }
         .pointerHand(open != nil)
         .contextMenu {
+            if let replyAction { Button("Reply", action: replyAction) }
             if message.canMakeTask, let id = message.postId { Button("Make task") { makeJob(id) } }
             Button("Copy") { copy() }
         }
@@ -403,15 +413,16 @@ private struct MessageBubble: View {
         Task { try? await Task.sleep(for: .seconds(1.2)); copied = false }
     }
 
-    /// Make task, Copy and Reply in one small bar (the D4 hover footer's pattern). Reply is "Make task" for a Duck message
-    /// the person can hand on; there is no threaded reply in the host, so Reply is not drawn.
+    /// Reply quotes this bubble into the Room composer. Make task and Copy act on the original bubble.
     private func actionBar(showAll: Bool, taskable: Bool) -> some View {
         HStack(spacing: 2) {
+            if showAll, let replyAction { barButton("Reply", symbol: "arrowshape.turn.up.left", replyAction) }
             if taskable, let id = message.postId {
                 barButton("Make task", symbol: "checkmark.circle") { makeJob(id) }.help("Hand this message to a duck as a task")
             }
             if showAll { barButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc") { copy() } }
         }
+        .fixedSize(horizontal: true, vertical: false)
         .padding(2)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))

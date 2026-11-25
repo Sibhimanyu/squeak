@@ -1314,8 +1314,10 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   (4 on the sender's side for the last bubble of a group), padding 10 by 14, at most 68% of the column, Markdown, selectable
   text; long text cuts at 10 lines with "Show more" inside the bubble, shown only when the layout really truncates (a hidden
   unclamped copy is measured against the `lineLimit` one, `RoomClampedText`; the cut is a clean ellipsis, never a clipped
-  half line). A floating bar on the bubble's top corner offers Make task and Copy on hover (Make task also shows at rest on the
-  newest taskable message); your own messages say "Sending\u2026", then nothing, or "Not sent" with Retry, small, under the
+  half line). A floating bar on the bubble's top corner offers Reply, Make task and Copy on hover (Make task also shows at rest on the
+  newest taskable message). To answer a specific line from a Duck or another person, choose Reply to quote it above the Room
+  draft, @mention the sender and focus the composer. Use Remove quote to drop the excerpt while keeping the draft.
+  Your own messages say "Sending\u2026", then nothing, or "Not sent" with Retry, small, under the
   bubble. Moments ("took it", "finished", blocked) are compact centred lines: a small duck glyph and "Ruby 2 finished
   \u00B7 Released Greenroom 1.8.5\u2026" in `muted` 12pt, one line; a run of one Duck's moments folds into "Ruby 2 \u00B7 4
   updates" which opens in place. Tasks are in-feed cards (title, state, owner Duck, Open). Day separators stay. The empty

@@ -38,6 +38,46 @@ import Testing
         #expect(RoomBubblePlan.words(RoomBubblePlan.ownState(pending: true, failed: true)) == "Not sent")
     }
 
+    @Test func replyQuotesOneLineAndMentionsTheDuckByName() throws {
+        let sage = RoomMessageAuthor.duck(threads[0], sessionId: "s1", fallbackName: "Chat title", agent: nil)
+        let reply = try #require(RoomBubblePlan.reply(to: sage, quoting: "\r\n  The build passed. \r\n Details below."))
+        #expect(reply.quote == "The build passed.")
+        #expect(reply.mention == "@Sage 2")
+        let draft = reply.insertingMention(in: "How long did it take?", replacing: nil)
+        #expect(draft == "@Sage 2 How long did it take?")
+        #expect(reply.messageText(draft) == "> “The build passed.”\n\n@Sage 2 How long did it take?")
+    }
+
+    @Test func replyToAPersonShortensLongQuotesAtACharacterBoundary() throws {
+        let emoji = "👩🏽‍💻"
+        let text = String(repeating: emoji, count: 95)
+        let reply = try #require(RoomBubblePlan.reply(to: .person("Anya Rao"), quoting: text))
+        #expect(reply.quote == String(repeating: emoji, count: 89) + "…")
+        #expect(reply.insertingMention(in: "", replacing: nil) == "@Anya Rao ")
+        #expect(RoomMention.active(in: reply.insertingMention(in: "", replacing: nil)) == nil)
+    }
+
+    @Test func replyingToAnotherBubbleReplacesThePreviousMentionAndKeepsTheDraft() throws {
+        let first = try #require(RoomBubblePlan.reply(to: .person("Anya"), quoting: "First"))
+        let second = try #require(RoomBubblePlan.reply(to: .person("Sam"), quoting: "Second"))
+        let draft = first.insertingMention(in: "I have a question.", replacing: nil)
+        #expect(first.insertingMention(in: draft, replacing: first) == draft)
+        #expect(second.insertingMention(in: draft, replacing: first) == "@Sam I have a question.")
+        #expect(second.insertingMention(in: "@Anyabelle is ready.", replacing: first) == "@Sam @Anyabelle is ready.")
+    }
+
+    @Test func quotedMentionsStayInTheQuoteAndReplyingAgainQuotesTheNewMessage() throws {
+        let reply = try #require(RoomBubblePlan.reply(to: .person("Anya"), quoting: "I checked with @Dot 2"))
+        let text = reply.messageText("@Anya Thanks!")
+        #expect(text == "> “I checked with ＠Dot 2”\n\n@Anya Thanks!")
+        #expect(RoomBubblePlan.reply(to: .person("Sam"), quoting: text)?.quote == "@Anya Thanks!")
+    }
+
+    @Test func replyRequiresAnotherSenderAndNonemptyText() {
+        #expect(RoomBubblePlan.reply(to: .me, quoting: "My message") == nil)
+        #expect(RoomBubblePlan.reply(to: .person("Anya"), quoting: " \r\n\t ") == nil)
+    }
+
     @Test func momentsAreOneCompactLine() {
         #expect(RoomMoment.line(name: "Ruby 2", verb: "finished", summary: "Released Greenroom 1.8.5") == "Ruby 2 finished \u{00B7} Released Greenroom 1.8.5")
         #expect(RoomMoment.line(name: "Ruby 2", verb: "took it", summary: "") == "Ruby 2 took it")

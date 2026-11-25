@@ -23,13 +23,29 @@ final class PondRoomModel {
     var filter = RoomFilter()
     static let pageSize = 50
 
+    var draft: String {
+        didSet { ContainerDrafts.shared.set(draft, for: ContainerDrafts.room(projectId)) }
+    }
+    var reply: RoomReply?
+    private(set) var replyFocusToken = 0
+
     @ObservationIgnored private var running = false
     /// What the person is attaching to the next message; survives leaving the room and coming back.
     @ObservationIgnored let tray = RoomAttachmentTray()
     /// The attachments of a message still on its way, kept so Retry sends them again.
     @ObservationIgnored private var outgoing: [String: [OutgoingAttachment]] = [:]
 
-    init(projectId: String, member: Bool = false) { self.projectId = projectId; self.member = member }
+    init(projectId: String, member: Bool = false) {
+        self.projectId = projectId
+        self.member = member
+        self.draft = ContainerDrafts.shared.draft(for: ContainerDrafts.room(projectId))
+    }
+
+    func beginReply(_ reply: RoomReply) {
+        draft = reply.insertingMention(in: draft, replacing: self.reply)
+        self.reply = reply
+        replyFocusToken += 1
+    }
 
     private func client(_ host: NativeHostClient) -> RoomClient { RoomClient(host: host, member: member) }
 
@@ -320,6 +336,12 @@ struct PondRoomView: View {
 
     private func conversation(_ room: PondRoomModel, _ items: [RoomItem], _ working: [RoomWorkingLine]) -> some View {
         let count = items.count + working.count + items.reduce(0) { n, i in if case .group(let g) = i { n + g.messages.count } else { n } }
+        let reply: ((RoomReply) -> Void)?
+        if MacLayoutPreference.shared.isNew && postBlock == nil {
+            reply = { excerpt in room.beginReply(excerpt) }
+        } else {
+            reply = nil
+        }
         return ScrollViewReader { proxy in
             ScrollView {
                 // Eager, not lazy: every row of the newest window is laid out at once, so the bottom anchor is exact from the
@@ -334,6 +356,7 @@ struct PondRoomView: View {
                             item: item, ducks: room.feed.threads, ledger: ledger, open: openThread, openTarget: openTarget, answer: answer,
                             retry: { id in Task { await room.retry(id, host: model.nativeHost) } },
                             makeJob: { id in Task { await room.makeJob(messageId: id, host: model.nativeHost) } },
+                            reply: reply,
                             act: { jobId, a, title in Task { await room.act(jobId: jobId, a, title: title, host: model.nativeHost) } },
                             comment: { card, text in Task { await room.comment(cardId: card, text: text, host: model.nativeHost) } })
                     }
