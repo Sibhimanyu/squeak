@@ -97,6 +97,70 @@ import Testing
         #expect(column.workspaces.map(\.workspace.name) == ["old", "new", "middle"])
     }
 
+    // The greenroom bug (ducksOwnBranch): a pond is one row holding every Duck, so its card took the errored Duck's state and
+    // folded the working ones into "3 ducks". Each Duck is its own card now, in the lane of its own chats.
+    private func duck(_ id: String, duck: String?, state: SessionState, ducklings: Int = 0, cwd: String? = nil) -> HostSession {
+        var c = chat(id, workspace: "greenroom", state: state)
+        c.duckId = duck
+        c.cwd = cwd
+        c.branch = nil
+        c.repoName = "greenroom"
+        if ducklings > 0 { c.ducklings = DucklingSet(running: ducklings) }
+        return c
+    }
+
+    @Test func pondWideDucksWithNoWorkspaceEachLandInTheirOwnLane() {
+        let chats = [
+            duck("zoom", duck: "d-zoom", state: .error),
+            duck("pickle", duck: "d-pickle", state: .finished, ducklings: 1),
+            duck("dhol", duck: "d-dhol", state: .working, ducklings: 2),
+        ]
+        let tree = SidebarTreeBuilder.build(chats, now: now, ducksMode: true)
+        let columns = DashboardBoard.build(tree, now: now)
+        let titles = { (lane: DashboardLane) in columns.first { $0.lane == lane }!.workspaces.flatMap(\.workspace.chats).map(\.title).sorted() }
+        #expect(titles(.needsYou) == ["zoom"])
+        #expect(titles(.working) == ["dhol", "pickle"])
+        #expect(columns.flatMap(\.workspaces).count == 3)
+        #expect(Set(columns.flatMap(\.workspaces).map(\.id)).count == 3)
+    }
+
+    @Test func oneWorkspaceHoldingAnErroredAndTwoWorkingDucksShowsAllThree() {
+        let dir = "/w/greenroom"
+        let chats = [
+            duck("zoom", duck: "d-zoom", state: .error, cwd: dir),
+            duck("pickle", duck: "d-pickle", state: .working, ducklings: 1, cwd: dir),
+            duck("dhol", duck: "d-dhol", state: .working, ducklings: 2, cwd: dir),
+        ]
+        let columns = DashboardBoard.build(SidebarTreeBuilder.build(chats, now: now, ducksMode: true), now: now)
+        let inLane = { (lane: DashboardLane) in columns.first { $0.lane == lane }!.workspaces.flatMap(\.workspace.chats).map(\.title).sorted() }
+        #expect(inLane(.working) == ["dhol", "pickle"])
+        #expect(inLane(.needsYou) == ["zoom"])
+        // Each card's glyph comes from its own chat.
+        let working = columns.first { $0.lane == .working }!.workspaces
+        #expect(working.allSatisfy { DashboardBoard.destination(in: $0.workspace, now: now)?.state == .working })
+        #expect(DashboardBoard.ducklingTotals(columns).running == 3)
+        // A plain stream (not ducks mode) stays one card, in the most urgent lane.
+        let stream = DashboardBoard.build(SidebarTreeBuilder.build(chats, now: now), now: now)
+        #expect(stream.first { $0.lane == .needsYou }!.workspaces.count == 1)
+    }
+
+    @Test func aDuckWithSeveralChatsIsOneCardAndAChatWithNoDuckIsItsOwn() {
+        let chats = [
+            duck("a1", duck: "d", state: .finished), duck("a2", duck: "d", state: .working),
+            duck("solo", duck: nil, state: .working),
+        ]
+        let columns = DashboardBoard.build(SidebarTreeBuilder.build(chats, now: now, ducksMode: true), now: now)
+        #expect(columns.flatMap(\.workspaces).count == 2)
+        #expect(columns.first { $0.lane == .working }!.workspaces.count == 2)
+    }
+
+    @Test func theWorkspaceFilterKeepsAPondRowsDuckCards() {
+        let tree = SidebarTreeBuilder.build([duck("x", duck: "d1", state: .working), duck("y", duck: "d2", state: .error)], now: now, ducksMode: true)
+        let row = tree.projects[0].workspaces[0]
+        let board = DashboardBoard.build(tree, now: now)
+        #expect(DashboardFilter.workspace(id: row.id, name: "greenroom").apply(to: board).flatMap(\.workspaces).count == 2)
+    }
+
     @Test func emptyBoardsKeepAllFourLanes() {
         let columns = DashboardBoard.build(SidebarTree(projects: []), now: now)
         #expect(columns.count == 4)
