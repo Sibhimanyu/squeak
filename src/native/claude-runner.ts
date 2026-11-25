@@ -127,6 +127,12 @@ export interface ClaudeRunnerOptions {
    * in every mode, and "Skip approvals" and "Accept edits" are held at "Ask" so a shell command still asks.
    */
   readOnlyRoot?: string | null;
+  /**
+   * The working copies of the Streams this Duck is in, read when a turn starts: they are given to Claude Code as
+   * additional directories, so editing there never asks for the outside-the-folder permission. A change (joined or
+   * left a Stream) restarts the idle agent process before the next turn; resume keeps the conversation.
+   */
+  streamDirs?: () => string[];
 }
 
 export const READ_ONLY_ROOT_REASON =
@@ -235,6 +241,13 @@ export class ClaudeRunner implements Runner {
     this.agentSessionId = options.resume ?? null;
   }
 
+  /** The additional directories the running process was started with (a key, to see a change). */
+  private startedDirs = "";
+
+  private dirs(): string[] {
+    return [...new Set((this.options.streamDirs?.() ?? []).filter((d) => d && d !== this.options.cwd))].sort();
+  }
+
   private async ensureStarted(): Promise<void> {
     if (this.query) return;
     const { hooks } = this.options;
@@ -304,6 +317,9 @@ export class ClaudeRunner implements Runner {
     if (cliModel) options.model = cliModel;
     if (this.effort) options.effort = this.effort;
     if (this.agentSessionId) options.resume = this.agentSessionId;
+    const dirs = this.dirs();
+    this.startedDirs = dirs.join("\n");
+    if (dirs.length > 0) options.additionalDirectories = dirs;
     if (this.options.autoCompactWindow) options.settings = { autoCompactWindow: this.options.autoCompactWindow };
     // Without this the SDK sends thinking as an empty block with a signature, and the transcript has nothing to show.
     options.thinking = { type: "adaptive", display: "summarized" };
@@ -748,6 +764,10 @@ export class ClaudeRunner implements Runner {
 
   async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
     const t0 = Date.now();
+    // Joined or left a Stream since the process started: it restarts (idle here, a turn in progress steers instead).
+    if (this.query && !this.turnActive && this.tasks.size === 0 && this.dirs().join("\n") !== this.startedDirs) {
+      this.restartNow();
+    }
     await this.ensureStarted();
     const spawned = Date.now();
     if (options?.after) {

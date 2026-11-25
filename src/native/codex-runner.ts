@@ -89,6 +89,12 @@ export interface CodexRunnerOptions {
   contextNote?: string | null;
   /** Ducks own their branch: the chat's folder is read-only (a git pond's Main), so Codex runs in its read-only sandbox. */
   readOnlyRoot?: string | null;
+  /**
+   * The working copies of the Streams this Duck is in, read every turn. In a read-only root they become the sandbox's
+   * writable roots (Main stays read-only), and the turn runs in the first of them so that Main is not the writable
+   * workspace: Codex's workspace-write sandbox always lets its own folder be written.
+   */
+  streamDirs?: () => string[];
 }
 
 const APPROVALS: Record<string, RequestKind> = {
@@ -115,7 +121,8 @@ export class CodexRunner implements Runner {
 
   private async ensureStarted(): Promise<string> {
     if (this.threadId) return this.threadId;
-    const { client, hooks, cwd } = this.options;
+    const { client, hooks } = this.options;
+    const cwd = this.runCwd();
     const model = this.model;
     if (!this.started) {
       this.started = true;
@@ -250,7 +257,7 @@ export class CodexRunner implements Runner {
     const { turnId } = await this.options.client.startTurn({
       threadId,
       input: text,
-      cwd: this.options.cwd,
+      cwd: this.runCwd(),
       model: this.model,
       effort: this.effort,
       approvalPolicy: policy.approvalPolicy,
@@ -284,7 +291,26 @@ export class CodexRunner implements Runner {
 
   /** The chat's mode as a Codex policy; a read-only root is held at the read-only sandbox in every mode. */
   private policy(): CodexPolicy {
-    return codexPolicyFor(this.options.readOnlyRoot ? "plan" : this.mode);
+    if (!this.options.readOnlyRoot) return codexPolicyFor(this.mode);
+    const roots = this.streams();
+    // Asks before what it does not trust, like Ask mode; "Skip approvals" and "Accept edits" are held at Ask here.
+    if (roots.length > 0) {
+      return {
+        approvalPolicy: "untrusted",
+        sandbox: "workspace-write",
+        sandboxPolicy: { type: "workspaceWrite", writableRoots: roots },
+      };
+    }
+    return codexPolicyFor("plan");
+  }
+
+  private streams(): string[] {
+    return [...new Set((this.options.streamDirs?.() ?? []).filter(Boolean))];
+  }
+
+  /** Where a turn runs: the chat's folder, or (read-only root with joined Streams) the first Stream's working copy. */
+  private runCwd(): string {
+    return (this.options.readOnlyRoot ? this.streams()[0] : undefined) ?? this.options.cwd;
   }
 
   /** Codex keeps the model and effort sent with a turn as the thread's settings: the next turn carries them. */

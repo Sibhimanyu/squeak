@@ -121,9 +121,9 @@ export function placeFromAliases(b: Record<string, unknown>, workspaceBranch?: s
   return null;
 }
 
-type Git = (cwd: string, args: string[]) => Promise<string | null>;
+export type Git = (cwd: string, args: string[]) => Promise<string | null>;
 
-const defaultGit: Git = (cwd, args) =>
+export const defaultGit: Git = (cwd, args) =>
   new Promise((resolve) => {
     execFile("git", ["-C", cwd, ...args], { timeout: 15_000, encoding: "utf8" }, (error, stdout) =>
       resolve(error ? null : stdout.trim()),
@@ -195,6 +195,16 @@ export function mainReadOnlyRoot(store: NativeStore, s: Pick<SessionRow, "worksp
   if (!ducksOwnBranch() || s.workspaceId) return null;
   const project = store.getProjectByRoot(s.cwd);
   return project && project.kind === "git" && project.rootPath === s.cwd ? project.rootPath : null;
+}
+
+/**
+ * The working copies of the Streams a chat's Duck is in, for a chat in a read-only Main: the agent is allowed to edit
+ * them without the outside-the-folder prompt. Empty elsewhere and when the folder is gone.
+ */
+export function joinedStreamDirs(store: NativeStore, s: Pick<SessionRow, "id" | "workspaceId" | "cwd">): string[] {
+  if (!mainReadOnlyRoot(store, s)) return [];
+  const duck = store.duckBySession(s.id);
+  return (duck ? store.duckStreams(duck.id) : []).map((w) => w.path).filter((p) => fs.existsSync(p));
 }
 
 /** True when `target` is `root` or inside it (lexically; the caller passes absolute paths). */

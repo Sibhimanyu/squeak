@@ -963,6 +963,53 @@ describe("a read-only root (Main of a git pond for a duck)", () => {
     }
   });
 
+  it("joined Stream folders go in as additionalDirectories, and a join or leave restarts the idle process before the next turn", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    let streams: string[] = [];
+    const r = new ClaudeRunner({
+      cwd: "/repo",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      readOnlyRoot: "/repo",
+      streamDirs: () => streams,
+    });
+    await r.send("one");
+    await tick();
+    expect(f.calls[0]!.additionalDirectories).toBeUndefined();
+    // joins a Stream mid-turn: the running process is left alone
+    streams = ["/ws/feat-a"];
+    f.out.push({ type: "result", subtype: "success", is_error: false });
+    await tick();
+    expect(f.calls).toHaveLength(1);
+    // the next turn starts a process that knows the folder
+    await r.send("two");
+    await tick();
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls[1]!.additionalDirectories).toEqual(["/ws/feat-a"]);
+    f.out.push({ type: "result", subtype: "success", is_error: false });
+    await tick();
+    // nothing changed: the same process carries on
+    await r.send("three");
+    await tick();
+    expect(f.calls).toHaveLength(2);
+    f.out.push({ type: "result", subtype: "success", is_error: false });
+    await tick();
+    // leaves it: gone again from the next turn
+    streams = [];
+    await r.send("four");
+    await tick();
+    expect(f.calls).toHaveLength(3);
+    expect(f.calls[2]!.additionalDirectories).toBeUndefined();
+    // Main is still refused
+    expect(
+      (await hookOf(f.calls[2]!)({ tool_name: "Write", tool_input: { file_path: "/repo/x.ts" } })).hookSpecificOutput,
+    ).toMatchObject({ permissionDecision: "deny" });
+  });
+
   it("no read-only root: bypass stays bypass, edits are allowed and the hook only waits (flag off behaves as before)", async () => {
     const f = fakeQuery();
     const { h } = hooks();

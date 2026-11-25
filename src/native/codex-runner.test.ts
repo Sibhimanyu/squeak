@@ -156,6 +156,70 @@ describe("CodexRunner", () => {
     }
   });
 
+  it("a read-only Main with joined Streams: writable roots for them, Main not the workspace, none when it has none", async () => {
+    const client = new FakeClient();
+    const hooks = {
+      onAgentSessionId() {},
+      onMessage() {},
+      onDelta() {},
+      onStatus() {},
+      onRequest: async () => ({ decision: "allow" }),
+      onTurnEnd() {},
+      onExit() {},
+    };
+    let streams: string[] = [];
+    const runner = new CodexRunner({
+      cwd: "/main",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: hooks as never,
+      client: client as unknown as CodexClient,
+      readOnlyRoot: "/main",
+      streamDirs: () => streams,
+    });
+    await runner.send("a");
+    expect(client.startTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cwd: "/main", sandboxPolicy: { type: "readOnly" } }),
+    );
+    streams = ["/ws/a", "/ws/b"];
+    await runner.send("b");
+    expect(client.startTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cwd: "/ws/a",
+        approvalPolicy: "untrusted",
+        sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/ws/a", "/ws/b"] },
+      }),
+    );
+    streams = [];
+    await runner.send("c");
+    expect(client.startTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cwd: "/main", sandboxPolicy: { type: "readOnly" } }),
+    );
+  });
+
+  it("a resumed thread asks for the chat's new folder (a thread resumes by id; the folder is only an override)", async () => {
+    const client = new FakeClient();
+    const hooks = {
+      onAgentSessionId() {},
+      onMessage() {},
+      onDelta() {},
+      onStatus() {},
+      onRequest: async () => ({ decision: "allow" }),
+      onTurnEnd() {},
+      onExit() {},
+    };
+    const runner = new CodexRunner({
+      cwd: "/main",
+      model: "m",
+      permissionMode: "default",
+      resume: "thread-old",
+      hooks: hooks as never,
+      client: client as unknown as CodexClient,
+    });
+    await runner.send("a");
+    expect(client.resumeThread).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread-old", cwd: "/main" }));
+  });
+
   it("compacts the thread through the client's thread/compact/start", async () => {
     const { client, runner } = setup();
     const compactThread = vi.fn(async () => {});

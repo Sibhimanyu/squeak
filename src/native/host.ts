@@ -31,7 +31,8 @@ import { closeWithin } from "./agent-procs.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
-import { activeBranches, ducksOwnBranch, mainReadOnlyRoot } from "./placement.js";
+import { moveDucksToPond } from "./stream-migration.js";
+import { activeBranches, ducksOwnBranch, joinedStreamDirs, mainReadOnlyRoot } from "./placement.js";
 import { streamEdits } from "./stream-edits.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import { projectOfSession } from "./room.js";
@@ -253,6 +254,7 @@ export function defaultRunnerFactory(
   compactWindowFor?: (session: SessionRow) => number | null,
   claudeAiConnectors?: () => boolean,
   readOnlyRootFor?: (session: SessionRow) => string | null,
+  streamDirsFor?: (session: SessionRow) => string[],
 ): RunnerFactory {
   const plugin = squeakPluginPath();
   return (session, hooks) =>
@@ -269,6 +271,7 @@ export function defaultRunnerFactory(
           autoCompactWindow: compactWindowFor?.(session) ?? null,
           claudeAiConnectors: claudeAiConnectors?.() ?? false,
           readOnlyRoot: readOnlyRootFor?.(session) ?? null,
+          streamDirs: () => streamDirsFor?.(session) ?? [],
           log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
@@ -282,6 +285,7 @@ export function defaultRunnerFactory(
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
           readOnlyRoot: readOnlyRootFor?.(session) ?? null,
+          streamDirs: () => streamDirsFor?.(session) ?? [],
           client: new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex")) as never,
         });
 }
@@ -372,6 +376,7 @@ export class SessionHost extends EventEmitter {
         (s) => cliCompactWindow(this.compactThreshold(s), s.model),
         options.claudeAiConnectors,
         (s) => mainReadOnlyRoot(this.store, s),
+        (s) => joinedStreamDirs(this.store, s),
       );
     this.summaryCall = options.summaryCall ?? defaultTitleCall();
     this.projectsDir = options.projectsDir;
@@ -496,6 +501,12 @@ export class SessionHost extends EventEmitter {
       this.store.migrateArchivedToOffDuty((s) => projectOfSession(this.store, s));
     } catch (error) {
       logHostError("archived to off duty", error);
+    }
+    // Chats that run in a Stream's working copy move to the Pond's folder and join that Stream (once).
+    if (ducksOwnBranch()) {
+      void moveDucksToPond({ store: this.store, ...(this.projectsDir ? { projectsDir: this.projectsDir } : {}) }).catch(
+        (error) => logHostError("ducks to pond", error),
+      );
     }
     for (const s of this.store.listSessions()) {
       if (!BUSY.has(s.status)) continue;
