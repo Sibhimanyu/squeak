@@ -45,6 +45,11 @@ enum WindowEscape {
         let step = EscapeRule.step(
             isNewLayout: isNew, overlayOpen: window.attachedSheet != nil, paneOpen: pane.shown != nil, panePinned: pane.pinned,
             page: page, turnRunning: false)
+        if window.attachedSheet == nil, step != .closePane, let workspace = model.pondWorkspace,
+           model.tabStore.currentPondItem(workspace.project.id) != nil {
+            model.leavePondItem(pond: workspace.pond)
+            return true
+        }
         switch step {
         case .nothing: break
         case .closePane: WorkPaneStore.shared.close()

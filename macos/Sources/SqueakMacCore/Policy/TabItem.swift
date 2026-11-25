@@ -3,7 +3,7 @@ import Foundation
 /// One tab of a Pond's strip, by identity: a Duck (its Duck id, so the tab follows the Duck to its newest chat), a file,
 /// a canvas or artifact, or a duckling the person clicked. Never a chat key, except for a chat no Duck owns (`chat:<key>`).
 public struct TabItem: Codable, Hashable, Sendable {
-    public enum Kind: String, Codable, Sendable { case duck, file, artifact, duckling }
+    public enum Kind: String, Codable, Sendable { case duck, file, artifact, duckling, diff, reviewAll, notebook }
     public var kind: Kind
     public var id: String
     public init(_ kind: Kind, _ id: String) { self.kind = kind; self.id = id }
@@ -11,6 +11,31 @@ public struct TabItem: Codable, Hashable, Sendable {
     /// A Duck's tab, by its Duck id (or `chat:<key>`, see `duckID(of:)`).
     public static func duck(_ id: String) -> TabItem { TabItem(.duck, id) }
     public static func file(_ id: String) -> TabItem { TabItem(.file, id) }
+    /// A file in a Pond may belong to any of its Streams, or be shown from outside the Stream.
+    public static func pondFile(root: String, path: String) -> TabItem { .file(ScopedTabID.make(root, path)) }
+    public static func diff(session: String, path: String) -> TabItem { TabItem(.diff, ScopedTabID.make(session, path)) }
+    public static func reviewAll(session: String) -> TabItem { TabItem(.reviewAll, session) }
+    public static let notebook = TabItem(.notebook, "notebook")
+
+    public var fileSource: (root: String, path: String)? {
+        guard kind == .file else { return nil }
+        return ScopedTabID.parse(id).map { ($0.scope, $0.path) }
+    }
+
+    public var diffSource: (session: String, path: String?)? {
+        switch kind {
+        case .diff: ScopedTabID.parse(id).map { ($0.scope, $0.path) }
+        case .reviewAll: (id, nil)
+        default: nil
+        }
+    }
+
+    var isPondItem: Bool {
+        switch kind {
+        case .file, .artifact, .diff, .reviewAll, .notebook: true
+        case .duck, .duckling: false
+        }
+    }
     /// An artifact or canvas opened as a tab; `id` is `ArtifactTabID.make`.
     public static func artifact(pond: String, path: String) -> TabItem { TabItem(.artifact, ArtifactTabID.make(pond: pond, path: path)) }
     /// A duckling the person clicked: its parent chat and its task.
@@ -37,9 +62,16 @@ public struct TabItem: Codable, Hashable, Sendable {
 
 /// An artifact tab's id: its pond (directory key) and the file (an absolute path, or a remote pond's wire id).
 public enum ArtifactTabID {
-    private static let separator: Character = "\u{1F}"
-    public static func make(pond: String, path: String) -> String { "\(pond)\(separator)\(path)" }
+    public static func make(pond: String, path: String) -> String { ScopedTabID.make(pond, path) }
     public static func parse(_ id: String) -> (pond: String, path: String)? {
+        ScopedTabID.parse(id).map { ($0.scope, $0.path) }
+    }
+}
+
+private enum ScopedTabID {
+    private static let separator: Character = "\u{1F}"
+    static func make(_ scope: String, _ path: String) -> String { "\(scope)\(separator)\(path)" }
+    static func parse(_ id: String) -> (scope: String, path: String)? {
         guard let at = id.firstIndex(of: separator) else { return nil }
         return (String(id[..<at]), String(id[id.index(after: at)...]))
     }

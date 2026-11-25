@@ -39,19 +39,22 @@ struct PondRouteView: View {
             // Never an empty owner pond: the location is pruned to the Dashboard; nothing draws meanwhile.
             Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
         } else if case .home(let project) = route, let room = roomProject(project) {
-            // New layout (DESIGN.md 8.12): the Duck row sits above both pages (Room and Dashboard), so it does not slide.
             let page = RoomViewPref.shared.mode(for: project)
-            let rowPlace = PondPageChrome.rowPlace(page: page)
-            if MacLayoutPreference.shared.isNew, DuckAvatarRowView.isAvailable(pond: project) {
-                // Nobody on duty: the row is not drawn, and the pond header below carries the sidebar clearance itself.
-                let rowShown = DuckAvatarRowView.isShown(pond: project, place: .dashboard)
-                let inset = PondPageChrome.headerInset(rowShown: rowShown, sidebarClearance: Double(sidebarClearance))
-                // One header and one Duck row for both pages, above the strip: only the content below them moves, so
-                // the header and the Dashboard | Room switch never slide, jump or rebuild when the page changes.
+            if let workspace = PondWorkspace(pond: project) {
+                let strip = workspace.strip(place: PondPageChrome.rowPlace(page: page), store: model.tabStore)
+                let inset = PondPageChrome.headerInset(rowShown: !strip.isEmpty, sidebarClearance: Double(sidebarClearance))
                 VStack(spacing: 0) {
-                    DuckAvatarRowView(key: project, place: rowPlace, leadingInset: sidebarClearance)
-                    PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset))
-                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset), showsHeader: false) { standard(header: false) }
+                    PondWorkspaceTabStrip(workspace: workspace, strip: strip, leadingInset: sidebarClearance)
+                        .id(workspace.project.id)
+                    PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset),
+                                     itemShowing: strip.currentItem != nil)
+                    ZStack {
+                        PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset), showsHeader: false) {
+                            standard(header: false)
+                        }
+                        .workbenchLayer(hidden: strip.currentItem != nil)
+                        if let item = strip.currentItem { PondItemPage(item: item, workspace: workspace) }
+                    }
                 }
             } else {
                 PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard() }
@@ -810,13 +813,41 @@ struct PondSharedHeader: View {
     let projectId: String
     var member = false
     var leadingInset: CGFloat = 0
+    var itemShowing = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let threads = PondRoomStore.shared.model(for: projectId, member: member).feed.threads
-        RoomHeader(
-            key: key, ducks: RoomDucks.headerDucks(threads),
-            open: { model.openFromPond(.duck($0), pond: key, page: RoomViewPref.shared.mode(for: key)) },
-            leadingInset: leadingInset)
+        let name = PondsModel.shared.name(key: key)
+        let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
+        HStack(spacing: Space.m) {
+            if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
+            PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,
+                     projectId: PondsModel.shared.native(key: key)?.id, size: 28)
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(verbatim: RoomDucks.subtitle(people: people, ducks: RoomDucks.headerDucks(threads).count))
+                        .font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                }
+                .fixedSize()
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            RoomSegmented(
+                items: PondPage.allCases.map(Optional.some),
+                selection: Binding<PondPage?>(get: { itemShowing ? nil : RoomViewPref.shared.mode(for: key) },
+                    set: { page in
+                        guard let page else { return }
+                        model.leavePondItem(pond: key)
+                        RoomViewPref.shared.set(page, for: key)
+                    }),
+                title: { $0?.title ?? "" }, height: 28)
+                .fixedSize().accessibilityLabel("Pond view")
+            PondHeaderMenu(key: key)
+        }
+        .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 }

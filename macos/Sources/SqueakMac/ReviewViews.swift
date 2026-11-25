@@ -10,6 +10,7 @@ import SwiftUI
 struct ReviewView: View {
     let files: FilesModel
     let session: HostSession
+    var showsBackButton = true
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -60,15 +61,17 @@ struct ReviewView: View {
 
     private func topBar(_ store: ChangesStore, _ list: [DaemonChanges.File]) -> some View {
         HStack(spacing: 10) {
-            Button { files.closeReview() } label: {
-                HStack(spacing: 5) {
-                    Lucide(.arrowLeft, size: 13, color: Theme.ink)
-                    Text("Back to chat")
+            if showsBackButton {
+                Button { files.closeReview() } label: {
+                    HStack(spacing: 5) {
+                        Lucide(.arrowLeft, size: 13, color: Theme.ink)
+                        Text("Back to chat")
+                    }
                 }
+                .buttonStyle(QuietButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                .help("Back to chat (Esc)").accessibilityLabel("Back to chat")
             }
-            .buttonStyle(QuietButtonStyle())
-            .keyboardShortcut(.cancelAction)
-            .help("Back to chat (Esc)").accessibilityLabel("Back to chat")
             Text(ChangeListing.header(count: list.count)).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
             if let c = store.changes {
                 Text("+\(c.added)").foregroundStyle(Theme.success)

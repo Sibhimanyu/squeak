@@ -503,6 +503,13 @@ final class AppModel {
     }
 
     private func saveTabs(_ pond: String) { saveTabs([pond]) }
+
+    func updatePondItems(in projectId: String, _ update: (inout TabStore) -> Void) {
+        let before = tabStore
+        update(&tabStore)
+        if tabStore != before { saveTabs(projectId) }
+    }
+
     private func saveTabs(_ ponds: [String]) {
         guard !demoMode, !captureMode else { return }
         for pond in ponds where !pond.isEmpty { tabStore.save(pond: pond, to: defaults) }
@@ -1246,6 +1253,7 @@ final class AppModel {
     /// from a thread should return to; `PondOrigin.goBack` is the way back that keeps it.
     func openPond(_ route: PondRoute) {
         let old = location
+        if case .home(let key) = route { leavePondItem(pond: key) }
         location = route.location
         if case .pondHome = location, location != old, !PondOrigin.shared.returning { PondOrigin.shared.clear() }
     }
@@ -1269,6 +1277,11 @@ final class AppModel {
     /// A single click opens it in the stream's preview tab (replacing the file or artifact previewing there); `pin`
     /// (a double-click) keeps it as a normal tab.
     func openArtifact(pond: String, path: String, pin: Bool = false) {
+        if let workspace = PondWorkspace(pond: pond) {
+            if pondWorkspace?.project.id != workspace.project.id { openPondHome(pond) }
+            openPondItem(.artifact(pond: pond, path: path))
+            return
+        }
         if let ctx = artifactContext(pond: pond), let place = stripPlace(of: ctx.key) {
             let pondTabs = tabPond(of: ctx)
             let tab = TabItem.artifact(pond: pond, path: path)
@@ -1314,12 +1327,20 @@ final class AppModel {
         guard let chat = allSessions.first(where: { $0.key.hostSessionId == "squeak-native:\(request.sessionId)" || $0.key.hostSessionId == request.sessionId }) else {
             return .refused("Squeak's window does not list the chat that showed it.")
         }
-        guard let cwd = chat.cwd, !cwd.isEmpty, let place = stripPlace(of: chat.key) else {
+        let workspace = PondsModel.shared.key(of: chat).flatMap { PondWorkspace(pond: $0) }
+        guard let cwd = chat.cwd, !cwd.isEmpty, workspace != nil || stripPlace(of: chat.key) != nil else {
             return .refused("The chat that showed it has no tab strip in the window.")
         }
         switch ShownFilePlan.make(path: request.path, cwd: cwd, exists: FileManager.default.isReadableFile(atPath: request.path)) {
         case .refuse(let why): return .refused(why)
         case .open(let tab):
+            if let workspace {
+                let afterDuck = pondWorkspace?.project.id == workspace.project.id && location.chatKey != nil
+                updatePondItems(in: workspace.project.id) {
+                    $0.openPondItem(.pondFile(root: cwd, path: tab), in: workspace.project.id, focus: false, afterDuck: afterDuck)
+                }
+                return .opened
+            }
             showConversationWindow()
             let pondTabs = tabPond(of: chat)
             let files = filesModel(root: cwd)
@@ -1444,6 +1465,7 @@ final class AppModel {
     private func selectUnmeasured(_ key: SessionKey?) {
         guard let key else { location = .home; return }
         lastWorkspaceSession = key
+        if let pond = session(key).flatMap({ PondsModel.shared.key(of: $0) }) { leavePondItem(pond: pond) }
         registerTab(key)
         location = .chat(key)
     }

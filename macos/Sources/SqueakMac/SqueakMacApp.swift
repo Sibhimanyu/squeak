@@ -75,7 +75,9 @@ struct SqueakCommands: Commands {
         }
         // File > Close: Cmd-W closes the open tab; with none to close (or a sheet/other window key) it closes the window.
         CommandGroup(replacing: .saveItem) {
-            Button(ShortcutFocus.closeTitle(in: focus.region, terminalOpen: focus.terminalOpen)) { CloseTabAction.perform() }
+            Button(model.pondWorkspace == nil ? ShortcutFocus.closeTitle(in: focus.region, terminalOpen: focus.terminalOpen) : "Close Tab") {
+                CloseTabAction.perform()
+            }
                 .registryShortcut(.closeTab)
         }
         CommandGroup(replacing: .appSettings) {
@@ -108,14 +110,20 @@ struct SqueakCommands: Commands {
                 .registryShortcut(.movePondDown)
         }
         CommandMenu("Chat") {
-            Button("Next Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
+            Button("Next Tab") {
+                if !model.stepPondTab(by: 1) { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
+            }
                 .registryShortcut(.nextTab)
-            Button("Previous Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: -1) }
+            Button("Previous Tab") {
+                if !model.stepPondTab(by: -1) { NotificationCenter.default.post(name: .squeakStepTab, object: -1) }
+            }
                 .registryShortcut(.previousTab)
-            Button("Move Tab Left") { NotificationCenter.default.post(name: .squeakMoveTab, object: -1) }
-                .registryShortcut(.moveTabLeft)
-            Button("Move Tab Right") { NotificationCenter.default.post(name: .squeakMoveTab, object: 1) }
-                .registryShortcut(.moveTabRight)
+            if model.pondWorkspace == nil {
+                Button("Move Tab Left") { NotificationCenter.default.post(name: .squeakMoveTab, object: -1) }
+                    .registryShortcut(.moveTabLeft)
+                Button("Move Tab Right") { NotificationCenter.default.post(name: .squeakMoveTab, object: 1) }
+                    .registryShortcut(.moveTabRight)
+            }
             Divider()
             Button("View All Changes") { NotificationCenter.default.post(name: .squeakShowAllChanges, object: nil) }
                 .registryShortcut(.diffView)
@@ -134,11 +142,22 @@ struct SqueakCommands: Commands {
             }
         }
         CommandMenu("Sessions") {
-            ForEach(0..<9, id: \.self) { i in
-                let list = model.ordered.flattened
-                Button(list.indices.contains(i) ? list[i].label : "Session \(i + 1)") { model.selectIndex(i) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
-                    .disabled(!list.indices.contains(i))
+            if let workspace = model.pondWorkspace, let strip = model.pondWorkspaceStrip {
+                ForEach(0..<9, id: \.self) { i in
+                    if let tab = strip.target(at: i) {
+                        let title = strip.row.ducks.first(where: { tab == .duck($0.id) })?.name
+                            ?? PondItemLabel(item: tab, workspace: workspace, model: model).title
+                        Button(title) { model.selectPondTab(tab) }
+                            .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                    }
+                }
+            } else {
+                ForEach(0..<9, id: \.self) { i in
+                    let list = model.ordered.flattened
+                    Button(list.indices.contains(i) ? list[i].label : "Session \(i + 1)") { model.selectIndex(i) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                        .disabled(!list.indices.contains(i))
+                }
             }
             Divider()
             Button("Quick message") { NewChatController.shared.showQuickMessage() }
@@ -346,11 +365,12 @@ extension Scene {
 @MainActor enum CloseTabAction {
     final class Box { var handled = false }
     static func perform() {
-        // The terminal has the keys: ⌘W closes its tab, never a chat.
-        if KeyFocus.shared.terminalFocused, KeyRouter.shared.perform(.closeTerminalTab) { return }
         let key = NSApp.keyWindow
         let mainKey = key != nil && key === NSApp.mainWindow && key?.attachedSheet == nil && key?.sheetParent == nil
             && !(key is NSPanel) && key?.canBecomeMain == true
+        if mainKey, AppModel.shared.closeCurrentPondItem() { return }
+        // In the classic layout, a focused terminal closes its shell tab.
+        if KeyFocus.shared.terminalFocused, KeyRouter.shared.perform(.closeTerminalTab) { return }
         let box = Box()
         if mainKey { NotificationCenter.default.post(name: .squeakCloseTab, object: box) }
         if CloseRouting.route(mainWindowKey: mainKey, tabClosable: box.handled) == .window { key?.performClose(nil) }

@@ -266,6 +266,7 @@ struct PondSpace<Dashboard: View>: View {
     @ViewBuilder let dashboard: () -> Dashboard
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.controlActiveState) private var activeState
+    @Environment(\.workbenchVisible) private var visible
     @State private var pan: PondPanState
     @State private var swipes = UserDefaults.standard.integer(forKey: PondHintStore.swipesKey)
     @State private var visits = 0
@@ -299,7 +300,7 @@ struct PondSpace<Dashboard: View>: View {
         .clipped()
         .background(PondSwipeMonitor(
             current: { RoomViewPref.shared.mode(for: key) }, origin: { pan.presented() },
-            trackingEnabled: !reduceMotion, update: { update($0) }))
+            trackingEnabled: !reduceMotion, update: { if visible { update($0) } }))
         .onChange(of: page) { _, new in pan.reconcile(page: new, width: width) }
         .onDisappear { pan.unmount(page: RoomViewPref.shared.mode(for: key)) }
         .task { await runHint() }

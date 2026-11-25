@@ -117,9 +117,19 @@ final class KeyRouter {
     /// Only the chords the terminal changes are enacted here (and ⌘T and ⌘W everywhere); the rest of the table's
     /// answers are what the window's own bindings already do, so they are left to them.
     private func consumes(_ event: NSEvent) -> Bool {
-        guard let window = event.window, !(window is NSPanel), window === NSApp.mainWindow, window.attachedSheet == nil,
-            let chord = chord(event)
+        guard let window = event.window, !(window is NSPanel), window === NSApp.mainWindow, window.attachedSheet == nil
         else { return false }
+        if event.keyCode == 48 {
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+            if mods == .control, model?.stepPondTab(by: 1) == true { return true }
+            if mods == [.control, .shift], model?.stepPondTab(by: -1) == true { return true }
+        }
+        guard let chord = chord(event) else { return false }
+        if chord == .close, model?.closeCurrentPondItem() == true { return true }
+        if case .session(let slot) = chord, let model, let strip = model.pondWorkspaceStrip {
+            model.selectPondTab(strip.target(at: slot - 1))
+            return true
+        }
         let focus = KeyFocus.shared
         focus.reclassify(window: window)
         if focus.region == .terminal, !focus.terminalOpen { focus.releaseTerminal(); focus.reclassify(window: window) }
