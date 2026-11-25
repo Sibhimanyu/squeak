@@ -127,6 +127,24 @@ public enum RailChanges {
             .key.stringValue
     }
 
+    /// The same sections with each Duck's chat (and Main's) filled in. The rows are built once when the host's list arrives (off
+    /// the main thread); this is the cheap part that follows the chats as they come and go: one pass over `sessions`, newest
+    /// activity wins, however many Ducks the Pond has.
+    public static func keyed(_ sections: [RailChangeSection], sessions: [HostSession], mainSessionKey: String?) -> [RailChangeSection] {
+        var newest: [String: (at: Date, key: String)] = [:]
+        for session in sessions {
+            guard let duck = session.duckId else { continue }
+            let at = session.lastActivityAt ?? .distantPast
+            if let current = newest[duck], !(current.at < at) { continue }
+            newest[duck] = (at, session.key.stringValue)
+        }
+        return sections.map { section in
+            var s = section
+            s.sessionKey = section.isDuck ? section.duckId.flatMap { newest[$0]?.key } : mainSessionKey
+            return s
+        }
+    }
+
     /// The rail's Changes badge: every changed file across the sections.
     public static func total(_ sections: [RailChangeSection]) -> Int {
         sections.reduce(0) { $0 + $1.rows.count + $1.hidden }

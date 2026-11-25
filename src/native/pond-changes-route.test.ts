@@ -151,6 +151,19 @@ describe("GET /native/projects/:id/changes", () => {
     expect(after.ducks[0].files).toMatchObject([{ path: "late.txt", added: 1 }]);
   });
 
+  it("answers the held list at once with ?cached=1, and the next plain read is current", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    const url = `/native/projects/${r.project.id}/changes`;
+    expect(((await (await r.get(url)).json()) as any).ducks[0].files).toEqual([]);
+    fs.writeFileSync(path.join(pip.wt, "late.txt"), "z\n");
+    r.git(pip.wt, "add", "late.txt");
+    const held: any = await (await r.get(`${url}?cached=1`)).json();
+    expect(held.ducks[0].files).toEqual([]); // the held list, drawn at once
+    const now: any = await (await r.get(url)).json();
+    expect(now.ducks[0].files).toMatchObject([{ path: "late.txt" }]);
+  });
+
   it("caps the files per Duck and says so", async () => {
     const r = rig("git", 3);
     const pip = r.duckOnStream("Pip", "sq/pip");

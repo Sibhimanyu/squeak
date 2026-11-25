@@ -47,13 +47,8 @@ struct WorkPaneRail: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Rail")
-        // The Pond-wide count behind the Changes badge is read now and then while the window shows this page.
-        .task(id: scope.key) {
-            while !Task.isCancelled {
-                if model.windowVisible { await RailChangesSource.refreshBadge(scope: scope, model: model) }
-                try? await Task.sleep(for: .seconds(20))
-            }
-        }
+        // The lists behind the icons (and the Changes badge) are kept loaded while this page shows, so they open at once.
+        .task(id: scope.key) { await RailWarmer.keepWarm(scope: scope, model: model) }
         // The page changed: a list belongs to the page it was opened on.
         .onChange(of: scope.key) { RailPopoverState.shared.close() }
     }

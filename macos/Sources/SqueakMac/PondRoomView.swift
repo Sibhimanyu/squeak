@@ -30,6 +30,7 @@ final class PondRoomModel {
     private(set) var replyFocusToken = 0
 
     @ObservationIgnored private var running = false
+    @ObservationIgnored private var warming = false
     /// What the person is attaching to the next message; survives leaving the room and coming back.
     @ObservationIgnored let tray = RoomAttachmentTray()
     /// The attachments of a message still on its way, kept so Retry sends them again.
@@ -119,6 +120,23 @@ final class PondRoomModel {
         f.apply(page: page)
         feed = f
         if member { ownerOffline = page.ownerOffline; canPost = page.canPost }
+    }
+
+    /// Reads (or catches up) the room without following its stream, for the rail's Tasks list on a page that is not the Room.
+    /// Does nothing while the Room page itself is following, which keeps the same feed current.
+    func warm(host: NativeHostClient) async {
+        guard !running, !warming else { return }
+        warming = true
+        defer { warming = false }
+        let client = client(host)
+        if feed.loaded { await catchUp(client); return }
+        guard let page = try? await client.page(project: projectId, limit: Self.pageSize) else { return }
+        guard !running, !feed.loaded else { return }
+        var f = feed
+        f.apply(page: page, pageSize: Self.pageSize)
+        feed = f
+        if member { ownerOffline = page.ownerOffline; canPost = page.canPost }
+        phase = .ready
     }
 
     func loadOlder(host: NativeHostClient) async {

@@ -18,7 +18,9 @@ export const POND_CHANGES_MAX_DUCKS = 40;
  * index already tracks touches neither, so the key alone cannot tell.
  */
 export const POND_CHANGES_TTL_MS = 4_000;
-const PARALLEL = 4;
+/** A held answer older than this is not served stale: the reader waits for a new one. */
+export const POND_CHANGES_MAX_STALE_MS = 120_000;
+const PARALLEL = 8;
 
 export interface PondChangeGroup {
   files: ChangeFile[];
@@ -70,6 +72,9 @@ export class PondChangesReader {
   private readonly cache = new Map<string, { key: string; at: number; value: Promise<ChangeSet | null> }>();
   private readonly now: () => number;
   private readonly maxFiles: number;
+  /** The last whole answer per Pond, served at once while a new one is read behind it. */
+  private readonly replies = new Map<string, { at: number; value: PondChangesReply }>();
+  private readonly inflight = new Map<string, Promise<PondChangesReply | null>>();
 
   constructor(
     private readonly deps: { store: NativeStore; room: Room; runGit?: RunGit; now?: () => number; maxFiles?: number },
@@ -80,7 +85,49 @@ export class PondChangesReader {
     this.maxFiles = deps.maxFiles ?? POND_CHANGES_MAX_FILES;
   }
 
-  async read(projectId: string): Promise<PondChangesReply | null> {
+  /**
+   * The Pond's changes, read now (simultaneous requests share one read). With `cached` a held answer is returned at
+   * once instead, and a read runs behind it when the answer is older than `POND_CHANGES_TTL_MS`: for a caller that
+   * would rather draw something now and ask again than wait on git.
+   */
+  async read(projectId: string, opts: { cached?: boolean } = {}): Promise<PondChangesReply | null> {
+    const held = this.replies.get(projectId);
+    if (held && opts.cached) {
+      const age = this.now() - held.at;
+      if (age < POND_CHANGES_TTL_MS) return held.value;
+      if (age < POND_CHANGES_MAX_STALE_MS) {
+        void this.refresh(projectId).catch(() => undefined);
+        return held.value;
+      }
+    }
+    return this.refresh(projectId);
+  }
+
+  /** Resolves when the read in progress for the Pond (if any) is done. */
+  async settled(projectId: string): Promise<void> {
+    await this.inflight.get(projectId)?.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+
+  private refresh(projectId: string): Promise<PondChangesReply | null> {
+    const running = this.inflight.get(projectId);
+    if (running) return running;
+    const next: Promise<PondChangesReply | null> = this.compute(projectId)
+      .then((value) => {
+        if (value) this.replies.set(projectId, { at: this.now(), value });
+        else this.replies.delete(projectId);
+        return value;
+      })
+      .finally(() => {
+        if (this.inflight.get(projectId) === next) this.inflight.delete(projectId);
+      });
+    this.inflight.set(projectId, next);
+    return next;
+  }
+
+  private async compute(projectId: string): Promise<PondChangesReply | null> {
     const { store, room } = this.deps;
     const project = store.getProject(projectId);
     if (!project) return null;
@@ -179,12 +226,15 @@ export class PondChangesReader {
   /** The worktree's changes, from the cache while HEAD, the base and the index file are as a moment ago. */
   private async changeSet(dir: string, targetBranch: string | null): Promise<ChangeSet | null> {
     let key: string;
-    let base: string | null = null;
+    let base: string | null;
     try {
-      const [head, indexPath] = (await this.runGit(dir, ["rev-parse", "HEAD", "--git-path", "index"]))
-        .trim()
-        .split("\n");
-      if (targetBranch) base = await this.mergeBase(dir, targetBranch);
+      // Each git call is a process spawn (about 50 ms here): the two that key the cache run side by side.
+      const [heads, mergeBase] = await Promise.all([
+        this.runGit(dir, ["rev-parse", "HEAD", "--git-path", "index"]),
+        targetBranch ? this.mergeBase(dir, targetBranch) : Promise.resolve(null),
+      ]);
+      const [head, indexPath] = heads.trim().split("\n");
+      base = mergeBase;
       let mtime = 0;
       try {
         mtime = fs.statSync(path.resolve(dir, indexPath ?? "")).mtimeMs;

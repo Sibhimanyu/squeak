@@ -709,7 +709,10 @@ export class NativeServer {
     }
     if (area === "projects" && id && sub === "changes" && parts.length === 4 && method === "GET") {
       // Read-only: every Duck's changed files in the Pond by Stream, plus Main's uncommitted work.
-      const reply = await this.pondChanges.read(id);
+      // `?cached=1` answers the held list at once (and refreshes behind it); the Mac draws it, then asks again for the current one.
+      const reply = await this.pondChanges.read(id, {
+        cached: new URL(req.url ?? "", "http://x").searchParams.get("cached") === "1",
+      });
       if (!reply) throw new HttpError(404, "no such project");
       return this.json(res, 200, reply);
     }

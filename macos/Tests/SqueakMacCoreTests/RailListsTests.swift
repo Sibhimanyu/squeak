@@ -53,6 +53,19 @@ import Testing
         #expect(RailChanges.total(sections) == 5 + 1 + 1)
     }
 
+    /// The rows are built once off the main thread with no chats; `keyed` then follows the chats cheaply and gives the same
+    /// sections as building with the chats in hand.
+    @Test func keyedFillsInChatsLikeBuildingWithThem() throws {
+        let sessions = [session("old", duck: "d1", ago: 500), session("new", duck: "d1", ago: 5), session("x", duck: "d3", ago: 1)]
+        let built = RailChanges.pondSections(try changes(), sessions: [], mainSessionKey: nil)
+        #expect(built.allSatisfy { $0.sessionKey == nil })
+        let keyed = RailChanges.keyed(built, sessions: sessions, mainSessionKey: "squeak:main")
+        #expect(keyed == RailChanges.pondSections(try changes(), sessions: sessions, mainSessionKey: "squeak:main"))
+        // A chat that appears later is picked up without rebuilding any rows.
+        let later = RailChanges.keyed(built, sessions: [], mainSessionKey: nil)
+        #expect(later.allSatisfy { $0.sessionKey == nil })
+    }
+
     @Test func reviewAllNamesTheDuckAndNeedsAChatAndFiles() throws {
         let sections = RailChanges.pondSections(try changes(), sessions: [session("s", duck: "d1", ago: 1)], mainSessionKey: nil)
         #expect(sections[0].reviewAllLabel == "Review all from Pip")
