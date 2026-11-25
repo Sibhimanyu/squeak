@@ -50,12 +50,16 @@ import Testing
         store.openPondItem(file, in: pond)
         store.openPondItem(diff, in: pond)
         store.openPondItem(artifact, in: pond)
-        #expect(!store.closePondItem(duck, in: pond))
-        #expect(store.closePondItem(file, in: pond))
+        let closedDuck = store.closePondItem(duck, in: pond)
+        let closedFile = store.closePondItem(file, in: pond)
+        #expect(!closedDuck)
+        #expect(closedFile)
         #expect(store.currentPondItem(pond) == artifact)
-        #expect(store.closePondItem(artifact, in: pond))
+        let closedArtifact = store.closePondItem(artifact, in: pond)
+        #expect(closedArtifact)
         #expect(store.currentPondItem(pond) == diff)
-        #expect(store.closePondItem(diff, in: pond))
+        let closedDiff = store.closePondItem(diff, in: pond)
+        #expect(closedDiff)
         #expect(store.currentPondItem(pond) == nil)
         #expect(store.tabs(pond) == [duck])
         #expect(store.current(pond) == duck)
@@ -64,10 +68,12 @@ import Testing
     @Test func closeCurrentDoesNothingWhenADuckOrPondPageIsShowing() {
         var store = TabStore()
         store.openPondItem(file, in: pond, focus: false)
-        #expect(!store.closeCurrentPondItem(in: pond))
+        let closedFromPage = store.closeCurrentPondItem(in: pond)
+        #expect(!closedFromPage)
         #expect(store.pondItems(pond) == [file])
         store.openPondItem(file, in: pond)
-        #expect(store.closeCurrentPondItem(in: pond))
+        let closedFromItem = store.closeCurrentPondItem(in: pond)
+        #expect(closedFromItem)
         #expect(store.pondItems(pond).isEmpty)
     }
 
@@ -82,7 +88,8 @@ import Testing
         store.save(pond: pond, to: defaults)
 
         store = TabStore(restoring: defaults)
-        #expect(store.adoptLegacy(in: defaults) { $0 == "chat" ? pond : nil } == [pond])
+        let adopted = store.adoptLegacy(in: defaults) { $0 == "chat" ? pond : nil }
+        #expect(adopted == [pond])
         #expect(store.tabs(pond) == [.duck("chat:chat")])
         #expect(store.pondItems(pond) == [file])
     }
