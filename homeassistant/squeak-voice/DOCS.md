@@ -5,7 +5,7 @@ places the call: it registers as a 3CX extension through your SBC and rings your
 key, and the answer goes back to the agent. The Mac needs no route to your PBX, so it works from any network.
 
 Everything sent through the relay is sealed with a key only Squeak and this add-on hold. You never copy that key: you
-pair the add-on with a short code it shows. The PIN is set from the Squeak app (Settings > Phone calls) and kept only in this
+pair the add-on with a short code it shows. The PIN is set from the Squeak app (Settings › Extensions › Phone calls) and kept only in this
 add-on's storage; it travels sealed, so the relay never sees it. Who to ring is also set in the app.
 
 ## Setup
@@ -13,14 +13,14 @@ add-on's storage; it travels sealed, so the relay never sees it. Who to ring is 
 1. Install the add-on, fill in the SIP options below from 3CX, and start it.
 2. Open **Squeak Voice** in Home Assistant's sidebar. It shows a code such as `K7M2-QX9P`, and whether the add-on is
    paired, registered with your PBX and has a PIN.
-3. In Squeak for Mac: Settings > Phone calls > Add gateway. Type the code and approve.
+3. Sign in on the Mac in **Settings › You › Account** to connect to Squeak's hosted relay.
+4. On the Mac, open **Settings › Extensions › Phone calls › Add gateway**. Type the code and approve.
 
 The add-on then keeps the channel and key in its own storage; it needs no restart and the code is never used again
 (it also changes by itself every 13 minutes while unpaired). Squeak's Settings shows whether the add-on is connected
-and whether it can register with your PBX. An older install that still has `database_url`, `channel` and `key`
-options keeps working with them.
+and whether it can register with your PBX.
 
-**Old pairing code.** The `pairing_code` option still works: make a code in Squeak (Settings > Phone calls > Use a
+**Old pairing code.** The `pairing_code` option still works: make a code in Squeak (Settings › Extensions › Phone calls > Use a
 pairing code instead), paste it in the option and start the add-on, then confirm the four digits it logs.
 
 ## Updates
@@ -30,8 +30,7 @@ Use Home Assistant’s **Check for updates** action to refresh available version
 and install its update. Home Assistant manages installation and any backup options.
 If you do not have permission to manage updates, ask your Home Assistant administrator.
 
-**Update from your Mac.** The add-on checks for a newer version itself, and when one exists Squeak for Mac (Settings >
-Phone calls) shows an **Update add-on** button. Home Assistant never lets an add-on update itself through the
+**Update from your Mac.** The add-on checks for a newer version itself, and when one exists Squeak for Mac (Settings › Extensions › Phone calls) shows an **Update add-on** button. Home Assistant never lets an add-on update itself through the
 Supervisor (it answers "can't update itself", whatever the permission), so the add-on asks Home Assistant Core to
 install its own update, the same as pressing Update in Settings > Add-ons. For that it declares `homeassistant_api`
 (to reach Core's update service) and `manager` (to make the Supervisor re-read the add-on repositories first, because
@@ -45,27 +44,24 @@ updated this way: copy the new files again, then press Update in Home Assistant.
 
 ## Options
 
-| Option         | What                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pairing_code` | optional, old way: a pairing code made in Squeak for Mac; not needed with the panel, and ignored after the add-on is paired                |
-| `sip_host`     | 3CX's "Registrar Hostname" (e.g. `1348.3cx.cloud`)                                                                                         |
-| `sip_proxy`    | 3CX's "Outbound Proxy (SBC) Address" with port (e.g. `192.168.68.114:5060`)                                                                |
-| `extension`    | the extension made for Squeak (3CX: Extension Number)                                                                                      |
-| `auth_id`      | 3CX's Authentication ID                                                                                                                    |
-| `password`     | 3CX's Authentication password                                                                                                              |
-| `speech`       | `natural` (a local neural voice, about 300 MB of memory for a second or two per prompt) or `plain` for a small machine: robotic, but light |
-| `transport`    | `udp` unless your SBC says otherwise                                                                                                       |
+- `sip_host` is the 3CX Registrar Hostname.
+- `sip_proxy` is the 3CX Outbound Proxy (SBC) Address, including the port.
+- `extension` is the extension number created for Squeak.
+- `auth_id` and `password` are the 3CX authentication credentials.
+- `transport` defaults to `udp`. Use your SBC's protocol.
+- `speech` defaults to `natural`. Choose `plain` for a lighter voice on a small machine.
+- `pairing_code` is for the legacy Mac-generated pairing flow.
 
 ## Notes
 
-- When the PIN is asked is set in the Squeak app (Settings > Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
-- 0.21.0: follows Squeak for Mac when it moves the phone channel between Firebase and Zoho Catalyst, without pairing again; can also be paired straight to a Catalyst setup.
+- When the PIN is asked is set in the Squeak app (Settings › Extensions › Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
+- 0.21.0: supports the hosted Catalyst relay and follows the Mac when its channel moves.
 - 0.20.0: answer by voice. Calling in asks "Which workspace?" and "Which chat?" out loud and you say a name or a number (keys still work at any point; after two misses it goes back to the keypad menu). The PIN stays on the keypad. Waiting lines vary and follow the character set in Squeak for Mac, and the Mac's own messages (refusals, outcomes) come in its voice. Needs Squeak for Mac's daemon from the same day.
 - 0.19.0: faster turns. Your recording goes to the Mac in pieces while you are still talking, so the Mac has it moments after you stop. The read-back of what you said plays in the Mac's voice as it is made, instead of after the whole of it, and a sentence that is late is waited for (up to 8 s) and only that sentence falls back to the add-on's own voice. The Mac does this only for an add-on of 0.19.0 or newer.
-- 0.18.0: a new chat from a call: in a workspace's chat menu, press 0 for a new chat there. Say what it should do; Squeak reads back the workspace, the model and your words, and only a yes (said, or 1 on the keypad) starts it. The model is the one picked in Squeak for Mac (Settings › Phone calls › New chats from calls use). The Mac offers it only to an add-on of 0.18.0 or newer.
+- 0.18.0: a new chat from a call: in a workspace's chat menu, press 0 for a new chat there. Say what it should do; Squeak reads back the workspace, the model and your words, and only a yes (said, or 1 on the keypad) starts it. The model is the one picked in Squeak for Mac (Settings › Extensions › Phone calls › New chats from calls use). The Mac offers it only to an add-on of 0.18.0 or newer.
 - 0.17.0: a spoken answer starts after its first sentence instead of after the whole answer: the Mac sends the rest as it makes it, and a late sentence is finished in the add-on's quick voice. The Mac does this only for an add-on of 0.17.0 or newer. A recording now ends after 1.6 s of quiet (was 2.5 s), and a call in offers "the last one you used" only for a chat used by phone in the last two hours, else the newest one waiting on you ("it's waiting on you").
 - 0.16.1: calls no longer break up on a slow machine: a Piper prompt being made when a call is answered stands still until it ends, and once the Mac sends recordings the add-on waits 5 minutes for a new list's before making its own.
-- 0.16.0: terse calls in: a call in no longer starts with "Hello, this is Squeak." and the conversation starts at the chat's name, unless the character in Squeak for Mac (Settings › Phone calls › How it talks) is Friendly.
+- 0.16.0: terse calls in: a call in no longer starts with "Hello, this is Squeak." and the conversation starts at the chat's name, unless the character in Squeak for Mac (Settings › Extensions › Phone calls › How it talks) is Friendly.
 - 0.15.0: hold: after you approve a message, Squeak asks if you want to stay on the line while the agent works. Say yes and it waits, tells you when it is done and carries on talking; press 1 any time to hear what the agent is thinking, hash to hang up. The Mac offers it only to an add-on of 0.15.0 or newer.
 - 0.14.0: call backs: end a call with "call me back when you're done" (or "go with B, then call me back") and Squeak rings you when that chat's work has ended, telling you how it went; you can talk to it then like on any call. The Mac offers it only to an add-on of 0.14.0 or newer; an older one gets a short call that only tells you.
 - 0.13.0: calling in is a conversation too: after you pick the chat (1 for the last one), Squeak says "Go ahead" and listens, exactly like a call out; ask about the chat, or say what to do and a spoken yes sends it. The keypad is the fallback if your Mac cannot be reached. The Mac offers it from this version of Squeak.

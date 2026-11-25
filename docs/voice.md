@@ -6,27 +6,17 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
 
 ## Gateway setup
 
-1. Build and install the add-on (step 2) and start it. Open the **Squeak Voice** panel in Home Assistant's sidebar: it
-   shows a code like `K7M2-QX9P`. In Squeak for Mac: Settings > Phone calls > Add gateway, type the code, approve.
-   The add-on posts a sealed request on the cloud relay (`claim-protocol.ts`, `addon-claim.ts`), the
-   Mac seals its channel and key to the add-on's key, and the add-on keeps them in `/data/pairing.json`
-   (design: `.context/claim-flow-contract.md`). The panel (`addon-panel.ts`, ingress port 8099, answers only the
-   Supervisor at 172.30.32.2) also shows SIP registration, PIN state and the recent log, never a key.
-   **Old pairing code:** still works. Make one in Squeak, paste it in the add-on's `pairing_code` option; the add-on
-   logs `Pairing: confirm NNNN on your Mac` (`pair-protocol.ts`). Also old: `squeak voice-relay` makes the channel
-   and key (saved to `.env`) and prints `database_url`, `channel` and `key` for the add-on's options.
-2. `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
-   share (Samba or SSH add-on), then Settings > Add-ons > Add-on store > menu > Check for updates, and install
-   Squeak Voice under Local add-ons. Fill in its SIP options (see its Documentation tab) and start it.
-   **Updates:** a local add-on never sees a new version until its folder is copied again. To get updates from Home
-   Assistant itself, add `https://github.com/Sibhimanyu/squeak` under Add-on store > menu > Repositories
-   (`repository.yaml` at the root makes the repo one); it pulls the prebuilt image for the `version` in
-   `config.yaml`, which the "Squeak Voice add-on image" workflow must have built first.
-3. The add-on reports to the Mac every 30 s (a sealed `voiceresult/gwstatus` document: version, whether the PBX accepted
-   its registration and why not, the PIN state), which Settings > Phone calls shows.
-4. Restart Squeak.
+1. Sign in to Squeak on the Mac in **Settings › You › Account**. Calls use the hosted Catalyst relay.
+2. Install Squeak Voice in Home Assistant and start it with your PBX's SIP details. For prebuilt updates, add
+   `https://github.com/Sibhimanyu/squeak` under **Add-on store › Repositories**. For a local install,
+   `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
+   share, then install Squeak Voice under **Local add-ons**. Copy the folder again when updating a local install.
+3. Open **Squeak Voice** in the Home Assistant sidebar to get its short code.
+4. On the Mac, open **Settings › Extensions › Phone calls › Add gateway**. Enter the code and approve.
+   The add-on stores the grant in `/data/pairing.json`. The Mac shows the gateway version, PBX registration and PIN state
+   from its sealed status report.
 
-**Who it rings** is set in Squeak for Mac, Settings > Phone calls (`GET/POST /control/voice`, saved in
+**Who it rings** is set in Squeak for Mac, Settings › Extensions › Phone calls (`GET/POST /control/voice`, saved in
 `voice-settings.json`), and travels in each sealed request. Only an internal extension (2 to 6 digits) is accepted,
 by the daemon and again by the gateway, so a stolen key cannot point the PBX at an outside number. The add-on's
 optional `callee` option is only the fallback; with neither, the call fails with a note saying to set one.
@@ -43,7 +33,7 @@ voice is plainer than the Mac's.
 
 ## Phone calls setup in Squeak for Mac
 
-Settings > Phone calls opens on a **Phone calls setup** list: the gateway paired, the add-on up to date, the extension to
+Settings › Extensions › Phone calls opens on a **Phone calls setup** list: the gateway paired, the add-on up to date, the extension to
 ring, a PIN (or consciously off), the realistic voice and a test call that was answered, each with its own button and a
 summary line ("Phone calls are ready" / "2 steps left"). It reads only what the daemon already says
 (`GET /control/voice`, the gateway view, the install status); the rules live in `PhoneCallsChecklist` (SqueakMacCore).
@@ -172,7 +162,7 @@ the Home Assistant gateway calls, in `<support dir>/voice-pin.json` (0600) when 
 never stores it. The file is `{ "pin": "4821" }` (a pin is required) or `{ "off": true }` (turned off); neither file
 nor option means "none". The add-on starts without a pin and says so in its log.
 
-From either app (Settings > Phone calls > Pin), or the iPhone's signed `voice` command, or `POST /control/voice` with
+From either app (Settings › Extensions › Phone calls > Pin), or the iPhone's signed `voice` command, or `POST /control/voice` with
 `{ "pin": PinAction }`:
 
 - **Change** (`change`: current, next): needs the current pin.
@@ -223,7 +213,7 @@ Changing and turning off still need the current pin.
 
 Dial Squeak's extension (the one in the add-on's options) from your 3CX app, from anywhere.
 
-1. It answers only if the call is from the extension set in Squeak for Mac, Settings > Phone calls: with none set
+1. It answers only if the call is from the extension set in Squeak for Mac, Settings › Extensions › Phone calls: with none set
    nobody can call in. It then asks for the PIN (two tries), unless the app's PIN setting for calls you make is "Don't ask" (the old `call_in_pin: skip` option only seeds it)
    (a call from that one extension is then proof enough). The Mac app sets when each call direction asks for the PIN.
    With the pin turned off from an app it asks nothing; with no pin ever set, calling in is
@@ -560,8 +550,7 @@ answers) hangs up; a call back asked for with the send hangs up too, since that 
 ## Terse by default, and a character you set (Squeak for Mac 2.12.32)
 
 These calls are to the owner, not to a customer, so the default **persona** is terse (`voice-settings.json`
-`persona: { style: "terse" | "friendly" | "custom", custom? }`, absent = terse; `GET/POST /control/voice`, Settings >
-Phone calls > How it talks).
+`persona: { style: "terse" | "friendly" | "custom", custom? }`, absent = terse; `GET/POST /control/voice`, Settings › Extensions › Phone calls > How it talks).
 
 - **Fixed lines**: a terse call drops "Hello, this is Squeak." and the "Just tell me what to do, or ask me anything about
   it." invitation (the beep says it): an opening is "<chat> has a question for you. <question>", a call back "<chat> is
@@ -629,7 +618,7 @@ earlier pass or a still-kept version already holds, by a digest of their clips, 
 ## Waiting lines in the character you picked (add-on 0.20.0)
 
 "One moment." and "Still working on it." were said the same every time. The directory now carries `fillers: { wait: string[], still: string[] }`
-(`voice/fillers.ts`), chosen by the persona in Settings › Phone calls › How it talks:
+(`voice/fillers.ts`), chosen by the persona in Settings › Extensions › Phone calls › How it talks:
 
 - **Terse** and **friendly** have built-in sets (8 `wait`, 8 `still` each, at most 50 characters, plain words).
 - **Custom**: when the text is saved (the `persona` change that `VoiceSettingsStore.apply` takes, from the Mac app or the phone), the Mac asks the
@@ -684,20 +673,15 @@ Whisper) the call-in menus are questions, not "Press 1 for...":
 
 ## Pairing a gateway (daemon side)
 
-The Mac makes one code (`src/voice/pair-protocol.ts`: the phone channel's database address and a one-time secret,
-valid 10 minutes). Control routes, token-gated like `/control/voice`, no CORS header:
+The **Add gateway** flow uses `POST /control/voice/gateway/claim` with `{ code }`. The add-on's short code
+opens a one-time exchange on Squeak's signaling database. The Mac seals the voice channel details to the add-on's
+key. Call traffic then uses the Mac's cloud store. A new voice channel is saved to `.env` and the daemon restarts to
+use it. The status document (`voiceresult/gwstatus`) is fresh for 90 seconds and is shown by `GET /control/voice`.
 
-- `POST /control/voice/gateway/pair` `{}` opens the window and answers `{ ok, code, expiresAt }`; a second call
-  replaces the first. It needs the phone channel's own `SQUEAK_REMOTE_DATABASE_URL` (503 on the shared server).
-- `GET /control/voice/gateway` answers `{ pairing: null | { state: waiting|request|done|expired, expiresAt, name?,
-version?, verify? }, status: { state: none|stale|ok|sipDown, version?, sipRegistered?, sipError?, at? } }`.
-- `POST /control/voice/gateway/approve` `{ approve: boolean }`: yes seals the Mac's channel and key for the add-on
-  (`src/voice/pairing-window.ts`); no deletes the request.
-
-If the grant made a new channel and key they are saved to `.env` and the daemon exits about 1.5 s later so launchd
-restarts it with the relay; an unchanged pair restarts nothing. Status comes from the add-on's `gwstatus` document
-(`gateway-status.ts`, fresh within 90 s), also in `GET /control/voice` as `gateway`. The `voicepair` rules kind
-carries the request and grant.
+The legacy **Use a pairing code instead** flow starts with `POST /control/voice/gateway/pair`. Paste the
+Mac-generated code into the add-on's `pairing_code` option, then confirm the four digits on the Mac.
+`GET /control/voice/gateway` reports progress. `POST /control/voice/gateway/approve` takes `{ approve }`.
+These control routes require the local control token and send no CORS header.
 
 ## Two call-in settings
 

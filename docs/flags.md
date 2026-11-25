@@ -18,17 +18,22 @@ the daemon. A missing file is fine. An invalid file, an unknown name or a non-bo
 
 ## Flags
 
-| name             | env                       | default | parse                                                                                                                                                           |
-| ---------------- | ------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `remote.verbose` | `SQUEAK_REMOTE_VERBOSE`   | on      | off only for `off`                                                                                                                                              |
-| `remote.local`   | `SQUEAK_REMOTE_LOCAL`     | on      | off only for `off`                                                                                                                                              |
-| `caffeinate`     | `SQUEAK_CAFFEINATE`       | on      | off only for `off` (`working` is read separately)                                                                                                               |
-| `askFormat`      | `SQUEAK_ASK_FORMAT`       | on      | off for `off`, `0`, `false`, `no`                                                                                                                               |
-| `autoTitle`      | `SQUEAK_AUTO_TITLE`       | on      | off only for `off` (heuristic title, no model)                                                                                                                  |
-| `roomSummary`    | `SQUEAK_ROOM_SUMMARY`     | on      | off only for `off` (no model-written room lines)                                                                                                                |
-| `roomJobs`       | `SQUEAK_ROOM_JOBS`        | on      | off only for `off` (no automatic job check; manual jobs still work)                                                                                             |
-| `pondOwnThreads` | `SQUEAK_POND_OWN_THREADS` | off     | on for `on`, `1`, `true`, `yes` (stashed: a member's own-Mac threads in a joined pond)                                                                          |
-| `ducksOwnBranch` | `SQUEAK_DUCKS_OWN_BRANCH` | on      | off for `off`, `0`, `false`, `no` (on: every new chat in a git pond gets its own branch and worktree, Main read-only; `docs/ponds.md` "Ducks own their branch") |
+On by default. Set the environment variable to `off` to disable it.
+
+- `remote.verbose` / `SQUEAK_REMOTE_VERBOSE` enables live turns on the phone.
+- `remote.local` / `SQUEAK_REMOTE_LOCAL` enables the direct same-Wi-Fi path.
+- `caffeinate` / `SQUEAK_CAFFEINATE` keeps the Mac awake. The separate value `working` disables the plugged-in hold.
+- `autoTitle` / `SQUEAK_AUTO_TITLE` uses a model to name new chats. Off uses a local title from the first message.
+- `roomSummary` / `SQUEAK_ROOM_SUMMARY` enables model-written Room status lines.
+- `roomJobs` / `SQUEAK_ROOM_JOBS` checks Room messages for Tasks. Manual Tasks still work when it is off.
+
+These also default to on and accept `off`, `0`, `false` or `no`.
+
+- `askFormat` / `SQUEAK_ASK_FORMAT` gives agents the lettered ask format.
+- `ducksOwnBranch` / `SQUEAK_DUCKS_OWN_BRANCH` gives each new Duck in a Git Pond its own branch and working copy.
+
+`pondOwnThreads` / `SQUEAK_POND_OWN_THREADS` is off by default. Set it to `on`, `1`, `true` or `yes` to let
+a Member run a Duck on their own Mac in a joined Git Pond.
 
 Values are trimmed and case-insensitive.
 
@@ -37,14 +42,15 @@ Values are trimmed and case-insensitive.
 These are read where they are used, not through `flag()`. They are not in `GET /control/flags`. Put them in the
 daemon's `.env` (the host reads the same file) or the launchd environment.
 
-- `SQUEAK_FLOTILLA`: ponds are on; `off` constructs nothing from `src/flotilla`.
-- `SQUEAK_ADDONS`: comma-separated names of development add-ons (not `distributed`) to load. Shipped add-ons load
-  always and stay off until enabled in Settings › Extensions.
+- `SQUEAK_FLOTILLA=off` disables Ponds. The host checks for the literal value `off`. Ponds are on by default.
+- `SQUEAK_ADDONS` lists extra add-on IDs to load, separated by commas. Distributed add-ons load automatically.
+  Enable an add-on in Settings › Extensions to run it.
 - `SQUEAK_NATIVE_COMPACT`: on; `off` skips the compaction of `native.db` at start.
 - `SQUEAK_AGENT_SDK_PREFETCH`: on; `off` skips fetching the Claude Agent SDK at start.
 - `SQUEAK_API_STALL_MIN`: minutes without a stream event before the host gives up on a request (default 10, `0` = never).
 - `SQUEAK_REMOTE_NATIVE_BYPASS`: off; `1` lets a phone start a native chat that skips approvals.
-- `SQUEAK_CLOUD_URL`: use another Catalyst relay than Squeak's hosted one.
+- `SQUEAK_CLOUD_URL` overrides the hosted relay base URL for sign-in and provisioning. The daemon accepts an HTTPS
+  Catalyst relay URL and falls back to Squeak's hosted URL if the value is invalid.
 - `SQUEAK_CLOUD_DEFER_MOVE`: off; `on`, `1`, `true` or `yes` (or a `cloud-defer-move` file in the support dir) holds an
   existing install's move to the hosted relay until `POST /control/cloud/move-now`.
 - `SQUEAK_HOST_PORT`: the session host's port (default 8479).

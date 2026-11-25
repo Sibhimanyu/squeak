@@ -135,14 +135,14 @@ and signing in on the Mac sets it up (see
 ### Telegram
 
 Create a bot with [@BotFather](https://t.me/BotFather) using `/newbot`. In
-**Settings → Telegram**, enter its token and allow only the chats you want to
+**Settings → Extensions → Telegram**, enter its token and allow only the chats you want to
 use. The bot sends attention cards with answer buttons and accepts replies.
 Telegram uses its own bot service and does not require the iPhone channel.
 
 ### Zoho Cliq and phone calls
 
 [Zoho Cliq setup](docs/cliq.md) covers the bot, owner restriction, webhook and
-three Deluge handlers for two-way cards. It needs a Squeak account (the hosted cloud) or, on older installs, your own Firebase relay.
+three Deluge handlers for two-way cards. Sign in on the Mac to connect replies to Squeak's hosted relay.
 
 [Phone call setup](docs/voice.md) covers SIP/PBX calls that read a waiting
 question and accept a keypad answer. Use a direct PBX connection or the Home

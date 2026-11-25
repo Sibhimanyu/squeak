@@ -1,88 +1,33 @@
-# The cloud layer: Firebase or Catalyst
+# Squeak's hosted cloud
 
-Squeak's devices (the Mac daemon, the iPhone app, the Home Assistant voice add-on) meet in one cloud store. Every
-document is sealed by the devices (docs/remote-channel.md), so the store only ever holds opaque boxes. This file is the
-contract the daemon, the relay function, the Mac app and the iPhone app are built to. Change it first, then the code.
-
-The spike that measured this is `spikes/catalyst/` (README: Firebase baseline, the Data Streams wire protocol).
+Sign in on the Mac in **Settings › You › Account**. The daemon provisions that Mac on Squeak's hosted Catalyst
+relay and saves its key in `cloud.json` in the support directory. The Account page shows the connection state and
+offers **Retry** after a connection error. See [Feature flags](flags.md) for the relay URL override.
 
 ## What a store is
 
-Exactly what `src/remote/rtdb-rest.ts` (`RtdbRest`) and `RealtimeDatabaseClient` (Swift) already do:
+`CloudStore` (`src/cloud/store.ts`) provides `get`, `set`, `delete`, `list` and `watch`. A watch is a signal
+to read again. The daemon uses `CatalystStore` and the iPhone uses `CatalystClient`. Both retain a Realtime
+Database implementation for older installs.
 
-| op                                  | meaning                                                                                                          |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `get(path)`                         | one document or null                                                                                             |
-| `set(path, doc, {timeoutMs?})`      | write (overwrite) one document                                                                                   |
-| `delete(path)`                      | remove one document (missing is fine)                                                                            |
-| `list(collection)`                  | `[{ id, doc }]` of a collection's direct children                                                                |
-| `watch(path, onChange)` → `unwatch` | a wake-up when anything under `path` may have changed; never carries data, the reader re-reads through the store |
+## Catalyst transport
 
-Paths are `channels/<channelId>/<kind>/<doc>` (the RTDB rule: channel id `^[A-Za-z0-9_-]{22,64}$`, the kinds the rules
-whitelist, doc `^[A-Za-z0-9_-]{1,80}$`, box < 900000 chars). `ChannelDoc` is unchanged.
+- The `squeak_relay` function lives in `cloud/catalyst-relay/`. Its base path is `/server/squeak_relay`.
+- `GET`, `PUT` and `DELETE /doc?path=` access one document. `GET /list?prefix=` lists a collection.
+  `GET /ping` reports relay health. `POST /token` opens the Data Streams connection.
+- Channel documents use `channels/<channelId>/<kind>/<doc>`. The relay validates paths and sizes.
+  The NoSQL table `squeak_docs` uses `channels/<channelId>/<kind>` as its partition key and the document ID as
+  its sort key. Channel payloads are sealed by the devices.
+- Data Streams wakes watchers after writes. Clients read through the store and poll as a fallback.
 
-Node: `interface CloudStore` in `src/cloud/store.ts` with exactly `RtdbRest`'s public signatures; `RtdbRest` implements
-it unchanged; `CatalystStore` (`src/cloud/catalyst-store.ts`) is the second implementation; `createCloudStore(config)`
-picks one. Every current `RtdbRest` user takes a `CloudStore` instead (types only; behaviour on Firebase identical).
-`FakeRtdb` keeps working for tests. Swift: `protocol CloudStore` in SqueakCore with the same five operations;
-`RealtimeDatabaseClient` conforms; `CatalystClient` is the second.
+## Devices and migration
 
-## Catalyst: how the five operations map
+An iPhone or browser signs in with the Mac's account. The Mac authorizes each device and seals its channel details
+to that device's key. See [Remote channel](remote-channel.md#web-accounts-2026-11-10).
 
-- **The relay** is one Catalyst Advanced I/O function, `squeak_relay` (Node), shipped in `cloud/catalyst-relay/`
-  (moved and hardened from `spikes/catalyst/relay`). Base URL `https://<project app domain>/server/squeak_relay`.
-  - `GET /doc?path=` → `200 {doc}` | `404`; `PUT /doc?path=` body `{doc}` → `204`; `DELETE /doc?path=` → `204`;
-    `GET /list?prefix=channels/<id>/<kind>` → `200 {items:[{id,doc}]}`; `GET /ping` → `200 {ok, store, channel, channelId?, version}`
-    (`store`/`channel`: `"ready"|"missing"`, so setup can check the console steps); `POST /token` body
-    `{name}` → `200 {url, key, wssId}` (a Data Streams token pair for a fresh connection name, ≤ 20 chars, no `.`/`:`).
-  - Every request carries header `x-squeak-relay: <RELAY_KEY>` (a random 32-byte base64url secret the daemon makes at
-    deploy, set as the function's env var, and handed to paired devices inside the sealed pairing grant, never logged).
-    A wrong or missing key is a bare `401`.
-  - The path rule, kinds whitelist and size cap are the RTDB rules', checked in the function.
-  - Storage: the NoSQL table `squeak_docs` (partition key `pk` = `channels/<id>/<kind>`, sort key `doc`; the item holds
-    the `ChannelDoc` JSON as a string). If the spike's open question (does `insertItems` overwrite) fails, update.
-  - After every successful PUT or DELETE the relay publishes `{"p":"channels/<id>/<kind>"}` to the Data Streams channel
-    `squeak_notice` (Custom Logic access control, the function `squeak_relay` selected). The channel id is found by the
-    relay itself (`getAllChannels`, name `squeak_notice`) and cached; no env var for it.
-- **watch** = one Data Streams subscriber per process (subscribe `'0'`, `sendAck` after every message, release and resubscribe
-  on reconnect exactly as the datastreams skill says, unsubscribe before every deliberate close), fanned out to every
-  `watch(path)` whose path is a prefix of (or equal to) the message's `p`. A 60 s safety poll stays, as with RTDB.
-  Node uses `@zcatalyst/datastreams` or the spike's protocol notes; Swift implements the JSON-over-WebSocket protocol in
-  `spikes/catalyst/README.md` with `URLSessionWebSocketTask`.
-
-## Configuration (`~/Library/Application Support/squeak/cloud.json`, 0600)
-
-```json
-{
-  "active": "firebase",
-  "firebase": { "databaseUrl": "https://<id>.<region>.firebasedatabase.app", "projectId": "<id>" },
-  "catalyst": {
-    "projectId": "<id>",
-    "projectName": "<name>",
-    "dc": "in",
-    "appUrl": "https://<domain>",
-    "relayKey": "<secret>",
-    "deployedVersion": "<relay version>"
-  }
-}
-```
-
-Absent file: today's behaviour (Firebase from `SQUEAK_REMOTE_DATABASE_URL` in `.env`). `active` decides the store the
-bridge, the voice relay and pairing use. The Cliq relay uses the same store (docs/cliq.md).
-
-## Pairing and devices
-
-The sealed pairing grant (and the add-on's pairing grant) gains the provider: Firebase as today (`r` = database URL);
-Catalyst `cu` = relay base URL and `ck` = relay key (`cu`, not `c`: in a pairing code `c` is already the channel id;
-`p` and `r` are absent when the Mac has no Firebase; the `move` document below keeps `c` = relay URL). Both sides accept a relay URL only for an https host under
-`.catalystserverless.com/.in/.eu/.com.au/.jp/.ca/.sa` or `.catalystappsail.*` (mirror of the RTDB host check). A device
-paired before keeps Firebase until told to move.
-
-**Moving.** When a Mac that was on another store gets its hosted key, the Mac first checks the target
-(`/ping` ready + a test round trip), then writes one sealed, signed `state` document `move` on the _current_ store
-(`{v:1, provider, r?|c?, ck?, at}`) that paired phones and the add-on act on: they verify it like any Mac-signed doc,
-switch their store, and confirm by writing their presence on the new store. The Mac switches at once after writing it
-and keeps reading the old store for 10 minutes for stragglers. A device that never saw the move can be re-paired.
+When sign-in moves a Mac from an older store, the daemon writes a sealed, signed `state/move` document on that store.
+Compatible paired phones and voice gateways verify it and move to the new location. The Mac reads the old store for
+10 minutes after the move. A phone that missed the move can sign in again.
 
 ## Accounts (Catalyst Hosted login; relay routes)
 
@@ -90,18 +35,12 @@ The account identifies the person; device keys authorise. The relay holds nothin
 signed-in account alone never grants access. Cookie routes answer a bare 401 when nobody is signed in and always send
 `Cache-Control: no-store`; Mac-side routes need `x-squeak-relay`.
 
-| route                                                             | who                                      | answer                                                                                                                              |
-| ----------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /account/link-ticket`                                       | cookie                                   | `{ticket, expiresAt}`; 10 min                                                                                                       |
-| `POST /account/link` `{ticket, macId, name}`                      | relay key                                | `{userId, email}`; bad/expired ticket `400 {error:"ticket"}`; the newer link wins over an older user's                              |
-| `POST /account/unlink` `{macId}`                                  | relay key                                | 204; drops both link records and the Mac's pending device requests and results                                                      |
-| `POST /account/app-token`                                         | cookie                                   | `{token, expiresAt, email, name}`; 30 days, for the native apps (below)                                                             |
-| `PUT /account/avatar` `{type:"image/jpeg", data:<base64>}`        | cookie or token                          | `{at}`; JPEG (starts FF D8 FF) of at most 64 KB decoded, else `413 size` / `400 image`; `429 busy` past 20 writes per user per hour |
-| `GET /account/avatar`                                             | cookie or token, or relay key `?userId=` | the JPEG (`image/jpeg`, `nosniff`, `private, no-store`) or 404; pond tokens refused (401)                                           |
-| `DELETE /account/avatar`                                          | cookie or token                          | 204                                                                                                                                 |
-| `GET /account/macs`                                               | cookie or token                          | `{macs:[{macId, name, linkedAt}]}`, this user's only                                                                                |
-| `POST /account/device-request` `{macId, name, publicKey, boxKey}` | cookie or token                          | `{reqId, expiresAt}`; `403 mac` unless linked to this user; `429 busy` at 3 open                                                    |
-| `GET /account/device-request?macId=&id=`                          | cookie or token                          | 202 `{}` pending; 200 `{result}` (result and request then deleted); 410 `gone`; 403 another user's                                  |
+- `POST /account/link-ticket` issues a 10-minute ticket from a signed-in browser session.
+- `POST /account/link` exchanges a ticket for the account identity. `POST /account/unlink` removes the account link and pending device requests.
+- `POST /account/app-token` exchanges the browser session for a 30-day token for a native app.
+- `/account/avatar` reads, writes or removes the account's JPEG photo. Uploads are capped at 64 KB.
+- `GET /account/macs` lists the account's Macs.
+- `POST /account/device-request` submits a new device's keys. The matching GET polls for the result.
 
 - **Ticket** `al.<userId>.<expMs>.<emailBase64url>.<mac>`: HMAC-SHA256 under `RELAY_KEY` over a domain prefix and the
   fields (`scoped.js`, constant-time verify). The email of the signed-in user is one of the signed fields, so the relay
@@ -110,8 +49,7 @@ signed-in account alone never grants access. Cookie routes answer a bare 401 whe
   (`squeak-account-app`), so neither verifies as the other. A native app (Squeak for Mac, Squeak for iPhone) gets one from
   the web callback page (`POST /account/app-token`, cookie only) and sends it as `x-squeak-account: <token>` on `/me`,
   `/account/macs`, `/account/device-request` (POST and GET) and `/account/avatar` (its own photo); the token wins over the cookie when both are present, and
-  a bad or expired one is a bare 401, never a fall back to the cookie. Nothing else takes it: not `/account/link-ticket`
-  nor `/account/app-token`, so a token lists Macs, requests devices and owns the account's photo, and mints neither tokens nor tickets. `/me` also carries `avatarAt` (ms) when a photo exists. Through a token `/me` answers `name: ""` (the
+  a bad or expired one is a bare 401, never a fall back to the cookie. It also authorizes hosted Mac provisioning. A browser session is required to mint tickets and app tokens. `/me` also carries `avatarAt` (ms) when a photo exists. Through a token `/me` answers `name: ""` (the
   token carries the email only). It identifies, never authorises: the Mac still approves every device.
 - **Records** (store partition keys): `accounts/<userId>` doc `<macId>` = `{macId, name, linkedAt}`; `maclinks` doc
   `<macId>` = `{userId, email}`; `channels/<macId>/devreqs` doc `<reqId>` = `{v:1, reqId, userId, email, name, publicKey,
@@ -227,11 +165,6 @@ only after its owner signs in (a Squeak account is required to use the hosted cl
   channel, written, watched, read and deleted; never real channel data).
 - Self-hosting is gone. The old routes to pick a Catalyst project, deploy a relay, select a provider or set up Firebase
   answer `410 self-hosting-removed`. Errors are fixed sentences; never a CLI's raw output or a token.
-
-## Mac app
-
-There is no Cloud tab. Settings › Account shows the hosted block: signed out, connecting, connected or an error, with
-Reconnect. Signing in is the whole setup: the Mac gets its own key from the hosted relay.
 
 ## History in the cloud (relay 1.5.0)
 

@@ -257,7 +257,7 @@ Each area: what it is for, what exists today, and the target. Areas without a ta
 
 ### Files and terminal
 
-- **Today:** file browser, search, Markdown preview; terminal panel.
+- **Today:** File browser, search and Markdown preview. The default Mac layout puts Terminal in the Duck's Work Pane. Classic layout uses its dock.
 - **Target:** unchanged.
 
 ### Heresay
@@ -317,19 +317,6 @@ Each area: what it is for, what exists today, and the target. Areas without a ta
 ## Further Notes
 
 - **Reversed decision:** routed Tasks start without a Go tap. This reverses the 2026-11-17 rule that nothing starts without a person's Go; Ask before starting keeps the old behaviour per Pond.
-- **Docs to fix (12):**
-  1. `getting-started.md` describes the deleted relay, Firebase, QR pairing and old Settings pages.
-  2. `AGENTS.md` and `layout.md` say the daemon watches every session; external discovery is now add-ons, off by default.
-  3. `macos/README.md` has an outdated Settings list and Sparkle status.
-  4. `voice.md` and the Home Assistant config describe a Firebase gateway and "Settings › Voice" (now Phone calls).
-  5. `cliq.md` routes replies through Firebase.
-  6. `cloud-layer.md` describes a Settings › Cloud tab that no longer exists.
-  7. `ponds.md` contradicts itself on live status, guest tokens and cloud setup.
-  8. `web-app.md` claims parity with iPhone.
-  9. `remote-channel.md` still recommends FCM push.
-  10. `flags.md` omits environment switches.
-  11. `todo.md` says Codex asks aren't answerable (check against code).
-  12. The terminal panel's status disagrees between docs.
 - **Suggested build order:**
   1. One way to start a Duck, and the host owning waiting messages.
   2. The Task model and decider on the Mac.

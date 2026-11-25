@@ -1,36 +1,28 @@
 # Ponds: multiplayer Squeak (Flotilla)
 
-Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. **On for everyone** (owner, 2026-11-10); `SQUEAK_FLOTILLA=off` is the off switch. The whole journey (create, publish, invite, join, approve, shared thread, hold, a member's own thread, restrictions, leave) runs between two Macs over one store in `src/flotilla/journey.e2e.test.ts`; a real two-Mac and relay run has not been done.
+Ponds are on by default. `SQUEAK_FLOTILLA=off` disables them. The two-Mac flow is covered by
+`src/flotilla/journey.e2e.test.ts` using a test store.
 
 ## Every project is a pond (local ponds)
 
-There is no "convert to a pond" step. The host keeps a **local pond** for every project (native projects by `projectId`; the other projects the Mac lists, Conductor's, by name): `GET /native/ponds` and `POST /native/ponds/local` call `ensureLocalPond`, which is synchronous and returns the pond a project already has (local or published, by project id, else by name for a pond with no project), so a project tied to a published pond never gets a second one and no existing pond or chat is touched. A local pond is a `local: true` entry in `flotilla/ponds.json`: its key exists but **nothing goes to any cloud**, nothing is watched, no network call is made, and with no cloud set up the service still constructs and works (`store: null`). Its home is the same page as a published one (a flock of just you, threads, Ripples) with one quiet line that only this Mac can see it.
+Each project has a Pond. The host reuses the existing record for the project. A local Pond works without sign-in.
+Its `local: true` record and key stay in `flotilla/ponds.json` until it is shared.
 
-**The first invite publishes.** `POST /native/ponds/<id>/invites` on a local pond runs `publish` first (the same documents `createPond` writes: the pond's meta with name and gitRemote, the owner's member document, a first Ripple), then makes the invite. One publish per pond runs at a time (a double click shares it); a failure before the owner document is written leaves the pond local with the same id and key, so a retry reuses it and no orphan is made. The Mac's Invite signs in to the Squeak account first when it is signed out, then continues to the invite; signing in gives the Mac the hosted cloud, so there is nothing else to set up. If the daemon still has no cloud store, the answer is the plain sentence "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond." and nothing changes.
+**The first invite publishes.** Sign in under **Settings › You › Account** to connect to Squeak's hosted relay.
+The host publishes the Pond's metadata and the Owner's membership before issuing the invite. A failed publish keeps
+the local Pond's ID and key so it can be retried.
 
-## Words (DESIGN.md §9)
+Use [GLOSSARY.md](../GLOSSARY.md) for product terms. The wire and source still use names such as `project` and `thread`.
 
-**Pond** the shared container. **Flock** its members. **Thread** one agent on one task. **Nest** a member's machine.
-**Egg** an idea not started; starting it hatches a thread. **Stream** a branch's own folder (a git worktree), always shown with its git branch. **Duckling** an agent's helper (a subagent). **Quack** a notification.
-**Ripples** the activity feed. "Workspace" stays in code and for Conductor's own. Controls stay literal.
+## Who can do what
 
-## The model (D)
+A Pond can use any folder. Members see shared Ducks according to the access the Owner grants. By default,
+Members work with Ducks on the Owner's Mac. The experimental `SQUEAK_POND_OWN_THREADS=on` lets Members of a Git
+Pond run their own Ducks and share their chats. Code moves through Git.
 
-- A pond is any folder. Opening one shows its home: the flock and every thread.
-- Access is granted per pond. Members see every thread unless its starter marks it private.
-- Two kinds of collaboration:
-  1. **Own thread** (**Stashed: off by default, `SQUEAK_POND_OWN_THREADS=on` to try**; the daemon says it as `pondOwnThreads` in `GET /native/directory`, and members start on the owner's Mac instead): a member runs their own agent on their own Nest. Needs a pond with a Git remote; code moves only through Git.
-  2. **Shared thread**: members chat in a thread running on its starter's Nest. Only messages travel, so any folder works.
-- On someone else's thread a member can watch, see the diff, message, steer and answer. **Approving actions and stopping a
-  thread belong to its starter**, and only on the starter's own Mac; neither exists as a command on the wire.
-- Whoever starts answering a question holds it (`hold`, 30 s, renewed while typing); others see "Aarav is answering".
-
-## Who can do what (live, 2026-11-14)
-
-Two modes: **shared thread** (the starter's agent on the starter's Mac; members read, see changes, message
-and answer) and **own thread** (**Stashed: off by default, `SQUEAK_POND_OWN_THREADS=on` to try.** Off: a member's Mac never publishes its own thread, readers drop one already published, the Mac and phone offer only "Runs on <owner>'s Mac" and no "Powered by" mark; Collaborator then means "can start threads on the owner's Mac". A member starts a thread with their own agent on their own Mac, git-backed ponds only;
-the pond shows it with the mark "Powered by <their Mac> · Flotilla", everyone reads it live, anyone may message it,
-approvals and Stop stay with its starter). The owner can restrict any of it at any time, with no rejoin.
+A Member can read, view changes, message, steer and answer according to their permissions. The Duck's starter
+handles approvals and Stop on the Mac that runs it. A question hold expires 2 minutes after its last renewal.
+Other readers see who is answering.
 
 - **Member switches** (`MemberDoc.caps`, owner-signed, in the member's own document): `see`, `diffs`, `message`, `answer`,
   `start`, and `muted` (read-only). Absent = the role's default (`ROLE_CAPS`: a member has `see`, `diffs`, `message` and `answer` but **`start` is off by default** (ticket 15: a Member's
@@ -61,8 +53,8 @@ The phone channel's rule holds: **a Mac trusts a key, not a server.**
   holds opaque boxes.
 - Each member is a Squeak account with a P-256 **device key** per device (one for a first-time member; see "Members are accounts"). Every command is signed; the receiving Mac checks membership, role, the thread
   not being private, expiry (≤ 10 min) and a fresh nonce, then runs it through the host's normal send path.
-- An invite is a code carrying pond id, pond key, store location and one-time secret. Using it writes a join request; **a person on
-  an owner's Mac must approve it**, as pairing does. The approval, signed by the owner, is what adds the member.
+- An invite is a code carrying pond id, pond key, store location and one-time secret. Using it writes a join request. The Owner approves a general invite. An email invite can be approved
+  automatically by the Owner's Mac when the relay verifies the matching account. The Owner's Mac signs the membership.
 - Removing a member rotates the pond key (a new key sealed to each remaining member's public key).
 - A guest's message drives an agent on the starter's Mac. So a thread running with `bypassPermissions` refuses other members'
   messages, and they never match the thread's "allow for this chat" rules unless its starter opts in.
@@ -70,26 +62,24 @@ The phone channel's rule holds: **a Mac trusts a key, not a server.**
 
 ## Transport
 
-`CloudStore` (`src/cloud/store.ts`), so Catalyst or Firebase, chosen by `cloud.json`. `watch` is the wake-up (Data Streams on
-Catalyst, SSE on Firebase); a stream event never carries data and the reader re-reads through the store.
+Shared Ponds use `CloudStore` (`src/cloud/store.ts`) on Squeak's hosted Catalyst relay. A Data Streams notice
+wakes a read through the store. Existing Realtime Database installs can use their legacy store until they move.
 
-One channel per pond: `channels/<pondChannelId>/<kind>/<doc>`. New kinds, added to the relay's `kinds.json` and the RTDB rules:
+Each Pond has one channel at `channels/<pondChannelId>/<kind>/<doc>`. The relay's `kinds.json` lists its document kinds.
 
-| kind       | doc                  | contents                                                                        |
-| ---------- | -------------------- | ------------------------------------------------------------------------------- |
-| `pond`     | `meta`               | name, owner, gitRemote?, created                                                |
-| `members`  | member id            | name, public key, role, nest name, owner's signature                            |
-| `joins`    | request id           | name, public key, one-time secret proof                                         |
-| `threads`  | thread id            | title, starter, nest, agent, model, state, private, mode, updated               |
-| `tevents`  | `<thread>-<seq>`     | a batch of normalized thread events                                             |
-| `presence` | member id            | online, viewing thread, typing, `at`; lives 4 min (older writers: 60 s)         |
-| `holds`    | request id           | who is answering, expires in 30 s                                               |
-| `tcmds`    | command id           | a signed message, steer or answer                                               |
-| `ripples`  | time-ordered id      | one activity line                                                               |
-| `keys`     | member id            | the rotated pond key sealed to that member                                      |
-| `room`     | post id              | one Room post, written only by the Owner's Mac (see "The Room reaches Members") |
-| `rposts`   | time-ordered id      | a Member's Room message waiting for the Owner's Mac                             |
-| `rtasks`   | task id (`:` as `-`) | a Task as Members see it, written only by the Owner's Mac                       |
+- `pond`/`meta` — name, owner, gitRemote?, created.
+- `members`/member id — name, public key, role, nest name, owner's signature.
+- `joins`/request id — name, public key, one-time secret proof.
+- `threads`/thread id — title, starter, nest, agent, model, state, private, mode, updated.
+- `tevents`/`<thread>-<seq>` — a batch of normalized thread events.
+- `presence`/member id — online, viewing thread, typing, `at`; lives 4 min (older writers: 45 s).
+- `holds`/request id — who is answering, expires 2 minutes after renewal.
+- `tcmds`/command id — a signed message, steer or answer.
+- `ripples`/time-ordered id — one activity line.
+- `keys`/member id — the rotated pond key sealed to that member.
+- `room`/post id — one Room post, written only by the Owner's Mac (see "The Room reaches Members").
+- `rposts`/time-ordered id — a Member's Room message waiting for the Owner's Mac.
+- `rtasks`/task id (`:` as `-`) — a Task as Members see it, written only by the Owner's Mac.
 
 Live output is batched at 250 ms, never token by token. Each event has a per-thread `seq`; a client resumes from its last `seq`.
 `tevents` keeps the newest 500 per thread; the starter's Mac remains the source of history.
@@ -101,26 +91,24 @@ up to 64 KB on request through `tcmds` `diff`).
 
 ## Host routes (`x-squeak-token`, no CORS, under `/native`)
 
-| route                                              | body                                | answer                                                                                                                                                                                                                        |
-| -------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /ponds`                                       |                                     | `{ ponds: [PondSummary] }`                                                                                                                                                                                                    |
-| `POST /ponds`                                      | `{ name, projectId? , rootPath? }`  | `{ pond }`                                                                                                                                                                                                                    |
-| `GET /ponds/<id>`                                  |                                     | `{ pond, members, threads, ripples, presence, holds, joins, me }`                                                                                                                                                             |
-| `DELETE /ponds/<id>/members/<memberId>`            |                                     | owner only; rotates the key                                                                                                                                                                                                   |
-| `POST /ponds/<id>/invites`                         | `{ role, short? }`                  | `{ code, expiresAt, link? }`, or with `short: true` `{ short, expiresAt, id, inviteExpiresAt }` (`link` only when an invite link base is configured)                                                                          |
-| `POST /ponds/<id>/invites/email`                   | `{ emails, role? }`                 | `{ sent: [email], failed: [{ email, reason }] }` (owner; 1 to 10 addresses, role member or viewer; publishes a local pond first; an email-bound invite per address, the relay sends the links; see "Invite by email")         |
-| `POST /ponds/join`                                 | `{ code }`                          | `{ pondId, status: "pending" }` (`code` is the code or the link; needs a signed-in Squeak account, else 401 "Sign in to Squeak to join a pond. Your name comes from your account."; an old client's `displayName` is ignored) |
-| `DELETE /ponds/<id>/invites/<inviteId>`            |                                     | `{ id, state: "revoked" }` (owner; an unused invite only; ends its relay join token first)                                                                                                                                    |
-| `POST /ponds/<id>/joins/<requestId>`               | `{ approve, role }`                 | `{ ok }`                                                                                                                                                                                                                      |
-| `POST /ponds/<id>/threads`                         | `{ text, agent, model }`            | own thread on this Nest; needs a git remote                                                                                                                                                                                   |
-| `POST /ponds/<id>/share`                           | `{ sessionId, private? }`           | publishes a host chat as a thread                                                                                                                                                                                             |
-| `POST /ponds/<id>/threads/<tid>/visibility`        | `{ private }`                       | starter only                                                                                                                                                                                                                  |
-| `GET /ponds/<id>/threads/<tid>/events?after=<seq>` |                                     | `{ events, lastSeq }`                                                                                                                                                                                                         |
-| `POST /ponds/<id>/threads/<tid>/messages`          | `{ text, mode?: "queue"\|"steer" }` | `{ ok, queued }` (on someone else's thread `queued` is true: it waits for the starter's Mac)                                                                                                                                  |
-| `POST /ponds/<id>/threads/<tid>/answers`           | `{ requestId, answer }`             | `{ ok }` or 409 with who holds it                                                                                                                                                                                             |
-| `POST /ponds/<id>/threads/<tid>/hold`              | `{ requestId }`                     | `{ ok, heldBy }` or 409 `{ error, heldBy }`                                                                                                                                                                                   |
-| `POST /ponds/<id>/presence`                        | `{ viewing?, typing? }`             | `{ ok }`                                                                                                                                                                                                                      |
-| `GET /ponds/stream`                                |                                     | SSE; `event: changed`, data `{ pondId }`, never content                                                                                                                                                                       |
+- `GET /ponds` → `{ ponds: [PondSummary] }`
+- `POST /ponds` with `{ name, projectId? , rootPath? }` → `{ pond }`
+- `GET /ponds/<id>` → `{ pond, members, threads, ripples, presence, holds, joins, me }`
+- `DELETE /ponds/<id>/members/<memberId>` → owner only; rotates the key
+- `POST /ponds/<id>/invites` with `{ role, short? }` → `{ code, expiresAt, link? }`, or with `short: true` `{ short, expiresAt, id, inviteExpiresAt }` (`link` only when an invite link base is configured)
+- `POST /ponds/<id>/invites/email` with `{ emails, role? }` → `{ sent: [email], failed: [{ email, reason }] }` (owner; 1 to 10 addresses, role member or viewer; publishes a local pond first; an email-bound invite per address, the relay sends the links; see "Invite by email")
+- `POST /ponds/join` with `{ code }` → `{ pondId, status: "pending" }` (`code` is the code or the link; needs a signed-in Squeak account, else 401 "Sign in to Squeak to join a pond. Your name comes from your account."; an old client's `displayName` is ignored)
+- `DELETE /ponds/<id>/invites/<inviteId>` → `{ id, state: "revoked" }` (owner; an unused invite only; ends its relay join token first)
+- `POST /ponds/<id>/joins/<requestId>` with `{ approve, role }` → `{ ok }`
+- `POST /ponds/<id>/threads` with `{ text, agent, model }` → own thread on this Nest; needs a git remote
+- `POST /ponds/<id>/share` with `{ sessionId, private? }` → publishes a host chat as a thread
+- `POST /ponds/<id>/threads/<tid>/visibility` with `{ private }` → starter only
+- `GET /ponds/<id>/threads/<tid>/events?after=<seq>` → `{ events, lastSeq }`
+- `POST /ponds/<id>/threads/<tid>/messages` with `{ text, mode?: "queue"|"steer" }` → `{ ok, queued }` (on someone else's thread `queued` is true: it waits for the starter's Mac)
+- `POST /ponds/<id>/threads/<tid>/answers` with `{ requestId, answer }` → `{ ok }` or 409 with who holds it
+- `POST /ponds/<id>/threads/<tid>/hold` with `{ requestId }` → `{ ok, heldBy }` or 409 `{ error, heldBy }`
+- `POST /ponds/<id>/presence` with `{ viewing?, typing? }` → `{ ok }`
+- `GET /ponds/stream` → SSE; `event: changed`, data `{ pondId }`, never content
 
 Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRemote?, tint }`; `Member { id, name, role, nest: string | null, online, you }` (`nest` is null for a web guest);
 `PondThread { id, title, starter, starterName, nest, agent, model, state: "idle"|"working"|"waiting"|"error", private, mode: "own"|"shared", sessionId?, permissionMode?, workspace?, branch?, participants?, updatedAt }` (`sessionId` is local to the starter's Mac and never written to the cloud; `permissionMode` is, so a guest sees why a message is refused; `workspace` and `branch` are the starter's workspace name and branch, filled when a chat is shared or an own thread is started from the host session's workspace; `participants: { memberId, name, lastAt (ISO-8601) }[]` is the starter plus everyone whose message ran in the thread, newest activity first, at most 50. The starter's Mac keeps the running set in `ponds.json` as turns pass through the bridge (private threads too) and republishes the thread document when someone new joins; other members read it from the document. All five are optional: older threads and older clients simply lack them, and every decoder must ignore what it does not know);
@@ -129,7 +117,7 @@ Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRe
 (`typing` is the **thread id** being typed in, not a flag; `POST .../presence` takes the same: `{ viewing?, typing? }` as ids);
 `me { id, name, role, nest }`. `PondSummary` also carries `projectId?` (local to the host: the project the pond was made from, set by
 `POST /ponds { projectId }`, never written to the cloud or an invite) and `status`. A 409 from `hold` and `answers` is
-`{ error: "<name> is answering", heldBy: "<name>" }`; viewing a pond whose join is not yet approved is a 409 too.
+`{ error: "<name> is answering", heldBy: "<name>" }`; a pending join returns its state with no shared content.
 The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fixtures.ts` in `macos/Tests/SqueakMacCoreTests/Fixtures/ponds/`. Roles: `owner`, `member`, `viewer` (viewers only watch).
 
 ## Wire details (as built, `src/flotilla/`)
@@ -194,7 +182,7 @@ token }` and **never the pond key** (`k`, `kv`; the relay refuses details that c
 - Events: batches of up to 250 ms, one `tevents` document per batch named `<thread>-<firstSeq>`; the newest 500 events are kept;
   a resume past a pruned range reports `gap`. A private thread has no thread or event documents at all (making it private deletes
   them; making it public again backfills from the chat).
-- Presence lives 4 minutes (`PRESENCE_TTL_MS`; an older writer's 60 s still reads); the host writes it only when it changed (at most every 5 s) or every 2 minutes; ripples keep the newest 100.
+- Presence lives 4 minutes (`PRESENCE_TTL_MS`; an older writer expires after 45 s); the host writes it only when it changed (at most every 5 s) or every 2 minutes; ripples keep the newest 100.
 
 ## Web guests
 
@@ -232,16 +220,10 @@ assumes a Mac.
      (docs/web-app.md, "Web guests"); it uses `/pond-stream` with a 60 s safety poll, so it works without that channel.
      A Mac invite for a Catalyst store carries the relay URL and a join-only token (`jt`), never the relay key.
 
-5. **Sign-in identifies, never grants.** Guests may sign in with Catalyst Hosted login (Zoho, Google, email). The relay's
-   `GET /me` (no relay key, `no-store`) answers `{userId, email, name}` or a bare 401. When a guest writes its join request, the
-   relay looks the signed-in user up and writes a relay-owned plain-JSON document `joinids/<requestId>`
-   (`{v:1,userId,email,name,at}`): no client token of any scope reads or writes it, and not even the relay key writes it (the Mac
-   may read and delete it). The Mac shows it as `verifiedEmail`/`verifiedName` on a pending join; the owner still approves every
-   join, and every key, proof and token check is unchanged. `GUEST_SIGNIN=required` (function env var, unset by default) refuses a
-   join with nobody signed in (`401 {"error":"signin"}`). An invite may be pinned to an email (`POST /pond-token` with `email`, a
-   join token only; the Mac's `invite(pondId, role, email)` and `POST /ponds/<id>/invites {email}`): the join is then refused
-   `401 signin` / `403 email` unless that account matches, whatever `GUEST_SIGNIN` says. On Firebase there is no relay and none
-   of this.
+5. **Sign in to join.** The hosted relay requires a Squeak account (`GUEST_SIGNIN=required`). It records verified
+   identity in `joinids/<requestId>` for the Owner's Mac. The invite's join token (`pj`) is limited to the request.
+   Approved browser members receive a pond-scoped guest token (`pt`) sealed to their key. Email-bound invites also
+   require the signed-in email to match. Account sign-in and relay tokens do not replace the Owner's signed membership.
 
 ## Tasks, claims and scope locks
 
@@ -268,19 +250,17 @@ rules list them; a web guest's scoped token does not write them yet).
 Routes, token-gated beside the pond routes (bodies are strict: an unknown key is a 400; a refusal is its sentence with 403 for a
 role, 404 for nothing there, 409 with `heldBy` when someone else holds it):
 
-| route                                          | body                               | answer                      |
-| ---------------------------------------------- | ---------------------------------- | --------------------------- |
-| `GET /ponds/<id>/tasks`                        |                                    | `{ tasks, locks }`          |
-| `POST /ponds/<id>/tasks`                       | `{ title, description?, scope? }`  | 201 `{ task }`              |
-| `POST /ponds/<id>/tasks/<tid>`                 | `{ title?, description?, scope? }` | `{ ok }` (creator or owner) |
-| `POST /ponds/<id>/tasks/<tid>/claim`           | `{}`                               | `{ ok, until }`             |
-| `POST /ponds/<id>/tasks/<tid>/release`         | `{}`                               | `{ ok }`                    |
-| `POST /ponds/<id>/tasks/<tid>/start`           | `{ threadKey }`                    | `{ ok }` (claimant)         |
-| `POST /ponds/<id>/tasks/<tid>/done` or `/drop` | `{}`                               | `{ ok }`                    |
-| `GET /ponds/<id>/locks`                        |                                    | `{ locks }`                 |
-| `POST /ponds/<id>/locks`                       | `{ paths, taskId?, threadKey? }`   | 201 `{ lock }` or 409       |
-| `POST /ponds/<id>/locks/<lid>/heartbeat`       | `{}`                               | `{ ok, until }`             |
-| `DELETE /ponds/<id>/locks/<lid>`               |                                    | `{ ok }`                    |
+- `GET /ponds/<id>/tasks` → `{ tasks, locks }`
+- `POST /ponds/<id>/tasks` with `{ title, description?, scope? }` → 201 `{ task }`
+- `POST /ponds/<id>/tasks/<tid>` with `{ title?, description?, scope? }` → `{ ok }` (creator or owner)
+- `POST /ponds/<id>/tasks/<tid>/claim` with `{}` → `{ ok, until }`
+- `POST /ponds/<id>/tasks/<tid>/release` with `{}` → `{ ok }`
+- `POST /ponds/<id>/tasks/<tid>/start` with `{ threadKey }` → `{ ok }` (claimant)
+- `POST /ponds/<id>/tasks/<tid>/done` or `/drop` with `{}` → `{ ok }`
+- `GET /ponds/<id>/locks` → `{ locks }`
+- `POST /ponds/<id>/locks` with `{ paths, taskId?, threadKey? }` → 201 `{ lock }` or 409
+- `POST /ponds/<id>/locks/<lid>/heartbeat` with `{}` → `{ ok, until }`
+- `DELETE /ponds/<id>/locks/<lid>` → `{ ok }`
 
 `GET /ponds/<id>` also carries `tasks: TaskView[]` (newest change first; `claimedBy { id, name, until }`, `threadKey`) and
 `locks: LockDoc[]`, both optional for older readers. A local pond has none (no cloud). Not here: nothing enforces a lock on file
@@ -353,7 +333,7 @@ own key; the member is the account those keys belong to.
 - **Surfaces.** `view().members[]` is one row per person with `devices` (count) and, on your own row, `ownDevices` (`id`, `client`,
   `nestName`, `addedAt`, `current`). The Mac's People list shows a person once with their device count; the person's own pond
   settings list "Your devices in this pond" with Remove. The web signs in, asks `GET /account/ponds` on load and requests each pond
-  it does not hold. The iPhone app does not read pond documents today (nothing to decode).
+  it does not hold. The iPhone reads shared Pond and Room views through the Mac. See “The Room on iPhone” below.
 - **Migration.** Nothing is rewritten. Existing documents are one-device members. An owner's Mac adds the accounts of members that
   have an `accountId` to the relay index at its first pass after the update; a member who joined with no `accountId` stays one device
   and re-joins by invite to attach an account. The email copy "you can add the Mac app later" is now true.
@@ -414,15 +394,11 @@ Nobody types or changes a name; a person is called by their Squeak account (Cata
 
 **Starting a thread on the owner's Mac** (`tcmds` kind `start`). A pond with no Git remote (or a project this Mac does not hold), or a person choosing "Runs on <owner>'s Mac", sends `POST /ponds/<id>/start { text, agent, model, title? }`: a signed `start` command (no thread id, `text`, `agent`, `model`, `title`, `requestId`; no permission or workspace field). Only the pond owner's Mac runs it; it checks the usual command rules plus role (member or owner of the pond, never a viewer), that the owner's Mac holds the pond's project, a limit of `START_PER_HOUR` (10) per member per pond per hour (in memory), then makes a normal native chat in the pond's folder (Main for a git pond, the folder for a plain one) in the owner's default permission mode, **never `bypassPermissions`** for someone else's thread, with the member as the thread's `requester` and first participant (the thread document's optional `requester: { memberId, requestId }`; a Ripple "<member> started <title>"). It is published like any thread, so everyone sees it, and the owner sees an ordinary chat. The member's Mac opens the thread when a pond read shows one carrying its `requestId`; if none comes in five minutes it says so. Not for the owner's own Mac: the owner starts in the normal way.
 
-## Not yet
-
-a push path, scheduling across Nests, handoffs, Eggs, enforcing locks on file writes, shared secrets.
-
-### Who wrote a message (host side)
+## Who wrote a message (host side)
 
 A user message that arrived from another member through a pond is stored with its author: the host's `messages` (and `queue`) rows carry nullable `author_id`, `author_name` (schema version 8), and the host's message API (`GET /native/sessions/<id>/messages`, the SSE `message` event) adds an optional `author: { id, name }` to such a row. The owner's own messages have no `author` key. A queued message keeps its author until its turn starts; several steers merged into one message keep one only when they share an author. **The agent is told who is talking** (`src/native/thread-context.ts`): every thread's agent gets a short note that it runs in Squeak (pond, folder, branch, target branch, tools, ask format; Claude as `systemPrompt: { type: "preset", preset: "claude_code", append }`, Codex as `thread/start`/`thread/resume`'s `developerInstructions` plus a compact guide), built when its agent starts. Once anyone other than the owner has written in a thread, the text the agent receives starts with `[from <name> · teammate]` (a pond member) or `[from <owner> · owner]` (the owner: the pond member name, else the macOS full name, else "owner"); each steer merged into one turn keeps its own line, a leading `[from ` line in message text is stripped so it cannot forge one, and the stored/displayed message is never prefixed.
 
-### Sidebar organisation and pond icons (host side, local to this Mac)
+## Sidebar organisation and Pond icons
 
 Per project, keyed by a native project's id (or a Conductor repository's name, which the Mac lists itself). Stored in the support dir: `project-prefs.json` (`{ <key>: { hidden, labels } }`, 0600, a project with neither is dropped) and `project-icons/<base64url key>.png`. Nothing is published: a pond's cloud documents have no icon field, so the icon and these choices stay on this Mac. **Hiding is only a sidebar choice**: a hidden project's chats stay in search, on the radar and keep pushing notifications.
 
@@ -435,7 +411,7 @@ Per project, keyed by a native project's id (or a Conductor repository's name, w
 - **Pond order.** `GET /native/pond-order` answers `{ mode: "recent" | "manual", order: string[] }` (default `{ mode: "recent", order: [] }`; keys are native project ids or Conductor repository names, as the prefs above). `PUT /native/pond-order` takes a strict `{ mode?, order? }` (unknown field or empty body is 400): `order` is at most 500 unique, non-empty strings of at most 200 characters, and may name keys that are absent now (a Conductor pond may come back). It answers the saved value. Stored in `project-prefs.json` under the reserved key `__pondOrder`, local to this Mac, never published. Removing a project (`DELETE /native/projects/<id>`) drops its key from the order. Only the Mac sidebar's ponds follow it, and only in `manual` mode; every other list stays newest first.
 - Precedence: Squeak icon (`iconUrl`) > Conductor's `repos.icon` (the Mac reads it from Conductor's database) > none.
 
-### Creation pages: typed names, pickers, split the work (host side)
+## Creation pages
 
 - **Project display name.** `POST /native/projects` (`{ rootPath, name? }`) and `POST /native/projects/clone` (`{ url, parentDir?, name? }`) take an optional `name`: trimmed, 1-60 characters, one line (else 400). It is the display name only; the folder stays. An already-added folder is returned as it is, never renamed. A `/`, `\` or `:` in a name becomes `-` in the workspaces folder path.
 - **Typed branch.** `POST /native/projects/<id>/workspaces` (`{ from?, branch? }`) and `POST /native/sessions` with `projectId` + `newWorkspace` (`{ branch? }`): for a new branch from the default, from a `base`, or for an `issue`, `branch` is the exact branch name (no prefix added), checked with `git check-ref-format --branch`, refused when a local branch has it or when its folder (a lowercase slug of it, `/` becoming `-`) is taken by a workspace or on disk (400 with the reason). The first message then does not rename it. Absent keeps the bird name. Ignored for `from: branch` and `pr`, which keep their own branch's name.
