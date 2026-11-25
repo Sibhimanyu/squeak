@@ -115,6 +115,15 @@ import Testing
     }
     private let kit = RoomMessageAuthor.duck(nil, sessionId: "s1", fallbackName: "Kit", agent: nil)
 
+    @Test func whatArrivesWhileLookingAtTheRoomNeverEarnsADivider() {
+        let items: [RoomItem] = [group("a", kit, at: [10]), group("c", kit, at: [30]), group("d", kit, at: [40, 50])]
+        // The visit began when 30 was the newest: 40 and 50 arrived under the person's eyes.
+        let out = RoomUnread.insert(into: items, seenAt: 15, through: 30)
+        #expect(out.map(\.id) == ["g:a0", "unread", "g:c0", "g:d0"])
+        #expect(out[1] == .unread(count: 1))
+        #expect(RoomUnread.insert(into: items, seenAt: 35, through: 30) == items)
+    }
+
     @Test func theDividerSitsBeforeTheFirstUnseenThingFromSomeoneElse() {
         let items: [RoomItem] = [group("a", kit, at: [10]), group("b", .me, at: [20]), group("c", kit, at: [30, 31]), group("d", kit, at: [40])]
         let out = RoomUnread.insert(into: items, seenAt: 15)

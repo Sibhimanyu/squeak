@@ -147,26 +147,29 @@ public enum RoomRowPlan {
 /// "3 new" in the duck's yellow, once, before the first thing from someone else you have not seen. `seenAt` is when the Room was
 /// last left (ms); nil (never opened) shows no divider. A group that straddles it is split there; the first part keeps its id.
 public enum RoomUnread {
-    public static func unseen(_ item: RoomItem, since seenAt: Int64) -> Int {
-        switch item {
-        case .group(let g): g.author.kind == .me ? 0 : g.messages.filter { $0.at > seenAt }.count
-        case .system(let s): s.at > seenAt ? 1 : 0
+    /// `through`: the newest thing there was when this visit began. Anything newer arrived while the person was looking at the
+    /// Room, so it is read as it arrives and never earns a divider mid-visit; nil counts everything after `seenAt`.
+    public static func unseen(_ item: RoomItem, since seenAt: Int64, through: Int64? = nil) -> Int {
+        let isNew: (Int64) -> Bool = { at in at > seenAt && at <= (through ?? .max) }
+        return switch item {
+        case .group(let g): g.author.kind == .me ? 0 : g.messages.filter { isNew($0.at) }.count
+        case .system(let s): isNew(s.at) ? 1 : 0
         case .day, .unread: 0
         }
     }
 
-    public static func insert(into items: [RoomItem], seenAt: Int64?) -> [RoomItem] {
+    public static func insert(into items: [RoomItem], seenAt: Int64?, through: Int64? = nil) -> [RoomItem] {
         guard let seenAt, seenAt > 0 else { return items }
-        guard let first = items.firstIndex(where: { unseen($0, since: seenAt) > 0 }) else { return items }
+        guard let first = items.firstIndex(where: { unseen($0, since: seenAt, through: through) > 0 }) else { return items }
         var out = Array(items[..<first])
         var rest = Array(items[first...])
-        if case .group(let g) = rest[0], let cut = g.messages.firstIndex(where: { $0.at > seenAt }), cut > 0 {
+        if case .group(let g) = rest[0], let cut = g.messages.firstIndex(where: { $0.at > seenAt && $0.at <= (through ?? .max) }), cut > 0 {
             var before = g; before.messages = Array(g.messages[..<cut])
             var after = g; after.messages = Array(g.messages[cut...])
             out.append(.group(before))
             rest[0] = .group(after)
         }
-        let count = rest.reduce(0) { $0 + unseen($1, since: seenAt) }
+        let count = rest.reduce(0) { $0 + unseen($1, since: seenAt, through: through) }
         out.append(.unread(count: count))
         return out + rest
     }

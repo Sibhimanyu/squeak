@@ -315,9 +315,9 @@ final class AppModel {
     private(set) var unread: UnreadTracker
     /// Which finished chats this Mac has opened (DESIGN.md §3.3: a chat is unread from a finished turn until opened).
     /// Local only; demo and capture runs neither read nor write the real record.
-    /// The open thread has been at its bottom long enough to count as seen (see `noteBottom`).
-    private(set) var viewingBottom = false { didSet { if viewingBottom != oldValue { inputsChanged() } } }
-    @ObservationIgnored private var dwellTask: Task<Void, Never>?
+    /// The open thread's newest end is in view (see `noteBottom`); one input of `ChatLook`.
+    private(set) var viewingBottom = false { didSet { if viewingBottom != oldValue { inputsChanged(); settleSeen() } } }
+    @ObservationIgnored private var readTracker = ChatReadTracker()
     private(set) var seenLog: ChatSeenLog { didSet { if seenLog != oldValue { inputsChanged() } } }
     /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
     private(set) var menuReplyPreviews: [SessionKey: String] = [:]
@@ -355,7 +355,7 @@ final class AppModel {
     private(set) var pinned: Set<SessionKey> { didSet { if pinned != oldValue { inputsChanged() } } }
     /// Every Pond's open tabs: app state owned by `TabStore` alone (nothing else computes a strip), so they survive Home, the
     /// Dashboard, other ponds, Settings and a relaunch. A tab exists because the person opened it; Squeak adds none.
-    private(set) var tabStore = TabStore()
+    private(set) var tabStore = TabStore() { didSet { if tabStore != oldValue { settleSeen() } } }
 
     /// The key of a Pond's tab list: the Pond's id (its native project id, the directory key), read from the placement every
     /// chat carries. Never a name. Empty while no chat of the workspace is placed yet: the strip then draws nothing and
@@ -693,7 +693,7 @@ final class AppModel {
                 }
             }
             startedChats.prune(listed: sessions, now: Date())
-            markOpenChatSeen()
+            settleSeen()
             hasLoaded = true
             if let lastChat, openURL == nil { openURL = await broker.openInHostURL(for: lastChat) }
             await refreshNeedsYouText()
@@ -735,7 +735,7 @@ final class AppModel {
             }
         case .notify(let n):
             guard !captureMode else { return }
-            let displayed = n.key == lastChat && conversationOnScreen
+            let displayed = screen.isLookingAt(n.key.stringValue)
             // Unread whether or not a banner is shown: the menu's dot is about the update, not the banner.
             if !displayed, let id = n.id { noteUnread(n.key, id: id, at: n.at ?? Date()) }
             guard notificationsEnabled else { return }
@@ -862,31 +862,27 @@ final class AppModel {
     }
 
     func isUnread(_ s: HostSession) -> Bool {
-        if s.key == lastChat, viewingSelected { return false }
+        if screen.reads(s.key.stringValue) { return false }
         return seenLog.isUnread(s)
     }
 
-    /// The open thread is being looked at: its window is on screen and key, and it has sat at (or within a screen of)
-    /// the bottom for `ReadGate.dwell`. Only then is its reply read (`ReadGate`).
-    private var viewingSelected: Bool {
-        if captureMode { return true }
-        // A chat under a page (Settings, a pond's home) is loaded, but nobody is looking at it.
-        guard location.chatKey == lastChat else { return false }
-        return viewingBottom && conversationOnScreen && (conversationWindow?.isKeyWindow ?? false)
+    /// What the person is looking at, from the one rule (`ChatLook`): the window's key state, whether the centre is a chat
+    /// (not a pond page, not a file or diff tab over the Duck), and whether the thread is near its bottom.
+    private var screen: ChatLook {
+        if captureMode { return ChatLook(centreChat: lastChat?.stringValue, windowKey: true, nearBottom: true) }
+        var itemOpen = false
+        if let s = selectedSession, let pond = PondsModel.shared.key(of: s), let workspace = PondWorkspace(pond: pond) {
+            itemOpen = tabStore.currentPondItem(workspace.project.id) != nil
+        }
+        return ChatLook.make(
+            locationChat: location.chatKey?.stringValue, loadedChat: lastChat?.stringValue, centreItemOpen: itemOpen,
+            windowOnScreen: conversationOnScreen, windowKey: conversationWindow?.isKeyWindow ?? false, nearBottom: viewingBottom)
     }
 
-    /// The thread view says whether the newest end is in view. Arriving starts the dwell; leaving ends it at once.
+    /// The thread view says whether the newest end is in view. Arriving reads at once; leaving ends it at once.
     func noteBottom(_ key: SessionKey, atBottom: Bool) {
         guard key == lastChat else { return }
-        dwellTask?.cancel()
-        guard atBottom else { if viewingBottom { viewingBottom = false }; return }
-        guard !viewingBottom else { return }
-        dwellTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(ReadGate.dwell))
-            guard !Task.isCancelled, let self, self.lastChat == key else { return }
-            self.viewingBottom = true
-            self.markOpenChatSeen()
-        }
+        if viewingBottom != atBottom { viewingBottom = atBottom }
     }
 
     /// Sending in a thread reads it: the person has plainly seen what they are answering.
@@ -904,17 +900,22 @@ final class AppModel {
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
     }
 
-    /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
-    private func markOpenChatSeen() {
-        guard !captureMode, !demoMode, let key = lastChat, viewingSelected, let s = session(key) else { return }
+    /// Writes the seen log from what is on screen: opening a chat reads it, and a chat on screen near its bottom reads every new
+    /// turn as it arrives. Run on every input of `screen` (location, window key, tabs, scroll, new sessions) so the log is never
+    /// behind what is drawn; a chat left behind keeps the turn it had read, so only a NEW finish makes it unread.
+    private func settleSeen() {
+        guard !captureMode, !demoMode else { return }
+        let now = screen
+        let s = now.visibleChat.flatMap { SessionKey(stringValue: $0) }.flatMap { session($0) }
+        guard readTracker.settle(now, available: s != nil) != nil, let s else { return }
         let before = seenLog
         seenLog.markOpened(s)
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
     }
 
     private func markSelectedDisplayed() {
-        markOpenChatSeen()
-        guard let key = lastChat, let loaded = selectedLoadedAt, unread.hasUnread(key), conversationOnScreen else { return }
+        settleSeen()
+        guard let key = lastChat, let loaded = selectedLoadedAt, unread.hasUnread(key), screen.isLookingAt(key.stringValue) else { return }
         unread.markRead(key, through: loaded)
         saveUnread()
     }
@@ -964,7 +965,7 @@ final class AppModel {
 
     func recomputeVisibility() {
         inputsChanged()
-        markOpenChatSeen()  // a thread already dwelt on at the bottom reads when its window regains focus  // what counts as "on screen" moves with the windows (marks read it)
+        settleSeen()  // what counts as "on screen" moves with the windows: a chat reads when its window regains focus
         let visible = captureMode || NSApp.windows.contains { w in
             w.isVisible && w.canBecomeKey && !w.isMiniaturized && w.occlusionState.contains(.visible)
         }
@@ -1248,6 +1249,7 @@ final class AppModel {
         case .home, .usage: loadChat(nil)
         default: break
         }
+        settleSeen()
         scheduleHistoryRecord()
     }
 
@@ -1477,9 +1479,8 @@ final class AppModel {
         guard key != lastChat else { return }
         if let old = lastChat { saveDraftNow(draft, for: old) }
         lastChat = key
-        dwellTask?.cancel()
         viewingBottom = false
-        markOpenChatSeen()
+        settleSeen()
         selectedLoadedAt = nil
         transcriptReadKey = nil
         activityReadKey = nil
