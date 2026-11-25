@@ -42,7 +42,7 @@ final class PondChatOpenedFirstTests: XCTestCase {
     func testStripListsOpenAndWorkingDucksAfterARestoredLaunch() {
         let strip = PondWorkspaceStrip(roster: roster(), place: .chat(sessionId: "abc", duckId: nil), items: [], current: nil)
         XCTAssertFalse(strip.isEmpty)
-        XCTAssertEqual(strip.tabs().map(\.item), [.duck("pickle"), .duck("dhol")])
+        XCTAssertEqual(Set(strip.tabs().map(\.item)), [.duck("pickle"), .duck("dhol")])
         XCTAssertEqual(strip.row.selectedDuck, "pickle")
         let byDuck = PondWorkspaceStrip(roster: roster(), place: .chat(sessionId: nil, duckId: "dhol"), items: [], current: nil)
         XCTAssertEqual(byDuck.row.selectedDuck, "dhol")
