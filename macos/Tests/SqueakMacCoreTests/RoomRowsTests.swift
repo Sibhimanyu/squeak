@@ -251,9 +251,12 @@ import Testing
         #expect(PondClick.sender(of: anon, threads: threads) == .duck("s2"))
     }
 
-    @Test func rowBarSpaceIsReservedWheneverThereAreActionsAndNeverWhenThereAreNone() {
-        #expect(RoomRowPlan.reservedBarHeight(actions: [.copy]) == RoomRowPlan.barHeight + RoomRowPlan.barGap)
-        #expect(RoomRowPlan.reservedBarHeight(actions: []) == 0)
+    @Test func rowBarLivesInTheGapAndAddsNoHeight() {
+        // Between 10 and 14 points, so the feed stays concise, continuation rows included (the gap is the same for them).
+        #expect((10.0...14.0).contains(RoomRowPlan.rowGap))
+        #expect(RoomRowPlan.barHeight <= 20)
+        #expect(RoomRowPlan.glyphClearsNextRow)
+        #expect(RoomRowPlan.barOverlapOfNext <= RoomRowPlan.rowPad)
         #expect(RoomRowPlan.barOpacity(hover: false, focusWithin: false) == 0)
         #expect(RoomRowPlan.barOpacity(hover: true, focusWithin: false) == 1)
         #expect(RoomRowPlan.barOpacity(hover: false, focusWithin: true) == 1)

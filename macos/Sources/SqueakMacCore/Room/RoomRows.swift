@@ -11,7 +11,7 @@ public enum RoomRowPlan {
     /// Between the avatar column and the text.
     public static let gutterGap: Double = 12
     /// A row's own padding above and below; two rows of one run sit this far apart twice over.
-    public static let rowPad: Double = 2
+    public static let rowPad: Double = 6
     /// Extra room above the first row of a group (a new name).
     public static let groupLead: Double = 10
     /// The thin line that marks my own messages.
@@ -91,14 +91,25 @@ public enum RoomRowPlan {
 
     public enum Action: String, Equatable, Sendable { case reply = "Reply", copy = "Copy", makeTask = "Make task" }
 
-    /// Height every row with actions always reserves for its bar under the text, drawn or not (points): the feed never
-    /// changes height as the pointer passes, and the bar never covers text.
-    public static let barHeight: Double = 24
-    /// Gap between the row's last line and its bar.
-    public static let barGap: Double = 2
-    /// A row with no action (nothing to Copy) reserves nothing; every other row reserves the bar's height at all times.
-    public static func reservedBarHeight(actions: [Action]) -> Double { actions.isEmpty ? 0 : barHeight + barGap }
-    /// The bar is drawn on hover or keyboard focus only; its space is reserved regardless.
+    /// The icon bar's height (points). It adds no height to a row: it is drawn in the gap between rows (`rowGap`).
+    public static let barHeight: Double = 20
+    /// The gap between two rows of one run (one row's bottom padding plus the next one's top padding).
+    public static var rowGap: Double { rowPad * 2 }
+    /// The bar's top edge sits this far above the row's bottom padding, i.e. inside the last line's own leading.
+    public static let barRaise: Double = 2
+    /// Where the bar's top edge is, measured down from the bottom of the row's text (points; negative is up into the text's
+    /// own line leading). Its glyphs, centred in the bar, must end before the next row's text starts.
+    public static var barOffsetBelowText: Double { -barRaise }
+    /// How far the bar reaches below the text: into the gap, and where that is too small, into the next row's top padding.
+    public static var barReach: Double { barHeight - barRaise }
+    /// Points of the bar's reach left over the gap (it overlaps the next row's top padding by this much, never its text, because
+    /// the icon sits centred with at least `glyphMargin` free above and below).
+    public static var barOverlapOfNext: Double { max(0, barReach - rowGap) }
+    public static let glyphSize: Double = 11
+    public static var glyphMargin: Double { (barHeight - glyphSize) / 2 }
+    /// The icons clear the next row's first line: the gap plus that line's own leading (about 3 points) holds the glyph's bottom.
+    public static var glyphClearsNextRow: Bool { barOffsetBelowText + glyphMargin + glyphSize <= rowGap + 3 }
+    /// The bar is drawn on hover or keyboard focus only; it takes no layout, so the feed never changes height as the pointer passes.
     public static func barOpacity(hover: Bool, focusWithin: Bool) -> Double { hover || focusWithin ? 1 : 0 }
 
     /// The small bar under a row's text: Reply (never on my own), Copy, Make task (only where a Task can be made), in this order.

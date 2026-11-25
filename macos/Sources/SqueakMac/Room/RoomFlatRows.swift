@@ -44,20 +44,6 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 if first { header() }
                 content()
-                // The bar's own row: its height is always reserved (only its opacity changes), so the feed never changes
-                // height as the pointer passes and the bar never covers the text above it.
-                if !actions.isEmpty {
-                    RoomHoverBar(actions: actions, copied: copied, perform: { a in
-                        if a == .copy { copied = true; Task { try? await Task.sleep(for: .seconds(1.2)); copied = false } }
-                        perform(a)
-                    })
-                    .onHover { barHover = $0 }
-                    .focused($barFocus)
-                    .opacity(RoomRowPlan.barOpacity(hover: hover, focusWithin: barFocus))
-                    .allowsHitTesting(hover || barFocus)
-                    .frame(height: CGFloat(RoomRowPlan.barHeight), alignment: .leading)
-                    .padding(.top, CGFloat(RoomRowPlan.barGap))
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -66,6 +52,22 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
         .background(RoundedRectangle(cornerRadius: CGFloat(RoomRowPlan.rowRadius), style: .continuous).fill(hover ? Theme.selected : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture { tap?() }
+        // The actions bar takes no layout: it hangs in the gap under the text (left edge of the text column), overlapping the next
+        // row's top padding where the gap is short, never its text. The row's height is the same hovered or not.
+        .overlay(alignment: .bottomLeading) {
+            if !actions.isEmpty {
+                RoomHoverBar(actions: actions, copied: copied, perform: { a in
+                    if a == .copy { copied = true; Task { try? await Task.sleep(for: .seconds(1.2)); copied = false } }
+                    perform(a)
+                })
+                .onHover { barHover = $0 }
+                .focused($barFocus)
+                .opacity(RoomRowPlan.barOpacity(hover: hover, focusWithin: barFocus))
+                .allowsHitTesting(hover || barFocus)
+                .padding(.leading, 12 + CGFloat(RoomRowPlan.textInset))
+                .offset(y: CGFloat(RoomRowPlan.barHeight - RoomRowPlan.rowPad - RoomRowPlan.barRaise))
+            }
+        }
         .overlay(alignment: .leading) {
             if own {
                 Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.tint(pondId)).opacity(0.85))
@@ -74,11 +76,12 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
             }
         }
         .onHover { rowHover = $0 }
+        .zIndex(hover || barFocus ? 1 : 0)
         .animation(Motion.quick, value: hover)
     }
 }
 
-/// Reply, Copy, Make task: a quiet row of small buttons under the row's text, left-aligned with it. No box, no shadow.
+/// Reply, Copy, Make task: small icon buttons (tooltips name them) in the gap under the row's text, left-aligned with it.
 struct RoomHoverBar: View {
     let actions: [RoomRowPlan.Action]
     let copied: Bool
@@ -103,23 +106,24 @@ private struct RoomHoverButton: View {
         switch action {
         case .reply: "arrowshape.turn.up.left"
         case .copy: copied ? "checkmark" : "doc.on.doc"
-        case .makeTask: "checkmark"
+        case .makeTask: copied ? "checkmark" : "checkmark.circle"
         }
+    }
+
+    private var tip: String {
+        copied ? "Copied" : (action == .makeTask ? "Make task: hand this message to a Duck as a Task" : action.rawValue)
     }
 
     var body: some View {
         Button { perform(action) } label: {
-            HStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 11, weight: .medium))
-                Text(verbatim: copied ? "Copied" : action.rawValue).font(.system(size: 12, weight: .medium)).lineLimit(1).fixedSize()
-            }
-            .foregroundStyle(hover ? Theme.ink : Theme.muted)
-            .padding(.horizontal, 6).frame(height: 24)
-            .background(hover ? Theme.selectedStrong : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(Rectangle())
+            Image(systemName: symbol).font(.system(size: CGFloat(RoomRowPlan.glyphSize), weight: .medium))
+                .foregroundStyle(hover ? Theme.ink : Theme.muted)
+                .frame(width: CGFloat(RoomRowPlan.barHeight), height: CGFloat(RoomRowPlan.barHeight))
+                .background(hover ? Theme.selectedStrong : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain).pointerHand().onHover { hover = $0 }
-        .help(action == .makeTask ? "Hand this message to a Duck as a Task" : action.rawValue)
+        .help(tip)
         .accessibilityLabel(action.rawValue)
     }
 }
