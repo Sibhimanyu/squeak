@@ -96,6 +96,14 @@ public enum PondStripPlan {
         return 0.28 * min(1, abs(x) / max(1, width))
     }
 
+    /// Which page takes clicks: the one the strip is mostly showing, so a visible page is never dead and an off-screen one
+    /// never catches a click. Decided from where the strip is drawn, not from a copy of the page (a stale copy once left the
+    /// visible page inert while the switch said the other one).
+    public static func takesClicks(page: PondPage, drawn: Double) -> Bool {
+        let nearest: PondPage = drawn < 0.5 ? .dashboard : .room
+        return page == nearest
+    }
+
     /// Stacking order: the page that is not at rest is drawn on top, in both directions.
     public static func zPosition(of page: PondPage, rest: PondPage) -> Double { page == rest ? 0 : 1 }
 }

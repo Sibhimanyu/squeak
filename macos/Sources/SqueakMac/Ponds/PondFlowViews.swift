@@ -37,7 +37,9 @@ extension AppModel {
     /// What the pond's centre shows now, read from the live state (the page preference, the open Duck, the selected item tab).
     func liveCentre(pond: String) -> PondCentre {
         var duck: String?
-        if let s = selectedSession, WorkPaneActions.isDuckView(s), PondsModel.shared.key(of: s) == pond { duck = s.duckId ?? s.key.stringValue }
+        if let s = selectedSession, WorkPaneActions.isDuckView(s), PondsModel.shared.key(of: s) == pond {
+            duck = PondCentre.liveDuck(selected: s.duckId ?? s.key.stringValue, location: baseLocation, selectedKey: s.key)
+        }
         let item = PondWorkspace(pond: pond).flatMap { tabStore.currentPondItem($0.project.id) }
         // The New duck page is its own centre state: it is open when the creation page is, in the pond it was opened from.
         let composing = focus.composePage == .newThread && (location.pondKey ?? selectedSession.flatMap { PondsModel.shared.key(of: $0) }) == pond
@@ -236,6 +238,8 @@ private struct PanPage: ViewModifier {
         content
             .offset(x: x)
             .zIndex(PondStripPlan.zPosition(of: page, rest: state.restPage))
+            // The page the strip shows takes the clicks; read here so only this small body follows the strip per frame.
+            .allowsHitTesting(PondStripPlan.takesClicks(page: page, drawn: state.drawn))
             .overlay {
                 // Nothing at all over a page at rest: the view exists only while the strip moves.
                 let s = state.mode == .rest ? 0 : PondStripPlan.scrim(x: x, width: Double(width))
@@ -278,11 +282,11 @@ struct PondSpace<Dashboard: View>: View {
                 dashboard()
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .dashboard, width: w))
-                    .allowsHitTesting(page == .dashboard).accessibilityHidden(page != .dashboard)
+                    .accessibilityHidden(page != .dashboard)
                 PondRoomView(projectId: projectId, member: member, key: key, leadingInset: leadingInset, showsHeader: showsHeader).id(key).screen("Pond room")
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .room, width: w))
-                    .allowsHitTesting(page == .room).accessibilityHidden(page != .room)
+                    .accessibilityHidden(page != .room)
             }
             .frame(width: w, height: geo.size.height)
             .onAppear { width = Double(w) }
@@ -293,6 +297,11 @@ struct PondSpace<Dashboard: View>: View {
             current: { RoomViewPref.shared.mode(for: key) }, pan: pan,
             trackingEnabled: !reduceMotion, update: { if visible { update($0) } }))
         .onChange(of: page) { _, new in pan.reconcile(page: new) }
+        // However a spring ends (settled, cancelled, interrupted), the strip at rest shows the page the centre holds.
+        .onChange(of: pan.mode) { _, mode in
+            let held = RoomViewPref.shared.mode(for: key)
+            if mode == .rest, pan.restPage != held { pan.reconcile(page: held) }
+        }
         .onDisappear { pan.unmount(page: RoomViewPref.shared.mode(for: key)) }
         .onAppear { pan.isMounted = true; pan.reconcile(page: RoomViewPref.shared.mode(for: key)) }
         .task { await runHint() }
@@ -316,10 +325,10 @@ struct PondSpace<Dashboard: View>: View {
             haptic.reset()
             swipes += 1
             UserDefaults.standard.set(swipes, forKey: PondHintStore.swipesKey)
-            // The strip springs on from where the fingers left it, at their speed; PondCentre holds the new page in the same
-            // step (the switch, Esc, a deep link and a reopen all read it), so nothing restarts when the spring ends.
-            pan.release(to: target, from: from, towardPointsPerSecond: v, width: width)
+            // PondCentre holds the new page first (the switch, Esc, a deep link and a reopen all read it); the strip then springs
+            // on from where the fingers left it, at their speed, to the page the centre actually holds, never to a page it refused.
             AppModel.shared.applyCentre(pond: key) { $0.swipe(to: target) }
+            pan.release(to: RoomViewPref.shared.mode(for: key), from: from, towardPointsPerSecond: v, width: width)
         }
     }
 

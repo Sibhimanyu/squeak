@@ -44,6 +44,14 @@ public struct PondCentre: Equatable, Sendable {
         return nil
     }
 
+    /// The Duck whose chat the centre shows, from the live state. `lastChat` is kept while a pond page covers the chat, so a
+    /// selected Duck is on screen only when the location itself is that chat: a stale one would make clicking that same Duck
+    /// a no-op (it already looks open) and would make a swipe a no-op (it looks like a Duck covers the pages).
+    public static func liveDuck(selected: String?, location: WorkbenchLocation, selectedKey: SessionKey?) -> String? {
+        guard let selected, let selectedKey, location.chatKey == selectedKey else { return nil }
+        return selected
+    }
+
     /// The page the Dashboard/Room strip must rest on whenever it is mounted: always the remembered page, never a copy.
     public var stripPage: PondPage { page }
 
