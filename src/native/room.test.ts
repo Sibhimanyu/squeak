@@ -203,7 +203,7 @@ describe("room turns", () => {
       id: `${r.s.id}:t1`,
       sessionId: r.s.id,
       duckId: expect.any(String),
-      threadTitle: "Wire retry",
+      threadTitle: r.store.duckBySession(r.s.id)!.name,
       agent: "claude",
       startedAt: NOW - 30 * 60_000,
       endedAt: NOW - 20 * 60_000,
