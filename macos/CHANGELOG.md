@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.34.6
+
+**One bar with tabs, a calmer Room, and ducks that choose their own streams.**
+
+- One bar on every page: the pond's logo and name, the Dashboard | Room switch, then tabs. Each duck is a low oval tab showing what its chat is for and what it's doing right now; files, diffs and artifacts open as tabs beside them. Inside a duck the bar stays put, with the duck's streams, commit and PR controls just below it.
+- The Room reads like a group chat: whole messages in flat rows, each task as one card that updates in place, and an unread line. Tap a message or a duck to open its chat at that moment. Ducks write short Room updates themselves; status chatter stays in their own chats.
+- Ducks start in the pond and open, join or leave streams themselves, even two at once. Their streams show under the bar and in Changes. Main stays read-only for ducks.
+- Duck names are short, many with an Indian touch, and never have a number. A duck gives its name back when it goes off duty; off-duty ducks are listed by what their chat was for. Chats get clear titles once their work is clear.
+- The Files, Changes, Artifacts and Tasks lists on the right open at once.
+- If a duck's stream folder is gone, its chat says so and offers Return to the Pond, instead of a confusing error.
+- Fewer buttons: every control has a reason to be there.
+
 ## 2.34.5
 
 **One rail, one top bar, and things open as tabs.**
