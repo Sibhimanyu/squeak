@@ -101,45 +101,46 @@ final class ComposerPickerModel {
     }
 }
 
-/// The list above the composer: path or command in `code`, its description in `muted`; ↑↓ ↵ esc work from the
-/// field and a click picks a row. Drawn inside the window (not an NSPopover) so the field keeps the keyboard.
+/// The rows of the suggestion list: path or command in `code`, its description in `muted`; up/down/return/esc work from the
+/// field and a click picks a row. Chrome, placement and scrolling are `suggestionPopup`'s; rows are drawn best match nearest
+/// the composer and keep the ranked index as their id, so the feed is id-stable while typing.
 struct ComposerPickerList: View {
     let model: ComposerPickerModel
+    let direction: SuggestionPlacement.Direction
     let onPick: (Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.items.isEmpty {
-                Text(verbatim: "Loading…").font(Typo.meta).foregroundStyle(Theme.muted).padding(10)
+                Text(verbatim: "Loading\u{2026}").font(Typo.meta).foregroundStyle(Theme.muted).padding(10)
             }
-            ForEach(Array(model.items.enumerated()), id: \.element.id) { i, item in
-                Button { onPick(i) } label: {
-                    HStack(spacing: 8) {
-                        Lucide(model.trigger.map { if case .mention = $0 { true } else { false } } == true ? .fileText : .terminal,
-                               size: 13, color: Theme.muted)
-                        Text(verbatim: item.title).font(Typo.code).foregroundStyle(Theme.ink)
-                            .lineLimit(1).truncationMode(.head)
-                        if !item.detail.isEmpty {
-                            Text(verbatim: item.detail).font(Typo.meta).foregroundStyle(Theme.muted)
-                                .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10).frame(height: 28)
-                    .background(i == model.selected ? Theme.surfaceRaised : .clear,
-                                in: RoundedRectangle(cornerRadius: Radius.chip))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            ForEach(SuggestionPlacement.drawOrder(count: model.items.count, direction: direction), id: \.self) { i in
+                row(i, model.items[i])
             }
         }
         .padding(4)
         .frame(maxWidth: 520, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.lineStrong))
-        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Suggestions")
+    }
+
+    private func row(_ i: Int, _ item: ComposerPickItem) -> some View {
+        Button { onPick(i) } label: {
+            HStack(spacing: 8) {
+                Lucide(model.trigger.map { if case .mention = $0 { true } else { false } } == true ? .fileText : .terminal,
+                       size: 13, color: Theme.muted)
+                Text(verbatim: item.title).font(Typo.code).foregroundStyle(Theme.ink)
+                    .lineLimit(1).truncationMode(.head)
+                if !item.detail.isEmpty {
+                    Text(verbatim: item.detail).font(Typo.meta).foregroundStyle(Theme.muted)
+                        .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(height: 28)
+            .background(i == model.selected ? Theme.surfaceRaised : .clear,
+                        in: RoundedRectangle(cornerRadius: Radius.chip))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .id(i)
     }
 }

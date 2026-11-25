@@ -17,6 +17,7 @@ struct RoomComposer: View {
     @State private var contentHeight: CGFloat = 0
     @State private var caret = 0
     @State private var highlighted = 0
+    @State private var pickerDirection: SuggestionPlacement.Direction = .up
     @State private var chooser = false
     @State private var focused = false
     @State private var focusToken = 0
@@ -55,12 +56,9 @@ struct RoomComposer: View {
         .padding(.horizontal, 14).padding(.bottom, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
-        .overlay(alignment: .topLeading) {
-            // Anchored to the composer's own top edge (its measured top, whatever the attachment tray or dictation bar
-            // hold): the picker's bottom sits a small gap above it, so it can never overlap them.
-            if mention != nil, !candidates.isEmpty {
-                picker(candidates).alignmentGuide(.top) { $0[.bottom] + 6 }.padding(.leading, 12)
-            }
+        .suggestionPopup(isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted) {
+            // The shared placement: above the composer's own top edge, best match nearest it, scrolling past its room.
+            picker(candidates, chrome: false)
         }
         .onAppear { if draft.isEmpty { draft = ContainerDrafts.shared.draft(for: draftKey) } }
         .onChange(of: draftKey) { _, key in draft = ContainerDrafts.shared.draft(for: key) }
@@ -120,14 +118,23 @@ struct RoomComposer: View {
         .accessibilityLabel("Dictate a message")
     }
 
-    private func picker(_ list: [RoomMention.Candidate], everyone: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    /// `chrome: false` is the inline list (the suggestion popup draws its own frame); the "@" button's popover keeps its own.
+    @ViewBuilder
+    private func picker(_ list: [RoomMention.Candidate], everyone: Bool = false, chrome: Bool = true) -> some View {
+        let rows = Array(list.prefix(8).enumerated())
+        let drawn = everyone ? rows : SuggestionPlacement.drawOrder(count: rows.count, direction: pickerDirection).map { rows[$0] }
+        let body = VStack(alignment: .leading, spacing: 0) {
             if everyone { row(.init(id: "all", addressee: .everyone, subtitle: "Everyone in the room"), index: -1) }
-            ForEach(Array(list.prefix(8).enumerated()), id: \.element.id) { i, c in row(c, index: everyone ? -1 : i) }
+            ForEach(drawn, id: \.element.id) { i, c in row(c, index: everyone ? -1 : i).id(i) }
         }
         .padding(6).frame(width: 300)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
+        if chrome {
+            body
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.lineStrong))
+        } else {
+            body.frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func row(_ c: RoomMention.Candidate, index: Int) -> some View {
@@ -160,8 +167,8 @@ struct RoomComposer: View {
         let list = Array(candidates.prefix(8))
         guard !list.isEmpty else { return false }
         switch key {
-        case .up: highlighted = (highlighted - 1 + list.count) % list.count
-        case .down: highlighted = (highlighted + 1) % list.count
+        case .up: highlighted = (highlighted + SuggestionPlacement.step(up: true, direction: pickerDirection) + list.count) % list.count
+        case .down: highlighted = (highlighted + SuggestionPlacement.step(up: false, direction: pickerDirection) + list.count) % list.count
         case .accept: choose(list[min(highlighted, list.count - 1)].addressee)
         case .escape: if let m = mention { draft = RoomMention.removing(m, from: draft) }
         }

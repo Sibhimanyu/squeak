@@ -14,6 +14,7 @@ struct RoomInspector: View {
     @State private var editing: DuckEdit?
     @State private var search = ""
     @State private var adding = false
+    @State private var offDutyOpen = false
     @State private var notice: String?
     @State private var noticeLine = RoomRoster.noJobLine
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
@@ -102,6 +103,7 @@ struct RoomInspector: View {
         let all = RoomRoster.roster(allDucks, threads: room.feed.threads)
         let rows = RoomRoster.visible(allDucks, threads: room.feed.threads, query: search)
         let searching = !search.trimmingCharacters(in: .whitespaces).isEmpty
+        let offDuty = RoomRoster.offDutyGroup(allDucks, threads: room.feed.threads)
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(verbatim: RoomRoster.header(all.available.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
@@ -132,9 +134,10 @@ struct RoomInspector: View {
             } else if searching && rows.isEmpty {
                 Text(verbatim: RoomRoster.noMatchLine(search)).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             } else if !searching && rows.isEmpty && !adding {
-                Text(RoomRoster.noneAvailableLine).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
+                Text(RoomRoster.noneOnDutyLine).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             }
             ForEach(rows) { d in duckRow(d) }
+            if !searching, !offDuty.rows.isEmpty { offDutyGroup(offDuty) }
             if let e = roster.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).padding(.horizontal, 6).padding(.top, 4) }
         }
         .task(id: room.feed.threads) {
@@ -154,6 +157,26 @@ struct RoomInspector: View {
                 await roster.perform(action, host: model.nativeHost)
                 return roster.error
             }
+        }
+    }
+
+    /// "Off duty - N", collapsed: the recent ones with Bring back, then a line pointing at the search for the rest.
+    @ViewBuilder
+    private func offDutyGroup(_ g: (rows: [RosterDuck], more: Int)) -> some View {
+        let total = g.rows.count + g.more
+        Button { withAnimation(Motion.standard) { offDutyOpen.toggle() } } label: {
+            HStack(spacing: 6) {
+                Lucide(.chevronRight, size: 11, color: Theme.subtle).rotationEffect(.degrees(offDutyOpen ? 90 : 0))
+                Text(verbatim: RoomRoster.offDutyLabel(total)).font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6).frame(height: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).padding(.top, 4)
+        .accessibilityLabel(RoomRoster.offDutyLabel(total)).accessibilityValue(offDutyOpen ? "expanded" : "collapsed")
+        if offDutyOpen {
+            ForEach(g.rows) { d in duckRow(d) }
+            if g.more > 0 { Text(verbatim: RoomRoster.offDutyMoreLine(g.more)).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.horizontal, 6) }
         }
     }
 

@@ -98,6 +98,8 @@ public struct RoomSystemLine: Sendable, Equatable, Identifiable {
     public var handoff: RoomHandoff? = nil
     /// A duck's state-change line, or its plan card.
     public var status: RoomStatusLine? = nil
+    /// The same duck's earlier state lines this row folded (oldest first); see `RoomFold`.
+    public var earlier: [RoomSystemLine] = []
 }
 
 /// A line that opens and closes: closed by default, one tap opens it. Pure state so the drawing is testable.
