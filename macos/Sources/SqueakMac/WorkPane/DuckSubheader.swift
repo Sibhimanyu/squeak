@@ -3,18 +3,17 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md 8.12: a Duck's chat has the same one top bar as the Dashboard and the Room (never a header row plus a strip row).
-// Left to right: the Pond's icon and name (a way back to the Pond), the Duck's name and branch chip, a divider, the Pond's
-// strip (Duck circles, item pills), the rules shield (only when the chat has rules), and one ⋯ menu.
-// Flow per control: the Pond name takes the person back to the Pond; the circles and pills switch Duck or item; the
-// shield lists what this chat may do without asking; the ⋯ menu holds the Duck's own actions (copy its branch, reveal its
-// folder, share its chat with a shared Pond, open it in its app). There is no Git cluster: review-all carries merge and the PR.
+// DESIGN.md 8.12: inside a Duck, the one top bar stays (Pond, switch, tabs) and this single subheader sits under it. Left to
+// right: the Duck's Streams or branch chips, the Git actions (commit and push, create PR, merge), the rules shield (only
+// when the chat has rules) and the ⋯ menu. There is no separate Duck header.
+// Flow per control: a Stream chip opens the rail's Changes list narrowed to that Stream; the Git cluster commits, pushes,
+// opens a pull request or merges; the shield lists what this chat may do without asking; the ⋯ menu holds Open in, sharing
+// the chat with a shared Pond, Off duty and Delete Duck.
 
-struct DuckTopBar: View {
+struct DuckSubheader: View {
+    static let height: CGFloat = 40
     let session: HostSession
     let workspace: PondWorkspace
-    let strip: PondWorkspaceStrip
-    let sidebarHidden: Bool
     @Environment(AppModel.self) private var model
 
     private var pondKey: String { workspace.pond }
@@ -23,40 +22,20 @@ struct DuckTopBar: View {
         let row = model.duckRow(session)
         return DuckHeaderChrome.of(branch: model.gitStatus(session)?.branch ?? row.branch, isMain: row.isMain, membership: model.focus.access)
     }
-    private var sidebarClearance: CGFloat {
-        sidebarHidden ? PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
-    }
 
     var body: some View {
-        let name = PondsModel.shared.name(key: pondKey)
         HStack(spacing: Space.m) {
-            let inset = PondPageChrome.headerInset(sidebarClearance: Double(sidebarClearance))
-            if inset > 0 { Color.clear.frame(width: CGFloat(inset)) }
-            Button { WorkbenchNav.openProject(model, key: pondKey, resuming: false) } label: {
-                HStack(spacing: Space.s) {
-                    PondTile(name: name, pondId: PondsModel.shared.pond(key: pondKey)?.id, projectId: workspace.project.id, size: 28)
-                    Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).pointerHand()
-            .help(PondWords.breadcrumb(name)).accessibilityLabel(PondWords.breadcrumb(name))
-            Lucide(.chevronRight, size: 12, color: Theme.subtle).accessibilityHidden(true)
-            // The Duck's own title is user text: it is the one thing here that may shorten (the full title is its tooltip).
-            Text(verbatim: model.workbenchTitle(session)).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.ink)
-                .lineLimit(1).truncationMode(.tail).frame(maxWidth: 320, alignment: .leading).fixedSize(horizontal: true, vertical: false)
-                .help(model.workbenchTitle(session))
             streamChips
             // Reads the Duck's changes now and then so the rail's badge and review-all stay current; draws nothing.
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count).hidden().frame(width: 0)
-            if !strip.isEmpty { Rectangle().fill(Theme.line).frame(width: 1, height: 22).accessibilityHidden(true) }
-            PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true).frame(maxWidth: .infinity)
-            if strip.isEmpty { Spacer(minLength: 0) }
+            Spacer(minLength: Space.m)
+            if session.source == .squeak, model.focus.access.showsCode, !model.ducksMode || duckChrome.showsCreatePR {
+                GitCluster(session: session, showsBranch: false)
+            }
             ChatRulesButton(session: session, hidesWhenEmpty: true)
             moreMenu
         }
-        .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .padding(.horizontal, Space.xl).frame(height: Self.height)
     }
 
     /// The Streams this Duck is in, from the host's roster (join order).
@@ -106,15 +85,22 @@ struct DuckTopBar: View {
                 Divider()
                 OpenInItems(session: session)
             }
+            if model.hasDuckLife(session) {
+                Divider()
+                // Flow: resting a Duck is a choice made here; closing its tab never changes duty.
+                if model.isOnDuty(session) { Button("Off duty") { model.setDuty(session, on: false) } }
+                else { Button(RoomRoster.bringBackTitle) { model.setDuty(session, on: true) } }
+                Button("Delete Duck\u{2026}", role: .destructive) { model.confirmDeleteDuck(session) }
+            }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel("More for this duck").help("Copy the branch, reveal the folder, share the chat")
+        .accessibilityLabel("More for this duck").help("Open in, share the chat, Off duty, Delete Duck")
     }
 }
 
-/// One Stream chip in a Duck's top bar. Flow: the person sees which Stream the Duck works in and clicks the chip to read what
+/// One Stream chip in a Duck's subheader. Flow: the person sees which Stream the Duck works in and clicks the chip to read what
 /// changed there: the rail's Changes list opens narrowed to that Stream ("Pond": the Pond's own folder). The label is never cut.
 private struct StreamChip: View {
     let chip: DuckStreamChip

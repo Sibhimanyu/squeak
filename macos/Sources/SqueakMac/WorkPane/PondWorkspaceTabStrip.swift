@@ -3,8 +3,8 @@ import SqueakMacCore
 import SwiftUI
 
 /// Opens a Duck or an item in the centre. The overflow list offers the same destinations when the strip scrolls.
-/// `embedded` is the one top bar's strip (DESIGN.md 8.12): the circles, divider and pills filling the rest of the bar's
-/// row, with no row of its own. Not embedded (a Duck's chat, until its header joins the bar) it draws its own row.
+/// `embedded` is the one top bar's strip (DESIGN.md 8.12): low oval tabs filling the rest of the bar's row, with no row
+/// of its own. Not embedded (a chat that is not a Duck view) it draws its own row.
 struct PondWorkspaceTabStrip: View {
     let workspace: PondWorkspace
     let strip: PondWorkspaceStrip
@@ -72,25 +72,24 @@ struct PondWorkspaceTabStrip: View {
         .accessibilityElement(children: .contain).accessibilityLabel("Pond tabs")
     }
 
+    /// The open Duck's current step: only that Duck's chat is loaded here, so only its tab can say "editing auth.ts".
+    private var tabs: [PondStripTab] {
+        let working = model.activity.isEmpty ? nil : ChatTimeline.workingLabel(model.activity)
+        return strip.tabs(activity: working)
+    }
+
     private var selected: TabItem? { strip.currentItem ?? strip.row.selectedDuck.map(TabItem.duck) }
 
     private var scroller: some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(strip.row.ducks) { duck in
-                            let tab = TabItem.duck(duck.id)
-                            PondDuckCircle(duck: duck, selected: selected == tab) { select(tab) }.id(tab)
-                        }
-                        if !strip.row.isEmpty && !strip.items.isEmpty {
-                            Rectangle().fill(Theme.line).frame(width: 1, height: 22).accessibilityHidden(true)
-                        }
-                        ForEach(strip.items, id: \.self) { item in
-                            PondItemPill(label: label(for: item), selected: selected == item,
-                                         updated: live.isUpdated(item) && selected != item, gone: live.goneState(item) != nil,
-                                         select: { select(item) }, close: { model.closePondItem(item) })
-                                .id(item)
+                    HStack(spacing: 6) {
+                        ForEach(tabs) { tab in
+                            PondOvalTab(tab: tab, label: tab.duck == nil ? label(for: tab.item) : nil, selected: selected == tab.item,
+                                        updated: live.isUpdated(tab.item) && selected != tab.item, gone: live.goneState(tab.item) != nil,
+                                        select: { select(tab.item) }, close: { close(tab) })
+                                .id(tab.item)
                         }
                     }
                     .padding(.horizontal, 8)
@@ -123,16 +122,14 @@ struct PondWorkspaceTabStrip: View {
     private var tabList: some View {
         ScrollView([.horizontal, .vertical]) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(strip.row.ducks) { duck in
-                    let tab = TabItem.duck(duck.id)
-                    listRow(tab, title: duck.name) { ThreadDuckView(id: duck.colourSeed, size: 16) }
-                        .disabled(!duck.opensChat)
-                }
-                if !strip.row.isEmpty && !strip.items.isEmpty { Divider() }
-                ForEach(strip.items, id: \.self) { item in
-                    let label = label(for: item)
-                    listRow(item, title: label.title) { label.icon }
-                        .help(label.help)
+                ForEach(tabs) { tab in
+                    if let duck = tab.duck {
+                        listRow(tab.item, title: tab.title ?? duck.name) { ThreadDuckView(id: duck.colourSeed, size: 16) }
+                            .disabled(!duck.opensChat).help(tab.help ?? "")
+                    } else {
+                        let label = label(for: tab.item)
+                        listRow(tab.item, title: label.title) { label.icon }.help(label.help)
+                    }
                 }
             }
             .padding(Space.s)
@@ -157,6 +154,15 @@ struct PondWorkspaceTabStrip: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(tab == selected ? .isSelected : [])
+    }
+
+    /// Flow: an item tab closes its item; an Off-duty Duck's tab (open only while its chat shows) closes back to the Room.
+    /// Closing never changes duty.
+    private func close(_ tab: PondStripTab) {
+        guard tab.closable else { return }
+        if tab.duck == nil { model.closePondItem(tab.item); return }
+        RoomViewPref.shared.set(.room, for: workspace.pond)
+        model.openPondHome(workspace.pond)
     }
 
     private func select(_ tab: TabItem) {
@@ -218,10 +224,15 @@ struct PondItemLabel {
     }
 }
 
-private struct PondItemPill: View {
-    let label: PondItemLabel
+/// One low oval tab (DESIGN.md 8.12). A Duck's has two compact lines: its chat's title, then the glyph (animated only while
+/// working; the amber triangle when it needs you) and what it is doing. An item's has an icon and its name. The selected
+/// tab is raised: `surface-raised` fill and a `lineStrong` border (no shadow inside the window). Labels may shorten, with the
+/// full text as the tooltip; they never wrap.
+private struct PondOvalTab: View {
+    let tab: PondStripTab
+    let label: PondItemLabel?
     let selected: Bool
-    /// The tab changed since the person last looked (a quiet dot); `gone` dims the pill, its page says why.
+    /// The tab changed since the person last looked (a quiet dot); `gone` dims it, its page says why.
     let updated: Bool
     let gone: Bool
     let select: () -> Void
@@ -229,82 +240,70 @@ private struct PondItemPill: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
+    static let height: CGFloat = 38
+    static let maxWidth: CGFloat = 220
+
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: select) {
-                HStack(spacing: 6) {
-                    label.icon
-                    Text(verbatim: label.title).font(Typo.label).lineLimit(1).fixedSize()
-                    if updated {
-                        Circle().fill(Theme.info).frame(width: 6, height: 6).accessibilityHidden(true)
-                    }
-                    if let seed = label.colourSeed {
-                        let rgb = ThreadDuck.rgb(for: seed, dark: scheme == .dark)
-                        Circle().fill(Color(red: rgb.r, green: rgb.g, blue: rgb.b))
-                            .frame(width: 6, height: 6).accessibilityHidden(true)
-                    }
+            Button(action: select) { content.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .disabled(tab.duck?.opensChat == false)
+                .help(help)
+                .accessibilityLabel(help.replacingOccurrences(of: "\n", with: ", "))
+                .accessibilityValue(updated ? "updated" : "")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityAction(named: Text("Close tab")) { if tab.closable { close() } }
+            if tab.closable {
+                Button(action: close) {
+                    Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: Self.height).contentShape(Rectangle())
                 }
-                .foregroundStyle(selected ? Theme.ink : Theme.muted)
-                .opacity(gone ? 0.6 : 1)
-                .padding(.leading, 10).padding(.trailing, 4)
-                .frame(height: 28).contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Close").accessibilityLabel("Close \(tab.title ?? label?.title ?? "tab")")
+                .opacity(hovering ? 1 : 0).disabled(!hovering).accessibilityHidden(!hovering)
             }
-            .buttonStyle(.plain)
-            .help(label.help)
-            .accessibilityValue(updated ? "updated" : "")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityAction(named: Text("Close tab"), close)
-            Button(action: close) {
-                Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close \(label.title)").accessibilityLabel("Close \(label.title)")
-            .opacity(hovering ? 1 : 0)
-            .disabled(!hovering).accessibilityHidden(!hovering)
         }
-        .padding(.trailing, 3)
-        .background(selected ? Theme.selected : Theme.surface, in: Capsule())
+        .padding(.trailing, tab.closable ? 3 : 0)
+        .frame(maxWidth: Self.maxWidth).fixedSize(horizontal: true, vertical: false)
+        .frame(height: Self.height)
+        .background(selected ? Theme.surfaceRaised : Theme.surface, in: Capsule())
         .overlay { Capsule().strokeBorder(selected ? Theme.lineStrong : Theme.line).allowsHitTesting(false) }
+        .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
         .onHover { hovering = $0 }
     }
-}
 
-private struct PondDuckCircle: View {
-    let duck: DuckRowAvatar
-    let selected: Bool
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
+    private var help: String { tab.help ?? label?.help ?? "" }
 
-    var body: some View {
-        let rgb = ThreadDuck.rgb(for: duck.colourSeed, dark: scheme == .dark)
-        let colour = Color(red: rgb.r, green: rgb.g, blue: rgb.b)
-        Button(action: action) {
-            Circle().fill(selected ? Theme.selected : Theme.surfaceRaised)
-                .overlay { Circle().fill(colour.opacity(0.18)) }
-                .overlay { Circle().strokeBorder(selected ? Theme.lineStrong : .clear, lineWidth: 2) }
-                .frame(width: DuckRowMetrics.avatar, height: DuckRowMetrics.avatar)
-                .overlay { ThreadDuckView(id: duck.colourSeed, size: 22) }
-                .overlay(alignment: .bottomTrailing) {
-                    if duck.showsWorkingGlyph {
-                        WorkingGlyph(slot: 12, alignment: .center, grid: .micro)
-                            .scaleEffect(0.8).frame(width: 15, height: 15)
-                            .background(Theme.bg, in: Circle()).offset(x: 3, y: 3)
+    @ViewBuilder private var content: some View {
+        if let duck = tab.duck {
+            HStack(spacing: 8) {
+                ThreadDuckView(id: duck.colourSeed, size: 20).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: tab.title ?? duck.name).font(Typo.label).foregroundStyle(Theme.ink)
+                        .lineLimit(1).truncationMode(.tail)
+                    HStack(spacing: 4) {
+                        if duck.showsWorkingGlyph {
+                            WorkingGlyph(slot: 12, alignment: .center, grid: .micro).scaleEffect(0.8).frame(width: 12, height: 12)
+                        } else if duck.needsYou {
+                            Lucide(.triangleAlert, size: 10, color: Theme.warning).frame(width: 12, height: 12)
+                        }
+                        Text(verbatim: tab.status ?? "").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                            .lineLimit(1).truncationMode(.tail)
                     }
                 }
-                .overlay(alignment: .topTrailing) {
-                    if duck.needsYou {
-                        Lucide(.triangleAlert, size: 10, color: Theme.warning).frame(width: 15, height: 15)
-                            .background(Theme.bg, in: Circle()).offset(x: 3, y: -3)
-                    }
+            }
+            .padding(.leading, 10).padding(.trailing, 12)
+        } else if let label {
+            HStack(spacing: 6) {
+                label.icon
+                Text(verbatim: label.title).font(Typo.label).lineLimit(1).truncationMode(.middle)
+                if updated { Circle().fill(Theme.info).frame(width: 6, height: 6).accessibilityHidden(true) }
+                if let seed = label.colourSeed {
+                    let rgb = ThreadDuck.rgb(for: seed, dark: scheme == .dark)
+                    Circle().fill(Color(red: rgb.r, green: rgb.g, blue: rgb.b)).frame(width: 6, height: 6).accessibilityHidden(true)
                 }
-                .opacity(duck.onDuty ? 1 : 0.6)
-                .contentShape(Circle())
+            }
+            .foregroundStyle(selected ? Theme.ink : Theme.muted)
+            .padding(.leading, 12).padding(.trailing, tab.closable ? 4 : 12)
         }
-        .buttonStyle(.plain)
-        .disabled(!duck.opensChat)
-        // The tooltip lists the Streams the Duck is in (or says it is in the Pond).
-        .help(duck.opensChat ? DuckStreams.tooltip(name: duck.name, presenceLine: duck.presenceLine, streams: duck.streams) : "\(duck.name) has no chat yet")
-        .accessibilityLabel(duck.opensChat ? DuckStreams.accessibilityLabel(name: duck.name, presenceLine: duck.presenceLine, streams: duck.streams) : "\(duck.name), \(duck.presenceLine)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

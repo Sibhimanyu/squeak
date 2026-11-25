@@ -18,22 +18,30 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
     public var state: RoomThreadState
     public var lastActiveAt: Int64?
     public var createdAt: Int64?
+    /// The chat's title (what the Duck is used for), when the host sends one.
+    public var title: String?
+    /// Names are masks worn only on duty: the host sends no name for an Off-duty Duck.
+    public var wearsName = true
 
     public init(
         id: String, name: String, role: String? = nil, colourSeed: String? = nil, duty: RoomDuty = .on, currentSessionId: String? = nil,
         place: RoomPlace? = nil, state: RoomThreadState = .idle, lastActiveAt: Int64? = nil, createdAt: Int64? = nil,
-        streams: [RoomStream] = []
+        streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true
     ) {
+        self.title = title; self.wearsName = wearsName
         self.streams = streams
         self.id = id; self.name = name; self.role = role; self.colourSeed = colourSeed ?? id; self.duty = duty
         self.currentSessionId = currentSessionId; self.place = place; self.state = state; self.lastActiveAt = lastActiveAt; self.createdAt = createdAt
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, streams, state, lastActiveAt, createdAt }
+    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, streams, state, lastActiveAt, createdAt, title }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        name = (try? c.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 } ?? "Duck"
+        let sent = (try? c.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 }
+        wearsName = sent != nil
+        title = (try? c.decode(String.self, forKey: .title)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        name = sent ?? "Duck"
         role = (try? c.decode(String.self, forKey: .role)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         colourSeed = (try? c.decode(String.self, forKey: .colourSeed)).flatMap { $0.isEmpty ? nil : $0 } ?? id
         duty = (try? c.decode(String.self, forKey: .duty)).flatMap(RoomDuty.init(rawValue:)) ?? .on
@@ -70,6 +78,9 @@ public struct RosterDuck: Sendable, Equatable, Identifiable {
     public var sessionId: String?
     /// The Streams it is in (join order); empty when it works in the Pond itself.
     public var streams: [RoomStream] = []
+    /// The chat's title, and whether the Duck's name is worn (on duty with a name from the host).
+    public var title: String?
+    public var wearsName = true
     public var onDuty: Bool { presence != .off }
     public var hasJob: Bool { sessionId != nil }
 }
@@ -108,7 +119,8 @@ public enum RoomRoster {
         return RosterDuck(
             id: d.id, name: d.name, colourSeed: d.colourSeed, agent: thread?.agent, agentLabel: RoomDucks.agentLabel(thread?.agent), role: d.role,
             placeChip: placeChip(d.place), presence: presence, presenceLine: presenceLine(d, thread: thread, presence: presence, now: now),
-            sessionId: d.currentSessionId, streams: d.streams)
+            sessionId: d.currentSessionId, streams: d.streams,
+            title: thread?.title ?? d.title, wearsName: d.wearsName && presence != .off)
     }
 
     /// "Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Off duty", "Ready for a job" (no session yet).

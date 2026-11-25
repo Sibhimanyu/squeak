@@ -22,6 +22,89 @@ import Testing
         #expect(store.tabs(pond).isEmpty)
     }
 
+    @Test func anItemFromThePageGoesFirstAmongItemsAndFromATabRightAfterIt() {
+        var store = TabStore()
+        store.openPondItem(file, in: pond)
+        store.deselectPondItem(in: pond) // back on the Dashboard or Room
+        store.openPondItem(diff, in: pond)
+        #expect(store.pondItems(pond) == [diff, file])
+        store.openPondItem(review, in: pond) // from the diff tab
+        #expect(store.pondItems(pond) == [diff, review, file])
+        store.deselectPondItem(in: pond)
+        store.openPondItem(artifact, in: pond, focus: false)
+        #expect(store.pondItems(pond) == [artifact, diff, review, file])
+    }
+
+    @Test func tabsListOnDutyDucksFirstNotClosableThenOffDutyThenItems() {
+        let roster = makeRoster()
+        let place = DuckRowPlace.chat(sessionId: "s-off", duckId: "off")
+        let strip = PondWorkspaceStrip(roster: roster, place: place, items: [file, diff], current: nil)
+        let tabs = strip.tabs()
+        #expect(tabs.map(\.item) == [.duck("a"), .duck("b"), .duck("no-chat"), .duck("off"), file, diff])
+        #expect(tabs.filter { $0.duck?.onDuty == true }.allSatisfy { !$0.closable })
+        #expect(tabs.first { $0.item == .duck("off") }?.closable == true)
+        #expect(tabs.suffix(2).allSatisfy { $0.closable && $0.duck == nil && $0.status == nil })
+    }
+
+    @Test func aDuckTabSaysWhatTheDuckIsDoing() {
+        func duck(_ presence: RoomDuckPresence, _ line: String) -> DuckRowAvatar {
+            DuckRowAvatar(id: "a", name: "Ada", colourSeed: "a", presence: presence, presenceLine: line, sessionId: "s")
+        }
+        #expect(PondTabStatus.line(for: duck(.working, "Working")) == "Working")
+        #expect(PondTabStatus.line(for: duck(.working, "Working \u{00B7} 3 of 5")) == "Working \u{00B7} 3 of 5")
+        #expect(PondTabStatus.line(for: duck(.working, "Working"), activity: "Editing auth.ts\u{2026}") == "Working \u{00B7} editing auth.ts")
+        #expect(PondTabStatus.line(for: duck(.working, "Working"), activity: "Starting\u{2026}") == "Working")
+        #expect(PondTabStatus.line(for: duck(.waiting, "Waiting on you")) == "Needs you")
+        #expect(PondTabStatus.line(for: duck(.idle, "Idle \u{00B7} 4m ago")) == "Idle \u{00B7} 4m")
+        #expect(PondTabStatus.line(for: duck(.off, "Off duty")) == "Off duty")
+    }
+
+    @Test func aDuckTabIsTitleOverNamePrefixedStatus() {
+        let roster = RoomRoster.roster([
+            PondDuck(id: "a", name: "Pip", currentSessionId: "s-a", state: .working),
+            PondDuck(id: "off", name: "Cy", duty: .off, currentSessionId: "s-off", wearsName: false)
+        ], threads: [
+            thread("s-a", title: "Fix login", state: .working),
+            thread("s-off", title: "Old spike", state: .idle)
+        ])
+        let strip = PondWorkspaceStrip(roster: roster, place: .chat(sessionId: "s-off", duckId: "off"), items: [], current: nil)
+        let tabs = strip.tabs()
+        let pip = tabs.first { $0.item == .duck("a") }
+        #expect(pip?.title == "Fix login")
+        #expect(pip?.status == "Pip \u{00B7} Working")
+        #expect(pip?.help == "Fix login\nPip \u{00B7} Working")
+        let off = tabs.first { $0.item == .duck("off") }
+        #expect(off?.title == "Old spike")
+        #expect(off?.status == "Off duty")
+        let open = PondWorkspaceStrip(roster: roster, place: .chat(sessionId: "s-a", duckId: "a"), items: [], current: nil)
+        #expect(open.tabs(activity: "Editing auth.ts\u{2026}").first?.status == "Pip \u{00B7} Working \u{00B7} editing auth.ts")
+    }
+
+    @Test func aMissingNameIsNotWornEvenOnDuty() throws {
+        let json = #"{"id":"d","name":null,"duty":"on","currentSessionId":"s","title":"Fix login"}"#
+        let duck = try JSONDecoder().decode(PondDuck.self, from: Data(json.utf8))
+        #expect(!duck.wearsName)
+        let tab = PondWorkspaceStrip(roster: RoomRoster.roster([duck]), place: .dashboard, items: [], current: nil).tabs().first
+        #expect(tab?.title == "Fix login")
+        #expect(tab?.status == "Idle")
+    }
+
+    private func thread(_ id: String, title: String, state: RoomThreadState) -> RoomThread {
+        let json = #"{"sessionId":"\#(id)","title":"\#(title)","state":"\#(state.rawValue)"}"#
+        return try! JSONDecoder().decode(RoomThread.self, from: Data(json.utf8))
+    }
+
+    @Test func onlyTheOpenDucksTabCarriesItsCurrentStep() {
+        let roster = RoomRoster.roster([
+            PondDuck(id: "a", name: "Ada", currentSessionId: "s-a", state: .working),
+            PondDuck(id: "b", name: "Bo", currentSessionId: "s-b", state: .working)
+        ])
+        let strip = PondWorkspaceStrip(roster: roster, place: .chat(sessionId: "s-a", duckId: "a"), items: [], current: nil)
+        let tabs = strip.tabs(activity: "Running tests\u{2026}")
+        #expect(tabs.first { $0.item == .duck("a") }?.status == "Working \u{00B7} running tests")
+        #expect(tabs.first { $0.item == .duck("b") }?.status == "Working")
+    }
+
     @Test func firstItemFromADuckGoesBeforeExistingItems() {
         var store = TabStore()
         store.openPondItem(file, in: pond)

@@ -30,19 +30,55 @@ struct WorkbenchCentre: View {
         let held = artifact.flatMap { model.artifactContext(pond: $0.pond) } != nil
         let layer = artifact != nil && !held
         let pondPage = held ? nil : PondRoute(model.baseLocation)
-        ZStack {
-            workbench.workbenchLayer(hidden: pondPage != nil || layer)
-            if let route = pondPage {
-                PondRouteView(route: route, sidebarHidden: sidebarHidden).heresayPrivate()
-                    .workbenchLayer(hidden: layer)
+        let bar = barContext(pondPage: pondPage, newDuck: newDuck && !layer)
+        // New layout: the one top bar is hosted here, above every page, so it keeps its identity (never moves or rebuilds)
+        // between the Dashboard, the Room, items and a Duck.
+        VStack(spacing: 0) {
+            if let bar {
+                PondSharedHeader(key: bar.workspace.pond, projectId: bar.workspace.project.id, member: bar.member,
+                                 leadingInset: CGFloat(PondPageChrome.headerInset(sidebarClearance: Double(sidebarClearance))),
+                                 itemShowing: bar.itemShowing, inDuck: bar.inDuck, workspace: bar.workspace, strip: bar.strip)
             }
-            // An artifact of a pond with no chat: a layer over the pond page, closed by its back control.
-            if let artifact, layer {
-                ArtifactViewerPage(pond: artifact.pond, path: artifact.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen)
-                    .id(artifact.path)
-                    .transition(.opacity)
+            ZStack {
+                workbench.workbenchLayer(hidden: pondPage != nil || layer)
+                if let route = pondPage {
+                    PondRouteView(route: route, sidebarHidden: sidebarHidden, barHosted: bar != nil).heresayPrivate()
+                        .workbenchLayer(hidden: layer)
+                }
+                // An artifact of a pond with no chat: a layer over the pond page, closed by its back control.
+                if let artifact, layer {
+                    ArtifactViewerPage(pond: artifact.pond, path: artifact.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen)
+                        .id(artifact.path)
+                        .transition(.opacity)
+                }
             }
         }
+    }
+
+    private struct BarContext {
+        let workspace: PondWorkspace
+        let strip: PondWorkspaceStrip
+        var member = false
+        var itemShowing = false
+        var inDuck = false
+    }
+
+    private var sidebarClearance: CGFloat {
+        sidebarHidden ? PaneToggle.clearance(fullScreen: true, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size : 0
+    }
+
+    /// What the one top bar needs: a Pond's Dashboard or Room, or the Pond of the Duck whose chat is showing; nil elsewhere.
+    private func barContext(pondPage: PondRoute?, newDuck: Bool) -> BarContext? {
+        if let pondPage {
+            guard case .home(let key) = pondPage, let room = PondRouteView.roomProject(key),
+                  let workspace = PondWorkspace(pond: key) else { return nil }
+            let strip = workspace.strip(place: PondPageChrome.rowPlace(page: RoomViewPref.shared.mode(for: key)), store: model.tabStore)
+            return BarContext(workspace: workspace, strip: strip, member: room.member, itemShowing: strip.currentItem != nil)
+        }
+        guard newDuck, let shell = model.selectedSession, let key = PondsModel.shared.key(of: shell),
+              let workspace = PondWorkspace(pond: key) else { return nil }
+        let strip = workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore)
+        return BarContext(workspace: workspace, strip: strip, itemShowing: strip.currentItem != nil, inDuck: true)
     }
 
     @ViewBuilder private var workbench: some View {
@@ -71,11 +107,8 @@ struct WorkbenchCentre: View {
         let item = model.location.chatKey == nil ? nil : workspace.flatMap { model.tabStore.currentPondItem($0.project.id) }
         VStack(spacing: 0) {
             if let shell, newDuck, let workspace {
-                // New layout: a Duck's chat has the one top bar (Pond, Duck, branch, strip, menu), like the Dashboard and the Room.
-                DuckTopBar(session: shell, workspace: workspace,
-                           strip: workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore),
-                           sidebarHidden: sidebarHidden)
-                    .id(workspace.project.id)
+                // New layout: the one top bar is above (WorkbenchCentre); a Duck adds one subheader and the Pond-coloured gradient.
+                DuckSubheader(session: shell, workspace: workspace).id(workspace.project.id)
             } else if let shell {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
@@ -108,7 +141,7 @@ struct WorkbenchCentre: View {
         // Pond tint (§3.5): a very faint wash from the top edge, fading out over the header and the tab strip.
         .background(alignment: .top) {
             LinearGradient(colors: [PondColour.wash(PondColour.openPond(shell), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: Metrics.header + (newDuck && workspace != nil ? 0 : Metrics.tabStrip)).allowsHitTesting(false)
+                .frame(height: newDuck && workspace != nil ? DuckSubheader.height + 56 : Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
         }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.lastChat) { _, key in

@@ -1271,20 +1271,34 @@ The window is redesigned from Squeak's own model: a Pond is a place, Ducks are t
 produces sits beside its chat. The new layout is the default for everyone who has not chosen; the classic layout stays exactly as it was and is optional. Anyone who explicitly chose keeps their choice. The setting is read through
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
-- **Pond tab strip.** On the Dashboard and the Room the strip is part of the one top bar, never a row of its own (a
-  Duck's chat still draws it as a row under its header until that header joins the bar). The bar reads, left to right:
-  the Pond's icon and name (the "1 person · 2 ducks on duty" subtitle is their tooltip), the Dashboard | Room switch, a
-  thin divider, then the Pond's on-duty Ducks as avatar-only circles (`DuckAvatarRow`), another divider and the opened
-  item pills. An empty strip hides its divider. Each circle uses the brand thread duck (`duckThread.png`, template,
-  tinted, never redrawn) in the Duck's own colour, with its name and status in the hover and VoiceOver labels. The working
-  glyph and amber waiting triangle sit on the circle. The selected circle has `selected` fill and a `lineStrong` ring.
-  Clicking a circle opens its Duck's chat. An Off-duty Duck appears at the end of the circles while its chat is showing.
-  Circles have no close action, and opening or closing tabs never changes duty. Each item pill has an icon, name and
-  a close control on hover. Diff and review pills carry a dot in their Duck's colour. The strip scrolls sideways,
-  fades at the hidden edges and offers a "⋯" list when it overflows. The two-finger swipe still works. The Dashboard's
-  Pond overview card does not repeat the icon and name: it keeps its label and actions.
+- **One bar, oval tabs.** The top bar is one view hosted above every page (`WorkbenchCentre`), so it never moves or rebuilds
+  between the Dashboard, the Room, an item and a Duck. It reads, left to right: the Pond's icon and name (the "1 person ·
+  2 ducks on duty" subtitle is their tooltip), the Dashboard | Room switch (neither side selected inside a Duck or an
+  item; picking one goes to that page), then the tabs filling the rest, fading at hidden edges with a "⋯" list on overflow.
+  The two-finger swipe still works. The Dashboard's Pond overview card does not repeat the icon and name.
+  Every tab is a low oval (38pt, width capped at 220, one line per row, never wrapping; text may shorten and the full text
+  is the tooltip). The selected tab is raised: `surface-raised` fill and a `lineStrong` border, no shadow (§5). Others sit
+  on `surface` with a `line` border.
+  - **Duck tab, two lines** (`PondStripTab`, `PondTabStatus`). The Duck's thread duck in its colour, then line 1, the
+    chat's title (what the Duck is used for; the Duck's name when the host sends no title), and line 2 at 11pt `muted`:
+    the glyph and the status. The working glyph is animated only while working; the amber triangle shows when it needs you;
+    idle shows no icon. Status comes from the host's roster: "Working · editing auth.ts" (the open Duck's current step) or
+    "Working · 3 of 5" or "Working", "Needs you", "Idle · 4m", "Off duty". It is prefixed by the Duck's name while the Duck
+    wears one: "Pip · Working · editing auth.ts". Names are masks worn only on duty (the host sends no name for an
+    Off-duty Duck), so an Off-duty Duck's tab shows its title and "Off duty".
+  - **Item tabs** (file, diff, review-all, artifact, notebook) use the same oval with an icon and name; diff and review
+    tabs carry a dot in their Duck's colour; a quiet blue dot marks "updated".
+  - **Order.** On-duty Ducks always have a tab, first, never closable. An Off-duty Duck opened from the roster or search
+    appears after them while its chat shows and closes (to the Room) with the hover close control; closing never changes
+    duty. Items follow. An item opened from the Dashboard, the Room or a Duck goes first among the items, right after the
+    Duck tabs; one opened from an item tab goes right after that tab.
+- **Duck subheader.** Inside a Duck, under the bar, one 40pt row (`DuckSubheader`) holds the Duck's Stream or branch chips (a
+  chip opens the rail's Changes list narrowed to it), then at the right the Git actions (commit and push, create PR,
+  merge: the existing Git cluster), the rules shield (only when the chat has rules) and the ⋯ menu (Open in, Share this
+  duck's chat… when allowed, Off duty, Delete Duck…). Below it, the Pond-coloured wash fades out, then the chat. There is
+  no separate Duck header.
 - **Item tabs.** Files, diffs, review-all, artifacts and the Notebook open in the centre. A click either selects the
-  existing pill or inserts one after the current tab, in the item group. A Duck showing a file adds its pill in the
+  existing tab or opens one (first among the items, or right after the current item tab). A Duck showing a file adds its tab in the
   background. Order is saved by project id. ⌘W closes the selected item, ⌘1–9 select strip tabs and ⌃Tab cycles them.
 - **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: "Here now",
   Tasks and the Notebook live on the Dashboard under the overview tiles (the Ducks working are the Working tile and the
