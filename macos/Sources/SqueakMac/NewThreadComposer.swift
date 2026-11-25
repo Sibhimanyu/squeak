@@ -263,9 +263,20 @@ struct NewThreadComposer: View {
     var openInWindow = true
     @Environment(AppModel.self) private var model
     @State private var optionsOpen = false
+    @State private var picker = ComposerPickerDriver()
+
+    /// `@` lists the folder the duck starts in; `/` lists the chosen agent's skills and commands there, so it follows the model chip.
+    private var pickerSource: ComposerPickerSource {
+        let agent = state.form.agent, folder = state.folder, host = model.nativeHost
+        return ComposerPickerSource(
+            folder: folder,
+            commands: { await NewDuckSlash.list(agent: agent, cwd: folder) { (try? await host.commands(cwd: folder)) ?? [] } },
+            identity: NewDuckSlash.identity(agent: agent, folder: folder))
+    }
 
     var body: some View {
         @Bindable var state = state
+        @Bindable var picker = picker
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
             if state.noTarget && !state.loading {
                 VStack(alignment: .leading, spacing: 10) {
@@ -286,12 +297,16 @@ struct NewThreadComposer: View {
                 ComposerField(
                     text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
                     isEnabled: !state.starting, focusToken: state.focus, onSend: start, onEscape: onEscape,
-                    fontSize: compact ? 13 : 14, onImages: state.hasPlace ? { state.images.add($0) } : nil)
+                    fontSize: compact ? 13 : 14, onImages: state.hasPlace ? { state.images.add($0) } : nil,
+                    onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle)
                     .padding(.horizontal, 6)
                     .frame(height: compact ? 96 : 150)
                     .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
                     .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
                     .imageDrop(state.images)
+                    .suggestionPopup(isPresented: picker.pick.isOpen, direction: $picker.direction, selected: picker.pick.selected, triggerX: picker.triggerX) {
+                        ComposerPickerList(model: picker.pick, direction: picker.direction, onPick: picker.accept)
+                    }
                 if state.form.trimmedText.count > NewChatForm.maxLength {
                     Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
                         .font(Typo.meta).foregroundStyle(Theme.negative)
@@ -312,6 +327,10 @@ struct NewThreadComposer: View {
             }
         }
         .disabled(state.starting)
+        .onChange(of: state.form.text) { _, new in picker.pick.refresh(text: new, caret: picker.caret) }
+        .onChange(of: picker.caret) { _, new in picker.pick.refresh(text: state.form.text, caret: new) }
+        .onChange(of: pickerSource.identity) { _, _ in picker.pick.use(pickerSource); picker.pick.refresh(text: state.form.text, caret: picker.caret) }
+        .onAppear { picker.pick.use(pickerSource) }
     }
 
     // MARK: Place
@@ -613,18 +632,54 @@ struct NewThreadPage: View {
     var state: NewThreadState
 
     var body: some View {
-        ScrollView {
+        NewDuckCentred {
             VStack(alignment: .leading, spacing: Space.l) {
                 Text("New duck").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 NewThreadComposer(state: state, onEscape: { NewChatController.shared.hide() }, onStarted: { NewChatController.shared.hide() })
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .padding(.horizontal, Space.xl).padding(.top, Space.l).padding(.bottom, Space.xl)
-            .frame(maxWidth: .infinity)
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .screen("New duck")
+    }
+}
+
+/// The New duck block centred in the space below the bar, a little above true centre (`NewDuckLayout`). It follows the window
+/// as it resizes; a block taller than the space starts at the top and scrolls, so it is never clipped under the bar. The
+/// `/` popup draws outside the scroll view's bounds (it flips above or below the box by the room there is).
+struct NewDuckCentred<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView {
+                CentredBlock(viewport: geo.size.height) {
+                    content()
+                        .frame(maxWidth: 720, alignment: .leading)
+                        .padding(.horizontal, Space.xl).padding(.vertical, Space.l)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollClipDisabled()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Lays its one child out `NewDuckLayout.top` from the top of a space `viewport` tall (or as tall as the child, when taller).
+private struct CentredBlock: Layout {
+    var viewport: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 0
+        let h = subviews.first?.sizeThatFits(ProposedViewSize(width: width, height: nil)).height ?? 0
+        return CGSize(width: width, height: NewDuckLayout.height(viewport: viewport, content: h))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let view = subviews.first else { return }
+        let h = view.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+        view.place(at: CGPoint(x: bounds.minX, y: bounds.minY + NewDuckLayout.top(viewport: viewport, content: h)),
+                   anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: h))
     }
 }
 

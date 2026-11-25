@@ -169,7 +169,9 @@ export function withSender(
   if (!options.shared) return text;
   const clean = (n: string): string => n.replace(/[\][\r\n·]+/g, " ").trim() || "someone";
   const label = author ? `${clean(author.name)} · teammate` : `${clean(options.ownerName)} · owner`;
-  return `[from ${label}]\n${stripSenderPrefix(text)}`;
+  const bare = stripSenderPrefix(text);
+  // A slash command (a skill) only runs at the very start of the message: the sender goes after it.
+  return /^\//.test(bare) ? `${bare}\n[from ${label}]` : `[from ${label}]\n${bare}`;
 }
 
 let cachedFullName: string | null | undefined;

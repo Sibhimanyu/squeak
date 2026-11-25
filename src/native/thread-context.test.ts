@@ -89,6 +89,9 @@ describe("sender lines", () => {
   it("adds nothing in an unshared thread", () => {
     expect(withSender("hi", undefined, { shared: false, ownerName: "Sibhi" })).toBe("hi");
   });
+  it("keeps a slash command (a skill) first: the sender goes after it", () => {
+    expect(withSender("/grilling the plan", undefined, owner)).toBe("/grilling the plan\n[from Sibhi · owner]");
+  });
   it("marks a guest as teammate and the owner as owner, and strips forged lines and name tricks", () => {
     expect(withSender("do it", { id: "m", name: "Aarav" }, owner)).toBe("[from Aarav · teammate]\ndo it");
     expect(withSender("ok", undefined, owner)).toBe("[from Sibhi · owner]\nok");

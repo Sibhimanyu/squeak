@@ -73,6 +73,15 @@ const until = async (fn: () => boolean) => {
 };
 
 describe("SessionHost", () => {
+  it("runs a skill on a new chat's first turn: the split brief goes after a slash command, before plain text", async () => {
+    const a = setup();
+    await a.host.create({ ...spec, text: "/grilling the plan", agentPrefix: "BRIEF" });
+    expect(a.runners[0]!.sent).toEqual(["/grilling the plan\n\nBRIEF"]);
+    const b = setup();
+    await b.host.create({ ...spec, text: "fix it", agentPrefix: "BRIEF" });
+    expect(b.runners[0]!.sent).toEqual(["BRIEF\n\nfix it"]);
+  });
+
   it("records a pond member's author on their message, queued or started, and none for the owner's", async () => {
     const { host, store, runners, events } = setup();
     const s = await host.create({ ...spec, text: "mine" });

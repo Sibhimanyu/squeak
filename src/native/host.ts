@@ -1506,7 +1506,8 @@ export class SessionHost extends EventEmitter {
     const brief = this.firstBrief.get(s.id);
     this.firstBrief.delete(s.id);
     const body = agentBody ?? this.agentText(s.id, text, author);
-    const full = brief ? `${brief}\n\n${body}` : body;
+    // A slash command only runs at the very start of the message, so a brief goes after one, never before it.
+    const full = !brief ? body : /^\//.test(body) ? `${body}\n\n${brief}` : `${brief}\n\n${body}`;
     this.sentText.set(s.id, full);
     let runner: Runner;
     try {

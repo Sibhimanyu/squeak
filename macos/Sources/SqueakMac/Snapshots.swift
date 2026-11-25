@@ -213,13 +213,11 @@ private enum Fixtures {
         state.loading = false
         state.pond = PondThreadContext(pondId: "p", pondName: "greenroom", projectId: "proj", choice: .new, showsPicker: true)
         return page(width: width, height: 560, centre: PondCentre(page: .room, duck: "dhol", newDuck: true), dark: dark) {
-            ScrollView {
+            NewDuckCentred {
                 VStack(alignment: .leading, spacing: Space.l) {
                     Text("New duck").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink)
                     NewThreadComposer(state: state, onEscape: {}, onStarted: {})
                 }
-                .frame(maxWidth: 720, alignment: .leading).padding(.horizontal, Space.xl).padding(.top, Space.l)
-                .frame(maxWidth: .infinity)
             }
         }
     }
