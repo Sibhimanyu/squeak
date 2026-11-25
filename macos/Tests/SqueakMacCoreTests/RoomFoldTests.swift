@@ -90,25 +90,4 @@ import Testing
         let appended = RoomFold.fold([status("a", duck: "pip"), status("b", duck: "pip"), person("m")]).map(\.id)
         #expect(Array(appended.prefix(1)) == before)
     }
-
-    @Test func longTextClampsAtThreeLines() {
-        #expect(!RoomRowText.isLong("Done."))
-        #expect(!RoomRowText.isLong("a\nb\nc"))
-        #expect(RoomRowText.isLong("a\nb\nc\nd"))
-        #expect(RoomRowText.isLong(String(repeating: "word ", count: 60)))
-    }
-
-    @Test func truncationIsDecidedFromMeasuredHeights() {
-        // Two and three full lines fit: natural == clamped, no "Show more".
-        #expect(!RoomRowText.truncates(clamped: 66, natural: 66))
-        #expect(!RoomRowText.truncates(clamped: 66, natural: 66.4))
-        // A fourth line is taller than the clamp.
-        #expect(RoomRowText.truncates(clamped: 66, natural: 88))
-    }
-
-    @Test func shortTextIsNeverMeasured() {
-        #expect(!RoomRowText.needsMeasure("Done."))
-        #expect(RoomRowText.needsMeasure("a\nb"))
-        #expect(RoomRowText.needsMeasure(String(repeating: "word ", count: 20)))
-    }
 }

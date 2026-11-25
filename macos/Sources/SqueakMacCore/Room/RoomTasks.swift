@@ -619,6 +619,8 @@ public struct RoomTaskCard: Sendable, Equatable, Identifiable {
     public var result: String?
     /// The duck's tab the card opens (the Duck that has the Task).
     public var opens: String?
+    /// The turn of that Duck's chat the Task began in (the bare turn id); nil until the host names it.
+    public var opensTurn: String? = nil
     /// The messages the person may include or leave out (never the one that made the Task); empty once it is sent.
     public var discussion: [RoomTaskMessage]
     public var excluded: Set<String>
@@ -655,6 +657,7 @@ extension RoomTasks {
             parentTitle: task.parentTaskId.flatMap { p in tasks.first { $0.id == p }?.title },
             result: task.state == .done ? task.result : nil,
             opens: task.handedTo?.sessionId,
+            opensTurn: task.handedTo.flatMap { h in h.turnId.map { RoomTurnId.bare($0, session: h.sessionId) } },
             discussion: carried, excluded: excluded.intersection(carried.map(\.id)),
             canDrop: task.state != .done, error: local?.error, routing: routingLine(for: task), approvalName: approval)
     }

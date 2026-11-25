@@ -188,9 +188,9 @@ struct RoomMessagesTests {
         let lines = items.compactMap { if case .system(let s) = $0 { s } else { nil } }
         let h = lines[0].handoff
         #expect(h?.title == "Pip \u{2192} Sage" && h?.body == note && h?.fromSessionId == "s1" && lines[0].opens == "s2")
-        #expect(h?.isLong == false)
-        #expect(RoomHandoff.isLong(String(repeating: "word ", count: 120)))
-        #expect(RoomHandoff.isLong((1...7).map(String.init).joined(separator: "\n")))
+        // A note shows in full like any message; only past about twelve lines is it cut.
+        #expect(!RoomRowPlan.isLong(note))
+        #expect(!RoomRowPlan.isLong((1...7).map(String.init).joined(separator: "\n")))
     }
 
     @Test func aHandoffNamesTheReceiverTheHostSent() throws {
@@ -202,19 +202,15 @@ struct RoomMessagesTests {
         #expect(lines.count == 1 && lines[0].hasPrefix("Pip \u{2192} Moss"))
     }
 
-    @Test func duckToDuckNotesAreClosedByDefaultAndOpenOnATap() {
+    @Test func duckToDuckNotesShowInFullWithAnArrowInTheNameLine() {
         let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
         let f = feed(posts: [post(1, "Sage, the API changed.\nSee routes.ts for the new shape.", by: agent, at: base, kind: .message, level: .agents, sid: "s1", to: "s2")],
                      threads: [thread("s1", name: "Pip"), thread("s2", name: "Sage")])
         let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
         let h = lines[0].handoff!
-        #expect(h.summary == "Sage, the API changed.")
-        var d = h.disclosure
-        #expect(!d.isOpen)
-        d.toggle()
-        #expect(d.isOpen)
-        d.toggle()
-        #expect(!d.isOpen)
+        #expect(h.title == "Pip \u{2192} Sage")
+        #expect(h.body == "Sage, the API changed.\nSee routes.ts for the new shape.")
+        #expect(!RoomRowPlan.clip(h.body).clipped)
     }
 
     @Test func aDucksStateChangeIsOneLineWhoseDetailOpensOnATap() {
@@ -416,5 +412,40 @@ struct RoomMessagesTests {
 
     @Test func dutyAndDuckBodiesAreStrict() {
         #expect(RoomDuckField.unchanged.json == nil && RoomDuckField.clear.json == .null && RoomDuckField.set("x").json == .string("x"))
+    }
+
+    // MARK: Flat rows: turn ids and the fallback mark
+
+    @Test func messagesCarryTheTurnTheyCameFrom() {
+        let f = feed(turns: [turn("s1:t7", at: base, prompt: "fix rejoin", text: "Fixed it.")], threads: [thread("s1", name: "Marlow")])
+        let g = groups(RoomMessages.build(feed: f, now: now, calendar: cal))
+        #expect(g[0].messages[0].turnId == "t7")
+        #expect(g[1].messages[0].turnId == "t7")
+        #expect(PondClick.target(message: g[1].messages[0]) == .turn(duck: "s1", turnId: "t7"))
+        #expect(PondClick.target(message: g[0].messages[0]) == .turn(duck: "s1", turnId: "t7"))
+    }
+
+    @Test func aDuckPostCarriesItsTurnAndTheFallbackFlag() {
+        var p = post(1, "Fixed the menus.", by: RoomAuthor(kind: .agent, id: "a", name: "Kit"), at: base + min, sid: "s1")
+        p.turnId = "s1:t3"; p.fallback = true
+        let f = feed(posts: [p], threads: [thread("s1", name: "Kit")], serves: false)
+        let m = groups(RoomMessages.build(feed: f, now: now, calendar: cal)).flatMap(\.messages)[0]
+        #expect(m.turnId == "t3")
+        #expect(RoomRowPlan.fallbackMark(for: m) == "written by Squeak")
+    }
+
+    @Test func aHostThatNamesNoTurnOpensTheChatItself() {
+        let p = post(1, "Hello.", by: RoomAuthor(kind: .agent, id: "a", name: "Kit"), at: base + min, sid: "s1")
+        let f = feed(posts: [p], threads: [thread("s1", name: "Kit")], serves: false)
+        let m = groups(RoomMessages.build(feed: f, now: now, calendar: cal)).flatMap(\.messages)[0]
+        #expect(m.turnId == nil && !m.fallback)
+        #expect(PondClick.target(message: m) == .duck("s1"))
+    }
+
+    @Test func oneSenderWithinFiveMinutesIsOneGroupAndSixMinutesStartsAnother() {
+        let me = RoomAuthor(kind: .person, id: "owner", name: "Me")
+        let f = feed(posts: [post(1, "a", by: me, at: base), post(2, "b", by: me, at: base + 4 * min), post(3, "c", by: me, at: base + 10 * min)])
+        let g = groups(RoomMessages.build(feed: f, now: now, calendar: cal, owner: nil))
+        #expect(g.map { $0.messages.count } == [2, 1])
     }
 }

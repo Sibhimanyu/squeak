@@ -310,6 +310,8 @@ struct SessionDetail: View {
                     // Short chats sit on the composer: the content is at least as tall as the scroll view, whose measured height already excludes the dock inset.
                     .frame(maxWidth: .infinity, minHeight: TranscriptMinHeight.value(viewport: viewportHeight), alignment: .bottom)
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
+                    .background(TurnJumpDriver(chat: session.key.stringValue, rows: usesTimelineView
+                        ? model.timeline(for: session.key).turns.map { ChatTurnJump.Row(id: $0.id, turnId: $0.turnId) } : []))
                     .background(TranscriptFollowDriver(
                         jumpToken: jumpToken, holdPlace: keepAnchor != nil, memoryKey: session.key.stringValue,
                         firstRow: memoryRows.first, lastRow: memoryRows.last,
@@ -948,5 +950,30 @@ private struct TranscriptColumnWidth: ViewModifier {
         // An upper bound only, never a minimum: a minimum from the measured width pins the ScrollView at its old size when
         // the centre narrows (a work pane opening), so the chat overflowed both sides instead of reflowing.
         content.frame(maxWidth: TranscriptColumn.maxWidth(container: container, cap: cap))
+    }
+}
+
+/// Scrolls a chat to the turn a Room tap named (`ChatTurnJump`). It sits inside the transcript's scroll view and acts only on a
+/// request for this chat; the request is cleared once taken, and a turn that is not loaded leaves the chat where it was.
+private struct TurnJumpDriver: View {
+    let chat: String
+    let rows: [ChatTurnJump.Row]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            Color.clear
+                .onChange(of: model.turnJump, initial: true) { _, request in
+                    guard let request, request.chat == chat else { return }
+                    model.turnJump = nil
+                    guard let id = ChatTurnJump.rowId(turnId: request.turnId, among: rows) else { return }
+                    // After the chat has laid out (it may have just opened).
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(180))
+                        withAnimation(Motion.standard) { proxy.scrollTo(id, anchor: .top) }
+                    }
+                }
+        }
+        .allowsHitTesting(false).accessibilityHidden(true)
     }
 }

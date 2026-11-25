@@ -41,6 +41,22 @@ final class PondRoomModel {
         self.draft = ContainerDrafts.shared.draft(for: ContainerDrafts.room(projectId))
     }
 
+    /// When the Room was last read up to (ms), as it was when this visit began: the "3 new" divider sits before the first thing
+    /// after it and stays put for the whole visit. Remembered per Pond on this Mac; nil when the Room was never opened here.
+    private(set) var visitSeenAt: Int64?
+    private var seenKey: String { "squeak.room.seenAt.\(projectId)" }
+
+    func beginVisit() {
+        let stored = UserDefaults.standard.object(forKey: seenKey) as? Int64
+        visitSeenAt = stored
+    }
+
+    /// The Room has been read up to its newest thing (written while it is on screen at its newest end, and as it is left).
+    func markSeen(_ items: [RoomItem]) {
+        guard let t = RoomUnread.seenUpTo(items), t > (UserDefaults.standard.object(forKey: seenKey) as? Int64 ?? 0) else { return }
+        UserDefaults.standard.set(t, forKey: seenKey)
+    }
+
     func beginReply(_ reply: RoomReply) {
         draft = reply.insertingMention(in: draft, replacing: self.reply)
         self.reply = reply
@@ -293,6 +309,7 @@ struct PondRoomView: View {
         // Files dropped anywhere in the room are attached to the next message.
         .dropDestination(for: URL.self) { urls, _ in room.tray.add(urls); return !urls.isEmpty }
         .task(id: projectId) { await room.run(host: model.nativeHost) }
+        .onAppear { room.beginVisit() }
         .environment(\.roomPlaceContext, RoomPlaceContext(streams: streams, taken: taken, choose: { id, p in room.choosePlace(jobId: id, p) }, include: { id, m, on in room.setIncluded(taskId: id, messageId: m, on) }))
     }
 
@@ -305,11 +322,11 @@ struct PondRoomView: View {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
-            let items = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
+            let built = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
+            let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)
-                    .environment(\.roomLatestTaskable, MakeTaskAffordance.latestPostId(in: items))
                 if let key, !member { GitHubLineView(key: key, room: room) }
                 if let line = room.ownerOffline {
                     // Said once, quietly, above the composer: nothing is lost, the Owner's Mac will pick it up.
@@ -346,7 +363,7 @@ struct PondRoomView: View {
             ScrollView {
                 // Eager, not lazy: every row of the newest window is laid out at once, so the bottom anchor is exact from the
                 // first layout and the slide's picture of the Room shows real rows while the page is off screen.
-                VStack(alignment: .leading, spacing: RoomBubblePlan.betweenGroups) {
+                VStack(alignment: .leading, spacing: 0) {
                     if items.isEmpty && working.isEmpty {
                         Text(verbatim: FirstPondJourney.emptyRoom)
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
@@ -364,7 +381,7 @@ struct PondRoomView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(working) { RoomWorkingRow(line: $0, open: openThread) }
                         }
-                        .padding(.top, 2)
+                        .padding(.top, 14)
                     }
                     Color.clear.frame(height: 1).id("room-bottom")
                         .onAppear { atBottom = true; unseen = 0 }
@@ -384,7 +401,9 @@ struct PondRoomView: View {
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
             .onAppear { ledger.freeze(items.map(\.id)) }
+            .onDisappear { room.markSeen(items) }
             .onChange(of: count) { old, new in
+                if atBottom { room.markSeen(items) }
                 guard new > old else { return }
                 if atBottom { proxy.scrollTo("room-bottom", anchor: .bottom) } else { unseen += new - old }
             }

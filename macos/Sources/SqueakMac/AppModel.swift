@@ -35,6 +35,8 @@ final class AppModel {
     @ObservationIgnored lazy var nativeHost = NativeHostClient.beside(client)
     @ObservationIgnored lazy var nativeAdapter = NativeAdapter(host: nativeHost, daemon: client)
     let native = NativeChatModel()
+    /// A Room tap asked for a chat at one turn; the open chat scrolls there and clears it (`ChatTurnJump`).
+    var turnJump: ChatTurnJump.Request?
     /// The hottest state, one store each (AppStores.swift); the properties below forward to them.
     let awakeStore = AwakeStore()
     let usageStore = UsageStore()

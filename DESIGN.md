@@ -1325,26 +1325,35 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   "needs you") with an Open button. The sidebar's yellow Pond badge is the same list's count (`PondForYou` makes both);
   the grey count beside a Pond name is not shown in the new layout. Duck rows everywhere are labelled by the Duck's name,
   the chat title only as secondary text, and the Room's header counts on-duty Ducks only.
-- **The Room reads like a chat.** Messages are bubbles; moments are not.
-  People: yours sit on the right in the Pond's colour toned down to a dark tint (text keeps AA contrast), with no avatar;
-  other people's sit on the left with their avatar and name above the first bubble. Ducks: left, `surface-raised` bubble, the
-  Duck's avatar, its name in the Duck's colour; a Duck-to-Duck note shows "Sage 2 \u2192 Dot 2" on the name line with a faint
-  left accent in the sender's colour. Consecutive messages from one sender within five minutes form a group: avatar and
-  name once, 2pt between bubbles, 14pt between groups, time on the name line and on hover per bubble. Bubbles have radius 14
-  (4 on the sender's side for the last bubble of a group), padding 10 by 14, at most 68% of the column, Markdown, selectable
-  text; long text cuts at 10 lines with "Show more" inside the bubble, shown only when the layout really truncates (a hidden
-  unclamped copy is measured against the `lineLimit` one, `RoomClampedText`; the cut is a clean ellipsis, never a clipped
-  half line). A floating bar on the bubble's top corner offers Reply, Make task and Copy on hover (Make task also shows at rest on the
-  newest taskable message). To answer a specific line from a Duck or another person, choose Reply to quote it above the Room
-  draft, @mention the sender and focus the composer. Use Remove quote to drop the excerpt while keeping the draft.
-  Your own messages say "Sending\u2026", then nothing, or "Not sent" with Retry, small, under the
-  bubble. Moments ("took it", "finished", blocked) are compact centred lines: a small duck glyph and "Ruby 2 finished
-  \u00B7 Released Greenroom 1.8.5\u2026" in `muted` 12pt, one line; a run of one Duck's moments folds into "Ruby 2 \u00B7 4
-  updates" which opens in place. Tasks are in-feed cards (title, state, owner Duck, Open). Day separators stay. The empty
-  Room explains you can talk to everyone or @ a Duck. Pure parts are `RoomBubblePlan`, `RoomMoment`, `RoomRowText`.
+- **The Room is flat rows (Slack or Cliq style; owner-approved 2026-11-25, mock-up direction B).** No bubbles, no box around
+  text. A row is a 36pt avatar column, a 12pt gap and the text column. The first row of a group has the avatar, the name in
+  bold 14.5pt `ink` (a Duck's agent as a small `subtle` tag after it) and the time in `subtle` 12pt; the other rows of the
+  run show only their text, with their time in the avatar column on hover. Consecutive messages from one sender within five
+  minutes are one group. Rows are 2pt apart, groups 10pt (plus 6pt of row padding) apart. Hovering a row fills it with
+  `selected` (radius 8); layout never changes with hover. A floating bar at the row's top right offers Reply (not on your
+  own), Copy and Make task (only where a Task can be made): `surface-raised`, `line-strong` border, radius 9, 12pt medium
+  labels with an SF Symbol, a soft shadow. Your own messages look like everyone's and carry only a 2pt line at the left edge in
+  the Pond's colour (and "you" as the tag); "Sending\u2026", then nothing, or "Not sent" with Retry, sits small under the text.
+  The text is Markdown at the chat's reading size (14/22) with lists, code blocks and quotes laid out by the chat's own
+  reader, in full and selectable. Only an unusually long message (more than 12 lines, estimated from the text so a row never
+  changes height after it is drawn) is cut after 12 lines, with "Open in <name>'s chat" under it. A Duck-to-Duck hand-off is a
+  row whose name line reads "Ivy \u2192 Kit" (each name opens its Duck), its text `muted`. A Task is one inline card in the text
+  column (`surface-raised`, radius 12, 16 by 14 padding): state first (the working glyph animates only while the Duck works;
+  a check when done; an amber triangle and a 3pt `warning` edge when it needs the owner or is blocked), the owner Duck, the
+  time, the title in semibold 14.5pt, the summary when done, then Open (to the Duck's chat at the turn the Task began in) and
+  Drop. A Duck's question is the same kind of card with the amber triangle, "<Duck> needs your answer", the 3pt edge, lettered
+  options and a field. A message the host wrote itself because the Duck did not post shows "\u00B7 written by Squeak" after
+  its time, in `subtle` 11pt. The unread divider is one line, a 45% `duck` hairline with "3 new" in `duck` 12pt semibold, drawn
+  once before the first thing from someone else that arrived since the Room was last read, and held for the whole visit.
+  Day separators are a hairline either side of a `subtle` 12pt label. Moments ("took it", "finished", blocked) that remain
+  are compact centred lines in `muted` 12pt; a run of one Duck's moments folds into "Ruby 2 \u00B7 4 updates". Tapping a
+  row, its avatar or its name opens that Duck's chat scrolled to the turn the message came from (a person's message: the
+  Duck it went to). To answer a specific line, choose Reply to quote it above the Room draft, @mention the sender and focus the
+  composer; Remove quote drops the excerpt. The feed is append-only and id-stable. The empty Room explains you can talk to
+  everyone or @ a Duck. Pure parts are `RoomRowPlan`, `RoomUnread`, `ChatTurnJump`, `RoomMoment`.
 - **A Duck's avatar and name are one button** everywhere in the Room (message groups, a note's sender and its "\u2192 receiver", moment
   lines, Task owners, working rows): pointer hand, a ring on the avatar and an underline on the name on hover, "Open <name>'s
-  chat", through the one open-Duck action (an off-duty Duck opens with no duty change). People's avatars open nothing.
+  chat", through the one open-Duck action (an off-duty Duck opens with no duty change). A person's avatar opens the Duck their message went to.
 - **Duck view = chat + slim icon rail + work pane (stage 2, built).** A 52pt rail at the right edge of the chat holds
   Changes, Files, Artifacts and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
   edge; a duck-yellow count badge on Changes with the changed-file count, "99+" past 99). Clicking an icon opens the work

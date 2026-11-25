@@ -69,6 +69,11 @@ public struct RoomMessage: Sendable, Equatable, Identifiable {
     public var goesTo: String?
     /// A person's pictures and files (drawn under the words).
     public var attachments: [RoomAttachment] = []
+    /// The host's bare turn id this message belongs to (a Duck's reply, or the prompt a person's words became), so a tap opens
+    /// that Duck's chat at the turn. Nil when the host names none.
+    public var turnId: String?
+    /// The host wrote this Duck message itself because the Duck did not post one.
+    public var fallback = false
 }
 
 public struct RoomMessageGroup: Sendable, Equatable, Identifiable {
@@ -142,7 +147,7 @@ public struct RoomStatusLine: Sendable, Equatable {
     }
 }
 
-/// A duck-to-duck note. `body` is the whole note, never cut: the view clamps it and offers Show more.
+/// A duck-to-duck note. `body` is the whole note, drawn in full like any message.
 public struct RoomHandoff: Sendable, Equatable {
     public var fromSessionId: String?
     public var from: String
@@ -150,34 +155,24 @@ public struct RoomHandoff: Sendable, Equatable {
     /// The receiving duck's name; nil when the post names none ("to another duck").
     public var to: String?
     public var body: String
-    /// Duck-to-duck talk is closed by default: its header and first line show, the rest on a tap.
-    public var disclosure: RoomDisclosure { RoomDisclosure(startsOpen: false) }
-    /// The first line of the note, at most 100 characters.
-    public var summary: String {
-        let first = body.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-        let t = first.trimmingCharacters(in: .whitespaces)
-        return t.count <= 100 ? t : String(t.prefix(99)) + "\u{2026}"
-    }
-
     /// "Pip \u{2192} Sage" or "Pip \u{2192} another duck".
     public var title: String { "\(from) \u{2192} \(to ?? "another duck")" }
-
-    /// Longer than the card shows at rest: more lines than `maxLines`, or a very long run of words.
-    public static let maxLines = 6
-    public static let maxChars = 480
-    public var isLong: Bool { Self.isLong(body) }
-    public static func isLong(_ text: String) -> Bool {
-        text.count > maxChars || text.split(separator: "\n", omittingEmptySubsequences: false).count > maxLines
-    }
 }
 
 public enum RoomItem: Sendable, Equatable, Identifiable {
     case day(id: String, label: String)
     case group(RoomMessageGroup)
     case system(RoomSystemLine)
+    /// "3 new": drawn once, before the first thing you have not seen (`RoomUnread`).
+    case unread(count: Int)
 
     public var id: String {
-        switch self { case .day(let id, _): id; case .group(let g): "g:" + g.id; case .system(let s): s.id }
+        switch self { case .day(let id, _): id; case .group(let g): "g:" + g.id; case .system(let s): s.id; case .unread: "unread" }
+    }
+
+    /// When it last changed (ms; a group: its newest message); nil for a separator.
+    public var at: Int64? {
+        switch self { case .day, .unread: nil; case .group(let g): g.lastAt; case .system(let s): s.at }
     }
 }
 
@@ -229,13 +224,16 @@ public enum RoomMessages {
                 let who: RoomMessageAuthor = RoomRipples.isOwner(t.author, owner: owner) ? .me : .person(t.author.name.isEmpty ? "Someone" : t.author.name)
                 var asked = RoomMessage(id: "t:\(t.id):q", at: t.startedAt, author: who, parts: [.text(text, .normal)])
                 asked.goesTo = t.sessionId
+                asked.turnId = RoomTurnId.bare(t.id, session: t.sessionId)
                 add(asked, order: 0)
             }
             let asking = thread?.state == .waiting && newest[t.sessionId]?.id == t.id
             let a = author(t.sessionId, t.threadTitle, t.agent)
             if asking {
                 askedSessions.insert(t.sessionId)
-                add(RoomMessage(id: "t:\(t.id):a", at: t.endedAt ?? t.startedAt, author: a, parts: [askPart(thread!, fallback: t)]), order: 1)
+                var ask = RoomMessage(id: "t:\(t.id):a", at: t.endedAt ?? t.startedAt, author: a, parts: [askPart(thread!, fallback: t)])
+                ask.turnId = RoomTurnId.bare(t.id, session: t.sessionId)
+                add(ask, order: 1)
             } else if let o = t.outcome {
                 var parts: [RoomPart] = []
                 let line = RoomRipples.outcomeLine(t, asking: false)
@@ -243,7 +241,9 @@ public enum RoomMessages {
                 let files = t.filesChanged ?? (newest[t.sessionId]?.id == t.id ? filesFor(t.sessionId) : nil)
                 if let chip = chipText(files: files, ms: t.durationMs ?? t.endedAt.map { $0 - t.startedAt }) { parts.append(.chip(sessionId: t.sessionId, text: chip)) }
                 if let d = t.ducklings, d.count > 0 { parts.append(.ducklings(d)) }
-                add(RoomMessage(id: "t:\(t.id):a", at: t.endedAt ?? t.startedAt, author: a, parts: parts), order: 1)
+                var reply = RoomMessage(id: "t:\(t.id):a", at: t.endedAt ?? t.startedAt, author: a, parts: parts)
+                reply.turnId = RoomTurnId.bare(t.id, session: t.sessionId)
+                add(reply, order: 1)
             }
         }
         // A waiting question with no turn (a host that serves none, or a turn off the page).
@@ -297,13 +297,17 @@ public enum RoomMessages {
                 m.canMakeTask = (!memberView || canMakeMemberTask) && feed.jobLocal["msg:" + p.id]?.queued != true
                     && RoomTasks.canMakeTask(r, jobs: feed.jobs)
                 m.goesTo = feed.jobs.first { $0.messageId == p.id && $0.handedTo != nil }?.handedTo?.sessionId ?? p.toSessionId
+                m.turnId = p.turnId.map { RoomTurnId.bare($0, session: m.goesTo ?? "") }
                 add(m, order: 0)
             } else if p.level == .room, p.author.kind == .agent, p.kind == .message || !feed.servesTurns {
                 // A duck speaking in the room (or, from a host without turns, its working / done / needs line).
                 let sid = p.sessionId ?? ""
                 let a = author(sid, p.author.name, nil)
                 let tone: RoomPart.Tone = p.kind == .needs ? .attention : .normal
-                add(RoomMessage(id: r.id, at: p.at, author: a, parts: [.text(p.text, tone)]), order: 1)
+                var said = RoomMessage(id: r.id, at: p.at, author: a, parts: [.text(p.text, tone)])
+                said.turnId = p.turnId.map { RoomTurnId.bare($0, session: sid) }
+                said.fallback = p.fallback
+                add(said, order: 1)
             }
         }
 
@@ -493,5 +497,14 @@ public enum RoomMessages {
                 if let p = t.progress { bits.append("\(p.current) of \(p.total)") }
                 return RoomWorkingLine(sessionId: t.sessionId, name: t.duckName, agent: t.agent, detail: bits.isEmpty ? nil : bits.joined(separator: " \u{00B7} "))
             }
+    }
+}
+
+/// The host's turn ids come as `<sessionId>:<turnId>` (a feed turn's id) or the bare turn id (a chat's own); the chat is
+/// found by the bare one.
+public enum RoomTurnId {
+    public static func bare(_ id: String, session: String) -> String {
+        let prefix = session + ":"
+        return !session.isEmpty && id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : id
     }
 }

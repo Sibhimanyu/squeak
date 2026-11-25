@@ -4,8 +4,8 @@ import SqueakMacCore
 import SqueakMarkup
 import SwiftUI
 
-// The conversation of the pond room (draft A): groups of bubbles, a duck's reply with its chip and ducklings, the ask
-// card, a duck's offer, Squeak's quiet system line and the working lines. Everything is decided in `RoomMessages`.
+// The conversation of the pond room as flat rows (RoomFlatRows): the ask card, a duck's offer, hand-off notes, Squeak's quiet
+// system line and the working lines. Everything is decided in `RoomMessages` and `RoomRowPlan`.
 
 /// A duck's avatar: its thread duck on a soft tile of its own colour, the agent badge at the corner.
 struct DuckAvatar: View {
@@ -68,137 +68,13 @@ struct RoomItemView: View {
 
     @ViewBuilder private var content: some View {
         switch item {
-        case .day(_, let label):
-            Text(verbatim: label).font(.system(size: 11)).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity)
-                .padding(.vertical, 2).accessibilityAddTraits(.isHeader)
+        case .day(_, let label): RoomDaySeparator(label: label)
+        case .unread(let count): RoomUnreadDivider(count: count)
         case .group(let g): RoomGroupView(group: g, ducks: ducks, open: open, openTarget: openTarget, answer: answer, retry: retry, makeJob: makeJob, reply: reply, act: act)
-        case .system(let s): RoomSystemView(line: s, act: act, comment: comment, open: PondClick.target(line: s).map { t in { openTarget(t) } })
+        case .system(let s): RoomSystemView(line: s, act: act, comment: comment, open: PondClick.target(line: s).map { t in { openTarget(t) } }).padding(.vertical, 4)
         }
     }
 }
-
-// MARK: Groups
-
-private struct RoomGroupView: View {
-    let group: RoomMessageGroup
-    let ducks: [RoomThread]
-    let open: (String) -> Void
-    let openTarget: (PondOpenTarget) -> Void
-    let answer: (String, String) -> Void
-    let retry: (String) -> Void
-    let makeJob: (String) -> Void
-    let reply: ((RoomReply) -> Void)?
-    let act: (String, RoomTaskAction, String?) -> Void
-
-    var body: some View {
-        if group.author.kind == .me { mine } else { theirs }
-    }
-
-    private var mine: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 60)
-            VStack(alignment: .trailing, spacing: RoomBubblePlan.withinGroup) {
-                ForEach(Array(group.messages.enumerated()), id: \.element.id) { i, m in
-                    VStack(alignment: .trailing, spacing: 2) {
-                        ForEach(Array(m.parts.enumerated()), id: \.offset) { _, part in
-                            if case .text(let t, _) = part {
-                                MessageBubble(message: m, text: t, tone: .normal, mine: true, tail: RoomBubblePlan.hasTail(index: i, count: group.messages.count), retry: retry, makeJob: makeJob, open: opener(PondClick.target(message: m)))
-                            }
-                        }
-                        if !m.attachments.isEmpty { RoomAttachmentsView(attachments: m.attachments, pending: m.pending, alignment: .trailing) }
-                        // Under the bubble, small: Sending, then nothing once sent, or Not sent with Retry.
-                        if let words = RoomBubblePlan.words(RoomBubblePlan.ownState(pending: m.pending, failed: m.failed)) {
-                            HStack(spacing: 6) {
-                                Text(verbatim: words).font(.system(size: 11)).foregroundStyle(m.failed ? Theme.negative : Theme.subtle)
-                                if m.failed { Button("Retry") { retry(m.id) }.buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.negative).pointerHand() }
-                            }
-                        }
-                    }
-                }
-                Text(verbatim: RoomRipples.clock(group.lastAt)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle).padding(.top, 2)
-            }
-        }
-    }
-
-    private var theirs: some View {
-        HStack(alignment: .top, spacing: 11) {
-            avatar
-            VStack(alignment: .leading, spacing: RoomBubblePlan.withinGroup) {
-                header
-                ForEach(Array(group.messages.enumerated()), id: \.element.id) { i, m in
-                    VStack(alignment: .leading, spacing: RoomBubblePlan.withinGroup) {
-                        ForEach(Array(m.parts.enumerated()), id: \.offset) { j, part in
-                            partView(m, part, tail: RoomBubblePlan.hasTail(index: i, count: group.messages.count) && j == m.parts.count - 1)
-                        }
-                        if !m.attachments.isEmpty { RoomAttachmentsView(attachments: m.attachments, pending: m.pending) }
-                    }
-                }
-            }
-            Spacer(minLength: 60)
-        }
-    }
-
-    @State private var hoverDuck = false
-    @Environment(\.roomThreads) private var threads
-    @Environment(\.colorScheme) private var scheme
-
-    /// The Duck this group's avatar and name open (a person's group opens nothing: no profile page yet).
-    private var duckTarget: PondOpenTarget? {
-        group.author.kind == .duck ? PondClick.duck(session: group.author.sessionId, name: group.author.name, threads: threads) : nil
-    }
-
-    /// What clicking this group's avatar or name opens: a duck, or the duck a person's first message went to.
-    private var groupTarget: PondOpenTarget? { PondClick.target(author: group.author, goesTo: group.messages.compactMap(\.goesTo).first) }
-
-    private func opener(_ target: PondOpenTarget?) -> (() -> Void)? { target.map { t in { openTarget(t) } } }
-
-    @ViewBuilder private var avatar: some View {
-        let a = group.author
-        if let t = duckTarget, let id = a.sessionId {
-            DuckHitAvatar(target: t, name: a.name, hovering: hoverDuck, set: { hoverDuck = $0 }, avatar: AnyView(DuckAvatar(sessionId: id, agent: a.agent)))
-        } else if let t = groupTarget, a.kind != .duck {
-            // A person's avatar does nothing by itself (no hover state); a click there may still open the Duck it went to.
-            Button { openTarget(t) } label: { PersonAvatar(name: a.name) }.buttonStyle(.plain).help("Open the duck it went to")
-        } else {
-            PersonAvatar(name: a.name)
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            nameText
-            if let l = group.author.agentLabel { Text(verbatim: l).font(.system(size: 12)).foregroundStyle(Theme.muted) }
-            Text(verbatim: RoomRipples.clock(group.at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
-        }
-        .padding(.bottom, 2)
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder private var nameText: some View {
-        let a = group.author
-        if a.kind == .duck, let t = duckTarget {
-            let c = ThreadDuck.rgb(for: a.sessionId ?? a.key, dark: scheme == .dark)
-            DuckHitName(target: t, name: a.name, hovering: hoverDuck, set: { hoverDuck = $0 }) {
-                Text(verbatim: a.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(red: c.r, green: c.g, blue: c.b))
-            }
-        } else {
-            Text(verbatim: a.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
-        }
-    }
-
-    @ViewBuilder private func partView(_ m: RoomMessage, _ part: RoomPart, tail: Bool) -> some View {
-        switch part {
-        case .text(let t, let tone): MessageBubble(message: m, text: t, tone: tone, mine: false, tail: tail, retry: retry, makeJob: makeJob, reply: reply, open: opener(PondClick.target(part: part, in: m)))
-        case .chip(let sid, let text): FilesChip(text: text) { open(sid) }.padding(.top, 5)
-        case .ducklings(let d):
-            DucklingsDisclosure(ducklings: d, openAll: opener(PondClick.target(part: part, in: m)),
-                                openOne: { item in m.author.sessionId.map { id in { openTarget(PondClick.target(duckling: item, of: id)) } } })
-        case .ask(let card): AskCardView(card: card, answer: answer, open: open)
-        case .offer(let o): OfferView(offer: o, ducks: ducks, act: act)
-        }
-    }
-}
-
 
 // MARK: Opening a Duck from its avatar or name
 
@@ -244,213 +120,13 @@ struct DuckHitName<Label: View>: View {
     }
 }
 
-// MARK: Measured clamping
-
-private struct ClampSizes: Equatable { var natural: CGFloat?; var shown: CGFloat? }
-private struct ClampSizesKey: PreferenceKey {
-    static let defaultValue = ClampSizes()
-    static func reduce(value: inout ClampSizes, nextValue: () -> ClampSizes) {
-        let n = nextValue()
-        if let v = n.natural { value.natural = v }
-        if let v = n.shown { value.shown = v }
-    }
-}
-
-/// Text clamped to `RoomRowText.lines` with `lineLimit` (a clean "..." cut, never a clipped half line) that says whether it is
-/// really cut: a hidden unclamped copy sits in the background and the two heights are compared (`RoomRowText.truncates`).
-/// The answer is kept once the text is expanded, so "Show less" stays.
-struct RoomClampedText<Content: View>: View {
-    let text: Content
-    var lines = RoomRowText.lines
-    let measure: Bool
-    let expanded: Bool
-    @Binding var truncated: Bool
-
-    var body: some View {
-        text
-            .lineLimit(expanded ? nil : lines)
-            .fixedSize(horizontal: false, vertical: true)
-            .background {
-                if measure && !expanded {
-                    text.fixedSize(horizontal: false, vertical: true).hidden()
-                        .background(GeometryReader { Color.clear.preference(key: ClampSizesKey.self, value: ClampSizes(natural: $0.size.height)) })
-                        .accessibilityHidden(true)
-                }
-            }
-            .background(GeometryReader { Color.clear.preference(key: ClampSizesKey.self, value: ClampSizes(shown: $0.size.height)) })
-            .onPreferenceChange(ClampSizesKey.self) { sizes in
-                guard measure, !expanded, let n = sizes.natural, let s = sizes.shown else { return }
-                let t = RoomRowText.truncates(clamped: Double(s), natural: Double(n))
-                if t != truncated { truncated = t }
-            }
-    }
-}
-
-/// A markdown body shown as inline-formatted text (no clipped block views) while collapsed.
-private func inlineMarkdown(_ s: String) -> AttributedString {
-    (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
-}
-
-/// Hugs its text, at most 68% of the column wide, and sits on the sender's side of the row.
-private struct RoomBubbleWidth: Layout {
-    let trailing: Bool
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let child = subviews.first else { return .zero }
-        let column = proposal.width ?? 740
-        let size = child.sizeThatFits(.init(width: CGFloat(RoomBubblePlan.maxWidth(column: Double(column))), height: nil))
-        return CGSize(width: proposal.width ?? size.width, height: size.height)
-    }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard let child = subviews.first else { return }
-        let size = child.sizeThatFits(.init(width: CGFloat(RoomBubblePlan.maxWidth(column: Double(bounds.width))), height: nil))
-        let x = trailing ? bounds.maxX - size.width : bounds.minX
-        child.place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading, proposal: .init(width: size.width, height: size.height))
-    }
-}
-
 extension EnvironmentValues {
-    /// The pond's directory id, for the colour of my bubbles.
+    /// The pond's directory id, for the colour of my own line.
     @Entry var roomPondId: String?
 }
 
-/// One bubble (DESIGN.md 8.12). Mine: right, filled with the pond's colour toned down to a dark tint, no avatar. Theirs: left,
-/// `surface-raised`. Radius 14, with the small corner on the sender's side for the last bubble of a group; padding 10 by 14,
-/// at most 68% of the column; text selectable; long text clamps at ten lines with "Show more" inside the bubble.
-private struct MessageBubble: View {
-    let message: RoomMessage
-    let text: String
-    let tone: RoomPart.Tone
-    let mine: Bool
-    /// The last bubble of its group.
-    let tail: Bool
-    let retry: (String) -> Void
-    let makeJob: (String) -> Void
-    var reply: ((RoomReply) -> Void)?
-    /// Opens the tab this bubble belongs to (the duck, or the duck a person's message went to); nil opens nothing.
-    var open: (() -> Void)?
-    @State private var hover = false
-    @Environment(\.roomLatestTaskable) private var latestTaskable
-    @Environment(\.roomPondId) private var pondId
-    @State private var expanded = false
-    @State private var truncated = false
-    @State private var copied = false
-
-    private var replyAction: (() -> Void)? {
-        guard let reply, let excerpt = RoomBubblePlan.reply(to: message.author, quoting: text) else { return nil }
-        return { reply(excerpt) }
-    }
-
-    var body: some View {
-        let taskable = message.canMakeTask && message.postId != nil
-        // The bar floats on the bubble's top corner on hover; "Make task" also shows at rest on the newest taskable message.
-        let restTask = taskable && MakeTaskAffordance.isShown(postId: message.postId ?? "", latest: latestTaskable, hovering: false)
-        VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
-            bubble
-                .overlay(alignment: mine ? .topLeading : .topTrailing) {
-                    if hover || restTask { actionBar(showAll: hover, taskable: taskable) .offset(x: mine ? -6 : 6, y: -12) }
-                }
-            if !mine, truncated {
-                Button { expanded.toggle() } label: {
-                    Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(minHeight: 22).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).pointerHand()
-            }
-            if hover { Text(verbatim: RoomRipples.clock(message.at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle) }
-        }
-        .onHover { hover = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(mine ? "You" : message.author.name): \(text)")
-        .accessibilityActions {
-            if let replyAction { Button("Reply", action: replyAction) }
-            if taskable, let id = message.postId { Button("Make task") { makeJob(id) } }
-        }
-    }
-
-    private var bubble: some View {
-        RoomBubbleWidth(trailing: mine) { bubbleBody }
-    }
-
-    private var bubbleBody: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            switch tone {
-            case .attention: Lucide(.triangleAlert, size: 14, color: Theme.warning).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
-            case .failed: Lucide(.circleX, size: 14, color: Theme.negative).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
-            case .normal: EmptyView()
-            }
-            // Markdown rendered; while collapsed, inline-formatted text cut cleanly by `lineLimit` (never a clipped half line).
-            Group {
-                if expanded || !RoomRowText.needsMeasure(text) {
-                    MessageText(markdown: text, style: .reading)
-                } else {
-                    RoomClampedText(
-                        text: Text(inlineMarkdown(text)).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink),
-                        lines: RoomBubblePlan.clampLines, measure: true, expanded: false, truncated: $truncated)
-                }
-            }
-            .textSelection(.enabled)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(fill, in: shape)
-        .opacity(message.pending ? 0.6 : 1)
-        .onTapGesture { open?() }
-        .pointerHand(open != nil)
-        .contextMenu {
-            if let replyAction { Button("Reply", action: replyAction) }
-            if message.canMakeTask, let id = message.postId { Button("Make task") { makeJob(id) } }
-            Button("Copy") { copy() }
-        }
-    }
-
-    private var fill: Color {
-        if mine { return PondColour.tint(pondId).opacity(0.30) }
-        return Theme.surfaceRaised
-    }
-
-    private func copy() {
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
-        copied = true
-        Task { try? await Task.sleep(for: .seconds(1.2)); copied = false }
-    }
-
-    /// Reply quotes this bubble into the Room composer. Make task and Copy act on the original bubble.
-    private func actionBar(showAll: Bool, taskable: Bool) -> some View {
-        HStack(spacing: 2) {
-            if showAll, let replyAction { barButton("Reply", symbol: "arrowshape.turn.up.left", replyAction) }
-            if taskable, let id = message.postId {
-                barButton("Make task", symbol: "checkmark.circle") { makeJob(id) }.help("Hand this message to a duck as a task")
-            }
-            if showAll { barButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc") { copy() } }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(2)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
-        .transition(.opacity)
-    }
-
-    private func barButton(_ title: String, symbol: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 11))
-                Text(verbatim: title).font(.system(size: 11, weight: .medium))
-            }
-            .foregroundStyle(Theme.muted).padding(.horizontal, 7).frame(height: 22).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).pointerHand().accessibilityHidden(true)
-    }
-
-    private var shape: UnevenRoundedRectangle {
-        let r = RoomBubblePlan.radius, small = RoomBubblePlan.smallRadius
-        let corner = tail ? small : r
-        return UnevenRoundedRectangle(
-            topLeadingRadius: r, bottomLeadingRadius: mine ? r : corner,
-            bottomTrailingRadius: mine ? corner : r, topTrailingRadius: r, style: .continuous)
-    }
-}
-
 /// "7 files . 4m 20s >": opens the duck's tab.
-private struct FilesChip: View {
+struct FilesChip: View {
     let text: String
     let action: () -> Void
     @State private var hover = false
@@ -476,7 +152,7 @@ private struct FilesChip: View {
 }
 
 /// "> handed 2 pieces to ducklings": expands to the pieces with their state.
-private struct DucklingsDisclosure: View {
+struct DucklingsDisclosure: View {
     let ducklings: RoomDucklings
     /// Opens the duck and its duckling tabs; each piece opens its own.
     var openAll: (() -> Void)?
@@ -524,8 +200,8 @@ private struct DucklingsDisclosure: View {
 
 // MARK: Ask, offer, system
 
-/// The duck's question: warning edge, lettered options, a field for the person's own words.
-private struct AskCardView: View {
+/// The duck's question, the "needs you" state: an amber triangle and label, a 3 pt amber edge, lettered options, a field for the person's own words.
+struct AskCardView: View {
     let card: RoomAskCard
     let answer: (String, String) -> Void
     let open: (String) -> Void
@@ -534,7 +210,12 @@ private struct AskCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: card.question).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Lucide(.triangleAlert, size: 13, color: Theme.warning)
+                Text(verbatim: "\(card.name) needs your answer").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+            }
+            .padding(.bottom, 6)
+            Text(verbatim: card.question).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
             if !card.options.isEmpty {
                 VStack(spacing: 6) { ForEach(card.options) { o in OptionRow(option: o, disabled: sent) { send(o.letter) } } }.padding(.top, 10)
             }
@@ -593,7 +274,7 @@ private struct OptionRow: View {
 }
 
 /// A duck offering to take a job, or asking to take it after its turn: words, then [Go] [Not now] / [Allow] [No].
-private struct OfferView: View {
+struct OfferView: View {
     let offer: RoomOffer
     let ducks: [RoomThread]
     let act: (String, RoomTaskAction, String?) -> Void
@@ -680,7 +361,7 @@ private struct RoomSystemView: View {
     @ViewBuilder private var single: some View {
         if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) }
         else if let st = line.status { RoomStatusLineView(status: st, at: line.at, comment: comment, open: open) }
-        else if let t = line.task { RoomTaskCardView(card: t, act: act, open: open) }
+        else if let t = line.task { RoomTaskCardView(card: t, at: line.at, act: act, open: open) }
         else { quiet }
     }
 
@@ -702,135 +383,77 @@ private struct RoomSystemView: View {
     }
 }
 
-/// The one row every Duck-side line of the Room uses (a Duck's note to another Duck, a state moment): avatar column, then a
-/// name row (name, what it did, time) and the text. Text shows up to three lines, then "Show more" inline; there is no
-/// bordered bubble and no chevron. Whether it is truncated is measured from the real layout (`RoomClampedText`), so a row never changes
-/// height after it is drawn.
+/// The one row every Duck-side line of the Room uses (a Duck's note to another Duck, a plan card): the same flat row as a
+/// message (`RoomRow`), with the name line "Ivy \u{2192} Kit" for a hand-off. The text shows in full; only an unusually long one
+/// ends with "Open in <name>'s chat".
 struct RoomEventRow<Extra: View>: View {
     let avatar: AnyView
     let name: String
     /// A handoff's receiver ("Quill 2 \u{2192} Dot 2").
     var to: String?
-    /// What the Duck did, quietly after the name ("finished").
+    /// What the Duck did, quietly after the name ("posted a plan").
     var verb: String?
-    var verbColour: Color = Theme.muted
     let at: Int64
     let text: String
-    var markdown = false
+    /// Hand-off notes read quieter than messages.
+    var quiet = false
     var open: (() -> Void)?
     /// The Ducks the avatar and name (and the "\u{2192} receiver") open.
     var senderTarget: PondOpenTarget?
     var receiverTarget: PondOpenTarget?
-    /// A faint left accent in the sender's colour (a Duck-to-Duck note).
-    var accent: String?
     @ViewBuilder var extra: () -> Extra
     @State private var hoverSender = false
     @State private var hoverReceiver = false
-    @Environment(\.colorScheme) private var scheme
-    @State private var expanded = false
-    @State private var truncated = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var style: MessageStyle {
-        var s = MessageStyle.reading
-        s.collapseLines = .max
-        return s
-    }
 
     var body: some View {
-        let measure = RoomRowText.needsMeasure(text)
-        HStack(alignment: .top, spacing: RoomRowMetrics.gap) {
-            if let senderTarget {
-                DuckHitAvatar(target: senderTarget, name: name, hovering: hoverSender, set: { hoverSender = $0 }, avatar: avatar)
-            } else { avatar }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    headlineView
-                    Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
-                }
-                .accessibilityElement(children: .combine)
-                if !text.isEmpty {
-                    Group {
-                        if markdown && expanded {
-                            MessageText(markdown: text, style: style)
-                        } else if markdown && !measure {
-                            MessageText(markdown: text, style: style)
-                        } else {
-                            // Collapsed text is `lineLimit` text (inline formatting for markdown): never a clipped half line.
-                            RoomClampedText(
-                                text: markdown ? Text(inlineMarkdown(text)).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink)
-                                    : Text(verbatim: text).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink),
-                                measure: measure, expanded: expanded, truncated: $truncated)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .frame(maxWidth: 640, alignment: .leading)
-                    if truncated {
-                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { expanded.toggle() } } label: {
-                            Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                                .frame(minHeight: 22).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).pointerHand().accessibilityLabel(expanded ? "Show less" : "Show more")
-                    }
-                }
+        RoomRow(
+            first: true, avatar: { avatarView }, at: at, tap: open,
+            header: { RoomNameLine(tag: nil, at: at) { headlineView } },
+            content: {
+                if !text.isEmpty { RoomRowBody(text: text, name: name, muted: quiet, open: open) }
                 extra()
-            }
-            Spacer(minLength: 60)
-        }
-        .padding(.leading, accent == nil ? 0 : 10)
-        .overlay(alignment: .leading) {
-            if let accent {
-                let c = ThreadDuck.rgb(for: accent, dark: scheme == .dark)
-                Capsule().fill(Color(red: c.r, green: c.g, blue: c.b).opacity(0.45)).frame(width: 2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+            })
+        .padding(.top, CGFloat(RoomRowPlan.groupLead))
         .accessibilityElement(children: .contain)
     }
 
+    @ViewBuilder private var avatarView: some View {
+        if let senderTarget {
+            DuckHitAvatar(target: senderTarget, name: name, hovering: hoverSender, set: { hoverSender = $0 }, avatar: avatar)
+        } else { avatar }
+    }
+
+    private var nameFont: Font { .system(size: CGFloat(RoomRowPlan.nameSize), weight: .bold) }
+
     /// "Sage 2 \u{2192} Dot 2": the sender and the receiver each open their own Duck; a status line's name opens its Duck.
     @ViewBuilder private var headlineView: some View {
-        if let senderTarget {
-            HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            if let senderTarget {
                 DuckHitName(target: senderTarget, name: name, hovering: hoverSender, set: { hoverSender = $0 }) {
-                    Text(verbatim: name).fontWeight(.semibold).foregroundStyle(Theme.ink)
+                    Text(verbatim: name).font(nameFont).foregroundStyle(Theme.ink)
                 }
-                if let to {
-                    Text(verbatim: " \u{2192} ").foregroundStyle(Theme.muted)
-                    if let receiverTarget {
-                        DuckHitName(target: receiverTarget, name: to, hovering: hoverReceiver, set: { hoverReceiver = $0 }) {
-                            Text(verbatim: to).fontWeight(.semibold).foregroundStyle(Theme.ink)
-                        }
-                    } else { Text(verbatim: to).fontWeight(.semibold).foregroundStyle(Theme.ink) }
-                }
-                if let verb { Text(verbatim: " \(verb)").foregroundStyle(verbColour) }
+            } else {
+                Text(verbatim: name).font(nameFont).foregroundStyle(Theme.ink)
             }
-            .font(.system(size: 13)).lineLimit(1)
-        } else {
-            headline.font(.system(size: 13)).lineLimit(1).onTapGesture { open?() }.pointerHand(open != nil)
+            if let to {
+                Text(verbatim: " \u{2192} ").font(nameFont).foregroundStyle(Theme.muted)
+                if let receiverTarget {
+                    DuckHitName(target: receiverTarget, name: to, hovering: hoverReceiver, set: { hoverReceiver = $0 }) {
+                        Text(verbatim: to).font(nameFont).foregroundStyle(Theme.ink)
+                    }
+                } else { Text(verbatim: to).font(nameFont).foregroundStyle(Theme.ink) }
+            }
+            if let verb { Text(verbatim: " \(verb)").font(.system(size: 13)).foregroundStyle(Theme.muted) }
         }
+        .lineLimit(1)
     }
-
-    private var headline: Text {
-        var t = Text(verbatim: name).fontWeight(.semibold).foregroundStyle(Theme.ink)
-        if let to { t = t + Text(verbatim: " \u{2192} ").foregroundStyle(Theme.muted) + Text(verbatim: to).fontWeight(.semibold).foregroundStyle(Theme.ink) }
-        if let verb { t = t + Text(verbatim: " \(verb)").foregroundStyle(verbColour) }
-        return t
-    }
-}
-
-enum RoomRowMetrics {
-    static let avatar: CGFloat = 36
-    static let gap: CGFloat = 11
-    /// Where a row's text starts: under this a fold row lines up with the names above it.
-    static var textInset: CGFloat { avatar + gap }
 }
 
 extension RoomEventRow where Extra == EmptyView {
-    init(avatar: AnyView, name: String, to: String? = nil, verb: String? = nil, verbColour: Color = Theme.muted, at: Int64, text: String, markdown: Bool = false, open: (() -> Void)? = nil,
-         senderTarget: PondOpenTarget? = nil, receiverTarget: PondOpenTarget? = nil, accent: String? = nil) {
-        self.init(avatar: avatar, name: name, to: to, verb: verb, verbColour: verbColour, at: at, text: text, markdown: markdown, open: open,
-                  senderTarget: senderTarget, receiverTarget: receiverTarget, accent: accent, extra: { EmptyView() })
+    init(avatar: AnyView, name: String, to: String? = nil, verb: String? = nil, at: Int64, text: String, quiet: Bool = false, open: (() -> Void)? = nil,
+         senderTarget: PondOpenTarget? = nil, receiverTarget: PondOpenTarget? = nil) {
+        self.init(avatar: avatar, name: name, to: to, verb: verb, at: at, text: text, quiet: quiet, open: open,
+                  senderTarget: senderTarget, receiverTarget: receiverTarget, extra: { EmptyView() })
     }
 }
 
@@ -844,9 +467,8 @@ private struct RoomHandoffCard: View {
     var body: some View {
         RoomEventRow(
             avatar: AnyView(Group { if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) } }),
-            name: note.from, to: note.to ?? "another duck", at: at, text: note.body, markdown: true, open: open,
-            senderTarget: PondClick.sender(of: note, threads: threads), receiverTarget: PondClick.receiver(of: note, threads: threads),
-            accent: note.fromSessionId)
+            name: note.from, to: note.to ?? "another duck", at: at, text: note.body, quiet: true, open: open,
+            senderTarget: PondClick.sender(of: note, threads: threads), receiverTarget: PondClick.receiver(of: note, threads: threads))
     }
 }
 
@@ -858,7 +480,7 @@ extension EnvironmentValues {
 }
 
 /// A canvas the Task made, under the done line: title, kind and artboard count; a tap opens it.
-private struct RoomCanvasCardView: View {
+struct RoomCanvasCardView: View {
     let card: RoomCanvasCard
     let memberView: Bool
     @Environment(\.roomOpenCanvas) private var openCanvas
@@ -938,8 +560,8 @@ private struct RoomStatusLineView: View {
 
     private var planCard: some View {
         RoomEventRow(
-            avatar: AnyView(Group { if let id = status.sessionId { DuckAvatar(sessionId: id, agent: status.agent) } else { Color.clear.frame(width: RoomRowMetrics.avatar, height: RoomRowMetrics.avatar) } }),
-            name: status.name, verb: status.verb, verbColour: Theme.muted,
+            avatar: AnyView(Group { if let id = status.sessionId { DuckAvatar(sessionId: id, agent: status.agent) } else { Color.clear.frame(width: CGFloat(RoomRowPlan.avatar), height: CGFloat(RoomRowPlan.avatar)) } }),
+            name: status.name, verb: status.verb,
             at: at, text: status.summary, open: open, senderTarget: PondClick.target(status: status, threads: threads)
         ) {
             ForEach(status.canvases) { RoomCanvasCardView(card: $0, memberView: memberView) }
@@ -990,7 +612,7 @@ struct RoomWorkingRow: View {
     let open: (String) -> Void
 
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: CGFloat(RoomRowPlan.gutterGap)) {
             Button { open(line.sessionId) } label: { DuckAvatar(sessionId: line.sessionId, agent: line.agent) }.buttonStyle(.plain).pointerHand().help("Open \(line.name)'s chat").accessibilityLabel("Open \(line.name)'s chat")
             WorkingGlyph(slot: TideGlyph.Grid.mark.size.width, alignment: .leading, grid: .mark)
             (Text(verbatim: line.name).fontWeight(.semibold).foregroundStyle(Theme.ink)
@@ -998,16 +620,7 @@ struct RoomWorkingRow: View {
                 .font(.system(size: 13)).lineLimit(1)
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 12)
         .accessibilityElement(children: .ignore).accessibilityLabel(line.spoken)
-    }
-}
-
-private struct RoomLatestTaskableKey: EnvironmentKey { static let defaultValue: String? = nil }
-
-extension EnvironmentValues {
-    /// The post id of the newest message that can be made a Task: its "Make task" shows at rest (`MakeTaskAffordance`).
-    var roomLatestTaskable: String? {
-        get { self[RoomLatestTaskableKey.self] }
-        set { self[RoomLatestTaskableKey.self] = newValue }
     }
 }
