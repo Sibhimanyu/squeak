@@ -1292,15 +1292,24 @@ produces sits beside its chat. The old layout stays exactly as it is while the s
   inspector in a Duck view; the Terminal lives in the pane. The pane slides in at `motion-standard` (ease-out) while the
   chat takes its final width at once, so the chat reflows once with no travel. Decisions (which view, open, close, pin,
   per-Duck memory and width) are `WorkPane` in SqueakMacCore; the views only draw them.
-- **Composer and messages (stage 3, planned).** Tool icons (attach, mention, command, voice) sit inside the field on its
-  left, a model chip floats above the field's left edge, and the send button is a round duck-yellow disc (`ink` glyph on
-  `duck`, 12.9:1). A message's footer (copy, time, retry) shows only on hover.
+- **Composer and messages (stage 3, built).** The composer (the chat's and the Room's, `ChatComposerBox`, `RoomComposer`) is
+  one rounded field (radius 22). Its tools sit inside on the left: attach, `@` mention, `/` command, dictate and the context
+  ring (icons only). Send is a 32pt round disc, `duck` fill with an `ink` arrow (12.9:1); while the agent works it keeps its
+  menu (queue / steer, ↵ and ⌘↵) and Stop keeps its square glyph and meaning. The model and effort picker is a small chip
+  above the field's left edge: "Pip · Opus 5.5 · Medium" (the duck's name, then the existing picker, so ⌘/ and ⇧⌘E work as
+  before); the mode chip follows it and the working glyph sits at its end while the agent works, so nothing animates in the
+  button row. In the Room the chip says "Room · everyone" or the duck or person the message goes to, and opens the chooser.
+  Pasted and dropped images, drafts, ⌘L, ⇧⌘D and the pickers are unchanged. A message's footer is not drawn: time, duration,
+  Copy and "…" are one small raised bar (`MessageActionBar`) that floats over the message's top trailing corner while the
+  pointer is over the message or a control of the bar has the keyboard (`MessageActionBarState` in SqueakMacCore). It is an
+  overlay that only changes opacity, so a row never moves; it stays in the tree so Tab reaches Copy and VoiceOver reads it.
+  Code blocks keep their own always-visible Copy. A user's message still shows its time and Retry as before.
 - **Pond rows (sidebar).** A tile in the Pond's own colour carrying its initial, the name, a duck-yellow count badge for
   chats not opened yet (`PondRowMarks`), and the amber `triangle-alert` when something waits on you. No coloured state dots
   (section 3.3).
 - **Colour.** The accent is the duck's yellow plus each Pond's own colour (section 3.5). State colours keep their meaning.
 - **Stages.** 1: setting, Duck row, Pond panel, Pond rows (built). 2: icon rail and work pane (built). 3: composer and
-  hover-only footer (planned). The new layout becomes the default only after a debug-build pass by the owner.
+  hover-only footer (built). The new layout becomes the default only after a debug-build pass by the owner.
 
 ## 9. Voice and copy
 

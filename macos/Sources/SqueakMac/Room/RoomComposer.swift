@@ -37,25 +37,7 @@ struct RoomComposer: View {
     private var canSend: Bool { tray.draft.canSend(text: draft) && !dictation.isActive }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            RoomAttachmentStrip(tray: tray).padding(.top, 8)
-            if dictation.state.showsMeter {
-                DictationBar(dictation: dictation).padding(.top, 8)
-            } else {
-                ComposerField(
-                    text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
-                    focusToken: focusToken,
-                    onSend: submit, onContentHeight: { contentHeight = $0 },
-                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
-                )
-                .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
-            }
-            DictationNotice(dictation: dictation)
-            bar
-        }
-        .padding(.horizontal, 14).padding(.bottom, 10)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
+        Group { if MacLayoutPreference.shared.isNew { newBox } else { oldBox } }
         .suggestionPopup(isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted) {
             // The shared placement: above the composer's own top edge, best match nearest it, scrolling past its room.
             picker(candidates, chrome: false)
@@ -75,6 +57,95 @@ struct RoomComposer: View {
         .onDisappear { dictation.cancel() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in tray.pick() }
         .accessibilityElement(children: .contain)
+    }
+
+    private var oldBox: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            RoomAttachmentStrip(tray: tray).padding(.top, 8)
+            if dictation.state.showsMeter {
+                DictationBar(dictation: dictation).padding(.top, 8)
+            } else {
+                ComposerField(
+                    text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                    focusToken: focusToken,
+                    onSend: submit, onContentHeight: { contentHeight = $0 },
+                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
+                )
+                .frame(height: min(max(contentHeight, 24), 140)).padding(.top, 12).padding(.bottom, 4)
+            }
+            DictationNotice(dictation: dictation)
+            bar
+    }
+    .padding(.horizontal, 14).padding(.bottom, 10)
+    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
+    }
+
+    // MARK: New layout (DESIGN.md §8.12, stage 3): the same field as the chat composer
+
+    private var newBox: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            chipLine
+            VStack(alignment: .leading, spacing: 4) {
+                RoomAttachmentStrip(tray: tray).padding(.leading, 4)
+                HStack(alignment: .bottom, spacing: 4) {
+                    HStack(spacing: 0) {
+                        RoomAttachButton(tray: tray)
+                        Button { chooser.toggle() } label: {
+                            Text(verbatim: "@").font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(Theme.muted)
+                                .frame(width: 28, height: 28).contentShape(Circle())
+                        }
+                        .buttonStyle(.plain).pointerHand().accessibilityLabel("Choose who this goes to").help("Send to a duck or a person")
+                        .popover(isPresented: $chooser, arrowEdge: .top) {
+                            picker(RoomMention.candidates(query: "", threads: room.feed.threads, people: people), everyone: true)
+                        }
+                        micButton
+                    }
+                    .frame(height: 32)
+                    if dictation.state.showsMeter {
+                        DictationBar(dictation: dictation).frame(minHeight: 32)
+                    } else {
+                        ComposerField(
+                            text: $draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                            focusToken: focusToken,
+                            onSend: submit, onContentHeight: { contentHeight = $0 },
+                            onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, onFocus: { focused = $0 }
+                        )
+                        .frame(height: min(max(contentHeight, 32), 140))
+                    }
+                    Button(action: submit) { DuckSendDisc(enabled: canSend) }
+                        .buttonStyle(.plain).disabled(!canSend).accessibilityLabel("Send").frame(height: 32)
+                }
+                DictationNotice(dictation: dictation)
+            }
+            .padding(8)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.lineStrong.opacity(0.7)))
+        }
+    }
+
+    /// Above the field: who it goes to ("Room \u{00B7} everyone", or the duck or person picked), tappable to change.
+    private var chipLine: some View {
+        HStack(spacing: 8) {
+            Button { chooser.toggle() } label: {
+                HStack(spacing: 6) {
+                    if case .thread(let id, _) = to { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 14) }
+                    Text(verbatim: to == .everyone ? "Room \u{00B7} everyone" : "To \(to.label)").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    Lucide(.chevronDown, size: 11, color: Theme.muted)
+                }
+                .padding(.horizontal, 10).frame(minHeight: 26).contentShape(Capsule())
+            }
+            .buttonStyle(.plain).pointerHand()
+            .background(Theme.sidebar, in: Capsule()).overlay(Capsule().strokeBorder(Theme.line))
+            .accessibilityLabel(to == .everyone ? "Sending to everyone in the room. Press to choose who" : "Sending to \(to.label). Press to choose who")
+            if to != .everyone {
+                Button { to = .everyone } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22).contentShape(Circle()) }
+                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Send to the whole pond instead")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 6).frame(height: 28)
     }
 
     private var bar: some View {
