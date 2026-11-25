@@ -67,6 +67,9 @@ public struct PondStripTab: Equatable, Sendable, Identifiable {
     /// A Duck tab's second line, beside the glyph: "Pip \u{00B7} Working \u{00B7} editing auth.ts". Nil for an item.
     public var status: String?
     public var id: TabItem { item }
+    public init(item: TabItem, duck: DuckRowAvatar?, closable: Bool, title: String?, status: String?) {
+        self.item = item; self.duck = duck; self.closable = closable; self.title = title; self.status = status
+    }
     /// The tab's full text, for its tooltip (labels may shorten, never wrap).
     public var help: String? { title.map { t in status.map { "\(t)\n\($0)" } ?? t } }
 }

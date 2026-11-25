@@ -213,7 +213,7 @@ struct WorkbenchSidebar: View {
 
     // Navigation lives in the window overlay so hiding this pane preserves its history.
     private var topBar: some View {
-        Color.clear.frame(height: Metrics.header).background(WindowDragArea())
+        Color.clear.frame(height: MacLayoutPreference.shared.isNew ? CGFloat(PondBarMetrics.height) : Metrics.header).background(WindowDragArea())
     }
 
 

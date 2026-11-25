@@ -23,6 +23,8 @@ struct RoomSegmented<T: Hashable>: View {
     @Binding var selection: T
     let title: (T) -> String
     var height: CGFloat = 26
+    /// The top bar's switch: capsule track and pill, the same family as the tabs beside it.
+    var capsule = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -33,15 +35,15 @@ struct RoomSegmented<T: Hashable>: View {
                     Text(verbatim: title(item)).font(.system(size: 13, weight: on ? .medium : .regular)).lineLimit(1).fixedSize()
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .padding(.horizontal, 12).frame(height: height - 4)
-                        .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: capsule ? 100 : 6, style: .continuous))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(title(item)).accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(2).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
+        .padding(2).background(Theme.surface, in: RoundedRectangle(cornerRadius: capsule ? 100 : 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: capsule ? 100 : 8, style: .continuous).strokeBorder(Theme.line))
         .animation(reduceMotion ? nil : Motion.quick, value: selection)
     }
 }

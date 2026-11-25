@@ -140,12 +140,15 @@ final class PondPanState {
         return g.from + (g.to - g.from) * SwipeCurve.value(t)
     }
 
+    /// True between the pond page appearing and leaving; while false the state may be stale against the page preference.
+    var isMounted = false
+
     func mount(page: PondPage) { mode = .rest; restPage = page; glide = nil; token += 1 }
 
     /// The pond page left the screen (a pond page mounts only while shown, this state outlives it): whatever was in flight
     /// can never finish, so rest on `page` with no snapshot or staging, or the next mount finds the Room slid off screen.
     func unmount(page: PondPage) {
-        mount(page: page); snapshotActive = false; staging = nil; strip = nil
+        mount(page: page); snapshotActive = false; staging = nil; strip = nil; isMounted = false
     }
 
     func track(_ p: Double) {
@@ -227,7 +230,9 @@ final class PondPanStore {
     static let shared = PondPanStore()
     private var states: [String: PondPanState] = [:]
     func state(for key: String) -> PondPanState {
-        if let s = states[key] { return s }
+        // The page preference can change while the pond page is not on screen (the switch pressed inside a Duck, Esc, a way
+        // back): a state that is not mounted always rests on the preference, never on where it was left (PondCentre.stripPage).
+        if let s = states[key] { if !s.isMounted { s.mount(page: RoomViewPref.shared.mode(for: key)) }; return s }
         let s = PondPanState(); s.mount(page: RoomViewPref.shared.mode(for: key)); states[key] = s
         return s
     }
@@ -304,6 +309,7 @@ struct PondSpace<Dashboard: View>: View {
             trackingEnabled: !reduceMotion, update: { if visible { update($0) } }))
         .onChange(of: page) { _, new in pan.reconcile(page: new, width: width) }
         .onDisappear { pan.unmount(page: RoomViewPref.shared.mode(for: key)) }
+        .onAppear { pan.isMounted = true; pan.reconcile(page: RoomViewPref.shared.mode(for: key), width: width) }
         .task { await runHint() }
     }
 

@@ -46,6 +46,21 @@ struct PondWashTests {
         #expect(heavy < Double.infinity)
     }
 
+    @Test func theDuckGradientIsVisibleAndFadesWithoutAnEdge() {
+        #expect(PondWash.Role.duckTop.opacity(dark: false) >= 0.2)
+        #expect(PondWash.Role.duckTop.opacity(dark: true) >= 0.2)
+        #expect(PondWash.duckFade(at: 0) == 1)
+        #expect(PondWash.duckFade(at: 1) == 0)
+        #expect(PondWash.duckFadeHeight >= 160 && PondWash.duckFadeHeight <= 240)
+        var last = 1.0
+        for i in 1...20 {
+            let v = PondWash.duckFade(at: Double(i) / 20)
+            #expect(v <= last); last = v
+        }
+        // Flat at the end: the last step is tiny, so no hard band edge.
+        #expect(PondWash.duckFade(at: 0.97) < 0.01)
+    }
+
     @Test func linesAndRingsKeepTheirOwnOpacityAndHaveNoGround() {
         let a = PondWash.accent(hue: 200, dark: false)
         #expect(PondWash.opacity(.tabIndicator, accent: a, dark: false) == 1)
