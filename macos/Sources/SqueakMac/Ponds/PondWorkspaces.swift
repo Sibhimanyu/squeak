@@ -144,7 +144,8 @@ private struct PondChatRowView: View {
                         InlineTitleEditor(session: s, font: Typo.label)
                     } else {
                         // The Duck's name is the label; the chat's title is only secondary text (never the sender or the label).
-                        let name = row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) }
+                        // An Off-duty Duck wears no name: its chat title leads.
+                        let name = row.offDuty != nil ? nil : row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) }
                         Text(verbatim: name ?? row.title).font(Typo.label).foregroundStyle(Theme.ink)
                             .lineLimit(2).multilineTextAlignment(.leading)
                         if let name, name != row.title {
@@ -153,7 +154,7 @@ private struct PondChatRowView: View {
                     }
                     HStack(spacing: 6) {
                         if let m = row.mark { ChatMarkGlyph(mark: m, leading: true) } else { PondStateMark(state: row.state, leading: true) }
-                        Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
+                        Text(verbatim: row.offDuty?.line ?? row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
                         if row.ducklingsRunning > 0 {
                             HStack(spacing: 2) {
@@ -163,7 +164,7 @@ private struct PondChatRowView: View {
                             .help("\(DucklingWords.count(row.ducklingsRunning)) running")
                             .accessibilityLabel("\(DucklingWords.count(row.ducklingsRunning)) running")
                         }
-                        if let at = row.lastAt {
+                        if row.offDuty == nil, let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
@@ -171,6 +172,9 @@ private struct PondChatRowView: View {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                         }
+                    }
+                    if let summary = row.offDuty?.summary {
+                        Text(verbatim: summary).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     if let visibility = row.visibility {
                         Text(verbatim: visibility)

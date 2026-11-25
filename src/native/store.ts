@@ -1525,6 +1525,14 @@ export class NativeStore {
     ).map(roomPostRow);
   }
 
+  /** A chat's newest `done` post: the last thing it reported finishing. */
+  latestDonePost(sessionId: string): RoomPostRow | null {
+    const r = this.db
+      .prepare("SELECT * FROM room_posts WHERE session_id=? AND kind='done' ORDER BY at DESC, seq DESC LIMIT 1")
+      .get(sessionId) as Row | undefined;
+    return r ? roomPostRow(r) : null;
+  }
+
   /** A chat's newest `working` post at or between two instants (ms): the turn's intent. */
   latestWorkingPost(sessionId: string, from: number, to: number): RoomPostRow | null {
     const r = this.db

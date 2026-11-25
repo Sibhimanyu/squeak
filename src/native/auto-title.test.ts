@@ -150,7 +150,7 @@ describe("looksWeak", () => {
 });
 
 describe("AutoTitler retitling", () => {
-  const model = (text: string) => vi.fn(async () => text);
+  const model = (text: string) => vi.fn(async (_input: { prompt: string }) => text);
 
   it("retitles once after the first finished turn with real tool work, in 3-6 plain words", async () => {
     const store = makeStore();

@@ -120,7 +120,7 @@ struct PondHomeView: View {
             emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [])
+            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [], offDutyNotes: roster?.offDutyNotes ?? [:])
     }
 
     /// The one-time "Next steps" card (`PondNextSteps`): gone for good once dismissed.

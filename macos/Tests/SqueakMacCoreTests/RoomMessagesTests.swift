@@ -357,7 +357,7 @@ struct RoomMessagesTests {
             thread("wait", name: "Marlow", state: .waiting, lastActive: ms + 1_800_000),
         ], now: now)
         #expect(ducks.map(\.name) == ["Pip", "Marlow", "Nibs", "Juno"])
-        #expect(ducks.map(\.presenceLine) == ["Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Off duty"])
+        #expect(ducks.map(\.presenceLine) == ["Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "off duty 2h ago"])
         #expect(ducks.map(\.presence) == [.working, .waiting, .idle, .off])
         #expect(ducks[2].roleLine == "Control bar" && ducks[0].roleLine == "T-work" && !ducks[3].onDuty)
         #expect(RoomDucks.ago(ms - 86_400_000 + 1, now: now) == "yesterday" || true)
@@ -409,8 +409,10 @@ struct RoomMessagesTests {
         #expect(RoomMention.active(in: "mail a@b") == nil)
         let threads = [thread("a", name: "Pip", state: .working), thread("b", name: "Pia", duty: .off), thread("c", name: "Nibs")]
         let c = RoomMention.candidates(query: "pi", threads: threads, people: ["Pia Nair"])
-        #expect(c.map(\.id) == ["t:a", "t:b", "p:Pia Nair"])
-        #expect(c[0].addressee == .thread(sessionId: "a", title: "Pip") && c[1].subtitle == "Off duty")
+        // Names are masks: the Off-duty Duck "b" is known by its chat title ("T-b"), not "Pia".
+        #expect(c.map(\.id) == ["t:a", "p:Pia Nair"])
+        #expect(RoomMention.candidates(query: "t-b", threads: threads, people: []).map(\.id) == ["t:b"])
+        #expect(c[0].addressee == .thread(sessionId: "a", title: "Pip") && c[0].insertion == nil)
         #expect(RoomMention.roomText("look", to: .person(name: "Priya")) == "@Priya look")
     }
 

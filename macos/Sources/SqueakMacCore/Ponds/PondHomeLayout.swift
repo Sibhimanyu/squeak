@@ -15,6 +15,23 @@ public struct PondChatPerson: Sendable, Equatable, Identifiable {
 }
 
 /// A chat in a workspace card: this Mac's own, or another Mac's thread that lands there.
+/// What an Off-duty Duck's Dashboard row says under its chat title.
+public struct PondOffDutyNote: Sendable, Equatable {
+    public var line: String
+    public var summary: String?
+    public init(line: String, summary: String? = nil) { self.line = line; self.summary = summary }
+
+    /// From the host's duck list, by the chat's session id.
+    public static func notes(_ ducks: [PondDuck], now: Date = Date()) -> [String: PondOffDutyNote] {
+        var out: [String: PondOffDutyNote] = [:]
+        for d in ducks where d.duty == .off {
+            guard let sid = d.currentSessionId else { continue }
+            out[sid] = PondOffDutyNote(line: RoomRoster.offDutyAgo(d.lastActiveAt, now: now), summary: d.lastSummary)
+        }
+        return out
+    }
+}
+
 public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var id: String
     public var title: String
@@ -40,6 +57,8 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var ducklingsRunning: Int = 0
     /// The duck is on duty (the host's roster says; a row it does not list is on duty).
     public var onDuty: Bool = true
+    /// An Off-duty Duck's row: "off duty 3d ago" and its last summary line. Known by its title, never a name.
+    public var offDuty: PondOffDutyNote? = nil
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
     /// Ducks mode: the duck's branch ("main" on main), the row's small mono label; nil otherwise.
@@ -105,7 +124,7 @@ public struct PondHomeLayout: Sendable, Equatable {
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
         emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil },
-        hiddenThreads: Set<String> = [], ownThreads: Bool = true, offDutySessions: Set<String> = []
+        hiddenThreads: Set<String> = [], ownThreads: Bool = true, offDutySessions: Set<String> = [], offDutyNotes: [String: PondOffDutyNote] = [:]
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -149,7 +168,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
-                if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false }
+                if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false; made.offDuty = offDutyNotes[id] ?? PondOffDutyNote(line: "Off duty") }
                 if ws.isDucks { made.branch = DuckRow(session: s, isMain: main?.contains(s) ?? false).label }
                 return made
             }

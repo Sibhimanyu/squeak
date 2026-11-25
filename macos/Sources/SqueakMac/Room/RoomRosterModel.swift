@@ -12,6 +12,8 @@ final class RoomRosterModel {
     private(set) var counts: PondCounts?
     /// Chats whose duck is off duty: the dashboard's Off duty filter.
     var offDutySessions: Set<String> { Set((ducks ?? []).filter { $0.duty == .off }.compactMap(\.currentSessionId)) }
+    /// Each Off-duty Duck's "off duty 3d ago" and last summary, by chat id: the dashboard rows.
+    var offDutyNotes: [String: PondOffDutyNote] { PondOffDutyNote.notes(ducks ?? []) }
     var error: String?
     private(set) var creating = false
 

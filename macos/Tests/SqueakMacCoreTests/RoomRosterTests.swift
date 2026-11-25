@@ -24,13 +24,13 @@ import Testing
     @Test func defaultListIsAvailableOnlyAndSearchCoversEveryDuck() {
         let ducks = [
             PondDuck(id: "a", name: "Ada", role: "Layout builder", lastActiveAt: ms(7200)),
-            PondDuck(id: "b", name: "Bo", role: "Tester", duty: .off, lastActiveAt: ms(10)),
+            PondDuck(id: "b", name: "Bo", role: "Tester", duty: .off, lastActiveAt: ms(10), chatTitle: "Bo tester run"),
             PondDuck(id: "c", name: "Cy\u{00E9}", lastActiveAt: ms(60)),
             PondDuck(id: "d", name: "Old Dan", role: "layout reviewer", duty: .off, lastActiveAt: 1),
         ]
         #expect(RoomRoster.visible(ducks, query: "", now: now).map(\.id) == ["c", "a"])
         #expect(RoomRoster.visible(ducks, query: "   ", now: now).map(\.id) == ["c", "a"])
-        // by name, off-duty included, greyed (onDuty false)
+        // by name (on duty) or chat title (off duty, which wears no name), greyed (onDuty false)
         let bo = RoomRoster.visible(ducks, query: "bo", now: now)
         #expect(bo.map(\.id) == ["b"] && bo[0].onDuty == false)
         // by role; Available first, then off duty; case-insensitive

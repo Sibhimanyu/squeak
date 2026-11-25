@@ -127,6 +127,8 @@ export interface DuckView {
   poweredBy?: string;
   state: "working" | "waiting" | "idle" | "error";
   lastActiveAt: number;
+  /** An Off-duty Duck only: the last thing it reported finishing (names are masks: it is known by its chat title). */
+  lastSummary?: string;
   /** How many sessions it has had (the current one and its history). */
   sessions: number;
   notebook: string;
@@ -157,6 +159,8 @@ export interface RoomThread {
   duty: "on" | "off";
   /** When the chat last did anything (ms epoch). */
   lastActiveAt: number;
+  /** An Off-duty Duck only: the last thing it reported finishing. */
+  lastSummary?: string;
   agent: string;
   state: "working" | "waiting" | "idle" | "error";
   workingOn?: string;
@@ -430,8 +434,8 @@ export class Room extends EventEmitter {
       if (row.text && row.kind === "message") {
         for (const duck of this.store.listDucks(row.projectId)) {
           const sid = duck.currentSessionId;
-          if (!sid || sid === row.sessionId || targets.has(sid) || !duck.name) continue;
-          if (!mentions(row.text, duck.name)) continue;
+          if (!sid || sid === row.sessionId || targets.has(sid)) continue;
+          if (!mentionedToken(row.text, duckMentionTokens(duck, this.store.getSession(sid)?.title))) continue;
           // A message that is already a Task routed to this Duck reaches it as the Task, not as a second nudge.
           if (this.routedTo(row.id, duck.id)) continue;
           if (duck.duty === "off") {
@@ -971,10 +975,16 @@ export class Room extends EventEmitter {
       ...(streams.length ? { streams } : {}),
       state: s ? threadState(s.status, s.lastTurnEndedAt) : "idle",
       lastActiveAt: Number.isFinite(at) ? at : created,
+      ...(duck.duty === "off" && s ? this.lastSummaryOf(s.id) : {}),
       sessions: this.store.duckSessionIds(duck.id).length,
       notebook: duck.notebook,
       createdAt: created,
     };
+  }
+
+  private lastSummaryOf(sessionId: string): { lastSummary?: string } {
+    const text = this.store.latestDonePost(sessionId)?.text.trim();
+    return text ? { lastSummary: text.length > 160 ? `${text.slice(0, 159)}…` : text } : {};
   }
 
   /** Every duck of the pond worth listing (sessionless ones, and those whose chat was active in 30 days). */
@@ -1029,6 +1039,7 @@ export class Room extends EventEmitter {
       name: duck?.name ?? agentName(s),
       ...(duck?.role ? { role: duck.role } : {}),
       duty: duck?.duty ?? "on",
+      ...(duck?.duty === "off" ? this.lastSummaryOf(s.id) : {}),
       lastActiveAt: Date.parse(s.updatedAt),
       agent: s.agent,
       state,
@@ -1162,6 +1173,30 @@ export function cleanDuckPatch(patch: { name?: unknown; role?: unknown }): {
 }
 
 /** `@Name` in text, as a whole word (case-insensitive); a name may hold spaces. */
+/**
+ * What an @mention can name. An on-duty Duck: its name. An Off-duty Duck wears no name (names are masks), so it is
+ * named by its chat title or its session id; the Mac's @ list inserts the title.
+ */
+export function duckMentionTokens(
+  duck: { name: string | null; duty: "on" | "off"; currentSessionId: string | null },
+  title: string | null | undefined,
+): string[] {
+  const out: string[] = [];
+  if (duck.name) out.push(duck.name);
+  if (duck.duty === "off") {
+    if (title?.trim()) out.push(title.trim());
+    if (duck.currentSessionId) out.push(duck.currentSessionId);
+  }
+  return out;
+}
+
+/** The longest token `text` @mentions, or null. */
+export function mentionedToken(text: string, tokens: string[]): string | null {
+  let best: string | null = null;
+  for (const t of tokens) if (mentions(text, t) && (!best || t.length > best.length)) best = t;
+  return best;
+}
+
 export function mentions(text: string, name: string): boolean {
   const escaped = name
     .trim()

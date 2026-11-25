@@ -102,18 +102,31 @@ public enum RoomMention {
         public var id: String
         public var addressee: RoomAddressee
         public var subtitle: String
-        public init(id: String, addressee: RoomAddressee, subtitle: String) { self.id = id; self.addressee = addressee; self.subtitle = subtitle }
+        /// What picking it types into the draft in place of the `@token`; set for an Off-duty Duck, whose mention wakes it.
+        public var insertion: String?
+        public init(id: String, addressee: RoomAddressee, subtitle: String, insertion: String? = nil) {
+            self.id = id; self.addressee = addressee; self.subtitle = subtitle; self.insertion = insertion
+        }
     }
 
     /// Ducks first (on duty, working ones, then the rest), then people; matched on a name prefix of any word.
-    public static func candidates(query: String, threads: [RoomThread], people: [String]) -> [Candidate] {
+    public static func candidates(query: String, threads: [RoomThread], people: [String], now: Date = Date()) -> [Candidate] {
         let q = query.lowercased()
         func match(_ s: String) -> Bool {
             q.isEmpty || s.lowercased().split(separator: " ").contains { $0.hasPrefix(q) } || s.lowercased().hasPrefix(q)
         }
         func rank(_ t: RoomThread) -> Int { !t.onDuty ? 2 : (t.state == .working || t.state == .waiting ? 0 : 1) }
-        let ts = threads.filter { match($0.duckName) }.sorted { (rank($0), $0.duckName) < (rank($1), $1.duckName) }
-            .map { Candidate(id: "t:" + $0.sessionId, addressee: .thread(sessionId: $0.sessionId, title: $0.duckName), subtitle: RoomDucks.duck($0).presenceLine) }
+        let ts = threads.filter { match($0.heading) }.sorted { (rank($0), $0.heading) < (rank($1), $1.heading) }
+            .map { t -> Candidate in
+                if t.onDuty {
+                    return Candidate(id: "t:" + t.sessionId, addressee: .thread(sessionId: t.sessionId, title: t.duckName), subtitle: RoomDucks.duck(t).presenceLine)
+                }
+                // Off duty: known by its chat title; "off duty 3d ago" and its last summary under it; picking it types a mention that wakes it.
+                let line = RoomRoster.offDutyAgo(t.lastActiveAt, now: now)
+                return Candidate(
+                    id: "t:" + t.sessionId, addressee: .thread(sessionId: t.sessionId, title: t.heading),
+                    subtitle: t.lastSummary.map { line + " \u{00B7} " + $0 } ?? line, insertion: "@" + t.heading + " ")
+            }
         let ps = people.filter(match).map { Candidate(id: "p:" + $0, addressee: .person(name: $0), subtitle: "Person") }
         return ts + ps
     }
