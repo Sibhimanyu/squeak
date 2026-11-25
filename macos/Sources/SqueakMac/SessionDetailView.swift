@@ -421,6 +421,7 @@ struct SessionDetail: View {
 
     @ViewBuilder private func turnAndRows() -> some View {
         let footers = footers
+        let newestReply = MessageActionBarState.newestID(in: model.displayMessages, footers: footers)
         let rows = self.rows
         let insert = turnInsertIndex(in: rows)
         let turn = self.turn
@@ -443,7 +444,7 @@ struct SessionDetail: View {
                     let before = TurnFolding.finished(steps: runs[n])
                     if !before.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: before.folded), filesLine: nil, showsExpandAll: false).padding(.bottom, ChatSpacing.turnToMessage) }
                 }
-                rowView(item.row, footers: footers)
+                rowView(item.row, footers: footers, newest: newestReply)
             }
             .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
             .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
@@ -474,13 +475,14 @@ struct SessionDetail: View {
         let live = model.native.key == session.key
         let feed = ChatFeed(timeline, pending: live ? model.native.pending : NativePendingStack())
         let footers = footers
+        let newestReply = MessageActionBarState.newestID(in: model.displayMessages, footers: footers)
         let attached = PictureLayout.attachedPaths(inTexts: timeline.turns.map(\.prompt))
         NativeTurnsContent(
             feed: feed, details: model.native.details, me: nil, fadeFrom: liveTurnFloor, followsEnd: atBottom,
             renderKey: "\(needsYouMessageID ?? "-")|\(model.askCardDisplay(for: session.key) == nil)|\(sendBlock == nil && model.isReachable(session))",
             filesLine: { t in t.turnId != nil && t.turnId == timeline.turns.last?.turnId && !isWorking ? turnFilesLine : nil },
             stream: live ? model.native.stream : nil,
-            message: { m in rowView(.message(m, muted: false), footers: footers) },
+            message: { m in rowView(.message(m, muted: false), footers: footers, newest: newestReply) },
             queuedActions: { t in
                 NativeQueuedRow(session: session, queuedId: t.queuedId, text: t.prompt, author: TimelineLabels.author(t.author, me: nil))
             }
@@ -528,13 +530,13 @@ struct SessionDetail: View {
     /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
     private var footers: [String: TurnFooter] { rowCache.footers(model.displayMessages, working: liveState == .working) }
 
-    @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
+    @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:], newest: String? = nil) -> some View {
         if case .message(let m, let muted) = row {
             MessageRowView(
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: liveState == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isReachable(session), onChoose: choose, muted: muted,
-                history: historyHandle(for: m), footer: footers[m.id]
+                history: historyHandle(for: m), footer: footers[m.id], isNewest: m.id == newest
             )
             .equatable()
         }

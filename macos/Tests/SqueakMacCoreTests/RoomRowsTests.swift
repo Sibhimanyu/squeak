@@ -250,4 +250,12 @@ import Testing
         #expect(PondClick.receiver(of: anon, threads: threads) == nil)
         #expect(PondClick.sender(of: anon, threads: threads) == .duck("s2"))
     }
+
+    @Test func rowBarSpaceIsReservedWheneverThereAreActionsAndNeverWhenThereAreNone() {
+        #expect(RoomRowPlan.reservedBarHeight(actions: [.copy]) == RoomRowPlan.barHeight + RoomRowPlan.barGap)
+        #expect(RoomRowPlan.reservedBarHeight(actions: []) == 0)
+        #expect(RoomRowPlan.barOpacity(hover: false, focusWithin: false) == 0)
+        #expect(RoomRowPlan.barOpacity(hover: true, focusWithin: false) == 1)
+        #expect(RoomRowPlan.barOpacity(hover: false, focusWithin: true) == 1)
+    }
 }

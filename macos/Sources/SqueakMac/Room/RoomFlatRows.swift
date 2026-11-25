@@ -5,7 +5,7 @@ import SqueakMarkup
 import SwiftUI
 
 // DESIGN.md 8.12, the Room as flat rows (Slack or Cliq style; mock-up direction B): avatar, bold name, muted time, the text on
-// the page with no box. A run by one sender sits under one name; a row lights up on hover with a small floating bar; your own
+// the page with no box. A run by one sender sits under one name; a row lights up on hover with a quiet bar under its text; your own
 // are marked only by a thin Pond-coloured line. Every number and word is decided in `RoomRowPlan`; this only places them.
 
 /// One row of the Room. Layout never depends on hover: the highlight is a background, the bar an overlay, and the time of a
@@ -25,6 +25,7 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
     @State private var rowHover = false
     @State private var barHover = false
     @State private var copied = false
+    @FocusState private var barFocus: Bool
     @Environment(\.roomPondId) private var pondId
 
     private var hover: Bool { rowHover || barHover }
@@ -43,6 +44,20 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 if first { header() }
                 content()
+                // The bar's own row: its height is always reserved (only its opacity changes), so the feed never changes
+                // height as the pointer passes and the bar never covers the text above it.
+                if !actions.isEmpty {
+                    RoomHoverBar(actions: actions, copied: copied, perform: { a in
+                        if a == .copy { copied = true; Task { try? await Task.sleep(for: .seconds(1.2)); copied = false } }
+                        perform(a)
+                    })
+                    .onHover { barHover = $0 }
+                    .focused($barFocus)
+                    .opacity(RoomRowPlan.barOpacity(hover: hover, focusWithin: barFocus))
+                    .allowsHitTesting(hover || barFocus)
+                    .frame(height: CGFloat(RoomRowPlan.barHeight), alignment: .leading)
+                    .padding(.top, CGFloat(RoomRowPlan.barGap))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -58,24 +73,12 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if hover, !actions.isEmpty {
-                RoomHoverBar(actions: actions, copied: copied, perform: { a in
-                    if a == .copy { copied = true; Task { try? await Task.sleep(for: .seconds(1.2)); copied = false } }
-                    perform(a)
-                })
-                .onHover { barHover = $0 }
-                .padding(.trailing, 8).offset(y: -10)
-                .transition(.opacity)
-            }
-        }
-        .zIndex(hover ? 1 : 0)
         .onHover { rowHover = $0 }
         .animation(Motion.quick, value: hover)
     }
 }
 
-/// Reply, Copy, Make task: a small floating bar, nothing more.
+/// Reply, Copy, Make task: a quiet row of small buttons under the row's text, left-aligned with it. No box, no shadow.
 struct RoomHoverBar: View {
     let actions: [RoomRowPlan.Action]
     let copied: Bool
@@ -85,10 +88,6 @@ struct RoomHoverBar: View {
         HStack(spacing: 2) {
             ForEach(actions, id: \.self) { a in RoomHoverButton(action: a, copied: copied && a == .copy, perform: perform) }
         }
-        .padding(3)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.lineStrong))
-        .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
         .fixedSize()
         .accessibilityElement(children: .contain)
     }
@@ -112,10 +111,10 @@ private struct RoomHoverButton: View {
         Button { perform(action) } label: {
             HStack(spacing: 5) {
                 Image(systemName: symbol).font(.system(size: 11, weight: .medium))
-                Text(verbatim: copied ? "Copied" : action.rawValue).font(.system(size: 12, weight: .medium))
+                Text(verbatim: copied ? "Copied" : action.rawValue).font(.system(size: 12, weight: .medium)).lineLimit(1).fixedSize()
             }
             .foregroundStyle(hover ? Theme.ink : Theme.muted)
-            .padding(.horizontal, 8).frame(height: 24)
+            .padding(.horizontal, 6).frame(height: 24)
             .background(hover ? Theme.selectedStrong : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .contentShape(Rectangle())
         }

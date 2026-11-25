@@ -25,6 +25,20 @@ struct NewLayoutComposerTests {
         #expect(MessageActionBarState(hovering: true, focusWithin: true).opacity == 1)
     }
 
+    @Test func actionRowAlwaysReservesItsHeightAndStaysVisibleOnTheNewestReply() {
+        #expect(MessageActionBarState.reservedHeight > 0)
+        #expect(MessageActionBarState(isNewest: true).isVisible)
+        #expect(MessageActionBarState(isNewest: true).opacity == 1)
+        #expect(MessageActionBarState().opacity == 0)
+    }
+
+    @Test func newestReplyIsTheLastMessageWithAFooter() {
+        func m(_ id: String) -> ChatMessage { ChatMessage(id: id, role: .assistant, text: id) }
+        let f = TurnFooter(elapsed: 1, at: nil, turnText: "x")
+        #expect(MessageActionBarState.newestID(in: [m("a"), m("b"), m("c")], footers: ["a": f, "b": f]) == "b")
+        #expect(MessageActionBarState.newestID(in: [m("a")], footers: [:]) == nil)
+    }
+
     @Test func chipJoinsDuckModelAndEffort() {
         #expect(ComposerChip.line(duck: "Pip", model: "Opus 5.5", effort: "Medium") == "Pip \u{00B7} Opus 5.5 \u{00B7} Medium")
     }

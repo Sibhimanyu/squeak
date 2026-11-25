@@ -20,17 +20,18 @@ struct MessageRowView: View, Equatable {
     var muted: Bool
     var history: HistoryHandle?
     var footer: TurnFooter?
+    var isNewest = false
 
     nonisolated static func == (a: MessageRowView, b: MessageRowView) -> Bool {
         a.message == b.message && a.agentName == b.agentName && a.canOpenHost == b.canOpenHost && a.agentWorking == b.agentWorking
             && a.layout == b.layout && a.canAnswer == b.canAnswer && a.muted == b.muted
-            && a.history == b.history && a.footer == b.footer
+            && a.history == b.history && a.footer == b.footer && a.isNewest == b.isNewest
     }
 
     var body: some View {
         MessageView(
             message: message, agentName: agentName, canOpenHost: canOpenHost, agentWorking: agentWorking, layout: layout,
-            canAnswer: canAnswer, onChoose: onChoose, muted: muted, history: history, footer: footer)
+            canAnswer: canAnswer, onChoose: onChoose, muted: muted, history: history, footer: footer, isNewest: isNewest)
     }
 }
 
@@ -49,6 +50,8 @@ struct MessageView: View {
     var history: HistoryHandle?
     /// The line under the last agent message of a finished turn (elapsed, time of day, copy, more).
     var footer: TurnFooter?
+    /// The newest finished reply of the chat: its actions row stays drawn at rest (new layout).
+    var isNewest = false
     @State private var hovering = false
     @State private var settled = false
     @Environment(AppModel.self) private var model
@@ -132,11 +135,11 @@ struct MessageView: View {
                 MessageText(markdown: message.text, style: .reading)
             }
             if let footer, !MacLayoutPreference.shared.isNew { TurnFooterView(footer: footer, messageText: message.text) }
-        }
-        // New layout: nothing sits under the message; its action bar floats over the top corner on hover or keyboard focus.
-        .overlay(alignment: .topTrailing) {
+            // New layout: the actions row sits directly under the last line, left-aligned with the text. It always owns its
+            // height (only its opacity changes), so it never covers text and nothing jumps when it appears.
             if let footer, MacLayoutPreference.shared.isNew {
-                MessageActionBar(footer: footer, messageText: message.text, overMessage: hovering).offset(y: -14).zIndex(2)
+                MessageActionBar(footer: footer, messageText: message.text, overMessage: hovering, isNewest: isNewest)
+                    .padding(.top, CGFloat(MessageActionBarState.gapAbove - 10))
             }
         }
         .modifier(NewLayoutHover(active: footer != nil && MacLayoutPreference.shared.isNew, hovering: $hovering))

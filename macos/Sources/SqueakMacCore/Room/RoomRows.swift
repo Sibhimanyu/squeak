@@ -91,7 +91,17 @@ public enum RoomRowPlan {
 
     public enum Action: String, Equatable, Sendable { case reply = "Reply", copy = "Copy", makeTask = "Make task" }
 
-    /// The small floating bar on a row: Reply (never on my own), Copy, Make task (only where a Task can be made), in this order.
+    /// Height every row with actions always reserves for its bar under the text, drawn or not (points): the feed never
+    /// changes height as the pointer passes, and the bar never covers text.
+    public static let barHeight: Double = 24
+    /// Gap between the row's last line and its bar.
+    public static let barGap: Double = 2
+    /// A row with no action (nothing to Copy) reserves nothing; every other row reserves the bar's height at all times.
+    public static func reservedBarHeight(actions: [Action]) -> Double { actions.isEmpty ? 0 : barHeight + barGap }
+    /// The bar is drawn on hover or keyboard focus only; its space is reserved regardless.
+    public static func barOpacity(hover: Bool, focusWithin: Bool) -> Double { hover || focusWithin ? 1 : 0 }
+
+    /// The small bar under a row's text: Reply (never on my own), Copy, Make task (only where a Task can be made), in this order.
     public static func actions(for message: RoomMessage, text: String, canReply: Bool) -> [Action] {
         var out: [Action] = []
         if canReply, reply(to: message.author, quoting: text) != nil { out.append(.reply) }
