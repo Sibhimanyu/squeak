@@ -115,7 +115,7 @@ describe("CodexRunner", () => {
     expect(log.ids).toEqual(["thread-1"]);
   });
 
-  it("a read-only root (Main of a git pond for a duck) holds Codex in the read-only sandbox in every mode; none leaves the mode alone", async () => {
+  it("a read-only root (Main of a git pond for a duck) holds Codex in the read-only sandbox in every mode with the approval policy of the chosen mode; none leaves the mode alone", async () => {
     for (const mode of ["default", "acceptEdits", "bypassPermissions"]) {
       const client = new FakeClient();
       const hooks = {
@@ -137,7 +137,7 @@ describe("CodexRunner", () => {
       });
       await guarded.send("go");
       expect(client.startThread).toHaveBeenCalledWith(
-        expect.objectContaining({ sandbox: "read-only", approvalPolicy: "untrusted" }),
+        expect.objectContaining({ sandbox: "read-only", approvalPolicy: codexPolicyFor(mode).approvalPolicy }),
       );
       expect(client.calls.find((c) => c.method === "startTurn")!.arg).toMatchObject({
         sandboxPolicy: { type: "readOnly" },
@@ -186,10 +186,23 @@ describe("CodexRunner", () => {
     expect(client.startTurn).toHaveBeenLastCalledWith(
       expect.objectContaining({
         cwd: "/ws/a",
-        approvalPolicy: "untrusted",
+        approvalPolicy: "never",
         sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/ws/a", "/ws/b"] },
       }),
     );
+    // Accept edits and Ask follow their own approval policy; Plan stays read-only
+    for (const [mode, policy, sandbox] of [
+      ["acceptEdits", "on-request", { type: "workspaceWrite", writableRoots: ["/ws/a", "/ws/b"] }],
+      ["default", "untrusted", { type: "workspaceWrite", writableRoots: ["/ws/a", "/ws/b"] }],
+      ["plan", "untrusted", { type: "readOnly" }],
+    ] as const) {
+      await runner.setPermissionMode(mode);
+      await runner.send(mode);
+      expect(client.startTurn).toHaveBeenLastCalledWith(
+        expect.objectContaining({ approvalPolicy: policy, sandboxPolicy: sandbox }),
+      );
+    }
+    await runner.setPermissionMode("bypassPermissions");
     streams = [];
     await runner.send("c");
     expect(client.startTurn).toHaveBeenLastCalledWith(
