@@ -453,7 +453,10 @@ export class RoomTasks extends EventEmitter {
     try {
       const duck = this.mentionedDuck(post.projectId, post.text);
       if (!duck) return false;
-      const token = mentionedToken(post.text, duckMentionTokens(duck, this.o.store.getSession(duck.currentSessionId ?? "")?.title));
+      const token = mentionedToken(
+        post.text,
+        duckMentionTokens(duck, this.o.store.getSession(duck.currentSessionId ?? "")?.title),
+      );
       const rest = stripMention(post.text, token ?? duck.name ?? "");
       if (wordCount(rest) < MIN_WORDS && !looksImperative(rest)) return false;
       if (this.o.store.roomJobRowByMessage(post.id)) return true;

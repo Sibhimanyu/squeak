@@ -159,7 +159,11 @@ export function looksWeak(title: string | null, first: string | null): boolean {
   const t = (title ?? "").trim();
   if (!t || /^(?:new (?:chat|task|thread)|untitled(?: chat)?|chat)$/i.test(t)) return true;
   if (t.length > WEAK_LENGTH || t.endsWith("…") || t.endsWith("...")) return true;
-  const line = (first ?? "").split(/\r?\n/).find((l) => l.trim())?.trim() ?? "";
+  const line =
+    (first ?? "")
+      .split(/\r?\n/)
+      .find((l) => l.trim())
+      ?.trim() ?? "";
   return line.length > 0 && line.toLowerCase().startsWith(t.toLowerCase()) && t.split(/\s+/).length >= 4;
 }
 
@@ -301,7 +305,7 @@ export class AutoTitler {
     if (!(this.options.modelEnabled ?? (() => flag("autoTitle")))()) return;
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), this.options.timeoutMs ?? TITLE_TIMEOUT_MS);
-    let title: string | null = null;
+    let title: string | null;
     try {
       const timedOut = new Promise<never>((_, reject) =>
         abort.signal.addEventListener("abort", () => reject(new Error("title call timed out")), { once: true }),

@@ -136,7 +136,9 @@ function work(store: NativeStore, id: string, tools: number): void {
       message: { content: [{ type: "tool_use", id: `t${i}`, name: "Edit", input: {} }] },
     });
   }
-  store.appendMessage(id, "agent", "assistant", { message: { content: [{ type: "text", text: "Fixed the Zoom review issues." }] } });
+  store.appendMessage(id, "agent", "assistant", {
+    message: { content: [{ type: "text", text: "Fixed the Zoom review issues." }] },
+  });
 }
 
 describe("looksWeak", () => {
@@ -150,7 +152,7 @@ describe("looksWeak", () => {
 });
 
 describe("AutoTitler retitling", () => {
-  const model = (text: string) => vi.fn(async (_input: { prompt: string }) => text);
+  const model = (text: string) => vi.fn(async (input: { prompt: string }) => (input.prompt ? text : text));
 
   it("retitles once after the first finished turn with real tool work, in 3-6 plain words", async () => {
     const store = makeStore();
@@ -183,7 +185,12 @@ describe("AutoTitler retitling", () => {
     t.taskDone(id);
     await t.idle();
     expect(store.getSession(id)!.title).toBe("Zoom Review Fixes");
-    const shifted = new AutoTitler({ store, onTitle: () => undefined, call: model("Zoom Listing And Pricing"), ...quick });
+    const shifted = new AutoTitler({
+      store,
+      onTitle: () => undefined,
+      call: model("Zoom Listing And Pricing"),
+      ...quick,
+    });
     shifted.taskDone(id);
     await shifted.idle();
     expect(store.getSession(id)!.title).toBe("Zoom Review Fixes");
@@ -214,7 +221,12 @@ describe("AutoTitler retitling", () => {
     const id = chat(store, "do the thing");
     store.setAutoTitle(id, "Do the Thing");
     work(store, id, 4);
-    const t = new AutoTitler({ store, onTitle: () => undefined, call: async () => Promise.reject(new Error("off")), ...quick });
+    const t = new AutoTitler({
+      store,
+      onTitle: () => undefined,
+      call: async () => Promise.reject(new Error("off")),
+      ...quick,
+    });
     t.turnFinished(id);
     await t.idle();
     expect(store.getSession(id)!.title).toBe("Do the Thing");
