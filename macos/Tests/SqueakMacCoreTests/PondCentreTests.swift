@@ -99,4 +99,47 @@ import Testing
         #expect(PondCentre(page: .room, item: notebook).showsPondMenu)
         #expect(!PondCentre(page: .room, duck: "dhol").showsPondMenu)
     }
+
+    /// The 2.34.8 bug: "New duck" opened from Pickle's chat still showed Pickle's subheader, branch chip and tab.
+    @Test func newDuckPageIsItsOwnStateAndNeverTheLastDucksSubheader() {
+        var c = PondCentre(page: .room, duck: "pickle")
+        #expect(c.showsDuckSubheader)
+        c.startNewDuck()
+        #expect(c.shows == .newDuck)
+        #expect(!c.showsDuckSubheader)
+        #expect(c.selectedTab == nil)
+        #expect(c.switchSelection == nil)
+        #expect(c.showsPondMenu)
+        #expect(c.page == .room)
+        // Built from live state where the last Duck is still the selected session: the Duck and item do not leak in.
+        let live = PondCentre(page: .room, duck: "pickle", item: notebook, newDuck: true)
+        #expect(live.shows == .newDuck); #expect(!live.showsDuckSubheader); #expect(live.selectedTab == nil)
+    }
+
+    @Test func newDuckPageLeavesOnTheSwitchADuckTabAnItemAndEsc() {
+        var c = PondCentre(page: .dashboard, newDuck: true)
+        #expect(c.escapeStep == .closeNewDuck)
+        c.escape(); #expect(c.shows == .page(.dashboard))
+
+        c = PondCentre(page: .room, newDuck: true); c.switchTo(.dashboard)
+        #expect(c.shows == .page(.dashboard)); #expect(c.switchSelection == .dashboard)
+
+        c = PondCentre(page: .room, newDuck: true); c.selectDuck("dhol")
+        #expect(c.shows == .duck("dhol")); #expect(c.showsDuckSubheader)
+
+        c = PondCentre(page: .room, newDuck: true); c.selectItem(notebook)
+        #expect(c.shows == .item(notebook))
+        // A swipe does not move the strip while the New duck page covers it.
+        c = PondCentre(page: .room, newDuck: true); c.swipe(to: .dashboard)
+        #expect(c.page == .room)
+    }
+
+    @Test func newDuckPageEffects() {
+        let old = PondCentre(page: .room, duck: "pickle")
+        var c = old; c.startNewDuck()
+        #expect(c.effects(from: old).openNewDuck)
+        #expect(!c.effects(from: old).leaveDuck)
+        var back = c; back.switchTo(.room)
+        #expect(back.effects(from: c).closeNewDuck)
+    }
 }

@@ -38,7 +38,9 @@ extension AppModel {
         var duck: String?
         if let s = selectedSession, WorkPaneActions.isDuckView(s), PondsModel.shared.key(of: s) == pond { duck = s.duckId ?? s.key.stringValue }
         let item = PondWorkspace(pond: pond).flatMap { tabStore.currentPondItem($0.project.id) }
-        return PondCentre(page: RoomViewPref.shared.mode(for: pond), duck: duck, item: item)
+        // The New duck page is its own centre state: it is open when the creation page is, in the pond it was opened from.
+        let composing = focus.composePage == .newThread && (location.pondKey ?? selectedSession.flatMap { PondsModel.shared.key(of: $0) }) == pond
+        return PondCentre(page: RoomViewPref.shared.mode(for: pond), duck: duck, item: item, newDuck: composing)
     }
 
     /// The one way the pond's centre changes: the switch, the swipe, Esc and a deep link each hand in an event on
@@ -51,7 +53,7 @@ extension AppModel {
         if let page = e.page { RoomViewPref.shared.set(page, for: pond) }
         if e.deselectItem { leavePondItem(pond: pond) }
         if let duck = e.openDuck { openDuck(duck) }
-        if e.leaveDuck { openPondHome(pond) }
+        if e.leaveDuck || e.closeNewDuck { openPondHome(pond) }
     }
 
     /// Opens a thread as a tab, remembering the pond page it was opened from so closing it comes back.

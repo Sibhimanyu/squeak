@@ -34,15 +34,19 @@ final class NewThreadState {
     }
     /// The busy-Main offer's answer so far ("Stay in Main" hides it until the page is opened again).
     var offer = NewChatIn.Offer()
-    /// Ducks mode (`ducksOwnBranch`): no "In:" picker; the daemon decides where the duck works unless "Work with…" names a duck or
-    /// branch (`duckPlace`). Off, none of this shows.
-    var ducksMode: Bool { conductorWorkspace == nil && AppModel.shared.ducksMode }
-    var duckPlace: DuckPlace?
-    /// The ducks and branches "Work with…" offers: the pond's, by its project.
-    var joinTargets: [DuckJoinTarget] {
-        guard let pid = pond?.projectId ?? main?.projectId else { return [] }
-        return DuckList.joinTargets(AppModel.shared.duckRows(pond: PondsModel.shared.key(forProject: pid)), excluding: nil)
+    /// Ducks mode (`ducksOwnBranch`, ADR 0003): the page never asks where. A new duck starts Pond-wide in the pond's main folder
+    /// and picks or joins Streams itself; nothing about a place is sent. Off, the classic pickers show.
+    var ducksMode: Bool { conductorWorkspace == nil && (ducksModeOverride ?? AppModel.shared.ducksMode) }
+    /// Offscreen snapshots only: draws the page as the ducks flag would.
+    @ObservationIgnored var ducksModeOverride: Bool?
+    /// People in this pond (nil until its detail loads), for whether Private makes sense.
+    var people: Int? { pond.flatMap { PondsModel.shared.detail(key: PondsModel.shared.key(forProject: $0.projectId))?.members.count } }
+    /// Which line the page shows above the message box (`.pondWide`: none).
+    var placeKind: NewChatIn.PlaceLine {
+        NewChatIn.placeLine(ducksFlag: ducksMode, conductorWorkspace: conductorWorkspace != nil, fixedPlace: fixedPlace,
+                            hasPond: pond != nil, ownerMac: pond?.ownerMac != nil, hasMain: main != nil)
     }
+    var startsPondWide: Bool { placeKind == .pondWide }
     /// The chat holding Main right now, while the choice is Main.
     var busyMain: HostSession? { main.flatMap { AppModel.shared.busyMainChat($0) } }
     var showsBusyOffer: Bool { offer.shows(choice: choice, busy: busyMain) }
@@ -82,8 +86,8 @@ final class NewThreadState {
         if let c = conductorWorkspace { return c.branch }
         return place?.displayTitle
     }
-    var folder: String? { conductorWorkspace?.path ?? (startsInMain ? main?.rootPath : nil) ?? place?.path }
-    var hasPlace: Bool { place != nil || conductorWorkspace != nil || startsInMain }
+    var folder: String? { conductorWorkspace?.path ?? ((startsInMain || startsPondWide) ? main?.rootPath : nil) ?? place?.path }
+    var hasPlace: Bool { place != nil || conductorWorkspace != nil || startsInMain || startsPondWide }
 
     /// The thread runs on the pond owner's Mac (a signed request): there is no place on this Mac to name.
     var runsOnOwner: Bool { pond?.runsOnOwner == true }
@@ -95,7 +99,7 @@ final class NewThreadState {
 
     func prepare(model: AppModel, route: NewPage = .thread(projectId: nil, workspaceId: nil), projectId: String? = nil,
                  workspaceId: String? = nil, text: String? = nil, error: String? = nil, conductorWorkspaceId: String? = nil,
-                 pond: PondThreadContext? = nil, contextPond: Bool = false, duckPlace: DuckPlace? = nil) {
+                 pond: PondThreadContext? = nil, contextPond: Bool = false) {
         loadTask?.cancel()
         self.pond = pond
         main = nil
@@ -108,9 +112,8 @@ final class NewThreadState {
         noTarget = false
         images.clear()
         place = nil
-        self.duckPlace = duckPlace
         conductorWorkspace = nil
-        // Ducks mode has no fixed stream: a branch's "+" is a new duck in the pond, working with that branch.
+        // Ducks mode has no fixed stream: a branch's "+" is a new duck in the pond, started Pond-wide like any other.
         fixedPlace = conductorWorkspaceId != nil || (projectId != nil && workspaceId != nil && !AppModel.shared.ducksMode)
         loading = true
         starting = false
@@ -140,7 +143,6 @@ final class NewThreadState {
                     ?? (workspaceId == nil ? (projectId.flatMap { id in projects.first { $0.id == id } } ?? (contextPond ? Self.contextProject(model: model, projects: projects) : nil)) : nil)
                 let ducks = AppModel.shared.ducksMode
                 if ducks, workspaceId != nil, projectId != nil {
-                    if let w = model.git.workspaces.first(where: { $0.id == workspaceId }), self.duckPlace == nil, !w.branch.isEmpty { self.duckPlace = .joinBranch(w.branch) }
                     main = projects.first { $0.id == projectId }.flatMap { MainPlace(project: $0) }
                 } else {
                     main = workspaceId == nil ? mainProject.flatMap { MainPlace(project: $0) } : nil
@@ -183,6 +185,7 @@ final class NewThreadState {
         error = nil
         guard let text = images.prepareToSend(text: form.trimmedText, folder: folder) else { starting = false; return }
         let hadImages = images.hasImages
+        let sends = NewChatIn.placement(line: placeKind, chosen: .init(main: startsInMain, newWorkspace: false, workspaceId: place?.id, place: nil))
         Task { [weak self] in
             guard let self else { return }
             var problem: String?
@@ -206,17 +209,17 @@ final class NewThreadState {
             } else if let pond {
                 let ponds = PondsModel.shared
                 started = await ponds.startThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
-                                                  workspaceId: place?.id, effort: form.effort,
+                                                  workspaceId: sends.workspaceId, effort: form.effort,
                                                   permissionMode: NativeModes.permissionMode(form.mode),
                                                   split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
-                                                  isPrivate: pond.isPrivate, main: ducksMode ? false : startsInMain, place: ducksMode ? duckPlace : nil)
+                                                  isPrivate: pond.isPrivate, main: sends.main, place: sends.place)
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let main, ducksMode {
-                // Ducks mode: the daemon decides (main read-only, the duck branches itself) unless "Work with…" chose.
+                // Ducks mode: Pond-wide, no place named; the host's ChatStarter starts it in the pond's main folder.
                 let spec = NativeNewSession(
                     agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
                     effort: form.effort, projectId: main.projectId, text: text,
-                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), place: duckPlace)
+                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), place: sends.place)
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
                 problem = why
@@ -293,7 +296,7 @@ struct NewThreadComposer: View {
                     Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
                         .font(Typo.meta).foregroundStyle(Theme.negative)
                 }
-                if state.pond != nil { shareRow }
+                if let pond = state.pond, NewDuckControls.showsPrivate(people: state.people, runsOnOwner: pond.runsOnOwner) { shareRow }
                 chipRow
             }
             if let e = state.error {
@@ -314,10 +317,9 @@ struct NewThreadComposer: View {
     // MARK: Place
 
     @ViewBuilder private var placeLine: some View {
-        let kind = NewChatIn.placeLine(ducksFlag: state.ducksMode, conductorWorkspace: state.conductorWorkspace != nil, fixedPlace: state.fixedPlace,
-                                       hasPond: state.pond != nil, ownerMac: state.pond?.ownerMac != nil, hasMain: state.main != nil)
-        if kind == .ducks, let name = state.main?.pondName ?? state.pond?.pondName {
-            ducksLine(pond: name)
+        let kind = state.placeKind
+        if kind == .pondWide {
+            EmptyView()
         } else if kind == .inMain, let main = state.main {
             VStack(alignment: .leading, spacing: 8) {
                 inLine(main)
@@ -395,44 +397,7 @@ struct NewThreadComposer: View {
 
     /// A pond's Start a thread: "pond › stream", the stream picked from the pond's own (newest first, then New stream).
     @ViewBuilder private func pondPlaceLine(_ pond: PondThreadContext) -> some View {
-        if state.ducksMode, pond.ownerMac == nil { ducksLine(pond: pond.pondName) } else { streamPlaceLine(pond) }
-    }
-
-    /// Ducks mode: "pond › New duck", with an optional "Work with…" menu (a duck or branch of the pond). No "In:" picker.
-    private func ducksLine(pond name: String) -> some View {
-        let targets = state.joinTargets
-        let chosen = state.duckPlace
-        let label: String = {
-            switch chosen {
-            case .join(let id): return targets.first { $0.kind == .duck(id) }.map { "With \($0.title)" } ?? "With another duck"
-            case .joinBranch(let b): return "On \(b)"
-            default: return "New duck"
-            }
-        }()
-        return HStack(spacing: 8) {
-            Text(verbatim: name).foregroundStyle(Theme.muted).lineLimit(1)
-            Text("›").foregroundStyle(Theme.subtle)
-            if targets.isEmpty {
-                Text(verbatim: label).foregroundStyle(Theme.ink)
-            } else {
-                SqueakMenu {
-                    Button { state.duckPlace = nil; state.focus += 1 } label: { Label("New duck", systemImage: chosen == nil ? "checkmark" : "plus") }
-                    Divider()
-                    DuckWorkWithItems(targets: targets) { state.duckPlace = $0; state.focus += 1 }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(verbatim: label).foregroundStyle(Theme.ink).lineLimit(1)
-                        Lucide(.chevronDown, size: 12, color: Theme.muted)
-                    }
-                    .padding(.horizontal, 8).frame(height: 26)
-                    .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.control))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
-                }
-                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-                .accessibilityLabel("\(label). Work with…")
-            }
-        }
-        .font(.system(size: 13))
+        streamPlaceLine(pond)
     }
 
     @ViewBuilder private func streamPlaceLine(_ pond: PondThreadContext) -> some View {
@@ -465,7 +430,7 @@ struct NewThreadComposer: View {
     /// otherwise). On the owner's Mac there is no stream to pick and nothing is private: the owner's Mac runs it for the pond.
     @ViewBuilder private func ownerPlaceLine(_ pond: PondThreadContext, owner: String, label: String) -> some View {
         let ownerLine = PondStartRequest.placeLine(ownerName: owner)
-        let here = pond.showsPicker ? label : "This Mac"
+        let here = pond.showsPicker && !state.ducksMode ? label : "This Mac"
         let current = pond.runsOnOwner ? ownerLine : here
         if pond.canRunHere {
             SqueakMenu {
@@ -596,18 +561,11 @@ struct NewThreadComposer: View {
             .popover(isPresented: $optionsOpen, arrowEdge: .top) { options.padding(14).frame(width: 300) }
     }
 
-    /// Presets, thinking, plan first and (Claude only) Split the work.
+    /// Thinking, plan first and (Claude only) Split the work. The Preset is the chip on the row, not repeated here.
     private var options: some View {
         @Bindable var state = state
         let f = state.form
         return VStack(alignment: .leading, spacing: 14) {
-            if !f.presets.isEmpty {
-                NCField("Preset") {
-                    NCSegmented(options: f.presetChoices.map { ($0.rawValue, f.presetTitle($0)) }, selection: f.activePreset.rawValue) { pick in
-                        if let p = ChatPreset(rawValue: pick) { state.form.apply(preset: p) }
-                    }
-                }
-            }
             if let m = f.chosenModel, !m.levels.isEmpty {
                 NCField("Thinking") {
                     NCSegmented(options: m.levels.map { ($0, DaemonChatModel.levelName($0)) }, selection: f.effort ?? "") { state.form.pick(effort: $0) }

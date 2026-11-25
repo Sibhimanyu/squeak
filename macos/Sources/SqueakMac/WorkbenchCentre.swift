@@ -30,14 +30,14 @@ struct WorkbenchCentre: View {
         let held = artifact.flatMap { model.artifactContext(pond: $0.pond) } != nil
         let layer = artifact != nil && !held
         let pondPage = held ? nil : PondRoute(model.baseLocation)
-        let bar = barContext(pondPage: pondPage, newDuck: newDuck && !layer)
+        let bar = barContext(pondPage: pondPage, newDuck: newDuck && !layer, composing: model.focus.composePage == .newThread)
         // New layout: the one top bar is hosted here, above every page, so it keeps its identity (never moves or rebuilds)
         // between the Dashboard, the Room, items and a Duck.
         VStack(spacing: 0) {
             if let bar {
                 PondSharedHeader(key: bar.workspace.pond, projectId: bar.workspace.project.id, member: bar.member,
                                  leadingInset: CGFloat(PondPageChrome.headerInset(sidebarClearance: Double(sidebarClearance))),
-                                 itemShowing: bar.itemShowing, inDuck: bar.inDuck, workspace: bar.workspace, strip: bar.strip)
+                                 itemShowing: bar.itemShowing, inDuck: bar.inDuck, newDuck: bar.newDuck, workspace: bar.workspace, strip: bar.strip)
             }
             ZStack {
                 workbench.workbenchLayer(hidden: pondPage != nil || layer)
@@ -68,6 +68,8 @@ struct WorkbenchCentre: View {
         var member = false
         var itemShowing = false
         var inDuck = false
+        /// The New duck page: its own centre state, with no Duck selected (PondCentre).
+        var newDuck = false
     }
 
     private var sidebarClearance: CGFloat {
@@ -75,7 +77,7 @@ struct WorkbenchCentre: View {
     }
 
     /// What the one top bar needs: a Pond's Dashboard or Room, or the Pond of the Duck whose chat is showing; nil elsewhere.
-    private func barContext(pondPage: PondRoute?, newDuck: Bool) -> BarContext? {
+    private func barContext(pondPage: PondRoute?, newDuck: Bool, composing: Bool) -> BarContext? {
         if let pondPage {
             guard case .home(let key) = pondPage, let room = PondRouteView.roomProject(key),
                   let workspace = PondWorkspace(pond: key) else { return nil }
@@ -84,8 +86,9 @@ struct WorkbenchCentre: View {
         }
         guard newDuck, let shell = model.selectedSession, let key = PondsModel.shared.key(of: shell),
               let workspace = PondWorkspace(pond: key) else { return nil }
-        let strip = workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore)
-        return BarContext(workspace: workspace, strip: strip, itemShowing: strip.currentItem != nil, inDuck: true)
+        // The New duck page is not the Duck that was open before it: no Duck is selected and no subheader follows.
+        let strip = workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore, newDuck: composing)
+        return BarContext(workspace: workspace, strip: strip, itemShowing: strip.currentItem != nil, inDuck: !composing, newDuck: composing)
     }
 
     @ViewBuilder private var workbench: some View {
@@ -114,8 +117,11 @@ struct WorkbenchCentre: View {
         let item = model.location.chatKey == nil ? nil : workspace.flatMap { model.tabStore.currentPondItem($0.project.id) }
         VStack(spacing: 0) {
             if let shell, newDuck, let workspace {
-                // New layout: the one top bar is above (WorkbenchCentre); a Duck adds one subheader and the Pond-coloured gradient.
-                DuckSubheader(session: shell, workspace: workspace).id(workspace.project.id)
+                // New layout: the one top bar is above (WorkbenchCentre); a selected Duck adds one subheader and the Pond-coloured
+                // gradient. The New duck page is its own centre state (PondCentre.showsDuckSubheader): no subheader, never the last Duck's.
+                if PondCentre(page: RoomViewPref.shared.mode(for: workspace.pond), duck: shell.duckId ?? shell.key.stringValue, newDuck: focus.composePage == .newThread).showsDuckSubheader {
+                    DuckSubheader(session: shell, workspace: workspace).id(workspace.project.id)
+                }
             } else if let shell {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
@@ -586,10 +592,8 @@ private struct WorkbenchTabs: View {
                         if case .newTerminal = DockPlusAction.of(zone: .centre, layout: dock.layout, terminals: dock.activeTerminals) {
                             NewTerminalAction.perform(model, in: .centre)
                         } else if workspace.isDucks, let pid = model.focus.pond.flatMap({ PondsModel.shared.entry($0)?.projectId }) ?? chats.first.flatMap({ model.duckPondKey($0) }).flatMap({ PondsModel.shared.entry($0)?.projectId }) {
-                            // Ducks mode: a new duck in the pond; the daemon decides where it works.
-                            // Opened from a duck's chat: the new chat works with that duck's branch.
-                            let current = chats.first(where: { $0.key == model.focus.chat }) ?? chats.first
-                            model.openNewMainThread(projectId: pid, duckPlace: current.flatMap { DuckList.plusPlace(for: $0, main: model.mainPlace(key: model.duckPondKey($0) ?? "")) })
+                            // Ducks mode: a new duck in the pond, started Pond-wide (ADR 0003); it picks its own Streams.
+                            model.openNewMainThread(projectId: pid)
                         } else if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
                         } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {
