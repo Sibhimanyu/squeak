@@ -205,6 +205,25 @@ private enum Fixtures {
         }
     }
 
+    /// The New duck page reached from a Duck's chat: its own centre state, so no Duck subheader, no selected tab, neither page
+    /// selected in the switch, and no place picker (ducks start Pond-wide).
+    static func newDuckPage(width: Double, dark: Bool) -> some View {
+        let state = NewThreadState()
+        state.ducksModeOverride = true
+        state.loading = false
+        state.pond = PondThreadContext(pondId: "p", pondName: "greenroom", projectId: "proj", choice: .new, showsPicker: true)
+        return page(width: width, height: 560, centre: PondCentre(page: .room, duck: "dhol", newDuck: true), dark: dark) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.l) {
+                    Text("New duck").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink)
+                    NewThreadComposer(state: state, onEscape: {}, onStarted: {})
+                }
+                .frame(maxWidth: 720, alignment: .leading).padding(.horizontal, Space.xl).padding(.top, Space.l)
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
     static func shots() -> [Shot] {
         var out: [Shot] = []
         func add(_ name: String, _ w: Double, _ h: Double, dark: Bool = false, _ v: some View) {
@@ -216,6 +235,7 @@ private enum Fixtures {
                 let n = Int(w)
                 add("dashboard-\(n)-\(label)", w, 640, dark: dark, dashboard(width: w, dark: dark))
                 add("room-\(n)-\(label)", w, 560, dark: dark, room(width: w, dark: dark))
+                add("new-duck-\(n)-\(label)", w, 560, dark: dark, newDuckPage(width: w, dark: dark))
                 for pond in ponds {
                     add("duck-\(pond.name)-\(n)-\(label)", w, 640, dark: dark, duckPage(width: w, seed: pond.seed, dark: dark))
                 }

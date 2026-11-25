@@ -834,6 +834,8 @@ struct PondSharedHeader: View {
     var itemShowing = false
     /// A Duck's chat is showing: neither page is selected, and picking one leaves the Duck for it.
     var inDuck = false
+    /// The New duck page is the centre: neither page, no Duck and no item is selected.
+    var newDuck = false
     /// The Pond's strip (oval tabs), drawn in this same row after the switch; nil draws no strip.
     var workspace: PondWorkspace?
     var strip: PondWorkspaceStrip?
@@ -844,7 +846,7 @@ struct PondSharedHeader: View {
         let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
         let subtitle = RoomDucks.subtitle(people: people, counts: PondsModel.shared.native(key: key).flatMap { RoomRosterStore.shared.model(for: $0.id).counts })
         let centre = PondCentre(page: RoomViewPref.shared.mode(for: key), duck: inDuck ? (strip?.row.selectedDuck ?? "") : nil,
-                                item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil)
+                                item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil, newDuck: newDuck)
         PondTopBar(
             name: name, subtitle: subtitle, leadingInset: leadingInset,
             switchSelection: centre.switchSelection,

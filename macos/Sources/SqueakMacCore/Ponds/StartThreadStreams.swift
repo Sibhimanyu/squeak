@@ -62,6 +62,10 @@ public struct PondThreadContext: Equatable, Sendable {
     /// A shared pond that could run the thread here too (it has a Git remote and this Mac has the project): the place menu offers both.
     public var canRunHere = true
 
+    public init(pondId: String, pondName: String, projectId: String, choice: StartThreadStream, showsPicker: Bool) {
+        self.pondId = pondId; self.pondName = pondName; self.projectId = projectId; self.choice = choice; self.showsPicker = showsPicker
+    }
+
     /// "Shared with <pond> · everyone in the pond can see it", or the private sentence.
     public var shareLine: String { PondThreadEntry.shareLine(pond: pondName, isPrivate: isPrivate) }
 }
