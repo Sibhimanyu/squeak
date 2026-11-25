@@ -18,9 +18,18 @@ public struct TabStore: Equatable, Sendable {
         /// The preview tab (at most one per Pond): a file, artifact or canvas opened by a single click. A later single
         /// click replaces it; pinning makes it a normal tab. Never a Duck.
         public var preview: TabItem?
+        /// The new layout keeps its item tabs in the same Pond record, independently of the classic strip.
+        fileprivate var workspaceItems: WorkspaceItems?
+        /// A background item can arrive before an old classic strip has been placed in this Pond.
+        fileprivate var workspaceOnly: Bool?
         public init(tabs: [TabItem] = [], current: TabItem? = nil, preview: TabItem? = nil) {
             self.tabs = tabs; self.current = current; self.preview = preview
         }
+    }
+
+    fileprivate struct WorkspaceItems: Codable, Equatable, Sendable {
+        var tabs: [TabItem] = []
+        var current: TabItem?
     }
 
     private var ponds: [String: Strip] = [:]
@@ -39,6 +48,41 @@ public struct TabStore: Equatable, Sendable {
     /// The saved file tabs of a Pond, in strip order.
     public func fileTabs(_ pond: String) -> [String] { tabs(pond).compactMap { $0.kind == .file ? $0.id : nil } }
 
+    public func pondItems(_ pond: String) -> [TabItem] { ponds[pond]?.workspaceItems?.tabs ?? [] }
+    public func currentPondItem(_ pond: String) -> TabItem? { ponds[pond]?.workspaceItems?.current }
+
+    /// Ducks precede every item. Opening from a Duck inserts at the head of the item group when there is no active item.
+    public mutating func openPondItem(_ item: TabItem, in pond: String, focus: Bool = true, afterDuck: Bool = false) {
+        guard !pond.isEmpty, item.isPondItem else { return }
+        var strip = ponds[pond] ?? Strip()
+        if ponds[pond] == nil { strip.workspaceOnly = true }
+        var items = strip.workspaceItems ?? WorkspaceItems()
+        Self.insert(item, into: &items.tabs, after: items.current, otherwiseFirst: afterDuck)
+        if focus { items.current = item }
+        strip.workspaceItems = items
+        ponds[pond] = strip
+    }
+
+    public mutating func deselectPondItem(in pond: String) {
+        ponds[pond]?.workspaceItems?.current = nil
+    }
+
+    @discardableResult
+    public mutating func closeCurrentPondItem(in pond: String) -> Bool {
+        guard let item = currentPondItem(pond) else { return false }
+        return closePondItem(item, in: pond)
+    }
+
+    /// Closing chooses the next item, then the previous one. With neither, the Pond page or Duck underneath resumes.
+    @discardableResult
+    public mutating func closePondItem(_ item: TabItem, in pond: String) -> Bool {
+        guard var items = ponds[pond]?.workspaceItems, let index = items.tabs.firstIndex(of: item) else { return false }
+        if items.current == item { items.current = Self.neighbour(of: index, in: items.tabs) }
+        items.tabs.remove(at: index)
+        ponds[pond]?.workspaceItems = items
+        return true
+    }
+
     // MARK: Opening and closing
 
     /// Opens `item`: switches to it when it is already open, else inserts it right after the current tab (at the end when
@@ -46,7 +90,8 @@ public struct TabStore: Equatable, Sendable {
     public mutating func open(_ item: TabItem, in pond: String) {
         guard !pond.isEmpty else { return }
         var strip = ponds[pond] ?? Strip()
-        Self.insert(item, into: &strip)
+        strip.workspaceOnly = nil
+        Self.insert(item, into: &strip.tabs, after: strip.current)
         strip.current = item
         ponds[pond] = strip
     }
@@ -59,13 +104,14 @@ public struct TabStore: Equatable, Sendable {
         guard !pond.isEmpty else { return nil }
         guard item.kind == .file || item.kind == .artifact else { open(item, in: pond); return nil }
         var strip = ponds[pond] ?? Strip()
+        strip.workspaceOnly = nil
         if strip.tabs.contains(item) { strip.current = item; ponds[pond] = strip; return nil }
         var replaced: TabItem?
         if let old = strip.preview, let at = strip.tabs.firstIndex(of: old) {
             strip.tabs[at] = item
             replaced = old
         } else {
-            Self.insert(item, into: &strip)
+            Self.insert(item, into: &strip.tabs, after: strip.current)
         }
         strip.preview = item
         strip.current = item
@@ -97,9 +143,9 @@ public struct TabStore: Equatable, Sendable {
     @discardableResult
     public mutating func close(_ item: TabItem, in pond: String) -> TabItem? {
         guard var strip = ponds[pond], let at = strip.tabs.firstIndex(of: item) else { return ponds[pond]?.current }
+        if strip.current == item { strip.current = Self.neighbour(of: at, in: strip.tabs) }
         strip.tabs.remove(at: at)
         if strip.preview == item { strip.preview = nil }
-        if strip.current == item { strip.current = strip.tabs.isEmpty ? nil : strip.tabs[min(at, strip.tabs.count - 1)] }
         ponds[pond] = strip
         return strip.current
     }
@@ -164,17 +210,28 @@ public struct TabStore: Equatable, Sendable {
             var found: String?
             for t in strip.tabs { if let key = t.chatKey, let p = pondOf(key), !p.isEmpty { found = p; break } }
             guard let pond = found else { continue }
-            if ponds[pond] == nil { ponds[pond] = strip; save(pond: pond, to: defaults); adopted.append(pond) }
+            if ponds[pond] == nil || ponds[pond]?.workspaceOnly == true {
+                var merged = strip
+                merged.workspaceItems = ponds[pond]?.workspaceItems
+                ponds[pond] = merged
+                save(pond: pond, to: defaults)
+                adopted.append(pond)
+            }
             legacy[name] = nil
             defaults.removeObject(forKey: Self.legacyPondKey(name))
         }
         return adopted
     }
 
-    private static func insert(_ item: TabItem, into strip: inout Strip) {
-        guard !strip.tabs.contains(item) else { return }
-        if let cur = strip.current, let at = strip.tabs.firstIndex(of: cur) { strip.tabs.insert(item, at: at + 1) }
-        else { strip.tabs.append(item) }
+    private static func insert(_ item: TabItem, into tabs: inout [TabItem], after current: TabItem?, otherwiseFirst: Bool = false) {
+        guard !tabs.contains(item) else { return }
+        let index = current.flatMap { tabs.firstIndex(of: $0) }.map { $0 + 1 } ?? (otherwiseFirst ? 0 : tabs.count)
+        tabs.insert(item, at: index)
+    }
+
+    private static func neighbour(of index: Int, in tabs: [TabItem]) -> TabItem? {
+        if tabs.indices.contains(index + 1) { return tabs[index + 1] }
+        return index > 0 ? tabs[index - 1] : nil
     }
 }
 
