@@ -140,6 +140,8 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var duckId: String?
     public var colourSeed: String?
     public var place: RoomPlace?
+    /// The Streams the Duck has joined, in join order; empty when none (or an older host).
+    public var streams: [RoomStream] = []
     public var id: String { sessionId }
 
     /// The duck's name: the chosen one, else the chat's title.
@@ -163,7 +165,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, title, agent, state, workingOn, workingOnAt, lastState, lastAt, progress, ask, turnStartedAt, filesChanged
-        case name, role, duty, lastActiveAt, duckId, colourSeed, place
+        case name, role, duty, lastActiveAt, duckId, colourSeed, place, streams
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -186,6 +188,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         duckId = (try? c.decode(String.self, forKey: .duckId)).flatMap { $0.isEmpty ? nil : $0 }
         colourSeed = (try? c.decode(String.self, forKey: .colourSeed)).flatMap { $0.isEmpty ? nil : $0 }
         place = try? c.decode(RoomPlace.self, forKey: .place)
+        streams = c.streams(forKey: .streams)
     }
 }
 

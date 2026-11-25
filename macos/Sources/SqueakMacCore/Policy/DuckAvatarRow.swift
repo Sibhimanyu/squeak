@@ -25,6 +25,8 @@ public struct DuckRowAvatar: Equatable, Sendable, Identifiable {
     public var presenceLine: String
     /// The Duck's current chat: nil until it has had a Task (nothing to open).
     public var sessionId: String?
+    /// The Streams it is in (join order); empty when it works in the Pond itself.
+    public var streams: [RoomStream] = []
     public var onDuty: Bool { presence != .off }
     /// The working glyph shows only on a working Duck.
     public var showsWorkingGlyph: Bool { presence == .working }
@@ -50,7 +52,7 @@ public struct DuckRowModel: Equatable, Sendable {
 public enum DuckAvatarRow {
     public static func build(roster: DuckRoster, place: DuckRowPlace) -> DuckRowModel {
         func avatar(_ d: RosterDuck) -> DuckRowAvatar {
-            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId)
+            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams)
         }
         var ducks = roster.onDuty.map(avatar)
         switch place {

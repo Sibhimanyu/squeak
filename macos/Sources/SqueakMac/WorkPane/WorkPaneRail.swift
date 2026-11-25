@@ -49,9 +49,8 @@ struct WorkPaneRail: View {
         .accessibilityLabel("Rail")
         // The Pond-wide count behind the Changes badge is read now and then while the window shows this page.
         .task(id: scope.key) {
-            guard scope.isPond else { return }
             while !Task.isCancelled {
-                if model.windowVisible { await RailChangesSource.refresh(scope: scope, model: model) }
+                if model.windowVisible { await RailChangesSource.refreshBadge(scope: scope, model: model) }
                 try? await Task.sleep(for: .seconds(20))
             }
         }

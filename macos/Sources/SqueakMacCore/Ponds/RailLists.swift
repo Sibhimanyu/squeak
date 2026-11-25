@@ -29,24 +29,58 @@ public struct RailChangeSection: Equatable, Identifiable, Sendable {
     /// Changed files the host did not list (its list is capped).
     public var hidden: Int
     public var isDuck: Bool
+    /// The Duck and the Stream (workspace) this section is; nil for Main.
+    public var duckId: String? = nil
+    public var streamId: String? = nil
+    /// The Duck is in more than one Stream: each of its Streams is its own section, in join order.
+    public var streamCount: Int = 1
+    /// Not the Duck's first Stream: the Duck's name is drawn once, above its first Stream only.
+    public var continuesDuck: Bool = false
 
-    /// "Review all from Pip": opens every one of this Duck's changes in one tab. Only for a Duck with a chat.
-    public var reviewAllLabel: String? { isDuck && sessionKey != nil && !rows.isEmpty ? "Review all from \(title)" : nil }
+    /// "Review all from Pip" (one Stream) or "Review all from Pip on sq/login" (several): opens this section's changes in one
+    /// tab. Only for a Duck with a chat.
+    public var reviewAllLabel: String? {
+        guard isDuck, sessionKey != nil, !rows.isEmpty else { return nil }
+        if streamCount > 1, let branch, !branch.isEmpty { return "Review all from \(title) on \(branch)" }
+        return "Review all from \(title)"
+    }
+}
+
+/// What the Changes list is narrowed to when a Duck's chip opened it.
+public enum RailChangeFilter: Equatable, Sendable {
+    /// One Stream (its workspace id).
+    case stream(String)
+    /// The Pond's own folder (the "Pond" chip).
+    case pond
 }
 
 public enum RailChanges {
     public static let mainTitle = "Main"
 
-    /// A Pond's changes by Duck, then Main's uncommitted ones. Ducks with nothing changed are left out; the host's order is
-    /// kept (the Duck with the newest work first). `sessions` finds the chat behind each Duck, newest activity wins;
-    /// `mainSessionKey` is a chat working in the Pond's own folder.
+    /// A Pond's changes by Duck, then by Stream within the Duck, then Main's uncommitted ones. A Duck's Streams sit together
+    /// in the host's order (join order); the Duck with the newest work comes first. Streams with nothing changed are left
+    /// out. `sessions` finds the chat behind each Duck, newest activity wins; `mainSessionKey` is a chat working in the
+    /// Pond's own folder.
     public static func pondSections(_ changes: HostPondChanges, sessions: [HostSession], mainSessionKey: String?) -> [RailChangeSection] {
+        var order: [String] = []
+        var byDuck: [String: [HostDuckChanges]] = [:]
+        for duck in changes.ducks {
+            if byDuck[duck.duckId] == nil { order.append(duck.duckId) }
+            byDuck[duck.duckId, default: []].append(duck)
+        }
         var out: [RailChangeSection] = []
-        for duck in changes.ducks where !duck.changes.files.isEmpty {
-            out.append(RailChangeSection(
-                id: "duck:\(duck.duckId)", title: duck.duckName, branch: duck.branch.isEmpty ? nil : duck.branch,
-                sessionKey: sessionKey(forDuck: duck.duckId, in: sessions), rows: duck.changes.files.map(row),
-                hidden: max(0, duck.changes.fileCount - duck.changes.files.count), isDuck: true))
+        for id in order {
+            let streams = byDuck[id] ?? []
+            var first = true
+            for duck in streams where !duck.changes.files.isEmpty {
+                out.append(RailChangeSection(
+                    id: "duck:\(duck.duckId):\(duck.workspaceId)", title: duck.duckName, branch: duck.branch.isEmpty ? nil : duck.branch,
+                    sessionKey: sessionKey(forDuck: duck.duckId, in: sessions), rows: duck.changes.files.map(row),
+                    hidden: max(0, duck.changes.fileCount - duck.changes.files.count), isDuck: true,
+                    duckId: duck.duckId, streamId: duck.workspaceId.isEmpty ? nil : duck.workspaceId,
+                    streamCount: streams.count, continuesDuck: !first))
+                first = false
+            }
         }
         if let main = changes.main, !main.changes.files.isEmpty {
             out.append(RailChangeSection(
@@ -54,6 +88,27 @@ public enum RailChanges {
                 hidden: max(0, main.changes.fileCount - main.changes.files.count), isDuck: false))
         }
         return out
+    }
+
+    /// A Duck view's Changes from the Pond's sections: that Duck's Streams only, narrowed further by a chip's filter.
+    /// The Pond chip shows Main's section.
+    public static func narrowed(_ sections: [RailChangeSection], duckId: String?, filter: RailChangeFilter?) -> [RailChangeSection] {
+        var kept = sections
+        if case .pond = filter { return kept.filter { !$0.isDuck } }
+        if let duckId { kept = kept.filter { $0.duckId == duckId } }
+        if case .stream(let id) = filter { kept = kept.filter { $0.streamId == id } }
+        return kept
+    }
+
+    /// The line over a narrowed list: "Showing sq/login" or "Showing the Pond's own folder"; nil when not narrowed.
+    public static func filterLine(_ filter: RailChangeFilter?, streams: [RoomStream]) -> String? {
+        switch filter {
+        case .none: return nil
+        case .pond: return "Showing the Pond\u{2019}s own folder"
+        case .stream(let id):
+            let label = streams.first { $0.workspaceId == id }.map { $0.branch.isEmpty ? ($0.title ?? "this Stream") : $0.branch } ?? "this Stream"
+            return "Showing \(label)"
+        }
     }
 
     /// A Duck view's list: that Duck's changes only, from its chat's own list.
@@ -78,8 +133,13 @@ public enum RailChanges {
     }
 
     /// What an empty list says.
-    public static func emptyLine(isPond: Bool) -> String {
-        isPond ? "Nothing has changed in this Pond." : "This Duck has not changed anything."
+    public static func emptyLine(isPond: Bool, filter: RailChangeFilter? = nil) -> String {
+        switch filter {
+        case .stream: return "Nothing has changed in this Stream."
+        case .pond: return "Nothing has changed in the Pond\u{2019}s own folder."
+        case .none: break
+        }
+        return isPond ? "Nothing has changed in this Pond." : "This Duck has not changed anything."
     }
 
     private static func row(_ f: HostChangeFile) -> RailChangeRow {

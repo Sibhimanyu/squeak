@@ -91,9 +91,11 @@ struct RailChangesPopover: View {
     var body: some View {
         RailPopoverFrame(title: "Changes") {
             let sections = RailChangesSource.sections(scope: scope, model: model)
+            let filter = RailPopoverState.shared.changesFilter
+            if let filter { filterBar(filter) }
             if sections.isEmpty {
                 RailEmptyLine(text: RailChangesSource.isLoaded(scope: scope, model: model)
-                    ? RailChanges.emptyLine(isPond: scope.isPond) : "Reading the changes…")
+                    ? RailChanges.emptyLine(isPond: scope.isPond, filter: filter) : "Reading the changes…")
                 Spacer(minLength: 0)
             } else {
                 RailListScroll {
@@ -126,10 +128,29 @@ struct RailChangesPopover: View {
         .task { await RailChangesSource.refresh(scope: scope, model: model, force: true) }
     }
 
+    /// Flow: a Stream chip opened this list narrowed to one Stream; "Show all" widens it to everything the Duck changed.
+    private func filterBar(_ filter: RailChangeFilter) -> some View {
+        let streams: [RoomStream]
+        if case .duck(let s) = scope { streams = model.pondWorkspace?.roster.ducks?.first { $0.id == s.duckId }?.streams ?? [] } else { streams = [] }
+        return HStack(spacing: Space.s) {
+            Text(verbatim: RailChanges.filterLine(filter, streams: streams) ?? "").font(Typo.meta).foregroundStyle(Theme.muted).fixedSize()
+            Spacer(minLength: Space.m)
+            Button("Show all") { RailPopoverState.shared.changesFilter = nil }
+                .buttonStyle(.plain).font(Typo.meta).fontWeight(.semibold).foregroundStyle(Theme.ink).fixedSize().pointerHand()
+                .accessibilityLabel("Show all changes")
+        }
+        .padding(.horizontal, Space.m).frame(height: 30)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
     private func sectionHeader(_ section: RailChangeSection) -> some View {
         HStack(spacing: Space.s) {
-            Text(verbatim: section.title).font(Typo.meta).fontWeight(.semibold).foregroundStyle(Theme.muted)
-            if let branch = section.branch { Text(verbatim: branch).font(Typo.meta).foregroundStyle(Theme.subtle) }
+            // A Duck in several Streams: its name once, then one header per Stream under it.
+            if !section.continuesDuck { Text(verbatim: section.title).font(Typo.meta).fontWeight(.semibold).foregroundStyle(Theme.muted) }
+            if let branch = section.branch {
+                if section.continuesDuck { Lucide(.gitBranch, size: 10, color: Theme.subtle) }
+                Text(verbatim: branch).font(Typo.meta).foregroundStyle(Theme.subtle)
+            }
         }
         .fixedSize().padding(.horizontal, Space.s).padding(.top, Space.s).padding(.bottom, 2)
         .accessibilityAddTraits(.isHeader)
@@ -163,8 +184,14 @@ private extension String {
             return RailChanges.pondSections(
                 changes, sessions: model.allSessions, mainSessionKey: p.changesSession(in: model.allSessions)?.key.stringValue)
         case .duck(let s):
-            let files = model.changesStore(for: s.key.hostSessionId).changes?.files ?? []
             let duck = model.pondWorkspace?.roster.ducks?.first { $0.id == s.duckId }
+            let filter = RailPopoverState.shared.changesFilter
+            // A Duck in Streams (or opened from a chip) reads the Pond's list narrowed to it: that list groups per Stream.
+            if usesPondList(s, model: model) {
+                guard let projectId = model.pondWorkspace?.project.id, let changes = PondChangesStore.shared.model(for: projectId).changes else { return [] }
+                return RailChanges.narrowed(RailChanges.pondSections(changes, sessions: model.allSessions, mainSessionKey: nil), duckId: s.duckId, filter: filter)
+            }
+            let files = model.changesStore(for: s.key.hostSessionId).changes?.files ?? []
             return RailChanges.duckSection(
                 name: duck?.name ?? model.workbenchTitle(s), duckId: s.duckId, branch: s.branch, sessionKey: s.key.stringValue, files: files)
         }
@@ -172,15 +199,38 @@ private extension String {
 
     static func isLoaded(scope: WorkPaneScope, model: AppModel) -> Bool {
         switch scope {
-        case .pond(let p): PondChangesStore.shared.model(for: p.projectId).loaded
-        case .duck(let s): model.changesStore(for: s.key.hostSessionId).changes != nil
+        case .pond(let p): return PondChangesStore.shared.model(for: p.projectId).loaded
+        case .duck(let s):
+            if usesPondList(s, model: model), let id = model.pondWorkspace?.project.id { return PondChangesStore.shared.model(for: id).loaded }
+            return model.changesStore(for: s.key.hostSessionId).changes != nil
+        }
+    }
+
+    /// A Duck in Streams, or a list a chip narrowed, reads the Pond's grouped list.
+    private static func usesPondList(_ s: HostSession, model: AppModel) -> Bool {
+        let duck = model.pondWorkspace?.roster.ducks?.first { $0.id == s.duckId }
+        return !(duck?.streams.isEmpty ?? true) || RailPopoverState.shared.changesFilter != nil
+    }
+
+    /// The rail's badge count, read now and then: the Pond's list for a Pond page, or for a Duck that is in Streams.
+    static func refreshBadge(scope: WorkPaneScope, model: AppModel) async {
+        switch scope {
+        case .pond: await refresh(scope: scope, model: model)
+        case .duck(let s):
+            guard usesPondList(s, model: model), let id = model.pondWorkspace?.project.id else { return }
+            await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost)
         }
     }
 
     static func refresh(scope: WorkPaneScope, model: AppModel, force: Bool = false) async {
         switch scope {
         case .pond(let p): await PondChangesStore.shared.model(for: p.projectId).refresh(projectId: p.projectId, host: model.nativeHost, force: force)
-        case .duck(let s): await model.changesStore(for: s.key.hostSessionId).refresh(sessionKey: s.key.hostSessionId, visible: true, activityChanged: true)
+        case .duck(let s):
+            if usesPondList(s, model: model), let id = model.pondWorkspace?.project.id {
+                await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost, force: force)
+            } else {
+                await model.changesStore(for: s.key.hostSessionId).refresh(sessionKey: s.key.hostSessionId, visible: true, activityChanged: true)
+            }
         }
     }
 }

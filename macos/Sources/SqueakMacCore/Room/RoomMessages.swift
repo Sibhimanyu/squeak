@@ -112,7 +112,7 @@ public struct RoomDisclosure: Sendable, Equatable {
 /// A duck's state change as one short line (took it, blocked, finished) or its spec+plan card. The detail shows only
 /// when the line is opened; a line with no detail has nothing to open.
 public struct RoomStatusLine: Sendable, Equatable {
-    public enum Kind: Sendable, Equatable { case took, blocked, done, plan }
+    public enum Kind: Sendable, Equatable { case took, blocked, done, plan, stream }
     public var kind: Kind
     public var sessionId: String?
     public var name: String
@@ -123,14 +123,22 @@ public struct RoomStatusLine: Sendable, Equatable {
     public var commentTarget: String?
     /// The canvases a done line carries, each a card that opens it.
     public var canvases: [RoomCanvasCard] = []
+    /// A stream line's whole words after the Duck's name ("joined Stream Login"); the line's verb.
+    public var phrase: String? = nil
     public var isExpandable: Bool { !(detail ?? "").isEmpty }
     /// Always closed at first.
     public var disclosure: RoomDisclosure { RoomDisclosure(startsOpen: false) }
     public var verb: String {
-        switch kind { case .took: "took it"; case .blocked: "is blocked"; case .done: "finished"; case .plan: "posted a plan" }
+        switch kind { case .took: "took it"; case .blocked: "is blocked"; case .done: "finished"; case .plan: "posted a plan"; case .stream: phrase ?? "joined a Stream" }
     }
     public static func kind(of post: RoomPostKind) -> Kind? {
         switch post { case .working: .took; case .needs: .blocked; case .done: .done; case .plan: .plan; case .message, .handoff: nil }
+    }
+
+    /// Squeak's own Stream lines ("created Stream Login", "joined Stream Login", "left Stream Login") that the host posts under the
+    /// Duck's name when it opens, joins or leaves a Stream. Anything else Squeak says stays out of the Room.
+    public static func isStreamLine(_ text: String) -> Bool {
+        ["created Stream ", "joined Stream ", "left Stream "].contains { text.hasPrefix($0) && text.count > $0.count }
     }
 }
 
@@ -269,6 +277,12 @@ public enum RoomMessages {
                     detail: p.detail, commentTarget: kind == .plan && (!memberView || canMakeMemberTask) ? p.id : nil, canvases: kind == .done ? p.canvases : [])
                 entries.append(Entry(at: p.at, order: 1, content: .system(RoomSystemLine(
                     id: r.id, at: p.at, text: "\(name) \(status.verb): \(p.text)", jobId: nil, buttons: [], opens: sid, status: status))))
+            } else if p.author.kind == .squeak, p.level == .room, p.kind == .message, let sid = p.sessionId, RoomStatusLine.isStreamLine(p.text) {
+                // A Duck opened, joined or left a Stream: a quiet moment line under the Duck's name, like its other state lines.
+                let name = threads[sid]?.duckName ?? RoomPresentation.authorName(p.author)
+                let status = RoomStatusLine(kind: .stream, sessionId: sid, name: name, agent: threads[sid]?.agent, summary: "", phrase: p.text)
+                entries.append(Entry(at: p.at, order: 1, content: .system(RoomSystemLine(
+                    id: r.id, at: p.at, text: "\(name) \(p.text)", jobId: nil, buttons: [], opens: sid, status: status))))
             } else if p.author.kind == .person, p.level == .room {
                 // A Member's own messages (from any of their Macs) are theirs by member id; the Owner's are "owner" only on the Owner's Mac.
                 let mine = r.mine || r.pending || ["You"].contains(p.author.name) || p.author.id == "me"
