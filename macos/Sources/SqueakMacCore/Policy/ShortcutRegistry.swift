@@ -35,7 +35,7 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen, minimize, closeWindow
+    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen, minimize, closeWindow, stepBack
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
     case newTab, reopenTab, closeTab, nextTab, previousTab, moveTabLeft, moveTabRight, diffView
     case nextAttention, expandTools, focusComposer
@@ -99,6 +99,8 @@ public enum ShortcutRegistry {
         e(.minimize, "Panes", "Minimize the window", KeyChord("M", c)),
         // ⌘W closes the tab first, so the window itself has its own chord.
         e(.closeWindow, "Panes", "Close the window", KeyChord("W", [c, s])),
+        // Esc steps back one level (EscapeRule): close the work pane, then Duck to Room, then Room to Dashboard. Never leaves full screen.
+        e(.stepBack, "Panes", "Step back: close the work pane, Duck to Room, Room to Dashboard", KeyChord("Esc")),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
         e(.newChat, "Stream", "New pond", KeyChord("N", c)),
         e(.newWorkspace, "Stream", "New stream", KeyChord("N", [c, s])),

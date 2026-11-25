@@ -113,6 +113,20 @@ struct RoomTaskCardView: View {
     var open: (() -> Void)?
     @Environment(\.roomPlaceContext) private var context
     @State private var trimming = false
+    @State private var hoverOwner = false
+    @Environment(\.roomThreads) private var threads
+
+    /// The Duck that has the Task: its avatar and name are one hit target, like everywhere else in the Room.
+    @ViewBuilder private var owner: some View {
+        if let target = PondClick.owner(of: card), let thread = threads.first(where: { $0.sessionId == target.duck }) {
+            HStack(spacing: 6) {
+                DuckHitAvatar(target: target, name: thread.duckName, hovering: hoverOwner, set: { hoverOwner = $0 }, avatar: AnyView(DuckAvatar(sessionId: thread.sessionId, agent: thread.agent, size: 20)))
+                DuckHitName(target: target, name: thread.duckName, hovering: hoverOwner, set: { hoverOwner = $0 }) {
+                    Text(verbatim: thread.duckName).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -120,6 +134,7 @@ struct RoomTaskCardView: View {
                 Text(verbatim: card.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
                     .onTapGesture { open?() }.pointerHand(open != nil)
                 stateBadge
+                owner
                 if card.trimmable {
                     Button { trimming = true } label: {
                         Text(verbatim: card.discussionSummary).font(.system(size: 12)).foregroundStyle(Theme.muted)
@@ -128,13 +143,18 @@ struct RoomTaskCardView: View {
                     .popover(isPresented: $trimming, arrowEdge: .bottom) { trimList }
                 }
                 if card.canDrop { Button("Drop") { act(card.taskId, .drop, nil) }.buttonStyle(SmallButtonStyle(role: .quiet)) }
+                if let open { Button("Open", action: open).buttonStyle(SmallButtonStyle(role: .secondary)) }
             }
             if let line = card.routing { routingLine(line) }
             if let p = card.parentTitle { Text(verbatim: "Part of \(p)").font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1) }
             if let r = card.result { Text(verbatim: r).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.center) }
             if let e = card.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative) }
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 2)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: 560)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine).accessibilityLabel(card.spoken)
     }
 

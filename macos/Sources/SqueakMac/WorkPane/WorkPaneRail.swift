@@ -1,18 +1,18 @@
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md 8.12: the slim icon rail on the right edge of a Duck's chat. One icon per work pane view; the selected one
+// DESIGN.md 8.12: the slim icon rail on the right edge of a Duck's chat (and of a Pond's Room and Dashboard). One icon per work pane view; the selected one
 // has the `selected` fill and a 3pt duck-yellow bar at the rail's edge; Changes carries the changed-file count.
 
 struct WorkPaneRail: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = WorkPaneStore.shared
-        let duck = WorkPaneActions.duckKey(session)
+        let duck = scope.key
         let shown = store.pane.current == duck ? store.pane.shown : nil
-        let changed = model.changesStore(for: session.key.hostSessionId).changes?.files.count
+        let changed = scope.changesSession(model).flatMap { model.changesStore(for: $0.key.hostSessionId).changes?.files.count }
         VStack(spacing: 6) {
             ForEach(WorkPaneView.allCases) { view in
                 WorkPaneRailButton(view: view, selected: shown == view, badge: view == .changes ? WorkPaneMetrics.badge(count: changed) : nil) {

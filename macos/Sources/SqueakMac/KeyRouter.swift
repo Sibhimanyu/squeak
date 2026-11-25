@@ -65,6 +65,7 @@ final class KeyRouter {
 
     func install(model: AppModel) {
         self.model = model
+        WindowEscape.install()
         guard monitors.isEmpty else { return }
         // The terminal takes and gives up the keys without an event (a new tab, a collapse): look again whenever a window updates.
         monitors.append(NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { n in

@@ -179,3 +179,26 @@ public struct PondOriginStack: Sendable, Equatable {
 
     public func has(tab: String) -> Bool { tabs.contains(tab) }
 }
+
+/// What stays the same while a pond's Dashboard and Room swap (DESIGN.md 7, 8.12): the header, its height and the Dashboard |
+/// Room switch are one view above both pages, and the Duck row is one row whose only change is which item is selected.
+/// Only the content below moves. Pure, so the choice is tested rather than drawn twice.
+public enum PondPageChrome {
+    /// The Duck row's selection for a page: the Room is selected on the Room page, nothing on the Dashboard.
+    public static func rowPlace(page: PondPage) -> DuckRowPlace {
+        page == .room ? .room : .dashboard
+    }
+
+    /// The header's leading room for the sidebar toggle: none while the Duck row (which carries it) is drawn. Independent of
+    /// the page, so the header never shifts between the two.
+    public static func headerInset(rowShown: Bool, sidebarClearance: Double) -> Double {
+        rowShown ? 0 : sidebarClearance
+    }
+
+    /// Both pages have the header; only the content below it changes.
+    public static func pageHasHeader(_ page: PondPage) -> Bool { true }
+
+    /// A page change from the switch or the keyboard is an animated one-curve slide of the content; a pond that has no
+    /// Room (no host project) has one page and nothing to swap.
+    public static func swaps(hasRoom: Bool, from: PondPage, to: PondPage) -> Bool { hasRoom && from != to }
+}

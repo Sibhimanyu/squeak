@@ -6,14 +6,14 @@ import SwiftUI
 // the existing view the rail chose (Changes / Files / Artifacts / Terminal), hosted as it is. The rail is the only switcher.
 
 struct WorkPanePane: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     let view: WorkPaneView
     let width: CGFloat
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = WorkPaneStore.shared
-        let duck = WorkPaneActions.duckKey(session)
+        let duck = scope.key
         VStack(spacing: 0) {
             header(store, duck: duck)
             Rectangle().fill(Theme.line).frame(height: 1)
@@ -30,7 +30,7 @@ struct WorkPanePane: View {
     private func header(_ store: WorkPaneStore, duck: String) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: Space.s) {
-                Text(verbatim: model.workbenchTitle(session)).font(Typo.heading).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                Text(verbatim: scope.title).font(Typo.heading).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: Space.s)
                 Button { store.setPinned(!store.pane.pinned) } label: {
                     Image(systemName: store.pane.pinned ? "pin.fill" : "pin").font(.system(size: 13))
@@ -53,10 +53,10 @@ struct WorkPanePane: View {
 
     @ViewBuilder private var content: some View {
         switch view {
-        case .changes: WorkPaneChanges(session: session)
-        case .files: WorkPaneFiles(session: session)
-        case .artifacts: WorkPaneArtifacts(session: session)
-        case .terminal: WorkPaneTerminal(session: session)
+        case .changes: WorkPaneChanges(scope: scope)
+        case .files: WorkPaneFiles(scope: scope)
+        case .artifacts: WorkPaneArtifacts(scope: scope)
+        case .terminal: WorkPaneTerminal(scope: scope)
         }
     }
 }
@@ -83,42 +83,61 @@ private struct WorkPaneBack: View {
 }
 
 private struct WorkPaneChanges: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     @Environment(AppModel.self) private var model
     @AppStorage("changesAsTree") private var asTree = false
 
-    private var files: FilesModel? { session.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) } }
+    /// The Duck's chat, or (a Pond) a real session working in the Pond's folder; nil when nothing runs there.
+    private var session: HostSession? { scope.changesSession(model) }
+    private var files: FilesModel? {
+        switch scope {
+        case .duck(let s): s.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
+        case .pond(let p): model.filesModel(root: p.root)
+        }
+    }
 
     var body: some View {
-        if let files, files.review.isOpen {
-            VStack(spacing: 0) {
-                WorkPaneBack(title: "Changes") { files.closeReview() }
-                ReviewView(files: files, session: session).heresayPrivate()
+        if let session {
+            if let files, files.review.isOpen {
+                VStack(spacing: 0) {
+                    WorkPaneBack(title: "Changes") { files.closeReview() }
+                    ReviewView(files: files, session: session).heresayPrivate()
+                }
+            } else {
+                VStack(spacing: 0) {
+                    let count = model.changesStore(for: session.key.hostSessionId).changes?.files.count
+                    HStack {
+                        Text(verbatim: count.map(ChangeListing.header(count:)) ?? "Changes").font(Typo.label).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 0)
+                        Button { asTree.toggle() } label: {
+                            Lucide(asTree ? .list : .folderTree, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help(asTree ? "Show as a list" : "Show as a tree").accessibilityLabel(asTree ? "Show as a list" : "Show as a tree")
+                    }
+                    .padding(.horizontal, Space.m).frame(height: 34)
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    ChangesTab(session: session, activityStamp: model.activity.count, asTree: asTree).heresayPrivate()
+                }
             }
         } else {
-            VStack(spacing: 0) {
-                let count = model.changesStore(for: session.key.hostSessionId).changes?.files.count
-                HStack {
-                    Text(verbatim: count.map(ChangeListing.header(count:)) ?? "Changes").font(Typo.label).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 0)
-                    Button { asTree.toggle() } label: {
-                        Lucide(asTree ? .list : .folderTree, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).help(asTree ? "Show as a list" : "Show as a tree").accessibilityLabel(asTree ? "Show as a list" : "Show as a tree")
-                }
-                .padding(.horizontal, Space.m).frame(height: 34)
-                Rectangle().fill(Theme.line).frame(height: 1)
-                ChangesTab(session: session, activityStamp: model.activity.count, asTree: asTree).heresayPrivate()
-            }
+            // A Pond whose own folder has no Duck working in it: nothing to read, and nothing is made up.
+            Text("Nothing is changing in the Pond's own folder. A Duck's changes show in its own view.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }
 
 private struct WorkPaneFiles: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     @Environment(AppModel.self) private var model
 
-    private var files: FilesModel? { session.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) } }
+    private var root: String? {
+        switch scope {
+        case .duck(let s): s.cwd.flatMap { $0.isEmpty ? nil : $0 }
+        case .pond(let p): p.root
+        }
+    }
+    private var files: FilesModel? { root.map { model.filesModel(root: $0) } }
 
     var body: some View {
         if let files, let file = files.activeFile {
@@ -127,13 +146,16 @@ private struct WorkPaneFiles: View {
                 FileViewer(files: files, file: file).id(file.path)
             }
         } else {
-            FilesTab(session: session).heresayPrivate()
+            switch scope {
+            case .duck(let s): FilesTab(session: s).heresayPrivate()
+            case .pond(let p): FilesTab(root: p.root, changesSession: p.changesSession(in: model.allSessions), storeKey: p.paneKey).heresayPrivate()
+            }
         }
     }
 }
 
 private struct WorkPaneArtifacts: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -142,9 +164,11 @@ private struct WorkPaneArtifacts: View {
                 WorkPaneBack(title: "Artifacts") { model.leaveArtifact() }
                 ArtifactViewerPage(pond: pond, path: path, embedded: true).id(path)
             }
-        } else if let remote = StreamArtifactsPin.remoteKey(for: session) {
+        } else if case .pond(let p) = scope {
+            ArtifactsTab(projectId: p.projectId)
+        } else if case .duck(let session) = scope, let remote = StreamArtifactsPin.remoteKey(for: session) {
             RemoteArtifactsTab(key: remote)
-        } else if let project = StreamArtifactsPin.projectId(for: session) {
+        } else if case .duck(let session) = scope, let project = StreamArtifactsPin.projectId(for: session) {
             ArtifactsTab(projectId: project)
         } else {
             Text("This Duck's Pond has no artifacts yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
@@ -153,13 +177,20 @@ private struct WorkPaneArtifacts: View {
     }
 }
 
-/// The Duck's terminal, in the pane (there is no bottom dock in the new layout). Shell chips appear with a second shell.
+/// The Duck's (or the Pond's folder's) terminal, in the pane (there is no bottom dock in the new layout). Shell chips appear with a second shell.
 private struct WorkPaneTerminal: View {
-    let session: HostSession
+    let scope: WorkPaneScope
     private let host = TerminalHost.shared
 
+    private var cwd: String? {
+        switch scope {
+        case .duck(let s): s.cwd
+        case .pond(let p): p.root
+        }
+    }
+
     var body: some View {
-        let folder = TerminalWorkspace.availability(cwd: session.cwd).folder
+        let folder = TerminalWorkspace.availability(cwd: cwd).folder
         let tabs = folder.map { host.registry.tabs($0) } ?? []
         let selected = folder.flatMap { host.registry.selected($0)?.id }
         VStack(spacing: 0) {
@@ -184,7 +215,10 @@ private struct WorkPaneTerminal: View {
                 .padding(.horizontal, Space.s).frame(height: 32)
                 Rectangle().fill(Theme.line).frame(height: 1)
             }
-            TerminalPanelView(session: session)
+            switch scope {
+            case .duck(let session): TerminalPanelView(session: session)
+            case .pond(let p): TerminalPanelView(session: nil, cwd: p.root)
+            }
         }
         .onAppear {
             host.focusPending = true

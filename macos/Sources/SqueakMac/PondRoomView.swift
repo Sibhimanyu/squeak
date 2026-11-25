@@ -237,7 +237,8 @@ struct PondRoomView: View {
     var key: String?
     /// Room for the sidebar toggle when the sidebar is closed.
     var leadingInset: CGFloat = 0
-    /// Room for the sidebar toggle when the sidebar is closed.
+    /// False when the pond's one shared header is drawn above both pages (new layout): the page is then content only.
+    var showsHeader = true
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -261,7 +262,7 @@ struct PondRoomView: View {
         let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.branch)
             + (model.native.projects.first { $0.id == projectId }.map { [$0.defaultBranch] } ?? [])
         VStack(spacing: 0) {
-            if let key { RoomHeader(key: key, ducks: RoomDucks.headerDucks(room.feed.threads), open: openThread, leadingInset: leadingInset) }
+            if showsHeader, let key { RoomHeader(key: key, ducks: RoomDucks.headerDucks(room.feed.threads), open: openThread, leadingInset: leadingInset) }
             content(room)
         }
         .overlay(alignment: .top) {
@@ -323,7 +324,7 @@ struct PondRoomView: View {
             ScrollView {
                 // Eager, not lazy: every row of the newest window is laid out at once, so the bottom anchor is exact from the
                 // first layout and the slide's picture of the Room shows real rows while the page is off screen.
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: RoomBubblePlan.betweenGroups) {
                     if items.isEmpty && working.isEmpty {
                         Text(verbatim: FirstPondJourney.emptyRoom)
                             .font(.system(size: 13)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, Space.xl)
@@ -347,6 +348,7 @@ struct PondRoomView: View {
                         .onDisappear { atBottom = false }
                 }
                 .environment(\.roomMemberView, member)
+                .environment(\.roomPondId, key.flatMap { PondsModel.shared.pond(key: $0)?.id })
                 .environment(\.roomOpenCanvas, { card in
                     if let key { model.openCanvas(pond: key, path: card.openPath(memberView: member)) }
                 })

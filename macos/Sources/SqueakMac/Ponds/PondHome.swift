@@ -40,13 +40,18 @@ struct PondRouteView: View {
             Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
         } else if case .home(let project) = route, let room = roomProject(project) {
             // New layout (DESIGN.md 8.12): the Duck row sits above both pages (Room and Dashboard), so it does not slide.
-            let rowPlace: DuckRowPlace = RoomViewPref.shared.mode(for: project) == .room ? .room : .dashboard
+            let page = RoomViewPref.shared.mode(for: project)
+            let rowPlace = PondPageChrome.rowPlace(page: page)
             if MacLayoutPreference.shared.isNew, DuckAvatarRowView.isAvailable(pond: project) {
                 // Nobody on duty: the row is not drawn, and the pond header below carries the sidebar clearance itself.
-                let rowShown = DuckAvatarRowView.isShown(pond: project, place: rowPlace)
+                let rowShown = DuckAvatarRowView.isShown(pond: project, place: .dashboard)
+                let inset = PondPageChrome.headerInset(rowShown: rowShown, sidebarClearance: Double(sidebarClearance))
+                // One header and one Duck row for both pages, above the strip: only the content below them moves, so
+                // the header and the Dashboard | Room switch never slide, jump or rebuild when the page changes.
                 VStack(spacing: 0) {
                     DuckAvatarRowView(key: project, place: rowPlace, leadingInset: sidebarClearance)
-                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: rowShown ? 0 : sidebarClearance) { standard(clearance: rowShown ? 0 : sidebarClearance) }
+                    PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset))
+                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset), showsHeader: false) { standard(header: false) }
                 }
             } else {
                 PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard() }
@@ -57,9 +62,9 @@ struct PondRouteView: View {
     }
 
     /// The pond page's own header. With the new layout's Duck row above, the row carries the sidebar clearance.
-    private func standard(clearance: CGFloat? = nil) -> some View {
+    private func standard(clearance: CGFloat? = nil, header: Bool = true) -> some View {
         VStack(spacing: 0) {
-            HStack {
+            if header { HStack {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
                 if sidebarHidden { Color.clear.frame(width: clearance ?? sidebarClearance) }
                 Spacer(minLength: 0)
@@ -68,7 +73,7 @@ struct PondRouteView: View {
                     else if PondsModel.shared.chrome(key: project).showsLeave { PondHeaderMenu(key: project).padding(.trailing, Space.xl) }
                 }
             }
-            .frame(height: Metrics.header).background(WindowDragArea())
+            .frame(height: Metrics.header).background(WindowDragArea()) }
             switch route {
             case .home(let project):
                 if let waiting = PondsModel.shared.pond(key: project), PondStates.isGreyedRow(waiting) {
@@ -796,5 +801,22 @@ struct PondFlockSection: View {
         .contextMenu {
             if dashboard, role.canRemoveMembers, !m.you, pond != nil, !removingNow, !changing, canWrite { memberActions(m) }
         }
+    }
+}
+
+/// The pond header both pages share (new layout): the same view, in the same place, whichever page is showing.
+struct PondSharedHeader: View {
+    let key: String
+    let projectId: String
+    var member = false
+    var leadingInset: CGFloat = 0
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let threads = PondRoomStore.shared.model(for: projectId, member: member).feed.threads
+        RoomHeader(
+            key: key, ducks: RoomDucks.headerDucks(threads),
+            open: { model.openFromPond(.duck($0), pond: key, page: RoomViewPref.shared.mode(for: key)) },
+            leadingInset: leadingInset)
     }
 }

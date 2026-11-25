@@ -1262,7 +1262,7 @@ pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
   shows its active global shortcut (double-tap Control by default, ⌃⇧ Space while Input
   Monitoring is unavailable), or no hint when disabled. It adds no local binding; ⌘K
   remains the command palette shortcut.
-  New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access.
+  New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access. In the new layout Esc steps back (section 8.12).
   Chat details and New chat use the same inset, surfaces and button styles.
 
 ### 8.12 New layout (owner-approved 2026-11-25; the default; Settings > This Mac > General > "Classic layout" switches back)
@@ -1281,19 +1281,46 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   between the two pages (the Dashboard shows the same row with nothing selected). No floating edge button stands in for
   the switch; the two-finger swipe still works. Tabs are hidden
   (the tab code stays for the old layout; in a Duck view files, artifacts, diffs and terminals open in the work pane).
-- **Room = home, with the Pond panel on the right.** In the Room the right side is the Pond panel, not the generic inspector:
-  who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`); it starts at
-  "Here now" (the pond's name and icon are in the header, never repeated). It lists host values and decides nothing. In a
-  Duck view the right inspector is hidden. The Dashboard has no side panel and no inspector toggle: its "Here now",
-  Tasks and Notebook sit in the page under the overview tiles (the Ducks working are the Working tile and the list).
+- **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: "Here now",
+  Tasks and the Notebook live on the Dashboard under the overview tiles (the Ducks working are the Working tile and the
+  list). Instead the Room (and the Dashboard beside it) carries the same slim icon rail and work pane as a Duck view,
+  scoped to the Pond itself (`PondWorkScope`, `WorkPaneScope.pond`): Changes and Files read the Pond's own folder (Changes
+  needs a real chat working in that folder, else it says nothing is changing there; nothing is faked), Artifacts are the
+  Pond's by project id, and Terminal is a shell in the Pond folder. The rail is on both Pond pages so the width never
+  changes when you switch. The pane remembers its view and width per Pond, keyed by project id. The classic layout keeps
+  its Room column.
+- **One header for both pages.** The Pond header (tile, name, subtitle, Dashboard | Room switch, menu) and the Duck row sit
+  above the two pages as one view each; only the content below them slides or crossfades, at `motion-standard`
+  (`PondPageChrome`). The header has the same height and the switch the same place on both pages; the Room keeps its scroll
+  position and loaded feed across switches. The swipe follows the fingers and settles on the same curve.
+- **Esc steps back one level** (`EscapeRule`): anything that owns Esc first (popover, menu, @ or / list, sheet, inline
+  editor), then an open unpinned work pane closes, then a Duck's chat goes to the Pond's Room, then the Room to the
+  Dashboard; on the Dashboard or anywhere else it does nothing. Esc never leaves full screen (the window's
+  `cancelOperation:` swallows it); Ctrl-Cmd-F and the green button still do. Esc is not bound to stopping a turn or
+  clearing the composer, and a draft is kept per Duck, so nothing is lost on the way. The classic layout keeps its behaviour
+  except that Esc does not leave full screen.
 - **For you.** The first card on the Dashboard, hidden at zero: one line per item ("Pip - finished, not opened yet" or
   "needs you") with an Open button. The sidebar's yellow Pond badge is the same list's count (`PondForYou` makes both);
   the grey count beside a Pond name is not shown in the new layout. Duck rows everywhere are labelled by the Duck's name,
   the chat title only as secondary text, and the Room's header counts on-duty Ducks only.
-- **One Room row.** A Duck's message, a note to another Duck and a state moment share one row: avatar, name, time, text,
-  with no bordered bubble. Text shows three lines, then an inline "Show more" (`RoomRowText`). A run of one Duck's moments
-  folds into one tappable row above its latest line: "Show 4 earlier from Ruby 2" / "Hide 4 earlier", aligned with the
-  names. Senders are always Duck names, never chat titles (the host resolves them when it serves the feed).
+- **The Room reads like a chat.** Messages are bubbles; moments are not.
+  People: yours sit on the right in the Pond's colour toned down to a dark tint (text keeps AA contrast), with no avatar;
+  other people's sit on the left with their avatar and name above the first bubble. Ducks: left, `surface-raised` bubble, the
+  Duck's avatar, its name in the Duck's colour; a Duck-to-Duck note shows "Sage 2 \u2192 Dot 2" on the name line with a faint
+  left accent in the sender's colour. Consecutive messages from one sender within five minutes form a group: avatar and
+  name once, 2pt between bubbles, 14pt between groups, time on the name line and on hover per bubble. Bubbles have radius 14
+  (4 on the sender's side for the last bubble of a group), padding 10 by 14, at most 68% of the column, Markdown, selectable
+  text; long text cuts at 10 lines with "Show more" inside the bubble, shown only when the layout really truncates (a hidden
+  unclamped copy is measured against the `lineLimit` one, `RoomClampedText`; the cut is a clean ellipsis, never a clipped
+  half line). A floating bar on the bubble's top corner offers Make task and Copy on hover (Make task also shows at rest on the
+  newest taskable message); your own messages say "Sending\u2026", then nothing, or "Not sent" with Retry, small, under the
+  bubble. Moments ("took it", "finished", blocked) are compact centred lines: a small duck glyph and "Ruby 2 finished
+  \u00B7 Released Greenroom 1.8.5\u2026" in `muted` 12pt, one line; a run of one Duck's moments folds into "Ruby 2 \u00B7 4
+  updates" which opens in place. Tasks are in-feed cards (title, state, owner Duck, Open). Day separators stay. The empty
+  Room explains you can talk to everyone or @ a Duck. Pure parts are `RoomBubblePlan`, `RoomMoment`, `RoomRowText`.
+- **A Duck's avatar and name are one button** everywhere in the Room (message groups, a note's sender and its "\u2192 receiver", moment
+  lines, Task owners, working rows): pointer hand, a ring on the avatar and an underline on the name on hover, "Open <name>'s
+  chat", through the one open-Duck action (an off-duty Duck opens with no duty change). People's avatars open nothing.
 - **Duck view = chat + slim icon rail + work pane (stage 2, built).** A 52pt rail at the right edge of the chat holds
   Changes, Files, Artifacts and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
   edge; a duck-yellow count badge on Changes with the changed-file count, "99+" past 99). Clicking an icon opens the work

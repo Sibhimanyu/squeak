@@ -261,6 +261,8 @@ struct PondSpace<Dashboard: View>: View {
     /// A Member's pond: the Room is the Owner's, read through the cloud (`projectId` is then the pond's id).
     var member = false
     var leadingInset: CGFloat = 0
+    /// False when the pond's shared header is drawn above the strip: neither page carries one, so it never moves.
+    var showsHeader = true
     @ViewBuilder let dashboard: () -> Dashboard
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.controlActiveState) private var activeState
@@ -270,8 +272,8 @@ struct PondSpace<Dashboard: View>: View {
     @State private var width = 0.0
     @State private var haptic = SwipeHapticLatch()
 
-    init(key: String, projectId: String, member: Bool = false, leadingInset: CGFloat = 0, @ViewBuilder dashboard: @escaping () -> Dashboard) {
-        self.key = key; self.projectId = projectId; self.member = member; self.leadingInset = leadingInset; self.dashboard = dashboard
+    init(key: String, projectId: String, member: Bool = false, leadingInset: CGFloat = 0, showsHeader: Bool = true, @ViewBuilder dashboard: @escaping () -> Dashboard) {
+        self.key = key; self.projectId = projectId; self.member = member; self.leadingInset = leadingInset; self.showsHeader = showsHeader; self.dashboard = dashboard
         _pan = State(initialValue: PondPanStore.shared.state(for: key))
     }
 
@@ -284,7 +286,7 @@ struct PondSpace<Dashboard: View>: View {
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .dashboard, width: w))
                     .allowsHitTesting(page == .dashboard).accessibilityHidden(page != .dashboard)
-                PondRoomView(projectId: projectId, member: member, key: key, leadingInset: leadingInset).id(key).screen("Pond room")
+                PondRoomView(projectId: projectId, member: member, key: key, leadingInset: leadingInset, showsHeader: showsHeader).id(key).screen("Pond room")
                     .frame(width: w, height: geo.size.height)
                     .modifier(PanPage(state: pan, page: .room, width: w))
                     .allowsHitTesting(page == .room).accessibilityHidden(page != .room)

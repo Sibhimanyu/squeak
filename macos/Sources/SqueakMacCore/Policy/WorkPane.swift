@@ -56,6 +56,9 @@ public enum WorkPaneMetrics {
         return count > 99 ? "99+" : String(count)
     }
 
+    /// One key per Pond (its project id), for the Pond-scoped pane in the Room.
+    public static func pondKey(projectId: String) -> String { "pond:\(projectId)" }
+
     /// One key per Duck: its id (the Duck follows its chats), else the chat's own key.
     public static func duckKey(duckId: String?, sessionKey: String) -> String {
         if let duckId, !duckId.isEmpty { return "duck:\(duckId)" }

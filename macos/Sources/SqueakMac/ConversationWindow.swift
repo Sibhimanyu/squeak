@@ -81,7 +81,7 @@ struct ConversationView: View {
             && !model.focus.isSettings && model.selectedSession != nil
         let base = CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.focus.isSettings || !sidebarHidden, rightShown: right))
         // New layout Duck view: the rail always, and the work pane's own minimum while it is open.
-        guard !model.focus.isSettings, isNewDuckView else { return base }
+        guard !model.focus.isSettings, isNewDuckView || pondScopeNow != nil else { return base }
         let pane = WorkPaneStore.shared.pane.shown != nil ? CGFloat(WorkPaneMetrics.range.lowerBound) : 0
         return base + CGFloat(WorkPaneMetrics.railWidth) + pane
     }
@@ -90,6 +90,12 @@ struct ConversationView: View {
     private var isNewDuckView: Bool {
         guard model.focus.page == .chat, roomContext == nil else { return false }
         return WorkPaneActions.isDuckView(model.selectedSession)
+    }
+
+    /// The Pond whose page is on screen, when the new layout gives it a Pond-scoped rail and pane (DESIGN.md 8.12).
+    private var pondScopeNow: PondWorkScope? {
+        guard model.focus.page != .chat || model.selectedSession == nil || roomContext != nil, roomContext != nil else { return nil }
+        return WorkPaneActions.pondScope(model: model)
     }
 
     var body: some View {
@@ -132,7 +138,9 @@ struct ConversationView: View {
         let focus = model.focus
         let roomCtx = roomContext
         // The Dashboard has no side panel: its content (who is here, Tasks, Notebook) is in the page. Only the Room has one.
-        let roomPanel = roomCtx.map { RoomViewPref.shared.mode(for: $0.key) == .room } ?? false
+        // The new layout has no panel in the Room either: its rail and work pane are Pond-scoped (below). Only the classic
+        // layout keeps the Room's right column.
+        let roomPanel = !MacLayoutPreference.shared.isNew && (roomCtx.map { RoomViewPref.shared.mode(for: $0.key) == .room } ?? false)
         let showingSettings = focus.isSettings
         // The right zone belongs to the page: a chat's dock column, or a pond home's room inspector.
         let chatOpen = focus.page == .chat && model.selectedSession != nil
@@ -144,7 +152,9 @@ struct ConversationView: View {
         let newDuckView = chatOpen && roomCtx == nil && WorkPaneActions.isDuckView(model.selectedSession)
         let workPane = WorkPaneStore.shared.pane
         let duckSession = newDuckView ? model.selectedSession : nil
-        let paneView = duckSession.flatMap { workPane.current == WorkPaneActions.duckKey($0) ? workPane.shown : nil }
+        let pondScope = roomCtx == nil ? nil : pondScopeNow
+        let paneScope: WorkPaneScope? = duckSession.map { .duck($0) } ?? pondScope.map { .pond($0) }
+        let paneView = paneScope.flatMap { workPane.current == $0.key ? workPane.shown : nil }
         let showsInspectorWanted = roomCtx != nil ? (roomInspectorOpen && roomPanel) : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
@@ -158,8 +168,8 @@ struct ConversationView: View {
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
         let toggleRightPane: () -> Void = {
-            if let duckSession {
-                let duck = WorkPaneActions.duckKey(duckSession)
+            if let paneScope {
+                let duck = paneScope.key
                 let now = WorkPaneStore.shared.pane
                 if now.current == duck, now.shown != nil { WorkPaneStore.shared.close() } else { WorkPaneStore.shared.open(now.memory[duck]?.view ?? .changes, duck: duck) }
                 return
@@ -209,26 +219,25 @@ struct ConversationView: View {
                     .clipped()
                     // The chat takes its final width at once and reflows once; only the pane itself slides.
                     .transaction(value: paneView) { $0.animation = nil }
-                    if let duckSession {
+                    if let paneScope {
                         if let paneView {
-                            let paneW = CGFloat(WorkPaneMetrics.drawn(stored: workPane.storedWidth(duck: WorkPaneActions.duckKey(duckSession)), window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarW))
-                            WorkPanePane(session: duckSession, view: paneView, width: paneW)
-                                .id(WorkPaneActions.duckKey(duckSession))
+                            let paneW = CGFloat(WorkPaneMetrics.drawn(stored: workPane.storedWidth(duck: paneScope.key), window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarW))
+                            WorkPanePane(scope: paneScope, view: paneView, width: paneW)
+                                .id(paneScope.key)
                                 .overlay(alignment: .leading) {
                                     PaneResizeHandle(
-                                        edge: .leading, width: Binding(get: { paneW }, set: { WorkPaneStore.shared.setWidth($0, duck: WorkPaneActions.duckKey(duckSession)) }),
+                                        edge: .leading, width: Binding(get: { paneW }, set: { WorkPaneStore.shared.setWidth($0, duck: paneScope.key) }),
                                         range: WorkPaneMetrics.range, fallback: WorkPaneMetrics.defaultWidth,
                                         window: windowWidth, otherPane: (sidebarHidden ? 0 : sidebarW) + WorkPaneMetrics.railWidth)
                                 }
                                 .transition(paneTransition(.trailing)).zIndex(1)
                         }
-                        WorkPaneRail(session: duckSession)
+                        WorkPaneRail(scope: paneScope)
                     }
                     if showsInspector, paneOpen {
                         VStack(spacing: 0) {
                             if let roomCtx {
-                                if MacLayoutPreference.shared.isNew { RoomPondPanelView(key: roomCtx.key, projectId: roomCtx.projectId, width: inspectorW) }
-                                else { RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW) }
+                                RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW)
                             }
                             else if homeCtx { HomeInspectorZone(width: inspectorW) }
                             else { DockRightColumn(session: model.selectedSession, width: inspectorW) }
@@ -264,7 +273,7 @@ struct ConversationView: View {
         .animation(Motion.standard, value: showingSettings)
         .animation(Motion.standard, value: showsInspector && paneOpen)
         .animation(Motion.standard, value: paneView)
-        .onChange(of: duckSession.map(WorkPaneActions.duckKey), initial: true) { _, key in
+        .onChange(of: paneScope?.key, initial: true) { _, key in
             if let key { WorkPaneStore.shared.switched(to: key) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakWorkPaneOpen)) { note in WorkPaneActions.open(note, model: model) }
@@ -285,7 +294,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && !newDuckView && (roomCtx != nil ? roomPanel : (rightAvailable || homeCtx)), window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && !newDuckView && pondScope == nil && (roomCtx != nil ? roomPanel : (rightAvailable || homeCtx)), window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)

@@ -10,19 +10,34 @@ import SwiftUI
 // no folder keeps the changed-files list.
 
 struct FilesTab: View {
-    let session: HostSession
+    let session: HostSession?
+    /// A Pond's own folder (the Room's work pane): no chat, so the change marks come from a real session working in that
+    /// folder when there is one, and `storeKey` holds an empty store otherwise.
+    var folder: String?
+    var storeKey: String?
     @Environment(AppModel.self) private var model
 
+    init(session: HostSession) { self.session = session }
+    init(root: String, changesSession: HostSession?, storeKey: String) {
+        session = changesSession; folder = root; self.storeKey = storeKey
+    }
+
     private var root: String? {
-        guard let cwd = session.cwd, !cwd.isEmpty, FileManager.default.fileExists(atPath: cwd) else { return nil }
+        let cwd = folder ?? session?.cwd
+        guard let cwd, !cwd.isEmpty, FileManager.default.fileExists(atPath: cwd) else { return nil }
         return cwd
     }
 
     var body: some View {
         if let root, !model.demoMode {
-            FilesBrowser(files: model.filesModel(root: root), store: model.changesStore(for: session.key.hostSessionId), sessionKey: session.key.hostSessionId)
-        } else {
+            FilesBrowser(
+                files: model.filesModel(root: root), store: model.changesStore(for: session?.key.hostSessionId ?? storeKey ?? root),
+                sessionKey: session?.key.hostSessionId)
+        } else if let session {
             ChangedFilesList(sessionKey: session.key.hostSessionId, note: model.demoMode ? nil : "This chat has no folder on this Mac.")
+        } else {
+            Text("This Pond's folder is not on this Mac.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }
@@ -30,7 +45,8 @@ struct FilesTab: View {
 private struct FilesBrowser: View {
     let files: FilesModel
     let store: ChangesStore
-    let sessionKey: String
+    /// Nil for a Pond folder with no session working in it: nothing is read from the daemon.
+    let sessionKey: String?
     @FocusState private var filterFocused: Bool
     @FocusState private var treeFocused: Bool
 
@@ -91,13 +107,13 @@ private struct FilesBrowser: View {
             ) { providers in FileDrop.handle(providers, files: files, into: "") }
         }
         .task(id: files.root) {
-            files.afterChange = { await store.refresh(sessionKey: sessionKey, visible: true, activityChanged: true) }
+            files.afterChange = { if let sessionKey { await store.refresh(sessionKey: sessionKey, visible: true, activityChanged: true) } }
             await files.refreshTree()
         }
         .onChange(of: store.changes) { Task { await files.refreshTree() } }
         .onChange(of: files.showIgnored) { Task { await files.refreshTree() } }
         // Changed files appear in the tree from the Changes list: keep it fresh while this tab is up.
-        .task(id: sessionKey) { await store.refresh(sessionKey: sessionKey, visible: true, activityChanged: true) }
+        .task(id: sessionKey) { if let sessionKey { await store.refresh(sessionKey: sessionKey, visible: true, activityChanged: true) } }
         .confirmationDialog(
             files.deleteAsk.map { "Move \(ChangesPresentation.fileName($0.path)) to the Trash?" } ?? "",
             isPresented: Binding(get: { files.deleteAsk != nil }, set: { if !$0 { files.deleteAsk = nil } }),

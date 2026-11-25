@@ -55,11 +55,23 @@ public enum RoomFold {
 }
 
 /// One text rule for every Room row (a Duck's message, a handoff note, a state line): up to `lines` lines, then an inline
-/// "Show more". Decided from the text alone, so a row never changes height after it is first drawn.
+/// "Show more". Whether a row is truncated is decided from its real layout (`truncates`, fed by two measured heights), never
+/// guessed from the text; `needsMeasure` only skips the measuring for text that cannot reach the limit.
 public enum RoomRowText {
     public static let lines = 3
     /// Roughly three lines of the reading column.
     static let characters = 240
+
+    /// Text that can never reach the line limit (one short line) is not measured at all.
+    public static func needsMeasure(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count > 60 || t.contains("\n")
+    }
+
+    /// True when the text is cut at `lines` lines: its natural height is taller than the clamped one (a point of slack for rounding).
+    public static func truncates(clamped: Double, natural: Double) -> Bool {
+        natural - clamped > 1
+    }
 
     public static func isLong(_ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
