@@ -63,31 +63,10 @@ import Testing
         #expect(DuckHeaderChrome.of(branch: nil, isMain: false, membership: .owner).chip == nil)
     }
 
-    @Test func tabPlanIsThePondsDucksWithOpenChatAlwaysThere() {
-        let rows = DuckList.rows([chat("a", duck: "A", ago: 1), chat("b", duck: "B", ago: 2)], main: nil)
-        let plan = DuckTabPlan.plan(location: .chat(key("n")), previous: key("a").stringValue, ducks: rows)
-        #expect(plan.entries == [.thread(key("a").stringValue), .thread(key("n").stringValue), .thread(key("b").stringValue)])
-        #expect(plan.selected == .thread(key("n").stringValue))
-    }
-
     @Test func collapseKeepsSavedOrderAndShowsEachDucksNewestChat() {
         let old = chat("a1", duck: "A", ago: 500), new = chat("a2", duck: "A", ago: 5), b = chat("b", duck: "B", ago: 50)
         let out = DuckList.collapse([old, b, new])
         #expect(out.map(\.key.hostSessionId) == ["a2", "b"])
-    }
-
-    @Test func movingADuckReplacesItsTabInPlace() {
-        var tabs = StreamTabs()
-        tabs.open(.thread("a"), in: "w"); tabs.open(.thread("b"), in: "w"); tabs.open(.thread("c"), in: "w")
-        tabs.select(.thread("b"), in: "w")
-        let r1 = tabs.replace(.thread("b"), with: .thread("b2"), in: "w")
-        #expect(r1)
-        #expect(tabs.tabs("w") == [.thread("a"), .thread("b2"), .thread("c")])
-        #expect(tabs.selected("w") == .thread("b2"))
-        // Replacing with a tab already open just drops the old one.
-        let r2 = tabs.replace(.thread("a"), with: .thread("c"), in: "w")
-        #expect(r2)
-        #expect(tabs.tabs("w") == [.thread("b2"), .thread("c")])
     }
 
     @Test func placeBodies() {

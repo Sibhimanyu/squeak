@@ -1738,6 +1738,23 @@ export class NativeStore {
     return rows.length;
   }
 
+  /**
+   * Removes a duck for good: its row and its links to its chats. Its chats are archived (kept in history, out of every
+   * list) so nothing reaches the duck again. Returns the chats it had. The caller has refused while one is busy.
+   */
+  deleteDuck(id: string): string[] {
+    this.ducksTable();
+    const sessions = this.duckSessionIds(id);
+    this.db.transaction(() => {
+      const at = nowIso();
+      for (const sid of sessions)
+        this.db.prepare("UPDATE sessions SET archived_at=COALESCE(archived_at, ?) WHERE id=?").run(at, sid);
+      this.db.prepare("DELETE FROM duck_sessions WHERE duck_id=?").run(id);
+      this.db.prepare("DELETE FROM ducks WHERE id=?").run(id);
+    })();
+    return sessions;
+  }
+
   /** The duck's working copy and branch follow its current session's. */
   syncDuckLinks(duckId: string): void {
     this.db

@@ -93,9 +93,6 @@ public enum RoomDucks {
         return "\(p) \u{00B7} \(d)"
     }
 
-    /// A tab's close tooltip: closing a duck's tab puts it off duty.
-    public static func closeTooltip(name: String) -> String { "Close \u{2014} \(name) goes off duty" }
-
     /// The duck's name as the host takes it (1 to 32 characters): nil when it cannot be sent.
     public static func cleanName(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)

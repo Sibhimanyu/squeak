@@ -21,12 +21,11 @@ extension AppModel {
     }
 
     /// Branch off, Work with…, Move to main: the host starts a fresh chat for the same duck in the new place; its tab
-    /// replaces the old one in the same slot, then it opens (no close and open, so the strip does not flicker).
+    /// is the same Duck, so it is the same tab: the tab follows the Duck to its new chat, then the new chat opens.
     /// A message to a chat in Main went to a new chat on its own branch: adopt it, swap its tab in, open it if the old one was open.
     func openMovedChat(from old: SessionKey, to sid: String) async {
         let agent = session(old)?.agent ?? "claude"
         let key = SessionKey(provider: "\(agent)-squeak", workspaceId: nil, hostSessionId: NativeAdapter.keyPrefix + sid)
-        let workspace = (sidebarTree.place(of: old) ?? pondPageTree.place(of: old))?.workspace.id
         if let made = try? await nativeHost.session(id: sid) {
             let stand = NativeAdapter.started(made)
             rememberStarted(stand)
@@ -34,14 +33,12 @@ extension AppModel {
         }
         await broker.refresh()
         let wasOpen = location == .chat(old)
-        if let workspace { replaceStreamTab(.thread(old.stringValue), with: .thread(key.stringValue), in: workspace) }
         if wasOpen { select(key) }
     }
 
     func moveDuck(_ s: HostSession, to place: DuckPlace) {
         guard let duckId = s.duckId, !demoMode else { return }
         let old = s.key
-        let workspace = (sidebarTree.place(of: old) ?? pondPageTree.place(of: old))?.workspace.id
         let agent = s.agent ?? "claude"
         Task { [weak self] in
             guard let self else { return }
@@ -55,7 +52,6 @@ extension AppModel {
                 }
                 await broker.refresh()
                 let wasOpen = location == .chat(old)
-                if let workspace { replaceStreamTab(.thread(old.stringValue), with: .thread(key.stringValue), in: workspace) }
                 if wasOpen { select(key) }
                 AppLog.info("duck moved")
             } catch let e as NativeHostError {
@@ -102,6 +98,62 @@ struct DuckMenuItems: View {
                 SqueakMenu("Work with\u{2026}") { DuckWorkWithItems(targets: targets) { model.moveDuck(session, to: $0) } }
             }
             if !onMain { Button("Move to main") { model.moveDuck(session, to: .main) } }
+        }
+        if model.hasDuckLife(session) {
+            Divider()
+            // Closing a tab never changes duty: resting is a choice made here, not a side effect of closing.
+            if model.isOnDuty(session) { Button("Put off duty") { model.setDuty(session, on: false) } }
+            else { Button(RoomRoster.bringBackTitle) { model.setDuty(session, on: true) } }
+            Button("Delete Duck\u{2026}", role: .destructive) { model.confirmDeleteDuck(session) }
+        }
+    }
+}
+
+extension AppModel {
+    /// The duck's project and host session id, for the room and the duty routes (a native chat of a Duck in ducks mode).
+    private func duckHostRef(_ s: HostSession) -> (project: String, id: String)? {
+        guard ducksMode, s.source == .squeak, s.duckId != nil, let pond = duckPondKey(s),
+              let project = PondsModel.shared.entry(pond)?.projectId else { return nil }
+        return (project, s.key.hostSessionId)
+    }
+
+    /// Whether the duck menu offers Off duty and Delete Duck for this chat.
+    func hasDuckLife(_ s: HostSession) -> Bool { duckHostRef(s) != nil }
+
+    func isOnDuty(_ s: HostSession) -> Bool {
+        guard let r = duckHostRef(s) else { return true }
+        return PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.onDuty != false
+    }
+
+    func setDuty(_ s: HostSession, on: Bool) {
+        guard let r = duckHostRef(s) else { return }
+        Task { await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: nativeHost) }
+    }
+
+    /// "Delete Duck\u{2026}": asks once, then removes the duck for good and closes its tab.
+    func confirmDeleteDuck(_ s: HostSession) {
+        guard let r = duckHostRef(s), let duckId = s.duckId else { return }
+        let name = PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.duckName ?? workbenchTitle(s)
+        let alert = NSAlert()
+        alert.messageText = "Delete \(name)?"
+        alert.informativeText = "This removes the duck for good. Its chats stay in history. To rest it instead, put it off duty."
+        alert.addButton(withTitle: "Delete Duck")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let pond = duckPondKey(s)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await nativeHost.deleteDuck(id: duckId)
+                closeTabs(ofDuck: duckId)
+                if lastChat == s.key { if let pond { WorkbenchNav.openProject(self, key: pond, resuming: false) } else { WorkbenchNav.goHome(self) } }
+                await broker.refresh()
+            } catch let e as NativeHostError {
+                native.note = e.reason
+            } catch {
+                native.note = "Squeak couldn\u{2019}t delete that duck"
+            }
         }
     }
 }

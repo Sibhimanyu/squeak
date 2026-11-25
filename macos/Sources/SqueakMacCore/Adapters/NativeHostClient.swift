@@ -876,6 +876,12 @@ public struct NativeHostClient: Sendable {
         return sid
     }
 
+    /// "Delete Duck": `DELETE /native/ducks/<id>` removes the duck for good (its chats stay in history, archived). The host
+    /// refuses with 409 while one of its chats is working or waiting on you.
+    public func deleteDuck(id duckId: String) async throws {
+        _ = try await call("DELETE", "/native/ducks/\(Self.id(duckId))", timeout: 15)
+    }
+
     /// Sends a message; true when the host queued it behind a running turn. A refused connection (`hostDown`: nothing
     /// was written) is tried again twice, 300 ms and 1 s apart; anything else (a timeout, a dropped connection, any
     /// answer from the host) is final, so a message the host may have accepted is never sent twice.

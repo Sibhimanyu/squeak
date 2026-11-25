@@ -367,41 +367,33 @@ private struct WorkbenchTabs: View {
     /// A New thread page is on screen: the placeholder is the selected tab, so nothing else reads as selected.
     private var composing: Bool { plan.selected == .placeholder && model.location.composePage == .newThread }
     /// The artifact tabs saved for this stream, after its chats and files.
-    private var artifactTabs: [(pond: String, path: String)] { model.streamTabs.artifactTabs(workspace.id) }
+    private var artifactTabs: [(pond: String, path: String)] { model.tabStore.tabs(model.tabPond(workspace)).compactMap { $0.kind == .artifact ? ArtifactTabID.parse($0.id) : nil } }
 
-    /// The plan's tabs the saved strip lacks: the open chat before the list carries it, and the placeholder; each sits
-    /// after the chat the transcript follows.
+    /// The New chat placeholder, the one thing the strip shows that is not saved: it sits after the chat the transcript
+    /// follows. Squeak adds no other tab; the open chat has its tab only when the person opened it.
     private func applyPlan(_ items: [StripItem]) -> [StripItem] {
+        guard plan.entries.contains(.placeholder) else { return items }
         var out = items
-        let present = Set(items.compactMap { if case .chat(let s) = $0 { s.key.stringValue } else { nil } })
         let after = out.firstIndex { if case .chat(let s) = $0 { s.key == model.lastChat } else { false } }
-        var at = after.map { $0 + 1 } ?? out.endIndex
-        for entry in plan.entries {
-            switch entry {
-            case .thread(let id):
-                guard !present.contains(id), !dock.threads.isDocked(id), let key = SessionKey(stringValue: id), let s = model.session(key) else { continue }
-                out.insert(.chat(s), at: at); at += 1
-            case .placeholder:
-                out.insert(.placeholder, at: at); at += 1
-            }
-        }
+        out.insert(.placeholder, at: after.map { $0 + 1 } ?? out.endIndex)
         return out
     }
 
     private var baseItems: [StripItem] { applyPlan(savedItems) }
 
+    /// The Pond's saved tabs as the store has them, unfiltered and unreordered: a Duck as its newest chat, a file where it
+    /// is open, a canvas. A thing the list does not carry yet simply is not drawn (it stays saved).
     private var savedItems: [StripItem] {
         let open = files?.open.filter { !$0.isListing } ?? []
-        guard model.streamTabs.hasStrip(workspace.id) else { return chats.map(StripItem.chat) + open.map(StripItem.file) }
-        let byKey = Dictionary(chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { a, _ in a })
         let byPath = Dictionary(open.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        let order = model.streamTabs.strip(workspace.id, hasThread: { byKey[$0] != nil }, isOpen: { byPath[$0] != nil }, openFiles: open.map(\.path),
-                                           withArtifacts: true)
-        var out = order.compactMap { t -> StripItem? in
+        let pond = model.tabPond(workspace)
+        var out: [StripItem] = []
+        for t in model.tabStore.tabs(pond) {
             switch t.kind {
-            case .thread: byKey[t.id].map(StripItem.chat)
-            case .file: byPath[t.id].map(StripItem.file)
-            case .artifact: ArtifactTabID.parse(t.id).map { StripItem.artifact(pond: $0.pond, path: $0.path) }
+            case .duck: if let s = model.chat(for: t), !dock.threads.isDocked(s.key.stringValue) { out.append(.chat(s)) }
+            case .file: if let f = byPath[t.id] { out.append(.file(f)) }
+            case .artifact: if let a = ArtifactTabID.parse(t.id) { out.append(.artifact(pond: a.pond, path: a.path)) }
+            case .duckling: break   // drawn from the dock's ducklings, after their parent (CentreStripOrder)
             }
         }
         // A listing tab is not saved: it sits at the end.
@@ -411,10 +403,10 @@ private struct WorkbenchTabs: View {
 
     /// The saved tabs as drawn, left to right: what a drop or a keyboard move is decided among (ducklings, panels and
     /// shells are not in it).
-    private var streamOrder: [StreamTab] {
+    private var streamOrder: [TabItem] {
         stripItems.compactMap { item in
             switch item {
-            case .chat(let s): .thread(s.key.stringValue)
+            case .chat(let s): .of(s)
             case .file(let f): dock.files.zone(of: f.path) == .centre ? .file(f.path) : nil
             case .artifact(let pond, let path): .artifact(pond: pond, path: path)
             case .duckling, .placeholder: nil
@@ -462,7 +454,7 @@ private struct WorkbenchTabs: View {
                             if let files, dock.files.zone(of: f.path) == .centre {
                                 DockFileTab(files: files, file: f, zone: .centre, selected: !composing && artifact == nil && files.activePath == f.path && dock.layout.centre.selected == nil && dock.ducklings.selected[.centre] == nil,
                                             height: Metrics.tabStrip, indicator: tabIndicator,
-                                            preview: model.streamTabs.isPreview(.file(f.path), in: workspace.id),
+                                            preview: model.tabStore.isPreview(.file(f.path), in: model.tabPond(workspace)),
                                             pin: { model.pinTab(.file(f.path), in: workspace) }) {
                                     dock.deselectTerminals(.centre); dock.deselectDucklings(.centre)
                                     dock.update { $0.selectChats() }
@@ -525,10 +517,10 @@ private struct WorkbenchTabs: View {
         // File tabs are saved with the strip: brought back once per run, if the file is still there.
         .task(id: files?.root) {
             guard let files, !files.restoredTabs else { return }
-            let saved = model.streamTabs.fileTabs(workspace.id)
+            let saved = model.tabStore.fileTabs(model.tabPond(workspace))
             let gone = saved.filter { !files.fileExists($0) }
             model.forgetFileTabs(gone, in: workspace)
-            let selected = model.streamTabs.selected(workspace.id)
+            let selected = model.tabStore.current(model.tabPond(workspace))
             let active = selected.flatMap { $0.kind == .file ? $0.id : nil }
             await files.restoreTabs(saved.filter { !gone.contains($0) }, active: active)
         }
@@ -543,9 +535,6 @@ private struct WorkbenchTabs: View {
         .modifier(CentreFileDockSync(files: files))
         .modifier(ArtifactLeaveSync(files: files))
         .onChange(of: files?.activePath) { _, path in if let path, files?.restoredTabs == true { model.fileTabSelected(path, in: workspace) } }
-        .task(id: "\(model.lastChat?.stringValue ?? "") \(model.sessionKeysRevision) \(workspace.id)") {
-            ensureOpenChatTab()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
             guard visible else { return }
             let box = note.object as? CloseTabAction.Box
@@ -564,17 +553,17 @@ private struct WorkbenchTabs: View {
             let current = files?.activePath == nil && files?.review.isOpen != true ? model.focus.chat : nil
             if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
         }
-        // A chat opened some other way (the sidebar, a notification) is no longer closed, and has its tab.
-        .onChange(of: model.lastChat) { _, key in dock.update { $0.selectChats() }; if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id); if let s = model.session(key), let r = duckRef(s), PondRoomStore.shared.model(for: r.project).feed.threads.first(where: { $0.sessionId == r.id })?.onDuty == false { setDuty(s, on: true) } } }
+        // A chat opened some other way (the sidebar, a notification) is no longer in the closed memory (it opened its own tab).
+        .onChange(of: model.lastChat) { _, key in dock.update { $0.selectChats() }; if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
         .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .animation(Motion.standard, value: model.lastChat)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
     private func artifactTab(pond: String, path: String) -> some View {
-        let tab = StreamTab.artifact(pond: pond, path: path)
+        let tab = TabItem.artifact(pond: pond, path: path)
         return ArtifactStripTab(pond: pond, path: path, selected: artifact?.pond == pond && artifact?.path == path,
-                                height: Metrics.tabStrip, indicator: tabIndicator, preview: model.streamTabs.isPreview(tab, in: workspace.id),
+                                height: Metrics.tabStrip, indicator: tabIndicator, preview: model.tabStore.isPreview(tab, in: model.tabPond(workspace)),
                                 pin: { model.pinTab(tab, in: workspace) }, open: { model.openArtifact(pond: pond, path: path) },
                                 close: { model.closeArtifactTab(pond: pond, path: path, in: workspace) })
             .transition(.opacity)
@@ -584,38 +573,22 @@ private struct WorkbenchTabs: View {
     private func moveShownTab(by delta: Int) {
         guard !composing, dock.layout.centre.selected == nil, dock.ducklings.selected[.centre] == nil,
               dock.activeTerminals.shown(in: .centre) == nil else { return }
-        var shown: StreamTab?
+        var shown: TabItem?
         if let artifact { shown = .artifact(pond: artifact.pond, path: artifact.path) }
         else if let path = files?.activePath { shown = .file(path) }
-        else if let chat = model.focus.chat { shown = .thread(chat.stringValue) }
+        else if let chat = model.focus.chat.flatMap({ model.session($0) }) { shown = .of(chat) }
         guard let shown, let landing = TabDrop.step(in: streamOrder, tab: shown, by: delta) else { return }
-        model.moveStreamTab(shown, to: landing, workspace: workspace)
+        model.moveTab(shown, to: landing, workspace: workspace)
     }
 
     /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
     /// the pond's overview page, or stays on a file tab open in the stream.
-    /// The pond's room state for a native duck: its project id and session id on the host.
-    private func duckRef(_ s: HostSession) -> (project: String, id: String)? {
-        guard s.source == .squeak, let project = model.nativeWorkspace(of: workspace)?.projectId ?? (workspace.isDucks ? model.duckPondKey(s).flatMap { PondsModel.shared.entry($0)?.projectId } : nil) else { return nil }
-        return (project, s.key.hostSessionId)
-    }
-
-    /// Closing a duck's tab puts it off duty, and the tooltip says so.
-    private func closeLabel(_ s: HostSession) -> String {
-        guard let r = duckRef(s) else { return "Close \(model.workbenchTitle(s))" }
-        let name = PondRoomStore.shared.model(for: r.project).feed.threads.first { $0.sessionId == r.id }?.duckName ?? model.workbenchTitle(s)
-        return RoomDucks.closeTooltip(name: name)
-    }
-
-    private func setDuty(_ s: HostSession, on: Bool) {
-        guard let r = duckRef(s) else { return }
-        Task { await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: model.nativeHost) }
-    }
+    /// Closing a tab only closes it: the duck keeps its duty.
+    private func closeLabel(_ s: HostSession) -> String { "Close \(model.workbenchTitle(s))" }
 
     private func closeTab(_ s: HostSession) {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
-        setDuty(s, on: false)
         let wasOpen = s.key == model.lastChat
         // A tab opened from a pond (the room or the dashboard): when it was the last of them, closing it comes back there.
         var back: PondOriginStack.Origin?
@@ -625,7 +598,7 @@ private struct WorkbenchTabs: View {
         }
         back = PondOrigin.shared.closed(tab: s.key.stringValue) ?? back
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
-        let next = model.closeStreamTab(s.key, in: workspace.id)
+        let next = model.closeDuckTab(s, in: workspace)
         if let back, wasOpen { PondOrigin.shared.goBack(to: back); return }
         if shown.count == 1 {
             if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage, let pond = PondsModel.shared.key(of: s) {
@@ -639,7 +612,6 @@ private struct WorkbenchTabs: View {
     private func reopenTab() {
         if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) {
             model.select(key)
-            if let s = workspace.chats.first(where: { $0.key == key }) { setDuty(s, on: true) }
         }
     }
 
@@ -649,13 +621,6 @@ private struct WorkbenchTabs: View {
     @ViewBuilder private func tabIcon(_ s: HostSession) -> some View {
         if let m = s.agentMark { AgentMark(m, size: 16) }
         else { ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab) }
-    }
-
-    /// The open chat has its tab in the strip that shows its workspace (never while the New thread page is up).
-    private func ensureOpenChatTab() {
-        guard !composing, let key = model.lastChat, model.selectedSession != nil else { return }
-        guard model.stripPlace(of: key)?.workspace.id == workspace.id else { return }
-        model.ensureTab(for: key, in: workspace)
     }
 
     /// The New thread page, as the strip's selected tab: closing it (or Esc) returns to the chat that was open.
@@ -702,7 +667,7 @@ private struct WorkbenchTabs: View {
         .opacity(dock.dragging == .thread(s.key.stringValue) ? 0.35 : 1)
         .animation(Motion.quick, value: dock.dragging == .thread(s.key.stringValue))
         .onDrag { dragProvider(DockItemPayload.encode(.thread(s.key.stringValue)), kind: .thread) } preview: { DockTabDragPreview(title: model.workbenchTitle(s)) }
-        .modifier(CentreTabDrop(tab: .thread(s.key.stringValue)))
+        .modifier(CentreTabDrop(tab: .of(s)))
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -711,7 +676,7 @@ private struct WorkbenchTabs: View {
             RenameThreadItem(session: s)
             DuckMenuItems(session: s)
             Divider()
-            Button(duckRef(s) == nil ? "Close tab" : "Close tab (goes off duty)") { closeTab(s) }
+            Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
     }
@@ -771,7 +736,7 @@ private struct ArtifactStripTab: View {
 
     var body: some View {
         let item = ArtifactViewerPage.item(pond: pond, path: path, remote: ArtifactViewerPage.isRemote(pond: pond))
-        let tab = StreamTab.artifact(pond: pond, path: path)
+        let tab = TabItem.artifact(pond: pond, path: path)
         StripTab(selected: selected, height: height, indicator: indicator, closeLabel: "Close \(item.name)",
                  titleWidth: TabTitleMeasure.width(item.name, semibold: false), close: close,
                  icon: { Lucide(item.kind.lucide, size: 13, color: selected ? Theme.ink : Theme.muted) },
@@ -801,7 +766,7 @@ private struct ArtifactStripTab: View {
 
 /// A chat or canvas tab in the centre strip takes drops on its halves: before it on the left, after it on the right.
 private struct CentreTabDrop: ViewModifier {
-    let tab: StreamTab
+    let tab: TabItem
     @Environment(AppModel.self) private var model
     @Environment(\.centreStream) private var centre
 
