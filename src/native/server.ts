@@ -97,6 +97,10 @@ export interface NativeServerOptions {
   room?: Room;
   /** Room jobs; one is made when absent (it must be the one `tools` and main.ts's auto check share). */
   jobs?: RoomTasks;
+  /** The Notebook, artifact list and open-in-app relay the injected `tools` use (main.ts builds one each for both). */
+  notebook?: PondNotebook;
+  artifacts?: Artifacts;
+  showRelay?: ShowRelay;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -192,9 +196,9 @@ export class NativeServer {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
     this.gitPond = new GitPond(options.store, this.history, options.github ?? ghAdapter);
-    this.artifacts = new Artifacts({ store: options.store });
-    this.notebook = new PondNotebook(options.store);
-    this.showRelay = new ShowRelay();
+    this.artifacts = options.artifacts ?? new Artifacts({ store: options.store });
+    this.notebook = options.notebook ?? new PondNotebook(options.store);
+    this.showRelay = options.showRelay ?? new ShowRelay();
     this.room =
       options.room ??
       new Room({

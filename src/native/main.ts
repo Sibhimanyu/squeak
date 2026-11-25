@@ -5,6 +5,7 @@ import { reapOrphanedAgents, setAgentLedger } from "./agent-procs.js";
 
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { AgentSettings } from "./agent-settings.js";
+import { Artifacts } from "./artifacts.js";
 import { ProjectPrefs } from "./project-prefs.js";
 import { DutyKeeper } from "./duty-keeper.js";
 import { logger } from "../utils/logger.js";
@@ -20,6 +21,7 @@ import type { AgentTools } from "./agent-tools.js";
 import { runCompaction } from "./compact.js";
 import { attachSqueakPosts, Room } from "./room.js";
 import { PondNotebook } from "./pond-notebook.js";
+import { ShowRelay } from "./show-relay.js";
 import { RoomTasks } from "./room-tasks.js";
 import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
 import { haikuDecider } from "./decider.js";
@@ -99,6 +101,9 @@ export async function runHost(supportDir: string): Promise<void> {
     onModelError: (error) => logger.warn("decider model failed", { error: String(error) }),
   });
   const notebook = new PondNotebook(store);
+  // One artifact list and one open-in-app relay: the server routes and the agent tools (`show`) share them.
+  const artifacts = new Artifacts({ store });
+  const showRelay = new ShowRelay();
   const jobs = new RoomTasks({
     store,
     room,
@@ -147,6 +152,9 @@ export async function runHost(supportDir: string): Promise<void> {
       post: (id, kind, payload) => host.post(id, kind, payload),
       room,
       jobs,
+      notebook,
+      artifactShown: (projectId) => artifacts.changed(projectId),
+      openShown: (req) => showRelay.request(req),
       pond: {
         prefs: new ProjectPrefs(supportDir),
         // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
@@ -174,6 +182,9 @@ export async function runHost(supportDir: string): Promise<void> {
     starter,
     room,
     jobs,
+    notebook,
+    artifacts,
+    showRelay,
     supportDir,
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,
