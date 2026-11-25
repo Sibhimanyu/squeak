@@ -78,6 +78,7 @@ describe("room sender names", () => {
     store.updateDuck(store.duckForSession(s.id, project.id)!.id, { name: "Quill 2" });
     room.agentPost(s, { kind: "needs", text: "Which database?" });
     const m = roomMoments({ store, room, projectId: project.id, pondName: "Shop", since: 0, tasks: [] });
-    expect(m.asks[0]!.duck).toBe("Quill 2");
+    // A Duck name never shows a digit.
+    expect(m.asks[0]!.duck).toBe("Quill");
   });
 });

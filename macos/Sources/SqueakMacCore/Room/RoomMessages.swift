@@ -155,8 +155,10 @@ public struct RoomHandoff: Sendable, Equatable {
     /// The receiving duck's name; nil when the post names none ("to another duck").
     public var to: String?
     public var body: String
-    /// "Pip \u{2192} Sage" or "Pip \u{2192} another duck".
-    public var title: String { "\(from) \u{2192} \(to ?? "another duck")" }
+    /// The sender's one-or-two-sentence summary; nil makes the line from `body` (see `line`).
+    public var summary: String? = nil
+    /// The whole original message, when the host keeps it beside a clipped `body`.
+    public var fullBody: String? = nil
 }
 
 public enum RoomItem: Sendable, Equatable, Identifiable {
@@ -257,15 +259,15 @@ public enum RoomMessages {
         let postsById = Dictionary(feed.rows.map { ($0.post.id, $0) }, uniquingKeysWith: { a, _ in a })
         for r in feed.rows {
             let p = r.post
-            if p.kind == .handoff || (p.level == .agents && p.author.kind != .person) {
+            if p.kind == .handoff || (p.level == .agents && p.author.kind != .person) || (p.author.kind == .agent && p.toSessionId != nil && p.summary != nil) {
                 if p.kind == .handoff || p.toSessionId != nil {
                     let from = p.sessionId.flatMap { threads[$0]?.duckName } ?? RoomPresentation.authorName(p.author)
                     let to = p.toName ?? p.toSessionId.flatMap { threads[$0]?.duckName }
                     let note = RoomHandoff(
                         fromSessionId: p.sessionId, from: from, agent: p.sessionId.flatMap { threads[$0]?.agent }, to: to,
-                        body: p.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        body: p.text.trimmingCharacters(in: .whitespacesAndNewlines), summary: p.summary, fullBody: p.fullBody)
                     entries.append(Entry(at: p.at, order: 0, content: .system(RoomSystemLine(
-                        id: r.id, at: p.at, text: "\(note.title): \(note.body)", jobId: nil, buttons: [],
+                        id: r.id, at: p.at, text: note.spoken, jobId: nil, buttons: [],
                         opens: p.toSessionId ?? p.sessionId, handoff: note))))
                 }
             } else if feed.servesTurns, p.level == .room, p.author.kind == .agent, let kind = RoomStatusLine.kind(of: p.kind) {

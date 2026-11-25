@@ -31,6 +31,8 @@ import type { SessionRow } from "./types.js";
 
 import { artifactWireId } from "./artifacts.js";
 import { summarize as summarizeCanvas, type CanvasKind } from "./canvases.js";
+import { bodyOf, cleanSummary, localSummary, writeSummary, type SummaryWriterPort } from "./room-handoff-summary.js";
+import { stripNumberSuffix } from "./store.js";
 import { AttachmentError, checkAttachments, RoomAttachments, type RoomAttachment } from "./room-attachments.js";
 
 export const ROOM_MAX_TEXT = 500;
@@ -41,6 +43,8 @@ export const ROOM_VIEWED_MS = 10 * 60_000;
 export const ROOM_KINDS: readonly RoomPostKind[] = ["working", "done", "needs", "message", "handoff", "plan"];
 /** The Room line a Duck's status change posts, and a spec+plan card's body: expandable detail, never a long line. */
 export const ROOM_DETAIL_MAX = 4000;
+/** The most of a Duck-to-Duck message kept whole (the same cap as `send_to_chat`). */
+export const ROOM_FULL_BODY_MAX = 20_000;
 /** The posts that tell people a Duck's state changed; the ones a solo Pond skips. */
 export const STATUS_KINDS: readonly RoomPostKind[] = ["working", "done"];
 export const ROOM_LEVELS: readonly RoomLevel[] = ["room", "agents"];
@@ -60,6 +64,10 @@ export interface RoomPost {
   toName?: string;
   /** What a one-line status post expands to (a `plan` card's spec and plan). */
   detail?: string;
+  /** A Duck-to-Duck message in one or two plain sentences: what the Room shows. */
+  summary?: string;
+  /** The whole original message of a Duck-to-Duck post (`text` may be clipped); the Room shows it behind "Show full message". */
+  fullBody?: string;
   /** The card (a `plan` post) this message comments on. */
   replyTo?: string;
   /** Pictures and files the person attached (a person's message only). */
@@ -197,6 +205,8 @@ export type { RoomAsk, RoomDucklings, RoomProgress, RoomTurn } from "./room-turn
 export const DUCK_NAME_MAX = 32;
 /** What a Duck's row says when the host has no identity for it. */
 export const NEUTRAL_DUCK_NAME = "A Duck";
+/** A Duck name as people see it: never with a digit ("Quill 2" is "Quill"). */
+export const plainDuckName = stripNumberSuffix;
 export const DUCK_ROLE_MAX = 80;
 
 export const ROOM_TURNS_MAX = 100;
@@ -218,6 +228,8 @@ export function toRoomPost(r: RoomPostRow): RoomPost {
     text: r.text,
     ...(r.toSessionId ? { toSessionId: r.toSessionId } : {}),
     ...(r.detail ? { detail: r.detail } : {}),
+    ...(r.summary ? { summary: r.summary } : {}),
+    ...(r.fullBody ? { fullBody: r.fullBody } : {}),
     ...(r.replyTo ? { replyTo: r.replyTo } : {}),
     ...(parseCanvases(r.canvases).length > 0 ? { canvases: parseCanvases(r.canvases) } : {}),
     ...(r.id.startsWith(FINISH_ID_PREFIX) ? { onBehalf: true as const } : {}),
@@ -244,6 +256,10 @@ export interface NewRoomPost {
   text: string;
   toSessionId?: string;
   detail?: string;
+  /** A Duck-to-Duck message's summary (the sender's own); written in the background when absent. */
+  summary?: string;
+  /** A Duck-to-Duck message's whole body, kept when `text` is a clipped form of it. */
+  fullBody?: string;
   replyTo?: string;
   /** A person's pictures and files, as the Mac sent them (checked here: PNG/JPEG by bytes, size and count limits). */
   attachments?: unknown;
@@ -271,12 +287,15 @@ export interface RoomOptions {
    */
   /** `woke`: the Duck was Off duty and this message put it back on duty (its Stream may have been cleaned up meanwhile). */
   deliver?: (sessionId: string, text: string, opts?: { woke: boolean }) => Promise<unknown> | void;
+  /** Writes the summary of a Duck-to-Duck message its sender left out: on-device first, Haiku after. */
+  summaryWriters?: SummaryWriterPort[];
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
 export class Room extends EventEmitter {
   private readonly store: NativeStore;
   private readonly now: () => number;
+  private readonly summaryWriters: SummaryWriterPort[];
   readonly attachments: RoomAttachments;
   private readonly viewed = new Map<string, number>();
   private readonly streams = new Map<string, number>();
@@ -292,6 +311,7 @@ export class Room extends EventEmitter {
     this.setMaxListeners(0);
     this.store = options.store;
     this.now = options.now ?? Date.now;
+    this.summaryWriters = options.summaryWriters ?? [];
     this.startedAt = this.now();
     this.attachments = new RoomAttachments(
       options.store,
@@ -303,6 +323,7 @@ export class Room extends EventEmitter {
       this.store.nameUnnamedDucks();
       this.migrateDucks();
       this.store.releaseDuckNames();
+      this.store.repairNumberedDuckNames();
     } catch (error) {
       logger.warn("duck migration failed", { error: String(error) });
     }
@@ -365,6 +386,9 @@ export class Room extends EventEmitter {
         ? ""
         : Room.cleanText(input.text, input.kind);
     const detail = Room.cleanDetail(input.detail, input.kind);
+    const duckToDuck = input.author.kind === "agent" && (!!input.toSessionId || input.kind === "handoff");
+    const summary = duckToDuck && input.summary?.trim() ? cleanSummary(input.summary) : null;
+    const fullBody = duckToDuck && input.fullBody?.trim() ? input.fullBody.trim().slice(0, ROOM_FULL_BODY_MAX) : null;
     const replyTo = input.replyTo ? this.cardOf(input.projectId, input.replyTo) : null;
     if (input.replyTo && !replyTo) throw new RoomError("That card isn't in this room.");
     if (replyTo && input.author.kind !== "person") throw new RoomError("Only a person comments on a card.");
@@ -380,6 +404,8 @@ export class Room extends EventEmitter {
       text,
       toSessionId: input.toSessionId ?? null,
       detail,
+      summary,
+      fullBody,
       replyTo: replyTo?.id ?? null,
       canvases: input.canvases?.length ? JSON.stringify(input.canvases.slice(0, ROOM_CANVAS_CARDS_MAX)) : null,
       at: input.at ?? this.now(),
@@ -394,8 +420,24 @@ export class Room extends EventEmitter {
       }
     }
     this.emit("post", row);
+    if (duckToDuck && !summary) this.summariseLater(row);
     if (!input.noWake) this.wake(row);
     return row;
+  }
+
+  /**
+   * A Duck-to-Duck post whose sender gave no summary: written in the background (on-device, then Haiku, then a plain
+   * clip) and announced as `post-updated`. Never blocks the post and never throws.
+   */
+  private summariseLater(row: RoomPostRow): void {
+    const body = bodyOf(row);
+    void (async () => {
+      const line = (await writeSummary(this.summaryWriters, body, 12_000)) ?? localSummary(body);
+      if (line && this.store.setRoomPostSummary(row.id, line)) {
+        const fresh = this.store.roomPostById(row.id);
+        if (fresh) this.emit("post-updated", fresh);
+      }
+    })().catch((error) => logger.warn("duck message summary failed", { error: String(error) }));
   }
 
   /** Detail as a post carries it: trimmed, at most 4000 characters, only on a post that is not a plain message. */
@@ -514,6 +556,8 @@ export class Room extends EventEmitter {
       text: string;
       detail?: string;
       toSessionId?: string;
+      summary?: string;
+      fullBody?: string;
       /** The post is a hand-off the Task carries to the Duck: do not also wake it with an @mention. */
       noWake?: boolean;
     },
@@ -588,13 +632,14 @@ export class Room extends EventEmitter {
   private receiverName(sessionId: string): string | null {
     if (!this.store.getSession(sessionId)) return null;
     const d = this.store.duckBySession(sessionId);
-    return d?.name?.trim() || d?.lastName?.trim() || NEUTRAL_DUCK_NAME;
+    return plainDuckName(d?.name?.trim() || d?.lastName?.trim() || NEUTRAL_DUCK_NAME);
   }
 
   /** The name a chat's Duck posts under now: its on-duty name, else its last one, else the chat's title. */
   private maskOf(s: SessionRow): string {
     const d = this.store.duckBySession(s.id);
-    return d?.name?.trim() || d?.lastName?.trim() || agentName(s);
+    const own = d?.name?.trim() || d?.lastName?.trim();
+    return own ? plainDuckName(own) : agentName(s);
   }
 
   /**
@@ -607,9 +652,10 @@ export class Room extends EventEmitter {
     const d = r.sessionId ? this.store.duckBySession(r.sessionId) : null;
     if (!d) return NEUTRAL_DUCK_NAME;
     const stored = r.authorName.trim();
-    if (stored) return stored;
+    if (stored) return plainDuckName(stored);
     const s = r.sessionId ? this.store.getSession(r.sessionId) : null;
-    return d.name?.trim() || d.lastName?.trim() || (s ? agentName(s) : NEUTRAL_DUCK_NAME);
+    const own = d.name?.trim() || d.lastName?.trim();
+    return own ? plainDuckName(own) : s ? agentName(s) : NEUTRAL_DUCK_NAME;
   }
 
   /** The turn of the Duck's chat a post was written in: the newest turn that had started by then. */

@@ -19,6 +19,7 @@ import {
 import { addArtboard, CanvasError, createCanvas, readCanvas, resolveCanvasDir, updateArtboard } from "./canvases.js";
 import { NOTEBOOK_PER_TASK, NotebookError, PondNotebook } from "./pond-notebook.js";
 import { TaskError, type RoomTasks } from "./room-tasks.js";
+import { clipAtWord } from "./room-handoff-summary.js";
 import { ducksOwnBranch, Placement, PlacementError } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
@@ -296,14 +297,18 @@ export const TOOLS: ToolDef[] = [
   {
     name: "send_to_chat",
     description:
-      "Send a message to another Squeak chat, as a new turn there (queued if it is busy). The person sees it, marked as from you. Use it to ask another agent something or hand over work; then read_chat later for its answer. Limited to a few messages per chat per hour.",
-    inputSchema: obj({ chatId: { type: "string" }, message: { type: "string" } }, ["chatId", "message"]),
+      "Send a message to another Squeak chat, as a new turn there (queued if it is busy). The person sees it, marked as from you. Use it to ask another agent something or hand over work; then read_chat later for its answer. summary: one plain sentence (two at most) of what this message asks that chat to do or know; the room shows it in place of the full message. Limited to a few messages per chat per hour.",
+    inputSchema: obj({ chatId: { type: "string" }, message: { type: "string" }, summary: { type: "string" } }, [
+      "chatId",
+      "message",
+      "summary",
+    ]),
     readOnly: false,
   },
   {
     name: "post_to_room",
     description:
-      'Write a message in this pond\'s room, the shared chat the person and the other chats read. Use kind message. Write one when you finish a task from the room, and when someone in the room asked you something: two or three plain sentences saying what you did, what you found, and what you need from the reader (leave that out if nothing). Start with the substance, with no greeting or preamble, and never paste tool output, logs or code; the details are in your chat, which the reader can open from your message. A "took it" or "finished" line is not needed: the room already shows the task moving. Other kinds: needs (you are blocked and need the person; say what you need), handoff (you are passing work on; name the chat in toChatId), plan (a spec and plan card, only for a task that is more than small: text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). done and working still post, but the room shows only what a person would read, so prefer a message. level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
+      'Write a message in this pond\'s room, the shared chat the person and the other chats read. Use kind message. Write one when you finish a task from the room, and when someone in the room asked you something: two or three plain sentences saying what you did, what you found, and what you need from the reader (leave that out if nothing). Start with the substance, with no greeting or preamble, and never paste tool output, logs or code; the details are in your chat, which the reader can open from your message. A "took it" or "finished" line is not needed: the room already shows the task moving. Other kinds: needs (you are blocked and need the person; say what you need), handoff (you are passing work on; name the chat in toChatId), plan (a spec and plan card, only for a task that is more than small: text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). done and working still post, but the room shows only what a person would read, so prefer a message. level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). When you write to another chat with toChatId, also give summary: one plain sentence (two at most) of what this tells that chat to do or know, which is what the room shows. At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
     inputSchema: obj(
       {
         text: { type: "string" },
@@ -311,6 +316,7 @@ export const TOOLS: ToolDef[] = [
         detail: { type: "string" },
         level: { type: "string", enum: ["room", "agents"] },
         toChatId: { type: "string" },
+        summary: { type: "string" },
       },
       ["text", "kind"],
     ),
@@ -319,8 +325,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: "hand_off",
     description:
-      'Give a piece of work to another duck in this pond, as a sub-task of the one you are on, visible in the room. toDuck: the duck\'s name; Squeak posts "@Name <text>" and gives it straight to that duck (it is woken, nothing decides). Leave toDuck out for a task nobody in particular should take: Squeak decides who does it, and may hatch a new duck. text: what to do, in one self-contained paragraph (at most 500 characters). A plain @mention in post_to_room only nudges a duck; hand_off gives it work.',
-    inputSchema: obj({ text: { type: "string" }, toDuck: { type: "string" } }, ["text"]),
+      'Give a piece of work to another duck in this pond, as a sub-task of the one you are on, visible in the room. toDuck: the duck\'s name; Squeak posts "@Name <text>" and gives it straight to that duck (it is woken, nothing decides). Leave toDuck out for a task nobody in particular should take: Squeak decides who does it, and may hatch a new duck. text: what to do, in one self-contained paragraph (at most 500 characters). summary: one plain sentence (two at most) of what you are asking the other agent to do, which is what the room shows (the full text stays one tap away). A plain @mention in post_to_room only nudges a duck; hand_off gives it work.',
+    inputSchema: obj({ text: { type: "string" }, toDuck: { type: "string" }, summary: { type: "string" } }, [
+      "text",
+      "summary",
+    ]),
     readOnly: false,
   },
   {
@@ -749,7 +758,7 @@ export class AgentTools {
       case "read_chat":
         return this.readChat(s, str("chatId"), typeof args.last === "number" ? args.last : 4);
       case "send_to_chat":
-        return this.sendToChat(s, str("chatId"), str("message"));
+        return this.sendToChat(s, str("chatId"), str("message"), str("summary"));
       case "start_chat":
         return this.startChat(s, args);
       case "post_to_room":
@@ -881,6 +890,7 @@ export class AgentTools {
       throw new ToolError("kind must be working, done, needs, handoff, plan or message.");
     }
     if (args.detail !== undefined && typeof args.detail !== "string") throw new ToolError("detail must be text.");
+    const summary = typeof args.summary === "string" && args.summary.trim() ? args.summary : undefined;
     const level = args.level === undefined ? "room" : args.level;
     if (level !== "room" && level !== "agents") throw new ToolError("level must be room or agents.");
     let toSessionId: string | undefined;
@@ -899,6 +909,7 @@ export class AgentTools {
         text: args.text as string,
         ...(typeof args.detail === "string" ? { detail: args.detail } : {}),
         ...(toSessionId ? { toSessionId } : {}),
+        ...(summary && toSessionId ? { summary } : {}),
       });
     } catch (error) {
       if (error instanceof RoomError) throw new ToolError(error.message);
@@ -932,6 +943,9 @@ export class AgentTools {
       row = room.agentPost(s, {
         kind: "message",
         text: target ? `@${target.name} ${body}` : body,
+        ...(target?.currentSessionId ? { toSessionId: target.currentSessionId } : {}),
+        ...(target ? { fullBody: body } : {}),
+        ...(target && typeof args.summary === "string" && args.summary.trim() ? { summary: args.summary } : {}),
         noWake: true,
       });
       if (!row) throw new ToolError("Could not post the hand-off.");
@@ -1272,7 +1286,12 @@ export class AgentTools {
     return { real, relative: path.relative(base, real), size: stat.size };
   }
 
-  private async sendToChat(s: SessionRow, chatId: string | undefined, message: string | undefined): Promise<string> {
+  private async sendToChat(
+    s: SessionRow,
+    chatId: string | undefined,
+    message: string | undefined,
+    summary?: string,
+  ): Promise<string> {
     if (!chatId || !message?.trim()) throw new ToolError("chatId and message are required.");
     if (chatId === s.id) throw new ToolError("That is this chat.");
     const target = this.deps.store.getSession(chatId);
@@ -1291,7 +1310,7 @@ export class AgentTools {
     this.sent.push({ from: s.id, to: chatId, at: this.now() });
     const header = `[Message from the Squeak chat "${s.title ?? "Untitled"}" (${s.id}). Reply in this chat; it can read your answer with read_chat.]`;
     const { queued } = await this.deps.send(chatId, `${header}\n\n${message}`);
-    this.mirrorToRoom(s, chatId, message);
+    this.mirrorToRoom(s, chatId, message, summary);
     this.deps.post(s.id, "squeak/agent-message", {
       text: `Sent to "${target.title ?? "Untitled"}"`,
       to: chatId,
@@ -1302,7 +1321,7 @@ export class AgentTools {
   }
 
   /** A sent message also lands in the room's agents level, from the sender; never fails the send. */
-  private mirrorToRoom(s: SessionRow, toChatId: string, message: string): void {
+  private mirrorToRoom(s: SessionRow, toChatId: string, message: string, summary?: string): void {
     try {
       const pond = this.pondOf(s);
       if (!this.deps.room || !pond) return;
@@ -1312,7 +1331,10 @@ export class AgentTools {
         sessionId: s.id,
         kind: "message",
         level: "agents",
-        text: message.trim().slice(0, ROOM_MAX_TEXT),
+        // The row's text is a word-boundary clip; the whole message is kept beside it (never cut mid-word).
+        text: clipAtWord(message.trim(), ROOM_MAX_TEXT),
+        fullBody: message.trim(),
+        ...(summary?.trim() ? { summary } : {}),
         toSessionId: toChatId,
       });
     } catch (error) {

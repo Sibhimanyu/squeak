@@ -1821,6 +1821,8 @@ export class NativeServer {
     };
     // Subscribe first, then say hello: a post in between shows up after the hello's seq, never lost.
     room.on("post", onPost);
+    // A Duck-to-Duck post whose summary was written after it landed: the same event again, the Mac replaces the row.
+    room.on("post-updated", onPost);
     room.on("turn", onTurn);
     room.on("thread", onThread);
     this.jobs.on("job", onTask);
@@ -1834,6 +1836,7 @@ export class NativeServer {
     req.on("close", () => {
       clearInterval(beat);
       room.off("post", onPost);
+      room.off("post-updated", onPost);
       room.off("turn", onTurn);
       room.off("thread", onThread);
       this.jobs.off("job", onTask);

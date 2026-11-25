@@ -252,6 +252,11 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
   `,
+  // Duck-to-Duck messages in the Room: a short plain summary (what the Room shows) and the whole original message.
+  `
+  ALTER TABLE room_posts ADD COLUMN summary TEXT;
+  ALTER TABLE room_posts ADD COLUMN full_body TEXT;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -329,6 +334,10 @@ export interface RoomPostRow {
   replyTo: string | null;
   /** The canvases the Task made or changed (a `done` line only), JSON: `RoomCanvasCard[]`. */
   canvases: string | null;
+  /** A Duck-to-Duck message in one or two plain sentences (what the Room shows); null until written. */
+  summary: string | null;
+  /** The whole original message of a Duck-to-Duck post (`text` may be a clipped form of it); null on any other post. */
+  fullBody: string | null;
   at: number;
 }
 
@@ -1442,18 +1451,20 @@ export class NativeStore {
   }
 
   addRoomPost(
-    input: Omit<RoomPostRow, "seq" | "id" | "detail" | "replyTo" | "canvases"> & {
+    input: Omit<RoomPostRow, "seq" | "id" | "detail" | "replyTo" | "canvases" | "summary" | "fullBody"> & {
       id?: string;
       detail?: string | null;
       replyTo?: string | null;
       canvases?: string | null;
+      summary?: string | null;
+      fullBody?: string | null;
     },
   ): RoomPostRow {
     const id = input.id ?? randomUUID();
     const info = this.db
       .prepare(
-        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, detail, reply_to, canvases, at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO room_posts (id, project_id, author_kind, author_id, author_name, session_id, kind, level, text, to_session_id, detail, reply_to, canvases, summary, full_body, at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -1469,6 +1480,8 @@ export class NativeStore {
         input.detail ?? null,
         input.replyTo ?? null,
         input.canvases ?? null,
+        input.summary ?? null,
+        input.fullBody ?? null,
         input.at,
       );
     const seq = Number(info.lastInsertRowid);
@@ -1485,6 +1498,8 @@ export class NativeStore {
       detail: input.detail ?? null,
       replyTo: input.replyTo ?? null,
       canvases: input.canvases ?? null,
+      summary: input.summary ?? null,
+      fullBody: input.fullBody ?? null,
     };
   }
 
@@ -1510,6 +1525,87 @@ export class NativeStore {
   roomPostById(id: string): RoomPostRow | null {
     const r = this.db.prepare("SELECT * FROM room_posts WHERE id=?").get(id) as Row | undefined;
     return r ? roomPostRow(r) : null;
+  }
+
+  /** Sets a Duck-to-Duck post's summary (only where it has none yet); true when it changed. */
+  setRoomPostSummary(id: string, summary: string): boolean {
+    return (
+      this.db.prepare("UPDATE room_posts SET summary=? WHERE id=? AND (summary IS NULL OR summary='')").run(summary, id)
+        .changes > 0
+    );
+  }
+
+  /** Duck-to-Duck posts (a Duck's post to another chat, or a hand-off) that have no summary yet, newest first. */
+  roomPostsNeedingSummary(limit: number): RoomPostRow[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM room_posts WHERE author_kind='agent' AND (summary IS NULL OR summary='')
+             AND (to_session_id IS NOT NULL OR kind='handoff') ORDER BY seq DESC LIMIT ?`,
+        )
+        .all(limit) as Row[]
+    ).map(roomPostRow);
+  }
+
+  /** True once a one-time host migration has been recorded. */
+  migrationDone(name: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(name);
+  }
+
+  recordMigration(name: string): void {
+    this.db.prepare("INSERT OR IGNORE INTO host_migrations (name, at) VALUES (?,?)").run(name, nowIso());
+  }
+
+  /**
+   * Once (recorded in `host_migrations`): a Duck name never shows a digit. Stored sender names on Duck posts and
+   * Off-duty Ducks' last names that end in a space and digits ("Quill 2") lose the suffix, or become the Duck's
+   * current or last name when the stored one is one of its `duck_aliases` (it was renamed). A leading "@Quill 2 " on
+   * a hand-off's text follows. Returns how many posts and Ducks were rewritten.
+   */
+  repairNumberedDuckNames(): number {
+    this.ducksTable();
+    const NAME = "duck-names-no-digits";
+    if (this.migrationDone(NAME)) return 0;
+    const numbered = /\s+\d+$/;
+    let n = 0;
+    this.db.transaction(() => {
+      const cleaned = (stored: string, sessionId: string | null): string => {
+        const d = sessionId ? this.duckBySession(sessionId) : null;
+        if (d && this.duckAliases(d.id).includes(stored)) {
+          const now = d.name?.trim() || d.lastName?.trim();
+          if (now && !numbered.test(now)) return now;
+        }
+        return stripNumberSuffix(stored);
+      };
+      const posts = this.db
+        .prepare("SELECT seq, author_name, session_id, to_session_id, text FROM room_posts WHERE author_kind='agent'")
+        .all() as Row[];
+      for (const r of posts) {
+        const stored = (r.author_name as string).trim();
+        const name = numbered.test(stored) ? cleaned(stored, r.session_id as string | null) : stored;
+        let text = r.text as string;
+        // Only where the stripped name is the receiving Duck's own and the sender wore a numbered name too ("@Dot 5 files" from "Quill" stays).
+        const m = /^@(\S+ \d+)(?=\s)/.exec(text);
+        const to = r.to_session_id ? this.duckBySession(r.to_session_id as string) : null;
+        const plain = m ? stripNumberSuffix(m[1]!) : "";
+        const known = !!to && (to.name === plain || to.lastName === plain);
+        if (m && known && (numbered.test(stored) || this.duckAliases(to.id).includes(m[1]!)))
+          text = `@${plain}${text.slice(m[0].length)}`;
+        if (name !== r.author_name || text !== r.text) {
+          this.db.prepare("UPDATE room_posts SET author_name=?, text=? WHERE seq=?").run(name, text, r.seq);
+          n += 1;
+        }
+      }
+      const ducks = this.db.prepare("SELECT id, last_name FROM ducks WHERE last_name IS NOT NULL").all() as Row[];
+      for (const d of ducks) {
+        const last = d.last_name as string;
+        if (!numbered.test(last.trim())) continue;
+        this.db.prepare("UPDATE ducks SET last_name=? WHERE id=?").run(stripNumberSuffix(last), d.id);
+        n += 1;
+      }
+      this.recordMigration(NAME);
+    })();
+    return n;
   }
 
   /** True once; the first caller for a pond gets false and the pond is marked. */
@@ -2232,6 +2328,12 @@ export class NativeStore {
   }
 }
 
+/** "Quill 2" is "Quill": a Duck name never shows a digit. */
+export function stripNumberSuffix(name: string): string {
+  const t = name.trim().replace(/\s+\d+$/, "");
+  return t || name.trim();
+}
+
 function roomPostRow(r: Row): RoomPostRow {
   return {
     seq: r.seq as number,
@@ -2248,6 +2350,8 @@ function roomPostRow(r: Row): RoomPostRow {
     detail: (r.detail as string | null) ?? null,
     replyTo: (r.reply_to as string | null) ?? null,
     canvases: (r.canvases as string | null) ?? null,
+    summary: (r.summary as string | null) ?? null,
+    fullBody: (r.full_body as string | null) ?? null,
     at: r.at as number,
   };
 }
