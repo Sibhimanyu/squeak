@@ -104,7 +104,7 @@ struct DucklingsTests {
         let held = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"s1","status":"idle","helpersWorking":true,"lastTurnEndedAt":"2026-11-12T07:31:26.000Z"}"#.utf8))
         let mapped = NativeAdapter.started(held)
         #expect(mapped.state == .finished)
-        let ready = NativeSession(id: "s2", status: "idle", lastTurnEndedAt: Date(), ducklings: DucklingSet(running: 1))
+        let ready = NativeSession(id: "s2", status: "idle", lastTurnEndedAt: Date(), ducklings: DucklingSet(running: 1), helpersWorking: true)
         let session = NativeAdapter.started(ready)
         #expect(session.state == .finished)
         #expect(ChatMark.of(session, unread: false) == ChatMark(.working, quiet: true))

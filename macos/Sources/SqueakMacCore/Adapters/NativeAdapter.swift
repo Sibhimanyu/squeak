@@ -175,6 +175,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.lastTurnEndedAt = s.lastTurnEndedAt
         h.duckId = DaemonAdapter.nonEmpty(s.duckId) ?? DaemonAdapter.nonEmpty(d?.duckId)
         h.hostDucklingsOnly = s.ducklingsOnly
+        h.helpersWorking = s.helpersWorking
         h.retryable = s.retryable && state == .error ? true : nil
         h.streamMissing = s.streamMissing
         return h

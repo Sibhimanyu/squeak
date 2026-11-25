@@ -21,7 +21,7 @@ import Testing
         let key = SessionKey(provider: "squeak", hostSessionId: "a")
         let chat = HostSession(key: key, state: .finished, ducklings: DucklingSet(running: 1))
         let fromChats = StreamGlyphState.of(chats: [chat], mark: { _ in nil })
-        let row = PondChatRow(id: "a", title: "t", agent: nil, state: PondThreadState(chat.state), mark: nil, lastAt: nil,
+        let row = PondChatRow(id: "a", title: "t", agent: nil, state: PondThreadState(chat.state), mark: ChatMark.of(chat, unread: false), lastAt: nil,
                               local: key, pondThread: nil, ducklingsRunning: chat.ducklings?.running ?? 0, people: [])
         #expect(fromChats == .working)
         #expect(StreamGlyphState.of(rows: [row]) == fromChats)
@@ -30,6 +30,49 @@ import Testing
         // Another Mac's finished thread carries no count: it stays idle, nothing invented.
         let remote = PondChatRow(id: "thread:x", title: "t", agent: nil, state: .finished, mark: nil, lastAt: nil, local: nil, pondThread: "x", people: [])
         #expect(StreamGlyphState.of(rows: [remote]) == .idle)
+    }
+
+    // The owner's bug: an idle Duck drew the working glyph. The host's rule (`helpersKeepWorking`) is the only word on whether
+    // background helpers keep a chat working; a bare count of running helpers includes a dev server left up for days.
+    @Test func aShellLeftUpDoesNotKeepAnIdleChatWorking() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "dev")
+        var chat = HostSession(key: key, state: .finished, ducklings: DucklingSet(running: 1))
+        chat.helpersWorking = false
+        #expect(!chat.helpersKeepWorking)
+        #expect(!chat.isActive)
+        #expect(ChatMark.of(chat, unread: false) == nil)
+        #expect(SessionGrouping.kind(of: chat, now: Date()) != .working)
+        #expect(StreamGlyphState.of(chats: [chat], mark: { ChatMark.of($0, unread: false) }) == .idle)
+        #expect(StatusRollup.of(marks: [nil], ducklingsRunning: [chat.helpersKeepWorking ? 1 : 0]).state == .idle)
+        // The host says the helpers keep it working: the quiet mark, as before.
+        chat.helpersWorking = true
+        #expect(ChatMark.of(chat, unread: false) == ChatMark(.working, quiet: true))
+        #expect(chat.isActive)
+        // An older host that says nothing keeps the count's meaning.
+        chat.helpersWorking = nil
+        #expect(chat.helpersKeepWorking)
+    }
+
+    @Test func anErroredChatNeverDrawsWorkingBecauseOfHelpers() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "err")
+        for says in [nil, true] as [Bool?] {
+            var chat = HostSession(key: key, state: .error, lastActivityAt: Date(), ducklings: DucklingSet(running: 1))
+            chat.helpersWorking = says
+            #expect(!chat.helpersKeepWorking)
+            #expect(!chat.isActive)
+            #expect(ChatMark.of(chat, unread: false) == ChatMark(.failed))
+        }
+    }
+
+    @Test func aRosterDuckReadsByTheHostsActivityNotItsHelperCount() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "d")
+        // Idle Duck whose host counted one running shell: the host's activity is idle, so no glyph.
+        var idle = PondChatRow(id: "duck:1", title: "t", agent: nil, state: .finished, mark: nil, lastAt: nil, local: key, pondThread: nil, ducklingsRunning: 1, people: [])
+        idle.duckId = "1"
+        #expect(StreamGlyphState.of(rows: [idle]) == .idle)
+        var working = idle
+        working.state = .working
+        #expect(StreamGlyphState.of(rows: [working]) == .working)
     }
 
     @Test func accessibilityWords() {

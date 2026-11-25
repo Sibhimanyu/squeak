@@ -19,14 +19,15 @@ public enum StreamGlyphState: Equatable, Sendable {
 
     /// A stream's chats on this Mac, marks as the sidebar shows them.
     public static func of(chats: [HostSession], mark: (HostSession) -> ChatMark?) -> StreamGlyphState {
-        of(marks: chats.map(mark), ducklingsRunning: chats.reduce(0) { $0 + $1.backgroundRunning })
+        of(marks: chats.map(mark), ducklingsRunning: chats.filter(\.helpersKeepWorking).count)
     }
 
-    /// A pond card's threads: this Mac's by their mark, another Mac's by the state its host reported.
+    /// A pond card's threads: this Mac's by their mark, another Mac's (and the roster's) by the state its host reported.
     public static func of(rows: [PondChatRow]) -> StreamGlyphState {
         let marks: [ChatMark?] = rows.map { row in
             if let m = row.mark { return m }
-            guard row.local == nil else { return nil }
+            // A local chat's mark is authoritative; a roster Duck (host-decided) and another Mac's thread read by state.
+            guard row.local == nil || row.duckId != nil else { return nil }
             switch row.state {
             case .needsYou: return ChatMark(.waiting)
             case .working: return ChatMark(.working)
@@ -34,7 +35,9 @@ public enum StreamGlyphState: Equatable, Sendable {
             case .finished: return nil
             }
         }
-        return of(marks: marks, ducklingsRunning: rows.reduce(0) { $0 + $1.ducklingsRunning })
+        // Running helpers are not counted here: a row's own mark (this Mac's chat) and its state (the host's roster) already
+        // say whether they keep the Duck working. A bare count includes a shell left up for days, which is not working.
+        return of(marks: marks)
     }
 
     /// Only the leaf that works moves: a rollup (a stream, a pond) whose chats are on screen shows no working glyph,

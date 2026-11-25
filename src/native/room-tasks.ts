@@ -145,6 +145,13 @@ export const JOB_CHECK_PER_HOUR = 30;
 export const JOB_CLAIMS_PER_HOUR = 10;
 export const JOB_MATCH_WINDOW_MS = 7 * 24 * 3_600_000;
 export const JOB_LISTED_MS = 24 * 3_600_000;
+/**
+ * A working Task whose handed turn never shows up (the message was steered into another turn, the host restarted and
+ * dropped the queued send, the turn was interrupted before it was recorded) is not working once its chat is idle this
+ * long. Without it the Task, and the Room's working glyph, stayed on for good.
+ */
+export const TASK_UNBOUND_MS = 120_000;
+const TASK_BUSY_STATUS = new Set(["working", "stopping", "awaiting_approval", "awaiting_plan", "awaiting_answer"]);
 /** A thread must score at least this (a title word is 3, an intent word 2, a past-turn word 1.5) to be suggested. */
 export const JOB_MIN_SCORE = 3;
 const MIN_WORDS = 3;
@@ -353,7 +360,7 @@ export class RoomTasks extends EventEmitter {
       .filter((j) => j.state === "waiting" || j.state === "working" || j.state === "blocked" || j.updatedAt >= cutoff)
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
       .slice(-50)
-      .map((j) => this.item(j));
+      .map((j) => this.item(j.state === "working" ? this.reconcileJob(projectId, j) : j));
   }
 
   /** The feed item of a Task: the Task, its owner Duck by its current name, where to open it, and on done its summary. */
@@ -1615,6 +1622,16 @@ export class RoomTasks extends EventEmitter {
     return out;
   }
 
+  /** No turn matched a working Task: once its chat has stopped for `TASK_UNBOUND_MS` it did not finish, so it is blocked. */
+  private settleUnbound(projectId: string, job: RoomTask): RoomTask {
+    const to = job.handedTo;
+    if (!to || job.state !== "working" || this.now() - job.updatedAt < TASK_UNBOUND_MS) return job;
+    const session = this.o.store.getSession(to.sessionId);
+    if (session && !session.archivedAt && TASK_BUSY_STATUS.has(session.status)) return job;
+    job.state = "blocked";
+    return this.save(projectId, job);
+  }
+
   /** Binds a working Task to the turn its text started, and follows that turn to its end. Saves only on change. */
   reconcileJob(projectId: string, job: RoomTask): RoomTask {
     const to = job.handedTo;
@@ -1635,7 +1652,7 @@ export class RoomTasks extends EventEmitter {
             oneLine(stripAttachmentLines(t.prompt)) === want &&
             !taken.has(`${to.sessionId}:${t.turnId}`),
         );
-    if (!turn) return job;
+    if (!turn) return this.settleUnbound(projectId, job);
     const before = JSON.stringify(job);
     to.turnId = `${to.sessionId}:${turn.turnId}`;
     if (turn.endedAt !== undefined) {
