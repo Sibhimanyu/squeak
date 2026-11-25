@@ -54,12 +54,15 @@ struct ChatComposerBox<Setup: View>: View {
     @State private var focused = false
 
     /// About twice the old box: room for two or three lines before it grows.
+    @State private var pickerDirection: SuggestionPlacement.Direction = .up
     private let minH: CGFloat = 48
     private let maxH: CGFloat = 17 * 8 + 12
 
     var body: some View {
         box
-            .overlay(alignment: .topLeading) { pickerOverlay }
+            .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected) {
+                ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
+            }
             .zIndex(1)
             .accessibilityElement(children: .contain)
             .modifier(OptionalImageDrop(tray: tray))
@@ -76,13 +79,6 @@ struct ChatComposerBox<Setup: View>: View {
             .onChange(of: chatID) { _, _ in dictation.cancel() }
             .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in if editable, let tray, !tray.isFull { tray.pick() } }
             .onDisappear { dictation.cancel() }
-    }
-
-    @ViewBuilder private var pickerOverlay: some View {
-        if pick.isOpen {
-            ComposerPickerList(model: pick, onPick: accept)
-                .alignmentGuide(.top) { $0[.bottom] + 6 }
-        }
     }
 
     private var box: some View {
@@ -147,8 +143,8 @@ struct ChatComposerBox<Setup: View>: View {
 
     private func pickerKey(_ key: ComposerPickerKey) -> Bool {
         switch key {
-        case .up: pick.move(-1)
-        case .down: pick.move(1)
+        case .up: pick.move(SuggestionPlacement.step(up: true, direction: pickerDirection))
+        case .down: pick.move(SuggestionPlacement.step(up: false, direction: pickerDirection))
         case .accept:
             guard !pick.items.isEmpty else { return false }
             accept(pick.selected)
