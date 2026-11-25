@@ -160,7 +160,7 @@ describe("a paired browser", () => {
     const { id, document } = await channel.replyDocument(view.sessions[0], "B", record.signingKey);
     await channel.send(id, document);
     await w.bridge.tick();
-    expect(w.sends).toEqual([["s1", "B", "queue"]]);
+    expect(w.sends).toEqual([["s1", "B", "steer"]]);
     expect(await channel.result(id)).toMatchObject({ id, status: "sent", via: "conductor", delivery: "sent" });
   });
 
@@ -195,7 +195,7 @@ describe("a paired browser", () => {
     await waitFor(() => w.database.docs.size > 0 && [...w.database.docs.keys()].some((k) => k.includes("/commands/")));
     await w.bridge.tick();
     expect(await answer).toMatchObject({ status: "sent", delivery: "sent" });
-    expect(w.sends).toEqual([["s1", "A", "queue"]]);
+    expect(w.sends).toEqual([["s1", "A", "steer"]]);
     // The result was cleaned up after it was read.
     await waitFor(() => ![...w.database.docs.keys()].some((k) => k.includes("/results/") && !k.includes("pair-")));
     sync.stop();

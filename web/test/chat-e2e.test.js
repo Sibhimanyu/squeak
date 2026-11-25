@@ -266,15 +266,15 @@ describe("what the Mac accepts from this browser", () => {
   }
   const view = (w) => ({ ...w.chat, conductorSessionId: "s1", turnId: "turn-1", state: "working" });
 
-  it("a queued reply with a message id: no mode, the id passed to the Mac's replier", async () => {
+  it("a reply with a message id and no mode steers (the default), the id passed to the Mac's replier", async () => {
     const w = await world();
     const messageId = "22222222-2222-4222-8222-222222222222";
     const result = await send(
       w,
       await w.channel.replyDocument(view(w), "after this", w.record.signingKey, { messageId }),
     );
-    expect(result).toMatchObject({ status: "sent", via: "conductor", delivery: "queued" });
-    expect(w.calls.send).toEqual([{ id: "s1", text: "after this", mode: "queue", messageId }]);
+    expect(result).toMatchObject({ status: "sent", via: "conductor", delivery: "steered" });
+    expect(w.calls.send).toEqual([{ id: "s1", text: "after this", mode: "steer", messageId }]);
     w.bridge.stop();
   });
 

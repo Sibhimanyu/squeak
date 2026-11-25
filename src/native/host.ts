@@ -1139,7 +1139,9 @@ export class SessionHost extends EventEmitter {
     // A pond member's message is running: a rule the starter kept for their own turns does not cover it (docs/ponds.md).
     if (this.guestTurns.has(id)) return false;
     // Skip approvals switched on mid-turn: Codex fixed the turn's approval policy when it started, so it still asks.
-    if (this.store.getSession(id)?.permissionMode === "bypassPermissions" && SKIPPABLE.has(kind)) return true;
+    const session = this.store.getSession(id);
+    if (session?.agent === "codex" && session.permissionMode === "bypassPermissions" && SKIPPABLE.has(kind))
+      return true;
     const cwd = this.store.getSession(id)?.cwd;
     const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload, cwd));
     if (!rule) return false;
