@@ -39,7 +39,7 @@ function setup(
   const client = new FakeClient();
   const log = {
     statuses: [] as SessionStatus[],
-    messages: [] as { kind: string; payload: unknown }[],
+    messages: [] as { role?: string; kind: string; payload: unknown }[],
     ends: [] as string[],
     details: [] as (string | undefined)[],
     requests: [] as { kind: RequestKind; payload: Record<string, unknown> }[],
@@ -48,7 +48,7 @@ function setup(
   };
   const hooks: RunnerHooks = {
     onAgentSessionId: (id) => log.ids.push(id),
-    onMessage: (_r, kind, payload) => log.messages.push({ kind, payload }),
+    onMessage: (role, kind, payload) => log.messages.push({ role, kind, payload }),
     onDelta: (d) => log.deltas.push(d),
     onStatus: (s) => log.statuses.push(s),
     onRequest: async (kind, payload) => {
@@ -362,6 +362,24 @@ describe("CodexRunner", () => {
     expect(log.deltas).toHaveLength(1);
     expect(log.ends).toEqual(["idle", "idle", "error"]);
     expect(log.details[2]).toBe("failed");
+  });
+
+  it("a background command finishing after the turn ended is a note, never an agent row that opens a turn", async () => {
+    const { client, log, runner } = setup();
+    await runner.send("go");
+    note(client, "turn/completed", { turn: { id: "turn-1", status: "completed" } });
+    note(client, "item/completed", {
+      item: { type: "commandExecution", id: "x", command: "npx playwright install", exitCode: 0 },
+    });
+    expect(log.messages.map((m) => [m.role, m.kind])).toEqual([
+      ["agent", "turn/completed"],
+      ["system", "system/note"],
+    ]);
+    expect(JSON.stringify(log.messages[1]!.payload)).toContain("npx playwright install (exit 0)");
+    // The next turn's items are agent rows again.
+    await runner.send("again");
+    note(client, "item/completed", { item: { type: "agentMessage", id: "b", text: "ok" } });
+    expect(log.messages.at(-1)).toMatchObject({ role: "agent", kind: "item/agentMessage" });
   });
 
   it("a failed turn carries Codex's own reason", async () => {

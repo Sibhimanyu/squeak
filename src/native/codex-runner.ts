@@ -102,10 +102,25 @@ const APPROVALS: Record<string, RequestKind> = {
   "item/fileChange/requestApproval": "file_change",
 };
 
+/** A line for an item Codex reported after its turn ended. */
+function lateItemNote(item: Record<string, unknown>): string {
+  if (item.type === "commandExecution") {
+    const command = typeof item.command === "string" ? item.command.slice(0, 200) : "a command";
+    const exit = typeof item.exitCode === "number" ? ` (exit ${item.exitCode})` : "";
+    return `A background command finished after the turn ended: ${command}${exit}`;
+  }
+  return `Codex reported a ${String(item.type)} after the turn ended.`;
+}
+
 export class CodexRunner implements Runner {
   readonly canSteer = true;
   private threadId: string | null = null;
   private turnId: string | null = null;
+  /**
+   * A turn is open from send() until turn/completed. Codex never starts a turn by itself without turn/started, so an
+   * item that lands after turn/completed (a background command finishing late) belongs to no turn.
+   */
+  private turnOpen = false;
   private started = false;
   private closed = false;
   private mode: string;
@@ -170,6 +185,7 @@ export class CodexRunner implements Runner {
       case "turn/started": {
         const id = (p.turn as { id?: string } | undefined)?.id;
         if (id) this.turnId = id;
+        this.turnOpen = true;
         return;
       }
       case "thread/tokenUsage/updated":
@@ -179,7 +195,13 @@ export class CodexRunner implements Runner {
         if (item?.type === "fileChange" && typeof item.id === "string") this.fileChanges.set(item.id, item);
         return;
       case "item/completed":
-        if (item && item.type !== "userMessage") hooks.onMessage("agent", `item/${String(item.type)}`, item);
+        if (!item || item.type === "userMessage") return;
+        if (!this.turnOpen) {
+          // Fed as an agent row it would open a turn that Codex never ends: the chat would show working for good.
+          hooks.onMessage("system", "system/note", { text: lateItemNote(item) });
+          return;
+        }
+        hooks.onMessage("agent", `item/${String(item.type)}`, item);
         return;
       case "item/agentMessage/delta":
       case "item/commandExecution/outputDelta":
@@ -188,6 +210,7 @@ export class CodexRunner implements Runner {
       case "turn/completed": {
         const turn = (p.turn ?? {}) as { status?: string; error?: { message?: unknown } | null };
         this.turnId = null;
+        this.turnOpen = false;
         hooks.onMessage("agent", "turn/completed", turn);
         const failed = turn.status !== "completed" && turn.status !== "interrupted";
         // Codex's own reason ("out of credits", "model not supported") beats the bare status.
@@ -252,6 +275,7 @@ export class CodexRunner implements Runner {
     const threadId = await this.ensureStarted();
     await options?.after;
     const policy = this.policy();
+    this.turnOpen = true;
     this.options.hooks.onStatus("working");
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.
     const { turnId } = await this.options.client.startTurn({
