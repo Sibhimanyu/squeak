@@ -18,16 +18,27 @@ import Testing
 
     // MARK: The setting
 
-    @MainActor @Test func settingIsOffByDefaultAndPersists() {
+    @MainActor @Test func newLayoutIsTheDefaultAndChoicePersists() {
         let suite = "newlayout-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let first = MacLayoutPreference(defaults: defaults)
-        #expect(first.isNew == false)
-        first.isNew = true
-        #expect(MacLayoutPreference(defaults: defaults).isNew == true)
+        #expect(first.isNew == true)
+        #expect(defaults.object(forKey: MacLayoutPreference.defaultsKey) == nil)  // never chose stays distinguishable
         first.isNew = false
         #expect(MacLayoutPreference(defaults: defaults).isNew == false)
+        first.isNew = true
+        #expect(MacLayoutPreference(defaults: defaults).isNew == true)
+    }
+
+    @MainActor @Test func explicitEarlierChoicesAreKept() {
+        let suite = "newlayout-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: MacLayoutPreference.defaultsKey)  // turned it off after trying: stays classic
+        #expect(MacLayoutPreference(defaults: defaults).isNew == false)
+        defaults.set(true, forKey: MacLayoutPreference.defaultsKey)
+        #expect(MacLayoutPreference(defaults: defaults).isNew == true)
     }
 
     // MARK: The Duck row

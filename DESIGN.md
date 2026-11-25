@@ -1260,10 +1260,10 @@ pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
   New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access.
   Chat details and New chat use the same inset, surfaces and button styles.
 
-### 8.12 New layout (owner-approved 2026-11-25; staged, behind Settings > This Mac > General > "New layout", off by default)
+### 8.12 New layout (owner-approved 2026-11-25; the default; Settings > This Mac > General > "Classic layout" switches back)
 
 The window is redesigned from Squeak's own model: a Pond is a place, Ducks are teammates you see as faces, and what a Duck
-produces sits beside its chat. The old layout stays exactly as it is while the setting is off; the setting is read through
+produces sits beside its chat. The new layout is the default for everyone who has not chosen; the classic layout stays exactly as it was and is optional. Anyone who explicitly chose keeps their choice. The setting is read through
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
 - **Duck avatar row instead of tabs.** The centre top is a row of round avatars: a "Room" avatar first, then the Pond's

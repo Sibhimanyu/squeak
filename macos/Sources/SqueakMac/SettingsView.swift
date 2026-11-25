@@ -491,9 +491,9 @@ struct GeneralSettings: View {
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
             }
-            SettingsCard(title: "Layout", subtitle: "Try the redesigned window while it is built in stages.", symbol: "rectangle.3.group") {
-                Toggle(isOn: Binding(get: { layoutPreference.isNew }, set: { layoutPreference.isNew = $0 })) {
-                    SettingsControlLabel(title: "New layout", detail: "Ducks as a row of faces instead of tabs, a Pond panel beside the Room and colour tiles for Ponds.")
+            SettingsCard(title: "Layout", subtitle: "Choose how the window is laid out.", symbol: "rectangle.3.group") {
+                Toggle(isOn: Binding(get: { !layoutPreference.isNew }, set: { layoutPreference.isNew = !$0 })) {
+                    SettingsControlLabel(title: "Classic layout", detail: "The earlier layout with tabs, the inspector and the bottom dock.")
                 }
             }
             SettingsCard(title: "Disk", subtitle: "Streams leave folders and branches behind. See them with their sizes and clean up what is safe.", symbol: "internaldrive") {
