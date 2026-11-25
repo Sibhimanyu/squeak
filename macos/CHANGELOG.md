@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.34.7
+
+**Fixes and polish for the new layout.**
+
+- Choosing Room in the top bar now always shows the Room, coming back from a duck too.
+- The top bar has proper spacing; the Dashboard | Room switch and the tabs share one height, and tabs size to what they say.
+- Inside a duck, the pond's colour runs as one smooth gradient from under the bar into the chat.
+- Message actions (time, Copy, more) sit under each reply instead of over the text. In the Room, Reply, Copy and Make task appear in the gap under a message.
+- In the Room, a note from one duck to another reads as one line with an @mention, with the full message one click away. Old duck names no longer show numbers.
+- Your Room messages show your initials; task cards follow the message column.
+- Skip approvals never asks again, also for ducks working in the pond's main folder.
+- Unread marks only follow finished turns, not Squeak's own housekeeping notes.
+
 ## 2.34.6
 
 **One bar with tabs, a calmer Room, and ducks that choose their own streams.**
