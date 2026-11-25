@@ -134,6 +134,18 @@ public enum RoomRoster {
         return (r.onDuty + r.offDuty).filter(hit)
     }
 
+    /// The collapsed "Off duty" group under the Available ducks: the most recently active Off duty ducks, capped; `more` is how
+    /// many the search still holds.
+    public static let offDutyCap = 20
+    public static func offDutyGroup(_ ducks: [PondDuck], threads: [RoomThread] = [], now: Date = Date()) -> (rows: [RosterDuck], more: Int) {
+        let off = roster(ducks, threads: threads, now: now).offDuty
+        return (Array(off.prefix(offDutyCap)), max(0, off.count - offDutyCap))
+    }
+    /// The line under a capped Off duty group.
+    public static func offDutyMoreLine(_ n: Int) -> String { "+\(n) more \u{2014} search to find them" }
+    /// Nothing Available, some off duty: the Available part of the list says so instead of looking empty.
+    public static let noneOnDutyLine = "No ducks on duty."
+
     /// "No duck called \u{201C}x\u{201D}", for a search that finds nothing.
     public static func noMatchLine(_ query: String) -> String {
         "No duck called \u{201C}\(query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}"

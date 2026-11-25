@@ -84,9 +84,12 @@ public enum RoomDucks {
     }
 
     /// "2 people \u{00B7} 5 ducks on duty": the header counts only ducks with a live chat.
-    public static func subtitle(people: Int, ducks: Int) -> String {
+    /// With nobody on duty but some off duty, it says how many are off duty ("1 person \u{00B7} 48 ducks off duty").
+    public static func subtitle(people: Int, ducks: Int, offDuty: Int = 0) -> String {
         let p = people == 1 ? "1 person" : "\(people) people"
-        let d = ducks == 0 ? "no ducks on duty" : (ducks == 1 ? "1 duck on duty" : "\(ducks) ducks on duty")
+        let d: String
+        if ducks == 0 && offDuty > 0 { d = offDuty == 1 ? "1 duck off duty" : "\(offDuty) ducks off duty" }
+        else { d = ducks == 0 ? "no ducks on duty" : (ducks == 1 ? "1 duck on duty" : "\(ducks) ducks on duty") }
         return "\(p) \u{00B7} \(d)"
     }
 
