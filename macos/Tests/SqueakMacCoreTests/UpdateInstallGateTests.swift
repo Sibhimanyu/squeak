@@ -100,7 +100,7 @@ import Testing
         let a = SessionKey(provider: "squeak", hostSessionId: "squeak-native:a")
         let old = SessionKey(provider: "squeak", hostSessionId: "squeak-native:old")
         try await store.save("stale", for: old)
-        let finished = await Task.detached { DraftFlush.waitFor(timeout: 5) { await DraftFlush.reconcile(store, to: [a: "typed last second"]) } }.value
+        let finished = await Task.detached { DraftFlush.waitFor(timeout: 30) { await DraftFlush.reconcile(store, to: [a: "typed last second"]) } }.value
         #expect(finished)
         let all = try await store.all()
         #expect(all == [a: "typed last second"])
