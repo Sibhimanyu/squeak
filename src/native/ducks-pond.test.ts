@@ -26,25 +26,26 @@ afterEach(async () => {
 
 const iso = (minAgo: number): string => new Date(Date.now() - minAgo * 60_000).toISOString();
 
-function gitRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ducks-git-"));
+function gitRepo(dir: string): void {
   const run = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "ignore" });
   run("init", "-b", "main");
-  run("config", "user.email", "t@t");
-  run("config", "user.name", "t");
-  fs.writeFileSync(path.join(dir, "a.txt"), "a");
-  run("add", ".");
-  run("commit", "-m", "init");
-  return dir;
+  run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "--no-gpg-sign", "-m", "init");
 }
 
-async function rig(kind: "git" | "folder" = "git") {
+function rig(mode: "routing" | "folder" | "git" = "routing") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ducks-pond-"));
+  const kind = mode === "folder" ? "folder" : "git";
+  const root = path.join(dir, "root");
+  fs.mkdirSync(root);
   const store = new NativeStore(":memory:");
-  const host = new SessionHost({ store } as any);
+  const host = new SessionHost({ store });
   const tokenPath = path.join(dir, "hook-token");
-  const workspaces = new WorkspaceManager({ store, workspacesRoot: path.join(dir, "ws") });
+  const workspaces = new WorkspaceManager({ store, workspacesRoot: path.join(dir, "ws"), gitUser: "t" });
   const room = new Room({ store, ownerName: () => "Sam" });
+  const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind });
+  // Routing only needs persisted stream identities. The Git cases below exercise real branch lookup and checkout.
+  const stream = (name: string, branch = `sq/${name}`) =>
+    store.createWorkspace({ projectId: project.id, name, path: path.join(dir, "ws", name), branch });
   const started: StartSpec[] = [];
   const sent: Array<{ id: string; text: string }> = [];
   let srvRef: NativeServer | null = null;
@@ -66,7 +67,11 @@ async function rig(kind: "git" | "folder" = "git") {
         workspaceId = spec.place.workspaceId;
         cwd = store.getWorkspace(workspaceId)!.path;
       } else if (spec.place?.kind === "new") {
-        const ws = workspaces.createWorkspace(project.id, undefined, undefined, spec.place.branch, spec.title);
+        const { branch } = spec.place;
+        const ws =
+          mode === "git"
+            ? workspaces.createWorkspace(project.id, undefined, undefined, branch, spec.title)
+            : stream(branch.replaceAll("/", "-"), branch);
         workspaceId = ws.id;
         cwd = ws.path;
       }
@@ -81,27 +86,29 @@ async function rig(kind: "git" | "folder" = "git") {
       store.attachSessionToDuck(spec.duck.id, s.id);
       return s;
     },
-    newBranch: (p, t) => srvRef!.starter.newBranch(p, t),
-    checkBranch: (p, b) => srvRef!.starter.checkBranch(p, b),
+    newBranch: (p, t) => (mode === "git" ? srvRef!.starter.newBranch(p, t) : kind === "git" ? "sq/task" : null),
+    checkBranch: (p, b) => (mode === "git" ? srvRef!.starter.checkBranch(p, b) : b),
     call: async () => '{"job":false,"text":""}',
   });
-  const srv = new NativeServer({ host, store, workspaces, tokenPath, port: 0, heartbeatMs: 40, room, jobs });
+  const srv = new NativeServer({ host, store, workspaces, tokenPath, port: 0, routines: false, room, jobs });
   srvRef = srv;
-  const port = await srv.start();
   open.push(async () => {
     await srv.stop();
     await host.stop();
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   });
-  const root = kind === "git" ? gitRepo() : fs.mkdtempSync(path.join(os.tmpdir(), "ducks-folder-"));
-  const project = store.createProject({ name: "app", rootPath: root, defaultBranch: "main", kind });
-  const token = fs.readFileSync(tokenPath, "utf8").trim();
-  const call = (method: string, url: string, body?: unknown) =>
-    fetch(`http://127.0.0.1:${port}${url}`, {
+  if (mode === "git") gitRepo(root);
+  let listening: Promise<number> | undefined;
+  const call = async (method: string, url: string, body?: unknown) => {
+    const port = await (listening ??= srv.start());
+    const token = fs.readFileSync(tokenPath, "utf8").trim();
+    return fetch(`http://127.0.0.1:${port}${url}`, {
       method,
       headers: { "x-squeak-token": token, ...(body === undefined ? {} : { "content-type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  const stream = (name: string) => workspaces.createWorkspace(project.id, undefined, undefined, `sq/${name}`, name);
+  };
   const chatIn = (title: string, ws?: { id: string; path: string }): SessionRow =>
     store.createSession({
       cwd: ws?.path ?? root,
@@ -193,7 +200,7 @@ describe("one-time stale duck cleanup", () => {
 
 describe("identity-only ducks and routes", () => {
   it("POST makes a duck with no session; GET lists it with no place; it shows in the room threads", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     const res = await h.call("POST", `/native/projects/${h.project.id}/ducks`, { name: "Pip", role: "layout" });
     expect(res.status).toBe(201);
     const { duck } = (await res.json()) as any;
@@ -212,7 +219,7 @@ describe("identity-only ducks and routes", () => {
   });
 
   it("is strict: unknown keys, a missing or long name, bad types are 400; unknown ids 404", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     const url = `/native/projects/${h.project.id}/ducks`;
     expect((await h.call("POST", url, { name: "Pip", extra: 1 })).status).toBe(400);
     expect((await h.call("POST", url, { role: "x" })).status).toBe(400);
@@ -233,7 +240,7 @@ describe("identity-only ducks and routes", () => {
   });
 
   it("DELETE removes the duck for good, keeps its chats in history (archived), and is refused while one is busy", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     expect((await h.call("DELETE", "/native/ducks/nope")).status).toBe(404);
     const s = h.chatIn("Layout builder");
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
@@ -252,7 +259,7 @@ describe("identity-only ducks and routes", () => {
   });
 
   it("the session routes resolve the session's duck", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     const s = h.chatIn("Layout builder");
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
     await h.call("POST", `/native/sessions/${s.id}/duty`, { on: false });
@@ -263,7 +270,7 @@ describe("identity-only ducks and routes", () => {
   });
 
   it("an off-duty duck is never a candidate, even with no session", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     const { duck } = (await (
       await h.call("POST", `/native/projects/${h.project.id}/ducks`, { name: "Pip", role: "webcam layout builder" })
     ).json()) as any;
@@ -273,27 +280,34 @@ describe("identity-only ducks and routes", () => {
   });
 });
 
+// The cases that call Git can exceed Vitest's default under concurrent disk and process load.
+const gitTimeout = { timeout: 60_000 };
+
 describe("place and go", () => {
-  it("a strong match with the duck's stream continues there; anything else is a new stream off main", async () => {
-    const h = await rig();
-    const ws = h.stream("control-bar");
-    const s = h.chatIn("Control bar", ws);
-    h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
-    const strong = await h.job("fix the control bar spacing");
-    expect(strong.suggestion).toMatchObject({ sessionId: s.id });
-    expect(strong.place).toEqual({ kind: "stream", workspaceId: ws.id, branch: ws.branch });
-    // One shared word: suggested (title) but not strong enough to stay in that stream.
-    const weak = await h.job("add a control to export settings");
-    expect(weak.place?.kind).toBe("new");
-    expect((weak.place as any).branch).toMatch(/^[\w./-]*add-a-control-to-export-settings$/);
-    // Nothing matches: a new stream, no suggestion.
-    const none = await h.job("translate the onboarding strings");
-    expect(none.suggestion).toBeUndefined();
-    expect(none.place).toMatchObject({ kind: "new" });
-  });
+  it(
+    "a strong match with the duck's stream continues there; anything else is a new stream off main",
+    gitTimeout,
+    async () => {
+      const h = rig("git");
+      const ws = h.stream("control-bar");
+      const s = h.chatIn("Control bar", ws);
+      h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
+      const strong = await h.job("fix the control bar spacing");
+      expect(strong.suggestion).toMatchObject({ sessionId: s.id });
+      expect(strong.place).toEqual({ kind: "stream", workspaceId: ws.id, branch: ws.branch });
+      // One shared word: suggested (title) but not strong enough to stay in that stream.
+      const weak = await h.job("add a control to export settings");
+      expect(weak.place?.kind).toBe("new");
+      expect((weak.place as any).branch).toMatch(/^[\w./-]*add-a-control-to-export-settings$/);
+      // Nothing matches: a new stream, no suggestion.
+      const none = await h.job("translate the onboarding strings");
+      expect(none.suggestion).toBeUndefined();
+      expect(none.place).toMatchObject({ kind: "new" });
+    },
+  );
 
   it("go on the same stream sends the next turn to the duck's session", async () => {
-    const h = await rig();
+    const h = rig();
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     h.turn(s, "t1", "tweak the control bar spacing", 30, "Adjusted the control bar spacing.");
@@ -305,7 +319,7 @@ describe("place and go", () => {
   });
 
   it("go with a place elsewhere starts a fresh session there; the old one stays as the duck's history", async () => {
-    const h = await rig();
+    const h = rig();
     const ws = h.stream("control-bar");
     const other = h.stream("settings");
     const s = h.chatIn("Control bar", ws);
@@ -334,8 +348,8 @@ describe("place and go", () => {
     expect(threads[0]).toMatchObject({ sessionId: child, place: { workspaceId: other.id } });
   });
 
-  it("go to a new place creates the stream (a worktree on the branch) and a session in it", async () => {
-    const h = await rig();
+  it("go to a new place creates the stream (a worktree on the branch) and a session in it", gitTimeout, async () => {
+    const h = rig("git");
     const s = h.chatIn("Layout builder");
     const j = await h.job("polish the webcam overlay");
     expect(j.place).toMatchObject({ kind: "new" });
@@ -351,8 +365,8 @@ describe("place and go", () => {
     expect(done.place).toEqual({ kind: "new", branch: "sq/webcam-overlay" });
   });
 
-  it("validates a place override: bad shape 400, taken branch or other pond's stream 409", async () => {
-    const h = await rig();
+  it("validates a place override: bad shape 400, taken branch or other pond's stream 409", gitTimeout, async () => {
+    const h = rig("git");
     const s = h.chatIn("Layout builder");
     const j = await h.job("polish the webcam overlay");
     const go = (place: unknown) => h.code(h.act(j.id, { action: "go", sessionId: s.id, place }));
@@ -367,7 +381,7 @@ describe("place and go", () => {
   });
 
   it("go with a duckId, and new with no duck makes one named from the job; a busy duck cannot start elsewhere", async () => {
-    const h = await rig();
+    const h = rig();
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     const duck = h.room.duckOfSession(s)!;
@@ -395,7 +409,7 @@ describe("place and go", () => {
   });
 
   it("a plain-folder pond has no places: the job carries none and a new duck runs in the folder", async () => {
-    const h = await rig("folder");
+    const h = rig("folder");
     const j = await h.job("polish the webcam overlay");
     expect(j.place).toBeUndefined();
     const done = await h.act(j.id, { action: "new" });
@@ -410,7 +424,7 @@ describe("place and go", () => {
 
 describe("notebook", () => {
   it("a turn ending no longer writes the duck's own notebook (the Pond Notebook replaced it)", async () => {
-    const h = await rig();
+    const h = rig();
     const ws = h.stream("control-bar");
     const s = h.chatIn("Control bar", ws);
     h.room.setDuck(s.id, { name: "Pip", role: "control bar" });

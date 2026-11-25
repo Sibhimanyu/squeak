@@ -2,10 +2,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
-import { tempRepo } from "./checkpoints.test.js";
-import { HostError, SessionHost, type ForkPoint } from "./host.js";
+import { tempRepo } from "./checkpoints.test-fixture.js";
+import { HostError, SessionHost, type ForkPoint, type HostEvent } from "./host.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
 
@@ -14,29 +14,27 @@ import type { Runner, RunnerHooks, SessionRow } from "./types.js";
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
 const git = (dir: string, ...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
-const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-// Real git runs behind each turn (checkpoints), so under a loaded CI machine 2 s was not always enough.
-const until = async (fn: () => boolean, ms = 15_000) => {
-  const end = Date.now() + ms;
-  while (!fn() && Date.now() < end) await tick(10);
-  expect(fn()).toBe(true);
-};
+interface Delivery {
+  id: string;
+  text: string;
+  hooks: RunnerHooks;
+}
 
-function setup(agent: "claude" | "codex" = "claude") {
+function setup() {
   const store = new NativeStore(":memory:");
-  const hooks: RunnerHooks[] = [];
-  const sent: [string, string][] = [];
+  let deliver: ((delivery: Delivery) => void) | undefined;
   const forks: { id: string; point: ForkPoint }[] = [];
   const host = new SessionHost({
     store,
     runnerFactory: (s: SessionRow, h: RunnerHooks): Runner => {
-      hooks.push(h);
       return {
         canSteer: false,
         send: async (t, o) => {
           await o?.after;
-          sent.push([s.id, t]);
           h.onStatus("working");
+          const notify = deliver;
+          deliver = undefined;
+          notify?.({ id: s.id, text: t, hooks: h });
         },
         steer: async () => false,
         interrupt: async () => {},
@@ -49,7 +47,34 @@ function setup(agent: "claude" | "codex" = "claude") {
       return `forked-${forks.length}`;
     },
   });
-  return { store, host, hooks, sent, forks, agent };
+  onTestFinished(async () => {
+    await host.stop();
+    store.close();
+  });
+  const nextDelivery = () =>
+    new Promise<Delivery>((resolve) => {
+      deliver = resolve;
+    });
+  return { store, host, forks, nextDelivery };
+}
+
+async function sendTurn(ctx: ReturnType<typeof setup>, sid: string, text: string): Promise<Delivery> {
+  const delivery = ctx.nextDelivery();
+  expect(await ctx.host.send(sid, text)).toEqual({ queued: false });
+  return delivery;
+}
+
+async function finishTurn(host: SessionHost, { id, hooks }: Delivery): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const onEvent = (event: HostEvent) => {
+      if (event.type === "status" && event.sessionId === id && event.status === "idle") {
+        host.off("event", onEvent);
+        resolve();
+      }
+    };
+    host.on("event", onEvent);
+    hooks.onTurnEnd("idle");
+  });
 }
 
 /** One finished turn: the user text, an assistant message with a uuid, then the turn's end. */
@@ -58,22 +83,18 @@ async function turn(
   sid: string,
   text: string,
   edit: () => void,
-  opts: { codex?: boolean; n?: number } = {},
+  opts: { codex?: boolean } = {},
 ) {
-  const before = ctx.hooks.length;
-  const sentBefore = ctx.sent.length;
-  await ctx.host.send(sid, text);
-  await until(() => ctx.sent.length > sentBefore);
-  const h = ctx.hooks[Math.max(0, before === 0 ? 0 : ctx.hooks.length - 1)]!;
+  const delivery = await sendTurn(ctx, sid, text);
+  const h = delivery.hooks;
   edit();
-  const n = opts.n ?? ctx.store.listTurns(sid).length;
+  const n = ctx.store.listTurns(sid).length;
   if (opts.codex) h.onMessage("agent", "turn/completed", { id: `ct-${n}`, status: "completed" });
   else h.onMessage("agent", "assistant", { type: "assistant", uuid: `u-${n}` });
-  h.onTurnEnd("idle");
-  await until(() => ctx.store.getSession(sid)!.status === "idle");
+  await finishTurn(ctx.host, delivery);
 }
 
-describe("per-turn checkpoints", { timeout: 30_000 }, () => {
+describe("per-turn checkpoints", () => {
   it("snapshots at turn start and end, lists files per turn, and leaves the user's git state alone", async () => {
     const dir = tempRepo();
     const ctx = setup();
@@ -112,7 +133,7 @@ describe("per-turn checkpoints", { timeout: 30_000 }, () => {
   });
 });
 
-describe("revert", { timeout: 30_000 }, () => {
+describe("revert", () => {
   it("restores a turn's start, writes the system message, refuses mid-turn and without confirm", async () => {
     const dir = tempRepo();
     const ctx = setup();
@@ -137,7 +158,7 @@ describe("revert", { timeout: 30_000 }, () => {
     await expect(ctx.host.revertFiles(s.id, 9, "end", true)).rejects.toMatchObject({ status: 404 });
 
     // mid-turn: refused, files untouched
-    await ctx.host.send(s.id, "three");
+    await sendTurn(ctx, s.id, "three");
     await expect(ctx.host.revertFiles(s.id, 1, "start", true)).rejects.toBeInstanceOf(HostError);
     await expect(ctx.host.revertFiles(s.id, 1, "start", true)).rejects.toMatchObject({ status: 409 });
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a-one\n");
@@ -168,7 +189,7 @@ describe("revert", { timeout: 30_000 }, () => {
   });
 });
 
-describe("fork", { timeout: 30_000 }, () => {
+describe("fork", () => {
   it("Claude: forks at a turn through the last assistant uuid of that turn and copies the history", async () => {
     const ctx = setup();
     const s = ctx.store.createSession({
@@ -202,7 +223,7 @@ describe("fork", { timeout: 30_000 }, () => {
   });
 
   it("Codex: forks through that turn's id", async () => {
-    const ctx = setup("codex");
+    const ctx = setup();
     const s = ctx.store.createSession({ cwd: "/w", agent: "codex", model: "m", permissionMode: "default" });
     ctx.store.setAgentSessionId(s.id, "thread-1");
     await turn(ctx, s.id, "one", () => {}, { codex: true });
@@ -216,12 +237,12 @@ describe("fork", { timeout: 30_000 }, () => {
     const s = ctx.store.createSession({ cwd: "/w", agent: "claude", model: "m", permissionMode: "default" });
     await expect(ctx.host.fork(s.id)).rejects.toMatchObject({ status: 409 });
     ctx.store.setAgentSessionId(s.id, "a");
-    await ctx.host.send(s.id, "go");
+    await sendTurn(ctx, s.id, "go");
     await expect(ctx.host.fork(s.id)).rejects.toMatchObject({ status: 409 });
   });
 });
 
-describe("edit", { timeout: 30_000 }, () => {
+describe("edit", () => {
   it("forks before the turn, sends the new text there, and can restore the turn's start files first", async () => {
     const dir = tempRepo();
     const ctx = setup();
@@ -229,22 +250,25 @@ describe("edit", { timeout: 30_000 }, () => {
     ctx.store.setAgentSessionId(s.id, "agent-1");
     await turn(ctx, s.id, "one", () => fs.writeFileSync(path.join(dir, "a.txt"), "a-one\n"));
     await turn(ctx, s.id, "two", () => fs.writeFileSync(path.join(dir, "a.txt"), "a-two\n"));
+    const editedDelivery = ctx.nextDelivery();
     const { session, restored } = await ctx.host.edit(s.id, { turn: 2, text: "two, better", revertFiles: true });
     expect(restored).not.toBeNull();
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a-one\n");
     expect(ctx.forks[0]!.point).toEqual({ claudeMessageUuid: "u-1" });
-    await until(() => ctx.sent.at(-1)?.[1] === "two, better");
-    expect(ctx.sent.at(-1)).toEqual([session.id, "two, better"]);
+    const edited = await editedDelivery;
+    expect(edited).toMatchObject({ id: session.id, text: "two, better" });
     const texts = ctx.store.messagesAfter(session.id).filter((m) => m.kind === "user/text");
     expect(texts.map((m) => (m.payload as { text: string }).text)).toEqual(["one", "two, better"]);
 
     // editing the first message forks to an empty history
+    const freshDelivery = ctx.nextDelivery();
     const first = await ctx.host.edit(s.id, { turn: 1, text: "fresh start" });
     expect(first.restored).toBeNull();
     expect(ctx.store.getSession(first.session.id)!.agentSessionId).toBeNull();
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a-one\n");
     await expect(ctx.host.edit(s.id, { turn: 0, text: "x" })).rejects.toMatchObject({ status: 400 });
     await expect(ctx.host.edit(s.id, { turn: 5, text: "x" })).rejects.toMatchObject({ status: 404 });
+    expect(await freshDelivery).toMatchObject({ id: first.session.id, text: "fresh start" });
   });
 
   it("changes nothing when the fork cannot be planned", async () => {
@@ -254,9 +278,7 @@ describe("edit", { timeout: 30_000 }, () => {
     ctx.store.setAgentSessionId(s.id, "a");
     await turn(ctx, s.id, "one", () => fs.writeFileSync(path.join(dir, "a.txt"), "x\n"));
     // turn 2 never produced an assistant message: forking before turn 3 is impossible, and no files move
-    await ctx.host.send(s.id, "two");
-    ctx.hooks.at(-1)!.onTurnEnd("idle");
-    await until(() => ctx.store.getSession(s.id)!.status === "idle");
+    await finishTurn(ctx.host, await sendTurn(ctx, s.id, "two"));
     await turn(ctx, s.id, "three", () => {});
     fs.writeFileSync(path.join(dir, "a.txt"), "keep\n");
     await expect(ctx.host.edit(s.id, { turn: 3, text: "z", revertFiles: true })).rejects.toMatchObject({ status: 409 });

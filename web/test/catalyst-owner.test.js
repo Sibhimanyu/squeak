@@ -71,11 +71,12 @@ describe("CatalystDb over the real relay handler", () => {
 
   it("wakes listeners on open and on a notice, and says dropped when the socket closes", async () => {
     const relay = fakeRelay();
-    const sockets = [];
+    const first = Promise.withResolvers();
+    const reconnect = Promise.withResolvers();
+    const connecting = [first, reconnect];
     const socket = (url) => {
       const s = { url, sent: [], send: (t) => s.sent.push(t), close() {} };
-      sockets.push(s);
-      setTimeout(() => s.onmessage({ data: JSON.stringify([{ mtype: "0" }]) }), 0);
+      connecting.shift().resolve(s);
       return s;
     };
     const db = new CatalystDb({
@@ -88,19 +89,26 @@ describe("CatalystDb over the real relay handler", () => {
     });
     const events = [];
     const stop = db.watch("channels/x/state", (e) => events.push(e.kind));
-    await new Promise((r) => setTimeout(r, 30));
-    expect(sockets[0].url).toContain("wss://in1-dms.zoho.in/wsconnect");
-    expect(events).toContain("open");
-    expect(events).toContain("change");
-    const before = events.length;
-    sockets[0].onmessage({ data: JSON.stringify({ mtype: "650", msg: { opr: "event", data: { streamingId: "9" } } }) });
-    expect(events.length).toBeGreaterThan(before);
-    expect(JSON.parse(sockets[0].sent.at(-1))).toEqual({ type: "ack", streamingId: "9" });
-    sockets[0].onclose();
-    await new Promise((r) => setTimeout(r, 30));
-    expect(events).toContain("dropped");
-    expect(sockets.length).toBeGreaterThan(1);
-    stop();
+    const handshake = { data: JSON.stringify([{ mtype: "0" }]) };
+    try {
+      const initial = await first.promise;
+      expect(initial.url).toContain("wss://in1-dms.zoho.in/wsconnect");
+      events.length = 0;
+      initial.onmessage(handshake);
+      expect(events).toEqual(["open", "change"]);
+      initial.onmessage({ data: JSON.stringify({ mtype: "650", msg: { opr: "event", data: { streamingId: "9" } } }) });
+      expect(events.at(-1)).toBe("change");
+      expect(events).toHaveLength(3);
+      expect(JSON.parse(initial.sent.at(-1))).toEqual({ type: "ack", streamingId: "9" });
+      initial.onclose();
+      expect(events.at(-1)).toBe("dropped");
+      const next = await reconnect.promise;
+      events.length = 0;
+      next.onmessage(handshake);
+      expect(events).toEqual(["open", "change"]);
+    } finally {
+      stop();
+    }
   });
 });
 

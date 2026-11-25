@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { tempRepo } from "./checkpoints.test-fixture.js";
 import { Checkpointer, checkpointRef } from "./checkpoints.js";
 
 // Real git on this Mac stalls ~3 s per launch (endpoint security), so a test that spawns a dozen git processes
@@ -15,21 +16,6 @@ const dirs: string[] = [];
 afterEach(() => {
   while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
 });
-
-export function tempRepo(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ckpt-")));
-  dirs.push(dir);
-  const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
-  git("init", "-q", "-b", "main");
-  git("config", "user.email", "t@t");
-  git("config", "user.name", "t");
-  fs.writeFileSync(path.join(dir, ".gitignore"), "ignored.log\nbuild/\n");
-  fs.writeFileSync(path.join(dir, "a.txt"), "a1\n");
-  fs.writeFileSync(path.join(dir, "b.txt"), "b1\n");
-  git("add", "-A");
-  git("commit", "-q", "-m", "init");
-  return dir;
-}
 
 const git = (dir: string, ...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
 const write = (dir: string, f: string, c: string) => {
