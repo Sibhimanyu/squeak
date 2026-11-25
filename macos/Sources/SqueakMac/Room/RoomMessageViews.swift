@@ -424,7 +424,27 @@ private struct RoomSystemView: View {
     /// A handoff line opens the duck it went to.
     var open: (() -> Void)?
 
+    @State private var showEarlier = false
+
     var body: some View {
+        if line.earlier.isEmpty { single }
+        else {
+            // A folded run: its latest line, with "+N earlier" to open the rest in place (ids are the lines' own).
+            VStack(alignment: .leading, spacing: 2) {
+                if showEarlier {
+                    ForEach(line.earlier) { e in RoomSystemView(line: e, act: act, comment: comment, open: open) }
+                }
+                single
+                Button { showEarlier.toggle() } label: {
+                    Text(verbatim: showEarlier ? "Hide earlier" : RoomFold.earlierLabel(line.earlier.count))
+                        .font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.leading, 26).frame(height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(showEarlier ? "Hide earlier updates" : "\(line.earlier.count) earlier updates")
+            }
+        }
+    }
+
+    @ViewBuilder private var single: some View {
         if let h = line.handoff { RoomHandoffCard(note: h, at: line.at, open: open) }
         else if let st = line.status { RoomStatusLineView(status: st, at: line.at, comment: comment, open: open) }
         else if let t = line.task { RoomTaskCardView(card: t, act: act, open: open) }

@@ -14,6 +14,7 @@ struct RoomInspector: View {
     @State private var editing: DuckEdit?
     @State private var search = ""
     @State private var adding = false
+    @State private var offDutyOpen = false
     @State private var notice: String?
     @State private var noticeLine = RoomRoster.noJobLine
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
