@@ -76,7 +76,7 @@ struct GitCluster: View {
             Button { model.runGitAction(session, kind) } label: {
                 HStack(spacing: 6) {
                     if busy { TideGlyph(color: Theme.muted, grid: .mini).opacity(0.7) }
-                    Text(kind.title)
+                    Text(kind.title).lineLimit(1).fixedSize()
                 }
                 .font(Typo.label).foregroundStyle(Theme.ink)
                 .padding(.horizontal, 10).frame(height: 24)

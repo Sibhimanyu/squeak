@@ -129,7 +129,8 @@ extension AppModel {
                 AppLog.info("native pull request merged")
                 git.mergeConfirm = nil
                 git.lastRead[confirm.hostId] = nil
-                if let s = selectedSession, hostId(s) == confirm.hostId { await refreshGit(s, visible: true, activityChanged: true) }
+                // Merged from review-all with no Duck selected: refresh the merged Duck's own chat, not the selection.
+                if let s = allSessions.first(where: { hostId($0) == confirm.hostId }) { await refreshGit(s, visible: true, activityChanged: true) }
             } catch let e as NativeHostError {
                 git.mergeError = e.reason
             } catch {

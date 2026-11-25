@@ -90,6 +90,18 @@ public enum ShareDuckWords {
     public static let helpEnabled = "Show the chat of one of this Mac\u{2019}s ducks to the flock. To bring a person in, use Invite."
     public static let helpNone = "No chats on this Mac to share yet"
     public static let helpAllShared = "Every duck on this Mac is already in the pond"
+    public static let withPond = "With the pond"
+    public static let privately = "Privately"
+}
+
+/// Whether a Duck's own menu offers "Share this duck\u{2019}s chat\u{2026}". It needs a chat this Mac runs, a shared Pond
+/// and a role that can post, and the chat must not already be in the Pond. Named flow: a person is in a Duck's chat and
+/// wants the flock to see it; the Dashboard has no Duck, so it never offers this.
+public enum ShareDuckRule {
+    public static func offered(sharedPond: Bool, canMessage: Bool, hostId: String?, sharedSessionIds: Set<String>) -> Bool {
+        guard sharedPond, canMessage, let hostId else { return false }
+        return !sharedSessionIds.contains(hostId)
+    }
 }
 
 // MARK: Clone: which GitHub sign-in

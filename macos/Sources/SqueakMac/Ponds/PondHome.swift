@@ -242,24 +242,20 @@ struct PondHomeView: View {
 
     private var actions: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { inviteAction; shareAction; startAction; settingsAction }
+            HStack(spacing: 8) { inviteAction; startAction; settingsAction }
             VStack(alignment: .leading, spacing: 10) {
                 startAction
-                HStack(spacing: 8) { inviteAction; shareAction; settingsAction }
+                HStack(spacing: 8) { inviteAction; settingsAction }
             }
         }
     }
 
     @ViewBuilder private var inviteAction: some View {
         if role.canInvite, let p = pond {
-            Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }
+            Button { ponds.startInvite(pondId: p.id, account: model.account) } label: { Text("Invite").lineLimit(1).fixedSize() }
                 .buttonStyle(SecondaryButtonStyle()).disabled(!ponds.freshness(p).canWrite)
                 .help(ponds.freshness(p).writesDisabledReason ?? "Invite someone to this pond")
         }
-    }
-
-    @ViewBuilder private var shareAction: some View {
-        if let p = pond, !p.local, role.canMessage { shareMenu(p) }
     }
 
     private var chrome: PondChrome { PondsModel.shared.chrome(key: key) }
@@ -273,7 +269,7 @@ struct PondHomeView: View {
             case .hidden: EmptyView()
             case .own, .askOwner:
                 let label: String = { if case .askOwner(let l) = chrome.start { return l } else { return "Start a duck" } }()
-                Button { startThread() } label: { Label(label, systemImage: "plus") }
+                Button { startThread() } label: { Label(label, systemImage: "plus").lineLimit(1).fixedSize() }
                     .buttonStyle(PondPrimaryButtonStyle())
                     .disabled(why != nil).help(why ?? (chrome.isRemote ? label : "Start a duck in this pond"))
             }
@@ -349,7 +345,7 @@ struct PondHomeView: View {
                             } else if item == .working && count > 0 {
                                 WorkingGlyph(slot: 20, alignment: .leading, grid: .compact)
                             }
-                            Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted)
+                            Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).fixedSize(horizontal: true, vertical: false)
                         }
                         .frame(height: 16)  // the working glyph or the alert icon never makes one tile taller
                         Text(verbatim: "\(count)")
@@ -415,13 +411,7 @@ struct PondHomeView: View {
                         .font(Typo.heading).foregroundStyle(Theme.ink)
                     Text(layout.isEmpty ? FirstPondJourney.emptyPondDetail(plainFolder: native?.isPlainFolder == true) : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    if layout.isEmpty {
-                        if chrome.start != .hidden, pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {
-                            Button({ if case .askOwner(let l) = chrome.start { return l } else { return "Start a duck" } }()) { startThread() }.buttonStyle(SecondaryButtonStyle())
-                        }
-                    } else {
-                        Button("Reset filters") { scope = .all; query = "" }.buttonStyle(SecondaryButtonStyle())
-                    }
+                    // No buttons here: "Start a duck" is the overview card's action and "Reset" is on the filter line above.
                 }
                 .padding(24).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
@@ -469,22 +459,6 @@ struct PondHomeView: View {
                 }
             }
         }
-    }
-
-    /// Threads on this Mac not yet in the pond.
-    private func shareMenu(_ p: PondSummary) -> some View {
-        let shared = Set((detail?.threads ?? []).compactMap(\.sessionId))
-        let candidates = localSessions.compactMap { s in model.hostId(s).map { (s, $0) } }.filter { !shared.contains($0.1) }
-        return SqueakMenu(ShareDuckWords.menu) {
-            ForEach(candidates, id: \.1) { s, id in
-                Button(model.workbenchTitle(s)) { Task { await ponds.share(pond: p.id, sessionId: id) } }
-                Button("\(model.workbenchTitle(s)) (private)") { Task { await ponds.share(pond: p.id, sessionId: id, isPrivate: true) } }
-            }
-        }
-        .menuStyle(.button).buttonStyle(SecondaryButtonStyle()).fixedSize()
-        .disabled(candidates.isEmpty)
-        .help(candidates.isEmpty ? (localSessions.isEmpty ? ShareDuckWords.helpNone : ShareDuckWords.helpAllShared) : ShareDuckWords.helpEnabled)
-        .accessibilityLabel(ShareDuckWords.menu)
     }
 
     private func startThread() { Self.startThread(key: key, model: model) }

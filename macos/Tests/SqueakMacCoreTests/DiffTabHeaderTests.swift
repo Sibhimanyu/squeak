@@ -25,4 +25,33 @@ import Testing
         #expect(!ReviewAllControls.shows(isSqueakChat: false, canSeeCode: true, isMain: false, hasHistory: true))
         #expect(!ReviewAllControls.shows(isSqueakChat: true, canSeeCode: true, isMain: false, hasHistory: false))
     }
+
+    @Test func oneFoldToggleFoldsWhileAnyFileIsOpenThenUnfolds() {
+        let paths = ["a", "b", "c"]
+        // Some open: the toggle folds, and flips only the open ones.
+        var folded: Set<String> = ["a"]
+        #expect(!ReviewAllControls_isUnfolding(paths, folded))
+        #expect(ReviewFoldAll.title(unfolding: false) == "Fold all")
+        #expect(ReviewFoldAll.toToggle(paths: paths, isFolded: { folded.contains($0) }) == ["b", "c"])
+        // All folded: it unfolds every file.
+        folded = ["a", "b", "c"]
+        #expect(ReviewAllControls_isUnfolding(paths, folded))
+        #expect(ReviewFoldAll.title(unfolding: true) == "Unfold all")
+        #expect(ReviewFoldAll.toToggle(paths: paths, isFolded: { folded.contains($0) }) == paths)
+        // No files: nothing to unfold, nothing to toggle.
+        #expect(!ReviewFoldAll.isUnfolding(paths: [], isFolded: { _ in true }))
+        #expect(ReviewFoldAll.toToggle(paths: [], isFolded: { _ in true }).isEmpty)
+    }
+
+    private func ReviewAllControls_isUnfolding(_ paths: [String], _ folded: Set<String>) -> Bool {
+        ReviewFoldAll.isUnfolding(paths: paths, isFolded: { folded.contains($0) })
+    }
+
+    @Test func shareDuckChatNeedsADuckASharedPondAndAChatNotYetShared() {
+        #expect(ShareDuckRule.offered(sharedPond: true, canMessage: true, hostId: "h1", sharedSessionIds: ["h2"]))
+        #expect(!ShareDuckRule.offered(sharedPond: true, canMessage: true, hostId: "h1", sharedSessionIds: ["h1"]))
+        #expect(!ShareDuckRule.offered(sharedPond: true, canMessage: true, hostId: nil, sharedSessionIds: []))
+        #expect(!ShareDuckRule.offered(sharedPond: false, canMessage: true, hostId: "h1", sharedSessionIds: []))
+        #expect(!ShareDuckRule.offered(sharedPond: true, canMessage: false, hostId: "h1", sharedSessionIds: []))
+    }
 }

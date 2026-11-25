@@ -70,7 +70,13 @@ struct WorkbenchCentre: View {
         let workspace = shell.flatMap { PondsModel.shared.key(of: $0) }.flatMap { PondWorkspace(pond: $0) }
         let item = model.location.chatKey == nil ? nil : workspace.flatMap { model.tabStore.currentPondItem($0.project.id) }
         VStack(spacing: 0) {
-            if let shell {
+            if let shell, newDuck, let workspace {
+                // New layout: a Duck's chat has the one top bar (Pond, Duck, branch, strip, menu), like the Dashboard and the Room.
+                DuckTopBar(session: shell, workspace: workspace,
+                           strip: workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore),
+                           sidebarHidden: sidebarHidden)
+                    .id(workspace.project.id)
+            } else if let shell {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
                     sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
@@ -102,7 +108,7 @@ struct WorkbenchCentre: View {
         // Pond tint (§3.5): a very faint wash from the top edge, fading out over the header and the tab strip.
         .background(alignment: .top) {
             LinearGradient(colors: [PondColour.wash(PondColour.openPond(shell), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
+                .frame(height: Metrics.header + (newDuck && workspace != nil ? 0 : Metrics.tabStrip)).allowsHitTesting(false)
         }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.lastChat) { _, key in
@@ -263,7 +269,9 @@ private struct WorkbenchHeader: View {
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
-            if session.source == .squeak, model.focus.access.showsCode, !ducks || duckChrome.showsCreatePR { GitCluster(session: session, showsBranch: false) }
+            // The new layout's Duck has no Git cluster: review-all carries merge and the PR.
+            if session.source == .squeak, model.focus.access.showsCode, !ducks || duckChrome.showsCreatePR,
+               !WorkPaneActions.isDuckView(session) { GitCluster(session: session, showsBranch: false) }
             // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
             if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
@@ -308,26 +316,41 @@ private struct WorkbenchHeader: View {
 }
 
 /// "Open in ▾" (quiet): Open in Conductor for a Conductor chat, and the workspace actions Conductor chats have.
-private struct OpenInMenu: View {
+/// The items of "Open in": the classic header's menu and, in the new layout, the Duck's one ⋯ menu.
+struct OpenInItems: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
+
+    static func isOffered(_ session: HostSession, model: AppModel) -> Bool {
+        session.capabilities.openInHost.isSupported || (session.conductorSessionId != nil && model.workspaceRepos != nil)
+    }
 
     private var canOpen: Bool { session.capabilities.openInHost.isSupported }
     private var hasActions: Bool { session.conductorSessionId != nil && model.workspaceRepos != nil }
     private var resting: Bool { session.state != .working && !(session.state == .blocked && session.pendingQuestion == nil) }
 
     var body: some View {
-        if canOpen || hasActions {
+        if canOpen {
+            Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }
+                .disabled(model.chatBusy || (model.openURL == nil && !model.demoMode))
+        }
+        if hasActions {
+            if canOpen { Divider() }
+            Button("Open a pull request") { Task { await model.askForPullRequest(session) } }.disabled(!resting || model.chatBusy)
+            Divider()
+            Button("Archive workspace…", role: .destructive) { Task { await model.archiveWorkspace(session) } }.disabled(!resting || model.chatBusy)
+        }
+    }
+}
+
+private struct OpenInMenu: View {
+    let session: HostSession
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if OpenInItems.isOffered(session, model: model) {
             SqueakMenu {
-                if canOpen {
-                    Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
-                }
-                if hasActions {
-                    if canOpen { Divider() }
-                    Button("Open a pull request") { Task { await model.askForPullRequest(session) } }.disabled(!resting)
-                    Divider()
-                    Button("Archive workspace…", role: .destructive) { Task { await model.archiveWorkspace(session) } }.disabled(!resting)
-                }
+                OpenInItems(session: session)
             } label: {
                 HStack(spacing: 4) {
                     Lucide(.externalLink, size: 14, color: Theme.muted)

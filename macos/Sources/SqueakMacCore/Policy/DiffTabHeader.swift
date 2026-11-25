@@ -30,6 +30,22 @@ public struct DiffTabHeader: Equatable, Sendable {
     }
 }
 
+/// The review-all header's one fold toggle (replaces separate "Fold all" and "Unfold all"): it folds while any file is
+/// open and unfolds once every file is folded. Named flow: a person folds a long review to its file headings, then opens one.
+public enum ReviewFoldAll {
+    public static func isUnfolding(paths: [String], isFolded: (String) -> Bool) -> Bool {
+        !paths.isEmpty && paths.allSatisfy(isFolded)
+    }
+
+    public static func title(unfolding: Bool) -> String { unfolding ? "Unfold all" : "Fold all" }
+
+    /// The files whose fold state must flip to reach the target (all folded, or all open).
+    public static func toToggle(paths: [String], isFolded: (String) -> Bool) -> [String] {
+        let unfolding = isUnfolding(paths: paths, isFolded: isFolded)
+        return paths.filter { isFolded($0) == unfolding }
+    }
+}
+
 /// Whether review-all shows merge and PR controls: only for a Duck on its own branch in a repository, never Main.
 public enum ReviewAllControls {
     public static func shows(isSqueakChat: Bool, canSeeCode: Bool, isMain: Bool, hasHistory: Bool) -> Bool {

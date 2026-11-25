@@ -47,12 +47,24 @@ struct PondReviewAllTab: View {
     var body: some View {
         let store = model.changesStore(for: session.key.hostSessionId)
         VStack(spacing: 0) {
-            DiffTabHeaderBar(session: session, path: nil, fileCount: store.changes?.files.count ?? 0, showsGit: true)
+            // One header row: the Duck, its branch, the count and diffstat, fold, Ask and the Git controls. ReviewView draws
+            // no bar of its own here.
+            DiffTabHeaderBar(session: session, path: nil, fileCount: store.changes?.files.count ?? 0, showsGit: true,
+                             review: ReviewHeaderInfo(files: files, list: store.changes?.files ?? [],
+                                                      added: store.changes?.added, removed: store.changes?.removed))
             Rectangle().fill(Theme.line).frame(height: 1)
-            ReviewView(files: files, session: session, showsBackButton: false)
+            ReviewView(files: files, session: session, showsBackButton: false, showsTopBar: false)
             if !store.tray.isEmpty { CommentTray(store: store, session: session) }
         }
     }
+}
+
+/// What review-all adds to the shared header: the diffstat and the fold toggle that ReviewView's own bar used to carry.
+private struct ReviewHeaderInfo {
+    let files: FilesModel
+    let list: [DaemonChanges.File]
+    let added: Int?
+    let removed: Int?
 }
 
 /// The shared header: Duck, branch, what the tab shows, then "Ask <Duck> to fix…" and (review-all) Git controls.
@@ -61,6 +73,7 @@ private struct DiffTabHeaderBar: View {
     let path: String?
     let fileCount: Int
     let showsGit: Bool
+    var review: ReviewHeaderInfo?
     @Environment(AppModel.self) private var model
     @State private var asking = false
     @State private var words = ""
@@ -82,11 +95,35 @@ private struct DiffTabHeaderBar: View {
                     }
                     .padding(.horizontal, 7).frame(height: 22)
                     .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
+                    .layoutPriority(-2)
                 }
                 if path != nil {
                     Text(verbatim: header.title).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                        .layoutPriority(-1)
+                }
+                if let review {
+                    // Flow: the person sees how big the review is before reading it.
+                    Text(verbatim: header.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                    if let added = review.added, let removed = review.removed {
+                        HStack(spacing: 5) {
+                            Text("+\(added)").foregroundStyle(Theme.success)
+                            Text("\u{2212}\(removed)").foregroundStyle(Theme.negative)
+                        }
+                        .font(Typo.code).monospacedDigit().lineLimit(1).fixedSize()
+                    }
                 }
                 Spacer(minLength: Space.s)
+                if let review {
+                    // Flow: a long review is folded to its file headings, then opened one file at a time (one toggle, not two).
+                    let paths = review.list.map(\.path)
+                    let folded: (String) -> Bool = { review.files.review.isFolded($0) }
+                    Button {
+                        for p in ReviewFoldAll.toToggle(paths: paths, isFolded: folded) { review.files.toggleDiffFold(p) }
+                    } label: {
+                        Text(ReviewFoldAll.title(unfolding: ReviewFoldAll.isUnfolding(paths: paths, isFolded: folded))).lineLimit(1).fixedSize()
+                    }
+                    .buttonStyle(QuietButtonStyle()).disabled(paths.isEmpty)
+                }
                 // Flow: the person sees something wrong and tells the Duck without switching to its chat.
                 Button { asking.toggle() } label: { Text(header.askLabel).lineLimit(1).fixedSize() }
                     .buttonStyle(QuietButtonStyle())
