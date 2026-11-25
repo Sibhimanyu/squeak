@@ -87,11 +87,11 @@ private enum Fixtures {
     }
 
     /// The real top bar from fixture data. `selected` is what the centre shows.
-    static func bar(width: Double, centre: PondCentre, withPip: Bool = false, duckling: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
+    static func bar(width: Double, centre: PondCentre, progress: Double? = nil, withPip: Bool = false, duckling: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
         let tabs = tabs(withPip: withPip, duckling: duckling)
         return PondTopBar(
             name: name, subtitle: "2 people, 2 ducks on duty", leadingInset: 0,
-            switchSelection: .constant(centre.switchSelection), hasTabs: true,
+            switchSelection: centre.switchSelection, switchProgress: progress, pick: { _ in }, hasTabs: true,
             tile: { tile(name, seed: seed) },
             tabs: {
                 PondTabsRow(
@@ -228,12 +228,19 @@ private enum Fixtures {
                     barOnSurface(width: w, centre: PondCentre(page: .room, item: TabItem(.notebook, "nb")), dark: dark))
             }
         }
+        // The Dashboard | Room switch mid-swipe: the pill at progress 0, 0.5 and 1.
+        for (label, p) in [("0", 0.0), ("half", 0.5), ("1", 1.0)] {
+            for dark in [false, true] {
+                add("switch-progress-\(label)-\(dark ? "dark" : "light")", 640, 56, dark: dark,
+                    barOnSurface(width: 640, centre: PondCentre(page: p >= 0.5 ? .room : .dashboard), progress: p, dark: dark))
+            }
+        }
         return out
     }
 
     /// The bar alone, on the top surface's tint (as it sits in the app).
-    static func barOnSurface(width: Double, centre: PondCentre, withPip: Bool = false, duckling: Bool = false, seed: PondSeed = greenroom, dark: Bool) -> some View {
-        bar(width: width, centre: centre, withPip: withPip, duckling: duckling, seed: seed)
+    static func barOnSurface(width: Double, centre: PondCentre, progress: Double? = nil, withPip: Bool = false, duckling: Bool = false, seed: PondSeed = greenroom, dark: Bool) -> some View {
+        bar(width: width, centre: centre, progress: progress, withPip: withPip, duckling: duckling, seed: seed)
             .frame(width: width, height: 56)
             .background(alignment: .top) { DuckPondGradient(colour: gradientColour(seed: seed, dark: dark)) }
             .background(Theme.bg)

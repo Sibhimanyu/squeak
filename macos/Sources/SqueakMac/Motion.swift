@@ -30,12 +30,6 @@ enum Motion {
         reduceMotion ? nil : .timingCurve(1.0 / 3, 0, 2.0 / 3, 1, duration: duration)
     }
 
-    /// The Dashboard <-> Room finish and settle: a decelerating timing curve (no spring) over `duration`, which the caller
-    /// scales by the distance left (`SwipeFinish`). Nil under Reduce Motion: the swap is instant.
-    static func swipe(duration: Double) -> Animation? {
-        reduceMotion ? nil : .timingCurve(SwipeCurve.x1, SwipeCurve.y1, SwipeCurve.x2, SwipeCurve.y2, duration: duration)
-    }
-
     /// Press-down is instant, release eases at `quick`. Use as `.animation(Motion.release(pressed), value: pressed)`.
     static func release(_ isPressed: Bool) -> Animation? { isPressed ? nil : quick }
 
