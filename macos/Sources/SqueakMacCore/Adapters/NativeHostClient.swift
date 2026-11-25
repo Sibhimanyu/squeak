@@ -934,6 +934,15 @@ public struct NativeHostClient: Sendable {
         try await decode(Messages.self, try await call("GET", "/native/sessions/\(Self.id(id))/messages?after=\(after)&limit=\(limit)")).messages
     }
 
+    /// The `/` list for a chat in `cwd`: the user's and the project's skills and commands and every enabled plugin's
+    /// (`plugin:skill`), found by the host the way Claude Code finds them.
+    public func commands(cwd: String?) async throws -> [SlashCommand] {
+        let q = cwd.flatMap { $0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) }.map { "?cwd=\($0)" } ?? ""
+        return try await decode(Commands.self, try await call("GET", "/native/commands" + q)).commands.map {
+            SlashCommand(name: $0.name, detail: $0.detail ?? "", plugin: $0.plugin ?? "")
+        }
+    }
+
     /// The newest `limit` rows before `before` (nil: before everything), still oldest first.
     public func messages(id: String, before: Int?, limit: Int) async throws -> [NativeMessage] {
         let b = before.map(String.init) ?? "latest"
@@ -1367,6 +1376,8 @@ public struct NativeHostClient: Sendable {
     private struct Sessions: Decodable { var sessions: [NativeSession] }
     private struct One: Decodable { var session: NativeSession }
     private struct Messages: Decodable { var messages: [NativeMessage] }
+    private struct CommandRow: Decodable { var name: String; var detail: String?; var plugin: String? }
+    private struct Commands: Decodable { var commands: [CommandRow] }
     private struct Requests: Decodable { var requests: [NativeRequest] }
     private struct Rules: Decodable { var rules: [NativeRule] }
     private struct Comments: Decodable { var comments: [NativeComment] }

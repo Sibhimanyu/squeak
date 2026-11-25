@@ -86,8 +86,15 @@ public enum FuzzyMatch {
 public struct SlashCommand: Equatable, Sendable, Identifiable {
     public var name: String
     public var detail: String
+    /// The plugin a `plugin:skill` entry comes from; empty for built-ins and the user's own.
+    public var plugin: String
     public var id: String { name }
-    public init(name: String, detail: String = "") { self.name = name; self.detail = detail }
+    public init(name: String, detail: String = "", plugin: String = "") { self.name = name; self.detail = detail; self.plugin = plugin }
+
+    /// The row's secondary text: the plugin, then what the command does.
+    public var secondary: String {
+        plugin.isEmpty ? detail : (detail.isEmpty ? plugin : plugin + " \u{00B7} " + detail)
+    }
 }
 
 public enum SlashCommands {
@@ -126,6 +133,38 @@ public enum SlashCommands {
             }
         }
         return out
+    }
+
+    /// The best `limit` commands for `query`, case-insensitive: a name or skill part (after the plugin's colon) that
+    /// starts with it first, then a name or plugin that contains it, then the looser fuzzy matches. Within the first
+    /// two tiers the list order (by name) holds, so `matt` lists every `mattpocock-skills:*` entry.
+    public static func rank(_ query: String, _ items: [SlashCommand], limit: Int) -> [SlashCommand] {
+        let q = query.lowercased()
+        if q.isEmpty { return Array(items.prefix(limit)) }
+        var scored: [(tier: Int, fuzzy: Int, index: Int, item: SlashCommand)] = []
+        for (i, c) in items.enumerated() {
+            let name = c.name.lowercased()
+            let skill = name.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init) ?? name
+            if name.hasPrefix(q) || skill.hasPrefix(q) {
+                scored.append((0, 0, i, c))
+            } else if name.contains(q) || c.plugin.lowercased().contains(q) {
+                scored.append((1, 0, i, c))
+            } else if let f = FuzzyMatch.score(query, in: c.name) {
+                scored.append((2, -f, i, c))
+            }
+        }
+        scored.sort { a, b in
+            if a.tier != b.tier { return a.tier < b.tier }
+            if a.fuzzy != b.fuzzy { return a.fuzzy < b.fuzzy }
+            return a.index < b.index
+        }
+        return scored.prefix(limit).map(\.item)
+    }
+
+    /// What the host found on disk (plugins, user and project skills) first, then the init message's names it lacks
+    /// (built-ins such as `compact`, connector prompts). A name keeps the description of its first appearance.
+    public static func combined(host: [SlashCommand], fromInit: [SlashCommand]) -> [SlashCommand] {
+        normalized(host + fromInit)
     }
 
     /// The init list with descriptions borrowed from same-named custom commands.

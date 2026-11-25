@@ -55,8 +55,9 @@ final class ComposerPickerModel {
             }
         case .command(let q, _):
             guard let commands else { load(files: false); return }
-            items = FuzzyMatch.rank(q, commands, limit: 8, key: { $0.name }).map {
-                ComposerPickItem(id: $0.name, title: "/" + $0.name, detail: $0.detail)
+            // Up to 40 rows: the popover shows six and scrolls, so a plugin's whole set is reachable.
+            items = SlashCommands.rank(q, commands, limit: 40).map {
+                ComposerPickItem(id: $0.name, title: "/" + $0.name, detail: $0.secondary)
             }
         }
         selected = min(selected, max(items.count - 1, 0))

@@ -175,6 +175,8 @@ describe("ClaudeRunner", () => {
         squeak: { type: "http", url: "http://127.0.0.1:1/mcp/s1", headers: { Authorization: "Bearer tok" } },
       },
       plugins: [{ type: "local", path: "/p/agent-plugin" }],
+      // Regression: the user's installed and enabled plugins load too, the same sources Claude Code reads.
+      settingSources: ["user", "project", "local"],
     });
     const canUseTool = f.calls[0]!.canUseTool as (
       n: string,

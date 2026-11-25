@@ -901,9 +901,14 @@ struct SessionDetail: View {
         return ComposerPickerSource(
             folder: cwd,
             commands: {
+                // The host lists what is on disk (plugins included) even before the chat's first turn, when there is no
+                // init message yet; the init's own names (built-ins) join it. Without the host, the local scan.
                 let custom = SlashCommands.custom(cwd: cwd)
-                guard nativeClaude, let rows = try? await host.messages(id: hostId, after: 0, limit: 60) else { return custom }
+                guard nativeClaude else { return custom }
+                let onDisk = (try? await host.commands(cwd: cwd)) ?? []
+                let rows = (try? await host.messages(id: hostId, after: 0, limit: 60)) ?? []
                 let fromInit = SlashCommands.fromInit(rows)
+                if !onDisk.isEmpty { return SlashCommands.combined(host: onDisk, fromInit: fromInit) }
                 return fromInit.isEmpty ? custom : SlashCommands.merged(fromInit, custom: custom)
             },
             identity: session.key.hostSessionId + "|" + cwd)

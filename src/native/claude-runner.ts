@@ -250,6 +250,9 @@ export class ClaudeRunner implements Runner {
       // Launched able to switch to "Skip approvals" and back later; canUseTool reads the live mode.
       allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
+      // The same settings Claude Code reads, so the user's installed and enabled plugins and skills load in a Squeak
+      // chat too (the `plugins` below only adds the bundled squeak plugin on top).
+      settingSources: ["user", "project", "local"],
       env: withSystemProxyEnv({ ...claudeEnv(this.options) }),
       // Squeak shows pages through its own `show` tool; Claude Code's artifacts live on claude.ai.
       disallowedTools: [...ARTIFACT_TOOLS],

@@ -27,7 +27,7 @@ afterEach(async () => {
   while (open.length) await open.pop()!.stop();
 });
 
-async function start(): Promise<Harness> {
+async function start(commandsHome?: string): Promise<Harness> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-srv-"));
   const store = new NativeStore(":memory:");
   const hooks: RunnerHooks[] = [];
@@ -55,6 +55,7 @@ async function start(): Promise<Harness> {
     store,
     workspaces: new WorkspaceManager({ store, workspacesRoot: path.join(dir, "ws") }),
     tokenPath,
+    ...(commandsHome ? { commandsHome } : {}),
     port: 0,
     heartbeatMs: 50,
   });
@@ -158,6 +159,34 @@ describe("NativeServer", () => {
       expect(r.headers.get("access-control-allow-origin")).toBeNull();
       expect(r.headers.get("access-control-allow-headers")).toBeNull();
     }
+  });
+
+  it("lists the user's plugin skills for the composer's slash list, token-gated", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "native-cmds-"));
+    const install = path.join(home, "plug");
+    fs.mkdirSync(path.join(install, "skills/grilling"), { recursive: true });
+    fs.mkdirSync(path.join(install, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(path.join(install, ".claude-plugin/plugin.json"), JSON.stringify({ name: "mattpocock-skills" }));
+    fs.writeFileSync(path.join(install, "skills/grilling/SKILL.md"), "---\ndescription: Grill the user\n---\n");
+    fs.mkdirSync(path.join(home, ".claude/plugins"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".claude/plugins/installed_plugins.json"),
+      JSON.stringify({ plugins: { "mattpocock-skills@m": [{ scope: "user", installPath: install }] } }),
+    );
+    fs.writeFileSync(
+      path.join(home, ".claude/settings.json"),
+      JSON.stringify({ enabledPlugins: { "mattpocock-skills@m": true } }),
+    );
+    const h = await start(home);
+    expect((await call(h, "GET", "/native/commands", undefined, null)).status).toBe(401);
+    const r = await call(h, "GET", `/native/commands?cwd=${encodeURIComponent(home)}`);
+    expect(r.status).toBe(200);
+    expect(r.json.commands).toContainEqual({
+      name: "mattpocock-skills:grilling",
+      detail: "Grill the user",
+      plugin: "mattpocock-skills",
+    });
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it("searches message text over the token-gated route", async () => {
