@@ -280,10 +280,17 @@ struct PondDragTests {
         #expect(u == .track(0.6))
     }
 
-    @Test func verticalScrollSettlesAndNeverCommits() {
-        let out = run([(-10, 0, 0.02), (-5, 40, 0.02), (-100, 10, 0.02)])
-        #expect(out.contains { if case .settle = $0 { true } else { false } })
-        #expect(!out.contains { if case .commit = $0 { true } else { false } })
+    @Test func aGestureThatStartsVerticalIsNeverTracked() {
+        let out = run([(-2, 8, 0.02), (-60, 40, 0.02), (-300, 10, 0.02)], rest: 0.3)
+        #expect(out.isEmpty)
+    }
+
+    @Test func aHorizontalLockHoldsWhenTheFingersDriftDown() {
+        // Locked on the first events: a later downward drift neither cancels the swipe nor scrolls the page.
+        let out = run([(-30, 2, 0.02), (-10, 60, 0.02), (-10, 60, 0.02)], rest: 0.3)
+        // Every event tracks, none of them settles or abandons the swipe early; the one finish comes at the end.
+        #expect(out.filter { if case .track = $0 { true } else { false } }.count == 3)
+        #expect(!out.dropLast().contains { if case .settle = $0 { true } else { false } })
     }
 
     @Test func momentumIsIgnored() {
@@ -312,24 +319,6 @@ struct SwipeFeelTests {
         #expect(!SwipeCommit.commits(travelShare: 0.08, velocityToward: 500, travel: 80))
         #expect(!SwipeCommit.commits(travelShare: 0.08, velocityToward: -900, travel: 80))
         #expect(!SwipeCommit.commits(travelShare: 0.01, velocityToward: 900, travel: 10))
-    }
-
-    @Test func finishDurationScalesWithRemainingDistance() {
-        let near = SwipeFinish.commitDuration(remainingShare: 0.1, width: 1000, velocity: 0)
-        let far = SwipeFinish.commitDuration(remainingShare: 0.9, width: 1000, velocity: 0)
-        #expect(near < far)
-        #expect(SwipeFinish.commitRange.contains(near) && SwipeFinish.commitRange.contains(far))
-        #expect(far <= 0.35 && near >= 0.18)
-        // A fast flick finishes sooner than the distance alone says.
-        #expect(SwipeFinish.commitDuration(remainingShare: 0.9, width: 1000, velocity: 4000) < far)
-        #expect(SwipeFinish.settleDuration(remainingShare: 0.5, width: 1000, velocity: 0) < SwipeFinish.commitDuration(remainingShare: 0.5, width: 1000, velocity: 0))
-        #expect(SwipeFinish.settleRange.contains(SwipeFinish.settleDuration(remainingShare: 1, width: 1000, velocity: 0)))
-    }
-
-    @Test func curveDecelerates() {
-        #expect(SwipeCurve.value(0) == 0 && SwipeCurve.value(1) == 1)
-        #expect(SwipeCurve.value(0.25) > 0.5)
-        #expect(SwipeCurve.value(0.5) < SwipeCurve.value(0.75))
     }
 
     @Test func ringFillsToTheCommitPoint() {

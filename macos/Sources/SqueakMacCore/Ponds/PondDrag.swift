@@ -2,7 +2,7 @@ import Foundation
 
 // The Dashboard <-> Room swipe as a gesture the pages follow (DESIGN.md §7): pure, so the view only draws what comes back.
 // The pages are one strip: `position` 0 is the Dashboard, 1 the Room, and the strip follows the fingers one to one, like
-// Safari's back swipe. Past either end it rubber-bands. The gesture commits by distance or by a flick.
+// Safari's back swipe. Past either end it rubber-bands. The gesture commits by distance or by a flick, then `SwipeSpring` carries it home.
 
 /// One finger sample: cumulative horizontal travel `x` (points) at time `t` (seconds).
 public struct SwipeSample: Sendable, Equatable {
@@ -42,53 +42,6 @@ public enum SwipeCommit {
     public static func commits(travelShare: Double, velocityToward: Double, travel: Double) -> Bool {
         if travelShare > distanceShare { return true }
         return velocityToward > flickVelocity && abs(travel) >= flickMinTravel && travelShare > 0
-    }
-}
-
-/// The easing every finish uses: cubic-bezier(0.22, 1, 0.36, 1), a strong ease-out. No springs (§7).
-public enum SwipeCurve {
-    public static let x1 = 0.22, y1 = 1.0, x2 = 0.36, y2 = 1.0
-
-    /// Eased progress 0...1 at linear time `t` 0...1.
-    public static func value(_ t: Double) -> Double {
-        let t = max(0, min(1, t))
-        if t == 0 || t == 1 { return t }
-        // Solve x(s) = t by bisection, then read y(s).
-        var lo = 0.0, hi = 1.0
-        for _ in 0..<40 {
-            let mid = (lo + hi) / 2
-            if bezier(mid, x1, x2) < t { lo = mid } else { hi = mid }
-        }
-        return bezier((lo + hi) / 2, y1, y2)
-    }
-
-    private static func bezier(_ s: Double, _ a: Double, _ b: Double) -> Double {
-        let u = 1 - s
-        return 3 * u * u * s * a + 3 * u * s * s * b + s * s * s
-    }
-}
-
-/// How long a finish or a settle takes.
-public enum SwipeFinish {
-    public static let commitRange = 0.18...0.35
-    public static let settleRange = 0.14...0.26
-
-    /// A finish to the other page from `remainingShare` of the width away (0...1), at `velocity` points per second toward
-    /// it (0 when unknown): longer for more distance, no longer than the fingers' own speed would take.
-    public static func commitDuration(remainingShare: Double, width: Double, velocity: Double) -> Double {
-        scaled(commitRange, remainingShare: remainingShare, width: width, velocity: velocity)
-    }
-
-    /// Back to rest, shorter than a finish.
-    public static func settleDuration(remainingShare: Double, width: Double, velocity: Double) -> Double {
-        scaled(settleRange, remainingShare: remainingShare, width: width, velocity: velocity)
-    }
-
-    private static func scaled(_ range: ClosedRange<Double>, remainingShare: Double, width: Double, velocity: Double) -> Double {
-        let share = max(0, min(1, remainingShare))
-        var d = range.lowerBound + (range.upperBound - range.lowerBound) * share
-        if velocity > 1, width > 0 { d = min(d, share * width / velocity * 1.2) }
-        return max(range.lowerBound, min(range.upperBound, d))
     }
 }
 
@@ -173,12 +126,6 @@ public struct PondDrag: Sendable, Equatable {
         (home(page) - position) * width
     }
 
-    /// Where the live pages sit: the staged page's rest, still while a snapshot glide moves the bitmaps, `drawn` otherwise.
-    public static func layoutPosition(staging: PondPage?, snapshotActive: Bool, restPage: PondPage, drawn: Double) -> Double {
-        if let staging { return home(staging) }
-        return snapshotActive ? home(restPage) : drawn
-    }
-
     public mutating func reset() {
         x = 0; y = 0; active = false; spent = false; moved = false; samples = []; axis = SwipeAxis()
         origin = 0; position = 0
@@ -215,11 +162,6 @@ public struct PondDrag: Sendable, Equatable {
         }
         samples.append(SwipeSample(t: time, x: x))
         if samples.count > 24 { samples.removeFirst(samples.count - 24) }
-        if abs(y) > abs(x) * PondSwipe.dominance, abs(y) > 12 {
-            spent = true
-            let was = moved, from = position; moved = false
-            return was ? .settle(from: from, velocity: 0) : nil
-        }
         guard abs(x) >= 4 else { return nil }
         moved = true
         position = Self.position(origin: origin, delta: x, width: width)
@@ -229,13 +171,13 @@ public struct PondDrag: Sendable, Equatable {
     private func ending(current: PondPage, width: Double, time: Double) -> Update? {
         guard active, !spent, moved else { return nil }
         let v = SwipeVelocity.estimate(samples, now: time)
-        let dir = Self.direction(from: current)
         // Fingers right = toward the Dashboard (position down): toward the other page is -v for the Dashboard.
         let towardOther = current == .dashboard ? -v : v
-        let share = (position - Self.home(current)) * dir
-        let horizontal = abs(x) >= abs(y) * PondSwipe.dominance
-        if horizontal, SwipeCommit.commits(travelShare: share, velocityToward: towardOther, travel: x) {
-            return .commit(current == .dashboard ? .room : .dashboard, from: position, velocity: max(0, towardOther))
+        // The axis was locked horizontal at the start of the gesture, so a drift downward never cancels it. Commit by
+        // distance or by velocity (SwipeSettle).
+        let landing = SwipeSettle.page(from: current, position: position, velocity: width > 0 ? -v / width : 0, width: width)
+        if landing != current {
+            return .commit(landing, from: position, velocity: max(0, towardOther))
         }
         // A strip that was grabbed mid-finish and let go near the page it was heading to still lands there.
         return .settle(from: position, velocity: max(0, -towardOther))

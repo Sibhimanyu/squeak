@@ -14,7 +14,12 @@ final class RoomViewPref {
     private(set) var modes: [String: PondPage] = [:]
 
     func mode(for key: String) -> Mode { modes[key] ?? .dashboard }
-    func set(_ mode: Mode, for key: String) { modes[key] = mode }
+    /// Every writer lands here (the switch, a swipe, Esc, a deep link, the way back from a tab), so the strip is sent to the
+    /// page in the same step: the pill and the pages never wait a frame on each other.
+    func set(_ mode: Mode, for key: String) {
+        modes[key] = mode
+        PondPanStore.shared.state(for: key).reconcile(page: mode)
+    }
 }
 
 /// A small segmented control: a `surface` track, the selected item raised.
@@ -23,8 +28,6 @@ struct RoomSegmented<T: Hashable>: View {
     @Binding var selection: T
     let title: (T) -> String
     var height: CGFloat = 26
-    /// The top bar's switch: capsule track and pill, the same family as the tabs beside it.
-    var capsule = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -35,9 +38,7 @@ struct RoomSegmented<T: Hashable>: View {
                     Text(verbatim: title(item)).font(.system(size: 13, weight: on ? .medium : .regular)).lineLimit(1).fixedSize()
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .padding(.horizontal, 12).frame(height: height - 4)
-                        .background(on ? (capsule ? TopSurfaceGlass.switchPill : Theme.selected) : .clear,
-                                    in: RoundedRectangle(cornerRadius: capsule ? 100 : 6, style: .continuous))
-                        .shadow(color: on && capsule ? TopSurfaceGlass.tabShadow : .clear, radius: 2, y: 1)
+                        .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -46,15 +47,72 @@ struct RoomSegmented<T: Hashable>: View {
         }
         .padding(2)
         .background {
-            if capsule {
-                // Glass: a translucent track, no outline.
-                Capsule().fill(TopSurfaceGlass.switchTrack)
-            } else {
-                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surface)
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
         }
         .animation(reduceMotion ? nil : Motion.quick, value: selection)
+    }
+}
+
+/// The top bar's Dashboard | Room switch: a glass track with a raised pill under the page that shows. The selection is the
+/// one `PondCentre` says (`selection`, nil while a Duck or an item covers the pages: no pill). While the two-finger swipe moves
+/// the strip, or the strip springs to a page, the pill slides between the segments with the strip's own position, so it lands
+/// with the page; at rest it sits under the selection. Segment widths are measured from the label font, so the pill's track
+/// is exact by construction (no layout pass needed to know where a segment is).
+struct PondPageSwitch: View {
+    let selection: PondPage?
+    /// The pond's strip, read only here and in the pages' own modifiers, never by the bar.
+    var strip: PondPanState?
+    /// A fixed progress for snapshots (0 Dashboard ... 1 Room).
+    var progress: Double?
+    let pick: (PondPage) -> Void
+
+    private static let font = Font.system(size: 13, weight: .medium)
+    private static let pad: CGFloat = 12
+    private static let gap: CGFloat = 2
+    private static let inset: CGFloat = 2
+
+    private static func width(of page: PondPage) -> CGFloat {
+        let w = (page.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium)]).width
+        return ceil(w) + pad * 2
+    }
+
+    var body: some View {
+        let height = CGFloat(PondBarMetrics.controlHeight)
+        let dash = Self.width(of: .dashboard), room = Self.width(of: .room)
+        let at: Double? = selection == nil ? nil : (progress ?? PondSwitchIndicator.progress(selection: selection, strip: strip?.moving))
+        let pill = at.map {
+            PondSwitchIndicator.pill(progress: $0, dashboard: (0, Double(dash)), room: (Double(dash + Self.gap), Double(room)))
+        }
+        HStack(spacing: Self.gap) {
+            segment(.dashboard, width: dash, height: height - 2 * Self.inset, at: at)
+            segment(.room, width: room, height: height - 2 * Self.inset, at: at)
+        }
+        .padding(Self.inset)
+        .background(alignment: .topLeading) {
+            if let pill {
+                Capsule().fill(TopSurfaceGlass.switchPill)
+                    .shadow(color: TopSurfaceGlass.tabShadow, radius: 2, y: 1)
+                    .frame(width: CGFloat(pill.width), height: height - 2 * Self.inset)
+                    .offset(x: Self.inset + CGFloat(pill.x), y: Self.inset)
+            }
+        }
+        .background(Capsule().fill(TopSurfaceGlass.switchTrack))
+        .fixedSize()
+        .accessibilityElement(children: .contain).accessibilityLabel("Pond view")
+    }
+
+    private func segment(_ page: PondPage, width: CGFloat, height: CGFloat, at: Double?) -> some View {
+        let w = at.map { PondSwitchIndicator.weight(of: page, progress: $0) } ?? 0
+        return Button { pick(page) } label: {
+            Text(verbatim: page.title).font(Self.font).lineLimit(1).fixedSize()
+                .foregroundStyle(Theme.muted)
+                .overlay { Text(verbatim: page.title).font(Self.font).lineLimit(1).fixedSize().foregroundStyle(Theme.ink).opacity(w) }
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(page.title).accessibilityAddTraits(selection == page ? .isSelected : [])
     }
 }
 
