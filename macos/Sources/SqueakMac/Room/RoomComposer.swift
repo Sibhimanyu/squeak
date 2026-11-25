@@ -251,7 +251,7 @@ struct RoomComposer: View {
     }
 
     private func row(_ c: RoomMention.Candidate, index: Int) -> some View {
-        Button { choose(c.addressee) } label: {
+        Button { choose(c) } label: {
             HStack(spacing: 8) {
                 if case .thread(let id, _) = c.addressee { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 18) }
                 else { Lucide(.messageSquare, size: 14, color: Theme.muted).frame(width: 18) }
@@ -268,9 +268,19 @@ struct RoomComposer: View {
         .buttonStyle(.plain).accessibilityLabel(c.addressee.label + ", " + c.subtitle)
     }
 
-    private func choose(_ a: RoomAddressee) {
+    private func choose(_ c: RoomMention.Candidate) {
+        if let insertion = c.insertion {
+            // An Off-duty Duck: the mention goes into the message (the host wakes it and gives it a fresh name).
+            var d = draft
+            if let m = mention { d.replaceSubrange(m.range, with: insertion) }
+            else { d += (d.isEmpty || d.hasSuffix(" ") ? "" : " ") + insertion }
+            room.draft = d
+            chooser = false
+            highlighted = 0
+            return
+        }
         if let m = mention { room.draft = RoomMention.removing(m, from: draft) }
-        to = a
+        to = c.addressee
         chooser = false
         highlighted = 0
     }
@@ -282,7 +292,7 @@ struct RoomComposer: View {
         switch key {
         case .up: highlighted = (highlighted + SuggestionPlacement.step(up: true, direction: pickerDirection) + list.count) % list.count
         case .down: highlighted = (highlighted + SuggestionPlacement.step(up: false, direction: pickerDirection) + list.count) % list.count
-        case .accept: choose(list[min(highlighted, list.count - 1)].addressee)
+        case .accept: choose(list[min(highlighted, list.count - 1)])
         case .escape: if let m = mention { room.draft = RoomMention.removing(m, from: draft) }
         }
         return true

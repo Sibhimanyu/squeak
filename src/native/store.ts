@@ -139,6 +139,9 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE sessions ADD COLUMN title_tried INTEGER;
   `,
   `
+  ALTER TABLE sessions ADD COLUMN title_stage INTEGER;
+  `,
+  `
   ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'git';
   `,
   `
@@ -1056,6 +1059,65 @@ export class NativeStore {
         .changes === 1
     );
   }
+  /**
+   * Swaps an automatic title for a better one. Only when the title is still `expected` and the person has not set it
+   * (title_auto is 1, or never recorded for an older chat), so a rename that races the model call always wins.
+   */
+  replaceAutoTitle(id: string, expected: string | null, title: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "UPDATE sessions SET title=?, title_auto=1 WHERE id=? AND title IS ? AND (title_auto IS NULL OR title_auto=1)",
+        )
+        .run(title, id, expected).changes === 1
+    );
+  }
+  /** True when the person typed the title (title_auto 0); an older chat that never recorded it is not. */
+  titleIsMine(id: string): boolean {
+    const r = this.db.prepare("SELECT title, title_auto FROM sessions WHERE id=?").get(id) as Row | undefined;
+    return !!r?.title && r.title_auto === 0;
+  }
+  /** How far a chat's re-titling has got: 0 none, 1 after its first real work, 2 at Task done. */
+  titleStage(id: string): number {
+    const r = this.db.prepare("SELECT title_stage FROM sessions WHERE id=?").get(id) as Row | undefined;
+    return typeof r?.title_stage === "number" ? r.title_stage : 0;
+  }
+  setTitleStage(id: string, stage: number): void {
+    this.db.prepare("UPDATE sessions SET title_stage=? WHERE id=?").run(stage, id);
+  }
+  /** How many tool calls the agent made in the chat (its own, not a helper's). */
+  toolUseCount(id: string): number {
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM messages WHERE session_id=? AND role='agent' AND kind='assistant'
+           AND payload LIKE '%"type":"tool_use"%' AND payload NOT LIKE '%"parent_tool_use_id":"%'`,
+      )
+      .get(id) as Row;
+    return Number(r.n);
+  }
+  /** The newest plain-text reply of the agent, if any. */
+  lastAgentText(id: string): string | null {
+    const rows = this.db
+      .prepare(
+        `SELECT payload FROM messages WHERE session_id=? AND role='agent' AND kind='assistant'
+           AND payload NOT LIKE '%"parent_tool_use_id":"%' ORDER BY seq DESC LIMIT 12`,
+      )
+      .all(id) as Row[];
+    for (const r of rows) {
+      const c = (JSON.parse(r.payload as string) as { message?: { content?: unknown } }).message?.content;
+      const text =
+        typeof c === "string"
+          ? c
+          : Array.isArray(c)
+            ? (c as { type?: string; text?: string }[])
+                .filter((b) => b?.type === "text" && typeof b.text === "string")
+                .map((b) => b.text)
+                .join("\n")
+            : "";
+      if (text.trim()) return text;
+    }
+    return null;
+  }
   /** Remembers that a title was attempted for this chat, so a failure is not retried at every start. */
   markTitleTried(id: string): void {
     this.db.prepare("UPDATE sessions SET title_tried=1 WHERE id=?").run(id);
@@ -1461,6 +1523,14 @@ export class NativeStore {
         )
         .all(sessionId, since) as Row[]
     ).map(roomPostRow);
+  }
+
+  /** A chat's newest `done` post: the last thing it reported finishing. */
+  latestDonePost(sessionId: string): RoomPostRow | null {
+    const r = this.db
+      .prepare("SELECT * FROM room_posts WHERE session_id=? AND kind='done' ORDER BY at DESC, seq DESC LIMIT 1")
+      .get(sessionId) as Row | undefined;
+    return r ? roomPostRow(r) : null;
   }
 
   /** A chat's newest `working` post at or between two instants (ms): the turn's intent. */

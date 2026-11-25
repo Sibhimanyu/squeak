@@ -5,7 +5,7 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import { Decider, haikuDecider, type DeciderDuck, type DeciderModelPort, type ScoredDuck } from "./decider.js";
-import { mentions, type HostEvents, type Room, type RoomThread } from "./room.js";
+import { duckMentionTokens, mentionedToken, mentions, type HostEvents, type Room, type RoomThread } from "./room.js";
 import { DEFAULT_MAX_WORKING_DUCKS } from "./project-settings.js";
 import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { firstSentence, oneLine } from "./room-turns.js";
@@ -255,6 +255,8 @@ export interface RoomTasksOptions {
    */
   notebook?: (projectId: string) => string | null | undefined;
   call?: TitleModelCall;
+  /** A Task just finished in this chat (once per finish): the host looks at the chat's title again. */
+  onTaskDone?: (sessionId: string) => void;
   /** The decider that routes a new Task; default: local similarity plus `deciderModel`. */
   decider?: Decider;
   /** Settles an unsure routing: a port, or "haiku" (the same small-model call as the job check); absent = never asked. */
@@ -451,7 +453,11 @@ export class RoomTasks extends EventEmitter {
     try {
       const duck = this.mentionedDuck(post.projectId, post.text);
       if (!duck) return false;
-      const rest = stripMention(post.text, duck.name!);
+      const token = mentionedToken(
+        post.text,
+        duckMentionTokens(duck, this.o.store.getSession(duck.currentSessionId ?? "")?.title),
+      );
+      const rest = stripMention(post.text, token ?? duck.name ?? "");
       if (wordCount(rest) < MIN_WORDS && !looksImperative(rest)) return false;
       if (this.o.store.roomJobRowByMessage(post.id)) return true;
       this.handOff(post.projectId, post.id, duck.id, { text: rest, reason: "you @mentioned it" });
@@ -465,8 +471,14 @@ export class RoomTasks extends EventEmitter {
   /** The Duck of the pond @mentioned in `text`; the longest matching name wins ("@Pip Squeak" is not "Pip"). */
   mentionedDuck(projectId: string, text: string): DuckRow | null {
     let best: DuckRow | null = null;
+    let bestLen = 0;
     for (const d of this.o.store.listDucks(projectId)) {
-      if (d.name && mentions(text, d.name) && (!best || d.name.length > best.name!.length)) best = d;
+      const sid = d.currentSessionId;
+      const token = mentionedToken(text, duckMentionTokens(d, sid ? this.o.store.getSession(sid)?.title : null));
+      if (token && token.length > bestLen) {
+        best = d;
+        bestLen = token.length;
+      }
     }
     return best;
   }
@@ -1271,7 +1283,7 @@ export class RoomTasks extends EventEmitter {
           return approved;
         }
         case "drop": {
-          const was = job.state;
+          const was = job.state as TaskState;
           const sid = job.handedTo?.sessionId;
           job.state = "dropped";
           delete job.inLine;
@@ -1578,7 +1590,15 @@ export class RoomTasks extends EventEmitter {
     const before = JSON.stringify(job);
     to.turnId = `${to.sessionId}:${turn.turnId}`;
     if (turn.endedAt !== undefined) {
+      const was = job.state as TaskState;
       job.state = turn.outcome === "finished" ? "done" : "blocked";
+      if (job.state === "done" && was !== "done") {
+        try {
+          this.o.onTaskDone?.(to.sessionId);
+        } catch {
+          // a title is never worth a Task's bookkeeping
+        }
+      }
       const outcome = turn.reply ? firstSentence(turn.reply) : "";
       if (outcome) job.result = outcome;
     }

@@ -61,7 +61,7 @@ public enum RoomDucks {
 
     static func presenceLine(_ t: RoomThread, presence: RoomDuckPresence, now: Date) -> String {
         switch presence {
-        case .off: return "Off duty"
+        case .off: return RoomRoster.offDutyAgo(t.lastActiveAt, now: now)
         case .waiting: return "Waiting on you"
         case .working:
             if let p = t.progress { return "Working \u{00B7} \(p.current) of \(p.total)" }

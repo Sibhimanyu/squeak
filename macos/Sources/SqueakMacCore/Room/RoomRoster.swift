@@ -22,19 +22,23 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
     public var title: String?
     /// Names are masks worn only on duty: the host sends no name for an Off-duty Duck.
     public var wearsName = true
+    /// The chat's title: what an Off-duty Duck is known by (names are masks, worn only on duty).
+    public var chatTitle: String?
+    /// An Off-duty Duck's last summary line (what it last reported finishing), when the host has one.
+    public var lastSummary: String?
 
     public init(
         id: String, name: String, role: String? = nil, colourSeed: String? = nil, duty: RoomDuty = .on, currentSessionId: String? = nil,
         place: RoomPlace? = nil, state: RoomThreadState = .idle, lastActiveAt: Int64? = nil, createdAt: Int64? = nil,
-        streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true
+        streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true, chatTitle: String? = nil, lastSummary: String? = nil
     ) {
-        self.title = title; self.wearsName = wearsName
+        self.title = title ?? chatTitle; self.wearsName = wearsName; self.chatTitle = chatTitle ?? title; self.lastSummary = lastSummary
         self.streams = streams
         self.id = id; self.name = name; self.role = role; self.colourSeed = colourSeed ?? id; self.duty = duty
         self.currentSessionId = currentSessionId; self.place = place; self.state = state; self.lastActiveAt = lastActiveAt; self.createdAt = createdAt
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, streams, state, lastActiveAt, createdAt, title }
+    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, place, streams, state, lastActiveAt, createdAt, title, chatTitle, lastSummary }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -51,6 +55,9 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomThreadState.init(rawValue:)) ?? .idle
         lastActiveAt = try? c.decode(Int64.self, forKey: .lastActiveAt)
         createdAt = try? c.decode(Int64.self, forKey: .createdAt)
+        chatTitle = (try? c.decode(String.self, forKey: .chatTitle)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        if title == nil { title = chatTitle } else if chatTitle == nil { chatTitle = title }
+        lastSummary = (try? c.decode(String.self, forKey: .lastSummary)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
     }
 
     /// An older host has no duck route: the room page's threads stand in (one per duck, or per chat).
@@ -58,7 +65,8 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         self.init(
             id: t.duckId ?? t.sessionId, name: t.duckName, role: t.role, colourSeed: t.colourSeed ?? t.sessionId, duty: t.duty,
             currentSessionId: t.sessionId.isEmpty ? nil : t.sessionId, place: t.place, state: t.state,
-            lastActiveAt: t.lastActiveAt ?? t.turnStartedAt ?? t.lastAt, streams: t.streams)
+            lastActiveAt: t.lastActiveAt ?? t.turnStartedAt ?? t.lastAt, streams: t.streams,
+            chatTitle: t.title.trimmingCharacters(in: .whitespaces).isEmpty ? nil : t.title, lastSummary: t.lastSummary)
     }
 }
 
@@ -81,7 +89,12 @@ public struct RosterDuck: Sendable, Equatable, Identifiable {
     /// The chat's title, and whether the Duck's name is worn (on duty with a name from the host).
     public var title: String?
     public var wearsName = true
+    /// The chat's title and an Off-duty Duck's last summary line (see `PondDuck`).
+    public var chatTitle: String?
+    public var lastSummary: String?
     public var onDuty: Bool { presence != .off }
+    /// The row's heading: an on-duty Duck's name; an Off-duty Duck's chat title, never a name (it wears none).
+    public var heading: String { onDuty ? name : RoomRoster.offDutyHeading(title: chatTitle) }
     public var hasJob: Bool { sessionId != nil }
 }
 
@@ -120,13 +133,26 @@ public enum RoomRoster {
             id: d.id, name: d.name, colourSeed: d.colourSeed, agent: thread?.agent, agentLabel: RoomDucks.agentLabel(thread?.agent), role: d.role,
             placeChip: placeChip(d.place), presence: presence, presenceLine: presenceLine(d, thread: thread, presence: presence, now: now),
             sessionId: d.currentSessionId, streams: d.streams,
-            title: thread?.title ?? d.title, wearsName: d.wearsName && presence != .off)
+            title: thread?.title ?? d.title, wearsName: d.wearsName && presence != .off,
+            chatTitle: d.chatTitle ?? thread?.title, lastSummary: d.lastSummary)
+    }
+
+    /// An Off-duty Duck's heading: its chat title, else "Untitled chat".
+    public static func offDutyHeading(title: String?) -> String {
+        let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? "Untitled chat" : t
+    }
+
+    /// "off duty 3d ago" (just "Off duty" when the host gave no time).
+    public static func offDutyAgo(_ at: Int64?, now: Date) -> String {
+        guard let at, at > 0 else { return "Off duty" }
+        return "off duty \(RoomDucks.ago(at, now: now))"
     }
 
     /// "Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Off duty", "Ready for a job" (no session yet).
     public static func presenceLine(_ d: PondDuck, thread: RoomThread?, presence: RoomDuckPresence, now: Date) -> String {
         switch presence {
-        case .off: return "Off duty"
+        case .off: return offDutyAgo(d.lastActiveAt, now: now)
         case .waiting: return "Waiting on you"
         case .working:
             if let p = thread?.progress { return "Working \u{00B7} \(p.current) of \(p.total)" }
@@ -147,7 +173,8 @@ public enum RoomRoster {
         let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
         if words.isEmpty { return r.available }
         func hit(_ d: RosterDuck) -> Bool {
-            let hay = d.name + " " + (d.role ?? "")
+            // An Off-duty Duck is found by its chat title and last summary; an on-duty one by its name.
+            let hay = (d.onDuty ? d.name : d.heading + " " + (d.lastSummary ?? "")) + " " + (d.role ?? "")
             return words.allSatisfy { hay.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
         }
         return (r.onDuty + r.offDuty).filter(hit)

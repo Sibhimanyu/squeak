@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 import type { DeciderModelSetting } from "./agent-settings.js";
 import { logger } from "../utils/logger.js";
+import type { TitleModelCall } from "./auto-title.js";
 import {
   DECIDER_SYSTEM,
   Decider,
@@ -180,6 +181,29 @@ export class OnDeviceDecider implements DeciderModelPort {
     }
     return this.fallback ? this.fallback.choose(input) : null;
   }
+}
+
+export interface OnDeviceTitleOptions {
+  setting: () => DeciderModelSetting;
+  helper: () => string | undefined;
+  /** Haiku: used when the setting is "haiku" and whenever the helper cannot answer. */
+  fallback: TitleModelCall;
+  timeoutMs?: number;
+}
+
+/** Chat titles from the Mac's own model (helper op "write"); Haiku when it is off, missing or has no answer. */
+export function onDeviceTitleCall(o: OnDeviceTitleOptions): TitleModelCall {
+  const gate = new HelperGate({
+    helper: o.helper,
+    enabled: () => o.setting() === "on-device",
+    ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+  });
+  return async (input) => {
+    const reply = await gate.call({ op: "write", system: input.system, prompt: input.prompt }, DECIDE_TIMEOUT_MS);
+    const text = reply?.kind === "ok" ? reply.body.text : undefined;
+    if (typeof text === "string" && text.trim()) return text;
+    return o.fallback(input);
+  };
 }
 
 export interface CreateDeciderOptions {

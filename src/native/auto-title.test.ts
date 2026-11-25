@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { AutoTitler, cleanTitle, heuristicTitle, titleModel, titlePrompt } from "./auto-title.js";
+import { AutoTitler, cleanTitle, heuristicTitle, looksWeak, titleModel, titlePrompt } from "./auto-title.js";
 import { NativeStore } from "./store.js";
 
 function makeStore(): NativeStore {
@@ -127,5 +127,134 @@ describe("AutoTitler", () => {
     expect(second).toHaveLength(5);
     expect(second.filter((id) => first.includes(id))).toEqual([]);
     expect(t.backfill()).toEqual([]);
+  });
+});
+
+function work(store: NativeStore, id: string, tools: number): void {
+  for (let i = 0; i < tools; i++) {
+    store.appendMessage(id, "agent", "assistant", {
+      message: { content: [{ type: "tool_use", id: `t${i}`, name: "Edit", input: {} }] },
+    });
+  }
+  store.appendMessage(id, "agent", "assistant", {
+    message: { content: [{ type: "text", text: "Fixed the Zoom review issues." }] },
+  });
+}
+
+describe("looksWeak", () => {
+  it("flags placeholders, long titles, cut titles and copied prompts", () => {
+    expect(looksWeak("New chat", null)).toBe(true);
+    expect(looksWeak("Please go through the whole Zoom marketplace review feedback", null)).toBe(true);
+    expect(looksWeak("Fix the thing and then…", null)).toBe(true);
+    expect(looksWeak("Fix the flaky upload", "Fix the flaky upload test please")).toBe(true);
+    expect(looksWeak("Zoom review fixes", "Please go through the Zoom feedback")).toBe(false);
+  });
+});
+
+describe("AutoTitler retitling", () => {
+  const model = (text: string) => vi.fn(async (input: { prompt: string }) => (input.prompt ? text : text));
+
+  it("retitles once after the first finished turn with real tool work, in 3-6 plain words", async () => {
+    const store = makeStore();
+    const id = chat(store, "can you look at the zoom stuff", undefined);
+    store.setAutoTitle(id, "Look at the Zoom Stuff");
+    const call = model("Zoom Marketplace review fixes");
+    const onTitle = vi.fn();
+    const t = new AutoTitler({ store, onTitle, call, ...quick });
+    work(store, id, 1);
+    t.turnFinished(id);
+    await t.idle();
+    expect(call).not.toHaveBeenCalled();
+    work(store, id, 3);
+    t.turnFinished(id);
+    await t.idle();
+    expect(store.getSession(id)).toMatchObject({ title: "Zoom Marketplace review fixes", titleAuto: true });
+    expect(onTitle).toHaveBeenCalledWith(id, "Zoom Marketplace review fixes");
+    expect(call.mock.calls[0]![0].prompt).toContain("Fixed the Zoom review issues");
+    t.turnFinished(id);
+    await t.idle();
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("looks again at Task done, once, and keeps the title when the scope has not shifted", async () => {
+    const store = makeStore();
+    const id = chat(store, "can you look at the zoom stuff");
+    store.setAutoTitle(id, "Zoom Review Fixes");
+    const same = model("Zoom Review Fixes");
+    const t = new AutoTitler({ store, onTitle: () => undefined, call: same, ...quick });
+    t.taskDone(id);
+    await t.idle();
+    expect(store.getSession(id)!.title).toBe("Zoom Review Fixes");
+    const shifted = new AutoTitler({
+      store,
+      onTitle: () => undefined,
+      call: model("Zoom Listing And Pricing"),
+      ...quick,
+    });
+    shifted.taskDone(id);
+    await shifted.idle();
+    expect(store.getSession(id)!.title).toBe("Zoom Review Fixes");
+  });
+
+  it("never overwrites a title the person set, even one set during the call", async () => {
+    const store = makeStore();
+    const mine = chat(store, "do the thing", "My name for it");
+    const racing = chat(store, "do the other thing");
+    store.setAutoTitle(racing, "Do the Other Thing");
+    work(store, mine, 4);
+    work(store, racing, 4);
+    const call = vi.fn(async () => {
+      store.setTitle(racing, "Typed meanwhile");
+      return "Model Title";
+    });
+    const t = new AutoTitler({ store, onTitle: () => undefined, call, ...quick });
+    t.turnFinished(mine);
+    t.turnFinished(racing);
+    t.taskDone(mine);
+    await t.idle();
+    expect(store.getSession(mine)!.title).toBe("My name for it");
+    expect(store.getSession(racing)).toMatchObject({ title: "Typed meanwhile", titleAuto: false });
+  });
+
+  it("leaves the title alone when the model fails or the switch is off", async () => {
+    const store = makeStore();
+    const id = chat(store, "do the thing");
+    store.setAutoTitle(id, "Do the Thing");
+    work(store, id, 4);
+    const t = new AutoTitler({
+      store,
+      onTitle: () => undefined,
+      call: async () => Promise.reject(new Error("off")),
+      ...quick,
+    });
+    t.turnFinished(id);
+    await t.idle();
+    expect(store.getSession(id)!.title).toBe("Do the Thing");
+  });
+
+  it("backfills weak titles once, capped, never a person's and never a good one", async () => {
+    const store = makeStore();
+    const weak: string[] = [];
+    for (let i = 0; i < 14; i++) weak.push(chat(store, `Task ${i} please go through everything carefully`, "New chat"));
+    // older chats never recorded who named them: put "New chat" back without title_auto
+    store.db.prepare("UPDATE sessions SET title_auto=NULL").run();
+    const mine = chat(store, "x y", "New chat");
+    store.setTitle(mine, "New chat");
+    const good = chat(store, "Please fix the login redirect", "Login redirect bug");
+    store.db.prepare("UPDATE sessions SET title_auto=NULL WHERE id=?").run(good);
+    const call = model("Tidy Task Summary");
+    const t = new AutoTitler({ store, onTitle: () => undefined, call, ...quick });
+    const first = t.backfillWeak();
+    await t.idle();
+    expect(first).toHaveLength(12);
+    expect(first).not.toContain(mine);
+    expect(first).not.toContain(good);
+    expect(call).toHaveBeenCalledTimes(12);
+    const second = t.backfillWeak();
+    await t.idle();
+    expect(second).toHaveLength(2);
+    expect(t.backfillWeak()).toEqual([]);
+    expect(store.getSession(good)!.title).toBe("Login redirect bug");
+    expect(weak.length).toBe(14);
   });
 });

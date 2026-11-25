@@ -230,6 +230,8 @@ export interface HostOptions {
   warmRecentMs?: number;
   /** Names untitled chats; the real one (Haiku, with a local fallback) unless a runner factory is injected, then none. */
   autoTitle?: AutoTitler | false;
+  /** The model call that names chats: this Mac's own model first, Haiku after (main.ts); Haiku alone when absent. */
+  titleCall?: TitleModelCall;
   /** The cheap model call that writes a handoff summary; the real one (Haiku) unless injected. */
   summaryCall?: TitleModelCall;
   /** Where the agent's own transcripts live (tests); `~/.claude/projects` otherwise. */
@@ -391,6 +393,7 @@ export class SessionHost extends EventEmitter {
         : (options.autoTitle ??
           new AutoTitler({
             store: this.store,
+            ...(options.titleCall ? { call: options.titleCall } : {}),
             onTitle: (sessionId, title) => this.emit("event", { type: "title", sessionId, title } satisfies HostEvent),
           }));
   }
@@ -494,6 +497,8 @@ export class SessionHost extends EventEmitter {
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
   start(): void {
     this.titler?.backfill();
+    // One-time, capped, in the background: "New chat" and copied-prompt titles get a real one.
+    this.titler?.backfillWeak();
     // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
     this.store.adoptWorkspaces();
     // Ducks have no archive: chats archived before become Off-duty Ducks, once.
@@ -1109,6 +1114,11 @@ export class SessionHost extends EventEmitter {
     return true;
   }
 
+  /** A Task finished in this chat: its title is looked at once more and changes only if the scope shifted. */
+  titleTaskDone(id: string): void {
+    this.titler?.taskDone(id);
+  }
+
   /** The person's own name for a chat: stored, and it replaces any earlier title. Throws on text that is not 1-200 chars on one line. */
   rename(id: string, title: unknown): string {
     this.require(id);
@@ -1620,7 +1630,11 @@ export class SessionHost extends EventEmitter {
             outcome === "error" ? this.lastFailure.get(id) : undefined,
           );
           this.turnStarts.delete(id);
-        }).then(() => this.afterTurn(id));
+        }).then(() => {
+          // The first finished turn with real tool work gives the chat its meaningful title, in the background.
+          if (outcome === "idle") this.titler?.turnFinished(id);
+          return this.afterTurn(id);
+        });
       },
       onExit: (error) => {
         this.runners.delete(id);

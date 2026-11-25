@@ -6,6 +6,8 @@ import Foundation
 ///     -> {"ok":true,"similarities":[0.4,0.1]}            (0..1 apiece, in the order of `texts`)
 ///   {"op":"decide","system":"...","prompt":"...","allowed":["1","2","hatch","wait"]}
 ///     -> {"ok":true,"choice":"2"}                        (`choice` is null when the model gave none of `allowed`)
+///   {"op":"write","system":"...","prompt":"..."}
+///     -> {"ok":true,"text":"Zoom Marketplace review fixes"}   (the model's raw answer; the caller cleans it)
 ///   anything the device cannot do (Apple Intelligence off, framework or assets missing)
 ///     -> {"ok":false,"unavailable":true,"reason":"..."}
 ///   a bad request
@@ -25,15 +27,17 @@ public struct Response: Equatable, Sendable {
     public var reason: String?
     public var similarities: [Double]?
     public var choice: String?
+    public var text: String?
     /// True for a decide answer: `choice` is then written even when it is null.
     public var hasChoice = false
 
-    public init(ok: Bool, unavailable: Bool? = nil, reason: String? = nil, similarities: [Double]? = nil, choice: String? = nil, hasChoice: Bool = false) {
+    public init(ok: Bool, unavailable: Bool? = nil, reason: String? = nil, similarities: [Double]? = nil, choice: String? = nil, text: String? = nil, hasChoice: Bool = false) {
         self.ok = ok
         self.unavailable = unavailable
         self.reason = reason
         self.similarities = similarities
         self.choice = choice
+        self.text = text
         self.hasChoice = hasChoice
     }
 
@@ -45,6 +49,7 @@ public struct Response: Equatable, Sendable {
         if let unavailable { o["unavailable"] = unavailable }
         if let reason { o["reason"] = reason }
         if let similarities { o["similarities"] = similarities }
+        if let text { o["text"] = text }
         if hasChoice { o["choice"] = choice ?? NSNull() }
         return (try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])) ?? Data("{\"ok\":false}".utf8)
     }
@@ -81,6 +86,12 @@ public enum Handler {
             switch await backend.generate(system: req.system ?? "", prompt: prompt) {
             case .failure(let u): return .unavailable(u.reason)
             case .success(let raw): return Response(ok: true, choice: pick(raw, allowed: allowed), hasChoice: true)
+            }
+        case "write":
+            guard let prompt = req.prompt, !prompt.isEmpty else { return .invalid("write needs a prompt") }
+            switch await backend.generate(system: req.system ?? "", prompt: prompt) {
+            case .failure(let u): return .unavailable(u.reason)
+            case .success(let raw): return Response(ok: true, text: raw)
             }
         default:
             return .invalid("unknown op")

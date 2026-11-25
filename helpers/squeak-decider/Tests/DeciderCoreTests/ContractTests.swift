@@ -33,6 +33,17 @@ func run(_ json: String, _ backend: Backend) async -> [String: Any] {
         #expect(r["unavailable"] as? Bool == true)
     }
 
+    @Test func writeReturnsTheModelsText() async {
+        let r = await run(#"{"op":"write","system":"s","prompt":"p"}"#, FakeBackend(answer: .success("Zoom review fixes")))
+        #expect(r["ok"] as? Bool == true)
+        #expect(r["text"] as? String == "Zoom review fixes")
+    }
+
+    @Test func writeUnavailableWhenTheModelIsOff() async {
+        let r = await run(#"{"op":"write","prompt":"p"}"#, FakeBackend())
+        #expect(r["unavailable"] as? Bool == true)
+    }
+
     @Test func decideUnavailableWhenTheModelIsOff() async {
         let r = await run(#"{"op":"decide","prompt":"p","allowed":["1","hatch"]}"#, FakeBackend())
         #expect(r["unavailable"] as? Bool == true)
