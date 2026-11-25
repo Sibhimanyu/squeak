@@ -35,12 +35,14 @@ struct PondItemPage: View {
             case .diff, .reviewAll:
                 if let source = item.diffSource, let key = SessionKey(stringValue: source.session),
                    let session = model.session(key), let root = session.cwd, !root.isEmpty {
+                    // A Stream's tab opens its files from the Stream's folder; the chat's folder is the Pond's.
+                    let filesRoot = model.streamRoot(source.stream) ?? root
                     if let path = source.path {
-                        PondDiffTab(session: session, path: path, files: model.filesModel(root: root)) {
+                        PondDiffTab(session: session, path: path, stream: source.stream, files: model.filesModel(root: filesRoot)) {
                             model.closePondItem(item)
                         }
                     } else {
-                        PondReviewAllTab(session: session, files: model.filesModel(root: root))
+                        PondReviewAllTab(session: session, stream: source.stream, files: model.filesModel(root: filesRoot))
                     }
                 } else {
                     unavailable("This Duck’s changes are unavailable.")

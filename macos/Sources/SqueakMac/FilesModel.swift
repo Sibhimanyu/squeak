@@ -254,7 +254,8 @@ final class FilesModel {
             let session = model.location.chatKey.flatMap { model.session($0) }
                 ?? PondWorkScope(key: workspace.pond, projectId: workspace.project.id, name: workspace.project.name,
                                  root: workspace.project.rootPath).changesSession(in: model.allSessions)
-            if let session, session.cwd == root, model.openPondDiff(session: session, path: file) { return }
+            let stream = session.flatMap { model.defaultStream(of: $0, path: file) }
+            if let session, session.cwd == root, model.openPondDiff(session: session, path: file, stream: stream) { return }
         }
         activePath = nil; review.open(file: file)
         NotificationCenter.default.post(name: .squeakShowCode, object: nil)

@@ -105,9 +105,9 @@ extension AppModel {
     }
 
     @discardableResult
-    func openPondDiff(session: HostSession, path: String?) -> Bool {
+    func openPondDiff(session: HostSession, path: String?, stream: TabStream? = nil) -> Bool {
         guard let workspace = pondWorkspace, PondsModel.shared.key(of: session) == workspace.pond else { return false }
         let key = session.key.stringValue
-        return openPondItem(path.map { .diff(session: key, path: $0) } ?? .reviewAll(session: key))
+        return openPondItem(path.map { .diff(session: key, path: $0, stream: stream) } ?? .reviewAll(session: key, stream: stream))
     }
 }

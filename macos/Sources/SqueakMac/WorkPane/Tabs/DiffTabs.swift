@@ -11,15 +11,17 @@ import SwiftUI
 struct PondDiffTab: View {
     let session: HostSession
     let path: String
+    /// The Stream the file is in (the Duck's chat folder is the Pond's, not the Stream's); nil reads through the chat.
+    var stream: TabStream?
     let files: FilesModel
     let close: () -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let key = session.key.hostSessionId
-        let store = model.changesStore(for: key)
+        let store = model.changesStore(for: key, route: DiffRoute(session: key, stream: stream))
         VStack(spacing: 0) {
-            DiffTabHeaderBar(session: session, path: path, fileCount: 1, showsGit: false)
+            DiffTabHeaderBar(session: session, stream: stream, path: path, fileCount: 1, showsGit: false)
             Rectangle().fill(Theme.line).frame(height: 1)
             // A merged, deleted or reverted file says so on the item page (`PondLiveTabs`); the tab never closes by itself.
             // The scroll view and section stay put while the diff changes, so it updates in place.
@@ -41,19 +43,20 @@ struct PondDiffTab: View {
 /// Named flow: a person finishing a review reads every file, comments, then merges or opens the PR without leaving the tab.
 struct PondReviewAllTab: View {
     let session: HostSession
+    var stream: TabStream?
     let files: FilesModel
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let store = model.changesStore(for: session.key.hostSessionId)
+        let store = model.changesStore(for: session.key.hostSessionId, route: DiffRoute(session: session.key.hostSessionId, stream: stream))
         VStack(spacing: 0) {
             // One header row: the Duck, its branch, the count and diffstat, fold, Ask and the Git controls. ReviewView draws
             // no bar of its own here.
-            DiffTabHeaderBar(session: session, path: nil, fileCount: store.changes?.files.count ?? 0, showsGit: true,
+            DiffTabHeaderBar(session: session, stream: stream, path: nil, fileCount: store.changes?.files.count ?? 0, showsGit: true,
                              review: ReviewHeaderInfo(files: files, list: store.changes?.files ?? [],
                                                       added: store.changes?.added, removed: store.changes?.removed))
             Rectangle().fill(Theme.line).frame(height: 1)
-            ReviewView(files: files, session: session, showsBackButton: false, showsTopBar: false)
+            ReviewView(files: files, session: session, stream: stream, showsBackButton: false, showsTopBar: false)
             if !store.tray.isEmpty { CommentTray(store: store, session: session) }
         }
     }
@@ -70,6 +73,7 @@ private struct ReviewHeaderInfo {
 /// The shared header: Duck, branch, what the tab shows, then "Ask <Duck> to fix…" and (review-all) Git controls.
 private struct DiffTabHeaderBar: View {
     let session: HostSession
+    var stream: TabStream?
     let path: String?
     let fileCount: Int
     let showsGit: Bool
@@ -82,9 +86,9 @@ private struct DiffTabHeaderBar: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        let status = model.gitStatus(session)
-        let header = DiffTabHeader(duck: model.composerDuckName(session), branch: status?.branch ?? session.branch,
-                                   path: path, fileCount: fileCount)
+        let status = model.gitStatus(session, stream: stream)
+        let header = DiffTabHeader(duck: model.composerDuckName(session), branch: stream?.branch ?? status?.branch ?? session.branch,
+                                   path: path, fileCount: fileCount, streamBranch: stream?.branch)
         VStack(spacing: 0) {
             HStack(spacing: Space.s) {
                 Text(verbatim: header.duck).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
@@ -131,7 +135,7 @@ private struct DiffTabHeaderBar: View {
                 if showsGit, session.source == .squeak,
                    ReviewAllControls.shows(isSqueakChat: true, canSeeCode: model.focus.access.showsCode,
                                            isMain: status?.main ?? false, hasHistory: status?.noHistory == nil) {
-                    GitCluster(session: session, showsBranch: false)
+                    GitCluster(session: session, stream: stream, showsBranch: false)
                 }
             }
             .padding(.horizontal, Space.m).frame(height: 40).clipped()

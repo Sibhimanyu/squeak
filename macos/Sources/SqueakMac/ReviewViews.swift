@@ -10,13 +10,15 @@ import SwiftUI
 struct ReviewView: View {
     let files: FilesModel
     let session: HostSession
+    /// The Stream whose changes this reads; nil reads through the chat's own folder.
+    var stream: TabStream?
     var showsBackButton = true
     /// The review-all tab has one header row of its own (`DiffTabHeaderBar`), so it asks for no bar here.
     var showsTopBar = true
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let store = model.changesStore(for: session.key.hostSessionId)
+        let store = model.changesStore(for: session.key.hostSessionId, route: DiffRoute(session: session.key.hostSessionId, stream: stream))
         let list = store.changes?.files ?? []
         VStack(spacing: 0) {
             if showsTopBar {

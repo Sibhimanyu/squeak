@@ -183,3 +183,64 @@ describe("GET /native/projects/:id/changes", () => {
     expect(body).toEqual({ projectId: r.project.id, ducks: [], ducksTruncated: false });
   });
 });
+
+describe("by-Stream routes: /native/workspaces/:id/changes and git", () => {
+  it("reads one Stream's changes and one file's diff by workspace id, not by the Duck's chat folder", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    const login = r.joinSecondStream(pip.duck.id, "login", "sq/login");
+    fs.writeFileSync(path.join(pip.wt, "one.txt"), "1\n");
+    fs.writeFileSync(path.join(login.wt, "two.txt"), "2\n3\n");
+    git(login.wt, "add", "two.txt");
+
+    const one: any = await (await r.get(`/native/workspaces/${pip.ws.id}/changes`)).json();
+    expect(one).toMatchObject({ workspaceId: pip.ws.id, branch: "sq/pip", files: [{ path: "one.txt" }] });
+    const two: any = await (await r.get(`/native/workspaces/${login.ws.id}/changes`)).json();
+    expect(two).toMatchObject({ branch: "sq/login", totals: { added: 2, files: 1 }, files: [{ path: "two.txt" }] });
+
+    const patch: any = await (await r.get(`/native/workspaces/${login.ws.id}/changes/file?path=two.txt`)).json();
+    expect(patch.path).toBe("two.txt");
+    expect(patch.patch).toContain("+3");
+    // a file of the other Stream is not in this list
+    expect((await r.get(`/native/workspaces/${login.ws.id}/changes/file?path=one.txt`)).status).toBe(404);
+    expect((await r.get(`/native/workspaces/${login.ws.id}/changes/file`)).status).toBe(400);
+  });
+
+  it("404s for an unknown or archived Stream and is token-gated", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    expect((await r.get(`/native/workspaces/nope/changes`)).status).toBe(404);
+    expect((await r.call(`/native/workspaces/${pip.ws.id}/changes`)).status).toBe(401);
+    expect((await r.call(`/native/workspaces/${pip.ws.id}/git`)).status).toBe(401);
+    r.store.setWorkspaceState(pip.ws.id, "archived");
+    expect((await r.get(`/native/workspaces/${pip.ws.id}/changes`)).status).toBe(404);
+  });
+
+  it("reads git status in the Stream's folder", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    fs.writeFileSync(path.join(pip.wt, "dirty.txt"), "x\n");
+    const status: any = await (await r.get(`/native/workspaces/${pip.ws.id}/git`)).json();
+    expect(status.branch).toBe("sq/pip");
+    expect(status.dirty).toBe(1);
+    expect(status.main).toBeUndefined();
+  });
+
+  it("refuses a Stream merge without confirm and a PR action without the Duck's chat", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    const post = async (p: string, body: unknown) => {
+      const res = await r.get(`/native/projects/${r.project.id}/changes`);
+      const token = fs.readFileSync(r.tokenPath, "utf8").trim();
+      const port = new URL(res.url).port;
+      return fetch(`http://127.0.0.1:${port}${p}`, {
+        method: "POST",
+        headers: { "x-squeak-token": token, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    };
+    expect((await post(`/native/workspaces/${pip.ws.id}/actions/merge`, {})).status).toBe(400);
+    expect((await post(`/native/workspaces/${pip.ws.id}/actions/create-pr`, {})).status).toBe(400);
+    expect((await post(`/native/workspaces/${pip.ws.id}/actions/create-pr`, { sessionId: "nope" })).status).toBe(404);
+  });
+});

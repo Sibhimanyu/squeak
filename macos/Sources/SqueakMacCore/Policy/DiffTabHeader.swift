@@ -8,7 +8,12 @@ public struct DiffTabHeader: Equatable, Sendable {
     /// The path when the tab is one file; nil for review-all.
     public let path: String?
 
-    public init(duck: String, branch: String?, path: String?, fileCount: Int = 0) {
+    /// The Stream the tab reads, when it carries one: the Duck works in several, so its message names which.
+    public let streamBranch: String?
+
+    public init(duck: String, branch: String?, path: String?, fileCount: Int = 0, streamBranch: String? = nil) {
+        let sb = streamBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.streamBranch = (sb?.isEmpty ?? true) ? nil : sb
         let name = duck.trimmingCharacters(in: .whitespacesAndNewlines)
         self.duck = name.isEmpty ? "the Duck" : name
         let b = branch?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,8 +30,9 @@ public struct DiffTabHeader: Equatable, Sendable {
     public func askMessage(_ words: String) -> String? {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        guard let path else { return text }
-        return "About \(path):\n\(text)"
+        let place = streamBranch.map { "In the stream \($0): " } ?? ""
+        guard let path else { return place + text }
+        return "\(place)About \(path):\n\(text)"
     }
 }
 
