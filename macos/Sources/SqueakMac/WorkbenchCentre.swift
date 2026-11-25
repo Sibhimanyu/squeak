@@ -23,7 +23,9 @@ struct WorkbenchCentre: View {
     /// A pond's home or a thread from it is a layer over the workbench (Ponds/PondHome.swift): the workbench, with its
     /// chat, scroll and focus, stays mounted underneath, so coming back to the chat finds it as it was.
     var body: some View {
-        let artifact = model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
+        // New layout: a canvas a Duck opens shows in the work pane, never over the chat (DESIGN.md 8.12).
+        let newDuck = WorkPaneActions.isDuckView(model.selectedSession)
+        let artifact: (pond: String, path: String)? = newDuck ? nil : model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
         // An artifact opens as a tab of its pond's chat strip; only a pond with no chat shows it as a layer.
         let held = artifact.flatMap { model.artifactContext(pond: $0.pond) } != nil
         let layer = artifact != nil && !held
@@ -47,8 +49,9 @@ struct WorkbenchCentre: View {
         let focus = model.focus
         let showingCompose = focus.composePage != nil
         let usage = focus.page == .usage
+        let newDuck = WorkPaneActions.isDuckView(model.selectedSession)
         // The chat the body keeps mounted under a creation page; the shell below follows the page.
-        let artifact = model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
+        let artifact: (pond: String, path: String)? = newDuck ? nil : model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
         let artifactChat = artifact.flatMap { model.artifactContext(pond: $0.pond) }
         let bodyChat = usage ? nil : (artifactChat ?? model.selectedSession)
         let chat = showingCompose ? nil : bodyChat
@@ -88,7 +91,7 @@ struct WorkbenchCentre: View {
             }
             ZStack {
                 // The chat layer: kept mounted under a creation page (not when there is no chat to keep).
-                if !showingCompose || bodyChat != nil { chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil).workbenchLayer(hidden: showingCompose) }
+                if !showingCompose || bodyChat != nil { chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil, newDuck: newDuck).workbenchLayer(hidden: showingCompose) }
                 if showingCompose { DesktopComposePage() }
             }
         }
@@ -115,12 +118,15 @@ struct WorkbenchCentre: View {
 
 extension WorkbenchCentre {
     /// What the centre shows for a chat (or the Dashboard, Usage and the empty states when there is none).
-    @ViewBuilder fileprivate func chatBody(chat: HostSession?, files: FilesModel?, artifact: (pond: String, path: String)? = nil) -> some View {
+    @ViewBuilder fileprivate func chatBody(chat: HostSession?, files: FilesModel?, artifact: (pond: String, path: String)? = nil, newDuck: Bool = false) -> some View {
         if let artifact {
             ArtifactViewerPage(pond: artifact.pond, path: artifact.path, embedded: true).id(artifact.path)
         } else if let chat, let ref = DockStore.shared.ducklings.selected[.centre], ref.session == chat.key {
             DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
                 .id(ref.taskId)
+        } else if newDuck {
+            // Files, diffs, canvases and terminals live in the work pane; the centre is always the chat.
+            DetailView()
         } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
             TerminalPanelView(session: chat, shell: shell)
         } else if let chat, let panel = DockStore.shared.layout.centre.selected {
