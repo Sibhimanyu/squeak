@@ -983,7 +983,7 @@ export class RoomTasks extends EventEmitter {
       const p = posts[i]!;
       if (p.kind !== "handoff" || p.at < floor || (p.sessionId && mine.has(p.sessionId))) continue;
       const to = p.toSessionId ? mine.has(p.toSessionId) : false;
-      if (to || (duck.name ? mentions(p.text, duck.name) : false)) {
+      if (to || this.o.store.duckNames(duck).some((n) => mentions(p.text, n))) {
         return { from: p.authorName, text: [p.text, p.detail].filter(Boolean).join("\n\n") };
       }
     }

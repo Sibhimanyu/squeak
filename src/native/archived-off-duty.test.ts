@@ -65,7 +65,7 @@ describe("archived chats become Off-duty Ducks at host start", () => {
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
     const duck = h.store.duckBySession(s.id)!;
     expect(duck).toMatchObject({ duty: "off", projectId: h.project.id });
-    expect(duck.name?.trim()).toBeTruthy();
+    expect(duck.name).toBeNull(); // Off duty: the name went back to the pool
     expect(h.store.messagesAfter(s.id).length).toBeGreaterThan(0);
 
     const list = await h.call("GET", `/native/projects/${h.project.id}/ducks`);
@@ -79,7 +79,7 @@ describe("archived chats become Off-duty Ducks at host start", () => {
     expect(h.store.duckBySession(s.id)?.id).toBe(duck.id);
   });
 
-  it("an existing Duck's archived current chat is unarchived and set Off duty, keeping its name", () => {
+  it("an existing Duck's archived current chat is unarchived and set Off duty, keeping its name as the last name", () => {
     const h = rig();
     const s = h.chat("Named");
     const duck = h.store.duckForSession(s.id, h.project.id)!;
@@ -87,7 +87,7 @@ describe("archived chats become Off-duty Ducks at host start", () => {
     h.store.setArchivedAt(s.id, new Date().toISOString());
     h.host.start();
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
-    expect(h.store.duckRow(duck.id)).toMatchObject({ name: "Pip", duty: "off" });
+    expect(h.store.duckRow(duck.id)).toMatchObject({ name: null, lastName: "Pip", duty: "off" });
   });
 
   it("a Duck's older chat stays in its history; a chat Delete Duck archived stays gone", async () => {

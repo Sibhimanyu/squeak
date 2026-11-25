@@ -19,17 +19,17 @@ function rig() {
 }
 
 describe("room sender names", () => {
-  it("a row stored with the chat's title reads as the Duck's name when the feed is served", () => {
+  it("a row with no stored name reads as the Duck's name when the feed is served", () => {
     const { store, room, project, chat } = rig();
     const s = chat("Rebuild and Improve Website Content");
-    store.updateDuck(store.duckForSession(s.id, project.id)!.id, { name: "Quill 2" });
-    // An old row: written before posts carried the Duck's name, so it holds the chat's title.
+    store.updateDuck(store.duckForSession(s.id, project.id)!.id, { name: "Quill" });
+    // A row with no stored name is resolved from the Duck.
     store.addRoomPost({
       id: "old1",
       projectId: project.id,
       authorKind: "agent",
       authorId: s.id,
-      authorName: "Rebuild and Improve Website Content",
+      authorName: "",
       sessionId: s.id,
       kind: "done",
       level: "room",
@@ -37,18 +37,18 @@ describe("room sender names", () => {
       at: 1,
     } as never);
     const [post] = room.toPosts(project.id, store.roomPosts(project.id, { limit: 10 }));
-    expect(post!.author.name).toBe("Quill 2");
+    expect(post!.author.name).toBe("Quill");
   });
 
-  it("a Duck renamed later reads under its current name on old rows", () => {
+  it("a post keeps the name its Duck wore when it posted, after a rename", () => {
     const { store, room, project, chat } = rig();
     const s = chat("Friendly Greeting");
     const duck = store.duckForSession(s.id, project.id)!;
     store.updateDuck(duck.id, { name: "Dot" });
     const row = room.agentPost(s, { kind: "message", text: "hello" });
-    store.updateDuck(duck.id, { name: "Dot 2" });
+    store.updateDuck(duck.id, { name: "Tara" });
     const [post] = room.toPosts(project.id, [row!]);
-    expect(post!.author.name).toBe("Dot 2");
+    expect(post!.author.name).toBe("Dot");
   });
 
   it("with no Duck identity the sender is a neutral 'A Duck', never the chat title", () => {

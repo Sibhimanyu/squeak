@@ -148,7 +148,7 @@ describe("a Duck hands work on with hand_off", () => {
     const bad = (a: Record<string, unknown>) => r.tools.call(pip.s.id, "hand_off", a).catch((e: Error) => e.message);
     expect(await bad({ text: "do it", toDuck: "Ghost" })).toMatch(/No duck named Ghost/);
     expect(await bad({ text: "do it", toDuck: "Pip" })).toMatch(/That is you/);
-    expect(await bad({ text: "do it", toDuck: "Sage" })).toMatch(/off duty/);
+    expect(await bad({ text: "do it", toDuck: "Sage" })).toMatch(/No duck named Sage/); // Off duty: the name is released
     expect(await bad({ text: " " })).toMatch(/text is required/);
     expect(r.jobs.list(r.pid)).toEqual([]);
   });

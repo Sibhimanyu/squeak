@@ -278,8 +278,10 @@ export interface NotebookRow {
 export interface DuckRow {
   id: string;
   projectId: string;
-  /** The person's name for it; null = follows its current chat's title. */
+  /** The mask it wears while on duty; null while Off duty (the name goes back to the pool) or before it has one. */
   name: string | null;
+  /** The name it wore when it last went Off duty (history only; never routes new @mentions). */
+  lastName: string | null;
   role: string | null;
   /** Seeds the duck's colour: a migrated duck's first session id, else its own id. */
   colourSeed: string;
@@ -1699,11 +1701,16 @@ export class NativeStore {
        CREATE TABLE IF NOT EXISTS duck_sessions (
          session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
        CREATE INDEX IF NOT EXISTS duck_sessions_duck ON duck_sessions(duck_id);
+       CREATE TABLE IF NOT EXISTS duck_aliases (
+         duck_id TEXT NOT NULL, alias TEXT NOT NULL, PRIMARY KEY (duck_id, alias));
        CREATE TABLE IF NOT EXISTS duck_streams (
          duck_id TEXT NOT NULL, workspace_id TEXT NOT NULL, joined_at TEXT NOT NULL,
          PRIMARY KEY (duck_id, workspace_id));
        CREATE INDEX IF NOT EXISTS duck_streams_workspace ON duck_streams(workspace_id)`,
     );
+    if (!(this.db.prepare("PRAGMA table_info(ducks)").all() as Row[]).some((c) => c.name === "last_name")) {
+      this.db.exec("ALTER TABLE ducks ADD COLUMN last_name TEXT");
+    }
     this.ducksReady = true;
   }
 
@@ -1764,16 +1771,20 @@ export class NativeStore {
     const id = randomUUID();
     const at = input.currentSessionId ? this.getSession(input.currentSessionId) : null;
     const seed = input.colourSeed ?? id;
-    const name = input.name?.trim() ? input.name : this.freshDuckName(input.projectId, seed);
+    const off = input.duty === "off";
+    const given = input.name?.trim() ? input.name : null;
+    // A name is a mask worn on duty: an Off-duty Duck holds none (a given one is kept as its last name).
+    const name = off ? null : (given ?? this.freshDuckName(input.projectId, seed));
     this.db
       .prepare(
-        `INSERT INTO ducks (id, project_id, name, role, colour_seed, notebook, current_session_id, created_at, duty, workspace_id, branch)
-         VALUES (?,?,?,?,?,'',?,?,?,?,?)`,
+        `INSERT INTO ducks (id, project_id, name, last_name, role, colour_seed, notebook, current_session_id, created_at, duty, workspace_id, branch)
+         VALUES (?,?,?,?,?,?,'',?,?,?,?,?)`,
       )
       .run(
         id,
         input.projectId,
         name,
+        off ? given : null,
         input.role ?? null,
         seed,
         input.currentSessionId ?? null,
@@ -1799,18 +1810,29 @@ export class NativeStore {
   ): void {
     const cur = this.duckRow(id);
     if (!cur) return;
-    // A Duck always has a name: clearing it (or never having one) hands back a host-picked one.
     const pond = patch.projectId !== undefined ? patch.projectId : cur.projectId;
-    if (patch.name !== undefined ? !(patch.name ?? "").trim() : !cur.name?.trim()) {
-      patch = { ...patch, name: this.freshDuckName(pond, cur.colourSeed, id) };
+    const duty = patch.duty !== undefined ? patch.duty : cur.duty;
+    let name: string | null;
+    let lastName = cur.lastName;
+    if (duty === "off") {
+      // Off duty releases the name back to the pool; the chat title identifies the Duck until it is back on duty.
+      name = null;
+      if (cur.name?.trim()) lastName = cur.name;
+    } else {
+      const wanted = patch.name !== undefined ? patch.name : cur.name;
+      // On duty a Duck always wears a name: a blank one (or coming back on duty) gets a fresh unused one.
+      name = wanted?.trim() ? wanted : this.freshDuckName(pond, cur.colourSeed, id);
     }
     this.db
-      .prepare("UPDATE ducks SET name=?, role=?, notebook=?, duty=?, current_session_id=?, project_id=? WHERE id=?")
+      .prepare(
+        "UPDATE ducks SET name=?, last_name=?, role=?, notebook=?, duty=?, current_session_id=?, project_id=? WHERE id=?",
+      )
       .run(
-        patch.name !== undefined ? patch.name : cur.name,
+        name,
+        lastName,
         patch.role !== undefined ? patch.role : cur.role,
         patch.notebook !== undefined ? patch.notebook : cur.notebook,
-        patch.duty !== undefined ? patch.duty : cur.duty,
+        duty,
         patch.currentSessionId !== undefined ? patch.currentSessionId : cur.currentSessionId,
         patch.projectId !== undefined ? patch.projectId : cur.projectId,
         id,
@@ -1818,19 +1840,74 @@ export class NativeStore {
     if (patch.currentSessionId) this.syncDuckLinks(id);
   }
 
-  /** A short stable name for a Duck with none: unique in its Pond, seeded by its colour seed. */
+  /** A short name for a Duck going on duty: unused by the Pond's on-duty Ducks, seeded by its colour seed. */
   freshDuckName(projectId: string, seed: string, exceptId?: string): string {
     const taken = this.listDucks(projectId)
-      .filter((d) => d.id !== exceptId && d.name)
+      .filter((d) => d.id !== exceptId && d.duty === "on" && d.name)
       .map((d) => d.name as string);
     return pickDuckName(seed, taken);
+  }
+
+  /** Old names a Duck still answers to (@mentions, hand_off), after it was renamed. */
+  duckAliases(duckId: string): string[] {
+    this.ducksTable();
+    return (this.db.prepare("SELECT alias FROM duck_aliases WHERE duck_id=? ORDER BY alias").all(duckId) as Row[]).map(
+      (r) => r.alias as string,
+    );
+  }
+
+  /** Every name a Duck has answered to: current, last and renamed-from. Only for replaying stored text. */
+  duckNames(d: { id: string; name: string | null; lastName?: string | null }): string[] {
+    return [...new Set([d.name, d.lastName, ...this.duckAliases(d.id)].filter((n): n is string => !!n?.trim()))];
+  }
+
+  /**
+   * Once (recorded in `host_migrations`): a name is a mask worn on duty. Every on-duty Duck whose name ends in a space
+   * and digits ("Dot 2") gets a fresh unused one (oldest first, seeded by colour; the old name stays as an alias);
+   * Duck posts keep the name their sender wore (stored on the post); every Off-duty Duck releases its name to
+   * `last_name`. Returns how many Ducks changed.
+   */
+  releaseDuckNames(): number {
+    this.ducksTable();
+    const NAME = "duck-names-are-masks";
+    if (this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(NAME)) return 0;
+    const rows = this.db
+      .prepare(
+        "SELECT id, project_id, name, colour_seed, duty FROM ducks WHERE name IS NOT NULL ORDER BY created_at, id",
+      )
+      .all() as Row[];
+    let changed = 0;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        const old = (r.name as string).trim();
+        if (r.duty !== "on" || !/\s\d+$/.test(old)) continue;
+        const fresh = this.freshDuckName(r.project_id as string, r.colour_seed as string, r.id as string);
+        this.db.prepare("UPDATE ducks SET name=? WHERE id=?").run(fresh, r.id);
+        this.db.prepare("INSERT OR IGNORE INTO duck_aliases (duck_id, alias) VALUES (?,?)").run(r.id, old);
+        changed++;
+      }
+      // Old Duck posts were resolved by session when served; from now on they carry the name they were posted under.
+      this.db.exec(
+        `UPDATE room_posts SET author_name = (
+           SELECT d.name FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id
+           WHERE ds.session_id = room_posts.session_id AND d.name IS NOT NULL AND TRIM(d.name) <> '')
+         WHERE author_kind='agent' AND session_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id
+           WHERE ds.session_id = room_posts.session_id AND d.name IS NOT NULL AND TRIM(d.name) <> '')`,
+      );
+      const off = this.db.prepare("SELECT COUNT(*) AS n FROM ducks WHERE duty='off' AND name IS NOT NULL").get() as Row;
+      this.db.exec("UPDATE ducks SET last_name=name, name=NULL WHERE duty='off' AND name IS NOT NULL");
+      changed += off.n as number;
+      this.db.prepare("INSERT OR IGNORE INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
+    })();
+    return changed;
   }
 
   /** Names every unnamed Duck (oldest first, so the result is the same on every host). Returns how many. */
   nameUnnamedDucks(): number {
     this.ducksTable();
     const rows = this.db
-      .prepare("SELECT id FROM ducks WHERE name IS NULL OR TRIM(name)='' ORDER BY created_at, id")
+      .prepare("SELECT id FROM ducks WHERE duty='on' AND (name IS NULL OR TRIM(name)='') ORDER BY created_at, id")
       .all() as Row[];
     for (const r of rows) this.updateDuck(r.id as string, {});
     return rows.length;
@@ -1850,6 +1927,7 @@ export class NativeStore {
         this.db.prepare("INSERT OR IGNORE INTO deleted_duck_chats (session_id, at) VALUES (?,?)").run(sid, at);
       }
       this.db.prepare("DELETE FROM duck_sessions WHERE duck_id=?").run(id);
+      this.db.prepare("DELETE FROM duck_aliases WHERE duck_id=?").run(id);
       this.db.prepare("DELETE FROM ducks WHERE id=?").run(id);
     })();
     return sessions;
@@ -2118,6 +2196,7 @@ function duckRow(r: Row): DuckRow {
     id: r.id as string,
     projectId: r.project_id as string,
     name: (r.name as string | null) ?? null,
+    lastName: (r.last_name as string | null) ?? null,
     role: (r.role as string | null) ?? null,
     colourSeed: r.colour_seed as string,
     notebook: (r.notebook as string | null) ?? "",
