@@ -117,6 +117,13 @@ extension AppModel {
         return (project, s.key.hostSessionId)
     }
 
+    /// The name the new composer's chip shows: the host's Duck name, the chat title only for a chat with no Duck.
+    func composerDuckName(_ s: HostSession) -> String {
+        let project = duckPondKey(s).flatMap { PondsModel.shared.entry($0)?.projectId }
+        let ducks = project.flatMap { RoomRosterStore.shared.model(for: $0).ducks }
+        return ComposerChip.duckName(duckId: s.duckId, sessionId: s.key.hostSessionId, ducks: ducks, chatTitle: s.title) ?? ""
+    }
+
     /// Whether the duck menu offers Off duty and Delete Duck for this chat.
     func hasDuckLife(_ s: HostSession) -> Bool { duckHostRef(s) != nil }
 
