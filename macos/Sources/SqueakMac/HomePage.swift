@@ -182,8 +182,11 @@ private struct DashboardWorkspaceCard: View {
                 Text(verbatim: DashboardBoard.streamLine(in: workspace)).font(Typo.meta).foregroundStyle(Theme.muted)
                     .lineLimit(1).truncationMode(.middle)
                 HStack(spacing: 6) {
-                    Text("\(workspace.chats.count) \(model.ducksMode ? (workspace.chats.count == 1 ? "duck" : "ducks") : (workspace.chats.count == 1 ? "chat" : "chats"))")
-                        .font(Typo.meta).foregroundStyle(Theme.subtle)
+                    // A Duck's own card counts its chats; a lone chat needs no count.
+                    if !(workspace.isDucks && workspace.chats.count == 1) {
+                        Text("\(workspace.chats.count) \(workspace.isDucks || !model.ducksMode ? (workspace.chats.count == 1 ? "chat" : "chats") : (workspace.chats.count == 1 ? "duck" : "ducks"))")
+                            .font(Typo.meta).foregroundStyle(Theme.subtle)
+                    }
                     Spacer(minLength: 0)
                     if let chat { AgentAvatar(session: chat, size: 14) }
                 }

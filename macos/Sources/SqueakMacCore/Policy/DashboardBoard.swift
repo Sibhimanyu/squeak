@@ -56,7 +56,7 @@ public enum DashboardFilter: Equatable, Sendable {
     public func includes(_ item: RecentWorkspace) -> Bool {
         switch self {
         case .project(let name): item.project.caseInsensitiveCompare(name) == .orderedSame
-        case .workspace(let id, _): item.workspace.id == id
+        case .workspace(let id, _): item.workspace.id == id || item.workspace.id.hasPrefix(id + "/")
         }
     }
 
@@ -68,12 +68,37 @@ public enum DashboardFilter: Equatable, Sendable {
 public enum DashboardBoard {
     public static func build(_ tree: SidebarTree, pins: Set<String> = [], now: Date = Date()) -> [DashboardColumn] {
         let count = tree.projects.reduce(0) { $0 + $1.workspaces.count }
-        let recent = WorkspaceNavigation.recent(tree, limit: count)
+        let recent = cards(WorkspaceNavigation.recent(tree, limit: count))
         return DashboardLane.allCases.map { lane in
             let items = recent.filter { self.lane(for: $0.workspace, now: now) == lane }
             return DashboardColumn(lane: lane, workspaces:
                 items.filter { pins.contains($0.id) } + items.filter { !pins.contains($0.id) })
         }
+    }
+
+    /// Ducks mode folds a pond into one row holding every Duck. A card per row would take its state from one chat and hide
+    /// the rest (a working Duck lost behind an errored one), so such a row becomes one card per Duck, each in the lane of
+    /// its own chats. A Duck is its `duckId`; a chat with no Duck is its own. Streams stay one card per workspace.
+    static func cards(_ recent: [RecentWorkspace]) -> [RecentWorkspace] {
+        recent.flatMap { item -> [RecentWorkspace] in
+            guard item.workspace.isDucks else { return [item] }
+            var order: [String] = []
+            var groups: [String: [HostSession]] = [:]
+            for chat in item.workspace.chats where chat.archivedAt == nil {
+                let key = chat.duckId.flatMap { $0.isEmpty ? nil : $0 } ?? "chat:\(chat.key.stringValue)"
+                if groups[key] == nil { order.append(key) }
+                groups[key, default: []].append(chat)
+            }
+            return order.map { key in
+                var w = item.workspace
+                w.id = "\(item.workspace.id)/\(key)"
+                w.chats = groups[key] ?? []
+                w.branch = w.chats.compactMap(\.branch).first { !$0.isEmpty }
+                w.foldedMark = nil
+                return RecentWorkspace(project: item.project, workspace: w)
+            }
+        }
+        .sorted { ($0.workspace.lastActivityAt ?? .distantPast) > ($1.workspace.lastActivityAt ?? .distantPast) }
     }
 
     public static func lane(for workspace: SidebarWorkspace, now: Date = Date()) -> DashboardLane {
