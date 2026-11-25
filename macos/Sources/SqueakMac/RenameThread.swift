@@ -20,8 +20,8 @@ struct RenameThreadItem: View {
 }
 
 extension AppModel {
-    /// Archives or unarchives a thread of any kind. A Squeak chat goes to the session host (it refuses a working or waiting
-    /// chat in its own sentence); every other thread is hidden in Squeak only, by the daemon. A refusal shows as the note;
+    /// Archives or unarchives an add-on thread (a Squeak chat is a Duck and has no archive; Off duty is its only rest). The
+    /// thread is hidden in Squeak only, by the daemon. A refusal shows as the note;
     /// the lists follow the next refresh, which is asked for now.
     func archiveThread(_ s: HostSession, archived: Bool) {
         guard !demoMode, let kind = ThreadArchive.kind(s) else { return }
@@ -30,15 +30,7 @@ extension AppModel {
             let result: NativeActionResult
             switch kind {
             case .squeak:
-                guard let c = self.nativeControls(for: s) else { return }
-                var stop = false
-                if archived, ThreadArchive.needsStop(s) {
-                    // Working: ask first. The host then stops the turn, drops the queue and archives.
-                    let queued = (try? await c.queue(for: s).count) ?? 0
-                    guard Self.confirmStopAndArchive(queued: queued) else { return }
-                    stop = true
-                }
-                result = await c.archive(s, archived: archived, stop: stop)
+                return  // Ducks have no archive (Off duty and Delete Duck)
             case .fleet:
                 result = await self.client.archiveThread(sessionKey: s.key.hostSessionId, archived: archived)
             }
@@ -47,16 +39,6 @@ extension AppModel {
             case .refused(let reason), .failed(let reason): self.native.note = reason
             }
         }
-    }
-
-    /// "Stop and archive?" for a chat that is working; true when the person chose to go on.
-    @MainActor static func confirmStopAndArchive(queued: Int) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = ThreadArchive.stopAlertTitle
-        alert.informativeText = ThreadArchive.stopAlertText(queued: queued)
-        alert.addButton(withTitle: ThreadArchive.stopAlertConfirm)
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// ⇧⌘A and the Chat menu: archive the open thread, or show it again when it is archived.

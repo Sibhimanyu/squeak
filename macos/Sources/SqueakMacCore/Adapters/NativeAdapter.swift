@@ -32,7 +32,7 @@ public protocol NativeChatControls: Sendable {
     /// Renames the chat (already checked by `ThreadTitle`); the host refuses text it will not store.
     func rename(_ session: HostSession, to title: String) async -> NativeActionResult
     /// Archives or unarchives the chat. A waiting chat is archived at once; a working one only with `stop`, which makes
-    /// the host stop the turn and drop its queue first (the Mac asks the person: `ThreadArchive.needsStop`).
+    /// the host stop the turn and drop its queue first.
     func archive(_ session: HostSession, archived: Bool, stop: Bool) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult

@@ -835,9 +835,10 @@ export class NativeServer {
       if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
       if (b.stop !== undefined && typeof b.stop !== "boolean") throw new HttpError(400, "stop must be true or false");
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
-      if (sub === "archive") await host.archive(id, { stop: b.stop === true });
-      else await host.unarchive(id);
-      return this.json(res, 200, { ok: true, archived: sub === "archive" });
+      // Ducks have no archive: the old routes map to Off duty (and back on duty).
+      if (sub === "archive") await host.standDown(id, { stop: b.stop === true });
+      const duty = this.room.setDuty(id, sub === "unarchive");
+      return this.json(res, 200, { ok: true, archived: false, duty });
     }
     if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
       const b = await this.body(req);
