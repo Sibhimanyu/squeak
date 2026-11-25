@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.34.8
+
+**One roster everywhere, a calmer top, and ducklings in tabs.**
+
+- Every place that shows a pond's ducks (the Dashboard numbers, the duck list, tabs, the subheader, For you, the sidebar) now reads one list from your Mac, so counts, status and streams always agree. A duck whose ducklings are still working shows as working.
+- The top bar and a duck's subheader sit on one quiet surface: borderless tabs, a frosted Dashboard | Room switch, and a soft hint of the pond's colour that fades out quickly. Bright pond colours stay muted everywhere.
+- Opening a duckling opens it as a tab next to its duck. Esc or ⌘W takes you back.
+
 ## 2.34.7
 
 **Fixes and polish for the new layout.**
