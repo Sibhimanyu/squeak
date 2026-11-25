@@ -11,6 +11,8 @@
 - The @ and / suggestion lists open above the composer instead of running off the bottom.
 - Ducks stay on duty when Squeak restarts; they go off duty only after an idle hour.
 - When a duck shows you a file, it opens in the app and the Artifacts list updates.
+- A duckling shows the model it really runs on, the same in its timeline row and in the helper strip.
+- Try the new layout in Settings › General (off by default): a row of your ducks instead of tabs, the Pond panel beside the Room, and each duck's Changes, Files, Canvas and Terminal in a pane beside its chat.
 
 ## 2.34.0
 
