@@ -1271,16 +1271,18 @@ The window is redesigned from Squeak's own model: a Pond is a place, Ducks are t
 produces sits beside its chat. The new layout is the default for everyone who has not chosen; the classic layout stays exactly as it was and is optional. Anyone who explicitly chose keeps their choice. The setting is read through
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
-- **Duck avatar row instead of tabs.** The centre top is a row of the Pond's on-duty Ducks (`DuckAvatarRow`); there is no
-  "Room" pill in it, and the row is not drawn at all while nobody is on duty and no Duck is open. Each avatar is the brand thread duck (`duckThread.png`, template, tinted, never redrawn)
-  in the Duck's own colour from its colour seed, on a soft tile of that colour, with the Duck's name beside it. The working
-  glyph shows only on working Ducks (corner, per section 8.1); a Duck waiting on you carries the amber triangle; no coloured
-  dots. The selected avatar is raised (`selected` fill, `lineStrong` ring). A Duck opened while Off duty (from the roster or
-  search) shows at the end of the row while it is open and leaves with it; showing it never changes its duty (Off duty
-  stays a separate action). Clicking an avatar shows that Duck's chat in the centre. The pond header's Dashboard | Room switch is the only way
-  between the two pages (the Dashboard shows the same row with nothing selected). No floating edge button stands in for
-  the switch; the two-finger swipe still works. Tabs are hidden
-  (the tab code stays for the old layout; in a Duck view files, artifacts, diffs and terminals open in the work pane).
+- **Pond tab strip.** The centre top shows the Pond's on-duty Ducks as circles (`DuckAvatarRow`), followed by a divider
+  and the opened item pills. An empty strip is hidden. Each circle uses the brand thread duck (`duckThread.png`, template,
+  tinted, never redrawn) in the Duck's own colour, with its name and status in the hover and VoiceOver labels. The working
+  glyph and amber waiting triangle sit on the circle. The selected circle has `selected` fill and a `lineStrong` ring.
+  Clicking a circle opens its Duck's chat. An Off-duty Duck appears at the end of the circles while its chat is showing.
+  Circles have no close action, and opening or closing tabs never changes duty. Each item pill has an icon, name and
+  a close control on hover. Diff and review pills carry a dot in their Duck's colour. The strip scrolls sideways,
+  fades at the hidden edges and offers a "⋯" list when it overflows. The Dashboard | Room switch stays in the Pond
+  header, and the two-finger swipe still works.
+- **Item tabs.** Files, diffs, review-all, artifacts and the Notebook open in the centre. A click either selects the
+  existing pill or inserts one after the current tab, in the item group. A Duck showing a file adds its pill in the
+  background. Order is saved by project id. ⌘W closes the selected item, ⌘1–9 select strip tabs and ⌃Tab cycles them.
 - **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: "Here now",
   Tasks and the Notebook live on the Dashboard under the overview tiles (the Ducks working are the Working tile and the
   list). Instead the Room (and the Dashboard beside it) carries the same slim icon rail and work pane as a Duck view,
