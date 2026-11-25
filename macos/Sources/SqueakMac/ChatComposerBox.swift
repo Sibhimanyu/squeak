@@ -1,3 +1,4 @@
+import AppKit
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -43,6 +44,8 @@ struct ChatComposerBox<Setup: View>: View {
     var picker: ComposerPickerSource?
     /// The pond this chat sits in: its accent draws the focus ring (§3.5). Nil: the neutral ring.
     var pondId: String?
+    /// The duck's name, drawn first in the new layout's chip above the field ("Pip · Opus 5.5 · Medium").
+    var duckName: String?
     @ViewBuilder var setup: () -> Setup
 
     @State private var dictation = DictationController()
@@ -59,7 +62,7 @@ struct ChatComposerBox<Setup: View>: View {
     private let maxH: CGFloat = 17 * 8 + 12
 
     var body: some View {
-        box
+        Group { if MacLayoutPreference.shared.isNew { newBox } else { box } }
             .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected) {
                 ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
             }
@@ -129,6 +132,151 @@ struct ChatComposerBox<Setup: View>: View {
             }
         }
         .animation(Motion.quick, value: focused)
+    }
+
+
+    // MARK: New layout (DESIGN.md §8.12, stage 3)
+
+    /// One rounded field with its tools inside on the left (attach, @, /, mic, the context ring) and a round duck-yellow
+    /// Send at the right; above it a small chip line: the duck, its model and effort (the existing picker), the mode, and
+    /// the working glyph while the agent works. Every function and key of the old box is kept.
+    private var newBox: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            chipLine
+            VStack(alignment: .leading, spacing: 4) {
+                if let tray { ImageStrip(tray: tray).padding(.leading, 4) }
+                HStack(alignment: .bottom, spacing: 4) {
+                    HStack(spacing: 0) { newTools }.frame(height: 32)
+                    if dictation.state.showsMeter {
+                        DictationBar(dictation: dictation).frame(minHeight: 32)
+                    } else {
+                        newField
+                    }
+                    newSend.frame(height: 32)
+                }
+                DictationNotice(dictation: dictation)
+            }
+            .padding(.leading, 8).padding(.trailing, 8).padding(.vertical, 8)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.lineStrong.opacity(0.7)))
+            .overlay {
+                if focused, editable, pondId != nil {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(PondColour.focusRing(pondId), lineWidth: 1.5)
+                        .allowsHitTesting(false).transition(.opacity)
+                }
+            }
+            .animation(Motion.quick, value: focused)
+        }
+    }
+
+    private var newField: some View {
+        ComposerField(
+            text: $text, sendKey: .returnSends, placeholder: placeholder,
+            isEnabled: editable, focusToken: focusToken + localFocus,
+            onSend: {
+                if let cardReply {
+                    let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !typed.isEmpty { cardReply(typed) }
+                } else {
+                    keySend(.plain)
+                }
+            },
+            onCommandReturn: cardReply == nil ? { keySend(.command) } : nil,
+            onContentHeight: { contentHeight = $0 },
+            onImages: editable && tray != nil ? { tray?.add($0) } : nil,
+            onCaret: { caret = $0 },
+            onPickerKey: pickerKeyHandler,
+            handle: fieldHandle,
+            onFocus: { focused = $0 }
+        )
+        .frame(height: min(max(contentHeight, 32), maxH))
+        .overlay(alignment: .trailing) {
+            if editable, text.isEmpty {
+                Text("\u{2318}L").font(.system(size: 11)).foregroundStyle(Theme.subtle).allowsHitTesting(false)
+                    .accessibilityHidden(true).help("\u{2318}L focuses the message field")
+            }
+        }
+    }
+
+    /// Attach, mention, command, dictate and the context ring: icons only, quiet until pressed.
+    @ViewBuilder private var newTools: some View {
+        if editable, let tray {
+            AttachButton(tray: tray, symbol: .paperclip)
+        } else {
+            Lucide(.paperclip, size: 15, color: Theme.subtle).frame(width: 28, height: 28)
+                .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
+                .accessibilityLabel("Attach unavailable")
+        }
+        triggerButton("@", label: "Mention a file", help: "Mention a file (@)")
+        triggerButton("/", label: "Run a command", help: "Run a command (/)")
+        micButton
+        if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText, popover: contextPopover, onCompact: onCompact) }
+    }
+
+    private func triggerButton(_ mark: String, label: String, help: String) -> some View {
+        Button { insertTrigger(mark) } label: {
+            Text(verbatim: mark).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(editable ? Theme.muted : Theme.subtle)
+                .frame(width: 28, height: 28).contentShape(Circle())
+        }
+        .buttonStyle(.plain).pointerHand(editable).disabled(!editable)
+        .help(help).accessibilityLabel(label)
+    }
+
+    /// Above the field: "Pip · [Opus 5.5 Medium ⌄]" (the picker), the mode, then the working glyph. Fixed height so the
+    /// field never moves when the glyph or a chip comes and goes.
+    private var chipLine: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                let lead = ComposerChip.line(duck: duckName, model: nil, effort: nil)
+                if !lead.isEmpty {
+                    Text(verbatim: lead).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: "\u{00B7}").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                }
+                setup()
+            }
+            .padding(.horizontal, 10).frame(minHeight: 26)
+            .background(Theme.sidebar, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.line))
+            if let mode { ModeChip(mode: mode, onPick: onMode) }
+            if working { WorkingGlyph(slot: 24, grid: .compact).accessibilityLabel("Working") }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 6).frame(height: 28)
+    }
+
+    /// Send as a round duck-yellow disc with an `ink` arrow (12.9:1); Stop keeps its own meaning and square glyph.
+    @ViewBuilder private var newSend: some View {
+        let ready = canSend && !dictation.isActive
+        if ComposerPrompt.button(phase: phase, hasContent: canSend, canStop: canStop) == .stop {
+            Button(action: onStop) { RoundStopLabel() }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop")
+                .shortcutHint("Stop this turn", .stop)
+        } else if working {
+            let primary = sendDefault.primary, other = sendDefault.other
+            SqueakMenu {
+                Button("\(SendDefault.title(primary)): \(SendDefault.explanation(primary))") { onSend(primary) }
+                Button("\(SendDefault.title(other)): \(SendDefault.explanation(other))") { onSend(other) }
+            } label: {
+                DuckSendDisc(enabled: ready)
+            } primaryAction: {
+                onSend(primary)
+            }
+            .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
+            .disabled(!ready)
+            .accessibilityLabel("\(SendDefault.title(primary)) message")
+            .accessibilityHint("Return queues, Command-Return steers.")
+            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false) ?? "")")
+            shortcut(.steer, [.command], ready)
+            shortcut(.queue, [.command, .shift], ready)
+        } else {
+            Button { onSend(.queue) } label: { DuckSendDisc(enabled: ready) }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!ready)
+                .accessibilityLabel("Send message")
+                .help(sendHelp)
+        }
     }
 
     /// ↵ and ⌘↵ in the field: while the agent works ↵ queues and ⌘↵ steers; idle either sends (`ComposerKeys`).
@@ -455,6 +603,17 @@ struct RoundSendLabel: View {
             .frame(width: 30, height: 30)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(enabled ? Theme.primaryFill : Theme.surfaceRaised.opacity(0.8)))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// New layout's Send: a 32pt duck-yellow disc with an `ink` arrow (§8.12); a quiet disc while there is nothing to send.
+struct DuckSendDisc: View {
+    let enabled: Bool
+    var body: some View {
+        Lucide(.arrowUp, size: 16, color: enabled ? Color(nsColor: NSColor(hex: Tokens.duckOutline)) : Theme.muted)
+            .frame(width: 32, height: 32)
+            .background(Circle().fill(enabled ? Theme.duck : Theme.surfaceRaised.opacity(0.8)))
+            .contentShape(Circle())
     }
 }
 

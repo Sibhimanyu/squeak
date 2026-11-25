@@ -131,8 +131,15 @@ struct MessageView: View {
             } else {
                 MessageText(markdown: message.text, style: .reading)
             }
-            if let footer { TurnFooterView(footer: footer, messageText: message.text) }
+            if let footer, !MacLayoutPreference.shared.isNew { TurnFooterView(footer: footer, messageText: message.text) }
         }
+        // New layout: nothing sits under the message; its action bar floats over the top corner on hover or keyboard focus.
+        .overlay(alignment: .topTrailing) {
+            if let footer, MacLayoutPreference.shared.isNew {
+                MessageActionBar(footer: footer, messageText: message.text, overMessage: hovering).offset(y: -14).zIndex(2)
+            }
+        }
+        .modifier(NewLayoutHover(active: footer != nil && MacLayoutPreference.shared.isNew, hovering: $hovering))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(layout != nil ? "\(agentName) is waiting for your answer" : "")
     }
@@ -372,5 +379,16 @@ private struct FailureHelp: ViewModifier {
     let reason: String?
     @ViewBuilder func body(content: Content) -> some View {
         if let reason, !reason.isEmpty { content.help(reason) } else { content }
+    }
+}
+
+
+/// New layout only: tracks the pointer over a message that has an action bar. A plain modifier so the old layout's
+/// view tree is untouched (no tracking area is installed when it is off or the message has no bar).
+private struct NewLayoutHover: ViewModifier {
+    let active: Bool
+    @Binding var hovering: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if active { content.contentShape(Rectangle()).onHover { hovering = $0 } } else { content }
     }
 }
