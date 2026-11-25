@@ -38,7 +38,7 @@ import { Room, RoomError } from "./room.js";
 import { ROOM_ATTACH_BODY_BYTES } from "./room-attachments.js";
 import { NotebookError, PondNotebook } from "./pond-notebook.js";
 import { roomMoments } from "./room-moments.js";
-import { TaskError, taskTitle, RoomTasks, type RoomTask } from "./room-tasks.js";
+import { TaskError, RoomTasks, type RoomTask } from "./room-tasks.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -47,7 +47,7 @@ import { GitPond, ghAdapter, githubRepoOf, type GitHubAdapter } from "./git-pond
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
 import { PondChangesReader } from "./pond-changes.js";
-import { ducksOwnBranch, mainReadOnlyRoot, Placement, PlacementError, parsePlace } from "./placement.js";
+import { ducksOwnBranch, Placement, PlacementError, parsePlace } from "./placement.js";
 import { logger } from "../utils/logger.js";
 
 export const DEFAULT_HOST_PORT = 8479;
@@ -679,23 +679,6 @@ export class NativeServer {
         const clientNonce = str(b.clientNonce)?.slice(0, 80);
         // Set by the Mac's room composer for an @duck send: that turn is the room's (a direct chat's never is).
         const room = b.room === true;
-        // Chats never work on Main: a chat still sitting in a git pond's Main moves to its own branch first, and the
-        // message goes to the new chat (`movedTo`).
-        const current = store.getSession(id);
-        if (current && mainReadOnlyRoot(store, current)) {
-          try {
-            const moved = await this.placement.move(
-              id,
-              { kind: "new", title: taskTitle(text) },
-              (spec) => this.starter.create(spec),
-              text,
-            );
-            if (moved.session) return this.json(res, 200, { queued: false, movedTo: moved.session.id });
-          } catch (error) {
-            if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
-            throw error;
-          }
-        }
         // The person messaging an off-duty duck puts it back on duty.
         if (store.duckOf(id).duty === "off") {
           this.room.setDuty(id, true);

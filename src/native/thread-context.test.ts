@@ -265,9 +265,10 @@ describe("placement lines (ducks own their branch)", () => {
   it("Main: read-only, the active branches with ducks and age, the three tools", () => {
     const note = buildThreadContext({ ...input, agent: "claude", placement: { mode: "main", branches } });
     expect(note).toContain("Main is read-only for ducks");
+    expect(note).toContain("Squeak never picks a stream for you");
     expect(note).toMatch(/- sibhi\/login: Login; ducks: Quiet Creek, Staff Otter; active 5 min ago/);
     expect(note).toMatch(/- sibhi\/billing: Billing; no duck on it now; active 3 h ago/);
-    for (const tool of ["branch_off", "join_branch"]) expect(note).toContain(tool);
+    for (const tool of ["streams", "open_stream", "leave_stream"]) expect(note).toContain(tool);
   });
 
   it("a branch: shared working copy, concurrent edits; no branches yet says so", () => {
@@ -280,6 +281,7 @@ describe("placement lines (ducks own their branch)", () => {
 
   it("absent without the flag: the note is unchanged", () => {
     const note = buildThreadContext({ ...input, agent: "claude" });
-    for (const word of ["branch_off", "join_branch", "move_to_main", "read-only"]) expect(note).not.toContain(word);
+    for (const word of ["open_stream", "leave_stream", "branch_off", "join_branch", "read-only"])
+      expect(note).not.toContain(word);
   });
 });

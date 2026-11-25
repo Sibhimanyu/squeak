@@ -102,7 +102,7 @@ export const FLAGS = [
     env: "SQUEAK_DUCKS_OWN_BRANCH",
     default: true,
     description:
-      "Ducks own their branch: in a git pond every new chat gets its own branch and worktree before its first turn (never Main, which is read-only for ducks), and agent tools branch_off and join_branch move it. On by default; off (SQUEAK_DUCKS_OWN_BRANCH=off or flags.json) keeps streams as the container.",
+      "Ducks start Pond-wide and choose their Streams (docs/adr/0003): a new Duck runs in the Pond's main folder, which is read-only for Ducks in a git pond, and opens or joins Streams with its agent tools streams, open_stream and leave_stream, several at once. On by default; off (SQUEAK_DUCKS_OWN_BRANCH=off or flags.json) keeps streams as the container. The name is from the earlier design and is kept so Macs and phones keep reading it.",
     stage: "stable",
     parse: "off-word-extended",
   },

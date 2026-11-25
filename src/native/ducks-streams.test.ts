@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { READ_ONLY_ROOT_REASON, readOnlyDenial } from "./claude-runner.js";
 import { SessionHost } from "./host.js";
-import { mainReadOnlyRoot } from "./placement.js";
+import { mainReadOnlyRoot, Placement } from "./placement.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
@@ -142,11 +142,11 @@ describe("POST /native/sessions place (flag on)", () => {
   it("main, new (typed branch), join by branch and by duck", async () => {
     flagOn(true);
     const h = await start();
-    // Main is no place to start a chat in a git pond: it gets a branch of its own.
+    // Main is where a Duck starts in a git pond: the Pond's folder, no Stream (it picks its own with open_stream).
     const main = await h.call("POST", "/native/sessions", body(h, { place: { kind: "main" } }));
     expect(main.status).toBe(201);
-    expect(main.json.session.cwd).not.toBe(h.pond.rootPath);
-    expect(main.json.session.workspaceId).toBeTruthy();
+    expect(main.json.session.cwd).toBe(h.pond.rootPath);
+    expect(main.json.session.workspaceId).toBeNull();
     const made = await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/login" } }));
     expect(made.status).toBe(201);
     expect(made.json.session).toMatchObject({ branch: "feat/login" });
@@ -165,21 +165,23 @@ describe("POST /native/sessions place (flag on)", () => {
       { agent: "claude", model: "m", text: "go", place: { kind: "join", duckId: duck.id } },
     );
     expect(byDuck.json.session.workspaceId).toBe(ws);
-    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(2); // Main became a branch too
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(1);
   });
 
-  it("a bare projectId, or main: true, starts on a branch of its own in a git pond; a folder pond gets its folder", async () => {
+  it("a bare projectId, or main: true, starts Pond-wide in the Pond's folder; a folder pond gets its folder", async () => {
     flagOn(true);
     const h = await start();
     for (const extra of [{}, { main: true }]) {
       const res = await h.call("POST", "/native/sessions", body(h, { text: "Fix the login form", ...extra }));
       expect(res.status).toBe(201);
       const s = res.json.session as SessionRow;
-      expect(s.workspaceId).toBeTruthy();
-      expect(s.cwd).not.toBe(h.pond.rootPath);
-      expect(s.branch).toMatch(/fix-the-login-form/);
-      expect(mainReadOnlyRoot(h.store, s)).toBeNull();
+      expect(s.workspaceId).toBeNull();
+      expect(s.cwd).toBe(h.pond.rootPath);
+      expect(mainReadOnlyRoot(h.store, s)).toBe(h.pond.rootPath);
+      expect(h.store.duckBySession(s.id)).toBeTruthy();
+      expect(h.store.duckStreams(h.store.duckBySession(s.id)!.id)).toEqual([]);
     }
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(0);
     // An explicit join still joins.
     const first = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/x" } }))).json
       .session as SessionRow;
@@ -272,20 +274,15 @@ describe("POST /native/ducks/<id>/place", () => {
 });
 
 describe("a message to a chat sitting in Main", () => {
-  it("moves it to its own branch and the message goes to the new chat; an edit aimed at Main is still refused", async () => {
+  it("goes to that chat (no move); an edit aimed at Main is still refused", async () => {
     flagOn(true);
     const h = await start();
     const old = await mainChat(h);
     h.store.setStatus(old.id, "idle");
     const res = await h.call("POST", `/native/sessions/${old.id}/messages`, { text: "Add dark mode" });
     expect(res.status).toBe(200);
-    const next = h.store.getSession(res.json.movedTo)!;
-    expect(next.id).not.toBe(old.id);
-    expect(next.workspaceId).toBeTruthy();
-    expect(next.cwd).not.toBe(h.pond.rootPath);
-    expect(h.sent.find((x) => x.session === next.id)!.text).toContain("Add dark mode");
-    expect(h.sent.filter((x) => x.session === old.id).every((x) => !x.text.includes("dark mode"))).toBe(true);
-    // The backstop: Main stays read-only.
+    expect(res.json.movedTo).toBeUndefined();
+    expect(h.sent.find((x) => x.session === old.id && x.text.includes("Add dark mode"))).toBeTruthy();
     expect(mainReadOnlyRoot(h.store, old)).toBe(h.pond.rootPath);
     expect(readOnlyDenial(h.pond.rootPath, old.cwd, "Edit", { file_path: `${h.pond.rootPath}/a.txt` })).toBe(
       READ_ONLY_ROOT_REASON,
@@ -293,83 +290,228 @@ describe("a message to a chat sitting in Main", () => {
   });
 });
 
-describe("agent tools: branch_off, join_branch (move_to_main refuses)", () => {
+const text = (r: { content: { text: string }[] }): string => r.content[0]!.text;
+const names = async (h: Awaited<ReturnType<typeof start>>, id: string): Promise<string[]> =>
+  (await h.rpc<{ tools: { name: string }[] }>(id, { jsonrpc: "2.0", id: 2, method: "tools/list" })).tools.map(
+    (t) => t.name,
+  );
+const roomLines = (h: Awaited<ReturnType<typeof start>>) =>
+  h.store.roomPosts(h.pond.id, { limit: 100 }).map((r) => ({ who: r.authorName, kind: r.kind, text: r.text }));
+
+describe("agent tools: streams, open_stream, leave_stream", () => {
   it("are hidden and refused with the flag off", async () => {
     flagOn(false);
     const h = await start();
     const main = await h.call("POST", "/native/sessions", body(h, { main: true }));
     const id = main.json.session.id as string;
-    const list = await h.rpc<{ tools: { name: string }[] }>(id, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-    const names = list.tools.map((t: { name: string }) => t.name);
-    for (const n of ["branch_off", "join_branch"]) expect(names).not.toContain(n);
-    const res = await h.tool(id, "branch_off", { name: "x" });
-    expect(res.isError).toBe(true);
+    const listed = await names(h, id);
+    for (const n of ["streams", "open_stream", "leave_stream", "branch_off", "join_branch"]) {
+      expect(listed).not.toContain(n);
+    }
+    expect((await h.tool(id, "open_stream", { name: "x" })).isError).toBe(true);
     expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(0);
   });
 
-  it("flag on: listed; a duck in Main branches off, joins and returns, carrying its duck and message", async () => {
+  it("a new Duck starts in Main with no Stream; open_stream creates one and returns its folder, the Room gets one line", async () => {
     flagOn(true);
     const h = await start();
     const first = await mainChat(h);
     const duck = h.store.duckForSession(first.id, h.pond.id)!;
-    const list = await h.rpc<{ tools: { name: string }[] }>(first.id, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-    const names = list.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["branch_off", "join_branch"]));
-    expect(names).not.toContain("move_to_main");
-
-    const off = await h.tool(first.id, "branch_off", { name: "Login form", message: "Build the form" });
-    expect(off.isError).toBeUndefined();
-    const second = h.store.getSession(h.store.duckRow(duck.id)!.currentSessionId!)!;
-    expect(second.id).not.toBe(first.id);
-    expect(second.workspaceId).toBeTruthy();
-    expect(second.branch).toMatch(/login-form/);
-    expect(h.store.duckRow(duck.id)).toMatchObject({ workspaceId: second.workspaceId, branch: second.branch });
-    expect(h.sent.find((x) => x.session === second.id)!.text).toContain("Build the form");
-
-    // Another duck joins it by the first duck's name.
     h.store.updateDuck(duck.id, { name: "Quiet Creek" });
-    const other = await mainChat(h);
-    const joined = await h.tool(other.id, "join_branch", { duck: "quiet creek" });
-    expect(joined.isError).toBeUndefined();
-    const otherDuck = h.store.duckBySession(other.id)!;
-    expect(h.store.duckRow(otherDuck.id)!.workspaceId).toBe(second.workspaceId);
-    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(1);
+    const listed = await names(h, first.id);
+    expect(listed).toEqual(expect.arrayContaining(["streams", "open_stream", "leave_stream"]));
+    expect(listed).not.toContain("branch_off");
+    expect(text(await h.tool(first.id, "streams"))).toMatch(/no branch yet/);
 
-    // Main is not a place to work any more.
-    const back = await h.tool(second.id, "move_to_main");
-    expect(back.isError).toBe(true);
-    expect(back.content[0]!.text).toMatch(/Main is read-only/);
+    const opened = await h.tool(first.id, "open_stream", { name: "Login form" });
+    expect(opened.isError).toBeUndefined();
+    const streams = h.store.duckStreams(duck.id);
+    expect(streams).toHaveLength(1);
+    expect(streams[0]!.branch).toMatch(/login-form/);
+    expect(text(opened)).toContain(streams[0]!.path);
+    expect(fs.existsSync(streams[0]!.path)).toBe(true);
+    // The chat itself did not move: still Main, still read-only.
+    expect(h.store.getSession(first.id)).toMatchObject({ cwd: h.pond.rootPath, workspaceId: null });
+    expect(roomLines(h)).toEqual([{ who: "Quiet Creek", kind: "message", text: "created Stream Login form" }]);
+    // Opening it again is a no-op: no second line, no second Stream.
+    expect(text(await h.tool(first.id, "open_stream", { name: "Login form" }))).toMatch(/already in/);
+    expect(roomLines(h)).toHaveLength(1);
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(1);
   });
 
-  it("branch_off from a branch cuts from that branch; join_branch by name of a branch; unknown duck is an error", async () => {
+  it("another Duck joins by name or branch; a Duck may be in several Streams; streams lists who is in each; leave_stream leaves", async () => {
     flagOn(true);
     const h = await start();
-    const a = (await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/a" } }))).json
-      .session as SessionRow;
-    fs.writeFileSync(path.join(a.cwd, "only-a.txt"), "x\n");
-    git(a.cwd, "add", ".");
-    git(a.cwd, "-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "-m", "a");
-    const duck = h.store.duckForSession(a.id, h.pond.id)!;
-    const off = await h.tool(a.id, "branch_off", { name: "Part two" });
-    expect(off.isError).toBeUndefined();
-    const next = h.store.getSession(h.store.duckRow(duck.id)!.currentSessionId!)!;
-    expect(fs.existsSync(path.join(next.cwd, "only-a.txt"))).toBe(true);
-    expect(next.branch).not.toBe("feat/a");
-    const joinA = await h.tool(next.id, "join_branch", { branch: "feat/a" });
-    expect(joinA.isError).toBeUndefined();
-    expect(h.store.getSession(h.store.duckRow(duck.id)!.currentSessionId!)!.workspaceId).toBe(a.workspaceId);
-    const ghost = await h.tool(a.id, "join_branch", { duck: "nobody" });
-    expect(ghost.isError).toBe(true);
-    expect((await h.tool(a.id, "join_branch", {})).isError).toBe(true);
+    const a = await mainChat(h);
+    const b = await mainChat(h);
+    const duckA = h.store.duckBySession(a.id)!;
+    const duckB = h.store.duckBySession(b.id)!;
+    h.store.updateDuck(duckA.id, { name: "Quiet Creek" });
+    h.store.updateDuck(duckB.id, { name: "Staff Otter" });
+    await h.tool(a.id, "open_stream", { name: "Login" });
+    await h.tool(a.id, "open_stream", { branch: "feat/billing" });
+    expect(h.store.duckStreams(duckA.id).map((w) => w.branch)).toEqual([
+      expect.stringMatching(/login/),
+      "feat/billing",
+    ]);
+    const joined = await h.tool(b.id, "open_stream", { branch: "feat/billing" });
+    expect(joined.isError).toBeUndefined();
+    expect(text(joined)).toMatch(/Joined branch feat\/billing/);
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(2);
+    const view = text(await h.tool(b.id, "streams"));
+    expect(view).toMatch(/feat\/billing.*Quiet Creek, Staff Otter; you are in it/);
+    expect(roomLines(h).map((r) => r.text)).toEqual([
+      "created Stream Login",
+      "created Stream Feat Billing",
+      "joined Stream Feat Billing",
+    ]);
+
+    // Leaving needs a name once in several; the Duck leaves just that one.
+    expect((await h.tool(a.id, "leave_stream")).isError).toBe(true);
+    const left = await h.tool(a.id, "leave_stream", { name: "feat/billing" });
+    expect(left.isError).toBeUndefined();
+    expect(h.store.duckStreams(duckA.id).map((w) => w.branch)).toEqual([expect.stringMatching(/login/)]);
+    expect(h.store.duckStreams(duckB.id)).toHaveLength(1);
+    expect(roomLines(h).at(-1)!.text).toBe("left Stream Feat Billing");
+    // With one left, no name is needed; a Duck in none is told so.
+    expect((await h.tool(a.id, "leave_stream")).isError).toBeUndefined();
+    expect(text(await h.tool(a.id, "leave_stream"))).toMatch(/not in any branch/);
   });
 
-  it("a plain-folder pond has no branches to move to", async () => {
+  it("the host state of a Duck lists its Streams", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    await h.tool(a.id, "open_stream", { name: "Login" });
+    await h.tool(a.id, "open_stream", { name: "Billing" });
+    const ducks = (await h.call("GET", `/native/projects/${h.pond.id}/ducks`)).json.ducks as {
+      streams?: { branch: string }[];
+    }[];
+    expect(ducks[0]!.streams!.map((s) => s.branch)).toEqual([
+      expect.stringMatching(/login/),
+      expect.stringMatching(/billing/),
+    ]);
+  });
+
+  it("limits: at most four Streams per Duck, and five created per hour", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    for (const n of ["one", "two", "three", "four"]) {
+      expect((await h.tool(a.id, "open_stream", { name: n })).isError).toBeUndefined();
+    }
+    const over = await h.tool(a.id, "open_stream", { name: "five" });
+    expect(over.isError).toBe(true);
+    expect(text(over)).toMatch(/already in 4 branches/);
+    // Another Duck may still join an existing one.
+    const b = await mainChat(h);
+    expect((await h.tool(b.id, "open_stream", { name: "one" })).isError).toBeUndefined();
+    expect(h.store.listWorkspaces(h.pond.id)).toHaveLength(4);
+    // Leaving frees a place.
+    await h.tool(a.id, "leave_stream", { name: "four" });
+    expect((await h.tool(a.id, "open_stream", { name: "five" })).isError).toBeUndefined();
+    await h.tool(a.id, "leave_stream", { name: "five" });
+    // That was the fifth creation this hour.
+    const sixth = await h.tool(a.id, "open_stream", { name: "six" });
+    expect(sixth.isError).toBe(true);
+    expect(text(sixth)).toMatch(/enough branches this hour/);
+  });
+
+  it("branch off an existing branch with from; an unknown base is an error; the older tool names still answer", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    await h.tool(a.id, "open_stream", { branch: "feat/a" });
+    const ws = h.store.duckStreams(h.store.duckBySession(a.id)!.id)[0]!;
+    fs.writeFileSync(path.join(ws.path, "only-a.txt"), "x\n");
+    git(ws.path, "add", ".");
+    git(ws.path, "-c", "user.name=T", "-c", "user.email=t@e.com", "commit", "-q", "-m", "a");
+    const off = await h.tool(a.id, "open_stream", { name: "Part two", from: "feat/a" });
+    expect(off.isError).toBeUndefined();
+    const part = h.store.duckStreams(h.store.duckBySession(a.id)!.id)[1]!;
+    expect(fs.existsSync(path.join(part.path, "only-a.txt"))).toBe(true);
+    const ghost = await h.tool(a.id, "open_stream", { name: "x", from: "no-such-branch" });
+    expect(ghost.isError).toBe(true);
+    expect((await h.tool(a.id, "open_stream", {})).isError).toBe(true);
+    // A chat begun before this update may still call the old names.
+    const old = await mainChat(h);
+    expect((await h.tool(old.id, "join_branch", { branch: "feat/a" })).isError).toBeUndefined();
+    expect(h.store.duckStreams(h.store.duckBySession(old.id)!.id).map((w) => w.branch)).toEqual(["feat/a"]);
+    expect((await h.tool(old.id, "join_branch", { duck: "nobody" })).isError).toBe(true);
+    expect((await h.tool(old.id, "branch_off", { name: "Old way" })).isError).toBeUndefined();
+  });
+
+  it("a plain-folder pond has no branches: streams says so, open_stream is refused", async () => {
     flagOn(true);
     const h = await start();
     const folder = (await h.call("POST", "/native/sessions", body({ pond: h.folderPond }, {}))).json
       .session as SessionRow;
-    const res = await h.tool(folder.id, "branch_off");
+    expect(text(await h.tool(folder.id, "streams"))).toMatch(/plain folder/);
+    const res = await h.tool(folder.id, "open_stream", { name: "x" });
     expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/plain folder/);
+  });
+
+  it("agent text is plain: no Squeak words in the tool descriptions", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    const list = await h.rpc<{ tools: { name: string; description: string }[] }>(a.id, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+    });
+    for (const t of list.tools.filter((x) => ["streams", "open_stream", "leave_stream"].includes(x.name))) {
+      expect(t.description).not.toMatch(/\b(duck|pond|squeak|stream)s?\b/i);
+    }
+  });
+});
+
+describe("Main read-only and edits in Streams", () => {
+  const edit = (h: Awaited<ReturnType<typeof start>>, id: string, file: string): string | null =>
+    (h.host as unknown as { guardEdit(id: string, files: string[]): string | null }).guardEdit(id, [file]);
+
+  it("an edit under Main is refused for a Duck in a git pond; the same edit in a Stream it joined is allowed and locked", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    const b = await mainChat(h);
+    const root = mainReadOnlyRoot(h.store, a);
+    expect(readOnlyDenial(root, a.cwd, "Write", { file_path: "new.txt" })).toBe(READ_ONLY_ROOT_REASON);
+    expect(readOnlyDenial(root, a.cwd, "Edit", { file_path: path.join(h.repo, "a.txt") })).toBe(READ_ONLY_ROOT_REASON);
+    await h.tool(a.id, "open_stream", { name: "Login" });
+    const stream = h.store.duckStreams(h.store.duckBySession(a.id)!.id)[0]!;
+    const file = path.join(stream.path, "a.txt");
+    expect(readOnlyDenial(root, a.cwd, "Edit", { file_path: file })).toBeNull();
+    expect(edit(h, a.id, file)).toBeNull();
+    // A Duck that has not joined it may not edit there, and says how to join.
+    expect(edit(h, b.id, file)).toMatch(/not joined.*open_stream/);
+    // Once it joins, the lock is per file: it waits while a holds a.txt, and may edit any other file.
+    await h.tool(b.id, "open_stream", { branch: stream.branch });
+    expect(edit(h, b.id, file)).toMatch(/locked/);
+    expect(edit(h, b.id, path.join(stream.path, "other.txt"))).toBeNull();
+    // Leaving takes the right to edit away.
+    await h.tool(b.id, "leave_stream");
+    expect(edit(h, b.id, path.join(stream.path, "third.txt"))).toMatch(/not joined/);
+  });
+
+  it("folder ponds are unchanged: edits take file locks in the folder", async () => {
+    flagOn(true);
+    const h = await start();
+    const x = (await h.call("POST", "/native/sessions", body({ pond: h.folderPond }, {}))).json.session as SessionRow;
+    const y = (await h.call("POST", "/native/sessions", body({ pond: h.folderPond }, {}))).json.session as SessionRow;
+    const file = path.join(h.folderPond.rootPath, "n.md");
+    expect(edit(h, x.id, file)).toBeNull();
+    expect(edit(h, y.id, file)).toMatch(/locked/);
+    expect(mainReadOnlyRoot(h.store, x)).toBeNull();
+  });
+
+  it("with the flag off a git pond's Main is not guarded", async () => {
+    flagOn(false);
+    const h = await start();
+    const s = (await h.call("POST", "/native/sessions", body(h, { main: true }))).json.session as SessionRow;
+    expect(mainReadOnlyRoot(h.store, s)).toBeNull();
+    expect(edit(h, s.id, path.join(h.repo, "a.txt"))).toBeNull();
   });
 });
 
@@ -386,9 +528,10 @@ describe("the thread context places the duck", () => {
     const main = await mainChat(h);
     const text = note(h, main);
     expect(text).toContain("Main is read-only for ducks");
+    expect(text).toContain("Squeak never picks a stream for you");
     expect(text).toContain("pond app");
     expect(text).toMatch(new RegExp(`- feat\\/a: .*ducks: ${h.store.duckBySession(a.id)!.name}`));
-    for (const t of ["branch_off", "join_branch"]) expect(text).toContain(t);
+    for (const t of ["streams", "open_stream", "leave_stream"]) expect(text).toContain(t);
   });
 
   it("flag on, on a branch: shares the working copy; flag off: no placement lines at all; folder pond: none", async () => {
@@ -400,7 +543,7 @@ describe("the thread context places the duck", () => {
     expect(note(h, a)).toContain("may edit at the same time");
     const folder = (await h.call("POST", "/native/sessions", body({ pond: h.folderPond }, {}))).json
       .session as SessionRow;
-    expect(note(h, folder)).not.toContain("branch_off");
+    expect(note(h, folder)).not.toContain("open_stream");
     flagOn(false);
     const main = h.store.createSession({
       cwd: h.pond.rootPath,
@@ -409,6 +552,31 @@ describe("the thread context places the duck", () => {
       permissionMode: "default",
     });
     expect(note(h, main)).not.toContain("read-only");
-    expect(note(h, a)).not.toContain("branch_off");
+    expect(note(h, a)).not.toContain("open_stream");
+  });
+});
+
+describe("Streams and the Duck's record", () => {
+  it("a chat started inside a Stream counts as its Duck joining it", async () => {
+    flagOn(true);
+    const h = await start();
+    const made = await h.call("POST", "/native/sessions", body(h, { place: { kind: "new", branch: "feat/login" } }));
+    const duck = h.store.duckBySession(made.json.session.id)!;
+    expect(h.store.duckStreams(duck.id).map((w) => w.branch)).toEqual(["feat/login"]);
+  });
+
+  it("a Stream with a joined Duck is not cleaned up; once the Duck leaves it can be", async () => {
+    flagOn(true);
+    const h = await start();
+    const a = await mainChat(h);
+    await h.tool(a.id, "open_stream", { name: "Kept" });
+    const stream = h.store.duckStreams(h.store.duckBySession(a.id)!.id)[0]!;
+    // Branch merged and folder clean: only the joined Duck keeps it.
+    const placement = new Placement({ store: h.store, workspaces: h.workspaces });
+    expect(await placement.cleanup(h.pond.id)).toEqual([]);
+    await h.tool(a.id, "leave_stream");
+    // Leaving also starts a clean-up pass of its own; either way the folder is gone once the passes finish.
+    await placement.cleanup(h.pond.id);
+    await vi.waitFor(() => expect(h.store.getWorkspace(stream.id)!.state).toBe("archived"));
   });
 });

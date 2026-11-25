@@ -9,10 +9,11 @@ import type { WorkspaceSources } from "./workspace-sources.js";
 import { WorkspaceError, type WorkspaceManager, type WorktreePlan } from "./workspaces.js";
 
 /**
- * Ducks own their branch (flag `ducksOwnBranch`, docs/ponds.md "Ducks own their branch"): where a duck works is a
- * branch (an internal working copy, `WorkspaceRow`) or Main (the pond's own folder, read-only for ducks in a git
- * pond). This module is the one place that turns a place request into a folder, lists the pond's active branches,
- * moves a duck, and removes working copies nobody uses.
+ * Ducks start Pond-wide (flag `ducksOwnBranch`, docs/adr/0003): a Duck's chat runs in the Pond's main folder (read-only
+ * for Ducks in a git pond) and the Duck joins Streams (branches, each an internal working copy, `WorkspaceRow`) with
+ * its `open_stream` tool, several at once. This module is the one place that does that git work (open or join a
+ * Stream, leave one), turns a place request into a folder, lists the pond's active branches, moves a duck when a
+ * person asks, and removes working copies nobody uses.
  */
 
 export class PlacementError extends Error {
@@ -49,6 +50,28 @@ export interface ResolvedPlace {
 
 export function ducksOwnBranch(): boolean {
   return flag("ducksOwnBranch");
+}
+
+/** How many Streams one Duck may be in at once, and how many working copies a Pond may keep. */
+export const MAX_STREAMS_PER_DUCK = 4;
+export const MAX_STREAMS_PER_POND = 24;
+
+/** What a Duck asks `open_stream` for: a name (joins the Stream called that, else creates it) or an exact branch. */
+export interface OpenStreamRequest {
+  name?: string;
+  branch?: string;
+  /** Branch a new Stream off this branch (default: the Pond's default branch). */
+  from?: string;
+}
+
+export interface OpenedStream {
+  stream: WorkspaceRow;
+  /** The Stream's working copy was made for this call. */
+  created: boolean;
+  /** The Duck was not in it before this call. */
+  joined: boolean;
+  /** Every Stream the Duck is in now, in the order it joined them. */
+  streams: WorkspaceRow[];
 }
 
 const KEYS: Record<string, string[]> = { new: ["kind", "branch"], join: ["kind", "duckId", "branch"], main: ["kind"] };
@@ -134,7 +157,7 @@ function duckNameOf(store: NativeStore, d: DuckRow): string {
 
 /** A duck is live in its working copy while it is on duty and its current chat is not archived. */
 function liveDucks(store: NativeStore, workspaceId: string): DuckRow[] {
-  return store.ducksInWorkspace(workspaceId).filter((d) => {
+  return store.ducksInStream(workspaceId).filter((d) => {
     if (d.duty === "off" || !d.currentSessionId) return false;
     const s = store.getSession(d.currentSessionId);
     return !!s && !s.archivedAt;
@@ -201,6 +224,130 @@ export class Placement {
     const p = this.o.store.getProject(projectId);
     if (!p) throw new PlacementError("no such project", 404);
     return p;
+  }
+
+  /** The Pond's active Streams with who is in each, and the Duck's own, for the `streams` tool. */
+  streamsFor(sessionId: string): { project: ProjectRow; main: string; mine: WorkspaceRow[]; active: ActiveBranch[] } {
+    const { store } = this.o;
+    const s = store.getSession(sessionId);
+    if (!s) throw new PlacementError("this chat no longer exists", 404);
+    const project = projectOfSession(store, s);
+    if (!project) throw new PlacementError("this chat is not in a pond", 409);
+    const duck = store.duckBySession(sessionId);
+    return {
+      project,
+      main: project.rootPath,
+      mine: duck ? store.duckStreams(duck.id) : [],
+      active: activeBranches(store, project.id, 50),
+    };
+  }
+
+  /**
+   * A Duck creates or joins a Stream (a branch with its own working copy) and is recorded as being in it. `branch`
+   * opens that exact branch (joining the Stream that has it, opening an existing git branch, else cutting a new one);
+   * `name` joins the Stream called that, else creates one. Squeak does the git work; the limits are enforced here.
+   */
+  async openStream(sessionId: string, req: OpenStreamRequest): Promise<OpenedStream> {
+    const { store } = this.o;
+    const s = store.getSession(sessionId);
+    if (!s) throw new PlacementError("this chat no longer exists", 404);
+    const project = projectOfSession(store, s);
+    if (!project) throw new PlacementError("this chat is not in a pond", 409);
+    if (project.kind === "folder") throw new PlacementError(NO_STREAMS, 400);
+    const duck = store.duckBySession(sessionId) ?? store.duckForSession(sessionId, project.id);
+    if (!duck) throw new PlacementError("this chat has no duck", 409);
+    const branch = req.branch?.trim().replace(/^origin\//, "");
+    const name = req.name?.trim();
+    if (!branch && !name) throw new PlacementError("Give a name for the work, or the branch to open.", 400);
+    const live = store.listWorkspaces(project.id).filter((w) => w.state !== "archived");
+    const same = (w: WorkspaceRow): boolean =>
+      branch
+        ? w.branch === branch
+        : [w.title, w.name, w.branch].some((x) => !!x && x.toLowerCase() === name!.toLowerCase());
+    let stream = live.find(same);
+    let created = false;
+    const mine = store.duckStreams(duck.id);
+    if (stream && !mine.some((w) => w.id === stream!.id) && mine.length >= MAX_STREAMS_PER_DUCK) {
+      throw new PlacementError(
+        `You are already in ${mine.length} branches (${mine.map((w) => w.branch).join(", ")}). Leave one with leave_stream first.`,
+        409,
+      );
+    }
+    if (!stream) {
+      if (mine.length >= MAX_STREAMS_PER_DUCK) {
+        throw new PlacementError(
+          `You are already in ${mine.length} branches (${mine.map((w) => w.branch).join(", ")}). Leave one with leave_stream first.`,
+          409,
+        );
+      }
+      if (live.length >= MAX_STREAMS_PER_POND) {
+        throw new PlacementError(
+          `This project already has ${live.length} branches with working copies; join one instead.`,
+          409,
+        );
+      }
+      const from = req.from?.trim();
+      let place: ResolvedPlace;
+      if (branch && !from) {
+        // An existing git branch opens as a working copy; one git does not have is cut new under that name.
+        try {
+          place = await this.resolve(project.id, { kind: "join", branch });
+        } catch (error) {
+          if (!(error instanceof PlacementError) || error.status !== 404) throw error;
+          place = await this.resolve(project.id, { kind: "new", branch });
+        }
+      } else {
+        place = await this.resolve(project.id, {
+          kind: "new",
+          ...(branch ? { branch } : {}),
+          ...(name ? { title: name } : {}),
+          ...(from ? { from } : {}),
+        });
+      }
+      if (place.kind !== "branch" || !place.workspace) {
+        throw new PlacementError(
+          "That is the project's main folder, which is read-only. Name new work to open a branch.",
+          400,
+        );
+      }
+      stream = place.workspace;
+      created = true;
+      // The Duck named it: the first chat title must not rename the branch.
+      store.markBranchRenamed(stream.id);
+    }
+    const joined = store.joinDuckStream(duck.id, stream.id);
+    return { stream, created, joined, streams: store.duckStreams(duck.id) };
+  }
+
+  /** A Duck leaves a Stream it is in (`ref`: its branch or title; omitted when it is in just one). */
+  leaveStream(sessionId: string, ref?: string): { stream: WorkspaceRow; streams: WorkspaceRow[] } {
+    const { store } = this.o;
+    const s = store.getSession(sessionId);
+    if (!s) throw new PlacementError("this chat no longer exists", 404);
+    const duck = store.duckBySession(sessionId);
+    const mine = duck ? store.duckStreams(duck.id) : [];
+    if (!duck || mine.length === 0) throw new PlacementError("You are not in any branch.", 409);
+    const want = ref
+      ?.trim()
+      .replace(/^origin\//, "")
+      .toLowerCase();
+    const stream = want
+      ? mine.find((w) => [w.branch, w.title, w.name].some((x) => !!x && x.toLowerCase() === want))
+      : mine.length === 1
+        ? mine[0]
+        : undefined;
+    if (!stream) {
+      throw new PlacementError(
+        want
+          ? `You are not in a branch called ${ref}. You are in: ${mine.map((w) => w.branch).join(", ")}.`
+          : `You are in ${mine.length} branches (${mine.map((w) => w.branch).join(", ")}); say which to leave.`,
+        want ? 404 : 400,
+      );
+    }
+    store.leaveDuckStream(duck.id, stream.id);
+    const project = projectOfSession(store, s);
+    if (project) void this.cleanup(project.id).catch(() => undefined);
+    return { stream, streams: store.duckStreams(duck.id) };
   }
 
   /** Turns a place request into a folder, creating the working copy when it is new (or gone). */

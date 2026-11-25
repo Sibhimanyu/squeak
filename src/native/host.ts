@@ -32,6 +32,7 @@ import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
 import { activeBranches, ducksOwnBranch, mainReadOnlyRoot } from "./placement.js";
+import { streamEdits } from "./stream-edits.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import { projectOfSession } from "./room.js";
 import {
@@ -1339,15 +1340,22 @@ export class SessionHost extends EventEmitter {
   private readonly firstBrief = new Map<string, string>();
 
   /**
-   * Folder Ponds have no Streams: Ducks edit the folder itself. A Duck's edit takes a per-file lock (until its turn
+   * Folder Ponds have no Streams: Ducks edit the folder itself; in a Git Pond they edit the Streams they joined. A Duck's edit takes a per-file lock (until its turn
    * ends, or ten idle minutes); another Duck's edit to a locked file is refused with the holder named, and the clash
-   * is announced as `file-clash` for the Room. Null: go ahead. Git Ponds (own Streams) are never guarded.
+   * is announced as `file-clash` for the Room. Null: go ahead.
    */
   private guardEdit(sessionId: string, files: string[]): string | null {
     const s = this.store.getSession(sessionId);
     if (!s || s.workspaceId) return null;
     const pond = this.store.getProjectByRoot(s.cwd);
-    if (!pond || pond.kind !== "folder") return null;
+    if (!pond) return null;
+    // A Duck in a Git Pond runs in Main (read-only) and edits the Streams it joined by path: those are what it locks.
+    if (pond.kind === "git") {
+      if (!ducksOwnBranch()) return null;
+      const checked = streamEdits(this.store, pond, sessionId, s.cwd, files);
+      if (checked.denied) return checked.denied;
+      files = checked.locked;
+    } else if (pond.kind !== "folder") return null;
     const absolute = [...new Set(files.map((f) => path.resolve(s.cwd, f)))];
     const name =
       this.store.duckBySession(sessionId)?.name?.trim() ||

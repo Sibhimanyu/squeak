@@ -32,11 +32,11 @@ afterEach(async () => {
 });
 
 /**
- * Regression: a Duck in a Git Pond's Main was told "Placement is unavailable here" by branch_off and join_branch all
+ * Regression: a Duck in a Git Pond's Main was told "Placement is unavailable here" by open_stream and leave_stream all
  * session (greenroom, 2026-11-23), so it could not edit at all. The host wires the server the way main.ts does when
  * Flotilla is on: one Placement and one ChatStarter, and the agent tools from createSharedTools.
  */
-describe("branch_off through the host's real wiring (as main.ts builds it)", () => {
+describe("open_stream through the host's real wiring (as main.ts builds it)", () => {
   it("a Duck in Main gets its own branch; never 'Placement is unavailable here'", async () => {
     process.env.SQUEAK_DUCKS_OWN_BRANCH = "on";
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shared-branch-")));
@@ -110,7 +110,7 @@ describe("branch_off through the host's real wiring (as main.ts builds it)", () 
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "branch_off", arguments: { name: "Login form" } },
+        params: { name: "open_stream", arguments: { name: "Login form" } },
       }),
     });
     const out = ((await res.json()) as { result: { content: { text: string }[]; isError?: boolean } }).result;

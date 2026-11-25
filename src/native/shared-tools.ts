@@ -5,7 +5,7 @@ import { WorkspaceSources } from "./workspace-sources.js";
 
 /**
  * The sources, Placement and agent tools the session host shares with the server and Flotilla. One Placement serves
- * both the server and the agents' branch tools (branch_off, join_branch): without it those tools refuse.
+ * both the server and the agents' branch tools (streams, open_stream, leave_stream): without it those tools refuse.
  */
 export function createSharedTools(
   deps: Omit<AgentToolDeps, "placement" | "workspaces"> & {

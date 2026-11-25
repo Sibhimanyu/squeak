@@ -137,9 +137,9 @@ describe("one way to start a duck: the Duck link on every path", () => {
 
 describe("one way to start a duck: placement through the host route", () => {
   const cases: [string, boolean, "git" | "folder", Record<string, unknown>, "own-branch" | "root" | "error"][] = [
-    ["no place in a git pond (flag on)", true, "git", {}, "own-branch"],
-    ["main alias in a git pond (flag on)", true, "git", { main: true }, "own-branch"],
-    ["place main in a git pond (flag on)", true, "git", { place: { kind: "main" } }, "own-branch"],
+    ["no place in a git pond (flag on)", true, "git", {}, "root"],
+    ["main alias in a git pond (flag on)", true, "git", { main: true }, "root"],
+    ["place main in a git pond (flag on)", true, "git", { place: { kind: "main" } }, "root"],
     ["place new in a git pond (flag on)", true, "git", { place: { kind: "new" } }, "own-branch"],
     ["no place in a folder pond", true, "folder", {}, "root"],
     ["main alias in a git pond (flag off)", false, "git", { main: true }, "root"],
