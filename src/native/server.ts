@@ -667,6 +667,29 @@ export class NativeServer {
         throw error;
       }
     }
+    if (area === "ducks" && id && parts.length === 3 && method === "DELETE") {
+      // "Delete Duck…": the duck goes for good (its chats stay in history, archived). Refused while one of its chats is busy.
+      const duck = store.duckRow(id);
+      if (!duck) throw new HttpError(404, "no such duck");
+      const busy = store
+        .duckSessionIds(id)
+        .map((sid) => store.getSession(sid))
+        .filter(
+          (s) =>
+            s &&
+            !s.archivedAt &&
+            ["working", "stopping", "awaiting_approval", "awaiting_plan", "awaiting_answer"].includes(s.status),
+        );
+      if (busy.length > 0) throw new HttpError(409, "This duck is working or waiting on you. Stop it first.");
+      for (const sid of store.deleteDuck(id))
+        host.emit("event", {
+          type: "archived",
+          sessionId: sid,
+          archived: true,
+          archivedAt: new Date().toISOString(),
+        } as never);
+      return this.json(res, 200, { ok: true, deleted: true });
+    }
     if (area === "ducks" && id && sub === "duty" && parts.length === 4 && method === "POST") {
       if (!store.duckRow(id)) throw new HttpError(404, "no such duck");
       const b = await this.body(req);

@@ -232,6 +232,25 @@ describe("identity-only ducks and routes", () => {
     expect(off).toMatchObject({ duty: "off", duck: { duty: "off" } });
   });
 
+  it("DELETE removes the duck for good, keeps its chats in history (archived), and is refused while one is busy", async () => {
+    const h = await rig("folder");
+    expect((await h.call("DELETE", "/native/ducks/nope")).status).toBe(404);
+    const s = h.chatIn("Layout builder");
+    await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
+    const duck = h.store.duckBySession(s.id)!;
+    h.store.setStatus(s.id, "working");
+    expect((await h.call("DELETE", `/native/ducks/${duck.id}`)).status).toBe(409);
+    expect(h.store.duckRow(duck.id)).not.toBeNull();
+    h.store.setStatus(s.id, "idle");
+    const res = await h.call("DELETE", `/native/ducks/${duck.id}`);
+    expect(res.status).toBe(200);
+    expect(h.store.duckRow(duck.id)).toBeNull();
+    expect(h.store.getSession(s.id)?.archivedAt).toBeTruthy();
+    const list = (await (await h.call("GET", `/native/projects/${h.project.id}/ducks`)).json()) as any;
+    expect(list.ducks).toEqual([]);
+    expect((await h.call("DELETE", `/native/ducks/${duck.id}`)).status).toBe(404);
+  });
+
   it("the session routes resolve the session's duck", async () => {
     const h = await rig("folder");
     const s = h.chatIn("Layout builder");
