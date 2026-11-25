@@ -333,6 +333,13 @@ extension NativeHostClient {
         let r = try? JSONDecoder.native(NativeGitPondReply.self, data)
         return (r?.url, r?.note)
     }
+
+    /// `GET /native/github/status[?repo=]`: read only; the `gh` sign-in this Mac uses and, for a repo to clone, whether it is private.
+    public func githubSignIn(repo: String? = nil) async throws -> GitHubSignIn {
+        var path = "/native/github/status"
+        if let repo, !repo.isEmpty, let q = repo.addingPercentEncoding(withAllowedCharacters: .alphanumerics) { path += "?repo=\(q)" }
+        return try JSONDecoder.native(GitHubSignIn.self, try await call("GET", path, timeout: 20))
+    }
 }
 
 extension JSONDecoder {

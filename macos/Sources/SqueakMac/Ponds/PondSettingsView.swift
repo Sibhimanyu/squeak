@@ -250,17 +250,6 @@ struct PondSettingsView: View {
     private func versionHistory(_ p: NativeProject) -> some View {
         section("Version history", FolderPond.streamsNote) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Turning it on adds git to this folder. Your files stay where they are, and you choose whether the first version saves what is in the folder now.")
-                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 10) {
-                    Button("Turn on version history\u{2026}") { askHistory(p) }
-                        .buttonStyle(SecondaryButtonStyle()).disabled(historyBusy)
-                    if historyBusy { ProgressView().controlSize(.small) }
-                }
-                if let historyProblem {
-                    Text(verbatim: historyProblem).font(Typo.body).foregroundStyle(Theme.negative)
-                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
                 Text(verbatim: FolderPond.gitPondIntro)
                     .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
@@ -273,6 +262,17 @@ struct PondSettingsView: View {
                 }
                 if let gitPondProblem {
                     Text(verbatim: gitPondProblem).font(Typo.body).foregroundStyle(Theme.negative)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                Text("Turning it on adds git to this folder. Your files stay where they are, and you choose whether the first version saves what is in the folder now.")
+                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Turn on version history\u{2026}") { askHistory(p) }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(historyBusy)
+                    if historyBusy { ProgressView().controlSize(.small) }
+                }
+                if let historyProblem {
+                    Text(verbatim: historyProblem).font(Typo.body).foregroundStyle(Theme.negative)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
             }

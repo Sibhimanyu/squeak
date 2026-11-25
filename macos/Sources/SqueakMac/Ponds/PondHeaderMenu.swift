@@ -10,7 +10,6 @@ struct PondHeaderMenu: View {
     @State private var leaving: String?
     @State private var confirmGitPond = false
     @State private var gitPondBusy = false
-    @State private var gitPondOutcome: (title: String, message: String)?
 
     private var ponds: PondsModel { .shared }
 
@@ -27,9 +26,7 @@ struct PondHeaderMenu: View {
                     .disabled(!ponds.freshness(pond).canWrite)
             }
             if offer.gitPond {
-                Button(FirstPondJourney.gitPondItem) {
-                    if model.demoMode { gitPondOutcome = (FirstPondJourney.gitPondFailedTitle, "Demo data: nothing is changed.") } else { confirmGitPond = true }
-                }
+                Button(FirstPondJourney.gitPondItem) { confirmGitPond = true }
                 .disabled(gitPondBusy).help(FirstPondJourney.gitPondHelp)
             }
             if offer.invite || offer.gitPond { Divider() }
@@ -42,36 +39,7 @@ struct PondHeaderMenu: View {
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("More for this pond").accessibilityLabel("More for this pond")
         .leavePondDialog($leaving)
-        .confirmationDialog("Make \(ponds.name(key: key)) a Git Pond?", isPresented: $confirmGitPond, titleVisibility: .visible) {
-            if let native = ponds.native(key: key) {
-                Button("Private repository on GitHub") { makeGitPond(native, isPublic: false) }
-                Button("Public repository on GitHub") { makeGitPond(native, isPublic: true) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(verbatim: FolderPond.gitPondQuestion(isPublic: false) + " Choose public only if you want everyone to see it.")
-        }
-        .alert(gitPondOutcome?.title ?? "", isPresented: Binding(get: { gitPondOutcome != nil }, set: { if !$0 { gitPondOutcome = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(verbatim: gitPondOutcome?.message ?? "")
-        }
-    }
-
-    private func makeGitPond(_ p: NativeProject, isPublic: Bool) {
-        gitPondBusy = true
-        Task {
-            defer { gitPondBusy = false }
-            do {
-                let made = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
-                gitPondOutcome = (FirstPondJourney.gitPondDoneTitle, FolderPond.gitPondResult(url: made.url, note: made.note))
-                await model.refreshNativeProjects()
-            } catch let e as NativeHostError {
-                gitPondOutcome = (FirstPondJourney.gitPondFailedTitle, e.reason)
-            } catch {
-                gitPondOutcome = (FirstPondJourney.gitPondFailedTitle, "Squeak couldn\u{2019}t make this pond a Git Pond.")
-            }
-        }
+        .gitPondFlow(key: key, ask: $confirmGitPond, busy: $gitPondBusy)
     }
 }
 

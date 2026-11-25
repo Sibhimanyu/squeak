@@ -184,6 +184,7 @@ private struct MessageBubble: View {
     /// Opens the tab this bubble belongs to (the duck, or the duck a person's message went to); nil opens nothing.
     var open: (() -> Void)?
     @State private var hover = false
+    @Environment(\.roomLatestTaskable) private var latestTaskable
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
@@ -209,14 +210,21 @@ private struct MessageBubble: View {
             }
             if message.failed { Button("Not sent. Retry") { retry(message.id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.negative) }
             if message.canMakeTask, let id = message.postId {
-                // Hover affordance; its height is reserved so the row never jumps.
+                // Quiet but always there on the newest message, on hover for the rest; its height is reserved so the row never jumps.
+                let shown = MakeTaskAffordance.isShown(postId: id, latest: latestTaskable, hovering: hover)
                 Button("Make task") { makeJob(id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.muted)
-                    .opacity(hover ? 1 : 0).allowsHitTesting(hover)
+                    .opacity(shown ? 1 : 0).allowsHitTesting(shown).pointerHand(shown)
+                    .help("Hand this message to a duck as a task")
+                    .accessibilityHidden(true)
             }
         }
         .onHover { hover = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mine ? "You" : message.author.name): \(text)")
+        // The button is merged into the message for VoiceOver, so the same action is offered there on every taskable message.
+        .accessibilityActions {
+            if message.canMakeTask, let id = message.postId { Button("Make task") { makeJob(id) } }
+        }
     }
 
     private var shape: UnevenRoundedRectangle {
@@ -661,5 +669,15 @@ struct RoomWorkingRow: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .ignore).accessibilityLabel(line.spoken)
+    }
+}
+
+private struct RoomLatestTaskableKey: EnvironmentKey { static let defaultValue: String? = nil }
+
+extension EnvironmentValues {
+    /// The post id of the newest message that can be made a Task: its "Make task" shows at rest (`MakeTaskAffordance`).
+    var roomLatestTaskable: String? {
+        get { self[RoomLatestTaskableKey.self] }
+        set { self[RoomLatestTaskableKey.self] = newValue }
     }
 }

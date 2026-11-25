@@ -93,6 +93,8 @@ struct PondHomeView: View {
     @State private var query = ""
     @State private var scope: PondDashboardScope = .all
     @State private var archivedOpen = false
+    /// Bumped when the next-steps card is dismissed, so the body reads the stored choice again.
+    @State private var dismissTick = 0
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
@@ -112,6 +114,21 @@ struct PondHomeView: View {
             hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [])
     }
 
+    /// The one-time "Next steps" card (`PondNextSteps`): gone for good once dismissed.
+    @ViewBuilder private func nextSteps(_ layout: PondHomeLayout) -> some View {
+        let _ = dismissTick
+        let steps = PondNextSteps.steps(
+            dismissed: PondOnce().done(.nextSteps, pond: key), canStartDuck: chrome.start != .hidden, hasDucks: !layout.isEmpty,
+            canInvite: role.canInvite && pond != nil, memberCount: pond?.memberCount ?? 1,
+            plainFolder: native?.isPlainFolder == true, isRemote: chrome.isRemote)
+        if let steps {
+            PondNextStepsCard(
+                key: key, steps: steps, startDuck: { startThread() },
+                invite: { if let pond { ponds.startInvite(pondId: pond.id, account: model.account) } },
+                dismiss: { PondOnce().markDone(.nextSteps, pond: key); dismissTick += 1 })
+        }
+    }
+
     var body: some View {
         let layout = layout
         let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
@@ -119,6 +136,7 @@ struct PondHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                    nextSteps(layout)
                     overview(layout, compact: geometry.size.width < 650)
                     if !joins.isEmpty { joinsGroup(joins) }
                     // The people, invites and pond controls live in the inspector beside this page (`PondInspector`).
@@ -427,7 +445,7 @@ struct PondHomeView: View {
     private func shareMenu(_ p: PondSummary) -> some View {
         let shared = Set((detail?.threads ?? []).compactMap(\.sessionId))
         let candidates = localSessions.compactMap { s in model.hostId(s).map { (s, $0) } }.filter { !shared.contains($0.1) }
-        return SqueakMenu("Share a duck") {
+        return SqueakMenu(ShareDuckWords.menu) {
             ForEach(candidates, id: \.1) { s, id in
                 Button(model.workbenchTitle(s)) { Task { await ponds.share(pond: p.id, sessionId: id) } }
                 Button("\(model.workbenchTitle(s)) (private)") { Task { await ponds.share(pond: p.id, sessionId: id, isPrivate: true) } }
@@ -435,7 +453,8 @@ struct PondHomeView: View {
         }
         .menuStyle(.button).buttonStyle(SecondaryButtonStyle()).fixedSize()
         .disabled(candidates.isEmpty)
-        .help(candidates.isEmpty ? (localSessions.isEmpty ? "No chats on this Mac to share yet" : "Every duck on this Mac is already in the pond") : "Show one of this Mac\u{2019}s ducks to the flock")
+        .help(candidates.isEmpty ? (localSessions.isEmpty ? ShareDuckWords.helpNone : ShareDuckWords.helpAllShared) : ShareDuckWords.helpEnabled)
+        .accessibilityLabel(ShareDuckWords.menu)
     }
 
     private func startThread() { Self.startThread(key: key, model: model) }

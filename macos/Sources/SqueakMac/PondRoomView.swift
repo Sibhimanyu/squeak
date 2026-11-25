@@ -292,6 +292,8 @@ struct PondRoomView: View {
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)
+                    .environment(\.roomLatestTaskable, MakeTaskAffordance.latestPostId(in: items))
+                if let key, !member { GitHubLineView(key: key, room: room) }
                 if let line = room.ownerOffline {
                     // Said once, quietly, above the composer: nothing is lost, the Owner's Mac will pick it up.
                     column { Text(verbatim: line).font(.system(size: 12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading) }

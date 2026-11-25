@@ -68,10 +68,13 @@ async function start(github?: GitHubAdapter) {
     await server.stop();
     await host.stop();
   });
-  const call = async (method: string, url: string, body?: unknown) => {
+  const call = async (method: string, url: string, body?: unknown, authed = true) => {
     const res = await fetch(`http://127.0.0.1:${port}${url}`, {
       method,
-      headers: { "x-squeak-token": token, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+      headers: {
+        ...(authed ? { "x-squeak-token": token } : {}),
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const text = await res.text();
@@ -298,6 +301,7 @@ function fakeGitHub(status: GitHubStatus = { ok: true, login: "owner" }) {
   const created: { name: string; visibility: RepoVisibility; remote: string }[] = [];
   const adapter: GitHubAdapter = {
     status: async () => status,
+    visibility: async (repo) => (repo === "acme/secret" ? "private" : repo === "acme/open" ? "public" : "unknown"),
     createAndPush: async ({ name, visibility, dir }) => {
       const remote = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fake-gh-")), `${name}.git`);
       execFileSync("git", ["init", "--bare", "-q", remote]);
@@ -371,3 +375,37 @@ function realGit(args: string[], cwd: string, env?: Record<string, string>) {
     return { code: 1, stdout: "", stderr: "" };
   }
 }
+
+describe("GET /native/github/status", () => {
+  it("says which GitHub account is signed in, read only", async () => {
+    const h = await start(fakeGitHub().adapter);
+    const r = await h.call("GET", "/native/github/status");
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true, login: "owner" });
+    expect((await h.call("POST", "/native/github/status", {})).status).toBe(404);
+  });
+
+  it("says plainly when nobody is signed in, and never looks up a repository then", async () => {
+    const h = await start(fakeGitHub({ ok: false, reason: "not-signed-in" }).adapter);
+    const r = await h.call("GET", "/native/github/status?repo=acme/secret");
+    expect(r.json).toEqual({ ok: false, reason: "not-signed-in", repo: "acme/secret" });
+  });
+
+  it("tells whether a repository to clone is private, from owner/repo or a GitHub URL", async () => {
+    const h = await start(fakeGitHub().adapter);
+    const a = await h.call("GET", "/native/github/status?repo=acme/secret");
+    expect(a.json.visibility).toBe("private");
+    const b = await h.call(
+      "GET",
+      `/native/github/status?repo=${encodeURIComponent("https://github.com/acme/open.git")}`,
+    );
+    expect(b.json).toMatchObject({ repo: "acme/open", visibility: "public" });
+    const c = await h.call("GET", `/native/github/status?repo=${encodeURIComponent("https://example.com/x/y")}`);
+    expect(c.json.repo).toBeUndefined();
+  });
+
+  it("is token gated", async () => {
+    const h = await start(fakeGitHub().adapter);
+    expect((await h.call("GET", "/native/github/status", undefined, false)).status).toBe(401);
+  });
+});

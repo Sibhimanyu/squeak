@@ -47,8 +47,18 @@ final class NewPondState {
     var joining = false
     /// One line above the choices ("Make a pond first: …") when a thread or stream led here.
     var notice: String?
+    /// Which GitHub sign-in a clone uses, as the host reports it (nil until asked: nothing is claimed).
+    var signIn: GitHubSignIn?
+    /// A private repository waits for the person's yes before it is cloned.
+    var confirmPrivate = false
 
-    func reset() { form = NewPondForm(); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil }
+    func reset() { form = NewPondForm(); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil; confirmPrivate = false }
+
+    /// Reads the gh sign-in once the clone choice is open; a host that cannot answer leaves the line out.
+    func loadSignIn(model: AppModel) async {
+        guard !model.demoMode else { return }
+        signIn = try? await model.nativeHost.githubSignIn()
+    }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
@@ -61,7 +71,7 @@ final class NewPondState {
         form.chooseFolder(url.path)
     }
 
-    func create(model: AppModel) {
+    func create(model: AppModel, privateConfirmed: Bool = false) {
         guard form.canCreate, !busy, !joining else { return }
         // The same invite while its request is still waiting shows the card; no second request goes out.
         if form.kind == .invite, let pending = PondJoinWaiting.pending(forInvite: form.inviteCode, in: PondsModel.shared.ponds) {
@@ -99,7 +109,14 @@ final class NewPondState {
                 let (project, problem) = await ProjectActions.shared.add(model, path: f.folderPath ?? "", name: f.name)
                 finish(model, project, problem)
             case .clone:
-                let (project, problem) = await ProjectActions.shared.clone(model, url: f.cloneURL.trimmingCharacters(in: .whitespacesAndNewlines), name: f.name)
+                let url = f.cloneURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                // A private repository is confirmed first; anything not known to be private clones straight away.
+                if !privateConfirmed, !model.demoMode, let s = try? await model.nativeHost.githubSignIn(repo: url), CloneSignIn.asksBeforeCloning(s) {
+                    signIn = s
+                    confirmPrivate = true
+                    return
+                }
+                let (project, problem) = await ProjectActions.shared.clone(model, url: url, name: f.name)
                 finish(model, project, problem)
             case .invite:
                 let ponds = PondsModel.shared
@@ -136,6 +153,14 @@ struct NewPondPage: View {
                 } else {
                 formBody
                 }
+            }
+            .confirmationDialog(
+                CloneSignIn.privateQuestion(repo: state.signIn?.repo, login: state.signIn?.login), isPresented: $state.confirmPrivate, titleVisibility: .visible
+            ) {
+                Button(CloneSignIn.cloneButton) { state.create(model: model, privateConfirmed: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(verbatim: CloneSignIn.privateMessage(login: state.signIn?.login))
             }
             .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
                 // Approved while the page is open: it is a normal pond now.
@@ -174,8 +199,14 @@ struct NewPondPage: View {
                         }
                     }
                     choice(.clone, icon: .gitBranch) {
-                        TextField("owner/repo or a git URL", text: $state.form.cloneURL).textFieldStyle(NewPageTextFieldStyle())
-                            .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("owner/repo or a git URL", text: $state.form.cloneURL).textFieldStyle(NewPageTextFieldStyle())
+                                .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
+                            if let line = CloneSignIn.line(state.signIn) {
+                                Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .task { await state.loadSignIn(model: model) }
                     }
                     choice(.invite, icon: .users) {
                         TextField("Paste the invite link or code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))

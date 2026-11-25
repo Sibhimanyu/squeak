@@ -18,7 +18,7 @@ public enum FirstPondJourney {
     }
 
     /// The Room before anyone has said anything: how work gets handed out.
-    public static let emptyRoom = "Say what you want done, then choose \u{201C}Make task\u{201D} on a message (hover it, or secondary-click) to hand it to a duck. Or start a duck yourself. What the ducks do shows up here."
+    public static let emptyRoom = "Say what you want done, then choose \u{201C}Make task\u{201D} under your latest message to hand it to a duck. Or start a duck yourself. What the ducks do shows up here."
 
     // MARK: New pond choices
 

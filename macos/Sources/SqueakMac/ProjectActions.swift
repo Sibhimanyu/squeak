@@ -25,12 +25,25 @@ final class ProjectActions {
     }
 
     func clone(_ model: AppModel) {
-        guard let url = TextPrompt.ask(
-            title: "Clone a repository", message: "owner/repo from GitHub, or a git URL. It goes to ~/squeak/repos.",
-            placeholder: "owner/repo")
-        else { return }
         busy = true
         Task {
+            // Which GitHub sign-in this uses, as the host reports it (nothing is claimed when it cannot say).
+            let signIn = model.demoMode ? nil : try? await model.nativeHost.githubSignIn()
+            busy = false
+            let base = "owner/repo from GitHub, or a repository address. It goes to ~/squeak/repos."
+            guard let url = TextPrompt.ask(
+                title: "Clone a repository", message: [base, CloneSignIn.line(signIn)].compactMap { $0 }.joined(separator: "\n\n"),
+                placeholder: "owner/repo")
+            else { return }
+            if !model.demoMode, let s = try? await model.nativeHost.githubSignIn(repo: url), CloneSignIn.asksBeforeCloning(s) {
+                let alert = NSAlert()
+                alert.messageText = CloneSignIn.privateQuestion(repo: s.repo, login: s.login)
+                alert.informativeText = CloneSignIn.privateMessage(login: s.login)
+                alert.addButton(withTitle: CloneSignIn.cloneButton)
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+            busy = true
             let (project, problem) = await model.nativeCloneProject(url: url)
             await finish(model, project, problem ?? "Squeak couldn't clone that repository.")
         }

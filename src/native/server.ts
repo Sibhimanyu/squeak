@@ -41,7 +41,7 @@ import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
-import { GitPond, ghAdapter, type GitHubAdapter } from "./git-pond.js";
+import { GitPond, ghAdapter, githubRepoOf, type GitHubAdapter } from "./git-pond.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
 import { ducksOwnBranch, mainReadOnlyRoot, Placement, PlacementError, parsePlace } from "./placement.js";
@@ -187,6 +187,7 @@ export class NativeServer {
   private readonly gitPond: GitPond;
   readonly room: Room;
   readonly jobs: RoomTasks;
+  private readonly github: GitHubAdapter;
   private readonly artifacts: Artifacts;
   private readonly showRelay: ShowRelay;
   private readonly canvasWatcher = new CanvasWatcher();
@@ -195,7 +196,8 @@ export class NativeServer {
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.history = options.history ?? new VersionHistory(options.store);
-    this.gitPond = new GitPond(options.store, this.history, options.github ?? ghAdapter);
+    this.github = options.github ?? ghAdapter;
+    this.gitPond = new GitPond(options.store, this.history, this.github);
     this.artifacts = options.artifacts ?? new Artifacts({ store: options.store });
     this.notebook = options.notebook ?? new PondNotebook(options.store);
     this.showRelay = options.showRelay ?? new ShowRelay();
@@ -1151,6 +1153,14 @@ export class NativeServer {
         if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
         throw error;
       }
+    }
+    if (area === "github" && id === "status" && !sub && parts.length === 3) {
+      // Read only: which GitHub sign-in (`gh`) this Mac uses, and, for a clone, whether the repository is private.
+      if (method !== "GET") throw new HttpError(404, "not found");
+      const status = await this.github.status();
+      const repo = githubRepoOf(url.searchParams.get("repo") ?? "");
+      const visibility = status.ok && repo ? await this.github.visibility(repo) : undefined;
+      return this.json(res, 200, { ...status, ...(repo ? { repo } : {}), ...(visibility ? { visibility } : {}) });
     }
     if (area === "projects" && id && sub === "git-pond" && parts.length === 4 && method === "POST") {
       // "Make it a Git Pond": version history, a GitHub repo under the Owner's account (private unless asked), a push.
