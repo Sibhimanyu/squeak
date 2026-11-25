@@ -3,10 +3,13 @@ import SqueakMacCore
 import SwiftUI
 
 /// Opens a Duck or an item in the centre. The overflow list offers the same destinations when the strip scrolls.
+/// `embedded` is the one top bar's strip (DESIGN.md 8.12): the circles, divider and pills filling the rest of the bar's
+/// row, with no row of its own. Not embedded (a Duck's chat, until its header joins the bar) it draws its own row.
 struct PondWorkspaceTabStrip: View {
     let workspace: PondWorkspace
     let strip: PondWorkspaceStrip
     var leadingInset: CGFloat = 0
+    var embedded = false
     @Environment(AppModel.self) private var model
     @Environment(\.workbenchVisible) private var visible
     @State private var overflow = PondStripOverflow(contentStart: 0, contentEnd: 0, viewport: 0)
@@ -16,24 +19,15 @@ struct PondWorkspaceTabStrip: View {
     var body: some View {
         VStack(spacing: 0) {
             if !strip.isEmpty {
-                HStack(spacing: Space.s) {
-                    if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
-                    scroller
-                    if overflow.isOverflowing || showingList {
-                        Button { showingList.toggle() } label: {
-                            Lucide(.ellipsis, size: 16, color: Theme.muted)
-                                .frame(width: 28, height: 28).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Show all tabs").accessibilityLabel("Show all tabs")
-                        .popover(isPresented: $showingList, arrowEdge: .bottom) { tabList }
-                    }
+                if embedded {
+                    stripRow.frame(height: Metrics.header)
+                } else {
+                    stripRow
+                        .padding(.horizontal, Space.m)
+                        .frame(height: DuckRowMetrics.height)
+                        .background(WindowDragArea())
+                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
                 }
-                .padding(.horizontal, Space.m)
-                .frame(height: DuckRowMetrics.height)
-                .background(WindowDragArea())
-                .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
-                .accessibilityElement(children: .contain).accessibilityLabel("Pond tabs")
             }
         }
         .task(id: visible ? workspace.threads : nil) {
@@ -48,6 +42,24 @@ struct PondWorkspaceTabStrip: View {
                 if !Task.isCancelled { await workspace.roster.refresh(host: model.nativeHost) }
             }
         }
+    }
+
+    private var stripRow: some View {
+        HStack(spacing: Space.s) {
+            if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
+            scroller
+            if overflow.isOverflowing || showingList {
+                // Flow: the strip is wider than the bar; this lists every Duck and item so one can be picked without scrolling.
+                Button { showingList.toggle() } label: {
+                    Lucide(.ellipsis, size: 16, color: Theme.muted)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Show all tabs").accessibilityLabel("Show all tabs")
+                .popover(isPresented: $showingList, arrowEdge: .bottom) { tabList }
+            }
+        }
+        .accessibilityElement(children: .contain).accessibilityLabel("Pond tabs")
     }
 
     private var selected: TabItem? { strip.currentItem ?? strip.row.selectedDuck.map(TabItem.duck) }
@@ -71,7 +83,7 @@ struct PondWorkspaceTabStrip: View {
                         }
                     }
                     .padding(.horizontal, 8)
-                    .frame(height: DuckRowMetrics.height)
+                    .frame(height: embedded ? Metrics.header : DuckRowMetrics.height)
                     .fixedSize(horizontal: true, vertical: false)
                     .background {
                         GeometryReader { content in
