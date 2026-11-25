@@ -12,6 +12,8 @@ export type GitHubStatus = { ok: true; login: string } | { ok: false; reason: "n
 /** The only door to GitHub: tests inject a fake, so no test ever creates a real repository. */
 export interface GitHubAdapter {
   status(): Promise<GitHubStatus>;
+  /** Whether `owner/name` is private, public, or could not be told (not found, no access, offline). Read only. */
+  visibility(repo: string): Promise<"private" | "public" | "unknown">;
   /** Creates `<owner>/<name>` under the signed-in account, adds it as `origin` of the repo in `dir` and pushes. */
   createAndPush(input: { name: string; visibility: RepoVisibility; dir: string }): Promise<{ url: string }>;
 }
@@ -42,6 +44,12 @@ export const ghAdapter: GitHubAdapter = {
     if (auth.code !== 0) return { ok: false, reason: "not-signed-in" };
     const who = await run("gh", ["api", "user", "--jq", ".login"]);
     return { ok: true, login: who.stdout.trim() };
+  },
+  async visibility(repo) {
+    const r = await run("gh", ["repo", "view", repo, "--json", "visibility", "--jq", ".visibility"]);
+    if (r.code !== 0) return "unknown";
+    const v = r.stdout.trim().toLowerCase();
+    return v === "public" ? "public" : v === "private" || v === "internal" ? "private" : "unknown";
   },
   async createAndPush({ name, visibility, dir }) {
     const r = await run(
@@ -118,4 +126,15 @@ export class GitPond {
   private async hasOrigin(dir: string): Promise<boolean> {
     return (await run("git", ["remote", "get-url", "origin"], dir)).code === 0;
   }
+}
+
+/** `owner/repo` from `owner/repo`, an https github.com URL or an ssh address; null for anything else. */
+export function githubRepoOf(input: string): string | null {
+  const t = input.trim();
+  const m =
+    /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(t) ??
+    /^(?:https?:\/\/(?:www\.)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(
+      t,
+    );
+  return m ? `${m[1]}/${m[2]}` : null;
 }
