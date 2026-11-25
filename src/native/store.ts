@@ -139,9 +139,6 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE sessions ADD COLUMN title_tried INTEGER;
   `,
   `
-  ALTER TABLE sessions ADD COLUMN title_stage INTEGER;
-  `,
-  `
   ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'git';
   `,
   `
@@ -245,6 +242,11 @@ export const MIGRATIONS: string[] = [
   `
   CREATE TABLE IF NOT EXISTS host_migrations (name TEXT PRIMARY KEY, at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS deleted_duck_chats (session_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+  `,
+  // Titles that mean something: how far a chat's automatic title has been re-written (0 none, 1 after real work,
+  // 2 at Task done). Appended last so existing databases run it (never insert a migration mid-list).
+  `
+  ALTER TABLE sessions ADD COLUMN title_stage INTEGER;
   `,
 ];
 
