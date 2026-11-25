@@ -60,4 +60,43 @@ import Testing
         #expect(c.shows == .duck("dhol")); #expect(c.page == .room)
         c.selectItem(.duck("other")); #expect(c.shows == .duck("other"))
     }
+
+    @Test func theSwipeCommitIsOneEventThatOnlySetsThePage() {
+        let old = PondCentre(page: .dashboard)
+        var next = old
+        next.swipe(to: .room)
+        #expect(next.effects(from: old) == PondCentre.Effects(page: .room))
+    }
+
+    @Test func aDeepLinkOpensTheDuckAndKeepsThePageUnderneath() {
+        let old = PondCentre(page: .room, item: notebook)
+        var next = old
+        next.deepLink(duck: "dhol")
+        let e = next.effects(from: old)
+        #expect(e.openDuck == "dhol"); #expect(e.deselectItem); #expect(e.page == nil); #expect(!e.leaveDuck)
+        // The same Duck again opens nothing new.
+        var again = next
+        again.deepLink(duck: "dhol")
+        #expect(again.effects(from: next).isEmpty)
+    }
+
+    @Test func theSwitchFromADuckGoesToThePageAndLeavesTheDuck() {
+        let old = PondCentre(page: .dashboard, duck: "dhol")
+        var next = old
+        next.switchTo(.room)
+        #expect(next.effects(from: old) == PondCentre.Effects(page: .room, deselectItem: false, openDuck: nil, leaveDuck: true))
+    }
+
+    @Test func escFromADuckIsTheSameEventAsTheSwitchToRoom() {
+        let old = PondCentre(page: .dashboard, duck: "dhol")
+        var viaEsc = old; viaEsc.escape()
+        var viaSwitch = old; viaSwitch.switchTo(.room)
+        #expect(viaEsc == viaSwitch)
+    }
+
+    @Test func thePondMenuIsNeverStackedWithTheDucksOwnMenu() {
+        #expect(PondCentre(page: .room).showsPondMenu)
+        #expect(PondCentre(page: .room, item: notebook).showsPondMenu)
+        #expect(!PondCentre(page: .room, duck: "dhol").showsPondMenu)
+    }
 }

@@ -16,6 +16,8 @@ public enum RoomRowPlan {
     public static let groupLead: Double = 10
     /// The thin line that marks my own messages.
     public static let ownLineWidth: Double = 2
+    /// The widest a message's text runs, so lines keep a comfortable measure in a wide window.
+    public static let readingWidth: Double = 700
     public static let rowRadius: Double = 8
     public static let nameSize: Double = 14.5
     public static let timeSize: Double = 11

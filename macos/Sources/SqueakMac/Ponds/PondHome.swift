@@ -844,12 +844,8 @@ struct PondSharedHeader: View {
                 set: { page in
                     guard let page else { return }
                     // One source of truth for what the centre shows (PondCentre): the switch writes it, the page reads it.
-                    var next = centre
-                    next.switchTo(page)
-                    if centre.item != nil { model.leavePondItem(pond: key) }
-                    RoomViewPref.shared.set(next.page, for: key)
                     // Flow: from inside a Duck, the switch goes to that page of the Pond.
-                    if inDuck { model.openPondHome(key) }
+                    model.applyCentre(pond: key) { $0.switchTo(page) }
                 }),
             hasTabs: !(strip?.isEmpty ?? true),
             tile: {
@@ -861,7 +857,7 @@ struct PondSharedHeader: View {
                     PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true).id(workspace.project.id)
                 }
             },
-            trailing: { PondHeaderMenu(key: key) })
+            trailing: { if centre.showsPondMenu { PondHeaderMenu(key: key) } })
         .background(WindowDragArea())
     }
 }

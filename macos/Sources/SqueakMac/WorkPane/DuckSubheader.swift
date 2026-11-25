@@ -38,7 +38,7 @@ struct DuckSubheader: View {
         .padding(.horizontal, Space.xl).frame(height: Self.height)
         // The chat starts below this row and is clipped at its edge: a hairline makes that edge read as intended, so no text
         // shows through half-faded behind the chips.
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.18)).frame(height: 1) }
     }
 
     /// The Streams this Duck is in, from the host's roster (join order).

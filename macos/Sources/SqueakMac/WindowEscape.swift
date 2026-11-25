@@ -47,7 +47,7 @@ enum WindowEscape {
             page: page, turnRunning: false)
         if window.attachedSheet == nil, step != .closePane, let workspace = model.pondWorkspace,
            PondCentre(page: RoomViewPref.shared.mode(for: workspace.pond), item: model.tabStore.currentPondItem(workspace.project.id)).escapeStep == .deselectItem {
-            model.leavePondItem(pond: workspace.pond)
+            model.applyCentre(pond: workspace.pond) { $0.escape() }
             return true
         }
         switch step {
@@ -55,11 +55,10 @@ enum WindowEscape {
         case .closePane: WorkPaneStore.shared.close()
         case .toRoom:
             if let session = model.selectedSession, let pond = PondsModel.shared.key(of: session) {
-                RoomViewPref.shared.set(.room, for: pond)
-                model.openPondHome(pond)
+                model.applyCentre(pond: pond) { $0.escape() }
             }
         case .toDashboard:
-            if case .pondHome(let key) = model.baseLocation { RoomViewPref.shared.set(.dashboard, for: key) }
+            if case .pondHome(let key) = model.baseLocation { model.applyCentre(pond: key) { $0.escape() } }
         }
         return true
     }

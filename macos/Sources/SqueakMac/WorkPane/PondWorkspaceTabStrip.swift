@@ -237,8 +237,11 @@ struct PondOvalTab: View {
                     .help("Close").accessibilityLabel("Close \(tab.title ?? label?.title ?? "tab")")
                 }
             }
-            .background(selected ? Theme.surfaceRaised : Theme.surface, in: Capsule())
-            .overlay { Capsule().strokeBorder(selected ? Theme.lineStrong : Theme.line).allowsHitTesting(false) }
+            // Outline as a filled capsule under an inset fill, not a stroke: strokes left a stray vertical tick at each end.
+            .background {
+                Capsule().fill(selected ? Theme.lineStrong : Theme.line)
+                    .overlay { Capsule().inset(by: 1).fill(selected ? Theme.surfaceRaised : Theme.surface) }
+            }
             .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
             .onHover { hovering = $0 }
             .help(help)

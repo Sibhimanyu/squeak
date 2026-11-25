@@ -42,8 +42,16 @@ struct RoomSegmented<T: Hashable>: View {
                 .accessibilityLabel(title(item)).accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(2).background(Theme.surface, in: RoundedRectangle(cornerRadius: capsule ? 100 : 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: capsule ? 100 : 8, style: .continuous).strokeBorder(Theme.line))
+        .padding(2)
+        .background {
+            if capsule {
+                // A filled outline under an inset fill, not a stroke: strokes left a stray tick at the capsule's ends.
+                Capsule().fill(Theme.line).overlay { Capsule().inset(by: 1).fill(Theme.surface) }
+            } else {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
+            }
+        }
         .animation(reduceMotion ? nil : Motion.quick, value: selection)
     }
 }

@@ -17,10 +17,10 @@ struct SmallButtonStyle: ButtonStyle {
                 switch role {
                 case .primary: RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill)
                 case .secondary: RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1))
-                case .quiet: Color.clear
+                case .quiet: RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Theme.surface.opacity(configuration.isPressed ? 0.7 : 0.6))
                 }
             }
-            .overlay { if role == .secondary { RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.line) } }
+            .overlay { if role != .primary { RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Theme.line) } }
             .opacity(isEnabled ? 1 : 0.5)
     }
 }
@@ -133,7 +133,7 @@ struct RoomTaskCardView: View {
 
     @ViewBuilder private var glyph: some View {
         switch card.state {
-        case .working: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .leading, grid: .micro)
+        case .working: WorkingGlyph(slot: TideGlyph.Grid.micro.size.width, alignment: .center, grid: .micro).scaleEffect(1.5)
         case .done: Lucide(.circleCheck, size: 14, color: Theme.muted)
         case .blocked: Lucide(.triangleAlert, size: 14, color: Theme.warning)
         case .waiting where needsYou: Lucide(.triangleAlert, size: 14, color: Theme.warning)
@@ -144,13 +144,13 @@ struct RoomTaskCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                glyph.frame(width: 14, height: 14)
-                Text(verbatim: card.stateLabel).font(.system(size: 12, weight: .medium)).foregroundStyle(card.state == .blocked ? Theme.negative : Theme.ink)
+                glyph.frame(width: 18, height: 18)
+                Text(verbatim: card.stateLabel).font(.system(size: 12, weight: .semibold)).textCase(.uppercase).tracking(0.4).foregroundStyle(card.state == .blocked ? Theme.negative : Theme.muted)
                 owner
                 Spacer(minLength: 8)
                 if at > 0 { Text(verbatim: RoomRipples.clock(at)).font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle) }
             }
-            Text(verbatim: card.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text(verbatim: card.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
             if let r = card.result {
                 Text(verbatim: r).font(.system(size: 14)).foregroundStyle(Theme.ink.opacity(0.92)).lineSpacing(3)
@@ -180,11 +180,14 @@ struct RoomTaskCardView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 14).padding(.leading, needsYou ? 3 : 0)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // The message column's width and leading edge: the card never runs past the text above it.
+        .frame(maxWidth: CGFloat(RoomRowPlan.readingWidth), alignment: .leading)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line).allowsHitTesting(false))
         .overlay(alignment: .leading) { if needsYou { Rectangle().fill(Theme.warning).frame(width: 3) } }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.leading, CGFloat(RoomRowPlan.textInset) + 12).padding(.trailing, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain).accessibilityLabel(card.spoken)
     }
 
