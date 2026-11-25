@@ -218,7 +218,11 @@ export class NativeServer {
         helpers: (id) => host.helpersOf(id),
         deliver: async (id, text, o) => {
           if (o?.woke) await this.restoreWoken(id);
-          return host.send(id, text, { room: true });
+          return host.send(id, text, {
+            room: true,
+            mode: "steer",
+            ...(o?.onSteered ? { onSteered: o.onSteered } : {}),
+          });
         },
       });
     this.pondChanges =

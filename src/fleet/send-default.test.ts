@@ -11,11 +11,19 @@ function file(): string {
 }
 
 describe("send default", () => {
-  it("defaults to queue, applies one strict change, and persists it", () => {
+  it("defaults to steer for someone who never picked, applies one strict change, and persists it", () => {
     const f = file();
     const store = new SendDefaultStore(f);
-    expect(store.mode).toBe("queue");
-    expect(store.apply({ mode: "steer" })).toEqual({ ok: true, mode: "steer" });
+    expect(store.mode).toBe("steer");
+    expect(store.apply({ mode: "queue" })).toEqual({ ok: true, mode: "queue" });
+    expect(new SendDefaultStore(f).mode).toBe("queue");
+  });
+
+  it("keeps an explicit choice of either mode across a restart", () => {
+    const f = file();
+    fs.writeFileSync(f, JSON.stringify({ mode: "queue" }));
+    expect(new SendDefaultStore(f).mode).toBe("queue");
+    fs.writeFileSync(f, JSON.stringify({ mode: "steer" }));
     expect(new SendDefaultStore(f).mode).toBe("steer");
   });
 
@@ -25,19 +33,19 @@ describe("send default", () => {
       expect(readSendDefaultRequest(bad)).toBeNull();
       expect(store.apply(bad).ok).toBe(false);
     }
-    expect(store.mode).toBe("queue");
+    expect(store.mode).toBe("steer");
   });
 
-  it("reads a damaged file as queue", () => {
+  it("reads a damaged file as the default (steer)", () => {
     const f = file();
     fs.writeFileSync(f, "{nope");
-    expect(new SendDefaultStore(f).mode).toBe("queue");
+    expect(new SendDefaultStore(f).mode).toBe("steer");
   });
 
   it("applies the default only when the send names no mode", () => {
     expect(resolveSendMode(undefined, "steer")).toBe("steer");
     expect(resolveSendMode("queue", "steer")).toBe("queue");
     expect(resolveSendMode("steer", "queue")).toBe("steer");
-    expect(resolveSendMode(undefined, undefined)).toBe("queue");
+    expect(resolveSendMode(undefined, undefined)).toBe("steer");
   });
 });

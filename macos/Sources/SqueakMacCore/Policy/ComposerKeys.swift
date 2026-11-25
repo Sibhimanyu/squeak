@@ -1,7 +1,7 @@
 import Foundation
 
-/// What a Return in the conversation composer does (DESIGN.md §8.10, keymap). While the agent works, ↵ queues
-/// the words behind the turn and ⌘↵ steers them into it; idle, ↵ sends. ⇧↵ is always a new line.
+/// What a Return in the conversation composer does (DESIGN.md §8.10, keymap). While the agent works, ↵ does the
+/// saved send default (steer unless a person chose queue) and ⌘↵ the other one; idle, both send. ⇧↵ is a new line.
 public enum ComposerReturn: Sendable, Equatable {
     case plain, command, shift, shiftCommand
 }
@@ -11,13 +11,13 @@ public enum ComposerKeyAction: Sendable, Equatable {
 }
 
 public enum ComposerKeys {
-    public static func action(_ key: ComposerReturn, working: Bool) -> ComposerKeyAction {
+    public static func action(_ key: ComposerReturn, working: Bool, primary: SendMode = .steer) -> ComposerKeyAction {
+        let first: ComposerKeyAction = primary == .steer ? .steer : .queue
+        let second: ComposerKeyAction = primary == .steer ? .queue : .steer
         switch key {
         case .shift: return .newLine
-        case .plain: return working ? .queue : .send
-        case .command: return working ? .steer : .send
-        // ⇧⌘↵ stays the other way round for anyone used to it: the queue, while working.
-        case .shiftCommand: return working ? .queue : .send
+        case .plain: return working ? first : .send
+        case .command, .shiftCommand: return working ? second : .send
         }
     }
 
@@ -31,7 +31,9 @@ public enum ComposerKeys {
     }
 
     /// The composer's hint, drawn only while the agent works.
-    public static func workingHint(canStop: Bool) -> String? {
-        "↵ queue · ⌘↵ steer" + (canStop ? " · ⌘. stop" : "")
+    public static func workingHint(canStop: Bool, primary: SendMode = .steer) -> String? {
+        let first = primary == .steer ? "steer" : "queue"
+        let second = primary == .steer ? "queue" : "steer"
+        return "↵ \(first) · ⌘↵ \(second)" + (canStop ? " · ⌘. stop" : "")
     }
 }

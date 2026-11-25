@@ -20,7 +20,7 @@ struct ChatComposerBox<Setup: View>: View {
     let agent: String
     let sendHelp: String
     /// What the round button and ⌘↩ do while the agent works; the other mode is in its menu and on ⇧⌘↩.
-    var sendDefault = SendDefault(.queue)
+    var sendDefault = SendDefault.initial
     let onSend: (SendMode) -> Void
     /// What the state asks of the round button (§8.10); `canStop` is whether this chat has a way to stop.
     var phase: ComposerPhase = .idle
@@ -274,10 +274,10 @@ struct ChatComposerBox<Setup: View>: View {
             .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
             .disabled(!ready)
             .accessibilityLabel("\(SendDefault.title(primary)) message")
-            .accessibilityHint("Return queues, Command-Return steers.")
-            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false) ?? "")")
-            shortcut(.steer, [.command], ready)
-            shortcut(.queue, [.command, .shift], ready)
+            .accessibilityHint(sendDefault.mode == .steer ? "Return steers, Command-Return queues." : "Return queues, Command-Return steers.")
+            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false, primary: sendDefault.primary) ?? "")")
+            shortcut(other, [.command], ready)
+            shortcut(other, [.command, .shift], ready)
         } else {
             Button { onSend(.queue) } label: { DuckSendDisc(enabled: ready) }
                 .buttonStyle(.plain)
@@ -288,9 +288,9 @@ struct ChatComposerBox<Setup: View>: View {
         }
     }
 
-    /// ↵ and ⌘↵ in the field: while the agent works ↵ queues and ⌘↵ steers; idle either sends (`ComposerKeys`).
+    /// ↵ and ⌘↵ in the field: while the agent works ↵ does the default (steer) and ⌘↵ the other; idle either sends (`ComposerKeys`).
     private func keySend(_ key: ComposerReturn) {
-        guard let mode = ComposerKeys.mode(ComposerKeys.action(key, working: working)) else { return }
+        guard let mode = ComposerKeys.mode(ComposerKeys.action(key, working: working, primary: sendDefault.primary)) else { return }
         onSend(mode)
     }
 
@@ -394,10 +394,10 @@ struct ChatComposerBox<Setup: View>: View {
             .fixedSize()
             .disabled(!ready)
             .accessibilityLabel("\(SendDefault.title(primary)) message")
-            .accessibilityHint("Return queues, Command-Return steers.")
-            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false) ?? "")")
-            shortcut(.steer, [.command], ready)
-            shortcut(.queue, [.command, .shift], ready)
+            .accessibilityHint(sendDefault.mode == .steer ? "Return steers, Command-Return queues." : "Return queues, Command-Return steers.")
+            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false, primary: sendDefault.primary) ?? "")")
+            shortcut(other, [.command], ready)
+            shortcut(other, [.command, .shift], ready)
         } else {
             Button { onSend(.queue) } label: { RoundSendLabel(enabled: ready) }
                 .buttonStyle(.plain)

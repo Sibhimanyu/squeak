@@ -308,7 +308,12 @@ export interface RoomOptions {
    * running one, never mid-step). The Room wakes a Duck only on an @mention or a comment on its own card.
    */
   /** `woke`: the Duck was Off duty and this message put it back on duty (its Stream may have been cleaned up meanwhile). */
-  deliver?: (sessionId: string, text: string, opts?: { woke: boolean }) => Promise<unknown> | void;
+  deliver?: (
+    sessionId: string,
+    text: string,
+    opts?: { woke: boolean; onSteered?: (steer: { seq: number; waiting: boolean }) => void },
+  ) => Promise<unknown> | void;
+  // `deliver` steers a working Duck (the message goes into the running turn); the answer comes back to the Room.
   /** Writes the summary of a Duck-to-Duck message its sender left out: on-device first, Haiku after. */
   summaryWriters?: SummaryWriterPort[];
   /** A chat's Ducklings now (the host's `helpersOf`). Absent: none run (tests with no host). */
@@ -528,9 +533,12 @@ export class Room extends EventEmitter {
         }
       }
       for (const [sid, text] of targets) {
-        void Promise.resolve(deliver(sid, text, { woke: woke.has(sid) })).catch((error) =>
-          logger.warn("room wake failed", { error: String(error) }),
-        );
+        void Promise.resolve(
+          deliver(sid, text, {
+            woke: woke.has(sid),
+            onSteered: (st) => this.followSteer(sid, st.seq, !st.waiting),
+          }),
+        ).catch((error) => logger.warn("room wake failed", { error: String(error) }));
       }
     } catch (error) {
       logger.warn("room wake failed", { error: String(error) });
@@ -855,6 +863,7 @@ export class Room extends EventEmitter {
   noteTimeline(sessionId: string, event: TimelineEvent | { type: string }): void {
     const t = event.type;
     const turnId = (event as { turnId?: string }).turnId;
+    this.settleSteers(sessionId, event);
     const relevant =
       t === "turn.started" ||
       t === "turn.ended" ||
@@ -882,6 +891,46 @@ export class Room extends EventEmitter {
       if (this.log.duckSteps(sessionId, t.turnId).some((e) => changed.includes(e.stepId))) {
         this.scheduleTurn(sessionId, t.turnId);
       }
+    }
+  }
+
+  /** Steers that came from the Room, per chat: `taken` once the Duck has read it (its answer is the next reply). */
+  private readonly roomSteers = new Map<string, Array<{ seq: number; taken: boolean; at: number }>>();
+
+  /** A Room message went into a Duck's running turn as a steer: its answer is posted back here, once. */
+  private followSteer(sessionId: string, seq: number, taken: boolean): void {
+    this.roomSteers.set(sessionId, [...(this.roomSteers.get(sessionId) ?? []), { seq, taken, at: this.now() }]);
+  }
+
+  /**
+   * The Duck's reply after it took a Room steer in is the answer: it was not a Room turn (the turn was already running),
+   * so the Room would never show it. Posted once as the Duck's own message, unless the Duck already posted here
+   * itself since. A turn that ends without one drops the wait.
+   */
+  private settleSteers(sessionId: string, event: TimelineEvent | { type: string }): void {
+    const list = this.roomSteers.get(sessionId);
+    if (!list) return;
+    const e = event as { type: string; stepId?: string; status?: string; text?: string };
+    if ((e.type === "step.updated" || e.type === "step.added") && e.status === "done") {
+      for (const w of list) if (e.stepId === `steer-${w.seq}`) w.taken = true;
+    } else if (e.type === "reply.done" && e.text?.trim()) {
+      const ready = list.filter((w) => w.taken);
+      if (ready.length === 0) return;
+      const rest = list.filter((w) => !w.taken);
+      if (rest.length) this.roomSteers.set(sessionId, rest);
+      else this.roomSteers.delete(sessionId);
+      const since = Math.min(...ready.map((w) => w.at));
+      try {
+        const s = this.store.getSession(sessionId);
+        if (!s || this.store.duckRoomPosts(sessionId, since, this.now() + 5_000).length > 0) return;
+        const chars = [...e.text.trim()];
+        const text = chars.length > ROOM_MAX_TEXT ? `${chars.slice(0, ROOM_MAX_TEXT - 1).join("")}…` : chars.join("");
+        this.agentPost(s, { kind: "message", text, noWake: true });
+      } catch (error) {
+        logger.warn("room steer reply failed", { error: String(error) });
+      }
+    } else if (e.type === "turn.ended") {
+      this.roomSteers.delete(sessionId);
     }
   }
 

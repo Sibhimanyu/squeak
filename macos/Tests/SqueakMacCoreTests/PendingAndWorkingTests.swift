@@ -203,10 +203,10 @@ struct NativePendingStackTests {
         #expect(s.visible([ChatMessage(id: "native-3", role: .user, text: "x")]).count == 1)
     }
 
-    @Test func returnQueuesAndCommandReturnSteersWhileWorking() {
-        #expect(ComposerKeys.action(.plain, working: true) == .queue)
+    @Test func returnSteersAndCommandReturnQueuesWhileWorking() {
+        #expect(ComposerKeys.action(.plain, working: true) == .steer)
         #expect(ComposerKeys.mode(.queue) == .queue)
-        #expect(ComposerKeys.action(.command, working: true) == .steer)
+        #expect(ComposerKeys.action(.command, working: true) == .queue)
         #expect(ComposerKeys.mode(.steer) == .steer)
         // idle: either sends
         #expect(ComposerKeys.action(.plain, working: false) == .send)

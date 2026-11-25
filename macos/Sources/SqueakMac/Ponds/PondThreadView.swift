@@ -443,7 +443,7 @@ struct PondThreadView: View {
                 ComposerField(
                     text: $draft, sendKey: .returnSends, placeholder: PondThreadRules.composerPlaceholder(role: role, working: working),
                     isEnabled: role.canMessage && !sending, focusToken: focusToken,
-                    onSend: { send(.queue) }, onCommandReturn: { send(.steer) })
+                    onSend: { send(.steer) }, onCommandReturn: { send(.queue) })
                     .frame(height: 56)
                 if role.canMessage, working {
                     Text("\u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer").font(Typo.meta).foregroundStyle(Theme.subtle)

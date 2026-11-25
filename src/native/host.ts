@@ -829,7 +829,14 @@ export class SessionHost extends EventEmitter {
   async send(
     id: string,
     text: string,
-    options: { mode?: "queue" | "steer"; author?: MessageAuthor; clientNonce?: string; room?: boolean } = {},
+    options: {
+      mode?: "queue" | "steer";
+      author?: MessageAuthor;
+      clientNonce?: string;
+      room?: boolean;
+      /** Told when the message went into the running turn as a steer (its step's seq, and whether the agent has yet to read it). */
+      onSteered?: (steer: { seq: number; waiting: boolean }) => void;
+    } = {},
   ): Promise<{ queued: boolean }> {
     const s = this.require(id);
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
@@ -854,6 +861,7 @@ export class SessionHost extends EventEmitter {
               at: row.createdAt,
             });
             this.noteSteered(id, text, options.author, row.seq, runner);
+            options.onSteered?.({ seq: row.seq, waiting: Boolean(runner.lastSteerUuid) });
             return { queued: false };
           }
         } else if (runner) {

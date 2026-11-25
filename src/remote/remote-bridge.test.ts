@@ -594,7 +594,7 @@ describe("RemoteBridge commands", () => {
     expect(f.store.docs.has(`${f.channel}/commands/c1`)).toBe(false);
   });
 
-  it("passes a signed steer through, defaults to queue, and reports the delivery", async () => {
+  it("passes a signed steer through, defaults to steer, and reports the delivery", async () => {
     const f = fixture({ outcome: { status: "started", via: "conductor", delivery: "steered" } });
     await f.pair();
     await f.store.set(`${f.channel}/commands/c1`, f.command({ mode: "steer" }));
@@ -602,7 +602,7 @@ describe("RemoteBridge commands", () => {
     await f.bridge.tick();
     expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
       { mode: "steer" },
-      { mode: "queue" },
+      { mode: "steer" },
     ]);
     expect(f.result("c1")).toMatchObject({ status: "sent", delivery: "steered" });
   });
@@ -613,7 +613,7 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command({ messageId: QUEUED_ID }));
     await f.bridge.tick();
     expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
-      { mode: "queue", messageId: QUEUED_ID },
+      { mode: "steer", messageId: QUEUED_ID },
     ]);
     expect(f.result("c1")).toMatchObject({ status: "sent" });
   });
@@ -758,7 +758,7 @@ describe("RemoteBridge command order and the send default", () => {
     await f.bridge.tick();
     expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
       { mode: "steer" },
-      { mode: "queue" },
+      { mode: "steer" },
     ]);
     expect(f.bridge.phoneView().sendDefault).toBe("steer");
   });

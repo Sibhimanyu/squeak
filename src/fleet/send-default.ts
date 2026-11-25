@@ -4,14 +4,16 @@ import path from "node:path";
 import { logger } from "../utils/logger.js";
 
 /**
- * What a message sent to a working chat does when the sender names no mode: wait its turn (`queue`, the
- * default) or go into the turn in progress (`steer`). One saved choice (`send-default.json`) shared by the
- * Mac app and the phone; a message that names its mode keeps it, and an idle chat just sends either way.
+ * What a message sent to a working chat does when the sender names no mode: go into the turn in
+ * progress (`steer`, the default: the Duck sees it now) or wait its turn (`queue`). One saved choice
+ * (`send-default.json`) shared by the Mac app and the phone; a message that names its mode keeps it, and an idle
+ * chat just sends either way. Only a person who never picked has no file, so they follow the default; an explicit
+ * choice (either one) is a file and stays.
  */
 export const SEND_DEFAULTS = ["queue", "steer"] as const;
 export type SendDefault = (typeof SEND_DEFAULTS)[number];
 
-export const DEFAULT_SEND_DEFAULT: SendDefault = "queue";
+export const DEFAULT_SEND_DEFAULT: SendDefault = "steer";
 
 /** One change, strictly: exactly `{ mode: "queue" | "steer" }`; null for anything else. */
 export function readSendDefaultRequest(value: unknown): SendDefault | null {
@@ -41,7 +43,7 @@ export class SendDefaultStore {
   private load(): SendDefault {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, "utf8")) as Record<string, unknown>;
-      return raw?.mode === "steer" ? "steer" : DEFAULT_SEND_DEFAULT;
+      return raw?.mode === "queue" ? "queue" : raw?.mode === "steer" ? "steer" : DEFAULT_SEND_DEFAULT;
     } catch {
       return DEFAULT_SEND_DEFAULT;
     }

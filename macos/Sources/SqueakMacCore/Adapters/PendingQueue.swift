@@ -105,10 +105,18 @@ public struct SendDefault: Sendable, Equatable {
         mode == .queue ? "after this turn" : "into the turn in progress"
     }
 
-    /// The button's tooltip, e.g. "Queue: Claude reads it after this turn (⌘↩). Steer now: hold, or ⇧⌘↩".
+    /// The button's tooltip, e.g. "Steer: into the turn Claude is running now (↩). Queue: after this turn: ⌘↩ or hold".
     public func help(agent: String) -> String {
         let a = mode == .queue ? "Queue: \(agent) reads it after this turn" : "Steer: into the turn \(agent) is running now"
         let b = other == .queue ? "Queue: after this turn" : "Steer now"
-        return "\(a) (⌘↩). \(b): hold, or ⇧⌘↩"
+        return "\(a) (↩). \(b): ⌘↩ or ⇧⌘↩, or hold"
     }
+
+    /// The quiet line by the send button while the agent works: what ↩ does and what ⌘↩ does instead.
+    public var statusLine: String {
+        mode == .steer ? "Steers now \u{00B7} \u{2318}\u{21A9} to queue" : "Queues \u{00B7} \u{2318}\u{21A9} to steer now"
+    }
+
+    /// Before the daemon has answered (and on a Mac that never picked): steer, the daemon's own default.
+    public static let initial = SendDefault(.steer)
 }

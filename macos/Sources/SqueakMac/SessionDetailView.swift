@@ -839,7 +839,7 @@ struct SessionDetail: View {
                     : [KeyHint(key: "1–9", label: "answer"), KeyHint(key: "0", label: "other")]
             }
         }
-        return ComposerHints.keys(phase: composerPhase, canStop: canStop)
+        return ComposerHints.keys(phase: composerPhase, canStop: canStop, primary: model.sendDefault.primary)
     }
 
     private var destinationNote: String {
@@ -848,8 +848,10 @@ struct SessionDetail: View {
         if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
         if working {
             return queueSteerExplained
-                ? "↵ queues after this turn · ⌘↵ steers now"
-                : "↵ queues it until \(agent) finishes this turn. ⌘↵ steers it into the turn now."
+                ? model.sendDefault.statusLine
+                : model.sendDefault.mode == .steer
+                    ? "↵ steers it into the turn \(agent) is running now. ⌘↵ queues it until the turn ends."
+                    : "↵ queues it until \(agent) finishes this turn. ⌘↵ steers it into the turn now."
         }
         return "Replies go to \(session.source.replyDestination)."
     }

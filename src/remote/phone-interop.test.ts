@@ -488,7 +488,7 @@ describe("a reply made on the iPhone", () => {
     const { remote, config, sends } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.commandId, fixture.command);
     expect(verdict.result).toMatchObject({ status: "sent" });
-    expect(sends).toEqual([["s1", "B", "queue"]]);
+    expect(sends).toEqual([["s1", "B", "steer"]]);
   });
 
   it("carries a signed steer mode through to the replier and reports the delivery", async () => {
@@ -535,8 +535,8 @@ describe("a reply made on the iPhone", () => {
     const { remote, config, sends, sent } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.queuedCommandId, fixture.queuedCommand);
     expect(verdict.result).toMatchObject({ status: "sent" });
-    expect(sends).toEqual([["s1", "Then add tests", "queue"]]);
-    expect(sent).toEqual([{ mode: "queue", messageId: QUEUED_ID }]);
+    expect(sends).toEqual([["s1", "Then add tests", "steer"]]);
+    expect(sent).toEqual([{ mode: "steer", messageId: QUEUED_ID }]);
   });
 
   it("steers a queued message in when the phone signs a queue command", async () => {

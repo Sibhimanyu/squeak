@@ -132,9 +132,10 @@ import Testing
 
     @Test func hintsListOnlyLiveKeys() {
         let w = ComposerHints.keys(phase: .working, canStop: true)
-        #expect(w.map(\.label) == ["queue", "steer", "stop"])
+        #expect(w.map(\.label) == ["steer", "queue", "stop"])
         #expect(w.map(\.key) == ["↵", "⌘↵", "⌘."])
-        #expect(ComposerHints.keys(phase: .working, canStop: false).map(\.label) == ["queue", "steer"])
+        #expect(ComposerHints.keys(phase: .working, canStop: false).map(\.label) == ["steer", "queue"])
+        #expect(ComposerHints.keys(phase: .working, canStop: false, primary: .queue).map(\.label) == ["queue", "steer"])
         #expect(ComposerHints.keys(phase: .idle, canStop: true).map(\.label) == ["send", "new line"])
     }
 

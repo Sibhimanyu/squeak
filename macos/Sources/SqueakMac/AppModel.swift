@@ -299,7 +299,7 @@ final class AppModel {
     /// Git, pull request, workspace lifecycle and project settings of the Squeak-run chats (`AppModel+Git.swift`).
     let git = GitModel()
     /// What a send to a working chat does by default (the daemon's `/control/send-default`); nil until read.
-    var sendDefault = SendDefault(.queue)
+    var sendDefault = SendDefault.initial
     enum SendDefaultLoad: Equatable { case loading, ready, unavailable(String) }
     var sendDefaultLoad: SendDefaultLoad = .loading
     /// When the open conversation's transcript was last read; what it shows is no newer than this.

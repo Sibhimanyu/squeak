@@ -94,7 +94,8 @@ export async function runHost(supportDir: string): Promise<void> {
     attachmentsDir: path.join(supportDir, "room-attachments"),
     members: (id) => server?.pondMembers(id) ?? 0,
     helpers: (id) => host.helpersOf(id),
-    deliver: (id, text) => host.send(id, text, { room: true }),
+    deliver: (id, text, o) =>
+      host.send(id, text, { room: true, mode: "steer", ...(o?.onSteered ? { onSteered: o.onSteered } : {}) }),
   });
   attachSqueakPosts(host, store, room);
   try {

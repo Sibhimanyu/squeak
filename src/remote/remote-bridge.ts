@@ -957,7 +957,7 @@ export interface RemoteBridgeDependencies {
     cliq(change: unknown): { ok: true; message: string } | { ok: false; reason: string };
   } | null;
   /**
-   * What a reply to a working chat does when the phone names no mode (fleet/send-default.ts). Absent: queue, and a
+   * What a reply to a working chat does when the phone names no mode (fleet/send-default.ts). Absent: steer, and a
    * phone's change is refused.
    */
   sendDefault?: {
