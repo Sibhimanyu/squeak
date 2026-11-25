@@ -171,7 +171,7 @@ struct ConversationView: View {
             if let paneScope {
                 let duck = paneScope.key
                 let now = WorkPaneStore.shared.pane
-                if now.current == duck, now.shown != nil { WorkPaneStore.shared.close() } else { WorkPaneStore.shared.open(now.memory[duck]?.view ?? .changes, duck: duck) }
+                if now.current == duck, now.shown != nil { WorkPaneStore.shared.close() } else { WorkPaneStore.shared.open(.terminal, duck: duck) }
                 return
             }
             guard roomCtx != nil ? roomPanel : (rightAvailable || homeCtx) else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
@@ -222,7 +222,7 @@ struct ConversationView: View {
                     if let paneScope {
                         if let paneView {
                             let paneW = CGFloat(WorkPaneMetrics.drawn(stored: workPane.storedWidth(duck: paneScope.key), window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarW))
-                            WorkPanePane(scope: paneScope, view: paneView, width: paneW)
+                            WorkPanePane(scope: paneScope, width: paneW)
                                 .id(paneScope.key)
                                 .overlay(alignment: .leading) {
                                     PaneResizeHandle(
@@ -276,7 +276,6 @@ struct ConversationView: View {
         .onChange(of: paneScope?.key, initial: true) { _, key in
             if let key { WorkPaneStore.shared.switched(to: key) }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakWorkPaneOpen)) { note in WorkPaneActions.open(note, model: model) }
         .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
@@ -315,10 +314,10 @@ struct ConversationView: View {
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in toggleRightPane() }
         // ⌥⌘C shows the Code panel, or closes it when it is the one showing; a diff opened anywhere shows it too.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in if !WorkPaneActions.toggle(.changes, model: model) { dock.update { $0.toggle(.code) } } }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in if !WorkPaneActions.open(.changes, model: model) { dock.update { $0.show(.code) } } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in if !WorkPaneActions.toggleRail(.changes, model: model) { dock.update { $0.toggle(.code) } } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in if !WorkPaneActions.showRail(.changes, model: model) { dock.update { $0.show(.code) } } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowFiles)) { _ in
-            if WorkPaneActions.open(.files, model: model) { return }
+            if WorkPaneActions.showRail(.files, model: model) { return }
             inspectorTabRaw = InspectorTab.files.rawValue
             dock.update { $0.show(.code) }
         }
@@ -333,12 +332,12 @@ struct ConversationView: View {
                     .keyboardShortcut("\\", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
                     Button("Inspector: \(t.title)") {
-                        // New layout: Files and Changes are work pane views; Review is the diff inside Changes.
-                        let view: WorkPaneView = t == .files ? .files : .changes
-                        if WorkPaneActions.open(view, model: model) {
-                            if t == .review, let cwd = model.selectedSession?.cwd, !cwd.isEmpty { model.filesModel(root: cwd).showReview() }
+                        // New layout: Files and Changes are the rail's lists; Review opens the Duck's changes as one tab.
+                        if t == .review, let cwd = model.selectedSession?.cwd, !cwd.isEmpty, WorkPaneActions.isDuckView(model.selectedSession) {
+                            model.filesModel(root: cwd).showReview()
                             return
                         }
+                        if WorkPaneActions.showRail(t == .files ? .files : .changes, model: model) { return }
                         inspectorTabRaw = t.rawValue; dock.update { $0.show(.code) }
                     }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])

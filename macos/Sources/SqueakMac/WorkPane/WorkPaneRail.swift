@@ -1,8 +1,9 @@
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md 8.12: the slim icon rail on the right edge of a Duck's chat (and of a Pond's Room and Dashboard). One icon per work pane view; the selected one
-// has the `selected` fill and a 3pt duck-yellow bar at the rail's edge; Changes carries the changed-file count.
+// DESIGN.md 8.12: the one slim icon rail on the right edge of the Dashboard, the Room and every Duck. One icon per tool
+// (`RailTool`); the selected one (open list, current tab or shown pane) has the `selected` fill and a 3pt duck-yellow bar at
+// the rail's edge; Changes carries the changed-file count.
 
 struct WorkPaneRail: View {
     let scope: WorkPaneScope
@@ -10,41 +11,71 @@ struct WorkPaneRail: View {
 
     var body: some View {
         let store = WorkPaneStore.shared
-        let duck = scope.key
-        let shown = store.pane.current == duck ? store.pane.shown : nil
-        let changed = scope.changesSession(model).flatMap { model.changesStore(for: $0.key.hostSessionId).changes?.files.count }
-        VStack(spacing: 6) {
-            tool(.changes, shown: shown, badge: WorkPaneMetrics.badge(count: changed))
-            tool(.files, shown: shown)
-            tool(.artifacts, shown: shown)
-            if let workspace = model.pondWorkspace {
-                let selected = model.tabStore.currentPondItem(workspace.project.id) == .notebook
-                WorkPaneRailButton(title: "Notebook", symbol: "book.closed", selected: selected, badge: nil) {
-                    model.openPondItem(.notebook)
+        let popovers = RailPopoverState.shared
+        let shown = store.pane.current == scope.key ? store.pane.shown : nil
+        VStack(spacing: CGFloat(RailMetrics.spacing)) {
+            // Flow per icon: Changes, Files and Artifacts open a one-shot list under the icon (pick an item: it opens as a tab);
+            // Notebook opens the Pond Notebook as a tab; Terminal opens or closes the side pane. Tasks takes its place
+            // between Artifacts and Notebook when its list ships (#88): the rail already has room for all six.
+            ForEach(RailTool.shown) { tool in
+                switch tool.opens {
+                case .popover:
+                    RailButton(title: tool.title, symbol: tool.symbol, selected: popovers.isOpen(tool), badge: badge(tool)) {
+                        popovers.toggle(tool)
+                    }
+                    .help(tool.title)
+                    .popover(isPresented: Binding(get: { popovers.isOpen(tool) }, set: { popovers.set(tool, open: $0) }), arrowEdge: .leading) {
+                        popover(tool)
+                    }
+                case .tab:
+                    let selected = model.pondWorkspace.map { model.tabStore.currentPondItem($0.project.id) == .notebook } ?? false
+                    RailButton(title: tool.title, symbol: tool.symbol, selected: selected, badge: nil) { model.openPondItem(.notebook) }
+                        .help("Open the Pond Notebook")
+                case .pane:
+                    RailButton(title: tool.title, symbol: tool.symbol, selected: shown == .terminal, badge: nil) {
+                        WorkPaneStore.shared.toggle(.terminal, duck: scope.key)
+                    }
+                    .help(shown == .terminal ? "Close Terminal" : "Terminal")
                 }
-                .help("Open the Pond Notebook")
             }
-            tool(.terminal, shown: shown)
             Spacer(minLength: 0)
         }
-        .padding(.top, Space.s)
+        .padding(.top, CGFloat(RailMetrics.topPadding))
         .frame(width: WorkPaneMetrics.railWidth)
         .frame(maxHeight: .infinity)
         .background(Theme.bg.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Work pane")
+        .accessibilityLabel("Rail")
+        // The Pond-wide count behind the Changes badge is read now and then while the window shows this page.
+        .task(id: scope.key) {
+            guard scope.isPond else { return }
+            while !Task.isCancelled {
+                if model.windowVisible { await RailChangesSource.refresh(scope: scope, model: model) }
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
+        // The page changed: a list belongs to the page it was opened on.
+        .onChange(of: scope.key) { RailPopoverState.shared.close() }
     }
 
-    private func tool(_ view: WorkPaneView, shown: WorkPaneView?, badge: String? = nil) -> some View {
-        WorkPaneRailButton(title: view.title, symbol: view.symbol, selected: shown == view, badge: badge) {
-            WorkPaneStore.shared.toggle(view, duck: scope.key)
+    private func badge(_ tool: RailTool) -> String? {
+        guard tool == .changes else { return nil }
+        return WorkPaneMetrics.badge(count: RailChanges.total(RailChangesSource.sections(scope: scope, model: model)))
+    }
+
+    @ViewBuilder private func popover(_ tool: RailTool) -> some View {
+        let close = { RailPopoverState.shared.close() }
+        switch tool {
+        case .changes: RailChangesPopover(scope: scope, close: close)
+        case .files: RailFilesPopover(scope: scope, close: close)
+        case .artifacts: RailArtifactsPopover(scope: scope, close: close)
+        case .tasks, .notebook, .terminal: EmptyView()
         }
-        .help(shown == view ? "Close \(view.title)" : view.title)
     }
 }
 
-private struct WorkPaneRailButton: View {
+private struct RailButton: View {
     let title: String
     let symbol: String
     let selected: Bool

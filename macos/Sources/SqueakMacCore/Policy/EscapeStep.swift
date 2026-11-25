@@ -8,7 +8,7 @@ import Foundation
 public enum EscapeStep: Equatable, Sendable {
     /// Nothing, but the key is still swallowed: Esc never exits full screen.
     case nothing
-    /// Close the work pane (open and unpinned).
+    /// Close the work pane (open).
     case closePane
     /// A Duck's chat: go to the Pond's Room.
     case toRoom
@@ -25,14 +25,14 @@ public enum EscapeRule {
     }
 
     /// The first rung that applies wins. `overlayOpen` (a sheet or anything else that owns Esc) comes first and leaves the key to
-    /// it. A pinned pane is the person's to close, so it is skipped. Esc is not bound to stopping a turn or clearing the
+    /// it. Esc is not bound to stopping a turn or clearing the
     /// composer anywhere, so `turnRunning` and a draft never change the step: a draft is kept per Duck and survives the move.
     /// The classic layout never navigates: it only swallows the key.
     public static func step(
-        isNewLayout: Bool, overlayOpen: Bool, paneOpen: Bool, panePinned: Bool, page: Page, turnRunning: Bool
+        isNewLayout: Bool, overlayOpen: Bool, paneOpen: Bool, page: Page, turnRunning: Bool
     ) -> EscapeStep {
         guard isNewLayout, !overlayOpen else { return .nothing }
-        if paneOpen, !panePinned { return .closePane }
+        if paneOpen { return .closePane }
         switch page {
         case .duckChat: return .toRoom
         case .room: return .toDashboard

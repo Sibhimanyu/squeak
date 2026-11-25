@@ -1,12 +1,6 @@
 import Foundation
 import SqueakMacCore
 
-extension Notification.Name {
-    /// Something was opened (a file, a diff, an artifact, a shell): in the new layout the work pane shows it. `userInfo`:
-    /// "view" (a `WorkPaneView` raw value) and optionally "root" (the folder it belongs to). The old layout ignores it.
-    static let squeakWorkPaneOpen = Notification.Name("SqueakWorkPaneOpen")
-}
-
 /// What a work pane belongs to: one Duck's chat, or the Pond itself (the Room and the Dashboard).
 @MainActor enum WorkPaneScope {
     case duck(HostSession)
@@ -48,50 +42,43 @@ extension Notification.Name {
         return PondWorkScope(key: key, projectId: project.id, name: PondsModel.shared.name(key: key), root: project.rootPath)
     }
 
-    /// Tells the window something was opened. Cheap and harmless in the old layout.
-    static func announce(_ view: WorkPaneView, root: String? = nil) {
-        var info: [String: String] = ["view": view.rawValue]
-        if let root { info["root"] = root }
-        NotificationCenter.default.post(name: .squeakWorkPaneOpen, object: nil, userInfo: info)
-    }
-
-    /// Opens `view` for the chat on screen. False when this is not a Duck view (the caller keeps the old behaviour).
+    /// Shows the Terminal pane for the page on screen. False when this is not a new-layout page (the caller keeps the old behaviour).
     @discardableResult
-    static func open(_ view: WorkPaneView, model: AppModel, root: String? = nil) -> Bool {
-        if let pond = pondScope(model: model) {
-            if pond.owns(root: root) { WorkPaneStore.shared.open(view, duck: pond.paneKey) }
-            return true
-        }
-        guard let session = model.selectedSession, isDuckView(session) else { return false }
-        if let root, let cwd = session.cwd, !cwd.isEmpty, cwd != root { return true }
-        WorkPaneStore.shared.open(view, duck: duckKey(session))
+    static func open(_ view: WorkPaneView, model: AppModel) -> Bool {
+        guard let key = pageKey(model: model) else { return false }
+        WorkPaneStore.shared.open(view, duck: key)
         return true
     }
 
-    static func open(_ note: Notification, model: AppModel) {
-        guard let raw = note.userInfo?["view"] as? String, let view = WorkPaneView(rawValue: raw) else { return }
-        open(view, model: model, root: note.userInfo?["root"] as? String)
+    /// A shortcut or menu item for a list tool (Changes, Files): opens its popover on the rail, or closes it when it is the
+    /// one open. False when the page has no rail (the caller keeps the old behaviour).
+    @discardableResult
+    static func toggleRail(_ tool: RailTool, model: AppModel) -> Bool {
+        guard pageKey(model: model) != nil else { return false }
+        RailPopoverState.shared.toggle(tool)
+        return true
     }
 
-    /// A shortcut or menu item: the icon's own behaviour (opens, or closes when it is the one showing).
+    /// A person's action that shows a list (a folder revealed, a review asked for): opens the popover, never closes it.
+    @discardableResult
+    static func showRail(_ tool: RailTool, model: AppModel) -> Bool {
+        guard pageKey(model: model) != nil else { return false }
+        RailPopoverState.shared.set(tool, open: true)
+        return true
+    }
+
+    /// The key of the new-layout page on screen (a Pond page or a Duck view); nil in the classic layout and elsewhere.
+    private static func pageKey(model: AppModel) -> String? {
+        if let pond = pondScope(model: model) { return pond.paneKey }
+        guard let session = model.selectedSession, isDuckView(session) else { return nil }
+        return duckKey(session)
+    }
+
+    /// A shortcut or menu item: the Terminal icon's own behaviour (opens, or closes when it is showing).
     @discardableResult
     static func toggle(_ view: WorkPaneView, model: AppModel) -> Bool {
-        if let pond = pondScope(model: model) {
-            WorkPaneStore.shared.toggle(view, duck: pond.paneKey)
-            return true
-        }
-        guard let session = model.selectedSession, isDuckView(session) else { return false }
-        WorkPaneStore.shared.toggle(view, duck: duckKey(session))
+        guard let key = pageKey(model: model) else { return false }
+        WorkPaneStore.shared.toggle(view, duck: key)
         return true
-    }
-}
-
-extension WorkPaneScope {
-    /// The chat whose Changes the pane reads: the Duck's own, or (for a Pond) a real session working in the Pond's folder.
-    @MainActor func changesSession(_ model: AppModel) -> HostSession? {
-        switch self {
-        case .duck(let s): s
-        case .pond(let p): p.changesSession(in: model.allSessions)
-        }
     }
 }

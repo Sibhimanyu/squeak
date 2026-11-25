@@ -12,10 +12,8 @@ import Testing
         #expect(!p.isOpen)
     }
 
-    @Test func iconOpensThenSameIconCloses() {
+    @Test func theTerminalIconOpensThenClosesThePane() {
         var p = WorkPane()
-        p.toggle(.files, duck: "a")
-        #expect(p.shown == .files)
         p.toggle(.terminal, duck: "a")
         #expect(p.shown == .terminal)
         p.toggle(.terminal, duck: "a")
@@ -24,53 +22,25 @@ import Testing
         #expect(p.shown == .terminal)
     }
 
-    @Test func unpinnedPaneClosesOnSwitchAndKeepsEachDucksLastView() {
-        var p = WorkPane()
-        p.open(.files, duck: "a")
-        p.switched(to: "b")
-        #expect(p.shown == nil)
-        p.open(.artifacts, duck: "b")
-        p.switched(to: "a")
-        #expect(p.shown == nil)
-        p.toggle(.changes, duck: "a")
-        p.close()
-        p.switched(to: "b")
-        p.open(.artifacts, duck: "b")
-        #expect(p.memory["a"]?.view == .changes)
-        #expect(p.memory["b"]?.view == .artifacts)
-    }
-
-    @Test func pinnedPaneStaysOpenAcrossDucksAndCarriesViewToANewDuck() {
+    @Test func thePaneClosesOnSwitchingPageWithNoPin() {
         var p = WorkPane()
         p.open(.terminal, duck: "a")
-        p.setPinned(true)
         p.switched(to: "b")
-        #expect(p.shown == .terminal)
-        p.open(.files, duck: "b")
+        #expect(p.shown == nil)
+        p.open(.terminal, duck: "b")
         p.switched(to: "a")
-        #expect(p.shown == .terminal)
-        p.switched(to: "b")
-        #expect(p.shown == .files)
-    }
-
-    @Test func pinnedButClosedStaysClosedOnSwitch() {
-        var p = WorkPane()
-        p.setPinned(true)
-        p.open(.files, duck: "a")
-        p.close()
-        p.switched(to: "b")
         #expect(p.shown == nil)
     }
 
-    @Test func aDuckOpeningSomethingSelectsItsDuckSoTheNextSwitchEventIsANoOp() {
+    @Test func aPageOpeningTheTerminalSelectsItSoTheNextSwitchEventIsANoOp() {
         var p = WorkPane()
         p.switched(to: "a")
-        p.open(.files, duck: "b")
+        p.open(.terminal, duck: "b")
         p.switched(to: "b")
-        #expect(p.shown == .files)
+        #expect(p.shown == .terminal)
     }
 
-    @Test func widthIsRememberedPerDuckAndClamped() {
+    @Test func widthIsRememberedPerPageAndClamped() {
         var p = WorkPane()
         p.setWidth(500, duck: "a")
         p.setWidth(10_000, duck: "b")
@@ -90,27 +60,24 @@ import Testing
         #expect(WorkPaneMetrics.drawn(stored: nil, window: 2000, sidebar: 256) == WorkPaneMetrics.defaultWidth)
     }
 
-    @Test func savedStateKeepsPinViewsAndWidthsButNotOpenness() throws {
+    @Test func savedStateKeepsWidthsButNotOpenness() throws {
         var p = WorkPane()
-        p.open(.artifacts, duck: "a")
+        p.open(.terminal, duck: "a")
         p.setWidth(480, duck: "a")
-        p.setPinned(true)
         let back = try JSONDecoder().decode(WorkPane.self, from: JSONEncoder().encode(p))
-        #expect(back.pinned)
-        #expect(back.memory["a"] == WorkPane.Memory(view: .artifacts, width: 480))
+        #expect(back.memory["a"] == WorkPane.Memory(view: .terminal, width: 480))
         #expect(!back.isOpen)
     }
 
     @Test func garbageSavedStateIsAnEmptyPane() throws {
-        let back = try JSONDecoder().decode(WorkPane.self, from: Data(#"{"pinned":"x","memory":{"a":{"view":"bogus"}}}"#.utf8))
-        #expect(!back.pinned)
+        let back = try JSONDecoder().decode(WorkPane.self, from: Data(#"{"pinned":"x","memory":"nope"}"#.utf8))
         #expect(back.memory.isEmpty)
     }
 
-    @Test func forgetDropsDucksThatAreGone() {
+    @Test func forgetDropsPagesThatAreGone() {
         var p = WorkPane()
-        p.open(.files, duck: "a")
-        p.open(.files, duck: "b")
+        p.open(.terminal, duck: "a")
+        p.open(.terminal, duck: "b")
         p.forget(keeping: ["b"])
         #expect(p.memory.keys.sorted() == ["b"])
     }
@@ -124,10 +91,11 @@ import Testing
         #expect(WorkPaneMetrics.duckKey(duckId: nil, sessionKey: "s") == "chat:s")
     }
 
-    @Test func oldCanvasViewReadsBackAsArtifacts() throws {
-        let json = #"{"pinned":true,"memory":{"a":{"view":"canvas","width":480}}}"#
+    @Test func oldSavedViewsAndThePinReadBackAsTheTerminalPane() throws {
+        let json = #"{"pinned":true,"memory":{"a":{"view":"canvas","width":480},"b":{"view":"files"}}}"#
         let p = try JSONDecoder().decode(WorkPane.self, from: Data(json.utf8))
-        #expect(p.memory["a"]?.view == .artifacts)
-        #expect(WorkPaneView.artifacts.title == "Artifacts")
+        #expect(p.memory["a"] == WorkPane.Memory(view: .terminal, width: 480))
+        #expect(p.memory["b"]?.view == .terminal)
+        #expect(WorkPaneView.allCases == [.terminal])
     }
 }

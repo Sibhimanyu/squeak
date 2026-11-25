@@ -43,7 +43,7 @@ enum WindowEscape {
             }
         }
         let step = EscapeRule.step(
-            isNewLayout: isNew, overlayOpen: window.attachedSheet != nil, paneOpen: pane.shown != nil, panePinned: pane.pinned,
+            isNewLayout: isNew, overlayOpen: window.attachedSheet != nil, paneOpen: pane.shown != nil,
             page: page, turnRunning: false)
         if window.attachedSheet == nil, step != .closePane, let workspace = model.pondWorkspace,
            model.tabStore.currentPondItem(workspace.project.id) != nil {
