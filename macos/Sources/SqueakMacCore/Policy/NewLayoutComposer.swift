@@ -25,6 +25,15 @@ public struct MessageActionBarState: Equatable, Sendable {
 
 /// The model chip above the new composer's field: "Pip · Opus 5.5 · Medium", tapping it opens the model picker.
 public enum ComposerChip {
+    /// The name the chip leads with: the host's name for the session's Duck (matched by Duck id, else by its current chat).
+    /// Only a session with no Duck falls back to the chat title; a Duck whose roster has not arrived yet shows no name
+    /// rather than flashing the chat title (never a name the app made up).
+    public static func duckName(duckId: String?, sessionId: String, ducks: [PondDuck]?, chatTitle: String) -> String? {
+        guard let duckId, !duckId.isEmpty else { return chatTitle }
+        let duck = ducks?.first { $0.id == duckId } ?? ducks?.first { $0.currentSessionId == sessionId }
+        return duck?.name
+    }
+
     /// The words, dropping any part that is unknown; the duck's name is clipped so a long title never fills the line.
     public static func line(duck: String?, model: String?, effort: String?, limit: Int = 24) -> String {
         let name = duck?.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: \.isNewline).first.map(String.init) ?? ""

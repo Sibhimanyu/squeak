@@ -3,6 +3,15 @@ import Testing
 @testable import SqueakMacCore
 
 struct NewLayoutComposerTests {
+    @Test func chipNamesTheHostDuckNotTheChatTitle() {
+        let ducks = [PondDuck(id: "d1", name: "Pip", currentSessionId: "s1"), PondDuck(id: "d2", name: "Moss", currentSessionId: "s2")]
+        #expect(ComposerChip.duckName(duckId: "d1", sessionId: "s9", ducks: ducks, chatTitle: "Fix the zoom bug") == "Pip")
+        #expect(ComposerChip.duckName(duckId: "dX", sessionId: "s2", ducks: ducks, chatTitle: "Fix the zoom bug") == "Moss")
+        #expect(ComposerChip.duckName(duckId: "d1", sessionId: "s1", ducks: nil, chatTitle: "Fix the zoom bug") == nil)
+        #expect(ComposerChip.duckName(duckId: nil, sessionId: "s1", ducks: ducks, chatTitle: "Fix the zoom bug") == "Fix the zoom bug")
+        #expect(ComposerChip.line(duck: "Pip", model: "Opus 5.5", effort: nil) == "Pip \u{00B7} Opus 5.5")
+    }
+
     @Test func actionBarIsHiddenAtRest() {
         let s = MessageActionBarState()
         #expect(!s.isVisible)

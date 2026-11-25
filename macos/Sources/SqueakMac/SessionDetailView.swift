@@ -880,7 +880,7 @@ struct SessionDetail: View {
             onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
             picker: pickerSource,
             pondId: PondsModel.shared.key(of: session),
-            duckName: session.title
+            duckName: model.composerDuckName(session)
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)
