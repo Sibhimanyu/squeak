@@ -47,9 +47,17 @@ final class PondRoomModel {
     private(set) var visitSeenAt: Int64?
     private var seenKey: String { "squeak.room.seenAt.\(projectId)" }
 
+    /// The newest thing in the Room when this visit's rows first drew: later arrivals were read as they came.
+    private(set) var visitThrough: Int64?
+
     func beginVisit() {
         let stored = UserDefaults.standard.object(forKey: seenKey) as? Int64
         visitSeenAt = stored
+        visitThrough = nil
+    }
+
+    func noteVisitEdge(_ items: [RoomItem]) {
+        if visitThrough == nil { visitThrough = RoomUnread.seenUpTo(items) }
     }
 
     /// The Room has been read up to its newest thing (written while it is on screen at its newest end, and as it is left).
@@ -341,7 +349,7 @@ struct PondRoomView: View {
         case .ready:
             let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
             let built = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
-            let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt)
+            let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt, through: room.visitThrough)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)
@@ -418,7 +426,7 @@ struct PondRoomView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
-            .onAppear { ledger.freeze(items.map(\.id)) }
+            .onAppear { ledger.freeze(items.map(\.id)); room.noteVisitEdge(items) }
             .onDisappear { room.markSeen(items) }
             .onChange(of: count) { old, new in
                 if atBottom { room.markSeen(items) }
