@@ -55,6 +55,8 @@ export interface RoomPost {
   level: RoomLevel;
   text: string;
   toSessionId?: string;
+  /** The receiving Duck's name (host-decided), set whenever `toSessionId` names a chat that exists. */
+  toName?: string;
   /** What a one-line status post expands to (a `plan` card's spec and plan). */
   detail?: string;
   /** The card (a `plan` post) this message comments on. */
@@ -102,6 +104,8 @@ export interface DuckView {
   id: string;
   projectId: string;
   name: string;
+  /** The title of the chat it is on: what it is working on ("Pip · Zoom SDK video fix"). */
+  chatTitle?: string;
   role?: string;
   colourSeed: string;
   duty: "on" | "off";
@@ -256,6 +260,7 @@ export class Room extends EventEmitter {
     this.setMaxListeners(0);
     this.store = options.store;
     this.now = options.now ?? Date.now;
+    this.startedAt = this.now();
     this.attachments = new RoomAttachments(
       options.store,
       options.attachmentsDir ?? path.join(os.tmpdir(), `squeak-room-attachments-${process.pid}`),
@@ -263,6 +268,7 @@ export class Room extends EventEmitter {
     this.log = new TimelineLog(options.store.db);
     this.reader = new TurnReader(this.log, this.now);
     try {
+      this.store.nameUnnamedDucks();
       this.migrateDucks();
     } catch (error) {
       logger.warn("duck migration failed", { error: String(error) });
@@ -543,7 +549,14 @@ export class Room extends EventEmitter {
     return this.store.roomPostsBySession(sessionId, since).some((p) => p.kind === kind);
   }
 
-  /** The wire form of posts, with their attachments. */
+  /** The name of the Duck a chat belongs to, else the chat's title; null only when the chat is gone. */
+  private receiverName(sessionId: string): string | null {
+    const s = this.store.getSession(sessionId);
+    if (!s) return null;
+    return this.store.duckBySession(sessionId)?.name ?? agentName(s);
+  }
+
+  /** The wire form of posts, with their attachments and the receiving Duck's name. */
   toPosts(projectId: string, rows: RoomPostRow[]): RoomPost[] {
     const atts = this.attachments.forPosts(
       projectId,
@@ -551,7 +564,8 @@ export class Room extends EventEmitter {
     );
     return rows.map((r) => {
       const a = atts.get(r.id);
-      return a?.length ? { ...toRoomPost(r), attachments: a } : toRoomPost(r);
+      const toName = r.toSessionId ? this.receiverName(r.toSessionId) : null;
+      return { ...toRoomPost(r), ...(toName ? { toName } : {}), ...(a?.length ? { attachments: a } : {}) };
     });
   }
 
@@ -764,6 +778,9 @@ export class Room extends EventEmitter {
   /** When a duck was last put on duty in this run (a duck put back on duty gets a fresh hour). */
   private readonly onDutyAt = new Map<string, number>();
 
+  /** When this host run began: the idle hour is watched while the host runs, so a restart never retires anyone. */
+  private readonly startedAt: number;
+
   /**
    * Puts every on-duty duck with no new work for `idleMs` off duty (history stays). Busy means a running or waiting turn,
    * or a Task it holds (`busyDuckIds`, from the Tasks); a new message in any of its chats counts as work.
@@ -775,7 +792,7 @@ export class Room extends EventEmitter {
       this.sessionsOf(p.id);
       for (const d of this.store.listDucks(p.id)) {
         if (d.duty !== "on" || busyDuckIds.has(d.id)) continue;
-        let last = Math.max(Date.parse(d.createdAt) || 0, this.onDutyAt.get(d.id) ?? 0);
+        let last = Math.max(Date.parse(d.createdAt) || 0, this.onDutyAt.get(d.id) ?? 0, this.startedAt);
         let busy = false;
         for (const sid of this.store.duckSessionIds(d.id)) {
           const s = this.store.getSession(sid);
@@ -902,6 +919,7 @@ export class Room extends EventEmitter {
       id: duck.id,
       projectId: duck.projectId,
       name: duck.name ?? (s ? agentName(s) : "Duck"),
+      ...(s?.title?.trim() ? { chatTitle: s.title.trim() } : {}),
       ...(duck.role ? { role: duck.role } : {}),
       colourSeed: duck.colourSeed,
       duty: duck.duty,

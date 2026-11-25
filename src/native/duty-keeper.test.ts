@@ -86,14 +86,47 @@ describe("Off duty after an idle hour", () => {
     expect(r.keeper.tick()).toBe(1);
   });
 
-  it("checks on start and on every timer tick, never with a real timer in tests", () => {
+  it("a Duck idle for days before a host restart stays on duty at start and goes off an hour later", () => {
+    let clock = Date.now();
+    const store = new NativeStore(":memory:");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duty-restart-"));
+    const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
+    const s = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title: "c" });
+    store.db
+      .prepare("UPDATE sessions SET updated_at=? WHERE id=?")
+      .run(new Date(clock - 5 * 24 * HOUR).toISOString(), s.id);
+    const old = new Date(clock - 5 * 24 * HOUR).toISOString();
+    store.duckForSession(s.id, project.id);
+    store.db.prepare("UPDATE ducks SET created_at=?").run(old);
+    // The host starts now: a new Room over the same store, five days after the Duck last worked.
+    const room = new Room({ store, ownerName: () => "Sam", now: () => clock });
+    const ticks: Array<() => void> = [];
+    const keeper = new DutyKeeper({
+      room,
+      busy: () => new Set(),
+      schedule: (fn) => (ticks.push(fn), { stop: () => ticks.splice(0) }),
+    });
+    keeper.start();
+    ticks[0]!();
+    expect(store.duckBySession(s.id)!.duty).toBe("on");
+    clock += HOUR - 60_000;
+    expect(keeper.tick()).toBe(0);
+    clock += 120_000;
+    expect(keeper.tick()).toBe(1);
+    expect(store.duckBySession(s.id)!.duty).toBe("off");
+    keeper.stop();
+  });
+
+  it("does not look at start; every timer tick looks, never with a real timer in tests", () => {
     const r = rig();
     const s = r.chat();
     r.duck(s.id);
     r.advance(2 * HOUR);
     r.keeper.start();
-    expect(r.duty(s.id)).toBe("off");
+    expect(r.duty(s.id)).toBe("on");
     expect(r.ticks).toHaveLength(1);
+    r.ticks[0]!();
+    expect(r.duty(s.id)).toBe("off");
     const s2 = r.chat();
     r.duck(s2.id);
     r.advance(2 * HOUR);

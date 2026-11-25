@@ -67,6 +67,8 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var level: RoomLevel
     public var text: String
     public var toSessionId: String?
+    /// The receiving duck's name, decided by the host (the chat title when it has no name); nil for a host that sends none.
+    public var toName: String?
     /// What a one-line status post expands to (a spec+plan card's body); nil for a host that sends none.
     public var detail: String?
     /// The spec+plan card a person's comment is on.
@@ -88,7 +90,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         self.level = level; self.text = text; self.toSessionId = toSessionId; self.attachments = attachments; self.at = at
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, detail, replyTo, attachments, canvases, at }
+    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, toName, detail, replyTo, attachments, canvases, at }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A post with no seq or id cannot be placed; the page drops it (see `Failable`).
@@ -100,6 +102,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         level = (try? c.decode(String.self, forKey: .level)).flatMap(RoomLevel.init(rawValue:)) ?? .room
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         toSessionId = try? c.decode(String.self, forKey: .toSessionId)
+        toName = (try? c.decode(String.self, forKey: .toName)).flatMap { $0.isEmpty ? nil : $0 }
         detail = try? c.decode(String.self, forKey: .detail)
         replyTo = try? c.decode(String.self, forKey: .replyTo)
         attachments = ((try? c.decode([Failable<RoomAttachment>].self, forKey: .attachments)) ?? []).compactMap(\.value)
