@@ -38,9 +38,11 @@ On first launch, choose **Set up Squeak** on the Welcome screen. The guided setu
 You can skip the optional steps. While any step is still to do, a **Finish setting up** card sits at the top of the
 Settings sidebar. Open it to finish.
 
+The new Mac layout is the default. To switch back, turn on **Classic layout** in **Settings › This Mac › General**.
+
 ## 3. Add extensions (optional)
 
-Settings › Extensions lists everything that is off until you add it:
+Open **Settings › Extensions** to add an optional integration.
 
 - **Claude Code (external)** and **Codex (external)** show chats you started outside Squeak, in Terminal or the Claude
   desktop app. Adding one puts Squeak's hooks in that agent's settings; removing it takes them out again.
@@ -56,7 +58,7 @@ terminals (iTerm, tmux, ssh), Claude Desktop and Cowork stay watch-only.
 Squeak sends cards to a bot you own, with buttons to answer.
 
 1. In Telegram, message **@BotFather**, send `/newbot` and copy the token.
-2. Open **Settings › Telegram**, paste the token and choose which chats may
+2. Open **Settings › Extensions › Telegram**, paste the token and choose which chats may
    talk to the bot.
 
 ## 5. Zoho Cliq (optional, Zoho orgs only)
@@ -64,12 +66,15 @@ Squeak sends cards to a bot you own, with buttons to answer.
 The Cliq channel is built for a particular Zoho org setup: a managed org blocks
 a personal Zoho OAuth app, so taps and replies come back through three Deluge
 handlers you paste into a Cliq bot. If you are not in a Zoho org, skip it.
-Follow [`cliq.md`](cliq.md).
+Follow the [Zoho Cliq setup guide](cliq.md).
+
+For PBX calls, open **Settings › Extensions › Phone calls**. Follow the [Phone calls guide](voice.md).
 
 ## 6. iPhone and web (optional)
 
-Sign in to Squeak on the Mac first (Settings › Account). Then sign in with the same account on your other devices. They
-find your Mac by themselves. There are no codes to scan or type.
+Sign in under **Settings › You › Account** on the Mac to set up Squeak's hosted relay. On your iPhone or browser,
+sign in with the same account and open your Mac. If **Ask before adding my own devices** is on, approve the device
+on the Mac in **Settings › Devices**.
 
 The iPhone app needs iOS 18 or later and is installed through SideStore, not the App Store. Add
 `https://sibhimanyu.github.io/squeak/ios/source.json` as a source in SideStore.
@@ -85,8 +90,7 @@ The design is in [`remote-channel.md`](remote-channel.md).
 - **Not notarized yet.** Expect the Gatekeeper warning on first open.
 - **Apple silicon only**, macOS 14 or later.
 - **Sessions in other terminals, Claude Desktop and Cowork are watch-only.**
-- **No push notifications on the iPhone** with a free Apple ID (SideStore);
-  Telegram or Cliq can carry them.
+- **iPhone notifications.** Use Telegram or Cliq for alerts. The SideStore build has no push notifications.
 
 ## Troubleshooting
 
@@ -95,7 +99,7 @@ For chats started outside Squeak, check that the Claude Code (external) or Codex
 Settings › Extensions. That is what installs the hooks.
 
 **The app says the background service is not running.**
-Open **Settings › Background service**. Install it if it is missing, or
+Open **Settings › This Mac › Background service**. Install it if it is missing, or
 use Repair if a version failed its health check. The service listens only on
 `127.0.0.1:8477`.
 
@@ -103,7 +107,7 @@ use Repair if a version failed its health check. The service listens only on
 Sending, terminal sessions and every channel need the background service; fix
 that first.
 
-**Copy diagnostics.** Settings › Background service has Copy diagnostics, a redacted
+**Copy diagnostics.** Settings › This Mac › Background service has Copy diagnostics, a redacted
 report you can attach to a bug report.
 
 To remove Squeak again, see [Uninstalling Squeak](uninstall.md).

@@ -1,147 +1,26 @@
-# Step 4 — The remote channel (design, before any code)
+# The remote channel
 
-> Status: **built** · 2026-09-25 · Roadmap steps 4–5 in `DESIGN.md` §13.
-> iOS via SideStore. There is no push notification (no FCM, no APNs): see "As built". The Firebase design below is the
-> original one; Squeak's hosted cloud replaced it (see "Squeak hosts the cloud" near the end).
->
-> This is the first step where a device that is not your Mac can make agents
-> on your Mac _do things_. That is remote code execution with extra steps: an
-> agent running `bypassPermissions` will run whatever a reply asks for. So the
-> security model is decided here, on paper, before the first line of code.
+Sign in to Squeak on the Mac in **Settings › You › Account**. This provisions the hosted Catalyst relay. Sign in
+with the same account on the iPhone or browser and open your Mac. New devices use account sign-in. When
+**Ask before adding my own devices** is on, approve the device on the Mac.
 
-## What it has to do
+The iPhone's SideStore build has no push notifications. Telegram and Zoho Cliq carry alerts. The iPhone
+syncs when open and can use a direct path on the same Wi-Fi. The browser uses the relay.
 
-1. **See** — the phone shows what the Squeak window shows: sessions by state,
-   the agent's last message, the parsed decision.
-2. **Be told** — a push notification when something needs you or a Conductor
-   chat finishes. Not built for the phone (a free Apple ID cannot use APNs); Telegram and Cliq do this.
-3. **Answer** — tap a letter or send text to one specific chat.
-4. **Work when the Mac is not reachable directly** — the phone is on cellular,
-   the Mac is behind home NAT. The Mac only ever makes _outbound_ connections.
+## Trust and delivery
 
-Explicitly **not** in scope for step 4 (starting new chats was later added, see the end): stopping agents,
-approving permission prompts, reading diffs of arbitrary files, anything that
-touches a machine other than this Mac. Each is a later, separate decision.
+- The device uses its own signing key. The Mac verifies the signature against its device list before acting.
+- Channel payloads are sealed with AES-256-GCM. The relay stores documents and signals changes.
+- Commands expire and carry a nonce. A reply to a question names its chat and turn so an old reply cannot
+  answer a newer question.
+- Revoke a device in **Settings › Devices**. Compatibility is pinned by the fixtures in `src/remote/fixtures`
+  and `ios/SqueakCore/Tests/SqueakCoreTests/Fixtures`.
 
-## Threat model
+## Channel features
 
-| Threat                                                      | What it would mean                                                | Mitigation (below)                                                                                                        |
-| ----------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Someone else's phone sends a reply                          | Arbitrary instructions to a `bypassPermissions` agent on your Mac | Device pairing + per-device keys; Mac verifies every command's signature                                                  |
-| The cloud provider (or a leaked admin key) forges a command | Same as above, at scale                                           | Commands are **signed on the phone with a key the cloud never sees**; the Mac rejects anything unsigned                   |
-| Replay of an old, legitimately signed "A"                   | An old decision re-sent to a new question                         | Each command names the chat **and the turn it answers**, carries a nonce and expiry; the Mac rejects stale or reused ones |
-| Conversation text leaks from the cloud                      | Your code, paths, business details exposed                        | Store only what the phone must render, encrypted end-to-end; short retention                                              |
-| Phone lost or stolen                                        | Holder can answer agents                                          | Revocation from the Mac app in one click; biometric unlock before sending                                                 |
-| Prompt injection _through_ the channel                      | A message crafted to look like a reply                            | Only the paired human can author commands; nothing from an agent is ever turned into a command                            |
+The dated notes below record protocol additions. See [Squeak hosts the cloud](#squeak-hosts-the-cloud-signing-in-sets-it-up-2026-11-11)
+for hosted provisioning and migration.
 
-The single most important property: **the Mac trusts a key, not a server.**
-Firebase (or anything) is a dumb, untrusted pipe. The same-Wi-Fi path added later
-(see "The direct path") is one more such pipe, with its own rows in the
-threat model there.
-
-## Options
-
-### A. Firebase (Firestore) — what was built first
-
-The Mac writes an encrypted snapshot and events to Firestore under your user;
-the phone reads it; replies go the other way as signed,
-encrypted command documents the Mac listens for.
-
-- ✅ Works from anywhere; the Mac only makes outbound HTTPS connections.
-- ✅ Real-time listeners on both sides; offline caching on the phone.
-- ✅ Free at this scale (a few thousand small documents a day).
-- ❌ A Google account and a Firebase project to set up (15 minutes, yours).
-- ❌ One more service holding data — mitigated by end-to-end encryption.
-
-### B. Keep Telegram as the transport
-
-The phone app talks to the existing Squeak bot.
-
-- ✅ Already works, already pushes.
-- ❌ A second bot client on the phone fights the one in Telegram; bot
-  messages cannot be end-to-end encrypted; the phone app would be a worse
-  Telegram. Telegram stays a channel, not the backbone.
-
-### C. Direct connection (Tailscale / WireGuard to the Mac)
-
-The phone talks straight to Squeak's loopback server over a private network.
-
-- ✅ No cloud at all.
-- ❌ Requires Tailscale on both devices and the Mac awake and online; no
-  push when the Mac sleeps; iOS background networking limits make "tell me
-  when it finishes" unreliable.
-
-## Recommended design (option A)
-
-### Pairing
-
-1. The Mac app shows **"Pair a phone"**: a QR code containing a one-time
-   pairing secret, the Mac's public key, and the Firebase project id.
-2. The phone app scans it, generates its own Ed25519 key pair in the Secure
-   Enclave / Android Keystore, and posts its public key, encrypted to the
-   Mac's key, to a pairing document.
-3. The Mac shows the phone's name and a 6-digit code; you confirm the code
-   matches on both screens. Only then is the device added to the Mac's local
-   allow-list (`squeak.db`, never the cloud).
-
-### What goes to the cloud
-
-- `snapshot` — the rendered `/state` for active sessions only, plus each
-  session's last message **truncated to what a card shows** and its parsed
-  choices. Encrypted with a key shared only between the Mac and paired phones.
-- `events` — "needs you" / "done" pushes, carrying only a session handle and
-  the three-line card text (so the lock screen can show it), encrypted.
-- `commands` — from the phone: `{ sessionId, answersTurn, text, mode?,
-messageId?, nonce, expiresAt }`, signed with the device key, encrypted to the
-  Mac (and the `kind: "start"`, `"usage"` and `"queue"` commands below).
-- Retention: snapshot overwritten in place; events and commands deleted by the
-  Mac as soon as they are processed, and expired server-side after 24 hours.
-
-### What the Mac accepts
-
-A command is executed only if **all** hold:
-
-1. Signature verifies against a paired, non-revoked device key.
-2. `expiresAt` is in the future (default lifetime 10 minutes) and the nonce
-   was never seen.
-3. `answersTurn` is the chat's **current** latest turn — a letter tapped for
-   yesterday's question is refused.
-4. The action is on the allow-list: _reply to an existing Conductor chat_.
-   Nothing else in step 4.
-5. The same busy rules as Telegram and the Mac window (`ConductorReplier`).
-
-Every accepted and rejected command is logged locally and shown in the Mac
-app's device list ("iPhone answered B in orchard · irrigation, 14:02").
-
-### The phone
-
-Home is the attention-ordered list from `DESIGN.md` §8.2; a tap opens the
-decision card (§8.4) or the reply composer (§8.5). Sending requires Face ID.
-The app is native SwiftUI, built with the same tokens (`DESIGN.md` §11). It sends no push notifications: Telegram and
-Cliq carry them.
-
-## As built (2026-09-25)
-
-Decisions: Firebase, iPhone only, a new project, reply-only scope.
-
-- **No push notifications on the phone.** A free Apple ID (SideStore) cannot
-  use APNs, so Telegram stays the notification channel; the app is where you
-  look and answer. The app polls only while it is on screen.
-- **No Firebase Auth.** Access is by capability: the channel id (128 random
-  bits) is only in the QR code, everything is AES-256-GCM encrypted, and
-  commands are signed. The rules (`firebase/firestore.rules`) allow nothing
-  else and were checked against the live database.
-- **Presence throttles cost.** The phone writes an encrypted presence ping
-  every 20s while open; the Mac polls every 2s then, every 15s otherwise, and
-  publishes the snapshot every 3s (open) or 60s (not) when it changed. A change
-  in what the phone shows (state, title, detail) publishes within ~300 ms
-  regardless, at most once a second; the phone looks for a new view every 2s
-  while on screen.
-- **Compatibility is pinned by fixtures** both ways (`src/remote/fixtures`,
-  `ios/SqueakCore/Tests/…/Fixtures`), and `scripts/e2e-remote.ts` pairs and
-  replies over the live project with both real implementations.
-- **The .ipa is published as .zip**: new projects on Spark refuse executable
-  uploads. SideStore installs from the bytes, not the extension.
 - **Queue or steer (2026-10-19).** `ReplyCommand` gains an optional `mode`,
   `"queue"` or `"steer"`, sealed and signed with the rest. Absent means queue,
   and the phone leaves it out for a queued reply, so those commands are
@@ -162,22 +41,9 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   old a reading is. Refreshing it from the phone came later (see "Usage
   refresh" below). A change in a reading republishes the snapshot;
   a re-read of the same numbers does not.
-- **The Realtime Database, streamed (2026-10-19).** With
-  `SQUEAK_REMOTE_DATABASE_URL` set, the channel's documents (same paths, same
-  `{ box, sig?, device?, at? }`) live in the project's Realtime Database
-  instead of Firestore (`src/remote/rtdb-rest.ts`,
-  `SqueakCore/RealtimeDatabase.swift`, rules in `firebase/database.rules.json`,
-  checked by `scripts/check-database-rules.sh` on the emulator). Why: it bills
-  for bytes stored and downloaded, never per read or write, and its REST API
-  streams changes as Server-Sent Events, which `fetch` and `URLSession` read
-  without an SDK. The Mac holds one stream each on `state/presence`, `pairing`
-  and `commands` and runs a pass within ~50 ms of a phone's write, polling only
-  every 60s as a safety net; the phone streams `state/snapshot` and `results`
-  and ticks every 20s only to keep presence fresh. A stream event only _wakes_
-  a pass: everything is still read through the same verbs and every check in
-  `handleCommand` runs unchanged, so a forged write to the stream runs nothing.
-  On the emulator (`SQUEAK_E2E_DATABASE_URL=… scripts/e2e-remote.ts`) a reply's
-  round trip was 74 ms and a steer's 16 ms.
+- **Legacy cloud transport.** Existing Realtime Database channels use Server-Sent Events. Each event wakes a read
+  through the store. The same command checks apply on Catalyst.
+
 - **A workflow's film, in sealed chunks (2026-10-21).** A RasanAI animatic or
   film plays on the phone. A signed `media` command names what the card
   waiting now plays (checked against the provider's own view, never the
@@ -189,32 +55,17 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   chunks two at a time, checks order, count and hash, and plays the file from
   Caches. Chunks are deleted after 30 minutes, and every chunk is in
   `remote-media.json` before it is written, so a restart still deletes it.
-  Only on the Realtime Database. Not Firebase Storage: that would be a second
-  service with its own rules for the same untrusted pipe. Measured on this
-  Mac behind its proxy: a 5 MB film copy up in 106 s, down in 21 s,
-  byte-identical.
+  The media chunks use the Mac's active cloud store.
   - **Films (2026-10-26).** A film is also named by its own id, not only through a chat's session: `film:` and the
     first 16 hex of sha256(realpath(projectDir)). A phone whose presence `caps` has `films` gets `films` in the
     view; the signed `film` command (`answer`, `chat`, `resume`, `stop`, `installTool`) and the `image`/`media`
     commands with a `filmId` all name a film from the Mac's own list (never a path from the phone), and `answer` is
     checked exactly as a `workflow` answer is, against the files as they are now. See docs/rasanai-plugin.md.
-  - **Finding the database.** New pairing codes carry it as `r`. A phone paired
-    before the move reads the sealed `state/transport` document the Mac writes
-    in Firestore (`{ r }`, sealed with the channel key) and follows it,
-    re-checking every five minutes while it is still on Firestore. Both the
-    Mac's config and the phone accept only an `https` host under
-    `firebasedatabase.app` or `firebaseio.com`: the phone sends signed commands
-    wherever this points, so a code or a forged announcement must not be able
-    to aim it at another server (a forged one cannot be sealed anyway).
-  - **Cutover.** Firestore stays the default. Set the URL only once the phone
-    runs a build that can follow (1.6+); an older phone keeps polling Firestore,
-    which the Mac then no longer updates. There is no dual-write.
 
 ## New chats from the phone (2026-10-19)
 
-The first capability beyond replying: a paired phone can **start a new Conductor
-chat** in an existing workspace. This lifts the "no new chats" line from the
-original scope, deliberately and only this far.
+This section records the first remote start path, for Conductor chats in existing workspaces.
+Conductor requires its add-on. See “Squeak's own chats from the phone” for native starts.
 
 - **Snapshot.** An optional `workspaces: [{ id, label ("repo · branch"),
 defaultAgent }]`: the non-archived, non-hidden workspaces from Conductor's
@@ -614,16 +465,10 @@ lifecycle on every Mac and phone for no new authority, and iOS gives a Local Net
 an ATS exemption (`NSAllowsLocalNetworking`) for exactly this. Not accepted: anything unauthenticated, anything that
 puts the channel key or channel id on the wire, anything outside the allow-list.
 
-| Threat on the direct path                                        | Mitigation                                                                                                                                                                                                                            |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A host on the same network reads or sends                        | Every request needs a MAC under a key only the Mac and paired phones hold; a command still needs a paired device's signature; documents are sealed. A stranger gets a bare 401                                                        |
-| A captured request is sent again                                 | 60 s window plus a remembered nonce; commands also keep their own expiry and nonce checks                                                                                                                                             |
-| A host impersonates the Mac and replays an old view              | A response MAC binds the request's nonce; without the key an impostor cannot make one, and the phone falls back to the cloud                                                                                                          |
-| A host (or a forged view) aims the phone at a server it controls | The phone tries only private-range addresses, only from the Mac's own sealed view or a Bonjour result whose tag matches, and sends nothing the key is not needed to read: a signed request reveals neither the key nor the channel id |
-| Flooding the Mac                                                 | Per-address rate and failure limits, stream and in-flight caps, size caps, timeouts                                                                                                                                                   |
-| The channel id leaks from the LAN                                | It is never in a local path or header, so a sniffer cannot address the cloud channel                                                                                                                                                  |
-| A command runs twice (both transports, or a retry)               | One transport per command, a confirmed take-back before a cloud resend, the Mac's handled-id memory, and the nonce check                                                                                                              |
-| Reading the Mac's other state                                    | Nothing but the channel's `state`, `results`, `live` and `commands` is served, and only what the bridge itself wrote                                                                                                                  |
+- LAN requests and responses carry MACs. The response binds the request nonce. Requests expire after 60 seconds.
+- The phone tries private addresses advertised by the Mac in a sealed view or matching Bonjour result.
+- The listener has rate, connection and size limits. It serves only the phone channel's documents.
+- Command ID and nonce checks prevent a retry from running the same command twice.
 
 **What the owner must do.** The iPhone asks once for **Local Network** access ("Squeak talks to your Mac directly
 when you're on the same Wi-Fi."); declining keeps everything on the cloud. If the Mac's firewall is on, macOS asks once
@@ -743,7 +588,7 @@ as the main feed's are); 404 for a task the session does not have. The existing 
 
 ## New chat presets (2026-10-30)
 
-Best / Balanced / Save usage are one setting on the daemon, edited from the Mac app (Settings, General), the phone
+Best / Balanced / Save usage are one setting on the daemon, edited from the Mac app (Settings › Agents › Models & presets), the phone
 and the web; the surfaces only draw. Code: `src/fleet/chat-presets.ts` (`ChatPresetsStore`), saved in
 `<support dir>/chat-presets.json` (0600, atomic write). It stores only what a person changed: a name per preset
 (shared by both agents) and, per agent and preset, a whole setup (`modelId`, `level`, `code`, `run`, `planFirst`)
@@ -889,10 +734,10 @@ key reach a browser only sealed to a key it made, after the Mac adds it).
 added without the six-digit code, through the exact approve path (`via: "account"`, `addedAutomatically: true` on its
 `devices` entry in `/control/remote/status`): Catalyst vouches for the account. Every such add is told at once: an
 activity line (device, email, time), a Telegram and Cliq card ("New device added: <name> (signed in as <email>). Not
-you? Revoke it in Squeak > Settings > Channels." Always sent, never muted: it is a security event) and the Mac app's
+you? Revoke it in Squeak > Settings > Devices." Always sent, never muted: it is a security event) and the Mac app's
 notification, and it is revocable like any device. "Ask before adding my own devices" (`askOwnDevices`, saved with the
 account in `remote.json`, cleared on unlink; `GET /control/remote/account` carries it, `POST
-/control/remote/account/settings` `{ askOwnDevices: boolean }` sets it, strict) restores the code. Requests from any
+/control/remote/account/settings` `{ askOwnDevices: boolean }` sets it, strict) requires the Mac owner to approve the device. Requests from any
 other account are still dropped, and pond guests always need the Mac's approval.
 
 **Your own devices have no pairing UI (2026-11-14).** Signing in with the account is the only visible step on the web, the Mac
@@ -958,7 +803,7 @@ folders above `dist/telegram`, which is the same place in the checkout and in th
 
 ## Channel setup from a phone (2026-10-30)
 
-Telegram and Zoho Cliq setup, which was only in the Mac app's Settings › Channels, is also on the iPhone and the web.
+Telegram and Zoho Cliq setup, which was only in the Mac app's Settings › Extensions, is also on the iPhone and the web.
 Protocol: `.context/channels-setup-protocol.md`; writer: `src/squeak/channels-setup.ts`.
 
 - **Two signed command kinds**, `telegram` and `cliq`: `{ v: 1, kind, change: { <exactly one key> }, nonce, expiresAt }`,

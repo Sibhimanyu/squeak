@@ -1651,15 +1651,10 @@ Step by step, each step shippable on its own:
    Electron one is retired.
 3. **Tokens as code.** ✅ Extract §11 into a shared package consumed by the Mac
    app; apply the §12 changes.
-4. **Remote channel.** ✅ Built on Firebase — see `docs/remote-channel.md`. A way for a phone to see state and send replies
-   without the Mac being reachable directly. Firebase (Firestore + FCM push +
-   Auth) is the default candidate; the key design constraint is that this
-   channel can make agents on your Mac _do things_, so it needs real
-   authentication, device pairing, and an allow-list of actions — decided in
-   that step, before any code.
-5. **Squeak for iPhone** ✅ (Android later). Home = the attention-ordered list;
-   decision cards; reply composer; diff review; push notifications that match
-   the Telegram cards. Same tokens, system type, 44pt targets.
+4. **Remote channel.** The hosted Catalyst relay carries sealed views and signed device commands. Sign in on the Mac to
+   set it up. See [Remote channel](docs/remote-channel.md).
+5. **Squeak for iPhone.** The SideStore build shows chats, decisions and diffs and sends replies. Telegram and Zoho Cliq
+   carry alerts.
 6. **Telegram becomes one channel among several**, fed by the same state and
    the same card rules.
 

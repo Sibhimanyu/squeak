@@ -8,9 +8,9 @@ Electron app (since removed). The Node daemon is still its backend.
 ## What it is
 
 A native Mac app for your coding agents. It runs Claude Code and Codex chats itself (through the
-daemon's session host), lists the other agent sessions on your Mac, shows a chat's messages, and sends a message
+daemon's session host), shows a chat's messages, and sends a message
 from the menu-bar popover, a conversation window, or a global quick-composer hot key. It also notifies you when a
-session needs you or finishes. Conductor chats appear once the optional Conductor add-on is added (Settings › Extensions).
+session needs you or finishes. To see external Claude Code, Codex or Conductor sessions, add the matching extension in Settings.
 
 Squeak does not generate text itself: every reply you read was written by an agent (Claude Code or Codex).
 
@@ -64,14 +64,17 @@ Untested:
   owner, along with the other owner steps in section 7 (relaunch, restart,
   sleep/wake, disconnect).
 
-Settings is a mode of the main window (⌘, and the menu-bar panel open it; Esc or Back returns to sessions). Its sidebar
-groups are You (Account, Ponds, Notifications, Privacy), Agents (Models & presets, Messages), This Mac (General, Keep
-awake, Background service), Devices (Devices, Connections), Extensions and About (`SettingsSection`). Telegram bot token
-and allowed chats and the Zoho Cliq webhook and owner live on their own extension pages. They write the daemon's
-`.env` (0600, `EnvFile`), restart the service with `launchctl kickstart`, and need the
-daemon's `/control/channels` and `/control/telegram/*` routes (older daemons read as "update
-the Squeak service"). Only smoke-run with demo data; no real token was entered, no test
-message sent, no phone paired.
+Open Settings with ⌘, or from the menu bar. Esc or Back returns to your chats.
+
+- **You** — Account, Ponds, Notifications, Privacy.
+- **Agents** — Models & presets, Messages.
+- **This Mac** — General, Keep awake, Background service.
+- **Devices** — Devices, Connections.
+- **Extensions** — Telegram, Zoho Cliq, Phone calls, Conductor and RasanAI have their own pages when added. The overview also manages external Claude Code and Codex.
+- **About** — Version and Sparkle updates. Automatic checks are on by default. Automatic downloads are optional.
+
+The new layout is the default. Use **Settings › This Mac › General › Classic layout** to switch to the earlier layout.
+Squeak keeps an explicit layout choice across launches.
 
 Add-ons: core knows no host app. `Addons/Conductor/` (a SwiftPM target, linked in every build) is the Conductor
 add-on: it reads conductor.db, lists Conductor's workspaces for the picker and opens a chat in Conductor, and it is inert
@@ -146,8 +149,7 @@ macos/Sources/
   message into Conductor's window. If the daemon is down or its token is
   missing, sending is disabled and Settings says why.
 - **`DaemonAdapter`** (the daemon on `127.0.0.1:8477`; override with
-  `SQUEAK_DAEMON_PORT`) keeps serving terminal and desktop sessions (Claude and
-  Codex in Terminal, Claude Desktop), read from `/state` and the control routes.
+  `SQUEAK_DAEMON_PORT`) serves external Terminal and desktop sessions when their add-ons are enabled. The app reads them from `/state` and the control routes.
   It reads a transcript through `/control/session/<id>/transcript`, which exists
   only after the daemon is shipped (`./scripts/ship.sh`, the owner's call); an
   older daemon answers 404 and the app reports no transcript.
@@ -155,22 +157,23 @@ macos/Sources/
 Settings pages are in `SettingsSection`. Setup is not a page: a "Finish setting up" card at the top of the sidebar
 lists the first-run steps still to do and leaves when none is left. Extensions is one group: an overview with every
 extension as the same card (status, Add/Remove), covering the daemon's add-ons (Conductor, RasanAI) and the built-ins
-Telegram, Zoho Cliq and Phone calls; each added one also gets its own sidebar row and page. Settings has a Connections page with one row per source: each enabled add-on's (Conductor database:
+Telegram, Zoho Cliq and Phone calls. External Claude Code and Codex are managed from the Extensions overview. Settings has a Connections page with one row per source: each enabled add-on's (Conductor database:
 readable or not), Squeak service (connected, down, token missing, trouble) and
-Sending (available or why not). About has "Copy diagnostics", which is redacted
-(no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and
-the "Automatically check for updates" switch (see Updates).
+Sending (available or why not). Background service has **Copy diagnostics**, which omits message text, titles, paths, IDs, tokens and URLs.
+About has **Check for Updates…** and **Automatically check for updates**.
 
-### Terminal panel (⌘J)
+### Terminal
 
-DESIGN.md §8.10. `TerminalHost` (app target) keeps one SwiftTerm `LocalProcessTerminalView` per tab alive for the
+In the default layout, open **Terminal** in a Duck's Work Pane or press ⌘J. In Classic layout, ⌘J opens or folds
+the zone holding the terminal.
+
+`TerminalHost` (app target) keeps one SwiftTerm `LocalProcessTerminalView` per tab alive for the
 app's life; the bookkeeping that decides things is in `SqueakMacCore/Terminal` with tests (`TerminalPanelSizing`
 120pt..60% and remembered, `TerminalRegistry` one tab set per workspace folder, `TerminalWorkspace` the folder and
 why there is none, `TerminalShell` login-shell launch and the close-asks rule from the pty's foreground group).
 Palette is `Tokens.Terminal` (contrast pinned by a test). SwiftTerm is pinned `exact: "1.99.3"` (MIT; notice in
 `THIRD-PARTY-NOTICES.md`, copied into the app by `build-app.sh` with JetBrains Mono in `Resources/fonts`); it links
-statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. The panel is live:
-it opens in the bottom dock zone (⌘J), and each shell is a tab that can sit in any zone.
+statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. Both layouts use the same shell registry.
 
 ### Right zone: Thread, Pond, Code
 
@@ -203,7 +206,7 @@ popover and menus opens the conversation. Nothing here quits the app.
 
 ### Menu-bar panel
 
-New chat presets can be renamed and configured in **Settings › Models & presets**.
+New chat presets can be renamed and configured in **Settings › Agents › Models & presets**.
 Choose Claude or Codex to edit that agent's model and thinking choices; Claude also
 offers worker choices. Changes save on this Mac and apply to the New chat window,
 quick composer and menu-bar popup. Restore defaults resets the selected preset.
@@ -369,18 +372,16 @@ It then prints the two publish steps and never runs them:
 
 Environment variables:
 
-| variable                              | effect                                                                                                                                                                                                                                                                                             |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SQUEAK_DAEMON_PORT`                  | daemon port to talk to instead of 8477                                                                                                                                                                                                                                                             |
-| `SQUEAK_MAC_CAPTURE=<prefix>`         | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file                                                                                                                                                                                              |
-| `SQUEAK_MAC_APPEARANCE=light`         | with capture, force light appearance (otherwise dark)                                                                                                                                                                                                                                              |
-| `SQUEAK_MAC_NEWCHAT_CUSTOMIZE=1`      | opens New chat with its Customize card expanded (capture, or by hand)                                                                                                                                                                                                                              |
-| `SQUEAK_MAC_DEMO=1`                   | demo data only: no network, no reporting, no cache, and no send reaches a chat                                                                                                                                                                                                                     |
-| `SQUEAK_MAC_CAPTURE_ONLY=popup`       | with `SQUEAK_MAC_CAPTURE` and demo, every menu-bar popup screen (home, needs-you, usage, controls, new-chat, new-chat-customize, workspaces, session) as `<prefix>-popup-<screen>.png`; `SQUEAK_MAC_POPUP_SCREEN=<screen>` takes one, `SQUEAK_MAC_POPUP_SCREEN_HEIGHT=<pt>` pins the screen height |
-| `SQUEAK_MAC_CAPTURE_ONLY=popover`     | with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen                                                                                                                                                                                                             |
-| `SQUEAK_MAC_CAPTURE_ONLY=refinements` | with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done                                                                 |
-| `SQUEAK_MAC_REFINEMENT_DEMO=menu`     | with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand                                                                                                                                                                             |
-| `SQUEAK_MAC_REFINEMENT_DEMO=context`  | with demo, as `menu`, and opens the quick composer on a notification reply (demo-6)                                                                                                                                                                                                                |
+- `SQUEAK_DAEMON_PORT` — daemon port to talk to instead of 8477.
+- `SQUEAK_MAC_CAPTURE=<prefix>` — open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file.
+- `SQUEAK_MAC_APPEARANCE=light` — with capture, force light appearance (otherwise dark).
+- `SQUEAK_MAC_NEWCHAT_CUSTOMIZE=1` — opens New chat with its Customize card expanded (capture, or by hand).
+- `SQUEAK_MAC_DEMO=1` — demo data only: no network, no reporting, no cache, and no send reaches a chat.
+- `SQUEAK_MAC_CAPTURE_ONLY=popup` — with `SQUEAK_MAC_CAPTURE` and demo, every menu-bar popup screen (home, needs-you, usage, controls, new-chat, new-chat-customize, workspaces, session) as `<prefix>-popup-<screen>.png`; `SQUEAK_MAC_POPUP_SCREEN=<screen>` takes one, `SQUEAK_MAC_POPUP_SCREEN_HEIGHT=<pt>` pins the screen height.
+- `SQUEAK_MAC_CAPTURE_ONLY=popover` — with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen.
+- `SQUEAK_MAC_CAPTURE_ONLY=refinements` — with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done.
+- `SQUEAK_MAC_REFINEMENT_DEMO=menu` — with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand.
+- `SQUEAK_MAC_REFINEMENT_DEMO=context` — with demo, as `menu`, and opens the quick composer on a notification reply (demo-6).
 
 The demo flags never send: the model refuses every send and reads no network.
 
@@ -486,7 +487,7 @@ opens, and ~6,300 files made a managed Mac's first start take minutes. While sta
 
 At launch `DaemonManager` (`DaemonInstaller` plans, `LiveDaemonEffects` acts) decides:
 a launch agent that does not run from `~/Library/Application Support/squeak/daemon/` is a dev checkout and is never touched;
-no agent waits for the person's press: **Welcome › Set up Squeak** (the guided setup installs it) or **Settings › Background service › Install** (nothing is installed without one of those clicks); an agent we
+no agent waits for the person's press: **Welcome › Set up Squeak** (the guided setup installs it) or **Settings › This Mac › Background service › Install** (nothing is installed without one of those clicks); an agent we
 own on an older build gets the new version copied beside it, the `current` symlink switched atomically,
 `launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
 (remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.
@@ -494,7 +495,7 @@ The daemon starts without a `.env` (Telegram off), so the install needs no setup
 
 ## Window menu and workspaces
 
-Window lists Sidebar, Inspector and every panel (Pond, Code, Terminal) with a checkmark when open and its shortcut
+In Classic layout, Window lists Sidebar, Inspector and every panel (Pond, Code, Terminal) with a checkmark when open and its shortcut
 beside it; choosing one opens it (to its home zone) or closes it (`WindowMenu`, pure, in SqueakMacCore). Window ›
 Workspace holds the saved workspaces, "Reset <Name>", "New Workspace…", Update and "Delete Workspace…". Right-clicking
 any tab strip shows the same panel list plus Reset. A workspace remembers the live layout (panels, order, selection,

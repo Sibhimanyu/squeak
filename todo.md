@@ -44,20 +44,12 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
 
 Not built yet:
 
-- [ ] **Codex's structured questions.** A Codex chat's command and file-change
-      approvals and its lettered questions (the ask format) are answered from every
-      surface already. Not handled: any other Codex server request, which
-      `codex-runner.ts` refuses ("Squeak does not handle ..."), and the Conductor
-      add-on's answer service, whose `readAsk` reads only Claude transcripts.
-- [ ] **New chat in a new workspace (phase 2)** — relay `POST /workspaces` body is
-      unknown; reverse-engineer it from Conductor's bundle first (`.context/re/`).
-- [ ] **Turn on the iPhone channel from Settings** (`SQUEAK_REMOTE_PROJECT`) — the
-      iPhone tab only explains it.
+- [ ] **Support Codex structured questions.** Native Codex command and file-change approvals are supported, as are
+      plain-text lettered questions. The native runner rejects other server requests, including structured input.
+      The Conductor add-on's answer service reads Claude transcripts.
 - [ ] **Remember linked Telegram chat names** across restarts (memory only now).
 - [ ] **New duck artwork** (DESIGN.md §12): mood sprites and the iPhone tab-bar duck
       are still the old round-eyed art; §8.7 empty/offline states want moods.
-- [ ] `macos/README.md` is behind the last releases (new chats, answering,
-      channels, keep-awake).
 
 Never tried by hand (do once):
 
@@ -67,7 +59,7 @@ Never tried by hand (do once):
 - [ ] A real **Queue** vs **Steer now** send from the Mac.
 - [ ] The glass menu-bar panel on screen; the menu bar reading "Squeak" when the
       window opens; the window staying off another app's full-screen Space.
-- [ ] Telegram / Cliq / iPhone pairing from Settings › Channels and › iPhone.
+- [ ] Telegram and Zoho Cliq setup from Settings › Extensions. iPhone sign-in with the Mac's Squeak account.
 - [ ] Verbose mode on the phone.
 
 Open design questions:

@@ -1,14 +1,12 @@
 # Squeak for Web: structure
 
-`web/` is a static page (no build step) that signs in to a Mac and shows what the Mac shows a phone. The
-channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `sync.js` (view, presence,
-results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
+Squeak for Web runs at <https://squeak-60083782173.development.catalystserverless.in/app/index.html>. Sign in with the
+same Squeak account as your Mac. Pick the Mac to read chats and send replies. A Pond invite opens the Member view,
+which shows shared Ducks and the Room. The paired Mac view has no Room.
 
-Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's "Copy web link" uses `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12). It is the no-install phone option, and it does less than the iPhone app. It has no Face ID, no same-Wi-Fi direct route and no push notifications, and it does not follow a Mac that moves the channel (sign in again). New iPhone features are not assumed to exist here: check `web/js/screens.js` and the screens below for what does.
-
-The owner's web path is sign-in only: you sign in with your Squeak account and open a Mac. There is no QR, pairing code or paste box on
-any screen (an old `#pair=` link shows the sign-in with "Pairing codes are gone. Sign in with the same account as your Mac."). Signed in with the
-same account as your Mac, this browser joins it by itself.
+The browser uses the hosted relay. The iPhone app also supports Face ID and a direct connection on the same Wi-Fi.
+If a Mac moves its channel to another relay, sign in again. Browser commands and screens live in
+`web/js/commands.js`, `web/js/screens.js` and the `guest-*` modules.
 
 ## Commands
 
@@ -49,32 +47,16 @@ not say, so the screen hides the control.
 `ctx`: `{ view, record, sync, commands, outbox, prefs: { get, save }, navigate(id), touch(), selectChat(key), settings }`.
 The module loads on first open; a failed load shows an error and a retry, never a blank pane.
 
-## Owner app on Catalyst, and the one entry page
+## Hosting and transport
 
-The owner app speaks two stores. A pairing code with `cu` (relay base URL) and `ck` (relay key) and no `p`/`r` is a Catalyst
-Mac; one with `p` and `r` is Firebase (`pairing-link.js`: `provider` is `"catalyst"` or `"firebase"`). The relay URL must be https,
-no credentials or port, host under `.catalystserverless.` or `.catalystappsail.` + `com|in|eu|com.au|jp|ca|sa` (the Node
-`relayBaseUrl` in `src/cloud/location.ts`, `guest-invite.js` here), the key `[A-Za-z0-9_-]{16,200}`; `cu` and `ck` come together
-or the code is refused.
+`scripts/build-guest-client.sh` packages `web/entry.html` and its modules as the Catalyst client. The entry at
+`/app/index.html` opens the Pond join screen for an invite fragment. It restores a saved Member view or opens the
+account screen when there is no invite. Legacy `#pair=` links open sign-in.
 
-`catalyst-db.js` (`CatalystDb`) has `rtdb.js`'s surface (`get`/`set`/`delete`/`watch`/`closeAll`) over the relay with
-`x-squeak-relay: <ck>`: it wraps the guest page's `RelayStore` and `watchPond` (`header` and `streamRoute` options: the owner's
-Data Streams token route is `/token`, the guest's `/pond-stream`). One socket serves every listener; a notice carries no data
-and wakes every listener with `{ kind: "change" }`, they re-read through `get`; `open` and `dropped` follow the socket; a 60 s
-poll is the safety net. `pairing.js`'s `channelFor` picks the store from the saved device record, which now also holds
-`provider`, `relayUrl`, `relayKey` (IndexedDB only). A record with no `provider` is a Firebase one and loads as before.
-A Mac that moves the channel (`state/move`) is not followed by the web app: pair again.
-
-Catalyst client hosting answers 200 only for `/app/index.html`, so `web/entry.html` (packaged as `index.html`) and
-`js/entry.js` choose: an invite fragment goes to the guest page; a `#pair=` fragment, a stored owner device, or nothing goes
-to the owner app; with no fragment, a browser holding only guest records (a joined pond, a parked invite) goes back to the guest
-page. The entry loads the chosen app's stylesheets and module into the same page. `scripts/build-guest-client.sh` packages both
-(it follows `entry.js`, `guest-boot.js` and `app.js` imports, comment lines ignored) into `cloud/catalyst-relay/client/`. The
-entry's CSP is `connect-src 'self'`, Firebase databases, the Catalyst relay hosts and the Data Streams `wss://*.zoho.*` hosts;
-`firebase/firebase.json` carries the same Catalyst hosts (a test pins both). Firebase Hosting still serves `web/index.html`
-(`firebase/stage-web.sh`); a Firebase-hosted page reaching a Catalyst relay is cross-origin and needs the relay to allow it
-(not verified; the relay sends no CORS headers today), so the Catalyst-hosted page is the one for a Catalyst Mac. The PWA manifest
-is Firebase-only (its `start_url` is `/`).
+`catalyst-db.js` reads and writes channel documents through the relay. The Mac view uses `/token` for Data
+Streams and the Member view uses `/pond-stream`. A notice triggers a read. Both watch with a 60-second polling
+fallback. The browser keeps each Mac's relay details in IndexedDB. The legacy database reader supports older
+saved records.
 
 ## Owner accounts (Catalyst hosting)
 
@@ -161,8 +143,8 @@ carries `img-src 'self' data: blob:` (`entry.html`, `firebase.json`, `security.t
 
 ## Web guests
 
-`web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link and no Squeak joins a pond as a
-member with no Nest (`client: "web"`) and sees its shared threads. They open `https://<app domain>/app/index.html#<code>`, sign in
+`web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link can join a Pond as a
+Member from the browser (`client: "web"`) and sees its shared threads. They open `https://<app domain>/app/index.html#<code>`, sign in
 (below) and wait for the owner's approval on their Mac. Contract: docs/ponds.md, "Web guests".
 
 - **Files** (`web/js`, all `guest-*`, browser WebCrypto only): `guest-invite.js` (read the code from the fragment, check it as the Mac does,
@@ -192,7 +174,7 @@ member with no Nest (`client: "web"`) and sees its shared threads. They open `ht
 - **What a guest sees and does.** The pond's name, the Flock (who is online, "Viewing <thread>"), its shared threads as cards grouped
   Needs you, Working, Done, newest first (private threads have no documents, so none show). A thread is the live conversation, resumed by
   `seq`. The composer sends signed `message` commands (Enter queues; Steer, only while it works, sends `steer`); a viewer, or a thread
-  that runs `bypassPermissions`, gets the reason instead of a composer. A question is answered through a hold (30 s, renewed while
+  that runs `bypassPermissions`, gets the reason instead of a composer. A question is answered through a hold (2 minutes, renewed while
   typing); someone else's hold shows "<name> is answering" and disables answering. An approval is shown read-only ("Waiting for <starter>
   to approve"). There is no stop and no approve, and no code pane or file tree. A message stays on screen as "Sent. Waiting for the
   duck's starter" until the duck's own `user` event arrives; an ambiguous send is never resent, it can be put back in the box.

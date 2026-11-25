@@ -24,7 +24,7 @@ card ──► bot /message ──► you tap / reply / type
 
 ### Setting up from the Mac app
 
-Extensions › Zoho Cliq › Replies shows the three handlers as steps with a Copy button each, the place to paste
+Settings › Extensions › Zoho Cliq › Replies shows the three handlers as steps with a Copy button each, the place to paste
 it, and a check that ticks when the first signed tap arrives. The daemon serves them on the token-gated
 `GET /control/cliq/handlers` (`{ blocks, relayReady, lastTapAt?, inbox }`; the code holds the signing secret, so it
 is never logged and carries no CORS header) and `POST /control/cliq/handlers/regenerate`, which does what
@@ -38,7 +38,7 @@ The handlers post to the Squeak relay, and Squeak reads
 the relay through the daemon's cloud store:
 
 ```
-bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──►
+bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-cliq──►
    <relay>/doc?path=channels/<SQUEAK_CLIQ_RELAY_ID>/cliq/<64-hex id>
                                │  (answers 200 {"ok":true}; Data Streams notice)
       Squeak watches channels/<relay id>/cliq, lists, verifies, deletes
@@ -48,14 +48,6 @@ bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──�
   channel id. The document id is a keyed hash over the record and the time.
   The relay has no sweeper: Squeak deletes every record it lists, bad ones
   unread.
-- Run `squeak cliq-relay --rotate` (no `SQUEAK_REMOTE_PROJECT` needed). It
-  saves the new relay id, secret and Cliq key (`SQUEAK_CLIQ_KEY`) to `.env`,
-  writes `cliq-handlers.txt` and prints the handler text. Set the relay
-  function's `CLIQ_KEY` environment variable to the printed key (Catalyst
-  console, `squeak_relay`, Configuration; or put it in the deploy copy's
-  `catalyst-config.json` and redeploy). Until then the handlers get a 401.
-  Then paste the three blocks into Cliq: Message handler, function
-  `squeakbutton` (Button), function `squeakreply` (Form). Restart Squeak.
 - **On Squeak's hosted cloud each Mac has its own Cliq key and nothing is set on the relay.** The daemon makes a random
   ingest token and registers it with `POST /account/macs/cliq-token {channel, token}` (the Mac's own `x-squeak-mac-key`);
   the relay keeps only its SHA-256, bound to that relay id and the Mac's account. A handler's post to
@@ -71,8 +63,7 @@ bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──�
   header is a bare 401, so a leaked handler can add junk Cliq records (each
   fails the HMAC and is deleted) but cannot read, list or delete anything.
   The Mac keeps using the full relay key.
-- A Mac still on the old Firebase setup keeps its Realtime Database inbox (`cliq/<relay>/inbox`) until its handlers
-  are re-pasted. The daemon reads both while it has both. Nothing new is set up on Firebase.
+- After moving an older install to the hosted relay, copy the new handlers from **Replies** and paste all three into Cliq.
 
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
@@ -102,17 +93,10 @@ bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──�
 
 What Cliq can do:
 
-| in Cliq                             | does                                                                                                      |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| tap **A** / **B** / **C** on a card | sends that letter                                                                                         |
-| tap **Reply**, type, **Send**       | sends the text                                                                                            |
-| reply to a card                     | sends the text                                                                                            |
-| tap **Full message**                | posts the agent's whole last message, with its own buttons                                                |
-| ask anything, in plain words        | an answer from what Squeak sees ("anything need me?", "what did greenroom change?", "mute for two hours") |
-| "tell _session_ to …"               | a card with the exact text and **Send** / **Cancel**; only Send types it                                  |
-| type `radar`                        | what is running now                                                                                       |
-| type `snooze` / `unmute`            | silence alerts for an hour / resume (Telegram too)                                                        |
-| type `hooks`, `help`                | hook wiring, what this is                                                                                 |
+- Tap **A**, **B** or **C** to answer with that letter.
+- Use **Reply** or reply to the card to send text. **Full message** shows the agent's full last message.
+- Ask a question in plain words. To send an instruction, type “tell <chat> to …” and confirm the card.
+- Type `radar` to see what is running, `snooze` or `unmute` to manage alerts, or `hooks` and `help` for wiring and help.
 
 ### Chatting
 
@@ -158,14 +142,13 @@ That alone gives you cards. The rest makes them answerable.
 
 ### 2. The relay
 
-Answerable Cliq commands and replies need the Mac signed in to Squeak (Settings › Account): the hosted relay is
+Answerable Cliq commands and replies need the Mac signed in to Squeak (Settings › You › Account): the hosted relay is
 what the handlers post to. One-way cards work without it.
 
-Open Extensions › Zoho Cliq › Replies. The daemon makes the relay id, signing secret and this Mac's own Cliq key and
-fills them into the three handlers. From a terminal, `squeak cliq-relay` does the same: it saves the id and secret to
-`.env` (`SQUEAK_CLIQ_RELAY_ID`, `SQUEAK_CLIQ_RELAY_SECRET`) and writes the handlers to
-`Application Support/squeak/cliq-handlers.txt` (0600). The secret is never printed. `--rotate` makes a new pair; paste
-the handlers again after it.
+Open Settings › Extensions › Zoho Cliq › Replies. The daemon makes the relay id, signing secret and this Mac's own Cliq key and
+fills them into the three handlers. Copy them from this page after the key is registered. The terminal command
+`squeak cliq-relay` can write handlers to `Application Support/squeak/cliq-handlers.txt` (0600). Open the Mac app's
+Zoho Cliq page to register a key generated that way.
 
 Add who may act, to `.env`:
 
