@@ -14,6 +14,7 @@ import {
   type ModelChoice,
   type SimilarityPort,
 } from "./decider.js";
+import { FINISH_SYSTEM, finishPrompt, type FinishInput, type FinishWriterPort } from "./room-finish.js";
 
 /**
  * The on-device decider: the Mac app bundles `squeak-decider` (helpers/squeak-decider), which embeds text with Apple's
@@ -199,4 +200,35 @@ export function createDecider(o: CreateDeciderOptions): Decider {
     model: new OnDeviceDecider({ helper: o.helper, enabled, fallback: o.haiku }),
     ...(o.onModelError ? { onModelError: o.onModelError } : {}),
   });
+}
+
+const WRITE_TIMEOUT_MS = 10_000;
+
+/**
+ * The Room message of a finished Task, written on the Mac's own Apple model (`{op:"write", system, prompt}` answers
+ * `{ok:true, text}`). A null answer (helper missing, off, or too old to know the op) leaves it to the Haiku port.
+ */
+export class OnDeviceFinishWriter implements FinishWriterPort {
+  private readonly gate: HelperGate;
+  constructor(o: AdapterOptions) {
+    this.gate = new HelperGate(o);
+  }
+
+  async write(input: FinishInput): Promise<string | null> {
+    const reply = await this.gate.call(
+      { op: "write", system: FINISH_SYSTEM, prompt: finishPrompt(input) },
+      WRITE_TIMEOUT_MS,
+    );
+    const text = reply?.kind === "ok" ? reply.body.text : undefined;
+    return typeof text === "string" && text.trim() ? text : null;
+  }
+}
+
+/** The finish-message writers in order: on-device when the setting allows it, then Haiku. */
+export function createFinishWriters(o: {
+  setting: () => DeciderModelSetting;
+  helper: () => string | undefined;
+  haiku: FinishWriterPort;
+}): FinishWriterPort[] {
+  return [new OnDeviceFinishWriter({ helper: o.helper, enabled: () => o.setting() === "on-device" }), o.haiku];
 }

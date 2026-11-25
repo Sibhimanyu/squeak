@@ -860,6 +860,22 @@ export class NativeServer {
         }),
       );
     }
+    if (area === "sessions" && id && sub === "turns" && parts.length === 5 && method === "GET") {
+      // GET /native/sessions/:id/turns/:turnId. Open a Duck's chat at a turn (a Room item's `sessionId` + `turnId`): where the turn sits in the timeline.
+      // Load the timeline with `since=<startSeq - 1>` to start at it. The turn's `RoomTurn.id` is `${id}:${turnId}`.
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const turnId = decodeURIComponent(parts[4]!);
+      const turn = this.room.sessionTurns(id).find((t) => t.turnId === turnId);
+      if (!turn) throw new HttpError(404, "no such turn");
+      return this.json(res, 200, {
+        sessionId: id,
+        turnId: turn.turnId,
+        startSeq: turn.startSeq,
+        startedAt: turn.startedAt,
+        ...(turn.endedAt !== undefined ? { endedAt: turn.endedAt } : {}),
+        ...(turn.outcome ? { outcome: turn.outcome } : {}),
+      });
+    }
     if (area === "sessions" && id && sub === "warm" && parts.length === 4 && method === "POST") {
       return this.json(res, 200, { ok: true, ...(await host.warm(id)) });
     }
@@ -1753,6 +1769,8 @@ export class NativeServer {
     });
     const onPost = (row: RoomPostRow): void => {
       if (row.projectId !== projectId) return;
+      // Only what a person would read goes out as a feed row (the Room's `feedRows`).
+      if (room.feedRows([row]).length === 0) return;
       res.write(`id: ${row.seq}\nevent: post\ndata: ${JSON.stringify(room.toPosts(projectId, [row])[0])}\n\n`);
     };
     const onTurn = (f: { projectId: string; turn: unknown }): void => {

@@ -542,6 +542,20 @@ a chat that posts nothing for 90 s and has taken three new steps gets one Haiku-
 (`room-summary.ts`, at most one per chat per 3 minutes, one running per pond, `SQUEAK_ROOM_SUMMARY=off` disables it);
 that line (or an agent's own) is the running turn's `intent`.
 
+**The feed is a group chat (2026-11-25).** `posts` and the stream's `post` events serve only what a person would read
+(`Room.feedRows`): people's messages, Duck messages, `needs` asks, `plan` cards and hand-offs (Duck to Duck included).
+`working` ("took it"), Squeak's own lines (a Stream joined) and repeated `done` lines stay in storage but are not served; an
+old `done` row is served only as its Room turn's last one. An agent's `read_room` still reads every stored row. A Duck
+writes its Room message itself (`post_to_room` kind `message`, two or three plain sentences). When a Task's turn
+finishes without one, `RoomTasks` writes one from the turn's final reply (`room-finish.ts`: the on-device model, Haiku
+after) as an agent post with id `fb:<taskId>`; the wire post carries `onBehalf: true`. Every Duck post carries
+`sessionId` + `turnId` (a person's post has its `id`); the turn's `RoomTurn.id` is `${sessionId}:${turnId}`.
+`GET /native/sessions/<id>/turns/<turnId>` -> `{ sessionId, turnId, startSeq, startedAt, endedAt?, outcome? }` says
+where to open the Duck's chat (load its timeline with `since=startSeq-1`). Each Task is one live item (`tasks` in the
+page, `event: task` on the stream, same `id` for life): `state`, `title`, `owner` `{ duckId?, name, sessionId }`, `open`
+`{ sessionId, turnId? }` and, on `done`, `summary` (the Duck's own message, else the one Squeak wrote, else its first
+sentence), filled in place.
+
 ### The Room reaches Members (`src/flotilla/room-sync.ts`)
 
 A shared (published) pond carries its Room to its Members through the same sealed channel as threads. The Flotilla `tasks`

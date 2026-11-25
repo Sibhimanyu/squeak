@@ -19,6 +19,7 @@ import {
   type TurnBase,
   TurnReader,
 } from "./room-turns.js";
+import { FINISH_ID_PREFIX } from "./room-finish.js";
 import { TimelineLog } from "./timeline-log.js";
 import type { TimelineEvent } from "./timeline.js";
 import type { SessionRow } from "./types.js";
@@ -65,6 +66,13 @@ export interface RoomPost {
   attachments?: RoomAttachment[];
   /** The canvases the Task made or changed, on a Duck's `done` line (the host attaches them, not the Duck). */
   canvases?: RoomCanvasCard[];
+  /**
+   * The turn of the Duck's chat this post was written in (`sessionId` + `turnId` open that chat at that turn; the
+   * turn's `RoomTurn.id` is `${sessionId}:${turnId}`). Absent on a person's post: its `id` is the message id.
+   */
+  turnId?: string;
+  /** Written by Squeak on the Duck's behalf (the Duck finished its Task without posting): the Mac may show it subtly. */
+  onBehalf?: true;
   at: number;
 }
 
@@ -203,6 +211,7 @@ export function toRoomPost(r: RoomPostRow): RoomPost {
     ...(r.detail ? { detail: r.detail } : {}),
     ...(r.replyTo ? { replyTo: r.replyTo } : {}),
     ...(parseCanvases(r.canvases).length > 0 ? { canvases: parseCanvases(r.canvases) } : {}),
+    ...(r.id.startsWith(FINISH_ID_PREFIX) ? { onBehalf: true as const } : {}),
     at: r.at,
   };
 }
@@ -582,6 +591,44 @@ export class Room extends EventEmitter {
     return name || NEUTRAL_DUCK_NAME;
   }
 
+  /** The turn of the Duck's chat a post was written in: the newest turn that had started by then. */
+  private turnAt(sessionId: string, at: number): TurnBase | undefined {
+    let found: TurnBase | undefined;
+    for (const t of this.reader.turns(sessionId)) if (t.startedAt <= at) found = t;
+    return found;
+  }
+
+  /** `{ turnId }` for a Duck's post, so the Mac can open that chat at that turn; nothing for anyone else's. */
+  private turnOfPost(r: RoomPostRow): { turnId?: string } {
+    if (r.authorKind !== "agent" || !r.sessionId) return {};
+    const t = this.turnAt(r.sessionId, r.at);
+    return t ? { turnId: t.turnId } : {};
+  }
+
+  /**
+   * The rows the Room feed serves: only what a person would read. People's messages, Duck messages, asks, plan cards
+   * and hand-offs (Duck to Duck included) stay; "took it" (`working`), Squeak's own lines (a Stream joined) and
+   * repeated "finished" lines go. An old `done` row is served only when it is its turn's last one, once per Task turn,
+   * and only for a turn sent from the Room. Everything stays in storage for the code that reads it.
+   */
+  feedRows(rows: RoomPostRow[]): RoomPostRow[] {
+    return rows.filter((r) => {
+      if (isSqueakLine(r) || r.authorKind === "squeak") return false;
+      if (r.kind === "working") return false;
+      if (r.kind !== "done") return true;
+      if (r.authorKind !== "agent" || !r.sessionId) return false;
+      const turn = this.turnAt(r.sessionId, r.at);
+      if (!turn?.room) return false;
+      // The turn owns every done line until the chat's next turn begins (a Duck may post just after its turn ended).
+      const next = this.reader.turns(r.sessionId).find((t) => t.startedAt > turn.startedAt)?.startedAt ?? Infinity;
+      const last = this.store
+        .duckRoomPosts(r.sessionId, turn.startedAt, next - 1)
+        .filter((p) => p.kind === "done")
+        .at(-1);
+      return last?.id === r.id;
+    });
+  }
+
   /** The wire form of posts, with their attachments and the receiving Duck's name. */
   toPosts(projectId: string, rows: RoomPostRow[]): RoomPost[] {
     const atts = this.attachments.forPosts(
@@ -597,6 +644,7 @@ export class Room extends EventEmitter {
         author: { ...post.author, name: this.senderName(r) },
         ...(toName ? { toName } : {}),
         ...(a?.length ? { attachments: a } : {}),
+        ...this.turnOfPost(r),
       };
     });
   }
@@ -604,17 +652,20 @@ export class Room extends EventEmitter {
   /** Posts for the room's page: `since` forwards, `before` backwards, else the newest. Oldest first. */
   page(
     projectId: string,
-    opts: { since?: number; before?: number; limit?: number },
+    opts: {
+      since?: number;
+      before?: number;
+      limit?: number;
+      /** Every stored row (an agent's `read_room`), not the readable feed. */ all?: boolean;
+    },
   ): { posts: RoomPost[]; latestSeq: number; threads: RoomThread[]; turns: RoomTurn[]; counts?: PondCounts } {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
-    const rows = this.store
-      .roomPosts(projectId, {
-        ...(opts.since !== undefined ? { since: opts.since } : {}),
-        ...(opts.before !== undefined ? { before: opts.before } : {}),
-        limit,
-      })
-      .filter((r) => !isSqueakLine(r));
-    const posts = this.toPosts(projectId, rows);
+    const rows = this.store.roomPosts(projectId, {
+      ...(opts.since !== undefined ? { since: opts.since } : {}),
+      ...(opts.before !== undefined ? { before: opts.before } : {}),
+      limit,
+    });
+    const posts = this.toPosts(projectId, opts.all ? rows.filter((r) => !isSqueakLine(r)) : this.feedRows(rows));
     // The turns that started inside the posts' time window: the newest page covers the last 24 h.
     let from = this.now() - ROOM_THREAD_WINDOW_MS;
     let to = Infinity;

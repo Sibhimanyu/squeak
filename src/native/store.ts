@@ -1463,6 +1463,17 @@ export class NativeStore {
     ).map(roomPostRow);
   }
 
+  /** The room-level posts a chat's Duck wrote itself (messages, asks, finishes) between two instants (ms), oldest first. */
+  duckRoomPosts(sessionId: string, from: number, to: number): RoomPostRow[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM room_posts WHERE session_id=? AND author_kind='agent' AND level='room' AND kind IN ('message','needs','done') AND at>=? AND at<=? ORDER BY seq ASC",
+        )
+        .all(sessionId, from, to) as Row[]
+    ).map(roomPostRow);
+  }
+
   /** A chat's newest `working` post at or between two instants (ms): the turn's intent. */
   latestWorkingPost(sessionId: string, from: number, to: number): RoomPostRow | null {
     const r = this.db
