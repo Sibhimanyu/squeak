@@ -44,6 +44,7 @@ import { Planner, PlannerError } from "./planner.js";
 import { GitPond, ghAdapter, githubRepoOf, type GitHubAdapter } from "./git-pond.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchSoon } from "./main-place.js";
+import { PondChangesReader } from "./pond-changes.js";
 import { ducksOwnBranch, mainReadOnlyRoot, Placement, PlacementError, parsePlace } from "./placement.js";
 import { logger } from "../utils/logger.js";
 
@@ -93,6 +94,8 @@ export interface NativeServerOptions {
   history?: VersionHistory;
   /** Tests inject a fake GitHub; default is the Mac's `gh` sign-in. Never create a real repository in a test. */
   github?: GitHubAdapter;
+  /** Tests inject one with a small file cap or a counting git; default reads with the real one. */
+  pondChanges?: (room: Room) => PondChangesReader;
   /** The pond rooms; one is made when absent (the same instance must reach `tools` for agents to share it). */
   room?: Room;
   /** Room jobs; one is made when absent (it must be the one `tools` and main.ts's auto check share). */
@@ -171,6 +174,7 @@ export class NativeServer {
   private token = "";
 
   private readonly git: GitActions;
+  private readonly pondChanges: PondChangesReader;
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
   /** The one way a Duck's chat starts (placement, model, Duck link); the routes only parse and map errors. */
@@ -209,6 +213,8 @@ export class NativeServer {
         members: (id) => this.pondMembers(id),
         deliver: (id, text) => host.send(id, text, { room: true }),
       });
+    this.pondChanges =
+      options.pondChanges?.(this.room) ?? new PondChangesReader({ store: options.store, room: this.room });
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
     this.placement = options.placement ?? new Placement({ store: options.store, workspaces, sources: this.sources });
     this.starter =
@@ -658,6 +664,12 @@ export class NativeServer {
           throw error;
         }
       }
+    }
+    if (area === "projects" && id && sub === "changes" && parts.length === 4 && method === "GET") {
+      // Read-only: every Duck's changed files in the Pond by Stream, plus Main's uncommitted work.
+      const reply = await this.pondChanges.read(id);
+      if (!reply) throw new HttpError(404, "no such project");
+      return this.json(res, 200, reply);
     }
     if (area === "ducks" && id && parts.length === 3 && method === "PATCH") {
       if (!store.duckRow(id)) throw new HttpError(404, "no such duck");
