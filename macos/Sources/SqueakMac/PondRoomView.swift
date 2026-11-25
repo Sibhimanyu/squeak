@@ -477,29 +477,12 @@ struct PondRoomView: View {
     /// A sentence when the attachments could not be prepared (nothing was sent), else nil.
     private func sendTo(_ to: RoomAddressee, _ text: String, _ items: [OutgoingAttachment]) -> String? {
         atBottom = true
-        switch to {
-        case .thread(let id, _):
-            guard let s = session(id) else { return nil }
-            var words = text
-            if !items.isEmpty {
-                guard let folder = s.cwd, !folder.isEmpty else { return ImageAttachmentError.folderMissing.errorDescription }
-                // A duck's own chat takes pictures and files the way its composer does: saved in its folder, named in the text.
-                do {
-                    let pictures = items.filter { $0.kind == .image }.map { PreparedImage(data: $0.data, ext: ImageAttachments.kind(of: $0.data) ?? "png") }
-                    let imageRefs = try ImageAttachments.save(pictures, into: folder)
-                    let fileRefs = try RoomAttachmentFiles.save(items.filter { $0.kind == .file }.map { ($0.name, $0.data) }, into: folder)
-                    words = RoomAttachmentFiles.compose(text, imageRefs: imageRefs, fileRefs: fileRefs)
-                } catch { return (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the attachments." }
-            }
-            Task { _ = await model.send(words, to: s.key, fromRoom: true) }
-            if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
-                Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
-            }
-        case .everyone, .person:
-            // A Member's message is words only for now: pictures and files stay on the Mac they were attached on.
-            if member, !items.isEmpty { return "Pictures and files aren\u{2019}t shared with the Owner\u{2019}s Mac yet." }
-            Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
-        }
+        // Every message written here is a Room message with the addressee's name leading it as an @mention. The host wakes
+        // the Duck with it as a Room turn and posts its answer back to the Room. (A message typed in the Duck's own chat is
+        // that chat's send and stays private.)
+        // A Member's message is words only for now: pictures and files stay on the Mac they were attached on.
+        if member, !items.isEmpty { return "Pictures and files aren\u{2019}t shared with the Owner\u{2019}s Mac yet." }
+        Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
         return nil
     }
 }
