@@ -77,7 +77,7 @@ export function roomMoments(input: {
     if (r.kind === "handoff") continue;
     const to = named.find((n) => mentions(r.text, n));
     if (r.kind !== "needs" && !to) continue;
-    asks.push({ seq: r.seq, id: r.id, duck: r.authorName, ...(to ? { to } : {}), text: oneLine(r.text) });
+    asks.push({ seq: r.seq, id: r.id, duck: input.room.senderName(r), ...(to ? { to } : {}), text: oneLine(r.text) });
   }
 
   const blocked: RoomTaskMoment[] = [];

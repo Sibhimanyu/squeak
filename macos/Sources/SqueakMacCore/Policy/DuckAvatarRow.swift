@@ -1,7 +1,6 @@
 import Foundation
 
-// The new layout's centre top (DESIGN.md "New layout"): a row of avatars instead of a tab strip. A "Room" avatar first,
-// then the Pond's on-duty Ducks in roster order. A Duck opened while Off duty (from the roster or search) shows at the
+// The new layout's centre top (DESIGN.md "New layout"): a row of avatars instead of a tab strip. The Pond's on-duty Ducks in roster order. A Duck opened while Off duty (from the roster or search) shows at the
 // end of the row for as long as it is open; showing it never changes its duty. Pure: the view only draws, and every
 // word and flag here comes from the host's roster.
 
@@ -39,11 +38,13 @@ public enum DuckRowSelection: Equatable, Sendable {
 }
 
 public struct DuckRowModel: Equatable, Sendable {
-    /// The Room avatar is always first and always there; these are the Ducks after it.
+    /// The Pond's on-duty Ducks in roster order (the Room has no avatar here: the pond header's switch goes there).
     public var ducks: [DuckRowAvatar]
     public var selection: DuckRowSelection
     public var selectedDuck: String? { if case .duck(let id) = selection { id } else { nil } }
     public var roomSelected: Bool { selection == .room }
+    /// Nothing on duty and no Duck open: the row is not drawn at all (the Dashboard | Room switch is the way to the Room).
+    public var isEmpty: Bool { ducks.isEmpty }
 }
 
 public enum DuckAvatarRow {

@@ -67,5 +67,34 @@ import Testing
         #expect(line(out[0])?.handoff != nil)
     }
 
-    @Test func earlierLabel() { #expect(RoomFold.earlierLabel(4) == "+4 earlier") }
+    @Test func earlierRowNamesTheDuckAndTurnsIntoHide() {
+        #expect(RoomFold.earlierLabel(4, from: "Ruby 2") == "Show 4 earlier from Ruby 2")
+        #expect(RoomFold.earlierLabel(4) == "Show 4 earlier")
+        #expect(RoomFold.earlierLabel(4, from: "Ruby 2", open: true) == "Hide 4 earlier")
+    }
+
+    @Test func aFoldedRowKnowsItsDuckByName() {
+        let out = RoomFold.fold([status("a", duck: "pip"), status("b", duck: "pip")])
+        #expect(line(out[0]).flatMap(RoomFold.owner(of:)) == "pip")
+    }
+
+    @Test func aRunOfOneIsNeverFolded() {
+        let out = RoomFold.fold([person("m"), status("a", duck: "pip")])
+        #expect(out.compactMap(line).allSatisfy { $0.earlier.isEmpty })
+    }
+
+    @Test func idsAreStableWhenALineArrives() {
+        let before = RoomFold.fold([status("a", duck: "pip"), status("b", duck: "pip")]).map(\.id)
+        let after = RoomFold.fold([status("a", duck: "pip"), status("b", duck: "pip"), status("c", duck: "pip")]).map(\.id)
+        #expect(before == after)
+        let appended = RoomFold.fold([status("a", duck: "pip"), status("b", duck: "pip"), person("m")]).map(\.id)
+        #expect(Array(appended.prefix(1)) == before)
+    }
+
+    @Test func longTextClampsAtThreeLines() {
+        #expect(!RoomRowText.isLong("Done."))
+        #expect(!RoomRowText.isLong("a\nb\nc"))
+        #expect(RoomRowText.isLong("a\nb\nc\nd"))
+        #expect(RoomRowText.isLong(String(repeating: "word ", count: 60)))
+    }
 }

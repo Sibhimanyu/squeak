@@ -143,8 +143,13 @@ private struct PondChatRowView: View {
                     if let key = row.local, let s = model.session(key), model.isRenaming(s) {
                         InlineTitleEditor(session: s, font: Typo.label)
                     } else {
-                        Text(verbatim: row.title).font(Typo.label).foregroundStyle(Theme.ink)
+                        // The Duck's name is the label; the chat's title is only secondary text (never the sender or the label).
+                        let name = row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) }
+                        Text(verbatim: name ?? row.title).font(Typo.label).foregroundStyle(Theme.ink)
                             .lineLimit(2).multilineTextAlignment(.leading)
+                        if let name, name != row.title {
+                            Text(verbatim: row.title).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
                     }
                     HStack(spacing: 6) {
                         if let m = row.mark { ChatMarkGlyph(mark: m, leading: true) } else { PondStateMark(state: row.state, leading: true) }

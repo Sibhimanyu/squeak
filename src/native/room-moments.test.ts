@@ -18,6 +18,7 @@ function rig() {
     store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title });
   const duck = chat("Maple");
   const pid = project.id;
+  store.updateDuck(store.duckForSession(duck.id, pid)!.id, { name: "Maple" });
   const moments = (since = 0, tasks: RoomTask[] = []) =>
     roomMoments({ store, room, projectId: pid, pondName: "Shop", since, tasks });
   return { store, room, duck, pid, chat, moments };

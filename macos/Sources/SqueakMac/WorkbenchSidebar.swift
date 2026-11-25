@@ -375,7 +375,8 @@ struct WorkbenchSidebar: View {
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
                 unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
-                unreadCount: workspaces.flatMap(\.chats).filter { model.isUnread($0) }.count,
+                // The yellow badge is the Dashboard's "For you" list, from the same function.
+                unreadCount: model.forYou(pond: key).count,
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? PondRowCount.of(ducksMode: model.ducksMode, counts: model.ducksMode ? PondRowCount.dutyCounts(sent: PondsModel.shared.directory?.pond(id: key)?.dutyCounts, roster: native.flatMap { RoomRosterStore.shared.model(for: $0.id).counts }) : nil, treeChats: sections.chatCount(of: key), listed: listed) : nil,
@@ -712,7 +713,8 @@ private struct FoldRow: View {
         case .error:
             StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
         case .count(let n):
-            Text("\(n)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
+            // New layout: the one number on a Pond row is the yellow "For you" badge; a grey count would mean something else.
+            if !newLayout { Text("\(n)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle) }
         case nil:
             EmptyView()
         }

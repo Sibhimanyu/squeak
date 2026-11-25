@@ -291,12 +291,6 @@ struct PondSpace<Dashboard: View>: View {
             }
             .frame(width: w, height: geo.size.height)
             .overlay { PondSnapshotLayer(state: pan).allowsHitTesting(false) }
-            .overlay(alignment: page == .dashboard ? .trailing : .leading) {
-                PondSwipeHintView(
-                    state: pan, page: page, hint: PondSwipeHint(visits: visits, swipes: swipes)
-                ) { switchTo(page == .dashboard ? .room : .dashboard) }
-                .opacity(pan.staging == nil ? 1 : 0)
-            }
             .onAppear { width = Double(w) }
             .onChange(of: w) { _, new in width = Double(new) }
         }
@@ -351,70 +345,6 @@ struct PondSpace<Dashboard: View>: View {
 enum PondHintStore {
     static let visitsKey = "pondSwipeHintVisits"
     static let swipesKey = "pondSwipeHintSwipes"
-}
-
-/// The edge affordance: a 36 pt round button with an 18 pt chevron and, while it still teaches, the other page's name under
-/// it. Idle it is static (a repeating animation paces the whole window's frame rate). While dragging, a thin ring fills toward the commit point and the chevron turns once it would commit.
-/// Neutral colours only (§3).
-struct PondSwipeHintView: View {
-    let state: PondPanState
-    let page: PondPage
-    let hint: PondSwipeHint
-    let action: () -> Void
-    @State private var hover = false
-
-    var body: some View {
-        let toRoom = page == .dashboard
-        VStack(spacing: 6) {
-            Button(action: action) {
-                ZStack {
-                    Circle().fill(Theme.surfaceRaised.opacity(0.9))
-                    Circle().strokeBorder(Theme.line, lineWidth: 1)
-                    PanRing(state: state, page: page)
-                    PanChevron(state: state, page: page, toRoom: toRoom)
-                }
-                .frame(width: 36, height: 36)
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            if hint.showsWord {
-                Text(toRoom ? "Room" : "Dashboard").font(Typo.meta).foregroundStyle(Theme.muted)
-            }
-        }
-        .padding(.horizontal, 10)
-        .opacity(hover ? 1 : hint.restingOpacity)
-        .onHover { hover = $0 }
-        .animation(Motion.quick, value: hover)
-        .help(toRoom ? "Show the Room" : "Show the Dashboard")
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(toRoom ? "Show the Room" : "Show the Dashboard")
-        .id(page)
-        .transition(.opacity)
-    }
-}
-
-/// The ring's stroke, trimmed by the drag's progress. Reads the position itself so only it re-evaluates per tick.
-private struct PanRing: View {
-    let state: PondPanState
-    let page: PondPage
-    var body: some View {
-        let progress = PondDrag.progress(position: state.drawn, page: page)
-        Circle().trim(from: 0, to: SwipeRing.trim(progress: progress))
-            .stroke(Theme.ink.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .rotationEffect(.degrees(-90))
-    }
-}
-
-private struct PanChevron: View {
-    let state: PondPanState
-    let page: PondPage
-    let toRoom: Bool
-    var body: some View {
-        let flipped = SwipeRing.flipped(progress: PondDrag.progress(position: state.drawn, page: page))
-        Lucide(toRoom ? .chevronRight : .chevronLeft, size: 18, color: flipped ? Theme.ink : Theme.muted)
-            .rotationEffect(.degrees(flipped ? 180 : 0))
-            .animation(Motion.quick, value: flipped)
-    }
 }
 
 // MARK: Swipe

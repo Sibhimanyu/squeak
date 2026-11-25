@@ -86,6 +86,6 @@ describe("Duck-to-Duck posts name the receiver", () => {
     const loose = r.chat("Loose chat");
     r.store.db.prepare("DELETE FROM duck_sessions WHERE session_id=?").run(loose.id);
     const row2 = r.room.post({ ...base, text: "yo", toSessionId: loose.id });
-    expect(r.room.toPosts(r.project.id, [row2])[0]!.toName).toBe("Loose chat");
+    expect(r.room.toPosts(r.project.id, [row2])[0]!.toName).toBe("A Duck");
   });
 });

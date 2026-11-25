@@ -1266,18 +1266,29 @@ The window is redesigned from Squeak's own model: a Pond is a place, Ducks are t
 produces sits beside its chat. The new layout is the default for everyone who has not chosen; the classic layout stays exactly as it was and is optional. Anyone who explicitly chose keeps their choice. The setting is read through
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
-- **Duck avatar row instead of tabs.** The centre top is a row of round avatars: a "Room" avatar first, then the Pond's
-  on-duty Ducks (`DuckAvatarRow`). Each avatar is the brand thread duck (`duckThread.png`, template, tinted, never redrawn)
+- **Duck avatar row instead of tabs.** The centre top is a row of the Pond's on-duty Ducks (`DuckAvatarRow`); there is no
+  "Room" pill in it, and the row is not drawn at all while nobody is on duty and no Duck is open. Each avatar is the brand thread duck (`duckThread.png`, template, tinted, never redrawn)
   in the Duck's own colour from its colour seed, on a soft tile of that colour, with the Duck's name beside it. The working
   glyph shows only on working Ducks (corner, per section 8.1); a Duck waiting on you carries the amber triangle; no coloured
   dots. The selected avatar is raised (`selected` fill, `lineStrong` ring). A Duck opened while Off duty (from the roster or
   search) shows at the end of the row while it is open and leaves with it; showing it never changes its duty (Off duty
-  stays a separate action). Clicking an avatar shows that Duck's chat in the centre; clicking Room shows the Room. The
-  Dashboard stays on the existing Room | Dashboard switch and shows the same row with nothing selected. Tabs are hidden
+  stays a separate action). Clicking an avatar shows that Duck's chat in the centre. The pond header's Dashboard | Room switch is the only way
+  between the two pages (the Dashboard shows the same row with nothing selected). No floating edge button stands in for
+  the switch; the two-finger swipe still works. Tabs are hidden
   (the tab code stays for the old layout; in a Duck view files, canvases, diffs and terminals open in the work pane).
 - **Room = home, with the Pond panel on the right.** In the Room the right side is the Pond panel, not the generic inspector:
-  who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`). It lists host
-  values and decides nothing. In a Duck view the right inspector is hidden.
+  who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`); it starts at
+  "Here now" (the pond's name and icon are in the header, never repeated). It lists host values and decides nothing. In a
+  Duck view the right inspector is hidden. The Dashboard has no side panel and no inspector toggle: its "Here now",
+  Tasks and Notebook sit in the page under the overview tiles (the Ducks working are the Working tile and the list).
+- **For you.** The first card on the Dashboard, hidden at zero: one line per item ("Pip - finished, not opened yet" or
+  "needs you") with an Open button. The sidebar's yellow Pond badge is the same list's count (`PondForYou` makes both);
+  the grey count beside a Pond name is not shown in the new layout. Duck rows everywhere are labelled by the Duck's name,
+  the chat title only as secondary text, and the Room's header counts on-duty Ducks only.
+- **One Room row.** A Duck's message, a note to another Duck and a state moment share one row: avatar, name, time, text,
+  with no bordered bubble. Text shows three lines, then an inline "Show more" (`RoomRowText`). A run of one Duck's moments
+  folds into one tappable row above its latest line: "Show 4 earlier from Ruby 2" / "Hide 4 earlier", aligned with the
+  names. Senders are always Duck names, never chat titles (the host resolves them when it serves the feed).
 - **Duck view = chat + slim icon rail + work pane (stage 2, built).** A 52pt rail at the right edge of the chat holds
   Changes, Files, Canvas and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
   edge; a duck-yellow count badge on Changes with the changed-file count, "99+" past 99). Clicking an icon opens the work

@@ -47,3 +47,11 @@ Read before touching `macos/`, the session timeline or control routes. Full deta
   `SQUEAK_MAC_DEMO=1` for fake data: no network, and no send ever reaches a chat.
   Never exercise a real send against a live chat without the owner. See the
   table of flags in `macos/README.md`.
+
+## Pond pages (new layout)
+
+The pond header's Dashboard | Room switch is the only switcher: no Room pill in the Duck row, and the row is not drawn
+while nobody is on duty. Only the Room has a side panel (`RoomPondPanelView`, starting at "Here now"); the Dashboard
+shows the same people, Tasks and Notebook in the page, under a "For you" card. The sidebar's yellow badge and that card
+come from one function, `PondForYou` (SqueakMacCore). Room rows are one layout (`RoomEventRow`); fold rows come from
+`RoomFold`. Senders are Duck names, resolved by the host (`Room.senderName`).

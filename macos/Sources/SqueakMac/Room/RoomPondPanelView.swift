@@ -2,7 +2,7 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md 8.12, New layout: the Room's right side. The Pond's name, who is here, the Ducks working, Tasks waiting or
+// DESIGN.md 8.12, New layout: the Room's right side. Who is here, the Ducks working, Tasks waiting or
 // blocked, and the way to the Notebook. Every list is the host's (`RoomPondPanel` groups it); a click only navigates.
 
 struct RoomPondPanelView: View {
@@ -24,11 +24,10 @@ struct RoomPondPanelView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    header
-                    people(panel)
+                    PondPeopleSection(panel: panel)
                     working(panel)
-                    tasks(panel)
-                    notebook
+                    PondTasksSection(panel: panel)
+                    PondNotebookRow(key: key)
                 }
                 .padding(.horizontal, 14).padding(.vertical, Space.l)
             }
@@ -43,42 +42,8 @@ struct RoomPondPanelView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            PondTile(name: ponds.name(key: key), pondId: ponds.pond(key: key)?.id, projectId: projectId, size: 36)
-            Text(verbatim: ponds.name(key: key)).font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.ink).lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-        }
-    }
-
-    private func section<C: View>(_ title: String, count: Int? = nil, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(verbatim: title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
-                Spacer(minLength: 0)
-                if let count { Text("\(count)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle) }
-            }
-            .accessibilityAddTraits(.isHeader)
-            content()
-        }
-    }
-
-    private func people(_ panel: RoomPondPanel) -> some View {
-        section("Here now", count: panel.present.count) {
-            ForEach(panel.present) { p in
-                HStack(spacing: 8) {
-                    PersonAvatar(name: p.name, size: 26)
-                    Text(verbatim: p.you ? "\(p.name) (you)" : p.name).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 3)
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-
     @ViewBuilder private func working(_ panel: RoomPondPanel) -> some View {
-        section("Ducks working", count: panel.working.count) {
+        PondPanelSection(title: "Ducks working", count: panel.working.count) {
             if panel.working.isEmpty {
                 Text("No Duck is working right now.").font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
@@ -101,49 +66,5 @@ struct RoomPondPanelView: View {
                 .accessibilityLabel("\(d.name), \(d.presenceLine)")
             }
         }
-    }
-
-    @ViewBuilder private func tasks(_ panel: RoomPondPanel) -> some View {
-        section("Tasks", count: panel.tasksOpen) {
-            if panel.tasksOpen == 0 {
-                Text("Nothing is waiting.").font(.system(size: 12)).foregroundStyle(Theme.muted)
-            }
-            ForEach(panel.blocked) { taskRow($0) }
-            ForEach(panel.waiting) { taskRow($0) }
-        }
-    }
-
-    private func taskRow(_ t: RoomTask) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Blocked is the one Task state that needs the person: the amber triangle, nothing else coloured.
-            if t.state == .blocked { Lucide(.triangleAlert, size: 12, color: Theme.warning).padding(.top, 2) }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: t.title).font(.system(size: 12.5)).foregroundStyle(Theme.ink).lineLimit(2)
-                Text(verbatim: t.state.label).font(.system(size: 11)).foregroundStyle(Theme.subtle)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .accessibilityElement(children: .combine)
-    }
-
-    private var notebook: some View {
-        Button { model.openPond(.settings(project: key)) } label: {
-            HStack(spacing: 10) {
-                Lucide(.clipboardList, size: 16, color: Theme.muted)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Notebook").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
-                    Text("What the Ducks have learned here").font(.system(size: 11)).foregroundStyle(Theme.subtle)
-                }
-                Spacer(minLength: 0)
-                Lucide(.chevronRight, size: 12, color: Theme.subtle)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Notebook").accessibilityHint("Opens the Pond's settings, where the Notebook is")
     }
 }
