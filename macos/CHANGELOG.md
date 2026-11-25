@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.34.3
+
+**The new layout is now the default, and the Room and Dashboard are calmer.**
+
+- The new layout is on for everyone who hadn't chosen. Prefer tabs and the inspector? Turn on Classic layout in Settings › General. If you had turned the new layout off, you stay on classic.
+- The chat narrows when a duck's side pane opens, instead of being cut off at both edges. The pane no longer repeats the Changes / Files / Artifacts / Terminal switcher; the icons beside the chat are the only one. Canvas is now called Artifacts: a canvas is one artifact among the rest.
+- One way into the Room: the Dashboard | Room switch. The top row of ducks hides when none is on duty.
+- The Room reads as one list: every line has an avatar, a name, a time and up to three lines of text with Show more. Lines are signed with duck names, never chat titles, including older ones. "Show 4 earlier from Ruby 2" opens a duck's earlier lines.
+- The Dashboard has no side panel. A "For you" card at the top lists what the pond's yellow badge counts, each with an Open button. Who is here, Tasks and the Notebook are on the page.
+- A new pond's Dashboard offers next steps: start a duck, invite someone, put it on GitHub. The newest message in the Room shows "Make task" without hovering.
+- Cloning shows which GitHub account you're signed in as, and asks before cloning a private repo.
+
 ## 2.34.2
 
 **The new layout gets its own composer.**
