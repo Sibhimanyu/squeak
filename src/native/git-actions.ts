@@ -59,7 +59,7 @@ export const noPrOnDefault = (branch: string | null, base: string): string =>
 
 /** Where a git action runs: a stream's folder, or the pond's own folder (Main: no workspace row). */
 interface Place {
-  session: SessionRow;
+  session: SessionRow | null;
   project: ProjectRow;
   ws: WorkspaceRow | null;
   path: string;
@@ -184,6 +184,18 @@ export class GitActions {
     return { session, ws, project: this.options.store.getProject(ws.projectId)!, path: ws.path };
   }
 
+  /** A Stream's folder by its workspace id: Ducks edit in joined Streams, so git is read and acted on per Stream. */
+  private streamTarget(workspaceId: string): Place {
+    const ws = this.options.store.getWorkspace(workspaceId);
+    if (!ws) throw new GitActionError("No such stream.", 404);
+    if (ws.state === "archived" || !fs.existsSync(ws.path)) throw new GitActionError("This stream is archived.");
+    return { session: null, ws, project: this.options.store.getProject(ws.projectId)!, path: ws.path };
+  }
+
+  private place(sessionId: string, workspaceId?: string): Place {
+    return workspaceId ? this.streamTarget(workspaceId) : this.target(sessionId);
+  }
+
   /** The git pond whose own folder this chat runs in (Main), or null: a stream chat, a folder pond, anything else. */
   private mainProject(session: SessionRow): ProjectRow | null {
     if (session.workspaceId) return null;
@@ -201,12 +213,13 @@ export class GitActions {
     return r.code === 0 ? r.stdout.trim() : null;
   }
 
-  async status(sessionId: string): Promise<GitStatus> {
-    const session = this.options.store.getSession(sessionId);
+  /** `workspaceId`: read that Stream's folder (the chat is then only the Duck that works there, or absent). */
+  async status(sessionId: string, workspaceId?: string): Promise<GitStatus> {
+    const session = workspaceId ? null : this.options.store.getSession(sessionId);
     if (session && this.inFolderPond(session)) {
       return { branch: null, base: "", baseRef: null, ahead: null, behind: null, dirty: 0, noHistory: NO_CHANGES };
     }
-    const { ws, project, path: cwd } = this.target(sessionId);
+    const { ws, project, path: cwd } = this.place(sessionId, workspaceId);
     const base = (ws ? this.options.store.getTargetBranch(ws.id) : null) ?? project.defaultBranch;
     const branch = await this.git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
     let baseRef: string | null = null;
@@ -296,8 +309,11 @@ export class GitActions {
   async runAction(
     sessionId: string,
     action: GitAction,
+    workspaceId?: string,
   ): Promise<{ queued: boolean; prompt: string; sessionId?: string }> {
-    const { ws, project, path: cwd } = this.target(sessionId);
+    // With a Stream, the prompt is filled from that Stream's branch and base and goes to `sessionId` (the Duck).
+    if (workspaceId && !this.options.store.getSession(sessionId)) throw new GitActionError("No such session.", 404);
+    const { ws, project, path: cwd } = this.place(sessionId, workspaceId);
     const template = this.options.workspaces.settingsFor(project).effective.prompts[action];
     const branch = (await this.git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])) ?? ws?.branch ?? "HEAD";
     const base = (ws ? this.options.store.getTargetBranch(ws.id) : null) ?? project.defaultBranch;
@@ -328,8 +344,8 @@ export class GitActions {
   }
 
   /** `gh pr merge`, only for an open, non-draft, mergeable PR whose checks are not failing. */
-  async merge(sessionId: string): Promise<{ method: MergeMethod; pr: PullRequestInfo }> {
-    const { project, path: cwd } = this.target(sessionId);
+  async merge(sessionId: string, workspaceId?: string): Promise<{ method: MergeMethod; pr: PullRequestInfo }> {
+    const { project, path: cwd } = this.place(sessionId, workspaceId);
     const gh = this.gh();
     if (!gh) throw new GitActionError("GitHub's gh tool is not installed, so Squeak can't merge.");
     this.cache.delete(cwd);

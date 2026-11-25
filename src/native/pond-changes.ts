@@ -127,6 +127,39 @@ export class PondChangesReader {
     return { projectId, ...(main ? { main } : {}), ducks: out, ducksTruncated: streams.length > picked.length };
   }
 
+  /** One Stream's whole change list (every file, uncapped but for the reader's own cap); null when the Stream is gone. */
+  async readStream(
+    workspaceId: string,
+  ): Promise<{ workspaceId: string; branch: string; base: string | null; files: ChangeFile[]; totals: ChangeSet["totals"] } | null> {
+    const found = this.streamFolder(workspaceId);
+    if (!found) return null;
+    const set = await this.changeSet(found.dir, found.target);
+    if (!set) return null;
+    return { workspaceId, branch: found.branch, base: set.base, files: set.files, totals: set.totals };
+  }
+
+  /** One listed file's diff in a Stream: the list, never the request, decides what git is asked about. */
+  async readStreamPatch(
+    workspaceId: string,
+    filePath: string,
+  ): Promise<{ path: string; patch: string; truncated: boolean } | null> {
+    const found = this.streamFolder(workspaceId);
+    if (!found) return null;
+    const set = await this.changeSet(found.dir, found.target);
+    if (!set) return null;
+    const patch = await this.reader.readChangePatch(found.dir, set.base, set, filePath);
+    return patch ? { path: filePath, ...patch } : null;
+  }
+
+  private streamFolder(workspaceId: string): { dir: string; target: string; branch: string } | null {
+    const { store } = this.deps;
+    const ws = store.getWorkspace(workspaceId);
+    if (!ws || ws.state === "archived" || !fs.existsSync(ws.path)) return null;
+    const project = store.getProject(ws.projectId);
+    if (!project || project.kind !== "git") return null;
+    return { dir: ws.path, target: store.getTargetBranch(ws.id) ?? project.defaultBranch ?? "main", branch: ws.branch };
+  }
+
   private async group(dir: string, targetBranch: string | null): Promise<PondChangeGroup | null> {
     if (!fs.existsSync(dir)) return null;
     const set = await this.changeSet(dir, targetBranch);

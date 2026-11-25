@@ -1588,6 +1588,32 @@ export class NativeServer {
       const ws = store.getWorkspace(id);
       if (!ws) throw new HttpError(404, "no such stream");
       if (sub === "log" && parts.length === 4 && method === "GET") return this.json(res, 200, workspaces.getLog(id));
+      // A Duck edits in joined Streams, so its changes, git state, merge and PR are read and acted on per Stream.
+      if (sub === "changes" && method === "GET" && (parts.length === 4 || (parts.length === 5 && parts[4] === "file"))) {
+        if (parts.length === 4) {
+          const read = await this.pondChanges.readStream(id);
+          if (!read) throw new HttpError(404, "this stream has no changes to read");
+          return this.json(res, 200, read);
+        }
+        const file = url.searchParams.get("path");
+        if (!file || file.length > 1024 || file.includes("\0")) throw new HttpError(400, "path is required");
+        const patch = await this.pondChanges.readStreamPatch(id, file);
+        if (!patch) throw new HttpError(404, "not in the change list");
+        return this.json(res, 200, patch);
+      }
+      if (sub === "git" && parts.length === 4 && method === "GET") return this.json(res, 200, await this.git.status("", id));
+      if (sub === "actions" && parts.length === 5 && method === "POST") {
+        const action = parts[4]!;
+        const b = await this.body(req);
+        if (action === "merge") {
+          if (b.confirm !== true) throw new HttpError(400, "Merging needs confirm: true.");
+          return this.json(res, 200, { ok: true, ...(await this.git.merge("", id)) });
+        }
+        if (!(GIT_ACTIONS as readonly string[]).includes(action)) throw new HttpError(404, "no such action");
+        const sessionId = str(b.sessionId);
+        if (!sessionId) throw new HttpError(400, "sessionId (the Duck's chat to send to) is required");
+        return this.json(res, 200, { ok: true, ...(await this.git.runAction(sessionId, action as GitAction, id)) });
+      }
       if (sub === "run" && parts.length === 4) {
         if (method === "GET") return this.json(res, 200, workspaces.runStatus(id));
         if (method === "POST") {
