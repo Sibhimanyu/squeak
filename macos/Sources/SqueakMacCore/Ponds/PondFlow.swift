@@ -101,10 +101,12 @@ public enum PondOpenTarget: Sendable, Equatable {
     case duck(String)
     /// A duck's ducklings: its tab, then the duckling tabs whose titles are `labels` (all of them when empty).
     case ducklings(duck: String, labels: [String])
+    /// A duck's tab, scrolled to the turn a Room message came from (`turnId` is the host's bare turn id).
+    case turn(duck: String, turnId: String)
 
     /// The duck the target belongs to.
     public var duck: String {
-        switch self { case .duck(let d): d; case .ducklings(let d, _): d }
+        switch self { case .duck(let d): d; case .ducklings(let d, _): d; case .turn(let d, _): d }
     }
 }
 
@@ -119,7 +121,12 @@ public enum PondClick {
         }
     }
 
-    public static func target(message: RoomMessage) -> PondOpenTarget? { target(author: message.author, goesTo: message.goesTo) }
+    /// A message opens its Duck's chat at the turn it came from when the host names the turn, else the chat itself.
+    public static func target(message: RoomMessage) -> PondOpenTarget? {
+        guard let base = target(author: message.author, goesTo: message.goesTo) else { return nil }
+        guard let turn = message.turnId, !turn.isEmpty else { return base }
+        return .turn(duck: base.duck, turnId: turn)
+    }
 
     /// A part of a duck's message. The ask card and the offer have buttons of their own, so they open nothing.
     public static func target(part: RoomPart, in message: RoomMessage) -> PondOpenTarget? {
@@ -135,7 +142,10 @@ public enum PondClick {
     public static func target(duckling: RoomDuckling, of duck: String) -> PondOpenTarget { .ducklings(duck: duck, labels: [duckling.label]) }
 
     /// Squeak's quiet line: a handoff opens the duck it went to.
-    public static func target(line: RoomSystemLine) -> PondOpenTarget? { line.opens.map(PondOpenTarget.duck) }
+    public static func target(line: RoomSystemLine) -> PondOpenTarget? {
+        if let task = line.task, let target = open(task: task) { return target }
+        return line.opens.map(PondOpenTarget.duck)
+    }
 
     /// A job's handed duck.
     public static func target(job: RoomTask) -> PondOpenTarget? { job.handedTo.map { .duck($0.sessionId) } }

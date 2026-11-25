@@ -77,20 +77,26 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var attachments: [RoomAttachment] = []
     /// The canvases the Task made or changed (a done line); empty for a host that sends none.
     public var canvases: [RoomCanvasCard] = []
+    /// The Duck's turn the post came from (the host's bare turn id or `<sessionId>:<turnId>`), so a tap opens its chat at that
+    /// turn. Optional: a host that sends none opens the chat at its end.
+    public var turnId: String?
+    /// The host wrote this post itself from the turn's result because the Duck did not post: shown with a quiet "written by Squeak".
+    public var fallback: Bool = false
     /// Milliseconds since 1970.
     public var at: Int64
 
     public init(
         seq: Int, id: String, author: RoomAuthor, sessionId: String? = nil, kind: RoomPostKind = .message,
         level: RoomLevel = .room, text: String, toSessionId: String? = nil, detail: String? = nil, replyTo: String? = nil,
-        attachments: [RoomAttachment] = [], at: Int64
+        attachments: [RoomAttachment] = [], turnId: String? = nil, fallback: Bool = false, at: Int64
     ) {
+        self.turnId = turnId; self.fallback = fallback
         self.detail = detail; self.replyTo = replyTo
         self.seq = seq; self.id = id; self.author = author; self.sessionId = sessionId; self.kind = kind
         self.level = level; self.text = text; self.toSessionId = toSessionId; self.attachments = attachments; self.at = at
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, toName, detail, replyTo, attachments, canvases, at }
+    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, toName, detail, replyTo, attachments, canvases, turnId, fallback, at }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A post with no seq or id cannot be placed; the page drops it (see `Failable`).
@@ -107,6 +113,8 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         replyTo = try? c.decode(String.self, forKey: .replyTo)
         attachments = ((try? c.decode([Failable<RoomAttachment>].self, forKey: .attachments)) ?? []).compactMap(\.value)
         canvases = ((try? c.decode([Failable<RoomCanvasCard>].self, forKey: .canvases)) ?? []).compactMap(\.value)
+        turnId = (try? c.decode(String.self, forKey: .turnId)).flatMap { $0.isEmpty ? nil : $0 }
+        fallback = (try? c.decode(Bool.self, forKey: .fallback)) ?? false
         at = (try? c.decode(Int64.self, forKey: .at)) ?? 0
     }
 }

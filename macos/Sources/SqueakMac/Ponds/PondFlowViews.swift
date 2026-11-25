@@ -54,6 +54,7 @@ extension AppModel {
     func openFromPond(_ target: PondOpenTarget, pond: String?, page: PondPage) -> Bool {
         guard let s = pondDuckSession(target.duck) else { return false }
         openFromPond(s.key, pond: pond, page: page)
+        if let request = ChatTurnJump.request(for: target, chat: s.key.stringValue, previous: turnJump) { turnJump = request }
         guard case .ducklings(_, let labels) = target, let items = ducklings(for: s)?.items else { return true }
         let wanted = labels.isEmpty ? items : items.filter { d in
             labels.contains { l in d.title.localizedCaseInsensitiveContains(l) || l.localizedCaseInsensitiveContains(d.title) }

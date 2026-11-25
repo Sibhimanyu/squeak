@@ -21,6 +21,18 @@ struct RoomFeedTests {
         #expect(page.threads[0].state == .idle)
     }
 
+    @Test func decodesTheTurnAndTheFallbackFlagWhenSentAndIgnoresThemWhenNot() throws {
+        let json = """
+        {"posts":[{"seq":1,"id":"a","author":{"kind":"agent","name":"Kit"},"text":"hi","at":5,"turnId":"t4","fallback":true},
+                  {"seq":2,"id":"b","author":{"kind":"agent","name":"Kit"},"text":"yo","at":6,"turnId":"","fallback":"yes"},
+                  {"seq":3,"id":"c","author":{"kind":"agent","name":"Kit"},"text":"old host","at":7}],"latestSeq":3,"threads":[]}
+        """
+        let page = try JSONDecoder().decode(RoomPage.self, from: Data(json.utf8))
+        #expect(page.posts[0].turnId == "t4" && page.posts[0].fallback)
+        #expect(page.posts[1].turnId == nil && !page.posts[1].fallback)
+        #expect(page.posts[2].turnId == nil && !page.posts[2].fallback)
+    }
+
     @Test func idempotentBySeq() {
         var f = RoomFeed()
         f.apply(page: RoomPage(posts: [post(1), post(2)], latestSeq: 2))
