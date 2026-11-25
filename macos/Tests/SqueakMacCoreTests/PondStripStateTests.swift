@@ -3,7 +3,7 @@ import XCTest
 
 /// Regressions for the Room that ignored clicks and the switch that disagreed with the visible page.
 final class PondStripStateTests: XCTestCase {
-    private let chat = SessionKey(stringValue: "squeak:abc")!
+    private let chat = SessionKey(provider: "squeak", hostSessionId: "abc")
     private var staleLive: String? { PondCentre.liveDuck(selected: "abc", location: .pondHome(pond: "p"), selectedKey: chat) }
 
     /// lastChat is kept while the Room covers the chat, so a stale selected Duck made clicking that same Duck a no-op (the
