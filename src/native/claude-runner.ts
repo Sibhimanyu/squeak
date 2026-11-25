@@ -123,14 +123,14 @@ export interface ClaudeRunnerOptions {
   /** The person allows their claude.ai account's connectors in Squeak chats (default off: the CLI is told not to load them). */
   claudeAiConnectors?: boolean;
   /**
-   * Ducks own their branch: a folder this chat may not edit (a git pond's Main). Edit tools aimed inside it are refused
+   * A folder this chat may not edit (a git pond's Main, for a Duck that picks its own Streams). Edit tools aimed inside it are refused
    * in every mode, and "Skip approvals" and "Accept edits" are held at "Ask" so a shell command still asks.
    */
   readOnlyRoot?: string | null;
 }
 
 export const READ_ONLY_ROOT_REASON =
-  "Main is read-only for ducks. Call branch_off to get your own branch and working copy (or join_branch to share another duck's), then make the change there.";
+  "The project's main folder is read-only for you. Call open_stream to create or join a branch with its own working copy, then make the change there by its full path.";
 
 /** Tools that take a file path, and the input key it is under. */
 const EDIT_PATH_KEYS: Record<string, string> = {

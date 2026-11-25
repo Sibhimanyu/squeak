@@ -19,7 +19,7 @@ import {
 import { addArtboard, CanvasError, createCanvas, readCanvas, resolveCanvasDir, updateArtboard } from "./canvases.js";
 import { NOTEBOOK_PER_TASK, NotebookError, PondNotebook } from "./pond-notebook.js";
 import { TaskError, type RoomTasks } from "./room-tasks.js";
-import { ducksOwnBranch, Placement, PlacementError, type PlaceRequest } from "./placement.js";
+import { ducksOwnBranch, Placement, PlacementError } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
@@ -96,7 +96,7 @@ export interface AgentToolDeps {
   notebook?: PondNotebook;
   /** The pond's room jobs (`open_jobs`, `claim_job`). Absent: those tools say so. */
   jobs?: RoomTasks;
-  /** Placement for `branch_off`, `join_branch` (flag `ducksOwnBranch`). Absent: those tools say so. */
+  /** Placement for `streams`, `open_stream`, `leave_stream` (flag `ducksOwnBranch`). Absent: those tools say so. */
   placement?: Placement;
   now?: () => number;
   /** git, injectable for tests. */
@@ -408,29 +408,37 @@ export const TOOLS: ToolDef[] = [
 ];
 
 /**
- * Ducks own their branch: a duck places itself. Listed (and answered) only while the flag is on. Each starts a fresh chat
- * for the same duck in the new place (an agent's history is tied to its folder) and the old chat can end its turn.
+ * Streams (flag `ducksOwnBranch`, docs/adr/0003): a Duck starts in the project's main folder, which is read-only, and
+ * opens or joins branches with their own working copies to edit. Listed (and answered) only while the flag is on. The
+ * descriptions use plain words (branch, working copy, other agents): they are read by whatever agent runs here.
  */
 export const PLACEMENT_TOOLS: ToolDef[] = [
   {
-    name: "branch_off",
+    name: "streams",
     description:
-      "Get your own branch and working copy to make changes (Main is read-only). name: a short name for the work (it becomes the branch name). from: a branch, or a duck's name, to branch off (default: your current branch, else the default branch). message: what to carry on with. A new chat for you starts there; end this turn after it.",
-    inputSchema: obj({ name: { type: "string" }, from: { type: "string" }, message: { type: "string" } }),
+      "List the branches of this project that have their own working copy, with the folder of each and which agents are working in it, and the ones you are in. Your own folder is the project's main folder and is read-only: to change files, open a branch with open_stream.",
+    inputSchema: obj({}),
+    readOnly: true,
+  },
+  {
+    name: "open_stream",
+    description:
+      "Create or join a branch with its own working copy so you can edit files; the main folder is read-only. name: a short name for the work (joins the branch called that if there is one, else creates it). branch: an exact branch name instead (joins it, opens it if it only exists in git, else creates it). from: the branch to branch off when creating (default: the default branch). Returns the folder. Edit files there by their full path, and run commands from that folder. You can be in several branches at once.",
+    inputSchema: obj({ name: { type: "string" }, branch: { type: "string" }, from: { type: "string" } }),
     readOnly: false,
   },
   {
-    name: "join_branch",
+    name: "leave_stream",
     description:
-      "Move to a branch another duck is on (or one that exists), sharing its working copy; ducks on one branch may edit at the same time. Give duck (a name or id) or branch, as the pond's list of active branches shows. A new chat for you starts there; end this turn after it.",
-    inputSchema: obj({ duck: { type: "string" }, branch: { type: "string" }, message: { type: "string" } }),
+      "Leave a branch you opened or joined with open_stream, so other agents can see you are no longer working in it. name: its branch or name (optional when you are in just one). Nothing is deleted; the branch and its changes stay.",
+    inputSchema: obj({ name: { type: "string" } }),
     readOnly: false,
   },
 ];
 
-const PLACEMENT_NAMES = new Set(PLACEMENT_TOOLS.map((t) => t.name));
+const PLACEMENT_NAMES = new Set([...PLACEMENT_TOOLS.map((t) => t.name), "branch_off", "join_branch", "move_to_main"]);
 
-const READ_ONLY = new Set(TOOLS.filter((t) => t.readOnly).map((t) => t.name));
+const READ_ONLY = new Set([...TOOLS, ...PLACEMENT_TOOLS].filter((t) => t.readOnly).map((t) => t.name));
 
 /** Tools any chat may call without asking the person: they read, or only write into Squeak itself. */
 export function isSqueakTool(toolName: string): boolean {
@@ -452,6 +460,7 @@ export const LIMITS = {
   maxMessage: 20_000,
   pondChangesPerHour: 10,
   imagesPerHour: 30,
+  streamsPerHour: 5,
 };
 
 export const SHOW_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".svg", ".pdf"]);
@@ -746,6 +755,9 @@ export class AgentTools {
         return this.openJobs(s);
       case "claim_job":
         return this.claimJob(s, args);
+      case "streams":
+      case "open_stream":
+      case "leave_stream":
       case "branch_off":
       case "join_branch":
       case "move_to_main":
@@ -1137,6 +1149,7 @@ export class AgentTools {
     const hour = this.now() - 3_600_000;
     while (this.sent.length && this.sent[0]!.at < hour) this.sent.shift();
     while (this.starts.length && this.starts[0]!.at < hour) this.starts.shift();
+    while (this.streamOpens.length && this.streamOpens[0]!.at < hour) this.streamOpens.shift();
     while (this.pondChanges.length && this.pondChanges[0]!.at < hour) this.pondChanges.shift();
     while (this.shown.length && this.shown[0]!.at < hour) this.shown.shift();
   }
@@ -1314,51 +1327,121 @@ export class AgentTools {
   }
 
   private async placeTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
-    if (!ducksOwnBranch()) throw new ToolError("Branches are not managed by ducks in this Squeak yet.");
-    if (name === "move_to_main") throw new ToolError("Chats work on their own branch; Main is read-only.");
+    if (!ducksOwnBranch()) throw new ToolError("Branches are not managed by agents in this Squeak yet.");
     const { placement, store } = this.deps;
     if (!placement) throw new ToolError("Placement is unavailable here.");
     const text = (k: string): string | undefined =>
       typeof args[k] === "string" && (args[k] as string).trim() ? (args[k] as string).trim() : undefined;
-    this.prune();
-    if (this.starts.filter((x) => x.from === s.id).length >= LIMITS.startsPerHour) {
-      throw new ToolError("This chat moved enough times this hour.");
-    }
-    let req: PlaceRequest;
-    if (name === "branch_off") {
-      const from = text("from");
-      const here = s.branch ?? store.duckBySession(s.id)?.branch ?? undefined;
-      req = {
-        kind: "new",
-        ...(from || here ? { from: from ?? here! } : {}),
-        ...(text("name") ? { title: text("name")! } : {}),
-      };
-    } else {
-      const project = projectOfSession(store, s);
-      const wanted = text("duck");
-      const duck = wanted
-        ? (store.duckRow(wanted) ??
-          (project ? store.listDucks(project.id) : []).find((d) => d.name?.toLowerCase() === wanted.toLowerCase()))
-        : null;
-      if (wanted && !duck) throw new ToolError(`No duck called ${wanted} in this pond.`);
-      const branch = text("branch");
-      if (!duck && !branch) throw new ToolError("Give a duck or a branch to join.");
-      req = duck ? { kind: "join", duckId: duck.id } : { kind: "join", branch: branch! };
-    }
-    this.starts.push({ from: s.id, at: this.now() });
+    const pondRef = projectOfSession(store, s);
+    const project = pondRef ? store.getProject(pondRef.id) : null;
+    const noBranches =
+      "This project is a plain folder with no git history, so it has no branches. Edit its files directly; a file is locked while another agent is editing it.";
     try {
-      const moved = await placement.move(s.id, req, (spec) => this.deps.create(spec), text("message"));
-      const where = moved.place.kind === "main" ? "Main (read-only)" : `branch ${moved.place.branch}`;
-      if (!moved.session) return `You are already in ${where}.`;
-      this.deps.post(s.id, "squeak/agent-started", {
-        text: `Moved to ${where}`,
-        chatId: moved.session.id,
-        agent: s.agent,
-      });
-      return `Moved to ${where}. Your work carries on in chat ${moved.session.id}; end this turn now.`;
+      if (project?.kind === "folder") {
+        if (name === "streams") return noBranches;
+        throw new ToolError(noBranches);
+      }
+      if (name === "streams") return this.streamsText(s, placement);
+      if (name === "leave_stream" || name === "move_to_main") {
+        const left = placement.leaveStream(s.id, text("name"));
+        this.streamLine(s, `left Stream ${left.stream.title || left.stream.branch}`);
+        const rest = left.streams.length
+          ? `You are still in: ${left.streams.map((w) => w.branch).join(", ")}.`
+          : "You are in no branch now; your folder is the read-only main folder.";
+        return `Left ${left.stream.branch}. ${rest}`;
+      }
+      // open_stream, and the older branch_off and join_branch that chats begun before this update may still call.
+      let req: { name?: string; branch?: string; from?: string };
+      if (name === "join_branch") {
+        const wanted = text("duck");
+        const duck = wanted
+          ? (store.duckRow(wanted) ??
+            (project ? store.listDucks(project.id) : []).find((d) => d.name?.toLowerCase() === wanted.toLowerCase()))
+          : null;
+        if (wanted && !duck) throw new ToolError(`No agent called ${wanted} in this project.`);
+        const branch =
+          text("branch") ?? (duck ? (store.duckStreams(duck.id)[0]?.branch ?? duck.branch ?? undefined) : undefined);
+        if (!branch) throw new ToolError("Give a branch to join.");
+        req = { branch };
+      } else {
+        const asked = { name: text("name"), branch: text("branch"), from: text("from") };
+        req = {
+          ...(asked.name ? { name: asked.name } : {}),
+          ...(asked.branch ? { branch: asked.branch } : {}),
+          ...(asked.from ? { from: asked.from } : {}),
+        };
+      }
+      this.prune();
+      if (this.streamOpens.filter((x) => x.from === s.id).length >= LIMITS.streamsPerHour) {
+        throw new ToolError("You created enough branches this hour; join one that exists with open_stream.");
+      }
+      const opened = await placement.openStream(s.id, req);
+      if (opened.created) this.streamOpens.push({ from: s.id, at: this.now() });
+      const label = opened.stream.title || opened.stream.branch;
+      if (opened.created) this.streamLine(s, `created Stream ${label}`);
+      else if (opened.joined) this.streamLine(s, `joined Stream ${label}`);
+      const folder = opened.stream.path;
+      const lead = opened.created
+        ? `Created branch ${opened.stream.branch}`
+        : opened.joined
+          ? `Joined branch ${opened.stream.branch}`
+          : `You are already in branch ${opened.stream.branch}`;
+      return [
+        `${lead}. Its working copy is ${folder}.`,
+        `Edit files there by their full path (for example ${folder}/<file>) and run commands from that folder. Your own folder is read-only. You are in: ${opened.streams.map((w) => w.branch).join(", ")}.`,
+      ].join(" ");
     } catch (error) {
       if (error instanceof PlacementError) throw new ToolError(error.message);
       throw error;
+    }
+  }
+
+  private readonly streamOpens: { from: string; at: number }[] = [];
+
+  /** `streams`: every branch with a working copy, who is in it, and which ones are yours. */
+  private streamsText(s: SessionRow, placement: Placement): string {
+    const { main, mine, active, project } = placement.streamsFor(s.id);
+    const mineIds = new Set(mine.map((w) => w.id));
+    const lines = [`Your folder: ${main} (the project's main folder, read-only for you).`];
+    lines.push(
+      mine.length
+        ? `You are in: ${mine.map((w) => w.branch).join(", ")}.`
+        : "You are in no branch yet; open one with open_stream to edit.",
+    );
+    if (active.length === 0) {
+      lines.push("No branches have a working copy yet.");
+    } else {
+      lines.push(`Branches with a working copy (default branch ${project.defaultBranch}):`);
+      for (const b of active) {
+        const ws = this.deps.store.getWorkspace(b.workspaceId);
+        const who = b.ducks.length ? b.ducks.map((d) => d.name).join(", ") : "nobody now";
+        const title = b.title && b.title !== b.branch ? ` (${b.title})` : "";
+        lines.push(
+          `- ${b.branch}${title}: ${ws?.path ?? ""}; ${who}${mineIds.has(b.workspaceId) ? "; you are in it" : ""}`,
+        );
+      }
+    }
+    return lines.join("\n");
+  }
+
+  /** One status line in the Room: a Duck joined, left or created a Stream. Never fails the tool. */
+  private streamLine(s: SessionRow, text: string): void {
+    const { room, store } = this.deps;
+    const project = projectOfSession(store, s);
+    if (!room || !project) return;
+    try {
+      const duck = store.duckBySession(s.id);
+      room.post({
+        projectId: project.id,
+        author: { kind: "squeak", name: duck?.name?.trim() || agentName(s) },
+        sessionId: s.id,
+        kind: "message",
+        level: "room",
+        text,
+      });
+      if (duck) room.emitDuck(duck.id);
+    } catch (error) {
+      logger.warn("stream line failed", { error: String(error) });
     }
   }
 

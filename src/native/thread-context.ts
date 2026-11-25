@@ -22,8 +22,8 @@ export interface ThreadContextInput {
   /** This chat's duck: its name (the person's, else the chat title) and the role the person gave it. */
   duck?: { name: string; role?: string | null };
   /**
-   * Ducks own their branch (flag `ducksOwnBranch`): where this chat is and the pond's active branches, so the duck
-   * can place itself. Absent with the flag off, and in a plain-folder pond.
+   * Ducks choose their Streams (flag `ducksOwnBranch`): where this chat is and the pond's active branches, so the duck
+   * can open or join one. Absent with the flag off, and in a plain-folder pond.
    */
   placement?: {
     /** `main`: the pond's own folder, read-only; `branch`: a working copy that other ducks may share. */
@@ -47,14 +47,14 @@ export function placementLines(p: NonNullable<ThreadContextInput["placement"]>, 
   const lines =
     p.mode === "main"
       ? [
-          "You are in Main, the pond's own folder, and Main is read-only for ducks: never create, edit or delete files in it (Squeak refuses the edit). Chats normally work on a branch of their own, so call branch_off (optional name for the work, optional from) to get your own branch and working copy, or join_branch to share a branch another duck is already on.",
+          "You start in Main, the pond's own folder, and Main is read-only for ducks: never create, edit or delete files in it (Squeak refuses the edit). Squeak never picks a stream for you. To change files, call open_stream (name for the work, or an exact branch; optional from) to create or join a branch with its own working copy: it returns that folder, and you edit its files by their full path and run commands from that folder. You may be in several streams at once; each joined stream is locked per file while you edit. streams lists the pond's streams and who is in each; leave_stream leaves one when you are done with it.",
         ]
       : [
-          `You work on branch ${branch ?? "(unnamed)"} in a working copy of its own. Other ducks on the same branch share this folder and may edit at the same time, so re-read a file before editing it and say in the room what you are changing. branch_off starts separate work on a new branch, join_branch moves you to another duck's branch. Main is read-only.`,
+          `You work on branch ${branch ?? "(unnamed)"} in a working copy of its own. Other ducks on the same branch share this folder and may edit at the same time, so re-read a file before editing it and say in the room what you are changing. open_stream creates or joins another branch with its own working copy (edit it by full path), streams lists them, leave_stream leaves one. Main is read-only.`,
         ];
   if (p.branches.length > 0) {
     lines.push(
-      `Active branches in this pond (join the one whose task matches yours with join_branch; otherwise branch_off for new work):\n${p.branches
+      `Active branches in this pond (join the one whose task matches yours with open_stream; otherwise open_stream with a name for new work):\n${p.branches
         .map(
           (b) =>
             `- ${b.branch}: ${b.title}${b.ducks.length ? `; ducks: ${b.ducks.join(", ")}` : "; no duck on it now"}; active ${ago(now - b.lastActiveAt)}`,

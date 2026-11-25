@@ -1610,7 +1610,11 @@ export class NativeStore {
        CREATE INDEX IF NOT EXISTS ducks_project ON ducks(project_id);
        CREATE TABLE IF NOT EXISTS duck_sessions (
          session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
-       CREATE INDEX IF NOT EXISTS duck_sessions_duck ON duck_sessions(duck_id)`,
+       CREATE INDEX IF NOT EXISTS duck_sessions_duck ON duck_sessions(duck_id);
+       CREATE TABLE IF NOT EXISTS duck_streams (
+         duck_id TEXT NOT NULL, workspace_id TEXT NOT NULL, joined_at TEXT NOT NULL,
+         PRIMARY KEY (duck_id, workspace_id));
+       CREATE INDEX IF NOT EXISTS duck_streams_workspace ON duck_streams(workspace_id)`,
     );
     this.ducksReady = true;
   }
@@ -1810,6 +1814,49 @@ export class NativeStore {
     this.ducksTable();
     return (
       this.db.prepare("SELECT * FROM ducks WHERE workspace_id=? ORDER BY created_at, id").all(workspaceId) as Row[]
+    ).map(duckRow);
+  }
+
+  /** The Duck joins a Stream (a working copy). True when it was not in it yet. */
+  joinDuckStream(duckId: string, workspaceId: string): boolean {
+    this.ducksTable();
+    return (
+      this.db
+        .prepare("INSERT OR IGNORE INTO duck_streams (duck_id, workspace_id, joined_at) VALUES (?,?,?)")
+        .run(duckId, workspaceId, nowIso()).changes > 0
+    );
+  }
+
+  /** The Duck leaves a Stream. True when it was in it. */
+  leaveDuckStream(duckId: string, workspaceId: string): boolean {
+    this.ducksTable();
+    return (
+      this.db.prepare("DELETE FROM duck_streams WHERE duck_id=? AND workspace_id=?").run(duckId, workspaceId).changes >
+      0
+    );
+  }
+
+  /** The Streams (usable working copies) a Duck is in, in the order it joined them. */
+  duckStreams(duckId: string): WorkspaceRow[] {
+    this.ducksTable();
+    const ids = this.db
+      .prepare("SELECT workspace_id FROM duck_streams WHERE duck_id=? ORDER BY joined_at, rowid")
+      .all(duckId) as { workspace_id: string }[];
+    return ids
+      .map((r) => this.getWorkspace(r.workspace_id))
+      .filter((w): w is WorkspaceRow => !!w && w.state !== "archived");
+  }
+
+  /** Every Duck in a Stream: those that joined it, and older Ducks whose chat runs in its folder (any duty). */
+  ducksInStream(workspaceId: string): DuckRow[] {
+    this.ducksTable();
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM ducks WHERE workspace_id=? OR id IN (SELECT duck_id FROM duck_streams WHERE workspace_id=?)
+           ORDER BY created_at, id`,
+        )
+        .all(workspaceId, workspaceId) as Row[]
     ).map(duckRow);
   }
 

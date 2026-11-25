@@ -99,6 +99,13 @@ export interface DuckPlace {
   branch: string;
 }
 
+/** A Stream a Duck is in (a Duck may be in several at once). */
+export interface DuckStream {
+  workspaceId: string;
+  branch: string;
+  title?: string;
+}
+
 /** One duck of the pond with its current place (GET .../ducks). */
 export interface DuckView {
   id: string;
@@ -112,6 +119,8 @@ export interface DuckView {
   /** The duck's current session; absent for a duck that has not worked yet. */
   currentSessionId?: string;
   place?: DuckPlace;
+  /** The Streams it has joined, in order; absent when it is in none (the Pond itself). */
+  streams?: DuckStream[];
   /** Members' own ducks (design only, `pondOwnThreads` stays off): which Mac runs this duck. Never set today. */
   nest?: string;
   /** Members' own ducks (design only): the member whose machine this duck runs on ("Powered by ..."). Never set today. */
@@ -131,6 +140,8 @@ export interface RoomThread {
   colourSeed?: string;
   /** Where the duck works now; absent for Main or when it has no session. */
   place?: DuckPlace;
+  /** The Streams the duck has joined, in order; absent when it is in none. */
+  streams?: DuckStream[];
   /** Members' own ducks (design only): which Mac runs this duck. Never set today. */
   nest?: string;
   /** Members' own ducks (design only): "Powered by <member>". Never set today. */
@@ -927,12 +938,23 @@ export class Room extends EventEmitter {
     };
   }
 
+  /** The Streams a Duck has joined (usable working copies only), in the order it joined them. */
+  streamsOf(duckId: string | undefined): DuckStream[] {
+    if (!duckId) return [];
+    return this.store.duckStreams(duckId).map((w) => ({
+      workspaceId: w.id,
+      branch: w.branch,
+      ...(w.title ? { title: w.title } : {}),
+    }));
+  }
+
   /** The duck's view for GET .../ducks. */
   duckView(duck: DuckRow): DuckView {
     const s = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
     const created = Date.parse(duck.createdAt) || 0;
     const at = s ? Date.parse(s.updatedAt) : created;
     const place = this.placeOf(s);
+    const streams = this.streamsOf(duck.id);
     return {
       id: duck.id,
       projectId: duck.projectId,
@@ -943,6 +965,7 @@ export class Room extends EventEmitter {
       duty: duck.duty,
       ...(s ? { currentSessionId: s.id } : {}),
       ...(place ? { place } : {}),
+      ...(streams.length ? { streams } : {}),
       state: s ? threadState(s.status, s.lastTurnEndedAt) : "idle",
       lastActiveAt: Number.isFinite(at) ? at : created,
       sessions: this.store.duckSessionIds(duck.id).length,
@@ -993,9 +1016,11 @@ export class Room extends EventEmitter {
     const ask = state === "waiting" ? askOf(last?.reply) : null;
     const duck = this.duckOfSession(s);
     const place = this.placeOf(s);
+    const streams = this.streamsOf(duck?.id);
     return {
       ...(duck ? { duckId: duck.id, colourSeed: duck.colourSeed } : {}),
       ...(place ? { place } : {}),
+      ...(streams.length ? { streams } : {}),
       sessionId: s.id,
       title: s.title ?? "Untitled",
       name: duck?.name ?? agentName(s),

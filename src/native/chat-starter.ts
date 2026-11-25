@@ -1,6 +1,6 @@
 import type { SessionHost, CreateSpec } from "./host.js";
 import { ducksOwnBranch, parsePlace, placeFromAliases, PlacementError, projectOfSession } from "./placement.js";
-import type { Placement, PlaceRequest } from "./placement.js";
+import type { Placement } from "./placement.js";
 import { TaskError, taskTitle, type StartSpec } from "./room-tasks.js";
 import type { Room } from "./room.js";
 import type { NativeStore } from "./store.js";
@@ -39,19 +39,24 @@ function optionalBranch(v: unknown): string | undefined {
 /**
  * The one way a Duck's chat starts. Every path (the host route, the Planner, Room jobs, Duck agent tools, Git
  * actions) ends in `create`, the only caller of the host's low-level create; this module owns placement (which Stream,
- * Main read-only in Git Ponds when Ducks own their branch, a folder Pond's own folder), the model a new chat
+ * Pond-wide start in the main folder, Main read-only in Git Ponds, a folder Pond's own folder), the model a new chat
  * inherits and the Duck link. Errors: `PlacementError` for requests, `TaskError` for jobs; callers map them.
  */
 export class ChatStarter {
   constructor(private readonly o: ChatStarterOptions) {}
 
   /**
-   * Starts a chat in a folder the caller already chose. When Ducks own their branch the chat gets its Duck at once
-   * (unless the spec names one), so the Pond's branch list counts it.
+   * Starts a chat in a folder the caller already chose. When Ducks choose their Streams the chat gets its Duck at once
+   * (unless the spec names one), and a chat that starts inside a Stream's folder counts as that Duck joining it.
    */
   async create(spec: CreateSpec): Promise<SessionRow> {
     const session = await this.o.host.create(spec);
-    return spec.duckId ? session : this.withDuck(session);
+    const done = spec.duckId ? session : this.withDuck(session);
+    if (ducksOwnBranch() && done.workspaceId) {
+      const duck = this.o.store.duckBySession(done.id);
+      if (duck) this.o.store.joinDuckStream(duck.id, done.workspaceId);
+    }
+    return done;
   }
 
   private withDuck(session: SessionRow): SessionRow {
@@ -83,18 +88,14 @@ export class ChatStarter {
     });
     if (b.main !== undefined && typeof b.main !== "boolean") throw new PlacementError("main must be true or false");
     if (b.place !== undefined) {
-      // `place` replaces `main`, `newWorkspace` and `workspaceId` (which stay as aliases) when ducks own their branch.
+      // `place` replaces `main`, `newWorkspace` and `workspaceId` (which stay as aliases) when Ducks choose their Streams.
       if (!ducksOwnBranch()) {
         throw new PlacementError("place needs ducksOwnBranch (SQUEAK_DUCKS_OWN_BRANCH) turned on");
       }
       if (b.main !== undefined || b.newWorkspace !== undefined || str(b.workspaceId) || cwd) {
         throw new PlacementError("give place, or main, newWorkspace, workspaceId and cwd, not both");
       }
-      let req = parsePlace(b.place);
-      // Main is no place to start a chat in a git pond: it gets a branch of its own, like `main: true`.
-      if (req.kind === "main" && store.getProject(projectId ?? "")?.kind === "git") {
-        req = { kind: "new", ...(text ? { title: taskTitle(text) } : {}) };
-      }
+      const req = parsePlace(b.place);
       const duck = req.kind === "join" && req.duckId ? store.duckRow(req.duckId) : null;
       const pond = projectId ?? duck?.projectId;
       if (!pond) throw new PlacementError("place needs a projectId");
@@ -132,38 +133,14 @@ export class ChatStarter {
       const project = store.getProject(projectId);
       if (!project) throw new PlacementError("no such project", 404);
       cwd = project.rootPath;
-      if (project.kind === "git" && ducksOwnBranch()) {
-        ({ cwd, workspaceId } = await this.ownBranch(project.id, text));
-      }
     } else if (!cwd && projectId && !workspaceId) {
-      // A plain-folder pond has no streams: its chats run in the folder itself.
+      // A plain-folder pond has no streams: its chats run in the folder itself. A Duck starts Pond-wide too: no place
+      // named means the Pond's main folder and no Stream; the Duck picks its own with open_stream.
       const project = store.getProject(projectId);
-      if (project?.kind === "folder") cwd = project.rootPath;
-      // Ducks own their branch: no place named means a branch and worktree of the chat's own, never Main.
-      else if (project?.kind === "git" && ducksOwnBranch()) {
-        ({ cwd, workspaceId } = await this.ownBranch(project.id, text));
-      }
+      if (project?.kind === "folder" || (project?.kind === "git" && ducksOwnBranch())) cwd = project.rootPath;
     }
     if (!cwd) throw new PlacementError("cwd, or projectId with newWorkspace, is required");
     return this.create(spec());
-  }
-
-  /** A new chat's own branch and worktree (before its first turn), titled from its first text. Failing fails the request. */
-  private async ownBranch(
-    projectId: string,
-    text: string | undefined,
-  ): Promise<{ cwd: string; workspaceId: string | null }> {
-    const req: PlaceRequest = { kind: "new", ...(text ? { title: taskTitle(text) } : {}) };
-    try {
-      const placed = await this.o.placement.resolve(projectId, req);
-      return { cwd: placed.cwd, workspaceId: placed.workspaceId };
-    } catch (error) {
-      if (error instanceof PlacementError) throw error;
-      throw new PlacementError(
-        `could not make a branch for this chat: ${error instanceof Error ? error.message : error}`,
-        500,
-      );
-    }
   }
 
   /** The model of the duck's newest chat, else of the pond's newest one that has a model. */
