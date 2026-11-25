@@ -790,7 +790,13 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
     let name: String
     let subtitle: String
     var leadingInset: CGFloat = 0
-    let switchSelection: Binding<PondPage?>
+    /// What the centre shows (`PondCentre.switchSelection`): nil while a Duck or an item covers the pages.
+    let switchSelection: PondPage?
+    /// The pond's strip, so the pill slides with a swipe; nil draws the pill at rest under the selection.
+    var strip: PondPanState?
+    /// A fixed progress, for snapshots.
+    var switchProgress: Double?
+    let pick: (PondPage) -> Void
     var hasTabs = true
     @ViewBuilder let tile: () -> Tile
     @ViewBuilder let tabs: () -> Tabs
@@ -807,10 +813,7 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
             }
             .help(subtitle)
             .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
-            RoomSegmented(
-                items: PondPage.allCases.map(Optional.some), selection: switchSelection,
-                title: { $0?.title ?? "" }, height: CGFloat(PondBarMetrics.controlHeight), capsule: true)
-                .fixedSize().accessibilityLabel("Pond view")
+            PondPageSwitch(selection: switchSelection, strip: strip, progress: switchProgress, pick: pick)
                 .padding(.leading, CGFloat(PondBarMetrics.sectionGap))
             if hasTabs { tabs().padding(.leading, CGFloat(PondBarMetrics.sectionGap)) }
             if !hasTabs { Spacer(minLength: 0) }
@@ -831,6 +834,8 @@ struct PondSharedHeader: View {
     var itemShowing = false
     /// A Duck's chat is showing: neither page is selected, and picking one leaves the Duck for it.
     var inDuck = false
+    /// The New duck page is the centre: neither page, no Duck and no item is selected.
+    var newDuck = false
     /// The Pond's strip (oval tabs), drawn in this same row after the switch; nil draws no strip.
     var workspace: PondWorkspace?
     var strip: PondWorkspaceStrip?
@@ -841,16 +846,14 @@ struct PondSharedHeader: View {
         let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
         let subtitle = RoomDucks.subtitle(people: people, counts: PondsModel.shared.native(key: key).flatMap { RoomRosterStore.shared.model(for: $0.id).counts })
         let centre = PondCentre(page: RoomViewPref.shared.mode(for: key), duck: inDuck ? (strip?.row.selectedDuck ?? "") : nil,
-                                item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil)
+                                item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil, newDuck: newDuck)
         PondTopBar(
             name: name, subtitle: subtitle, leadingInset: leadingInset,
-            switchSelection: Binding<PondPage?>(get: { centre.switchSelection },
-                set: { page in
-                    guard let page else { return }
-                    // One source of truth for what the centre shows (PondCentre): the switch writes it, the page reads it.
-                    // Flow: from inside a Duck, the switch goes to that page of the Pond.
-                    model.applyCentre(pond: key) { $0.switchTo(page) }
-                }),
+            switchSelection: centre.switchSelection,
+            strip: PondPanStore.shared.state(for: key),
+            // One source of truth for what the centre shows (PondCentre): the switch writes it, the page reads it.
+            // Flow: from inside a Duck, the switch goes to that page of the Pond.
+            pick: { page in model.applyCentre(pond: key) { $0.switchTo(page) } },
             hasTabs: !(strip?.isEmpty ?? true),
             tile: {
                 PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,

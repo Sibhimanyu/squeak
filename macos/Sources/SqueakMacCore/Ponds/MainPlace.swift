@@ -54,6 +54,15 @@ public struct MainPlace: Equatable, Sendable {
     public static let offerStay = "Stay in Main"
 }
 
+/// The New duck page's controls, each with the flow that earns it (every control needs a named user flow):
+/// the message box starts the duck; the model chip picks who leads it; the Preset chip is the one-tap way to set how hard it
+/// thinks; Options folds the rare ones (Thinking, Plan first, Split the work); the "+" attaches a screenshot or file the
+/// agent should see; Private keeps this duck's chat to myself in a pond with other people. Preset sits on the chip row only,
+/// not again inside Options. Private is not drawn when there is nobody to hide it from, or when the owner's Mac runs it.
+public enum NewDuckControls {
+    public static func showsPrivate(people: Int?, runsOnOwner: Bool) -> Bool { !runsOnOwner && (people ?? 2) > 1 }
+}
+
 /// Where a new, unsent chat starts: the "In:" control above the composer.
 public enum NewChatIn {
     /// ⌘N and a pond's Start a thread begin in Main when the pond has one; a named stream (a stream's "+") stays
@@ -64,12 +73,28 @@ public enum NewChatIn {
         return newestStream.map { .existing($0) } ?? .new
     }
 
-    /// The one line above the composer. Ducks mode never offers or shows Main: every path there reads the ducks line,
-    /// whatever opened the page (a pond's Start a thread, a duck's "+", a branch's "+", the shortcut).
-    public enum PlaceLine: Equatable, Sendable { case ducks, inMain, pond, fixed, picker }
+    /// The one line above the composer. Ducks mode (ADR 0003) never asks where: a new Duck starts Pond-wide in the Pond's main
+    /// folder and picks or joins Streams itself, so every path there reads `.pondWide` (no line at all), whatever opened the
+    /// page (a pond's Start a duck, the Room's new duck, a duck's "+", a branch's "+", the shortcut).
+    public enum PlaceLine: Equatable, Sendable { case pondWide, inMain, pond, fixed, picker }
+
+    /// What a start sends to the host to say where. Pond-wide sends none of it (no place, newWorkspace, branch, stream or Main):
+    /// the host's ChatStarter starts the Duck Pond-wide. Any other line sends what the person chose.
+    public struct Placement: Equatable, Sendable {
+        public var main: Bool
+        public var newWorkspace: Bool
+        public var workspaceId: String?
+        public var place: DuckPlace?
+        public static let none = Placement(main: false, newWorkspace: false, workspaceId: nil, place: nil)
+        public init(main: Bool, newWorkspace: Bool, workspaceId: String?, place: DuckPlace?) {
+            self.main = main; self.newWorkspace = newWorkspace; self.workspaceId = workspaceId; self.place = place
+        }
+    }
+
+    public static func placement(line: PlaceLine, chosen: Placement) -> Placement { line == .pondWide ? .none : chosen }
 
     public static func placeLine(ducksFlag: Bool, conductorWorkspace: Bool, fixedPlace: Bool, hasPond: Bool, ownerMac: Bool, hasMain: Bool) -> PlaceLine {
-        if ducksFlag, !conductorWorkspace, !(hasPond && ownerMac), hasMain || hasPond { return .ducks }
+        if ducksFlag, !conductorWorkspace, !(hasPond && ownerMac), hasMain || hasPond { return .pondWide }
         if hasMain, !conductorWorkspace, !fixedPlace { return .inMain }
         if hasPond { return .pond }
         if fixedPlace || conductorWorkspace { return .fixed }

@@ -126,11 +126,26 @@ import Testing
         // Every opening path in ducks mode reads the ducks line: pond context, fixed branch, shortcut with Main known.
         for fixed in [false, true] {
             for pond in [false, true] {
-                #expect(NewChatIn.placeLine(ducksFlag: true, conductorWorkspace: false, fixedPlace: fixed, hasPond: pond, ownerMac: false, hasMain: true) == .ducks)
+                #expect(NewChatIn.placeLine(ducksFlag: true, conductorWorkspace: false, fixedPlace: fixed, hasPond: pond, ownerMac: false, hasMain: true) == .pondWide)
             }
         }
         // The old regression: a pond context with Main known fell through to "In: Main".
         #expect(NewChatIn.placeLine(ducksFlag: true, conductorWorkspace: false, fixedPlace: false, hasPond: true, ownerMac: false, hasMain: true) != .inMain)
+    }
+
+    @Test func pondWideStartSendsNoPlaceAtAll() {
+        let picked = NewChatIn.Placement(main: true, newWorkspace: true, workspaceId: "ws", place: .joinBranch("sibhimanyu/i-have-a-list-of-bugs"))
+        #expect(NewChatIn.placement(line: .pondWide, chosen: picked) == .none)
+        // Classic (flag off) keeps what was chosen.
+        #expect(NewChatIn.placement(line: .inMain, chosen: picked) == picked)
+        #expect(NewChatIn.placement(line: .pond, chosen: picked) == picked)
+    }
+
+    @Test func privateOnlyWhereThereIsSomeoneToHideFrom() {
+        #expect(!NewDuckControls.showsPrivate(people: 1, runsOnOwner: false))
+        #expect(NewDuckControls.showsPrivate(people: 2, runsOnOwner: false))
+        #expect(NewDuckControls.showsPrivate(people: nil, runsOnOwner: false))
+        #expect(!NewDuckControls.showsPrivate(people: 3, runsOnOwner: true))
     }
 
     @Test func nonDucksPlaceLineIsUnchanged() {

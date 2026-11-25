@@ -16,10 +16,11 @@ import SqueakMacCore
     var roster: RoomRosterModel { RoomRosterStore.shared.model(for: project.id) }
     var threads: [RoomThread] { PondRoomStore.shared.model(for: project.id).feed.threads }
 
-    func strip(place: DuckRowPlace, store: TabStore) -> PondWorkspaceStrip {
+    /// `newDuck`: the New duck page is the centre, so no tab is selected (neither a Duck nor an item).
+    func strip(place: DuckRowPlace, store: TabStore, newDuck: Bool = false) -> PondWorkspaceStrip {
         PondWorkspaceStrip(
             roster: RoomRoster.roster(roster.list, threads: threads),
-            place: place, items: store.pondItems(project.id), current: store.currentPondItem(project.id))
+            place: newDuck ? .dashboard : place, items: store.pondItems(project.id), current: newDuck ? nil : store.currentPondItem(project.id))
     }
 }
 

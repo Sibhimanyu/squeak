@@ -109,14 +109,6 @@ private func chat(_ id: String, repo: String = "squeak", cwd: String, state: Ses
 @Suite struct ReadGateTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    @Test func aReplyIsSeenOnlyAfterTheDwellAtTheBottomInAKeyWindow() {
-        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: nil, now: now))
-        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: now.addingTimeInterval(-0.4), now: now))
-        #expect(ReadGate.isViewing(windowOnScreen: true, windowKey: true, bottomSince: now.addingTimeInterval(-1), now: now))
-        #expect(!ReadGate.isViewing(windowOnScreen: true, windowKey: false, bottomSince: now.addingTimeInterval(-5), now: now))
-        #expect(!ReadGate.isViewing(windowOnScreen: false, windowKey: true, bottomSince: now.addingTimeInterval(-5), now: now))
-    }
-
     private func chat(_ id: String, _ state: SessionState, ago: TimeInterval) -> HostSession {
         HostSession(key: SessionKey(provider: "conductor", workspaceId: nil, hostSessionId: id), title: id, repoName: "r", branch: nil, cwd: "/w/r/\(id)",
                     agent: "claude", state: state, lastActivityAt: now.addingTimeInterval(-ago), alive: true)

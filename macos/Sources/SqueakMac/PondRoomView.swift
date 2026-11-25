@@ -47,9 +47,17 @@ final class PondRoomModel {
     private(set) var visitSeenAt: Int64?
     private var seenKey: String { "squeak.room.seenAt.\(projectId)" }
 
+    /// The newest thing in the Room when this visit's rows first drew: later arrivals were read as they came.
+    private(set) var visitThrough: Int64?
+
     func beginVisit() {
         let stored = UserDefaults.standard.object(forKey: seenKey) as? Int64
         visitSeenAt = stored
+        visitThrough = nil
+    }
+
+    func noteVisitEdge(_ items: [RoomItem]) {
+        if visitThrough == nil { visitThrough = RoomUnread.seenUpTo(items) }
     }
 
     /// The Room has been read up to its newest thing (written while it is on screen at its newest end, and as it is left).
@@ -341,7 +349,7 @@ struct PondRoomView: View {
         case .ready:
             let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
             let built = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
-            let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt)
+            let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt, through: room.visitThrough)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {
                 conversation(room, items, working)
@@ -418,7 +426,7 @@ struct PondRoomView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
-            .onAppear { ledger.freeze(items.map(\.id)) }
+            .onAppear { ledger.freeze(items.map(\.id)); room.noteVisitEdge(items) }
             .onDisappear { room.markSeen(items) }
             .onChange(of: count) { old, new in
                 if atBottom { room.markSeen(items) }
@@ -477,29 +485,12 @@ struct PondRoomView: View {
     /// A sentence when the attachments could not be prepared (nothing was sent), else nil.
     private func sendTo(_ to: RoomAddressee, _ text: String, _ items: [OutgoingAttachment]) -> String? {
         atBottom = true
-        switch to {
-        case .thread(let id, _):
-            guard let s = session(id) else { return nil }
-            var words = text
-            if !items.isEmpty {
-                guard let folder = s.cwd, !folder.isEmpty else { return ImageAttachmentError.folderMissing.errorDescription }
-                // A duck's own chat takes pictures and files the way its composer does: saved in its folder, named in the text.
-                do {
-                    let pictures = items.filter { $0.kind == .image }.map { PreparedImage(data: $0.data, ext: ImageAttachments.kind(of: $0.data) ?? "png") }
-                    let imageRefs = try ImageAttachments.save(pictures, into: folder)
-                    let fileRefs = try RoomAttachmentFiles.save(items.filter { $0.kind == .file }.map { ($0.name, $0.data) }, into: folder)
-                    words = RoomAttachmentFiles.compose(text, imageRefs: imageRefs, fileRefs: fileRefs)
-                } catch { return (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the attachments." }
-            }
-            Task { _ = await model.send(words, to: s.key, fromRoom: true) }
-            if room.feed.threads.first(where: { $0.sessionId == id })?.onDuty == false {
-                Task { await room.setDuty(sessionId: id, on: true, host: model.nativeHost) }
-            }
-        case .everyone, .person:
-            // A Member's message is words only for now: pictures and files stay on the Mac they were attached on.
-            if member, !items.isEmpty { return "Pictures and files aren\u{2019}t shared with the Owner\u{2019}s Mac yet." }
-            Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
-        }
+        // Every message written here is a Room message with the addressee's name leading it as an @mention. The host wakes
+        // the Duck with it as a Room turn and posts its answer back to the Room. (A message typed in the Duck's own chat is
+        // that chat's send and stays private.)
+        // A Member's message is words only for now: pictures and files stay on the Mac they were attached on.
+        if member, !items.isEmpty { return "Pictures and files aren\u{2019}t shared with the Owner\u{2019}s Mac yet." }
+        Task { await room.send(RoomMention.roomText(text, to: to), attachments: items, host: model.nativeHost) }
         return nil
     }
 }

@@ -9,10 +9,12 @@ public struct PondCentre: Equatable, Sendable {
         case page(PondPage)
         case duck(String)
         case item(TabItem)
+        /// The New duck page: its own state, with no Duck selected and no page selected.
+        case newDuck
     }
 
     /// What Esc does next.
-    public enum EscapeStep: Equatable, Sendable { case deselectItem, toParentDuck, toRoom, toDashboard, nothing }
+    public enum EscapeStep: Equatable, Sendable { case deselectItem, toParentDuck, toRoom, toDashboard, closeNewDuck, nothing }
 
     /// The pond page underneath everything: the one the switch last picked, remembered while a Duck or item covers it.
     public private(set) var page: PondPage
@@ -20,12 +22,17 @@ public struct PondCentre: Equatable, Sendable {
     public private(set) var duck: String?
     /// The selected item tab (a file, diff, Notebook...), over the page or the Duck.
     public private(set) var item: TabItem?
+    /// The New duck page is open. It covers everything, and the Duck that was open before it is no longer selected.
+    public private(set) var newDuck: Bool
 
-    public init(page: PondPage = .dashboard, duck: String? = nil, item: TabItem? = nil) {
-        self.page = page; self.duck = duck; self.item = item
+    public init(page: PondPage = .dashboard, duck: String? = nil, item: TabItem? = nil, newDuck: Bool = false) {
+        self.page = page; self.newDuck = newDuck
+        // A page that is its own state leaves no Duck or item selected: the last one never leaks into it.
+        self.duck = newDuck ? nil : duck; self.item = newDuck ? nil : item
     }
 
     public var shows: Shows {
+        if newDuck { return .newDuck }
         if let item { return .item(item) }
         if let duck { return .duck(duck) }
         return .page(page)
@@ -45,19 +52,25 @@ public struct PondCentre: Equatable, Sendable {
         switch shows {
         case .item(let i): i
         case .duck(let d): .duck(d)
-        case .page: nil
+        case .page, .newDuck: nil
         }
     }
 
-    /// The switch: that page, leaving any Duck or item.
-    public mutating func switchTo(_ target: PondPage) { page = target; duck = nil; item = nil }
+    /// The Duck subheader (its branch chip and the Duck gradient) belongs only to a selected Duck.
+    public var showsDuckSubheader: Bool { if case .duck = shows { return true } else { return false } }
+
+    /// The New duck page: over the page, with no Duck selected.
+    public mutating func startNewDuck() { newDuck = true; duck = nil; item = nil }
+
+    /// The switch: that page, leaving any Duck, item or the New duck page.
+    public mutating func switchTo(_ target: PondPage) { page = target; duck = nil; item = nil; newDuck = false }
 
     /// A Duck's tab (or a deep link to it): its chat, over the remembered page.
-    public mutating func selectDuck(_ id: String) { duck = id; item = nil }
+    public mutating func selectDuck(_ id: String) { duck = id; item = nil; newDuck = false }
 
     /// An item tab: over whatever is underneath.
     public mutating func selectItem(_ tab: TabItem) {
-        if tab.kind == .duck { selectDuck(tab.id) } else { item = tab }
+        if tab.kind == .duck { selectDuck(tab.id) } else { item = tab; newDuck = false }
     }
 
     /// A deep link from a Room message: the Duck's chat; the Room stays the page the way back lands on.
@@ -80,7 +93,9 @@ public struct PondCentre: Equatable, Sendable {
         public var deselectItem = false
         public var openDuck: String?
         public var leaveDuck = false
-        public var isEmpty: Bool { page == nil && !deselectItem && openDuck == nil && !leaveDuck }
+        public var openNewDuck = false
+        public var closeNewDuck = false
+        public var isEmpty: Bool { page == nil && !deselectItem && openDuck == nil && !leaveDuck && !openNewDuck && !closeNewDuck }
     }
 
     public func effects(from old: PondCentre) -> Effects {
@@ -88,7 +103,9 @@ public struct PondCentre: Equatable, Sendable {
         if page != old.page { e.page = page }
         if old.item != nil, item == nil { e.deselectItem = true }
         if let duck, duck != old.duck { e.openDuck = duck }
-        if old.duck != nil, duck == nil { e.leaveDuck = true }
+        if old.duck != nil, duck == nil, !newDuck { e.leaveDuck = true }
+        if newDuck, !old.newDuck { e.openNewDuck = true }
+        if !newDuck, old.newDuck { e.closeNewDuck = true }
         return e
     }
 
@@ -96,6 +113,7 @@ public struct PondCentre: Equatable, Sendable {
         switch shows {
         case .item(let tab): tab.kind == .duckling && tab.parentDuck != nil ? .toParentDuck : .deselectItem
         case .duck: .toRoom
+        case .newDuck: .closeNewDuck
         case .page(.room): .toDashboard
         case .page(.dashboard): .nothing
         }
@@ -108,6 +126,7 @@ public struct PondCentre: Equatable, Sendable {
         case .toParentDuck: if let parent = item?.parentDuck { selectDuck(parent) }
         case .toRoom: switchTo(.room)
         case .toDashboard: switchTo(.dashboard)
+        case .closeNewDuck: newDuck = false
         case .nothing: break
         }
     }
