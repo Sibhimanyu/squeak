@@ -392,8 +392,8 @@ public enum NativeTranscript {
         case "WebSearch": return "Search the web for \"\(clip(s("query") ?? "", 120))\""
         case "WebFetch": return "Fetch \(clip(s("url") ?? "", 160))"
         case "Task", "Agent":
-            let own = s("model").map { "[\($0.filter { $0 != "[" && $0 != "]" })] " } ?? ""
-            return "Start \(own)\(clip(s("description") ?? s("subagent_type") ?? "a duckling", 120))" + background
+            // The model is the host's duckling record, never the call's input: one source for every surface.
+            return "Start \(clip(s("description") ?? s("subagent_type") ?? "a duckling", 120))" + background
         case "TodoWrite": return "Update the plan"
         case "ToolSearch":
             let q = (s("query") ?? "").replacingOccurrences(of: "select:", with: "")

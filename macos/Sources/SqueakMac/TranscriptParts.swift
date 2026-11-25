@@ -177,19 +177,6 @@ struct ThinkingRow: View {
     }
 }
 
-/// The chat's model name and the catalogue, for a started subagent's row: its own model, else "same as chat".
-struct AgentModelContext: Equatable {
-    var chatModelName: String?
-    var choices: [DaemonChatModel] = []
-}
-private struct AgentModelContextKey: EnvironmentKey { static let defaultValue = AgentModelContext() }
-extension EnvironmentValues {
-    var agentModelContext: AgentModelContext {
-        get { self[AgentModelContextKey.self] }
-        set { self[AgentModelContextKey.self] = newValue }
-    }
-}
-
 /// One 24pt tool row: icon, name, target in mono (truncated), duration, chevron. Opens to output or a diff only when the transcript
 /// holds one (none does yet), so a row without detail shows no chevron and does not respond.
 struct ToolCallRow: View {
@@ -200,7 +187,6 @@ struct ToolCallRow: View {
     var toolId: String?
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.agentModelContext) private var agentContext
     @Environment(\.pathLinker) private var linker
     @Environment(\.attachedPictures) private var attached
     var expand = TurnExpansion()
@@ -215,7 +201,11 @@ struct ToolCallRow: View {
               model.ducklings(for: session)?.items.contains(where: { $0.id == toolId }) == true else { return nil }
         return DucklingRef(session: session.key, taskId: toolId)
     }
-    private var agentModel: String? { preview.agentModel(chatModelName: agentContext.chatModelName, in: agentContext.choices) }
+    /// The model this row's duckling runs on: the host's field for the call's id, the one the strip draws too.
+    private var agentModel: String? {
+        guard preview.kind == .agent, let toolId, let session = model.selectedSession else { return nil }
+        return preview.agentModel(duckling: model.ducklings(for: session)?.items.first { $0.id == toolId })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

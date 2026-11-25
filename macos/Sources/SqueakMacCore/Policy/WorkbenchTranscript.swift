@@ -17,24 +17,21 @@ public struct ToolCallPreview: Equatable, Sendable {
     public var target: String
     /// "6s", "background"; nil when nothing is known.
     public var meta: String?
-    /// A started subagent's own `model` alias ("sonnet"), when its call named one; nil means the chat's model.
-    public var modelAlias: String?
 
-    public init(kind: ToolKind, verb: String, target: String, meta: String? = nil, modelAlias: String? = nil) {
-        self.kind = kind; self.verb = verb; self.target = target; self.meta = meta; self.modelAlias = modelAlias
+    public init(kind: ToolKind, verb: String, target: String, meta: String? = nil) {
+        self.kind = kind; self.verb = verb; self.target = target; self.meta = meta
     }
 
-    /// The model a started subagent runs on, as a name: its own alias in the catalogue, else the chat's. Nil for any
-    /// other row, or when neither is known.
-    public func agentModel(chatModelName: String?, in choices: [DaemonChatModel]) -> String? {
+    /// The model a started subagent runs on, from the host's duckling record for this call (the same field the strip draws).
+    /// Nil for any other row, and when the host has no record: never the chat's own model as a guess.
+    public func agentModel(duckling: Duckling?) -> String? {
         guard kind == .agent, verb == "Start" else { return nil }
-        if let alias = modelAlias, let own = ModelNames.subagentLabel(alias: alias, in: choices) { return own }
-        return chatModelName.flatMap { ModelNames.nonEmpty($0) }
+        return duckling?.shownModel
     }
 
     /// "Agent · Sonnet 5.5 Ship the daemon": one line for the accessibility label and tests.
-    public func agentRowLabel(chatModelName: String?, in choices: [DaemonChatModel]) -> String {
-        (["Agent"] + [agentModel(chatModelName: chatModelName, in: choices)].compactMap { $0 }).joined(separator: " · ") + " " + target
+    public func agentRowLabel(duckling: Duckling?) -> String {
+        (["Agent"] + [agentModel(duckling: duckling)].compactMap { $0 }).joined(separator: " · ") + " " + target
     }
 
     /// A path or a file name: truncated from the start. Commands and queries truncate at the end.
@@ -73,14 +70,7 @@ public enum ToolCallLabel {
         case "Find": return ToolCallPreview(kind: .search, verb: "Find", target: rest, meta: meta)
         case "Load": return ToolCallPreview(kind: .search, verb: "Load", target: rest, meta: meta)
         case "Fetch": return ToolCallPreview(kind: .fetch, verb: "Fetch", target: rest, meta: meta)
-        case "Start":
-            // The host writes a model the call named as "Start [sonnet] description".
-            if rest.hasPrefix("["), let close = rest.firstIndex(of: "]") {
-                let alias = String(rest[rest.index(after: rest.startIndex)..<close])
-                let target = rest[rest.index(after: close)...].trimmingCharacters(in: .whitespaces)
-                return ToolCallPreview(kind: .agent, verb: "Start", target: target, meta: meta, modelAlias: alias.isEmpty ? nil : alias)
-            }
-            return ToolCallPreview(kind: .agent, verb: "Start", target: rest, meta: meta)
+        case "Start": return ToolCallPreview(kind: .agent, verb: "Start", target: rest, meta: meta)
         case "Use": return ToolCallPreview(kind: .other, verb: "Use", target: rest, meta: meta)
         case "Notify", "Comment", "Set": return ToolCallPreview(kind: .other, verb: first, target: rest, meta: meta)
         case "Message", "Ask": return ToolCallPreview(kind: .agent, verb: first, target: rest, meta: meta)

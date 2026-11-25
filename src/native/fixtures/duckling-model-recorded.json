@@ -1,0 +1,141 @@
+[
+  {
+    "role": "agent",
+    "kind": "assistant",
+    "createdAt": "2026-11-25T04:16:46.705Z",
+    "payload": {
+      "type": "assistant",
+      "message": {
+        "model": "claude-opus-5-5",
+        "id": "msg_011ChNzwmcQy49SpfohxkgUP",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_018U4qNtJxUTxmnkNUTEaf2s",
+            "name": "Agent",
+            "input": {
+              "description": "Build and deploy to Firebase",
+              "model": "haiku",
+              "run_in_background": false,
+              "prompt": "x"
+            }
+          }
+        ],
+        "stop_reason": null,
+        "stop_sequence": null
+      },
+      "parent_tool_use_id": null,
+      "session_id": "x",
+      "uuid": "x",
+      "timestamp": "2026-11-25T04:16:46.704Z",
+      "request_id": "req_011ChNzwmXgx88wrRT3sjUTG",
+      "wire_tool_inputs": {
+        "toolu_018U4qNtJxUTxmnkNUTEaf2s": {
+          "description": "Build and deploy to Firebase",
+          "model": "haiku",
+          "run_in_background": false,
+          "prompt": "x"
+        }
+      }
+    }
+  },
+  {
+    "role": "agent",
+    "kind": "system/task_started",
+    "createdAt": "2026-11-25T04:16:46.896Z",
+    "payload": {
+      "type": "system",
+      "subtype": "task_started",
+      "task_id": "a427ce59eb765158a",
+      "run_id": "x",
+      "tool_use_id": "toolu_018U4qNtJxUTxmnkNUTEaf2s",
+      "description": "Build and deploy to Firebase",
+      "subagent_type": "general-purpose",
+      "is_backgrounded": false,
+      "spawn_depth": 1,
+      "task_type": "local_agent",
+      "prompt": "x",
+      "uuid": "x",
+      "session_id": "x"
+    }
+  },
+  {
+    "role": "agent",
+    "kind": "user",
+    "createdAt": "2026-11-25T04:16:46.901Z",
+    "payload": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "cmd"
+          }
+        ]
+      },
+      "parent_tool_use_id": "toolu_018U4qNtJxUTxmnkNUTEaf2s",
+      "agent_id": "a427ce59eb765158a",
+      "session_id": "x",
+      "uuid": "x",
+      "timestamp": "2026-11-25T04:16:46.888Z",
+      "subagent_type": "general-purpose",
+      "task_description": "Build and deploy to Firebase"
+    }
+  },
+  {
+    "role": "agent",
+    "kind": "system/task_progress",
+    "createdAt": "2026-11-25T04:16:48.530Z",
+    "payload": {
+      "type": "system",
+      "subtype": "task_progress",
+      "task_id": "a427ce59eb765158a",
+      "run_id": "x",
+      "tool_use_id": "toolu_018U4qNtJxUTxmnkNUTEaf2s",
+      "description": "Running Build the frontend",
+      "subagent_type": "general-purpose",
+      "last_tool_name": "Bash",
+      "uuid": "x",
+      "session_id": "x"
+    }
+  },
+  {
+    "role": "agent",
+    "kind": "assistant",
+    "createdAt": "2026-11-25T04:16:48.534Z",
+    "payload": {
+      "type": "assistant",
+      "message": {
+        "model": "claude-haiku-5-5",
+        "id": "msg_011ChNzxETwDFGqjcG9Q1n9H",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01YGMUjGT86rc3WTQciNUCV4",
+            "name": "Bash",
+            "input": {
+              "command": "cmd",
+              "description": "Build the frontend",
+              "timeout": 600000
+            }
+          }
+        ],
+        "stop_reason": null,
+        "stop_sequence": null
+      },
+      "parent_tool_use_id": "toolu_018U4qNtJxUTxmnkNUTEaf2s",
+      "agent_id": "a427ce59eb765158a",
+      "session_id": "x",
+      "uuid": "x",
+      "timestamp": "2026-11-25T04:16:48.528Z",
+      "request_id": "req_011ChNzxE3tbwgkbEMdE5xes",
+      "subagent_type": "general-purpose",
+      "task_description": "Build and deploy to Firebase"
+    }
+  }
+]

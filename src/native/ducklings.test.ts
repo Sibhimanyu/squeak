@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { DucklingTracker, modelLabel } from "./ducklings.js";
@@ -22,6 +23,90 @@ const result = (id: string, text: string, s: number, extra: Record<string, unkno
     { type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: text }] }, ...extra },
     s,
   );
+
+describe("a helper's one model", () => {
+  const recorded = JSON.parse(
+    readFileSync(new URL("./fixtures/duckling-model-recorded.json", import.meta.url), "utf8"),
+  ) as Array<{ role: MessageRow["role"]; kind: string; createdAt: string; payload: unknown }>;
+  const feedAll = (t: DucklingTracker, upTo = recorded.length) =>
+    recorded.slice(0, upTo).forEach((r) => t.feed({ seq: ++seq, sessionId: "x", ...r }));
+  const now = Date.parse("2026-11-25T04:17:00Z");
+
+  it("a recorded chat on Opus whose call names haiku: the helper is Haiku, not inherited", () => {
+    const t = new DucklingTracker();
+    feedAll(t, 1); // only the launching row: the call's model
+    expect(t.list(now).items[0]).toMatchObject({ title: "Build and deploy to Firebase", model: "Haiku" });
+    expect(t.list(now).items[0]?.modelInherited).toBeUndefined();
+  });
+
+  it("the helper's own reported model beats the call's alias", () => {
+    const t = new DucklingTracker();
+    feedAll(t);
+    const item = t.list(now).items[0];
+    expect(item?.model).toBe("Haiku 5.5");
+    expect(item?.modelInherited).toBeUndefined();
+    expect(t.detail("toolu_018U4qNtJxUTxmnkNUTEaf2s", now, [])?.model).toBe("Haiku 5.5");
+  });
+
+  it("a call that names no model runs on the chat's, marked inherited, until the helper reports its own", () => {
+    const t = new DucklingTracker();
+    t.feed(
+      row(
+        "agent",
+        "assistant",
+        {
+          type: "assistant",
+          message: {
+            model: "claude-opus-5-5",
+            content: [{ type: "tool_use", id: "toolu_i", name: "Agent", input: { description: "d", prompt: "p" } }],
+          },
+        },
+        0,
+      ),
+    );
+    expect(t.list(Date.parse(at(1))).items[0]).toMatchObject({ model: "Opus 5.5", modelInherited: true });
+    t.feed(
+      row(
+        "agent",
+        "assistant",
+        { type: "assistant", parent_tool_use_id: "toolu_i", message: { model: "claude-sonnet-5-5", content: [] } },
+        2,
+      ),
+    );
+    const item = t.list(Date.parse(at(3))).items[0];
+    expect(item?.model).toBe("Sonnet 5.5");
+    expect(item?.modelInherited).toBeUndefined();
+  });
+
+  it("`inherit` is the chat's model; a shell has none", () => {
+    const t = new DucklingTracker();
+    t.feed(
+      row(
+        "agent",
+        "assistant",
+        {
+          type: "assistant",
+          message: {
+            model: "claude-opus-5-5",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_h",
+                name: "Agent",
+                input: { description: "d", prompt: "p", model: "inherit" },
+              },
+              { type: "tool_use", id: "toolu_s", name: "Bash", input: { command: "sleep 9", run_in_background: true } },
+            ],
+          },
+        },
+        0,
+      ),
+    );
+    const items = t.list(Date.parse(at(1))).items;
+    expect(items.find((i) => i.id === "toolu_h")).toMatchObject({ model: "Opus 5.5", modelInherited: true });
+    expect(items.find((i) => i.id === "toolu_s")?.model).toBeUndefined();
+  });
+});
 
 describe("DucklingTracker", () => {
   it("reportedAt is the agent's next assistant row after the notification, not a helper's own row", () => {
