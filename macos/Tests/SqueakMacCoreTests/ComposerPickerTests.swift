@@ -133,4 +133,48 @@ import Testing
         #expect(Set(files) == [".gitignore", "new file.txt", "tracked.txt"])
         #expect(WorkspaceFileIndex.gitList(in: dir + "/missing").isEmpty)
     }
+
+    // MARK: Matching plugin skills (`/matt` finds `mattpocock-skills:grilling`)
+
+    private static let plugin: [SlashCommand] = [
+        SlashCommand(name: "compact"),
+        SlashCommand(name: "mattpocock-skills:grilling", detail: "Grill the user", plugin: "mattpocock-skills"),
+        SlashCommand(name: "mattpocock-skills:tdd", detail: "Test first", plugin: "mattpocock-skills"),
+        SlashCommand(name: "grill-me"),
+        SlashCommand(name: "impeccable:impeccable", plugin: "impeccable"),
+        SlashCommand(name: "tdd-lite"),
+    ]
+
+    @Test func pluginPrefixMatchesItsSkills() {
+        let names = SlashCommands.rank("matt", Self.plugin, limit: 40).map(\.name)
+        #expect(names == ["mattpocock-skills:grilling", "mattpocock-skills:tdd"])
+        #expect(SlashCommands.rank("MATT", Self.plugin, limit: 40).map(\.name) == names)
+    }
+
+    @Test func skillPartAfterTheColonMatchesByPrefixAndSubstring() {
+        // Prefix of the skill part beats a plain substring.
+        #expect(SlashCommands.rank("tdd", Self.plugin, limit: 40).map(\.name) == ["mattpocock-skills:tdd", "tdd-lite"])
+        #expect(SlashCommands.rank("rilli", Self.plugin, limit: 40).map(\.name).first == "mattpocock-skills:grilling")
+        #expect(SlashCommands.rank("skills", Self.plugin, limit: 40).count == 2)
+    }
+
+    @Test func rankCapsAndEmptyQueryListsInOrder() {
+        #expect(SlashCommands.rank("", Self.plugin, limit: 2).map(\.name) == ["compact", "mattpocock-skills:grilling"])
+        #expect(SlashCommands.rank("matt", Self.plugin, limit: 1).count == 1)
+        #expect(SlashCommands.rank("zzzz", Self.plugin, limit: 40).isEmpty)
+    }
+
+    @Test func pluginShowsAsSecondaryText() {
+        #expect(Self.plugin[1].secondary == "mattpocock-skills \u{00B7} Grill the user")
+        #expect(SlashCommand(name: "x:y", plugin: "x").secondary == "x")
+        #expect(SlashCommand(name: "grill-me", detail: "d").secondary == "d")
+    }
+
+    @Test func hostListComesFirstAndInitAddsBuiltIns() {
+        let host = [SlashCommand(name: "mattpocock-skills:tdd", detail: "Test first", plugin: "mattpocock-skills")]
+        let init_ = [SlashCommand(name: "mattpocock-skills:tdd"), SlashCommand(name: "compact")]
+        let all = SlashCommands.combined(host: host, fromInit: init_)
+        #expect(all.map(\.name) == ["compact", "mattpocock-skills:tdd"])
+        #expect(all.last?.plugin == "mattpocock-skills" && all.last?.detail == "Test first")
+    }
 }

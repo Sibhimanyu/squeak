@@ -2,6 +2,8 @@ import { flag } from "../squeak/flags.js";
 import { buildDirectory, mapOrder, type DirSession, type PondDirectory } from "../flotilla/directory.js";
 import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { AgentSettings } from "./agent-settings.js";
+import { squeakPluginPath } from "./agent-plugin.js";
+import { discoverSlashEntries } from "./slash-commands.js";
 import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -66,6 +68,8 @@ export interface NativeServerOptions {
   heartbeatMs?: number;
   /** Tests inject one with a fake `gh`; default resolves the user's. */
   git?: GitActions;
+  /** Tests point the `/` list's discovery at a temp home; default is the user's. */
+  commandsHome?: string;
   /** Tests inject one; default runs against the host and its store. */
   tools?: AgentTools;
   /** Tests inject one with fake git/gh; default runs the real ones. */
@@ -571,6 +575,16 @@ export class NativeServer {
       const project = url.searchParams.get("project") || null;
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
       return this.json(res, 200, { results: store.search(q, project, limit) });
+    }
+    if (area === "commands" && !id && method === "GET") {
+      // The `/` list: the user's and the project's skills and commands, then each enabled plugin's, like Claude Code.
+      const plugin = squeakPluginPath();
+      const entries = discoverSlashEntries({
+        cwd: url.searchParams.get("cwd") || null,
+        ...(this.options.commandsHome ? { home: this.options.commandsHome } : {}),
+        extraPlugins: plugin ? [plugin] : [],
+      });
+      return this.json(res, 200, { commands: entries });
     }
     if (area === "disk-cleanup" && !id) {
       const pondId = url.searchParams.get("pond") || null;
