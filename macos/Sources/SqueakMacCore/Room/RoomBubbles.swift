@@ -37,8 +37,44 @@ public enum RoomBubblePlan {
         switch state { case .sent: nil; case .sending: "Sending\u{2026}"; case .failed: "Not sent" }
     }
 
+    /// Reply to someone else's text bubble with one excerpt and an editable @mention in the Room draft.
+    public static func reply(to author: RoomMessageAuthor, quoting text: String) -> RoomReply? {
+        guard author.kind != .me else { return nil }
+        let name = author.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // When replying to a quoted reply, use the sender's words if available.
+        guard !name.isEmpty, let line = lines.first(where: { !$0.hasPrefix(">") }) ?? lines.first else { return nil }
+        return RoomReply(quote: RoomMessages.shorten(line, 90), mention: "@\(name)")
+    }
+
     /// A Duck's note to a Duck wears a faint accent of the sender's colour on its left edge.
     public static func hasAccent(text: Bool, toDuck: Bool) -> Bool { text && toDuck }
+}
+
+public struct RoomReply: Equatable, Sendable {
+    public let quote: String
+    public let mention: String
+
+    /// Preserve written text, replacing the previous reply's leading mention if it is still there.
+    public func insertingMention(in draft: String, replacing previous: RoomReply?) -> String {
+        var body = draft[...]
+        if let previous, previous.hasLeadingMention(in: body) {
+            body = body.dropFirst(previous.mention.count).drop(while: { $0 == " " })
+        }
+        if hasLeadingMention(in: body) { return body == mention ? mention + " " : String(body) }
+        return "\(mention) \(body)"
+    }
+
+    /// The quote is context. Use a typographic @ inside it so quoted names do not trigger Room mentions.
+    public func messageText(_ draft: String) -> String {
+        let excerpt = quote.replacingOccurrences(of: "@", with: "＠")
+        return "> “\(excerpt)”\n\n\(draft)"
+    }
+
+    private func hasLeadingMention(in draft: Substring) -> Bool {
+        draft.hasPrefix(mention) && (draft.dropFirst(mention.count).first?.isWhitespace ?? true)
+    }
 }
 
 public enum RoomMoment {
