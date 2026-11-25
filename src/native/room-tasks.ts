@@ -255,6 +255,8 @@ export interface RoomTasksOptions {
    */
   notebook?: (projectId: string) => string | null | undefined;
   call?: TitleModelCall;
+  /** A Task just finished in this chat (once per finish): the host looks at the chat's title again. */
+  onTaskDone?: (sessionId: string) => void;
   /** The decider that routes a new Task; default: local similarity plus `deciderModel`. */
   decider?: Decider;
   /** Settles an unsure routing: a port, or "haiku" (the same small-model call as the job check); absent = never asked. */
@@ -1578,7 +1580,15 @@ export class RoomTasks extends EventEmitter {
     const before = JSON.stringify(job);
     to.turnId = `${to.sessionId}:${turn.turnId}`;
     if (turn.endedAt !== undefined) {
+      const was = job.state;
       job.state = turn.outcome === "finished" ? "done" : "blocked";
+      if (job.state === "done" && was !== "done") {
+        try {
+          this.o.onTaskDone?.(to.sessionId);
+        } catch {
+          // a title is never worth a Task's bookkeeping
+        }
+      }
       const outcome = turn.reply ? firstSentence(turn.reply) : "";
       if (outcome) job.result = outcome;
     }

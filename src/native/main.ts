@@ -25,7 +25,7 @@ import { ShowRelay } from "./show-relay.js";
 import { RoomTasks } from "./room-tasks.js";
 import { defaultTitleCall, type TitleModelCall } from "./auto-title.js";
 import { haikuDecider } from "./decider.js";
-import { createDecider, deciderHelperDirs, resolveDeciderHelper } from "./on-device.js";
+import { createDecider, deciderHelperDirs, onDeviceTitleCall, resolveDeciderHelper } from "./on-device.js";
 import { RoomSummariser } from "./room-summary.js";
 import { Placement } from "./placement.js";
 import { ChatStarter } from "./chat-starter.js";
@@ -64,6 +64,11 @@ export async function runHost(supportDir: string): Promise<void> {
     mcpFor: (id) => server?.mcpEndpoint(id) ?? null,
     claudeAiConnectors: () => new AgentSettings(supportDir).get().claudeAiConnectors,
     ownerName: () => flotilla?.service?.identity.name ?? null,
+    titleCall: onDeviceTitleCall({
+      setting: () => new AgentSettings(supportDir).get().deciderModel,
+      helper: () => resolveDeciderHelper({ dirs: deciderHelperDirs(supportDir) }),
+      fallback: defaultTitleCall(),
+    }),
   });
   const room = new Room({
     store,
@@ -114,6 +119,7 @@ export async function runHost(supportDir: string): Promise<void> {
     newBranch: (projectId, text) => starter.newBranch(projectId, text),
     checkBranch: (projectId, branch) => starter.checkBranch(projectId, branch),
     decider,
+    onTaskDone: (id) => host.titleTaskDone(id),
     contextPercent: (s) => host.contextOf(s)?.percent ?? null,
   });
   jobs.attach(host);

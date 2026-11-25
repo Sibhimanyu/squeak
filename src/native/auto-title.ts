@@ -130,6 +130,39 @@ export function defaultTitleCall(): TitleModelCall {
   };
 }
 
+export const RETITLE_SYSTEM = [
+  "You name chats for the person who owns them. Reply with the title only: 3 to 6 plain words, no quotes, no markdown, no trailing punctuation.",
+  "Say what the chat is for, the work and its subject, the way a colleague would name it: not the first instruction, not a sentence, no filler.",
+  "Keep proper nouns as written. Use Title Case unless the person's own words are clearly written otherwise.",
+  'Examples: "Zoom Marketplace review fixes", "Login redirect bug", "Tab strip and rail polish".',
+  "If the current title already describes the work well, reply with it unchanged.",
+].join(" ");
+
+/** Real tool work: a chat's agent made at least this many tool calls, so what the chat is for is clear. */
+export const REAL_WORK_TOOL_CALLS = 3;
+/** The one-time pass at start: at most this many weak titles are rewritten. */
+export const RETITLE_BACKFILL_LIMIT = 12;
+const WEAK_LENGTH = 48;
+
+export function retitlePrompt(current: string | null, first: string, reply: string | null): string {
+  const clip = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n)}…` : t);
+  const parts: string[] = [];
+  if (current) parts.push(`Current title: ${current}`);
+  parts.push(`First message:\n${clip(first.trim(), 1200)}`);
+  if (reply?.trim()) parts.push(`The agent's latest reply:\n${clip(reply.trim(), 800)}`);
+  parts.push("Title:");
+  return parts.join("\n\n");
+}
+
+/** A title that is a placeholder or a copy of the prompt: "New chat", empty, long, cut with "…", or the first line itself. */
+export function looksWeak(title: string | null, first: string | null): boolean {
+  const t = (title ?? "").trim();
+  if (!t || /^(?:new (?:chat|task|thread)|untitled(?: chat)?|chat)$/i.test(t)) return true;
+  if (t.length > WEAK_LENGTH || t.endsWith("…") || t.endsWith("...")) return true;
+  const line = (first ?? "").split(/\r?\n/).find((l) => l.trim())?.trim() ?? "";
+  return line.length > 0 && line.toLowerCase().startsWith(t.toLowerCase()) && t.split(/\s+/).length >= 4;
+}
+
 export interface AutoTitleStore {
   getSession(id: string): SessionRow | null;
   listSessions(): SessionRow[];
@@ -137,6 +170,12 @@ export interface AutoTitleStore {
   setAutoTitle(id: string, title: string): boolean;
   markTitleTried(id: string): void;
   titleTried(id: string): boolean;
+  replaceAutoTitle(id: string, expected: string | null, title: string): boolean;
+  titleIsMine(id: string): boolean;
+  titleStage(id: string): number;
+  setTitleStage(id: string, stage: number): void;
+  toolUseCount(id: string): number;
+  lastAgentText(id: string): string | null;
 }
 
 export interface AutoTitleOptions {
@@ -184,6 +223,50 @@ export class AutoTitler {
     return picked;
   }
 
+  /**
+   * A turn finished well. The first one with real tool work retitles the chat from what it did (stage 1); a title the
+   * person set is never touched. Fire and forget, never throws.
+   */
+  turnFinished(sessionId: string): void {
+    const { store } = this.options;
+    if (!store.getSession(sessionId) || store.titleStage(sessionId) >= 1) return;
+    if (store.toolUseCount(sessionId) < REAL_WORK_TOOL_CALLS) return;
+    this.requestRetitle(sessionId, 1);
+  }
+
+  /** A Task finished in this chat: look again, and retitle only if the scope shifted (stage 2, once). */
+  taskDone(sessionId: string): void {
+    const { store } = this.options;
+    if (!store.getSession(sessionId) || store.titleStage(sessionId) >= 2) return;
+    this.requestRetitle(sessionId, 2);
+  }
+
+  /** At start: the newest chats still titled "New chat" or with a copy of their prompt, once each, capped. */
+  backfillWeak(): string[] {
+    const { store } = this.options;
+    const picked = store
+      .listSessions()
+      .filter((s) => s.title && !store.titleIsMine(s.id) && store.titleStage(s.id) === 0)
+      .filter((s) => {
+        const first = store.firstUserText(s.id);
+        return first !== null && looksWeak(s.title, first);
+      })
+      .slice(0, RETITLE_BACKFILL_LIMIT)
+      .map((s) => s.id);
+    for (const id of picked) this.requestRetitle(id, 1);
+    return picked;
+  }
+
+  private requestRetitle(sessionId: string, stage: number): void {
+    const key = `r${stage}:${sessionId}`;
+    if (this.queued.has(key)) return;
+    this.queued.add(key);
+    this.queue.push(key);
+    this.running ??= this.drain().finally(() => {
+      this.running = null;
+    });
+  }
+
   /** Resolves when everything queued so far is done (tests). */
   idle(): Promise<void> {
     return this.running ?? Promise.resolve();
@@ -193,7 +276,9 @@ export class AutoTitler {
     while (this.queue.length > 0) {
       const id = this.queue.shift()!;
       try {
-        await this.name(id);
+        const m = /^r(\d):(.+)$/.exec(id);
+        if (m) await this.rename(m[2]!, Number(m[1]));
+        else await this.name(id);
       } catch (error) {
         logger.warn("auto title failed", { error: error instanceof Error ? error.message : String(error) });
       }
@@ -202,6 +287,43 @@ export class AutoTitler {
         await new Promise((r) => setTimeout(r, this.options.gapMs ?? 1500));
       }
     }
+  }
+
+  /** Rewrites an automatic or weak title from the work done. A title the person set, or a failing model, changes nothing. */
+  private async rename(id: string, stage: number): Promise<void> {
+    const { store } = this.options;
+    const s = store.getSession(id);
+    const first = store.firstUserText(id);
+    if (!s || !first || store.titleStage(id) >= stage || store.titleIsMine(id)) return;
+    // An older chat that never recorded who named it counts as the person's unless it is still a placeholder or a copy.
+    if (!s.titleAuto && s.title && !looksWeak(s.title, first)) return;
+    store.setTitleStage(id, stage);
+    if (!(this.options.modelEnabled ?? (() => flag("autoTitle")))()) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), this.options.timeoutMs ?? TITLE_TIMEOUT_MS);
+    let title: string | null = null;
+    try {
+      const timedOut = new Promise<never>((_, reject) =>
+        abort.signal.addEventListener("abort", () => reject(new Error("title call timed out")), { once: true }),
+      );
+      title = cleanTitle(
+        await Promise.race([
+          this.call({
+            prompt: retitlePrompt(s.title, first, store.lastAgentText(id)),
+            system: RETITLE_SYSTEM,
+            signal: abort.signal,
+          }),
+          timedOut,
+        ]),
+      );
+    } catch {
+      title = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!title || title === s.title) return;
+    // The person may have renamed while the call ran: replaceAutoTitle only swaps the title it read.
+    if (store.replaceAutoTitle(id, s.title, title)) this.options.onTitle(id, title);
   }
 
   private async name(id: string): Promise<void> {
