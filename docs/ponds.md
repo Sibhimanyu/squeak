@@ -690,30 +690,42 @@ Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessio
 Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
 ```
 
-#### Ducks own their branch (flag `ducksOwnBranch`, `SQUEAK_DUCKS_OWN_BRANCH`, on by default)
+#### Ducks start Pond-wide and choose their Streams (flag `ducksOwnBranch`, `SQUEAK_DUCKS_OWN_BRANCH`, on by default)
 
-Host side in `src/native/placement.ts` (plan: `.context/plans/ducks-own-their-branch.md`). On by default since v1; turn it off with `SQUEAK_DUCKS_OWN_BRANCH=off` or `flags.json`, and nothing below
-applies (the columns exist and fill; behaviour is as before).
+Replaces "Ducks own their branch" (ADR 0003, `docs/adr/0003-ducks-start-pond-wide.md`). Host side in
+`src/native/placement.ts` (`openStream`, `leaveStream`, `streamsFor`), `agent-tools.ts` and `stream-edits.ts`. The flag keeps
+its old name so Macs and phones keep reading it; off (`SQUEAK_DUCKS_OWN_BRANCH=off` or `flags.json`) means none of this
+applies.
 
-- **Model.** `sessions.branch` (from the workspace) and `ducks.workspace_id` / `ducks.branch` (the duck's working copy,
-  followed from its current session); a `WorkspaceRow` stays the internal worktree. `SessionRow` carries optional `branch`
-  and `duckId`. Migration 25 makes the duck tables, adds the columns and backfills (idempotent): streams become branches,
-  chats ducks on that branch, Main chats ducks on main (null branch).
-- **Place API.** `POST /native/sessions` takes `place: {kind:"new", branch?} | {kind:"join", duckId | branch} |
-{kind:"main"}` (strict; 400 with the flag off, or mixed with `main`/`newWorkspace`/`workspaceId`/`cwd`, which stay as
-  aliases). `join` reuses the working copy that has the branch (git cannot check one branch out twice) and reopens a
-  removed one on the kept branch; an unknown branch or duck is 404. With the flag on a bare `projectId` starts in Main.
-- **Main is read-only for ducks in a git pond** (folder ponds edit main). The thread context says so; Claude's PreToolUse
-  hook (every mode) and `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the root; "Skip approvals" and
-  "Accept edits" are held at Ask there, so a shell command still asks; Codex runs in its read-only sandbox.
-- **Agent-led placement.** The note lists the pond's active branches (branch, title, ducks, last activity). Tools
-  `branch_off(name?, from?, message?)`, `join_branch(duck|branch, message?)` start a fresh chat for
-  the same duck in the new place (an agent's history is tied to its folder). Listed only with the flag on.
-- **Chats never work on Main.** A new chat in a git pond (no place, or `main: true`) gets its own branch and worktree
-  before its first turn; a message to an old chat sitting in Main moves it first (`{ movedTo }` in the reply). An
-  explicit `place` or stream still wins; a failed worktree fails the request.
-- **Clean-up.** A working copy with no live duck (on duty, chat not archived), no busy chat, a clean folder and a branch
-  pushed or merged is removed; the branch stays. After a move, and every 15 min while the host runs.
+- **Start.** A new Duck's chat has `cwd` = the Pond's main folder and no workspace, in a git Pond and a folder Pond alike
+  (`POST /native/sessions` with no place, `main: true` or `place: {kind:"main"}`). Squeak never picks a Stream for it, and
+  a message to a chat in Main goes to that chat. An explicit `place` (`new`, `join`) or `newWorkspace` still starts the
+  chat inside a Stream and records the Duck as joined.
+- **Model.** `duck_streams (duck_id, workspace_id, joined_at)`, many to many; `NativeStore.joinDuckStream`,
+  `leaveDuckStream`, `duckStreams(duckId)` (usable working copies, join order) and `ducksInStream(workspaceId)` (also
+  counts older Ducks whose chat runs in the folder). `ducks.workspace_id` / `ducks.branch` stay for old Ducks until the
+  migration ticket. A working copy is removed by the clean-up only when no Duck is in it.
+- **Tools** (plain wording, listed only with the flag on): `streams()` lists the Pond's branches with working copies, each
+  folder and who is in it, and which are yours; `open_stream({name?, branch?, from?})` joins the Stream called `name`
+  (title, name or branch) or creates it, or opens the exact `branch` (joins the Stream that has it, opens an existing git
+  branch, else cuts it new), branching off `from` (default: the default branch), and returns the folder;
+  `leave_stream({name?})` leaves one (name optional when in just one). Squeak does the git work. Limits: 4 Streams per
+  Duck at once, 24 per Pond, 5 created per chat per hour. A folder Pond answers `streams` with "plain folder" and refuses
+  `open_stream`. `branch_off`, `join_branch` and `move_to_main` are no longer listed; a chat begun before still gets
+  `open_stream` / `leave_stream` behaviour from them.
+- **Main is read-only for Ducks in a git pond** (folder ponds edit the folder). Claude's PreToolUse hook (every mode) and
+  `canUseTool` refuse Edit/Write/MultiEdit/NotebookEdit inside the Pond's root (`mainReadOnlyRoot`, a chat with no workspace
+  whose `cwd` is the root); "Skip approvals" and "Accept edits" are held at Ask there, so a shell command still asks;
+  Codex runs in its read-only sandbox (so a Codex Duck cannot yet edit a Stream; held for a later ticket). A Duck edits a
+  Stream by full path: `SessionHost.guardEdit` refuses a file inside a Stream's folder the Duck has not joined, and takes
+  the per-file lock (`file-locks.ts`, one lock per absolute file, so per Stream) for the ones it has.
+- **Room.** Creating, joining or leaving posts one line from Squeak under the Duck's name: `created Stream <title>`,
+  `joined Stream <title>`, `left Stream <title>`. Opening a Stream the Duck is already in posts nothing.
+- **State.** `DuckView` and `RoomThread` carry `streams?: {workspaceId, branch, title?}[]` (join order; absent when none).
+  A `thread` frame is sent on join and leave.
+- **Clean-up.** A working copy with no Duck in it (any Duck that joined it, or whose chat runs there), no busy chat, a
+  clean folder and a branch pushed or merged is removed; the branch stays. After a leave, and every 15 min while the host
+  runs.
 - **Held back (no behaviour).** `nest` / `poweredBy` are optional on `DuckView` and `RoomThread` for members' own ducks.
 - **Phone, cards (phase 3).** With the flag on the phone view carries `ducksOwnBranch: true`, each project pond's
   `branches` (`{name, ducks, lastActivityAt?, pr?}`, newest first, Main left out; `pr` reserved, not read yet; `streams`

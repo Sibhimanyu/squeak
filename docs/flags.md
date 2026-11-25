@@ -30,7 +30,9 @@ On by default. Set the environment variable to `off` to disable it.
 These also default to on and accept `off`, `0`, `false` or `no`.
 
 - `askFormat` / `SQUEAK_ASK_FORMAT` gives agents the lettered ask format.
-- `ducksOwnBranch` / `SQUEAK_DUCKS_OWN_BRANCH` gives each new Duck in a Git Pond its own branch and working copy.
+- `ducksOwnBranch` / `SQUEAK_DUCKS_OWN_BRANCH` lets Ducks start Pond-wide in a Git Pond and choose their Streams with
+  `streams`, `open_stream` and `leave_stream`; Main is read-only for them. The name is from the earlier "own branch"
+  design and is kept so Macs and phones keep reading it.
 
 `pondOwnThreads` / `SQUEAK_POND_OWN_THREADS` is off by default. Set it to `on`, `1`, `true` or `yes` to let
 a Member run a Duck on their own Mac in a joined Git Pond.
