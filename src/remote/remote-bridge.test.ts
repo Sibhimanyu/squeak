@@ -758,7 +758,7 @@ describe("RemoteBridge command order and the send default", () => {
     await f.bridge.tick();
     expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
       { mode: "steer" },
-      { mode: "steer" },
+      { mode: "queue" },
     ]);
     expect(f.bridge.phoneView().sendDefault).toBe("steer");
   });
