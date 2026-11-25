@@ -50,8 +50,8 @@ public enum PondWash {
     /// flat at the end, so the gradient has no visible edge where it stops.
     public static func duckFade(at fraction: Double) -> Double {
         let t = min(max(fraction, 0), 1)
-        let s = t * t * t * (t * (t * 6 - 15) + 10)
-        return 1 - s
+        // Quadratic ease-out: strongest at the very top (no flat shoulder), flat at the end.
+        return (1 - t) * (1 - t)
     }
 
     /// Text that must stay readable on a wash: ink and muted (WCAG 2 AA, 4.5:1).

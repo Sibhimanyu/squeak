@@ -69,6 +69,29 @@ public struct PondCentre: Equatable, Sendable {
         page = target
     }
 
+    /// The pond menu (settings, invite, leave) sits at the bar's end on the Dashboard, the Room and items. Inside a Duck the
+    /// subheader carries that Duck's own menu, so the bar shows none: never two menus stacked in one view.
+    public var showsPondMenu: Bool { duck == nil }
+
+    /// What to carry out to get from `old` (what was on screen) to this value (after an event): the one list the views apply,
+    /// so the switch, the swipe, Esc and a deep link all change the screen the same way.
+    public struct Effects: Equatable, Sendable {
+        public var page: PondPage?
+        public var deselectItem = false
+        public var openDuck: String?
+        public var leaveDuck = false
+        public var isEmpty: Bool { page == nil && !deselectItem && openDuck == nil && !leaveDuck }
+    }
+
+    public func effects(from old: PondCentre) -> Effects {
+        var e = Effects()
+        if page != old.page { e.page = page }
+        if old.item != nil, item == nil { e.deselectItem = true }
+        if let duck, duck != old.duck { e.openDuck = duck }
+        if old.duck != nil, duck == nil { e.leaveDuck = true }
+        return e
+    }
+
     public var escapeStep: EscapeStep {
         switch shows {
         case .item: .deselectItem

@@ -17,6 +17,8 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
     @ViewBuilder let avatar: () -> Avatar
     let at: Int64
     var own = false
+    /// The own-message line's colour; the Pond's accent when nil.
+    var ownAccent: Color?
     var actions: [RoomRowPlan.Action] = []
     var perform: (RoomRowPlan.Action) -> Void = { _ in }
     var tap: (() -> Void)?
@@ -45,7 +47,8 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
                 if first { header() }
                 content()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: CGFloat(RoomRowPlan.readingWidth), alignment: .leading)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.top, first ? 6 : CGFloat(RoomRowPlan.rowPad)).padding(.bottom, CGFloat(RoomRowPlan.rowPad))
@@ -70,7 +73,7 @@ struct RoomRow<Avatar: View, Header: View, Content: View>: View {
         }
         .overlay(alignment: .leading) {
             if own {
-                Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.tint(pondId)).opacity(0.85))
+                Capsule().fill((ownAccent ?? PondColour.pondAccent(pondId, fallback: PondColour.tint(pondId))).opacity(0.85))
                     .frame(width: CGFloat(RoomRowPlan.ownLineWidth)).padding(.vertical, 3).padding(.top, first ? 4 : 0)
                     .accessibilityHidden(true)
             }

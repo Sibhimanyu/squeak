@@ -91,7 +91,7 @@ private enum Fixtures {
                     tabs: tabs, selected: centre.selectedTab, label: { _ in PondItemLabel(title: "Notebook", symbol: "book.closed") },
                     overflow: .constant(PondStripOverflow(contentStart: 0, contentEnd: 0, viewport: 0)))
             },
-            trailing: { Image(systemName: "ellipsis").foregroundStyle(Theme.muted).frame(width: 28, height: 28) })
+            trailing: { if centre.showsPondMenu { Image(systemName: "ellipsis").foregroundStyle(Theme.muted).frame(width: 28, height: 28) } })
         .frame(width: width).background(Theme.bg)
     }
 
@@ -101,6 +101,11 @@ private enum Fixtures {
             content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(width: width, height: height).background(Theme.bg)
+    }
+
+    static func accent(hue: Double) -> Color {
+        let a = PondWash.accent(hue: hue, dark: false)
+        return Color(red: a.r, green: a.g, blue: a.b)
     }
 
     static func gradientColour(hue: Double, dark: Bool) -> Color {
@@ -118,7 +123,7 @@ private enum Fixtures {
                     Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Space.xl).frame(height: DuckSubheader.height)
-                .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.line.opacity(0.18)).frame(height: 1) }
                 VStack(alignment: .leading, spacing: Space.l) {
                     Text("hi there").padding(.horizontal, Space.m).padding(.vertical, Space.s)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -142,17 +147,16 @@ private enum Fixtures {
         let card = RoomTasks.card(for: task, among: [task])
         return page(width: width, height: 560, centre: PondCentre(page: .room)) {
             VStack(alignment: .leading, spacing: 0) {
-                RoomRow(first: true, avatar: { ThreadDuckView(id: "me", size: 28) }, at: 1_700_000_000_000, header: {
-                    RoomNameLine(tag: nil, at: 1_700_000_000_000) { Text("You").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink) }
+                RoomRow(first: true, avatar: { PersonAvatar(name: "Sibhi V", size: CGFloat(RoomRowPlan.avatar)) }, at: 1_700_000_000_000, own: true, ownAccent: accent(hue: 140), header: {
+                    RoomNameLine(tag: nil, at: 1_700_000_000_000) { Text("Sibhi").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink) }
                 }, content: { RoomRowBody(text: "Can someone write the greeting copy for the sign-in screen?") })
-                RoomRow(first: false, avatar: { EmptyView() }, at: 1_700_000_060_000, header: { EmptyView() },
+                RoomRow(first: false, avatar: { EmptyView() }, at: 1_700_000_060_000, own: true, ownAccent: accent(hue: 140), header: { EmptyView() },
                         content: { RoomRowBody(text: "Keep it short, one friendly line.") })
-                RoomRow(first: true, avatar: { ThreadDuckView(id: "dhol", size: 28) }, at: 1_700_000_120_000, header: {
+                RoomRow(first: true, avatar: { ThreadDuckView(id: "dhol", size: CGFloat(RoomRowPlan.avatar)) }, at: 1_700_000_120_000, header: {
                     RoomNameLine(tag: "Duck", at: 1_700_000_120_000) { Text("Dhol").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink) }
                 }, content: { RoomRowBody(text: "On it. I will draft three options and put the best one in the screen.") })
                 if let card {
                     RoomTaskCardView(card: card, at: 1_700_000_180_000, act: { _, _, _ in }, open: nil)
-                        .padding(.horizontal, 12).padding(.leading, CGFloat(RoomRowPlan.avatar) + CGFloat(RoomRowPlan.gutterGap))
                 }
             }
             .padding(.top, Space.l)

@@ -33,6 +33,27 @@ final class PondOrigin {
 }
 
 extension AppModel {
+    /// What the pond's centre shows now, read from the live state (the page preference, the open Duck, the selected item tab).
+    func liveCentre(pond: String) -> PondCentre {
+        var duck: String?
+        if let s = selectedSession, WorkPaneActions.isDuckView(s), PondsModel.shared.key(of: s) == pond { duck = s.duckId ?? s.key.stringValue }
+        let item = PondWorkspace(pond: pond).flatMap { tabStore.currentPondItem($0.project.id) }
+        return PondCentre(page: RoomViewPref.shared.mode(for: pond), duck: duck, item: item)
+    }
+
+    /// The one way the pond's centre changes: the switch, the swipe, Esc and a deep link each hand in an event on
+    /// `PondCentre`, and the difference is carried out here, never by writing the page preference from a view.
+    func applyCentre(pond: String, openDuck: (String) -> Void = { _ in }, _ event: (inout PondCentre) -> Void) {
+        let old = liveCentre(pond: pond)
+        var next = old
+        event(&next)
+        let e = next.effects(from: old)
+        if let page = e.page { RoomViewPref.shared.set(page, for: pond) }
+        if e.deselectItem { leavePondItem(pond: pond) }
+        if let duck = e.openDuck { openDuck(duck) }
+        if e.leaveDuck { openPondHome(pond) }
+    }
+
     /// Opens a thread as a tab, remembering the pond page it was opened from so closing it comes back.
     func openFromPond(_ key: SessionKey, pond: String?, page: PondPage) {
         if let pond { PondOrigin.shared.opened(tab: key.stringValue, pond: pond, page: page) }
@@ -53,7 +74,12 @@ extension AppModel {
     @discardableResult
     func openFromPond(_ target: PondOpenTarget, pond: String?, page: PondPage) -> Bool {
         guard let s = pondDuckSession(target.duck) else { return false }
-        openFromPond(s.key, pond: pond, page: page)
+        if let pond {
+            // One source of truth: the deep link is an event on the pond's centre (PondCentre), which opens the Duck's chat.
+            applyCentre(pond: pond, openDuck: { _ in openFromPond(s.key, pond: pond, page: page) }) { $0.deepLink(duck: s.duckId ?? s.key.stringValue) }
+        } else {
+            openFromPond(s.key, pond: pond, page: page)
+        }
         if let request = ChatTurnJump.request(for: target, chat: s.key.stringValue, previous: turnJump) { turnJump = request }
         guard case .ducklings(_, let labels) = target, let items = ducklings(for: s)?.items else { return true }
         let wanted = labels.isEmpty ? items : items.filter { d in
@@ -335,7 +361,7 @@ struct PondSpace<Dashboard: View>: View {
             let remaining = abs(PondDrag.home(target) - from)
             // The strip finishes from where the fingers left it; the page changes in the same step, so nothing restarts.
             pan.finish(to: target, from: from, duration: SwipeFinish.commitDuration(remainingShare: remaining, width: width, velocity: v))
-            RoomViewPref.shared.set(target, for: key)
+            AppModel.shared.applyCentre(pond: key) { $0.swipe(to: target) }
         }
     }
 

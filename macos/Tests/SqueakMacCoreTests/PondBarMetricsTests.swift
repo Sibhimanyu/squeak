@@ -27,4 +27,8 @@ import Testing
         #expect(fit.reduce(0, +) + PondBarMetrics.tabGap <= 400.5)
         #expect(fit[0] < 280)
     }
+
+    @Test func messageTextKeepsAComfortableMeasure() {
+        #expect(RoomRowPlan.readingWidth >= 680 && RoomRowPlan.readingWidth <= 720)
+    }
 }
