@@ -113,9 +113,10 @@ public struct HostPondChanges: Decodable, Sendable, Equatable {
 
 extension NativeHostClient {
     /// A Pond's changes by Duck and Stream. nil when the host is older than the route (404).
-    public func pondChanges(projectId: String) async throws -> HostPondChanges? {
+    /// `cached` asks for the host's held list at once (it reads anew behind it): for a first paint, before the current list.
+    public func pondChanges(projectId: String, cached: Bool = false) async throws -> HostPondChanges? {
         do {
-            let data = try await call("GET", "/native/projects/\(Self.id(projectId))/changes", timeout: 20)
+            let data = try await call("GET", "/native/projects/\(Self.id(projectId))/changes\(cached ? "?cached=1" : "")", timeout: 20)
             return try JSONDecoder.native(HostPondChanges.self, data)
         } catch NativeHostError.http(404, _) { return nil }
     }

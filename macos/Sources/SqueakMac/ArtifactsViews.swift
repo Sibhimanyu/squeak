@@ -32,6 +32,12 @@ final class ArtifactsModel {
         }
     }
 
+    /// Follows unless already following this Pond (a second ask neither restarts the stream nor re-reads the list).
+    func ensureFollowing(_ id: String, host: NativeHostClient) {
+        if task != nil, projectId == id { return }
+        follow(id, host: host)
+    }
+
     private func read(_ id: String, _ host: NativeHostClient) async {
         do {
             let rows = try await host.artifacts(projectId: id)

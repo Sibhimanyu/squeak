@@ -32,7 +32,8 @@ private struct RailListScroll<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-            VStack(alignment: .leading, spacing: 2) { content }
+            // Lazy: a Pond with many Ducks lists thousands of rows, and only the ones in view are built.
+            LazyVStack(alignment: .leading, spacing: 2) { content }
                 .padding(Space.s)
                 .frame(minWidth: RailPopoverMetrics.width, alignment: .leading)
         }
@@ -180,16 +181,17 @@ private extension String {
     static func sections(scope: WorkPaneScope, model: AppModel) -> [RailChangeSection] {
         switch scope {
         case .pond(let p):
-            guard let changes = PondChangesStore.shared.model(for: p.projectId).changes else { return [] }
-            return RailChanges.pondSections(
-                changes, sessions: model.allSessions, mainSessionKey: p.changesSession(in: model.allSessions)?.key.stringValue)
+            let built = PondChangesStore.shared.model(for: p.projectId).sections
+            return RailChanges.keyed(
+                built, sessions: model.allSessions, mainSessionKey: p.changesSession(in: model.allSessions)?.key.stringValue)
         case .duck(let s):
             let duck = model.pondWorkspace?.roster.ducks?.first { $0.id == s.duckId }
             let filter = RailPopoverState.shared.changesFilter
             // A Duck in Streams (or opened from a chip) reads the Pond's list narrowed to it: that list groups per Stream.
             if usesPondList(s, model: model) {
-                guard let projectId = model.pondWorkspace?.project.id, let changes = PondChangesStore.shared.model(for: projectId).changes else { return [] }
-                return RailChanges.narrowed(RailChanges.pondSections(changes, sessions: model.allSessions, mainSessionKey: nil), duckId: s.duckId, filter: filter)
+                guard let projectId = model.pondWorkspace?.project.id else { return [] }
+                let built = PondChangesStore.shared.model(for: projectId).sections
+                return RailChanges.narrowed(RailChanges.keyed(built, sessions: model.allSessions, mainSessionKey: nil), duckId: s.duckId, filter: filter)
             }
             let files = model.changesStore(for: s.key.hostSessionId).changes?.files ?? []
             return RailChanges.duckSection(
@@ -213,21 +215,21 @@ private extension String {
     }
 
     /// The rail's badge count, read now and then: the Pond's list for a Pond page, or for a Duck that is in Streams.
-    static func refreshBadge(scope: WorkPaneScope, model: AppModel) async {
+    static func refreshBadge(scope: WorkPaneScope, model: AppModel, cached: Bool = false) async {
         switch scope {
-        case .pond: await refresh(scope: scope, model: model)
+        case .pond: await refresh(scope: scope, model: model, cached: cached)
         case .duck(let s):
             guard usesPondList(s, model: model), let id = model.pondWorkspace?.project.id else { return }
-            await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost)
+            await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost, cached: cached)
         }
     }
 
-    static func refresh(scope: WorkPaneScope, model: AppModel, force: Bool = false) async {
+    static func refresh(scope: WorkPaneScope, model: AppModel, force: Bool = false, cached: Bool = false) async {
         switch scope {
-        case .pond(let p): await PondChangesStore.shared.model(for: p.projectId).refresh(projectId: p.projectId, host: model.nativeHost, force: force)
+        case .pond(let p): await PondChangesStore.shared.model(for: p.projectId).refresh(projectId: p.projectId, host: model.nativeHost, force: force, cached: cached)
         case .duck(let s):
             if usesPondList(s, model: model), let id = model.pondWorkspace?.project.id {
-                await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost, force: force)
+                await PondChangesStore.shared.model(for: id).refresh(projectId: id, host: model.nativeHost, force: force, cached: cached)
             } else {
                 await model.changesStore(for: s.key.hostSessionId).refresh(sessionKey: s.key.hostSessionId, visible: true, activityChanged: true)
             }
@@ -280,10 +282,10 @@ struct RailArtifactsPopover: View {
                 Spacer(minLength: 0)
             }
         }
+        // The rail already follows the feed (`RailWarmer`); this only makes sure, and never stops it on close.
         .task(id: projectId) {
-            if let projectId { ArtifactsStore.shared.model(for: projectId).follow(projectId, host: model.nativeHost) }
+            if let projectId { ArtifactsStore.shared.model(for: projectId).ensureFollowing(projectId, host: model.nativeHost) }
         }
-        .onDisappear { if let projectId { ArtifactsStore.shared.model(for: projectId).stop() } }
     }
 
     private var currentDuckId: String? {
@@ -413,7 +415,7 @@ private struct FilesList: View {
                 }
             }
         }
-        .task(id: root) { await files.refreshTree() }
+        .task(id: root) { await files.warm(maxAge: 5) }
     }
 
     @ViewBuilder private var recent: some View {

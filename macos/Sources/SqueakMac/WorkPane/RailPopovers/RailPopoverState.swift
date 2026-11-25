@@ -25,20 +25,38 @@ final class RailPopoverState {
     func showChanges(_ filter: RailChangeFilter) { changesFilter = filter; open = .changes }
 }
 
-/// Every Duck's changed files in a Pond, from the host (`GET /native/projects/<id>/changes`). Read when a list opens and now
-/// and then while the window is up, so the Changes badge on the Dashboard and Room stays near the truth.
+/// Every Duck's changed files in a Pond, from the host (`GET /native/projects/<id>/changes`). Kept warm by the rail from the
+/// moment a Pond page shows (`RailWarmer`), so the Changes list opens from what is already here; a list that opens reads
+/// again quietly and the rows change in place. The rows are built off the main thread when the answer arrives.
 @MainActor @Observable
 final class PondChangesModel {
     private(set) var changes: HostPondChanges?
+    /// The list's rows, built once per host answer (no chats filled in; `RailChanges.keyed` does that when drawing).
+    private(set) var sections: [RailChangeSection] = []
     private(set) var loaded = false
     @ObservationIgnored private var lastRead: Date?
+    @ObservationIgnored private var running: Task<Void, Never>?
 
-    func refresh(projectId: String, host: NativeHostClient, force: Bool = false) async {
+    func refresh(projectId: String, host: NativeHostClient, force: Bool = false, cached: Bool = false) async {
         if !force, let lastRead, Date().timeIntervalSince(lastRead) < 10 { return }
+        // One read at a time: a second ask waits for the one in flight instead of starting another on the host.
+        if let running { await running.value; return }
         lastRead = Date()
-        let read = try? await host.pondChanges(projectId: projectId)
-        if read != changes { changes = read }
-        loaded = true
+        let task = Task { [weak self] in
+            let read = try? await host.pondChanges(projectId: projectId, cached: cached)
+            guard let self else { return }
+            if read != self.changes {
+                let built = await Task.detached(priority: .userInitiated) {
+                    read.map { RailChanges.pondSections($0, sessions: [], mainSessionKey: nil) } ?? []
+                }.value
+                self.changes = read
+                self.sections = built
+            }
+            self.loaded = true
+        }
+        running = task
+        await task.value
+        running = nil
     }
 }
 

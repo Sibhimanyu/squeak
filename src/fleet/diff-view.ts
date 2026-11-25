@@ -47,6 +47,7 @@ export interface ChangeSet {
 }
 
 export const MAX_CHANGE_FILES = 500;
+const UNTRACKED_PARALLEL = 8;
 export const MAX_CHANGE_PATCH_BYTES = 400 * 1024;
 
 const DEFAULT_MAX_FILES = 40;
@@ -221,21 +222,27 @@ export class DiffReader {
       .filter(Boolean)
       .slice(0, budget);
 
-    const files: DiffFile[] = [];
-    for (const path of paths) {
-      // `--no-index` exits non-zero whenever the files differ, which for a new
-      // file is always, so the output matters and the status does not.
-      const numstat = await this.tryGit(dir, ["diff", "--no-index", "--numstat", "--", "/dev/null", path]);
-      const parsed = numstat ? parseNumstat(numstat) : [];
-      const entry = parsed[0];
-      files.push({
-        path,
-        insertions: entry?.insertions ?? 0,
-        deletions: 0,
-        binary: entry?.binary ?? false,
-        untracked: true,
-      });
-    }
+    // One `git diff --no-index` per new file (about 50 ms each): run a few side by side, results kept in order.
+    const files: DiffFile[] = new Array<DiffFile>(paths.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < paths.length) {
+        const slot = next++;
+        const path = paths[slot]!;
+        // `--no-index` exits non-zero whenever the files differ, which for a new
+        // file is always, so the output matters and the status does not.
+        const numstat = await this.tryGit(dir, ["diff", "--no-index", "--numstat", "--", "/dev/null", path]);
+        const entry = (numstat ? parseNumstat(numstat) : [])[0];
+        files[slot] = {
+          path,
+          insertions: entry?.insertions ?? 0,
+          deletions: 0,
+          binary: entry?.binary ?? false,
+          untracked: true,
+        };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(UNTRACKED_PARALLEL, paths.length) }, worker));
     return files;
   }
 

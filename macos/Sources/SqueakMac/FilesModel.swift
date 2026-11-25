@@ -51,10 +51,12 @@ final class OpenFile: Identifiable {
 @MainActor @Observable
 final class FilesModel {
     let root: String
-    private(set) var children: [String: [FileEntry]] = [:]
-    private(set) var ignored: Set<String> = []
-    var expanded: Set<String> = []
-    var showIgnored = false
+    private(set) var children: [String: [FileEntry]] = [:] { didSet { rebuildRows() } }
+    private(set) var ignored: Set<String> = [] { didSet { rebuildRows() } }
+    var expanded: Set<String> = [] { didSet { rebuildRows() } }
+    var showIgnored = false { didSet { rebuildRows() } }
+    /// The tree's rows, flattened once when the tree changes (not on every redraw of a list that shows them).
+    private(set) var rows: [FileRow] = []
     var filter = "" { didSet { if filter != oldValue { Task { await refilter() } } } }
     /// "Names" filters paths as before; "Contents" greps the files (`ContentSearch`).
     var searchMode: SearchMode = .names { didSet { if searchMode != oldValue { Task { await refilter() } } } }
@@ -86,24 +88,42 @@ final class FilesModel {
     /// The file whose tab was closed with unsaved edits; the window asks what to do.
     var closeAsk: String?
     @ObservationIgnored private var loading = false
+    @ObservationIgnored private var lastTreeRead: Date?
 
     init(root: String) { self.root = root }
 
-    var rows: [FileRow] { FileTree.rows(children: children, expanded: expanded, ignored: ignored, showIgnored: showIgnored) }
+    private func rebuildRows() {
+        rows = FileTree.rows(children: children, expanded: expanded, ignored: ignored, showIgnored: showIgnored)
+    }
     var activeFile: OpenFile? { activePath.flatMap { p in open.first { $0.path == p } } }
     var isFiltering: Bool { !filter.trimmingCharacters(in: .whitespaces).isEmpty }
     var hasUnsaved: Bool { open.contains { $0.dirty } }
 
     // MARK: Tree
 
-    /// Reads the root and every expanded folder again (a folder that vanished is dropped).
+    /// Reads the root and every expanded folder again, side by side (a folder that vanished is dropped). The rows already
+    /// shown stay until a folder's answer differs, then change in place.
     func refreshTree() async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
         allFiles = nil
-        for dir in [""] + expanded.sorted() { await load(dir) }
+        let root = root
+        let dirs = [""] + expanded.sorted()
+        let read = await withTaskGroup(of: (String, [FileEntry], Set<String>).self) { group in
+            for dir in dirs {
+                group.addTask(priority: .userInitiated) {
+                    let e = FileDisk.list(root: root, relative: dir)
+                    return (dir, e, FileDisk.gitIgnored(root: root, paths: e.map(\.path)))
+                }
+            }
+            var out: [(String, [FileEntry], Set<String>)] = []
+            for await r in group { out.append(r) }
+            return out
+        }
+        for (dir, entries, hidden) in read { apply(dir: dir, entries: entries, hidden: hidden) }
         expanded = expanded.filter { children[$0] != nil }
+        lastTreeRead = Date()
         if isFiltering { await refilter() }
     }
 
@@ -113,9 +133,25 @@ final class FilesModel {
             let e = FileDisk.list(root: root, relative: dir)
             return (e, FileDisk.gitIgnored(root: root, paths: e.map(\.path)))
         }.value
+        apply(dir: dir, entries: entries, hidden: hidden)
+    }
+
+    private func apply(dir: String, entries: [FileEntry], hidden: Set<String>) {
         if children[dir] != entries { children[dir] = entries }
         let inDir = Set(entries.map(\.path))
-        ignored = ignored.filter { FileTree.parent(of: $0) != dir || inDir.contains($0) }.union(hidden)
+        let next = ignored.filter { FileTree.parent(of: $0) != dir || inDir.contains($0) }.union(hidden)
+        if next != ignored { ignored = next }
+    }
+
+    /// Kept ready by the rail while a Pond page shows: the root listed (and read again when older than `maxAge`), and the
+    /// file list the name search filters, so the Files list opens with both in hand.
+    func warm(maxAge: TimeInterval = 30) async {
+        if children[""] == nil || Date().timeIntervalSince(lastTreeRead ?? .distantPast) > maxAge { await refreshTree() }
+        if allFiles == nil {
+            let root = root
+            let listed = await Task.detached(priority: .utility) { FileDisk.allFiles(root: root) }.value
+            if allFiles == nil { allFiles = listed }
+        }
     }
 
     func toggle(_ dir: String) {
