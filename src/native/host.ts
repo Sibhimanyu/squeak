@@ -26,6 +26,7 @@ import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
 import { activeBranches, ducksOwnBranch, mainReadOnlyRoot } from "./placement.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
+import { projectOfSession } from "./room.js";
 import {
   deriveRule,
   describeRule,
@@ -475,6 +476,12 @@ export class SessionHost extends EventEmitter {
     this.titler?.backfill();
     // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
     this.store.adoptWorkspaces();
+    // Ducks have no archive: chats archived before become Off-duty Ducks, once.
+    try {
+      this.store.migrateArchivedToOffDuty((s) => projectOfSession(this.store, s));
+    } catch (error) {
+      logHostError("archived to off duty", error);
+    }
     for (const s of this.store.listSessions()) {
       if (!BUSY.has(s.status)) continue;
       this.store.setStatus(s.id, "idle", true);
@@ -1068,21 +1075,18 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * Archives a chat. A chat waiting on the person (approval, plan, question) is archived at once: what it waits on is
-   * denied, as a Stop does. A working chat is refused unless `stop` is true, which stops the turn (waiting for it to
-   * settle, up to `timeoutMs`; the agent is closed if it will not) and drops the queued messages. Its idle agent
-   * process is closed and watchers are told.
+   * Takes a chat off duty (Ducks have no archive). A chat waiting on the person (approval, plan, question) is stood down
+   * at once: what it waits on is denied, as a Stop does. A working chat is refused unless `stop` is true, which stops the
+   * turn (waiting for it to settle, up to `timeoutMs`; the agent is closed if it will not) and drops the queued
+   * messages. Its idle agent process is closed. The caller sets the Duck's duty.
    */
-  async archive(id: string, options: { stop?: boolean; timeoutMs?: number } = {}): Promise<void> {
+  async standDown(id: string, options: { stop?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const s = this.require(id);
-    if (s.archivedAt) return;
     const waiting = NEEDS.has(s.status);
     const working = BUSY.has(s.status) && !waiting;
     if (!waiting && (working || this.runners.get(id)?.activity?.().busy === true) && options.stop !== true)
-      throw new HostError("Stop the chat before archiving it.", 409);
+      throw new HostError("Stop the chat before taking it off duty.", 409);
     if (waiting || working || options.stop === true) await this.stopForArchive(id, options.timeoutMs ?? 8000);
-    const at = new Date().toISOString();
-    this.store.setArchivedAt(id, at);
     const runner = this.runners.get(id);
     if (runner) {
       this.runners.delete(id);
@@ -1090,7 +1094,6 @@ export class SessionHost extends EventEmitter {
       await this.closeRunner(id, runner);
     }
     this.warmed.delete(id);
-    this.emit("event", { type: "archived", sessionId: id, archived: true, archivedAt: at } satisfies HostEvent);
   }
 
   /** Drops the chat's queued messages and steers, stops its turn (denying what it waits on) and waits for it to settle. */
@@ -1106,7 +1109,7 @@ export class SessionHost extends EventEmitter {
       if (!now || !BUSY.has(now.status)) return;
       await new Promise((r) => setTimeout(r, 25));
     }
-    // It will not settle: the chat is being archived, so the agent is closed and the turn ends as a stop.
+    // It will not settle: the chat is being stood down, so the agent is closed and the turn ends as a stop.
     const runner = this.runners.get(id);
     this.runners.delete(id);
     if (runner) await this.closeRunner(id, runner);
@@ -1116,13 +1119,6 @@ export class SessionHost extends EventEmitter {
       this.setStatus(id, "idle", true);
       this.timeline.end(id, "stopped");
     }
-  }
-
-  async unarchive(id: string): Promise<void> {
-    const s = this.require(id);
-    if (!s.archivedAt) return;
-    this.store.setArchivedAt(id, null);
-    this.emit("event", { type: "archived", sessionId: id, archived: false, archivedAt: null } satisfies HostEvent);
   }
 
   async setMode(id: string, permissionMode: string): Promise<void> {

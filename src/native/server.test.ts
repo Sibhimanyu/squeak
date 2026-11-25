@@ -720,37 +720,36 @@ describe("host server errors", () => {
     expect((await call(h, "POST", `/native/sessions/nope/title`, { title: "x" })).status).toBe(404);
     expect(h.store.getSession(s.id)?.title).toBe("Fix the build");
   });
-  it("POST /native/sessions/:id/archive and /unarchive store, emit, refuse a busy chat and are strict", async () => {
+  it("POST /native/sessions/:id/archive and /unarchive map to Off duty and On duty, refuse a busy chat and are strict", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
-    const seen: { archived: boolean }[] = [];
-    h.host.on("event", (e: { type: string; archived: boolean }) => e.type === "archived" && seen.push(e));
     expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, { x: 1 })).status).toBe(400);
     expect((await call(h, "POST", `/native/sessions/nope/archive`, {})).status).toBe(404);
     const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(ok.status).toBe(200);
-    expect(h.store.getSession(s.id)?.archivedAt).toBeTruthy();
-    expect(seen.map((e) => e.archived)).toEqual([true]);
-    expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, {})).status).toBe(200);
+    expect(ok.json).toMatchObject({ ok: true, archived: false, duty: "off" });
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
+    expect(h.store.duckOf(s.id).duty).toBe("off");
+    expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, {})).status).toBe(200);
+    expect(h.store.duckOf(s.id).duty).toBe("on");
     h.store.setStatus(s.id, "working");
     const busy = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(busy.status).toBe(409);
-    expect(JSON.stringify(busy.json)).toContain("Stop the chat before archiving it.");
-    expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
+    expect(JSON.stringify(busy.json)).toContain("Stop the chat before taking it off duty.");
+    expect(h.store.duckOf(s.id).duty).toBe("on");
   });
-  it("archives a chat waiting on the person at once and denies what it waited on", async () => {
+  it("taking a chat waiting on the person off duty is at once and denies what it waited on", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
     h.store.createRequest(s.id, "tool", { toolName: "Bash" });
     h.store.setStatus(s.id, "awaiting_approval");
     const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(ok.status).toBe(200);
-    expect(h.store.getSession(s.id)?.archivedAt).toBeTruthy();
+    expect(h.store.duckOf(s.id).duty).toBe("off");
     expect(h.store.getSession(s.id)?.status).toBe("idle");
     expect(h.store.openRequests(s.id)).toEqual([]);
   });
-  it("archives a working chat only with stop: the turn stops, the queue is dropped, then it is archived", async () => {
+  it("a working chat goes off duty only with stop: the turn stops and the queue is dropped", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
     h.store.setStatus(s.id, "working");
@@ -758,12 +757,12 @@ describe("host server errors", () => {
     expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, { stop: "yes" })).status).toBe(400);
     expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, {})).status).toBe(409);
     expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, { stop: true })).status).toBe(400);
-    await h.host.archive(s.id, { stop: true, timeoutMs: 100 });
+    const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, { stop: true });
+    expect(ok.status).toBe(200);
     const now = h.store.getSession(s.id);
-    expect(now?.archivedAt).toBeTruthy();
+    expect(now?.archivedAt).toBeNull();
     expect(now?.status).toBe("idle");
+    expect(h.store.duckOf(s.id).duty).toBe("off");
     expect(h.store.queued(s.id)).toEqual([]);
-    await h.host.unarchive(s.id);
-    expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
   });
 });

@@ -1,28 +1,13 @@
 import Foundation
 
-/// Archiving a thread, whatever kind it is: which menu items appear, which chats the lists show, and the archived
-/// view's words. Three kinds, three meanings:
-///  - a Squeak chat: the session host archives it, at any time: a chat waiting on the person is archived at once, a
-///    working one is stopped first (the Mac asks, `needsStop`);
+/// Archiving an add-on thread: which menu items appear, which chats the lists show, and the archived view's words.
+/// Squeak's own chats (Ducks) have no archive: the host moves old archived ones to Off duty, and Off duty and Delete
+/// Duck are all a Duck has. Two kinds still archive:
 ///  - any other thread (Conductor, terminal, Codex, desktop, headless): hidden in Squeak only, by the daemon
 ///    (`archived-sessions.json`); Conductor's database and the agent's files are never touched;
 ///  - a thread someone else started in a shared pond: hidden from your view only (`SharedThreadHides`), never theirs.
 /// The host and daemon own the rules; this keeps the menu from offering what they would refuse.
 public enum ThreadArchive {
-    /// What the host answers an archive without `stop` while the chat works (an older Mac or phone); the Mac now asks first.
-    public static let busySentence = "Stop the chat before archiving it."
-
-    /// A working Squeak chat needs the person's "Stop and archive?" first; a waiting one is archived at once.
-    public static func needsStop(_ s: HostSession) -> Bool { kind(s) == .squeak && s.state == .working }
-
-    public static let stopAlertTitle = "Stop and archive?"
-    public static let stopAlertConfirm = "Stop and Archive"
-    public static func stopAlertText(queued: Int) -> String {
-        let base = "The turn stops and the chat is archived."
-        guard queued > 0 else { return base }
-        return base + " \(queued) queued message\(queued == 1 ? "" : "s") will be dropped."
-    }
-
     /// Who archives a thread.
     public enum Kind: Sendable, Equatable {
         /// A chat Squeak runs: the session host.
@@ -43,10 +28,9 @@ public enum ThreadArchive {
     /// "Archive" for any thread in the list (a working Squeak chat asks to stop first); "Unarchive" for an archived one;
     /// nothing for a row with no key. One rule for the sidebar, chat tabs, pond rows, Main chats and the Archived page.
     public static func menuItem(_ s: HostSession) -> MenuItem? {
-        guard kind(s) != nil else { return nil }
+        // Ducks have no archive, only Off duty and Delete Duck: a Squeak chat offers neither Archive nor Unarchive.
+        guard kind(s) == .fleet else { return nil }
         if s.archivedAt != nil { return .unarchive }
-        // A Squeak chat is archived in any state; another thread keeps the old rule.
-        if kind(s) == .squeak { return .archive }
         return s.state != .working && s.state != .blocked ? .archive : nil
     }
 
@@ -77,10 +61,6 @@ public enum ThreadArchive {
 
     /// The pond home's Archived section title: nil when nothing is archived there.
     public static func entryTitle(count: Int) -> String? { count > 0 ? "Archived (\(count))" : nil }
-
-    /// The sidebar's own entry, always there so people find it: muted, with the count only when something is archived.
-    public static let pageTitle = "Archived"
-    public static func pageEntryTitle(count: Int) -> String { count > 0 ? "Archived (\(count))" : pageTitle }
 
     /// An archived chat opens read-only: "Unarchive" stands where the composer was.
     public static func composerReplaced(_ s: HostSession) -> Bool { s.archivedAt != nil }

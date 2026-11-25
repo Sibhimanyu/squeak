@@ -97,7 +97,6 @@ struct WorkbenchSidebar: View {
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             }
             .scrollContentBackground(.hidden)
-            archivedPageEntry
             footer
         }
         // Never narrower than the minimum, whatever the caller passes: pond names must always show (DESIGN.md §8.10).
@@ -592,28 +591,6 @@ struct WorkbenchSidebar: View {
                 ForEach(sessions) { WorkbenchChatRow(session: $0, indent: 1).heresayPrivate() }
             }
         }
-    }
-
-    // MARK: Archived
-
-    /// "Archived" at the foot of the sidebar, always there so people find it: muted, with the count only when something
-    /// is archived. It opens the Archived page (every archived thread across all ponds).
-    private var archivedPageEntry: some View {
-        let count = ArchivedPage.count(sessions: model.allSessions, shared: PondsModel.shared.hides.all)
-        let open = model.focus.page == .archived
-        return Button { model.openPond(.archived) } label: {
-            HStack(spacing: 8) {
-                Lucide(.inbox, size: 14, color: Theme.subtle).frame(width: 18)
-                Text(verbatim: ThreadArchive.pageEntryTitle(count: count)).font(Typo.body).foregroundStyle(Theme.muted)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Space.s + 2).frame(height: 32).contentShape(Rectangle())
-            .background(open ? Theme.selected.opacity(0.75) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
-        }
-        .buttonStyle(.plain).pointerHand()
-        .padding(.horizontal, Space.s).padding(.bottom, 4)
-        .accessibilityLabel(count > 0 ? "Archived, \(count) ducks" : "Archived, nothing yet")
-        .accessibilityAddTraits(open ? .isSelected : [])
     }
 
     // MARK: Footer

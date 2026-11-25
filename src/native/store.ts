@@ -237,6 +237,12 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE room_posts ADD COLUMN canvases TEXT;
   `,
+  // No Archived: one-shot host migrations are recorded here so each runs once, and a deleted Duck's chats are
+  // remembered so the archived-to-Off-duty migration never brings a deleted Duck back.
+  `
+  CREATE TABLE IF NOT EXISTS host_migrations (name TEXT PRIMARY KEY, at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS deleted_duck_chats (session_id TEXT PRIMARY KEY, at TEXT NOT NULL);
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -1747,12 +1753,44 @@ export class NativeStore {
     const sessions = this.duckSessionIds(id);
     this.db.transaction(() => {
       const at = nowIso();
-      for (const sid of sessions)
+      for (const sid of sessions) {
         this.db.prepare("UPDATE sessions SET archived_at=COALESCE(archived_at, ?) WHERE id=?").run(at, sid);
+        this.db.prepare("INSERT OR IGNORE INTO deleted_duck_chats (session_id, at) VALUES (?,?)").run(sid, at);
+      }
       this.db.prepare("DELETE FROM duck_sessions WHERE duck_id=?").run(id);
       this.db.prepare("DELETE FROM ducks WHERE id=?").run(id);
     })();
     return sessions;
+  }
+
+  /**
+   * Ducks have no archive, only Off duty and Delete Duck. Once (recorded in `host_migrations`): every archived chat
+   * becomes an Off-duty Duck that keeps its history, named when it has no name, and is listed again. A chat that
+   * Delete Duck archived stays gone. `pondOf` finds a chat's pond. Returns how many chats were migrated.
+   */
+  migrateArchivedToOffDuty(pondOf: (s: SessionRow) => { id: string } | null): number {
+    const NAME = "archived-to-off-duty";
+    this.ducksTable();
+    if (this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(NAME)) return 0;
+    const gone = new Set(
+      (this.db.prepare("SELECT session_id FROM deleted_duck_chats").all() as Row[]).map((r) => r.session_id as string),
+    );
+    let n = 0;
+    this.db.transaction(() => {
+      for (const s of this.listSessions()) {
+        if (!s.archivedAt || gone.has(s.id)) continue;
+        let duck = this.duckBySession(s.id);
+        // An older chat of a Duck that moved on is that Duck's history; it stays as it is.
+        if (duck && duck.currentSessionId !== s.id) continue;
+        duck ??= this.duckForSession(s.id, pondOf(s)?.id ?? "");
+        if (!duck) continue;
+        this.setArchivedAt(s.id, null);
+        this.updateDuck(duck.id, { duty: "off" });
+        n += 1;
+      }
+      this.db.prepare("INSERT INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
+    })();
+    return n;
   }
 
   /** The duck's working copy and branch follow its current session's. */

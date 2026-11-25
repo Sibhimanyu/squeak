@@ -126,10 +126,12 @@ struct SqueakCommands: Commands {
                 .registryShortcut(.effortPicker)
             Button("Attach Images…") { NotificationCenter.default.post(name: .squeakAttach, object: nil) }
                 .registryShortcut(.attach)
-            Divider()
-            Button(model.archiveMenuTitle ?? "Archive Duck") { model.archiveSelectedThread() }
-                .registryShortcut(.archiveThread)
-                .disabled(model.archiveMenuTitle == nil)
+            // Ducks have no archive (Off duty and Delete Duck): the item shows only for an add-on thread.
+            if let archiveTitle = model.archiveMenuTitle {
+                Divider()
+                Button(archiveTitle) { model.archiveSelectedThread() }
+                    .registryShortcut(.archiveThread)
+            }
         }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in

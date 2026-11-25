@@ -13,19 +13,12 @@ import Testing
             title: title, repoName: repo, state: state, archivedAt: archived)
     }
 
-    @Test func archiveIsOfferedForEveryKindOfIdleThread() {
-        #expect(ThreadArchive.canArchive(chat("a")))
-        #expect(ThreadArchive.canArchive(chat("a", state: .finished)))
-        // A Squeak chat is archived in any state: waiting at once, working after "Stop and archive?".
-        #expect(ThreadArchive.canArchive(chat("a", state: .working)))
-        #expect(ThreadArchive.canArchive(chat("a", state: .blocked)))
-        #expect(ThreadArchive.needsStop(chat("a", state: .working)))
-        #expect(!ThreadArchive.needsStop(chat("a", state: .blocked)))
-        #expect(!ThreadArchive.needsStop(chat("a")))
-        #expect(!ThreadArchive.needsStop(other("c1", provider: "conductor", state: .working)))
-        #expect(ThreadArchive.stopAlertText(queued: 0) == "The turn stops and the chat is archived.")
-        #expect(ThreadArchive.stopAlertText(queued: 2).contains("2 queued messages will be dropped"))
-        #expect(!ThreadArchive.canArchive(chat("a", archived: Date())))
+    @Test func archiveIsOnlyOfferedForAddOnThreads() {
+        // Ducks have no archive: a Squeak chat is offered neither Archive nor Unarchive, in any state.
+        #expect(!ThreadArchive.canArchive(chat("a")))
+        #expect(!ThreadArchive.canArchive(chat("a", state: .working)))
+        #expect(!ThreadArchive.canArchive(chat("a", state: .blocked)))
+        #expect(ThreadArchive.menuItem(chat("a", archived: Date())) == nil)
         // A Conductor, terminal or Codex thread: hidden in Squeak only, by the daemon.
         #expect(ThreadArchive.canArchive(chat("a", squeak: false)))
         #expect(ThreadArchive.canArchive(other("terminal-1", provider: "claude-terminal")))
@@ -44,7 +37,6 @@ import Testing
     }
 
     @Test func unarchiveIsOfferedForAnyArchivedThread() {
-        #expect(ThreadArchive.canUnarchive(chat("a", archived: Date())))
         #expect(ThreadArchive.canUnarchive(chat("a", archived: Date(), squeak: false)))
         #expect(ThreadArchive.canUnarchive(other("t", provider: "codex-terminal", archived: Date())))
         #expect(!ThreadArchive.canUnarchive(chat("a")))
@@ -55,11 +47,6 @@ import Testing
     @Test func aSharedPondThreadSomeoneElseStartedHidesInYourViewOnly() {
         #expect(ThreadArchive.sharedMenuItem(hidden: false) == .archive)
         #expect(ThreadArchive.sharedMenuItem(hidden: true) == .unarchive)
-    }
-
-    @Test func theSidebarEntryIsAlwaysThereAndQuietWhenEmpty() {
-        #expect(ThreadArchive.pageEntryTitle(count: 0) == "Archived")
-        #expect(ThreadArchive.pageEntryTitle(count: 4) == "Archived (4)")
     }
 
     @Test func listsDropArchivedAndTheArchivedViewIsNewestFirst() {
