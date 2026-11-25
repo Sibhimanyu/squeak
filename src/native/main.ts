@@ -28,11 +28,13 @@ import { haikuDecider } from "./decider.js";
 import {
   createDecider,
   createFinishWriters,
+  createSummaryWriters,
   deciderHelperDirs,
   onDeviceTitleCall,
   resolveDeciderHelper,
 } from "./on-device.js";
 import { haikuFinishWriter } from "./room-finish.js";
+import { backfillSummaries, haikuSummaryWriter } from "./room-handoff-summary.js";
 import { RoomSummariser } from "./room-summary.js";
 import { Placement } from "./placement.js";
 import { ChatStarter } from "./chat-starter.js";
@@ -77,8 +79,17 @@ export async function runHost(supportDir: string): Promise<void> {
       fallback: defaultTitleCall(),
     }),
   });
+  let titleCall: TitleModelCall | null = null;
+  const agentSettings = new AgentSettings(supportDir);
+  // A Duck-to-Duck message its sender gave no summary for gets one written: on-device, else Haiku.
+  const summaryWriters = createSummaryWriters({
+    setting: () => agentSettings.get().deciderModel,
+    helper: () => resolveDeciderHelper({ dirs: deciderHelperDirs(supportDir) }),
+    haiku: haikuSummaryWriter(() => (titleCall ??= defaultTitleCall())),
+  });
   const room = new Room({
     store,
+    summaryWriters,
     ownerName: () => flotilla?.service?.identity.name ?? null,
     attachmentsDir: path.join(supportDir, "room-attachments"),
     members: (id) => server?.pondMembers(id) ?? 0,
@@ -104,8 +115,6 @@ export async function runHost(supportDir: string): Promise<void> {
   const starter = new ChatStarter({ store, host, workspaces, placement, room });
   // Routing a new Task: this Mac's own models by default (the bundled squeak-decider helper), Haiku by the setting or
   // whenever the helper cannot answer. The setting is read on every Task, so a change needs no restart.
-  let titleCall: TitleModelCall | null = null;
-  const agentSettings = new AgentSettings(supportDir);
   const decider = createDecider({
     setting: () => agentSettings.get().deciderModel,
     helper: () => resolveDeciderHelper({ dirs: deciderHelperDirs(supportDir) }),
@@ -140,6 +149,15 @@ export async function runHost(supportDir: string): Promise<void> {
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
   host.start();
+  // One-time, capped, in the background: old Duck-to-Duck posts get a summary line (resumes at the next start if capped).
+  setTimeout(() => {
+    void backfillSummaries({
+      store,
+      writers: summaryWriters,
+      onWritten: (row) => room.emit("post-updated", row),
+      onError: (error) => logger.warn("hand-off summary backfill model failed", { error: String(error) }),
+    }).catch((error) => logger.warn("hand-off summary backfill failed", { error: String(error) }));
+  }, 30_000).unref();
   // One-time, resumable: old screenshots and huge tool outputs leave the rows (a backup first, 40 ms slices).
   if (process.env.SQUEAK_NATIVE_COMPACT !== "off") {
     setTimeout(() => {

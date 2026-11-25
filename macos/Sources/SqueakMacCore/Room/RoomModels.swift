@@ -71,6 +71,10 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
     public var toName: String?
     /// What a one-line status post expands to (a spec+plan card's body); nil for a host that sends none.
     public var detail: String?
+    /// A Duck-to-Duck message in one or two plain sentences; nil from a host that sends none (the line is made from the text).
+    public var summary: String?
+    /// The whole original message of a Duck-to-Duck post (`text` may be clipped); nil from a host that sends none.
+    public var fullBody: String?
     /// The spec+plan card a person's comment is on.
     public var replyTo: String?
     /// Pictures and files a person attached; empty for a host that does not send them.
@@ -96,7 +100,7 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         self.level = level; self.text = text; self.toSessionId = toSessionId; self.attachments = attachments; self.at = at
     }
 
-    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, toName, detail, replyTo, attachments, canvases, turnId, fallback, at }
+    private enum CodingKeys: String, CodingKey { case seq, id, author, sessionId, kind, level, text, toSessionId, toName, detail, summary, fullBody, replyTo, attachments, canvases, turnId, fallback, at }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // A post with no seq or id cannot be placed; the page drops it (see `Failable`).
@@ -110,6 +114,8 @@ public struct RoomPost: Sendable, Equatable, Decodable, Identifiable {
         toSessionId = try? c.decode(String.self, forKey: .toSessionId)
         toName = (try? c.decode(String.self, forKey: .toName)).flatMap { $0.isEmpty ? nil : $0 }
         detail = try? c.decode(String.self, forKey: .detail)
+        summary = (try? c.decode(String.self, forKey: .summary)).flatMap { $0.isEmpty ? nil : $0 }
+        fullBody = (try? c.decode(String.self, forKey: .fullBody)).flatMap { $0.isEmpty ? nil : $0 }
         replyTo = try? c.decode(String.self, forKey: .replyTo)
         attachments = ((try? c.decode([Failable<RoomAttachment>].self, forKey: .attachments)) ?? []).compactMap(\.value)
         canvases = ((try? c.decode([Failable<RoomCanvasCard>].self, forKey: .canvases)) ?? []).compactMap(\.value)

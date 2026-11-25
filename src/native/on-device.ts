@@ -16,6 +16,7 @@ import {
   type SimilarityPort,
 } from "./decider.js";
 import { FINISH_SYSTEM, finishPrompt, type FinishInput, type FinishWriterPort } from "./room-finish.js";
+import { SUMMARY_SYSTEM, summaryPrompt, type SummaryWriterPort } from "./room-handoff-summary.js";
 
 /**
  * The on-device decider: the Mac app bundles `squeak-decider` (helpers/squeak-decider), which embeds text with Apple's
@@ -246,6 +247,32 @@ export class OnDeviceFinishWriter implements FinishWriterPort {
     const text = reply?.kind === "ok" ? reply.body.text : undefined;
     return typeof text === "string" && text.trim() ? text : null;
   }
+}
+
+/** The one-line summary of a Duck-to-Duck message, written on the Mac's own Apple model; null leaves it to Haiku. */
+export class OnDeviceSummaryWriter implements SummaryWriterPort {
+  private readonly gate: HelperGate;
+  constructor(o: AdapterOptions) {
+    this.gate = new HelperGate(o);
+  }
+
+  async write(message: string): Promise<string | null> {
+    const reply = await this.gate.call(
+      { op: "write", system: SUMMARY_SYSTEM, prompt: summaryPrompt(message) },
+      WRITE_TIMEOUT_MS,
+    );
+    const text = reply?.kind === "ok" ? reply.body.text : undefined;
+    return typeof text === "string" && text.trim() ? text : null;
+  }
+}
+
+/** The summary writers in order: on-device when the setting allows it, then Haiku. */
+export function createSummaryWriters(o: {
+  setting: () => DeciderModelSetting;
+  helper: () => string | undefined;
+  haiku: SummaryWriterPort;
+}): SummaryWriterPort[] {
+  return [new OnDeviceSummaryWriter({ helper: o.helper, enabled: () => o.setting() === "on-device" }), o.haiku];
 }
 
 /** The finish-message writers in order: on-device when the setting allows it, then Haiku. */

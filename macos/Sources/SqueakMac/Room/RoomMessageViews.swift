@@ -384,13 +384,12 @@ private struct RoomSystemView: View {
 }
 
 /// The one row every Duck-side line of the Room uses (a Duck's note to another Duck, a plan card): the same flat row as a
-/// message (`RoomRow`), with the name line "Ivy \u{2192} Kit" for a hand-off. The text shows in full; only an unusually long one
-/// ends with "Open in <name>'s chat".
+/// message (`RoomRow`): avatar, bold name, time, text. A Duck's note to another Duck puts the receiver in the body as an @mention
+/// (`RoomHandoffBody`); there is no "A \u{2192} B" name line. The text shows in full; only an unusually long one ends with
+/// "Open in <name>'s chat".
 struct RoomEventRow<Extra: View>: View {
     let avatar: AnyView
     let name: String
-    /// A handoff's receiver ("Quill 2 \u{2192} Dot 2").
-    var to: String?
     /// What the Duck did, quietly after the name ("posted a plan").
     var verb: String?
     let at: Int64
@@ -398,12 +397,10 @@ struct RoomEventRow<Extra: View>: View {
     /// Hand-off notes read quieter than messages.
     var quiet = false
     var open: (() -> Void)?
-    /// The Ducks the avatar and name (and the "\u{2192} receiver") open.
+    /// The Duck the avatar and name open.
     var senderTarget: PondOpenTarget?
-    var receiverTarget: PondOpenTarget?
     @ViewBuilder var extra: () -> Extra
     @State private var hoverSender = false
-    @State private var hoverReceiver = false
 
     var body: some View {
         RoomRow(
@@ -425,7 +422,7 @@ struct RoomEventRow<Extra: View>: View {
 
     private var nameFont: Font { .system(size: CGFloat(RoomRowPlan.nameSize), weight: .bold) }
 
-    /// "Sage 2 \u{2192} Dot 2": the sender and the receiver each open their own Duck; a status line's name opens its Duck.
+    /// The sender's name (opens its Duck), then what the Duck did, quietly.
     @ViewBuilder private var headlineView: some View {
         HStack(spacing: 0) {
             if let senderTarget {
@@ -435,14 +432,6 @@ struct RoomEventRow<Extra: View>: View {
             } else {
                 Text(verbatim: name).font(nameFont).foregroundStyle(Theme.ink)
             }
-            if let to {
-                Text(verbatim: " \u{2192} ").font(nameFont).foregroundStyle(Theme.muted)
-                if let receiverTarget {
-                    DuckHitName(target: receiverTarget, name: to, hovering: hoverReceiver, set: { hoverReceiver = $0 }) {
-                        Text(verbatim: to).font(nameFont).foregroundStyle(Theme.ink)
-                    }
-                } else { Text(verbatim: to).font(nameFont).foregroundStyle(Theme.ink) }
-            }
             if let verb { Text(verbatim: " \(verb)").font(.system(size: 13)).foregroundStyle(Theme.muted) }
         }
         .lineLimit(1)
@@ -450,10 +439,57 @@ struct RoomEventRow<Extra: View>: View {
 }
 
 extension RoomEventRow where Extra == EmptyView {
-    init(avatar: AnyView, name: String, to: String? = nil, verb: String? = nil, at: Int64, text: String, quiet: Bool = false, open: (() -> Void)? = nil,
-         senderTarget: PondOpenTarget? = nil, receiverTarget: PondOpenTarget? = nil) {
-        self.init(avatar: avatar, name: name, to: to, verb: verb, at: at, text: text, quiet: quiet, open: open,
-                  senderTarget: senderTarget, receiverTarget: receiverTarget, extra: { EmptyView() })
+    init(avatar: AnyView, name: String, verb: String? = nil, at: Int64, text: String, quiet: Bool = false, open: (() -> Void)? = nil,
+         senderTarget: PondOpenTarget? = nil) {
+        self.init(avatar: avatar, name: name, verb: verb, at: at, text: text, quiet: quiet, open: open,
+                  senderTarget: senderTarget, extra: { EmptyView() })
+    }
+}
+
+/// A Duck's note to another Duck: a normal row from the sender; the body is one line with the receiver as an inline @mention
+/// chip (it opens that Duck), the whole message behind "Show full message" (Markdown when opened).
+private struct RoomHandoffBody: View {
+    let note: RoomHandoff
+    let receiver: PondOpenTarget?
+    @State private var disclosure = RoomDisclosure()
+    @Environment(\.roomOpenTarget) private var openTarget
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var attributed: AttributedString {
+        var out = AttributedString()
+        if let mention = note.mention {
+            var chip = AttributedString(" " + mention + " ")
+            chip.font = .system(size: 14, weight: .semibold)
+            chip.foregroundColor = PondColour.accent
+            chip.backgroundColor = PondColour.accent.opacity(0.14)
+            if receiver != nil { chip.link = URL(string: "squeak-duck://open") }
+            out += chip
+            out += AttributedString(" ")
+        }
+        out += AttributedString(note.line)
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(attributed).font(.system(size: 14)).foregroundStyle(Theme.ink).tint(PondColour.accent)
+                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                .environment(\.openURL, OpenURLAction { _ in
+                    if let receiver { openTarget(receiver) }
+                    return .handled
+                })
+                .accessibilityLabel(note.spoken)
+            if let whole = note.fullMessage {
+                Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
+                    Text(RoomHandoff.disclosureLabel(open: disclosure.isOpen)).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(minHeight: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
+                if disclosure.isOpen {
+                    MessageText(markdown: whole, style: .reading).frame(maxWidth: 640, alignment: .leading)
+                }
+            }
+        }
     }
 }
 
@@ -467,8 +503,11 @@ private struct RoomHandoffCard: View {
     var body: some View {
         RoomEventRow(
             avatar: AnyView(Group { if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) } }),
-            name: note.from, to: note.to ?? "another duck", at: at, text: note.body, quiet: true, open: open,
-            senderTarget: PondClick.sender(of: note, threads: threads), receiverTarget: PondClick.receiver(of: note, threads: threads))
+            name: note.senderName, at: at, text: "", open: open,
+            senderTarget: PondClick.sender(of: note, threads: threads)
+        ) {
+            RoomHandoffBody(note: note, receiver: PondClick.receiver(of: note, threads: threads))
+        }
     }
 }
 

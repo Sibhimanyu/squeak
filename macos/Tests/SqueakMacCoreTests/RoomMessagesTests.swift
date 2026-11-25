@@ -176,7 +176,7 @@ struct RoomMessagesTests {
         let items = RoomMessages.build(feed: f, now: now, calendar: cal)
         #expect(groups(items).isEmpty)
         let lines = items.compactMap { if case .system(let s) = $0 { s.text } else { nil } }
-        #expect(lines.count == 1 && lines[0].hasPrefix("Pip \u{2192} another duck"))
+        #expect(lines.count == 1 && lines[0].hasPrefix("Pip:"))
     }
 
     @Test func aHandoffNoteIsACardWithTheWholeMarkdownNote() {
@@ -187,7 +187,7 @@ struct RoomMessagesTests {
         let items = RoomMessages.build(feed: f, now: now, calendar: cal)
         let lines = items.compactMap { if case .system(let s) = $0 { s } else { nil } }
         let h = lines[0].handoff
-        #expect(h?.title == "Pip \u{2192} Sage" && h?.body == note && h?.fromSessionId == "s1" && lines[0].opens == "s2")
+        #expect(h?.senderName == "Pip" && h?.mention == "@Sage" && h?.body == note && h?.fromSessionId == "s1" && lines[0].opens == "s2")
         // A note shows in full like any message; only past about twelve lines is it cut.
         #expect(!RoomRowPlan.isLong(note))
         #expect(!RoomRowPlan.isLong((1...7).map(String.init).joined(separator: "\n")))
@@ -199,16 +199,16 @@ struct RoomMessagesTests {
         #expect(p.toName == "Moss")
         let f = feed(posts: [p], threads: [thread("s1", name: "Pip")])
         let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s.text } else { nil } }
-        #expect(lines.count == 1 && lines[0].hasPrefix("Pip \u{2192} Moss"))
+        #expect(lines.count == 1 && lines[0].hasPrefix("Pip to Moss"))
     }
 
-    @Test func duckToDuckNotesShowInFullWithAnArrowInTheNameLine() {
+    @Test func duckToDuckNotesShowAsAMentionedLineWithTheWholeMessageKept() {
         let agent = RoomAuthor(kind: .agent, id: "s1", name: "x")
         let f = feed(posts: [post(1, "Sage, the API changed.\nSee routes.ts for the new shape.", by: agent, at: base, kind: .message, level: .agents, sid: "s1", to: "s2")],
                      threads: [thread("s1", name: "Pip"), thread("s2", name: "Sage")])
         let lines = RoomMessages.build(feed: f, now: now, calendar: cal).compactMap { if case .system(let s) = $0 { s } else { nil } }
         let h = lines[0].handoff!
-        #expect(h.title == "Pip \u{2192} Sage")
+        #expect(h.senderName == "Pip" && h.mention == "@Sage")
         #expect(h.body == "Sage, the API changed.\nSee routes.ts for the new shape.")
         #expect(!RoomRowPlan.clip(h.body).clipped)
     }
