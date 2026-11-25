@@ -48,11 +48,8 @@ public enum RailTool: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Tasks arrives with its own list (#88); until then its icon is not drawn, but its place in the order is kept.
-    public var isBuilt: Bool { self != .tasks }
-
-    /// The icons drawn today, in rail order.
-    public static var shown: [RailTool] { allCases.filter(\.isBuilt) }
+    /// The icons drawn, in rail order: all six.
+    public static var shown: [RailTool] { allCases }
 }
 
 public enum RailMetrics {

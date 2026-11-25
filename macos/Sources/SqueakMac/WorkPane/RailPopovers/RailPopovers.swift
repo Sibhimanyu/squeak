@@ -260,6 +260,48 @@ struct RailArtifactsPopover: View {
     }
 }
 
+// MARK: Tasks
+
+/// Flow: the person opens Tasks to see what is blocked, working or waiting in the Pond and picks one to open the Duck that
+/// has it (a Task no Duck has yet is listed but does not open anything). Same list on the Dashboard, the Room and in a Duck.
+struct RailTasksPopover: View {
+    let close: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        RailPopoverFrame(title: "Tasks") {
+            let rows = rows()
+            if rows.isEmpty {
+                RailEmptyLine(text: RailTasks.emptyLine)
+                Spacer(minLength: 0)
+            } else {
+                RailListScroll {
+                    ForEach(rows) { row in
+                        RailPickRow(title: row.title, detail: row.detail, action: { open(row) }, leading: {
+                            // Blocked is the one state that needs the person: the amber triangle, nothing else coloured.
+                            if row.state == .blocked { Lucide(.triangleAlert, size: 14, color: Theme.warning) }
+                        }, trailing: { EmptyView() })
+                        .disabled(row.duckSessionId == nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private func rows() -> [RailTaskRow] {
+        guard let workspace = model.pondWorkspace else { return [] }
+        let feed = PondRoomStore.shared.model(for: workspace.project.id).feed
+        return RailTasks.rows(feed.jobs, threads: feed.threads)
+    }
+
+    private func open(_ row: RailTaskRow) {
+        if let sessionId = row.duckSessionId, let workspace = model.pondWorkspace {
+            _ = model.openFromPond(.duck(sessionId), pond: workspace.pond, page: RoomViewPref.shared.mode(for: workspace.pond))
+        }
+        close()
+    }
+}
+
 // MARK: Files
 
 /// Flow: the person opens Files to find a file: types in the search, or picks from Recent (opened or shown by Ducks),

@@ -4,9 +4,9 @@ import Testing
 @testable import SqueakMacCore
 
 @Suite struct RailToolTests {
-    @Test func sixToolsInOrderAndTasksIsHeldBack() {
+    @Test func sixToolsInOrder() {
         #expect(RailTool.allCases == [.changes, .files, .artifacts, .tasks, .notebook, .terminal])
-        #expect(RailTool.shown == [.changes, .files, .artifacts, .notebook, .terminal])
+        #expect(RailTool.shown == RailTool.allCases)
     }
 
     @Test func listsOpenPopoversNotebookATabAndTerminalThePane() {

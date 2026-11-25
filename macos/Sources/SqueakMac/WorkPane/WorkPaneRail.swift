@@ -15,8 +15,8 @@ struct WorkPaneRail: View {
         let shown = store.pane.current == scope.key ? store.pane.shown : nil
         VStack(spacing: CGFloat(RailMetrics.spacing)) {
             // Flow per icon: Changes, Files and Artifacts open a one-shot list under the icon (pick an item: it opens as a tab);
-            // Notebook opens the Pond Notebook as a tab; Terminal opens or closes the side pane. Tasks takes its place
-            // between Artifacts and Notebook when its list ships (#88): the rail already has room for all six.
+            // Tasks opens a one-shot list of open Tasks (pick one: its Duck opens); Notebook opens the Pond Notebook as a tab;
+            // Terminal opens or closes the side pane.
             ForEach(RailTool.shown) { tool in
                 switch tool.opens {
                 case .popover:
@@ -70,7 +70,8 @@ struct WorkPaneRail: View {
         case .changes: RailChangesPopover(scope: scope, close: close)
         case .files: RailFilesPopover(scope: scope, close: close)
         case .artifacts: RailArtifactsPopover(scope: scope, close: close)
-        case .tasks, .notebook, .terminal: EmptyView()
+        case .tasks: RailTasksPopover(close: close)
+        case .notebook, .terminal: EmptyView()
         }
     }
 }

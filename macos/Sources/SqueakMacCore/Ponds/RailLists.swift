@@ -123,3 +123,43 @@ public struct RailRecentFiles: Equatable, Sendable {
         return Array(out.prefix(Self.cap))
     }
 }
+
+// MARK: Tasks
+
+/// One row of the Tasks list: a Task that is not finished, and the Duck a pick opens (nil when no Duck has it yet).
+public struct RailTaskRow: Equatable, Identifiable, Sendable {
+    public var id: String
+    public var title: String
+    public var state: RoomTaskState
+    /// The Duck's name, shown in the row's detail.
+    public var duckName: String?
+    /// The chat of the Duck holding the Task; a pick opens it.
+    public var duckSessionId: String?
+
+    /// The line under the title: "Working · Pip", or the bare state when no Duck has it.
+    public var detail: String { duckName.map { "\(state.label) · \($0)" } ?? state.label }
+}
+
+public enum RailTasks {
+    /// Blocked first (the one state that needs the person), then working, then waiting; each keeps the host's order.
+    /// Done and dropped Tasks are not listed. The Duck is the one the Task was handed to, else the one routing chose.
+    public static func rows(_ tasks: [RoomTask], threads: [RoomThread]) -> [RailTaskRow] {
+        let order: [RoomTaskState] = [.blocked, .working, .waiting]
+        return order.flatMap { state in
+            tasks.filter { $0.state == state }.map { task in
+                let thread = duck(for: task, threads: threads)
+                let name = thread.map { ($0.name ?? "").isEmpty ? $0.title : ($0.name ?? $0.title) }
+                return RailTaskRow(id: task.id, title: task.title, state: state, duckName: name,
+                                   duckSessionId: thread?.sessionId ?? task.handedTo?.sessionId)
+            }
+        }
+    }
+
+    private static func duck(for task: RoomTask, threads: [RoomThread]) -> RoomThread? {
+        if let sid = task.handedTo?.sessionId, let t = threads.first(where: { $0.sessionId == sid }) { return t }
+        if task.routing?.kind == "duck", let id = task.routing?.duckId, let t = threads.first(where: { $0.duckId == id }) { return t }
+        return nil
+    }
+
+    public static let emptyLine = "No Task is waiting, working or blocked."
+}
