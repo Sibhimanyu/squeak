@@ -23,7 +23,7 @@ struct WorkbenchCentre: View {
     /// A pond's home or a thread from it is a layer over the workbench (Ponds/PondHome.swift): the workbench, with its
     /// chat, scroll and focus, stays mounted underneath, so coming back to the chat finds it as it was.
     var body: some View {
-        // New layout: a canvas a Duck opens shows in the work pane, never over the chat (DESIGN.md 8.12).
+        // The classic artifact layer uses location; new-layout items use the Pond strip.
         let newDuck = WorkPaneActions.isDuckView(model.selectedSession)
         let artifact: (pond: String, path: String)? = newDuck ? nil : model.location.artifactPath.flatMap { path in model.location.pondKey.map { (pond: $0, path: path) } }
         // An artifact opens as a tab of its pond's chat strip; only a pond with no chat shows it as a layer.
@@ -67,19 +67,18 @@ struct WorkbenchCentre: View {
         let files = shell?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         // The chat layer's own files: the chat's workspace, also while a creation page covers it.
         let bodyFiles = showingCompose ? bodyChat?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) } : files
+        let workspace = shell.flatMap { PondsModel.shared.key(of: $0) }.flatMap { PondWorkspace(pond: $0) }
+        let item = model.location.chatKey == nil ? nil : workspace.flatMap { model.tabStore.currentPondItem($0.project.id) }
         VStack(spacing: 0) {
             if let shell {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
                     sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
-                if let workspace = place?.workspace {
-                    // New layout (DESIGN.md 8.12): the Pond's Ducks as a row of avatars instead of the tab strip. A Pond with
-                    // no host project on this Mac (a Member's remote Pond) keeps the strip.
-                    if MacLayoutPreference.shared.isNew, let pond = PondsModel.shared.key(of: shell), DuckAvatarRowView.isAvailable(pond: pond) {
-                        DuckAvatarRowView(key: pond, place: .chat(sessionId: NativeAdapter.nativeId(shell) ?? shell.key.hostSessionId, duckId: shell.duckId))
-                    } else {
-                        WorkbenchTabs(workspace: workspace, files: files, artifact: artifactChat != nil ? artifact : nil)
-                    }
+                if let workspace {
+                    let strip = workspace.strip(place: AppModel.duckRowPlace(shell), store: model.tabStore)
+                    PondWorkspaceTabStrip(workspace: workspace, strip: strip).id(workspace.project.id)
+                } else if let workspace = place?.workspace {
+                    WorkbenchTabs(workspace: workspace, files: files, artifact: artifactChat != nil ? artifact : nil)
                 }
             } else {
                 HStack {
@@ -91,7 +90,11 @@ struct WorkbenchCentre: View {
             }
             ZStack {
                 // The chat layer: kept mounted under a creation page (not when there is no chat to keep).
-                if !showingCompose || bodyChat != nil { chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil, newDuck: newDuck).workbenchLayer(hidden: showingCompose) }
+                if !showingCompose || bodyChat != nil {
+                    chatBody(chat: bodyChat, files: bodyFiles, artifact: artifactChat != nil ? artifact : nil, newDuck: newDuck)
+                        .workbenchLayer(hidden: showingCompose || item != nil)
+                }
+                if !showingCompose, let workspace, let item { PondItemPage(item: item, workspace: workspace) }
                 if showingCompose { DesktopComposePage() }
             }
         }
@@ -125,7 +128,7 @@ extension WorkbenchCentre {
             DucklingPanel(session: chat, chip: model.ducklings(for: chat)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId, centred: true)
                 .id(ref.taskId)
         } else if newDuck {
-            // Files, diffs, canvases and terminals live in the work pane; the centre is always the chat.
+            // The Pond strip owns the item selection in the new layout.
             DetailView()
         } else if let chat, let shell = DockStore.shared.activeTerminals.shown(in: .centre) {
             TerminalPanelView(session: chat, shell: shell)
@@ -407,7 +410,7 @@ private struct WorkbenchTabs: View {
             case .duck: if let s = model.chat(for: t), !dock.threads.isDocked(s.key.stringValue) { out.append(.chat(s)) }
             case .file: if let f = byPath[t.id] { out.append(.file(f)) }
             case .artifact: if let a = ArtifactTabID.parse(t.id) { out.append(.artifact(pond: a.pond, path: a.path)) }
-            case .duckling: break   // drawn from the dock's ducklings, after their parent (CentreStripOrder)
+            case .duckling, .diff, .reviewAll, .notebook: break
             }
         }
         // A listing tab is not saved: it sits at the end.

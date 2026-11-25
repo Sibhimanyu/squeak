@@ -14,11 +14,17 @@ struct WorkPaneRail: View {
         let shown = store.pane.current == duck ? store.pane.shown : nil
         let changed = scope.changesSession(model).flatMap { model.changesStore(for: $0.key.hostSessionId).changes?.files.count }
         VStack(spacing: 6) {
-            ForEach(WorkPaneView.allCases) { view in
-                WorkPaneRailButton(view: view, selected: shown == view, badge: view == .changes ? WorkPaneMetrics.badge(count: changed) : nil) {
-                    store.toggle(view, duck: duck)
+            tool(.changes, shown: shown, badge: WorkPaneMetrics.badge(count: changed))
+            tool(.files, shown: shown)
+            tool(.artifacts, shown: shown)
+            if let workspace = model.pondWorkspace {
+                let selected = model.tabStore.currentPondItem(workspace.project.id) == .notebook
+                WorkPaneRailButton(title: "Notebook", symbol: "book.closed", selected: selected, badge: nil) {
+                    model.openPondItem(.notebook)
                 }
+                .help("Open the Pond Notebook")
             }
+            tool(.terminal, shown: shown)
             Spacer(minLength: 0)
         }
         .padding(.top, Space.s)
@@ -29,10 +35,18 @@ struct WorkPaneRail: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Work pane")
     }
+
+    private func tool(_ view: WorkPaneView, shown: WorkPaneView?, badge: String? = nil) -> some View {
+        WorkPaneRailButton(title: view.title, symbol: view.symbol, selected: shown == view, badge: badge) {
+            WorkPaneStore.shared.toggle(view, duck: scope.key)
+        }
+        .help(shown == view ? "Close \(view.title)" : view.title)
+    }
 }
 
 private struct WorkPaneRailButton: View {
-    let view: WorkPaneView
+    let title: String
+    let symbol: String
     let selected: Bool
     let badge: String?
     let action: () -> Void
@@ -40,7 +54,7 @@ private struct WorkPaneRailButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: view.symbol)
+            Image(systemName: symbol)
                 .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(selected || hovering ? Theme.ink : Theme.muted)
                 .frame(width: 40, height: 40)
@@ -63,8 +77,7 @@ private struct WorkPaneRailButton: View {
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: selected)
-        .help(selected ? "Close \(view.title)" : view.title)
-        .accessibilityLabel(badge.map { "\(view.title), \($0)" } ?? view.title)
+        .accessibilityLabel(badge.map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

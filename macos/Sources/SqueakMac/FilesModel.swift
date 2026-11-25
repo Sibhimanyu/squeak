@@ -153,11 +153,34 @@ final class FilesModel {
     /// A file already open that a double-click asked to keep open: the strip pins it (`PinRequest.id` makes each a change).
     private(set) var pinRequest: PinRequest?
     struct PinRequest: Equatable { let path: String; let id = UUID() }
+    @ObservationIgnored private var pondLineJumps: [String: LineJump] = [:]
+
+    /// Loads one Pond item without selecting it in the classic Files model.
+    func loadPondFile(_ path: String) async {
+        if !open.contains(where: { $0.path == path }) {
+            if path.hasPrefix("/") { await openOutsideQuietly(URL(fileURLWithPath: path)) }
+            else { await loadFile(path, line: nil, activate: false) }
+        }
+        if let jump = pondLineJumps.removeValue(forKey: path) {
+            open.first(where: { $0.path == path })?.jump = jump
+        }
+    }
+
+    private func openAsPondItem(_ path: String, line: Int?) -> Bool {
+        guard AppModel.shared.openPondFile(root: root, path: path) else { return false }
+        if let line {
+            let jump = LineJump(line: line)
+            if let file = open.first(where: { $0.path == path }) { file.jump = jump }
+            else { pondLineJumps[path] = jump }
+        }
+        return true
+    }
 
     /// Opens `path` in the preview tab (a single click); `pin` opens it as a normal tab, or keeps one open that is the preview.
     func openFile(_ path: String, line: Int? = nil, pin: Bool = false) {
         note = nil
         selection = path
+        if openAsPondItem(path, line: line) { return }
         if pin { if open.contains(where: { $0.path == path }) { pinRequest = PinRequest(path: path) } else { pinOnOpen.insert(path) } }
         WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
@@ -227,6 +250,13 @@ final class FilesModel {
 
     /// Opens the Review, on one file or (nil) at the top.
     func showReview(file: String? = nil) {
+        let model = AppModel.shared
+        if let workspace = model.pondWorkspace {
+            let session = model.location.chatKey.flatMap { model.session($0) }
+                ?? PondWorkScope(key: workspace.pond, projectId: workspace.project.id, name: workspace.project.name,
+                                 root: workspace.project.rootPath).changesSession(in: model.allSessions)
+            if let session, session.cwd == root, model.openPondDiff(session: session, path: file) { return }
+        }
         activePath = nil; review.open(file: file)
         NotificationCenter.default.post(name: .squeakShowCode, object: nil)
     }
@@ -286,6 +316,7 @@ final class FilesModel {
         note = nil
         let path = url.path
         selection = nil
+        if openAsPondItem(path, line: line) { return }
         WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
             activePath = path
