@@ -51,13 +51,15 @@ public struct TabStore: Equatable, Sendable {
     public func pondItems(_ pond: String) -> [TabItem] { ponds[pond]?.workspaceItems?.tabs ?? [] }
     public func currentPondItem(_ pond: String) -> TabItem? { ponds[pond]?.workspaceItems?.current }
 
-    /// Ducks precede every item. Opening from a Duck inserts at the head of the item group when there is no active item.
+    /// Ducks precede every item. A new item opened from the Dashboard, the Room or a Duck (no item is current) goes first among
+    /// the items; one opened from an item tab goes right after that tab. `afterDuck` is kept for callers and changes nothing:
+    /// every page without a current item behaves the same way.
     public mutating func openPondItem(_ item: TabItem, in pond: String, focus: Bool = true, afterDuck: Bool = false) {
         guard !pond.isEmpty, item.isPondItem else { return }
         var strip = ponds[pond] ?? Strip()
         if ponds[pond] == nil { strip.workspaceOnly = true }
         var items = strip.workspaceItems ?? WorkspaceItems()
-        Self.insert(item, into: &items.tabs, after: items.current, otherwiseFirst: afterDuck)
+        Self.insert(item, into: &items.tabs, after: items.current, otherwiseFirst: true)
         if focus { items.current = item }
         strip.workspaceItems = items
         ponds[pond] = strip

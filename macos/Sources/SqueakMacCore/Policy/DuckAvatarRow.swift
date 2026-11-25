@@ -27,12 +27,24 @@ public struct DuckRowAvatar: Equatable, Sendable, Identifiable {
     public var sessionId: String?
     /// The Streams it is in (join order); empty when it works in the Pond itself.
     public var streams: [RoomStream] = []
+    /// The chat's title (the host's), and whether the Duck's name is worn right now.
+    public var title: String?
+    public var wearsName = true
     public var onDuty: Bool { presence != .off }
     /// The working glyph shows only on a working Duck.
     public var showsWorkingGlyph: Bool { presence == .working }
     /// The amber triangle shows only on a Duck waiting on the person.
     public var needsYou: Bool { presence == .waiting }
     public var opensChat: Bool { sessionId != nil }
+
+    public init(
+        id: String, name: String, colourSeed: String, agent: String? = nil, presence: RoomDuckPresence, presenceLine: String,
+        sessionId: String? = nil, streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true
+    ) {
+        self.id = id; self.name = name; self.colourSeed = colourSeed; self.agent = agent; self.presence = presence
+        self.presenceLine = presenceLine; self.sessionId = sessionId; self.streams = streams; self.title = title
+        self.wearsName = wearsName
+    }
 }
 
 public enum DuckRowSelection: Equatable, Sendable {
@@ -52,7 +64,7 @@ public struct DuckRowModel: Equatable, Sendable {
 public enum DuckAvatarRow {
     public static func build(roster: DuckRoster, place: DuckRowPlace) -> DuckRowModel {
         func avatar(_ d: RosterDuck) -> DuckRowAvatar {
-            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams)
+            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams, title: d.title, wearsName: d.wearsName)
         }
         var ducks = roster.onDuty.map(avatar)
         switch place {

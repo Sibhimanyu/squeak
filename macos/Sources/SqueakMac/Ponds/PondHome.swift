@@ -11,11 +11,15 @@ import SwiftUI
 struct PondRouteView: View {
     let route: PondRoute
     let sidebarHidden: Bool
+    /// The one top bar is drawn above by WorkbenchCentre; the Dashboard and Room draw only their pages.
+    var barHosted = false
     @Environment(AppModel.self) private var model
 
     /// A pond opens on its Dashboard; the Room is the other page beside it (`PondSpace`), swapped by the switch or a
     /// two-finger swipe. A pond with no native project (or still waiting to join) has no room, so it keeps the dashboard.
-    private func roomProject(_ key: String) -> (id: String, member: Bool)? {
+    private func roomProject(_ key: String) -> (id: String, member: Bool)? { Self.roomProject(key) }
+
+    static func roomProject(_ key: String) -> (id: String, member: Bool)? {
         if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
         // Someone else's pond: its Room is the Owner's, read through the cloud by the pond's id.
         if let pond = PondsModel.shared.pond(key: key), pond.role != .owner, !pond.id.isEmpty { return (pond.id, true) }
@@ -44,8 +48,10 @@ struct PondRouteView: View {
                 let strip = workspace.strip(place: PondPageChrome.rowPlace(page: page), store: model.tabStore)
                 let inset = PondPageChrome.headerInset(sidebarClearance: Double(sidebarClearance))
                 VStack(spacing: 0) {
-                    PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset),
-                                     itemShowing: strip.currentItem != nil, workspace: workspace, strip: strip)
+                    if !barHosted {
+                        PondSharedHeader(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset),
+                                         itemShowing: strip.currentItem != nil, workspace: workspace, strip: strip)
+                    }
                     ZStack {
                         PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: CGFloat(inset), showsHeader: false) {
                             standard(header: false)
@@ -772,14 +778,17 @@ struct PondFlockSection: View {
     }
 }
 
-/// The pond header both pages share (new layout): the same view, in the same place, whichever page is showing.
+/// The one top bar of the new layout: the same view, in the same place, on the Dashboard, the Room, an item and inside a Duck
+/// (WorkbenchCentre hosts it above every page, so it never moves or rebuilds).
 struct PondSharedHeader: View {
     let key: String
     let projectId: String
     var member = false
     var leadingInset: CGFloat = 0
     var itemShowing = false
-    /// The Pond's strip (Duck circles, then item pills), drawn in this same row after the switch; nil draws no strip.
+    /// A Duck's chat is showing: neither page is selected, and picking one leaves the Duck for it.
+    var inDuck = false
+    /// The Pond's strip (oval tabs), drawn in this same row after the switch; nil draws no strip.
     var workspace: PondWorkspace?
     var strip: PondWorkspaceStrip?
     @Environment(AppModel.self) private var model
@@ -802,11 +811,13 @@ struct PondSharedHeader: View {
             .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
             RoomSegmented(
                 items: PondPage.allCases.map(Optional.some),
-                selection: Binding<PondPage?>(get: { itemShowing ? nil : RoomViewPref.shared.mode(for: key) },
+                selection: Binding<PondPage?>(get: { itemShowing || inDuck ? nil : RoomViewPref.shared.mode(for: key) },
                     set: { page in
                         guard let page else { return }
                         model.leavePondItem(pond: key)
                         RoomViewPref.shared.set(page, for: key)
+                        // Flow: from inside a Duck, the switch goes to that page of the Pond.
+                        if inDuck { model.openPondHome(key) }
                     }),
                 title: { $0?.title ?? "" }, height: 28)
                 .fixedSize().accessibilityLabel("Pond view")
