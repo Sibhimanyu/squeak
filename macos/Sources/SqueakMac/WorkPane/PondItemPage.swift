@@ -9,6 +9,22 @@ struct PondItemPage: View {
 
     var body: some View {
         Group {
+            if let gone = PondLiveTabsModel.shared.live(workspace.project.id).goneState(item) {
+                // The source is gone: say so, and leave closing to the person.
+                PondItemUnavailable(title: gone.title, message: gone.detail) { model.closePondItem(item) }
+            } else {
+                content
+            }
+        }
+        .id(item)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg)
+        .heresayPrivate()
+        .onAppear { PondLiveTabsModel.shared.visit(item, pond: workspace.project.id) }
+    }
+
+    @ViewBuilder private var content: some View {
+        Group {
             switch item.kind {
             case .file:
                 if let source = item.fileSource {
@@ -45,10 +61,6 @@ struct PondItemPage: View {
                 EmptyView()
             }
         }
-        .id(item)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.bg)
-        .heresayPrivate()
     }
 
     private func unavailable(_ message: String) -> some View {
@@ -80,12 +92,14 @@ private struct PondFilePage: View {
 }
 
 private struct PondItemUnavailable: View {
+    var title: String?
     let message: String
     let close: () -> Void
 
     var body: some View {
         VStack(spacing: Space.s) {
-            Text(verbatim: message).font(Typo.body).foregroundStyle(Theme.muted)
+            if let title { Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink) }
+            Text(verbatim: message).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
             Button("Close tab", action: close).buttonStyle(SecondaryButtonStyle()).fixedSize()
         }
         .padding(Space.l)

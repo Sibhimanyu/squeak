@@ -52,6 +52,8 @@ struct ArtifactViewerPage: View {
     /// A remote pond's file once the owner's Mac has sent it: the cached copy on this Mac. Until then there is nothing to open.
     @State private var fetched: RemoteArtifactFile?
     @State private var fetching: Fetch?
+    /// `sourceStamp` when the content on screen was read.
+    @State private var readStamp: String?
 
     private enum Rendering: Equatable { case idle, running, failed(String) }
     private enum Fetch: Equatable { case downloading(Double?), failed(String) }
@@ -62,6 +64,14 @@ struct ArtifactViewerPage: View {
     /// What the viewer reads: the cached copy for a remote pond (empty until it arrives), else the file itself.
     private var filePath: String { remote ? (fetched?.path ?? "") : path }
     private var url: URL { URL(fileURLWithPath: filePath) }
+
+    /// What the Pond's artifact list says about this file's content; a change means the file was rewritten.
+    /// Only the list's own row counts: a fallback row built from "now" would change on every read.
+    private var sourceStamp: String {
+        guard !remote, let id = PondsModel.shared.native(key: pond)?.id,
+              let row = ArtifactsStore.shared.model(for: id).items.first(where: { $0.path == path }) else { return "unlisted" }
+        return "\(row.modifiedAt.timeIntervalSince1970)/\(row.size)"
+    }
 
     private var item: ArtifactItem { Self.item(pond: pond, path: path, remote: remote, fetched: fetched) }
 
@@ -112,9 +122,17 @@ struct ArtifactViewerPage: View {
                 guard await download() else { return }
             }
             let local = filePath
+            readStamp = sourceStamp
             let found = await ArtifactLoader.load(path: local)
             adopt(found)
             if case .quickLook = found { slides = await ArtifactLoader.slideCount(path: local) }
+        }
+        .task(id: sourceStamp) {
+            // The Duck changed the file while it is open: read it again and swap the content in place. The viewer keeps
+            // its identity (`id(path)`), so its scroll position stays and nothing flashes to "Opening".
+            guard !remote, let seen = readStamp, seen != sourceStamp, content != nil else { return }
+            readStamp = sourceStamp
+            adopt(await ArtifactLoader.load(path: path))
         }
         .task(id: filePath) {
             systemApp = ArtifactLoader.defaultAppName(for: url)

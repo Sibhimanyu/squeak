@@ -44,6 +44,7 @@ final class ArtifactsModel {
     }
 
     func stop() { task?.cancel(); task = nil }
+    var isFollowing: Bool { task != nil }
 }
 
 /// One list per pond, shared by the tab and the viewer (which reads a file's duck and branch from it).
