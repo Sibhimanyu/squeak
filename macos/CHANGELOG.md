@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.34.1
+
+**Tabs stay put; the Room reads like a room.**
+
+- Each pond keeps exactly the tabs you opened, in your order, across restarts. A new pond opens on its Dashboard with no tabs, and Squeak never adds tabs by itself. Closing a duck's tab no longer puts it off duty.
+- "Delete Duck…" in a duck's menu removes it for good. Off duty and Bring back are there too.
+- Ducks have short names, and lines between ducks say who they went to.
+- A duck's run of status lines folds into one row; tap "+N earlier" to see the rest. Off duty ducks are listed in their own group in the roster.
+- The @ and / suggestion lists open above the composer instead of running off the bottom.
+- Ducks stay on duty when Squeak restarts; they go off duty only after an idle hour.
+- When a duck shows you a file, it opens in the app and the Artifacts list updates.
+
 ## 2.34.0
 
 **The Room works for you.**
