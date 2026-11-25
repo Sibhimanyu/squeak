@@ -69,7 +69,15 @@ struct WorkbenchCentre: View {
                 WorkbenchHeader(
                     session: shell, project: place?.project.name ?? HomeProjects.projectName(shell), workspace: place?.workspace.displayTitle,
                     sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, toggleSidebar: toggleSidebar)
-                if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files, artifact: artifactChat != nil ? artifact : nil) }
+                if let workspace = place?.workspace {
+                    // New layout (DESIGN.md 8.12): the Pond's Ducks as a row of avatars instead of the tab strip. A Pond with
+                    // no host project on this Mac (a Member's remote Pond) keeps the strip.
+                    if MacLayoutPreference.shared.isNew, let pond = PondsModel.shared.key(of: shell), DuckAvatarRowView.isAvailable(pond: pond) {
+                        DuckAvatarRowView(key: pond, place: .chat(sessionId: NativeAdapter.nativeId(shell) ?? shell.key.hostSessionId, duckId: shell.duckId))
+                    } else {
+                        WorkbenchTabs(workspace: workspace, files: files, artifact: artifactChat != nil ? artifact : nil)
+                    }
+                }
             } else {
                 HStack {
                     // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.

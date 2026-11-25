@@ -22,6 +22,8 @@ public struct DuckRowAvatar: Equatable, Sendable, Identifiable {
     public var colourSeed: String
     public var agent: String?
     public var presence: RoomDuckPresence
+    /// The host-worded status line ("Working \u{00B7} 3 of 5", "Idle \u{00B7} 2h ago").
+    public var presenceLine: String
     /// The Duck's current chat: nil until it has had a Task (nothing to open).
     public var sessionId: String?
     public var onDuty: Bool { presence != .off }
@@ -47,7 +49,7 @@ public struct DuckRowModel: Equatable, Sendable {
 public enum DuckAvatarRow {
     public static func build(roster: DuckRoster, place: DuckRowPlace) -> DuckRowModel {
         func avatar(_ d: RosterDuck) -> DuckRowAvatar {
-            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, sessionId: d.sessionId)
+            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId)
         }
         var ducks = roster.onDuty.map(avatar)
         switch place {

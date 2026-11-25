@@ -17,10 +17,12 @@ public struct RoomPondPanel: Equatable, Sendable {
     public var tasksOpen: Int { waiting.count + blocked.count }
 
     /// People who are online now (you first), Ducks at work, Tasks waiting and blocked (host order, oldest first).
-    public static func build(members: [FlockMember], roster: DuckRoster, tasks: [RoomTask]) -> RoomPondPanel {
-        let people = members.filter { $0.online || $0.you }
+    /// A Pond the host lists no members for (a folder only you use) still shows you.
+    public static func build(members: [FlockMember], youName: String = "You", roster: DuckRoster, tasks: [RoomTask]) -> RoomPondPanel {
+        var people = members.filter { $0.online || $0.you }
             .sorted { ($0.you ? 0 : 1, $0.name.lowercased()) < ($1.you ? 0 : 1, $1.name.lowercased()) }
             .map { Person(id: $0.id, name: $0.name, you: $0.you) }
+        if members.isEmpty { people = [Person(id: "you", name: youName.isEmpty ? "You" : youName, you: true)] }
         return RoomPondPanel(
             present: people,
             working: roster.onDuty.filter { $0.presence == .working },

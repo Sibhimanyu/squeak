@@ -104,5 +104,8 @@ import Testing
         #expect(p.present.map(\.id) == ["m3", "m1"])
         #expect(p.working.map(\.id) == ["ada"])
         #expect(p.waiting.map(\.id) == ["t1"] && p.blocked.map(\.id) == ["t2"] && p.tasksOpen == 2)
+        // A folder Pond with no member list still shows you.
+        let solo = RoomPondPanel.build(members: [], youName: "Sam", roster: roster(), tasks: [])
+        #expect(solo.present.map(\.name) == ["Sam"] && solo.present[0].you)
     }
 }

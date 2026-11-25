@@ -39,17 +39,26 @@ struct PondRouteView: View {
             // Never an empty owner pond: the location is pruned to the Dashboard; nothing draws meanwhile.
             Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
         } else if case .home(let project) = route, let room = roomProject(project) {
-            PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard }
+            // New layout (DESIGN.md 8.12): the Duck row sits above both pages (Room and Dashboard), so it does not slide.
+            if MacLayoutPreference.shared.isNew, DuckAvatarRowView.isAvailable(pond: project) {
+                VStack(spacing: 0) {
+                    DuckAvatarRowView(key: project, place: RoomViewPref.shared.mode(for: project) == .room ? .room : .dashboard, leadingInset: sidebarClearance)
+                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: 0) { standard(clearance: 0) }
+                }
+            } else {
+                PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard() }
+            }
         } else {
-            standard
+            standard()
         }
     }
 
-    private var standard: some View {
+    /// The pond page's own header. With the new layout's Duck row above, the row carries the sidebar clearance.
+    private func standard(clearance: CGFloat? = nil) -> some View {
         VStack(spacing: 0) {
             HStack {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                if sidebarHidden { Color.clear.frame(width: sidebarClearance) }
+                if sidebarHidden { Color.clear.frame(width: clearance ?? sidebarClearance) }
                 Spacer(minLength: 0)
                 if case .home(let project) = route {
                     if PondsModel.shared.native(key: project) != nil || roomProject(project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }

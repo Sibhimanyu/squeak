@@ -81,12 +81,15 @@ struct RoomHeader: View {
                 Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count, offDuty: offDuty)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
             }
             Spacer(minLength: Space.s)
-            HStack(spacing: 14) {
-                ForEach(ducks.prefix(8)) { d in
-                    Button { open(d.sessionId) } label: { HeaderDuck(duck: d) }.buttonStyle(.plain).help("\(d.name) \u{00B7} \(d.presenceLine)")
+            // New layout: the Duck row above the page carries the Ducks, so the header does not repeat them.
+            if !(MacLayoutPreference.shared.isNew && DuckAvatarRowView.isAvailable(pond: key)) {
+                HStack(spacing: 14) {
+                    ForEach(ducks.prefix(8)) { d in
+                        Button { open(d.sessionId) } label: { HeaderDuck(duck: d) }.buttonStyle(.plain).help("\(d.name) \u{00B7} \(d.presenceLine)")
+                    }
                 }
+                .padding(.trailing, 6)
             }
-            .padding(.trailing, 6)
             RoomModeSwitch(key: key)
             PondHeaderMenu(key: key)
         }

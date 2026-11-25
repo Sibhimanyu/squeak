@@ -375,6 +375,7 @@ struct WorkbenchSidebar: View {
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
                 unread: ReadGate.anyUnread(workspaces.flatMap(\.chats)) { model.isUnread($0) },
+                unreadCount: workspaces.flatMap(\.chats).filter { model.isUnread($0) }.count,
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? PondRowCount.of(ducksMode: model.ducksMode, counts: model.ducksMode ? PondRowCount.dutyCounts(sent: PondsModel.shared.directory?.pond(id: key)?.dutyCounts, roster: native.flatMap { RoomRosterStore.shared.model(for: $0.id).counts }) : nil, treeChats: sections.chatCount(of: key), listed: listed) : nil,
@@ -640,6 +641,8 @@ private struct FoldRow: View {
     var selected = false
     var running = false
     var unread = false
+    /// How many chats in the pond are unread (the new layout's count badge).
+    var unreadCount = 0
     /// A stream's waves state (depth 1), derived from its chats; `.idle` when not given.
     var streamState: StreamGlyphState = .idle
     var adding = false
@@ -680,6 +683,21 @@ private struct FoldRow: View {
 
     /// The count's slot, 24pt wide for the glyphs so a row never changes size: needs-you badge wins, then the working
     /// glyph, then the error mark; idle (or no rollup) is the count.
+    private var newLayout: Bool { MacLayoutPreference.shared.isNew }
+    private var newMarkSet: PondRowMarks { PondRowMarks.of(needsYou: max(needs, rollup?.needsYou ?? 0), unread: unreadCount) }
+    private var hasNewMarks: Bool { newMarkSet.needsYou || newMarkSet.badge != nil }
+
+    /// New layout: the amber triangle when something waits on you, and a duck-yellow badge with the unread count.
+    @ViewBuilder private var newMarks: some View {
+        let m = newMarkSet
+        if m.needsYou { StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16).help("Waiting on you") }
+        if let text = m.badgeText {
+            Text(verbatim: text).font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(Color(nsColor: NSColor(hex: Tokens.duckOutline)))
+                .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18).background(Theme.duck, in: Capsule())
+                .help("\(text) unread").accessibilityLabel("\(text) unread")
+        }
+    }
+
     @ViewBuilder private var pondMark: some View {
         let own = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
         // An open pond shows its chats, and the working one moves: the pond itself does not repeat it.
@@ -743,6 +761,14 @@ private struct FoldRow: View {
                         Image(nsImage: icon).resizable().scaledToFill().frame(width: 26, height: 26)
                             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .padding(-3).frame(width: 20, height: 20)
+                    } else if newLayout, pondId != nil {
+                        // New layout (DESIGN.md 8.12): the pond's own colour as a 26 pt tile carrying its initial (an image icon
+                        // above still fills the same tile). The initial reads against the accent (`bg`), or `ink` on the soft tint.
+                        let accented = pondId.map { PondsModel.shared.accentSeed(forPondId: $0) != nil } ?? false
+                        Text(glyph ?? "").font(.system(size: 14, weight: .bold)).foregroundStyle(accented ? Theme.bg : Theme.ink)
+                            .frame(width: 26, height: 26)
+                            .background(PondColour.pondAccent(pondId), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .padding(-3).frame(width: 20, height: 20)
                     } else {
                         // A letter sits on the pond's own soft tint; a project that is not a pond stays plain.
                         Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
@@ -765,7 +791,8 @@ private struct FoldRow: View {
                     .truncationMode(.tail)
                 if depth == 0, let badge { Text(verbatim: badge).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).fixedSize() }
                 // An open pond shows its chats, each with its own mark: the rollup would only repeat them.
-                if depth == 0, folded || count != nil { pondMark }
+                if depth == 0, newLayout { newMarks }
+                if depth == 0, folded || count != nil, !(newLayout && hasNewMarks) { pondMark }
                 if conductor { ConductorMarker(size: 12) }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)
