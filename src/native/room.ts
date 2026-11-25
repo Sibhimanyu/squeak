@@ -110,7 +110,10 @@ export interface DuckStream {
 export interface DuckView {
   id: string;
   projectId: string;
+  /** The mask it wears on duty; Off duty the chat title (the name went back to the pool). */
   name: string;
+  /** The name it wore before going Off duty; only present while Off duty. */
+  lastName?: string;
   /** The title of the chat it is on: what it is working on ("Pip · Zoom SDK video fix"). */
   chatTitle?: string;
   role?: string;
@@ -149,8 +152,10 @@ export interface RoomThread {
   /** The duck's current session; empty for a duck that has not worked yet. */
   sessionId: string;
   title: string;
-  /** The duck's name: the person's chosen one, else the chat title. */
+  /** The duck's name while on duty; Off duty the chat title (the name went back to the pool). */
   name: string;
+  /** The name it wore before going Off duty; only present while Off duty. */
+  lastName?: string;
   /** One line the person set for what this duck is for. */
   role?: string;
   /** "off" = the person closed the duck's tab: never suggested for jobs, never woken. */
@@ -284,6 +289,7 @@ export class Room extends EventEmitter {
     try {
       this.store.nameUnnamedDucks();
       this.migrateDucks();
+      this.store.releaseDuckNames();
     } catch (error) {
       logger.warn("duck migration failed", { error: String(error) });
     }
@@ -514,7 +520,7 @@ export class Room extends EventEmitter {
     const cards = input.kind === "done" && (input.level ?? "room") === "room" ? this.touchedCanvasCards(s.id) : [];
     const row = this.post({
       projectId: pond.id,
-      author: { kind: "agent", id: s.id, name: agentName(s) },
+      author: { kind: "agent", id: s.id, name: this.maskOf(s) },
       sessionId: s.id,
       ...input,
       ...(cards.length > 0 ? { canvases: cards } : {}),
@@ -568,18 +574,29 @@ export class Room extends EventEmitter {
   /** The name of the Duck a chat belongs to, else a neutral "A Duck" (never the chat's title); null only when the chat is gone. */
   private receiverName(sessionId: string): string | null {
     if (!this.store.getSession(sessionId)) return null;
-    return this.store.duckBySession(sessionId)?.name?.trim() || NEUTRAL_DUCK_NAME;
+    const d = this.store.duckBySession(sessionId);
+    return d?.name?.trim() || d?.lastName?.trim() || NEUTRAL_DUCK_NAME;
+  }
+
+  /** The name a chat's Duck posts under now: its on-duty name, else its last one, else the chat's title. */
+  private maskOf(s: SessionRow): string {
+    const d = this.store.duckBySession(s.id);
+    return d?.name?.trim() || d?.lastName?.trim() || agentName(s);
   }
 
   /**
-   * Who a post is from, as the feed shows it. A Duck's post reads as the Duck's name, resolved here from its identity
-   * (by session id) every time the feed is served, so rows stored when posts carried the chat's title read right too.
-   * A chat title is never a sender: with no identity the row says "A Duck". People and Squeak keep their stored name.
+   * Who a post is from, as the feed shows it. A Duck's post keeps the name the Duck wore when it posted (stored on the
+   * post, so a name given back to the pool never rewrites history). Only a row with no stored name is resolved from
+   * the Duck's identity: its last name, else its chat title. With no identity at all the row says "A Duck".
    */
   senderName(r: RoomPostRow): string {
     if (r.authorKind !== "agent") return r.authorName;
-    const name = r.sessionId ? this.store.duckBySession(r.sessionId)?.name?.trim() : undefined;
-    return name || NEUTRAL_DUCK_NAME;
+    const d = r.sessionId ? this.store.duckBySession(r.sessionId) : null;
+    if (!d) return NEUTRAL_DUCK_NAME;
+    const stored = r.authorName.trim();
+    if (stored) return stored;
+    const s = r.sessionId ? this.store.getSession(r.sessionId) : null;
+    return d.name?.trim() || d.lastName?.trim() || (s ? agentName(s) : NEUTRAL_DUCK_NAME);
   }
 
   /** The wire form of posts, with their attachments and the receiving Duck's name. */
@@ -929,8 +946,9 @@ export class Room extends EventEmitter {
       duckId: duck.id,
       colourSeed: duck.colourSeed,
       sessionId: "",
-      title: duck.name ?? "Duck",
-      name: duck.name ?? "Duck",
+      title: duck.name ?? duck.lastName ?? "Duck",
+      name: duck.name ?? duck.lastName ?? "Duck",
+      ...(duck.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(duck.role ? { role: duck.role } : {}),
       duty: duck.duty,
       lastActiveAt: at,
@@ -961,7 +979,9 @@ export class Room extends EventEmitter {
     return {
       id: duck.id,
       projectId: duck.projectId,
-      name: duck.name ?? (s ? agentName(s) : "Duck"),
+      // Off duty the name is released: the Duck reads by its chat title (`lastName` is history only).
+      name: duck.name ?? (s ? agentName(s) : (duck.lastName ?? "Duck")),
+      ...(duck.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(s?.title?.trim() ? { chatTitle: s.title.trim() } : {}),
       ...(duck.role ? { role: duck.role } : {}),
       colourSeed: duck.colourSeed,
@@ -1027,6 +1047,7 @@ export class Room extends EventEmitter {
       sessionId: s.id,
       title: s.title ?? "Untitled",
       name: duck?.name ?? agentName(s),
+      ...(duck?.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(duck?.role ? { role: duck.role } : {}),
       duty: duck?.duty ?? "on",
       lastActiveAt: Date.parse(s.updatedAt),

@@ -165,9 +165,17 @@ describe("duck migration", () => {
     const ducks = store.listDucks(project.id);
     expect(ducks).toHaveLength(2);
     const da = store.duckBySession(a.id)!;
-    expect(da).toMatchObject({ name: "Pip", role: "layout", duty: "off", colourSeed: a.id, currentSessionId: a.id });
+    // Off duty the name went back to the pool; it is kept as the last name.
+    expect(da).toMatchObject({
+      name: null,
+      lastName: "Pip",
+      role: "layout",
+      duty: "off",
+      colourSeed: a.id,
+      currentSessionId: a.id,
+    });
     expect(store.duckBySession(b.id)).toMatchObject({ name: expect.any(String), colourSeed: b.id });
-    expect(store.duckOf(a.id)).toEqual({ name: "Pip", role: "layout", duty: "off" });
+    expect(store.duckOf(a.id)).toEqual({ name: null, role: "layout", duty: "off" });
     expect(store.offDutyIds().has(a.id)).toBe(true);
   });
 });
@@ -264,7 +272,7 @@ describe("identity-only ducks and routes", () => {
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
     await h.call("POST", `/native/sessions/${s.id}/duty`, { on: false });
     const duck = h.store.duckBySession(s.id)!;
-    expect(duck).toMatchObject({ name: "Pip", duty: "off" });
+    expect(duck).toMatchObject({ name: null, lastName: "Pip", duty: "off" });
     const list = (await (await h.call("GET", `/native/projects/${h.project.id}/ducks`)).json()) as any;
     expect(list.ducks[0]).toMatchObject({ id: duck.id, currentSessionId: s.id, sessions: 1, duty: "off" });
   });

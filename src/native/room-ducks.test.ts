@@ -120,6 +120,8 @@ describe("ducks", () => {
     await until("event: thread");
     expect(buf).toContain('"duty":"off"');
     expect(buf).toContain(`"sessionId":"${s.id}"`);
+    // A name is worn on duty only: back on duty the Duck takes a fresh one, which a rename then replaces.
+    expect(await (await h.call("POST", url, { on: true })).json()).toEqual({ duty: "on" });
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
     await until('"name":"Pip"');
     await reader.cancel();
