@@ -39,6 +39,8 @@ struct ArtifactViewerPage: View {
     /// The body of an artifact tab: the chat's own header and strip are above, so there is no header or back control,
     /// only the compact toolbar row.
     var embedded = false
+    /// The artifact tab of the Pond workspace: one header (name, Duck, Export menu) instead of the toolbar row.
+    var tab = false
     @Environment(AppModel.self) private var model
     @State private var content: ViewerContent?
     @State private var slides: Int?
@@ -85,10 +87,10 @@ struct ArtifactViewerPage: View {
     var body: some View {
         if path.hasSuffix(".canvas"), !remote {
             // A canvas is a folder of artboards: its own viewer, with its own toolbar line.
-            CanvasViewerPage(pond: pond, path: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded)
+            CanvasViewerPage(pond: pond, path: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded, tab: tab)
         } else if remote, item.kind == .canvas {
             // A remote pond's canvas arrives as one bundle file and is shown view-only.
-            RemoteCanvasViewer(pond: pond, id: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded)
+            RemoteCanvasViewer(pond: pond, id: path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded, tab: tab)
         } else {
             fileBody
         }
@@ -98,7 +100,7 @@ struct ArtifactViewerPage: View {
         let item = item
         return VStack(spacing: 0) {
             if !embedded { header(item) }
-            toolbar(item)
+            if tab { tabHeader(item) } else { toolbar(item) }
             Rectangle().fill(Theme.line).frame(height: 1)
             viewer(item)
         }
@@ -212,6 +214,33 @@ struct ArtifactViewerPage: View {
             if !remote || fetched != nil { ArtifactCopyPath(path: filePath) }
         }
         .padding(.horizontal, Space.m).frame(height: 36)
+    }
+
+    /// The artifact tab's one header: name, Duck, Export (Save a copy, Reveal in Finder, Copy path).
+    private func tabHeader(_ item: ArtifactItem) -> some View {
+        let available = !(isMissing || (remote && fetched == nil))
+        let groups = ArtifactTabMenu.groups(kind: item.kind, fileAvailable: available)
+        let zoom = controller.flatMap { c in
+            c.zoomLevel == nil ? nil : ArtifactZoomKeys(zoomIn: { c.zoomStep(in: true) }, zoomOut: { c.zoomStep(in: false) }, fit: { c.fit() })
+        }
+        return ArtifactTabHeader(
+            name: item.name, duck: ArtifactTabMenu.duckLabel(item), kind: item.kind, menuEnabled: !groups.isEmpty, zoom: zoom,
+            leading: { EmptyView() }, trailing: { EmptyView() }
+        ) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                if index > 0 { Divider() }
+                ForEach(group, id: \.title) { entry in
+                    Button(entry.title) {
+                        switch entry {
+                        case .saveCopy: ArtifactTabActions.saveCopy(of: filePath)
+                        case .reveal: ArtifactTabActions.reveal(filePath)
+                        case .copyPath: ArtifactTabActions.copyPath(filePath)
+                        case .pdfAllBoards, .png: break
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func openDefault() {

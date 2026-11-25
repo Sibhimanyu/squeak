@@ -31,7 +31,7 @@ struct PondItemPage: View {
                 }
             case .artifact:
                 if let source = ArtifactTabID.parse(item.id) {
-                    ArtifactViewerPage(pond: source.pond, path: source.path, embedded: true)
+                    ArtifactTab(pond: source.pond, path: source.path)
                 } else {
                     unavailable("This artifact is unavailable.")
                 }

@@ -15,6 +15,8 @@ struct CanvasViewerPage: View {
     var inspectorOpen = false
     /// The body of an artifact tab: the chat's own header and strip are above, so there is no header or back control.
     var embedded = false
+    /// The artifact tab of the Pond workspace: one header (name, Duck, edit tools, Export menu).
+    var tab = false
     /// A remote pond's canvas, unpacked into a folder on this Mac: drawn and exported, never edited.
     var fixed: CanvasDetail?
     @Environment(AppModel.self) private var model
@@ -23,7 +25,7 @@ struct CanvasViewerPage: View {
     var body: some View {
         VStack(spacing: 0) {
             if !embedded { header }
-            toolbar
+            if tab { tabHeader } else { toolbar }
             Rectangle().fill(Theme.line).frame(height: 1)
             content
         }
@@ -95,6 +97,48 @@ struct CanvasViewerPage: View {
             }
         }
         .padding(.horizontal, Space.m).frame(height: 36)
+    }
+
+    /// The tab's one header. The edit tools stay (a canvas is edited by hand, see `CanvasEditor`); Ask a duck stays (the
+    /// flow: change this canvas without leaving it). Zoom, Fit, folder and Copy are gone: zoom is Cmd+=, Cmd+-, Cmd+0.
+    private var tabHeader: some View {
+        let board = canvas?.pasteboard
+        let item = ArtifactViewerPage.item(pond: pond, path: path, remote: fixed != nil)
+        let busy: Bool = { if case .running = canvas?.export { true } else { false } }()
+        let groups = ArtifactTabMenu.groups(kind: .canvas, canExportCanvas: !(canvas?.detail?.artboards.isEmpty ?? true) && !busy)
+        let zoom = board.map { b in ArtifactZoomKeys(zoomIn: { b.zoomStep(in: true) }, zoomOut: { b.zoomStep(in: false) }, fit: { b.fit() }) }
+        return ArtifactTabHeader(
+            name: title, duck: ArtifactTabMenu.duckLabel(item), kind: .canvas, zoom: zoom,
+            leading: {
+                if let canvas, !canvas.readOnly { EditTools(editor: canvas.editor, pickImage: pickImage) }
+                if canvas?.readOnly == true { Text("View only").font(Typo.meta).foregroundStyle(Theme.subtle).fixedSize() }
+                if let canvas, !canvas.readOnly { EditNote(editor: canvas.editor) }
+                exportStatus
+            },
+            trailing: {
+                if canvas?.readOnly != true {
+                    Button { model.askDuck(pond: pond, prefill: CanvasBoards.askPrefill(title: title)) } label: {
+                        HStack(spacing: 4) { Lucide(.messageSquare, size: 13, color: Theme.ink); Text("Ask a duck\u{2026}") }
+                    }
+                    .buttonStyle(CompactToolStyle()).fixedSize().help("Ask the pond\u{2019}s duck to change this canvas").accessibilityLabel("Ask a duck about this canvas")
+                }
+            }
+        ) {
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                if index > 0 { Divider() }
+                ForEach(group, id: \.title) { entry in
+                    Button(entry.title) {
+                        switch entry {
+                        case .pdfAllBoards: canvas?.exportPDF()
+                        case .png(let scale, let all): canvas?.exportPNG(scale: scale, all: all)
+                        case .reveal: ArtifactTabActions.reveal(path)
+                        case .copyPath: ArtifactTabActions.copyPath(path)
+                        case .saveCopy: break
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func pickImage() {
@@ -187,6 +231,7 @@ struct RemoteCanvasViewer: View {
     var sidebarHidden = false
     var inspectorOpen = false
     var embedded = false
+    var tab = false
     @Environment(AppModel.self) private var model
     @State private var phase: Phase = .loading(nil)
     @State private var attempt = 0
@@ -198,7 +243,7 @@ struct RemoteCanvasViewer: View {
         Group {
             switch phase {
             case .ready(let detail):
-                CanvasViewerPage(pond: pond, path: detail.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded, fixed: detail)
+                CanvasViewerPage(pond: pond, path: detail.path, sidebarHidden: sidebarHidden, inspectorOpen: inspectorOpen, embedded: embedded, tab: tab, fixed: detail)
                     .id(detail.path)
             case .loading(let progress):
                 status(RemoteArtifacts.downloading(progress), retry: false)
