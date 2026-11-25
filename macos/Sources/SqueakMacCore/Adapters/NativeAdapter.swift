@@ -10,6 +10,8 @@ public protocol NativeChatControls: Sendable {
     func compact(_ session: HostSession) async -> NativeActionResult
     /// "Try again": resend the last message after a connection failure. `resent` false = the agent had already replied.
     func retry(_ session: HostSession) async -> (result: NativeActionResult, resent: Bool)
+    /// "Return to the Pond" for a Duck whose Stream folder is gone: it carries on in the Pond's own folder (read-only).
+    func recoverStream(_ session: HostSession) async -> NativeActionResult
     /// The editable opening message for a new thread that continues this chat; nil when the host cannot write one.
     func handoffDraft(_ session: HostSession) async -> String?
     /// Creates the linked thread with `summary` as its first message; the new chat's id on success.
@@ -174,6 +176,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.duckId = DaemonAdapter.nonEmpty(s.duckId) ?? DaemonAdapter.nonEmpty(d?.duckId)
         h.hostDucklingsOnly = s.ducklingsOnly
         h.retryable = s.retryable && state == .error ? true : nil
+        h.streamMissing = s.streamMissing
         return h
     }
 
@@ -364,6 +367,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         var resent = false
         let r = await act(session) { id in resent = try await host.retry(id: id).resent }
         return (r, resent)
+    }
+
+    public func recoverStream(_ session: HostSession) async -> NativeActionResult {
+        await act(session) { id in try await host.recoverStream(id: id) }
     }
 
     public func handoffDraft(_ session: HostSession) async -> String? {

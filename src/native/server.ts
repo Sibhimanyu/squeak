@@ -215,7 +215,10 @@ export class NativeServer {
         store: options.store,
         ...(options.supportDir ? { attachmentsDir: path.join(options.supportDir, "room-attachments") } : {}),
         members: (id) => this.pondMembers(id),
-        deliver: (id, text) => host.send(id, text, { room: true }),
+        deliver: async (id, text, o) => {
+          if (o?.woke) await this.restoreWoken(id);
+          return host.send(id, text, { room: true });
+        },
       });
     this.pondChanges =
       options.pondChanges?.(this.room) ?? new PondChangesReader({ store: options.store, room: this.room });
@@ -287,10 +290,49 @@ export class NativeServer {
         jobs: this.jobs,
         notebook: this.notebook,
         placement: this.placement,
+        recoverStream: (sessionId) => this.recoverStream(sessionId),
         artifactShown: (projectId) => this.artifacts.changed(projectId),
         openShown: (req) => this.showRelay.request(req),
         ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
+  }
+
+  private async returnToPond(id: string) {
+    const { place, joined, note } = await this.placement.returnToPond(id);
+    const session = await this.options.host.recoverStream(
+      id,
+      { cwd: place.cwd, workspaceId: place.workspaceId, branch: place.branch },
+      note,
+      joined,
+    );
+    const duck = this.options.store.duckBySession(id);
+    if (duck) this.room.emitDuck(duck.id);
+    return { place, note, session };
+  }
+
+  /**
+   * A Duck woken from Off duty whose Stream folder was cleaned up while it rested gets a working copy of its branch
+   * again, so waking it just works. If that fails, the chat's own banner offers the move.
+   */
+  private async restoreWoken(id: string): Promise<void> {
+    const s = this.options.store.getSession(id);
+    if (!s || !this.options.host.streamMissingOf(s)) return;
+    try {
+      await this.returnToPond(id);
+    } catch (error) {
+      logHostError(`restore ${id}`, error);
+    }
+  }
+
+  /** The agent tool's recovery: the same move, answered in words. */
+  private async recoverStream(id: string): Promise<string> {
+    try {
+      const { note } = await this.returnToPond(id);
+      return `${note} The chat carries on there with its history.`;
+    } catch (error) {
+      if (error instanceof PlacementError) throw new Error(error.message, { cause: error });
+      throw error;
+    }
   }
 
   async start(): Promise<number> {
@@ -655,7 +697,10 @@ export class NativeServer {
           }
         }
         // The person messaging an off-duty duck puts it back on duty.
-        if (store.duckOf(id).duty === "off") this.room.setDuty(id, true);
+        if (store.duckOf(id).duty === "off") {
+          this.room.setDuty(id, true);
+          await this.restoreWoken(id);
+        }
         return this.json(
           res,
           200,
@@ -759,6 +804,29 @@ export class NativeServer {
           b.message as string | undefined,
         );
         return this.json(res, 200, { sessionId: (moved.session ?? current).id });
+      } catch (error) {
+        if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+    }
+    // A Duck whose Stream folder is gone returns to the Pond (its main folder), history kept.
+    if (area === "sessions" && id && sub === "recover-stream" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      const unknown = Object.keys(b);
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      if (!host.streamMissingOf(store.getSession(id)!)) {
+        throw new HttpError(409, "This chat's folder is there, so there is nothing to move.");
+      }
+      try {
+        const moved = await this.returnToPond(id);
+        return this.json(res, 200, {
+          ok: true,
+          place: moved.place.kind,
+          cwd: moved.place.cwd,
+          branch: moved.place.branch,
+          session: moved.session,
+        });
       } catch (error) {
         if (error instanceof PlacementError) throw new HttpError(error.status, error.message);
         throw error;

@@ -88,6 +88,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var autoCompactAt: Int?? = .none
     /// The last turn failed in a way "Try again" can resend; false from an older host.
     public var retryable: Bool = false
+    /// The host says the chat's folder is gone from disk (a removed Stream); nil when it is there or from an older host.
+    public var streamMissing: StreamMissing?
     /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
     public var contextTokens: Int?
     public var contextLimit: Int?
@@ -101,7 +103,7 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case branch, duckId
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable, autoCompactAt
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable, autoCompactAt, streamMissing
     }
 
     private struct Background: Decodable { var count: Int? }
@@ -135,6 +137,7 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         largeCompacting = large?.compacting ?? false
         if c.contains(.autoCompactAt) { autoCompactAt = .some(c.lenient(Int.self, .autoCompactAt)) }
         retryable = c.lenient(Bool.self, .retryable) ?? false
+        streamMissing = c.lenient(StreamMissing.self, .streamMissing)
         let ctx = c.lenient(Context.self, .context)
         contextTokens = ctx?.used
         contextLimit = ctx?.limit
@@ -963,6 +966,12 @@ public struct NativeHostClient: Sendable {
     public func retry(id: String) async throws -> (resent: Bool, reason: String?) {
         let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/retry", body: .object([:]), timeout: 30))
         return (j["resent"]?.bool ?? false, j["reason"]?.string)
+    }
+
+    /// "Return to the Pond": a Duck whose Stream folder is gone carries on in the Pond's own folder, the same chat with its
+    /// history. 409 when the folder is there after all or the chat works.
+    public func recoverStream(id: String) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/recover-stream", body: .object([:]), timeout: 60)
     }
 
     /// The opening message for a new thread that continues this chat: a cheap model's summary, which the person edits.
