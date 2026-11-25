@@ -866,5 +866,9 @@ struct PondSharedHeader: View {
             },
             trailing: { if centre.showsPondMenu { PondHeaderMenu(key: key) } })
         .background(WindowDragArea())
+        // The bar owns the Pond's roster feed. It used to start only from views that mount once the strip has tabs (the strip
+        // itself, the Dashboard, the Room): a chat opened first after a launch (restored, sidebar, deep link) had an empty
+        // roster, so the strip was empty, never mounted, and never fetched: no tabs, no selected Duck, a bare subheader.
+        .task(id: workspace?.project.id) { workspace?.roster.keepFresh(host: model.nativeHost) }
     }
 }
