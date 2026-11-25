@@ -82,4 +82,18 @@ import Testing
         let plain = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"b","status":"idle"}"#.utf8))
         #expect(!plain.isLarge && !plain.retryable)
     }
+
+    @Test func theHostsStreamMissingReachesTheSessionAndWordsTheBanner() throws {
+        let json = #"{"id":"a","status":"error","streamMissing":{"path":"/w/greenroom/function-catfish","branch":"sibhimanyu/video","folder":"function-catfish"}}"#
+        let s = try JSONDecoder().decode(NativeSession.self, from: Data(json.utf8))
+        #expect(s.streamMissing == StreamMissing(path: "/w/greenroom/function-catfish", branch: "sibhimanyu/video", folder: "function-catfish"))
+        let mapped = NativeAdapter.map(s, overlay: nil)
+        #expect(NativeChatNotice.showsStreamMissing(mapped))
+        #expect(NativeChatNotice.streamMissingText(duck: "Ruby 2", mapped.streamMissing!) == "Ruby 2's Stream folder (function-catfish) is gone, so it can't run there.")
+        #expect(NativeChatNotice.streamMissingText(duck: " ", mapped.streamMissing!).hasPrefix("This Duck's Stream folder"))
+        let plain = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"b","status":"idle"}"#.utf8))
+        #expect(plain.streamMissing == nil)
+        #expect(!NativeChatNotice.showsStreamMissing(NativeAdapter.map(plain, overlay: nil)))
+        #expect(NativeChatNotice.streamReturnTitle == "Return to the Pond")
+    }
 }

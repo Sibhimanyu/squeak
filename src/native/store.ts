@@ -1014,6 +1014,24 @@ export class NativeStore {
   setAgentSessionId(id: string, agentSessionId: string): void {
     this.db.prepare("UPDATE sessions SET agent_session_id=? WHERE id=?").run(agentSessionId, id);
   }
+  /** Points a chat (and the duck it is the current chat of) at another folder, keeping its history and its place in time. */
+  moveSessionPlace(
+    id: string,
+    place: { cwd: string; workspaceId: string | null; branch: string | null },
+    /** The duck's joined Stream when it differs from the chat's place (a duck in Main keeps its old branch). */
+    duckBranch: string | null = place.branch,
+  ): void {
+    this.ducksTable();
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE sessions SET cwd=?, workspace_id=?, branch=? WHERE id=?")
+        .run(place.cwd, place.workspaceId, place.branch, id);
+      this.db
+        .prepare("UPDATE ducks SET workspace_id=?, branch=? WHERE current_session_id=?")
+        .run(place.workspaceId, duckBranch, id);
+    })();
+  }
+
   clearAgentSessionId(id: string): void {
     this.db.prepare("UPDATE sessions SET agent_session_id=NULL WHERE id=?").run(id);
   }

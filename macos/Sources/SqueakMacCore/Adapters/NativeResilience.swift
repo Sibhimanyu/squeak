@@ -102,6 +102,20 @@ public enum NativeChatNotice {
 
     public static func showsRetry(_ s: HostSession) -> Bool { s.retryable == true && s.state == .error }
 
+    // The Duck's Stream folder is gone: the host says so, the banner offers one way on, the composer waits.
+    public static let streamReturnTitle = "Return to the Pond"
+    /// Why the composer is off while the folder is gone.
+    public static let streamBlockedReason = "its Stream folder is gone. Return it to the Pond above."
+
+    /// The banner's sentence; the Mac draws the host's facts (`streamMissing`) and the Duck's name.
+    public static func streamMissingText(duck: String, _ gone: StreamMissing) -> String {
+        let who = duck.trimmingCharacters(in: .whitespaces).isEmpty ? "This Duck" : duck
+        return "\(who)'s Stream folder (\(gone.folder)) is gone, so it can't run there."
+    }
+
+    /// Shown whenever the host reports the folder gone; the button is a real flow (`recoverStream`).
+    public static func showsStreamMissing(_ s: HostSession) -> Bool { s.streamMissing != nil }
+
     /// The line a link note shows: "Continued from …" and "Continued in …" arrive as the host's own sentence.
     public static func isLinkNote(_ text: String) -> Bool { text.hasPrefix("Continued from ") || text.hasPrefix("Continued in ") }
 }

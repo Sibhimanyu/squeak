@@ -74,6 +74,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var autoCompactAt: Int?? = nil
     /// This Squeak chat's last turn failed in a way "Try again" can resend.
     public var retryable: Bool? = nil
+    /// The host says this chat's folder (its Stream's working copy) is gone from disk, so no agent can start there; nil otherwise.
+    public var streamMissing: StreamMissing? = nil
     /// The host says only a duckling works in this working chat (`ClaudeActivity`); nil from an older host.
     public var hostDucklingsOnly: Bool? = nil
     /// Set by `ClaudeActivity.apply`: the chat reads as ready (its state) but Claude's turn is still open, waiting on a
@@ -150,5 +152,19 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         if !title.isEmpty { return title }
         if let r = repoName, !r.isEmpty { return r }
         return "Untitled"
+    }
+}
+
+/// A chat whose Stream folder was removed from disk. Computed by the host (`streamMissing` on the chat); the Mac only words it.
+public struct StreamMissing: Sendable, Hashable, Codable {
+    /// The folder that is gone.
+    public var path: String
+    /// The Stream's branch when the host knows it (it may still exist, so a new Stream can reopen it).
+    public var branch: String?
+    /// The folder's own name.
+    public var folder: String
+
+    public init(path: String, branch: String? = nil, folder: String) {
+        self.path = path; self.branch = branch; self.folder = folder
     }
 }

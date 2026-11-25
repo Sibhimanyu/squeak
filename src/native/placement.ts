@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 
 import { flag } from "../squeak/flags.js";
 import type { DuckRow, NativeStore } from "./store.js";
@@ -325,6 +326,44 @@ export class Placement {
       return false;
     }
     return (await this.git(ws.path, ["rev-list", "--count", `origin/${ws.branch}..${ws.branch}`])) === "0";
+  }
+
+  /**
+   * "Return to the Pond", for a Duck whose Stream folder is gone: it carries on in the Pond's own folder (read-only
+   * Main in a git Pond, by the placement policy). The branch it was on stays the Duck's joined Stream when it still
+   * exists (`joined`); its working copy is made again only when the Duck next joins it.
+   */
+  async returnToPond(sessionId: string): Promise<{ place: ResolvedPlace; joined: string | null; note: string }> {
+    const { store } = this.o;
+    const s = store.getSession(sessionId);
+    if (!s) throw new PlacementError("this chat no longer exists", 404);
+    const duck = store.duckBySession(sessionId);
+    const ws = s.workspaceId ? store.getWorkspace(s.workspaceId) : null;
+    const project = duck ? store.getProject(duck.projectId) : ws ? store.getProject(ws.projectId) : null;
+    if (!project) throw new PlacementError("this chat is not in a pond", 409);
+    if (project.kind === "folder") {
+      throw new PlacementError("This Pond's own folder is gone, so there is nowhere to return to.", 409);
+    }
+    if (!fs.existsSync(project.rootPath)) throw new PlacementError("The Pond's folder is gone.", 409);
+    if (this.moving.has(sessionId)) throw new PlacementError("this chat is already moving", 409);
+    this.moving.add(sessionId);
+    try {
+      // git still lists the vanished folder as a worktree of its branch; forget it so the branch can be joined again
+      await this.git(project.rootPath, ["worktree", "prune"]);
+      const branch = duck?.branch ?? ws?.branch ?? s.branch ?? null;
+      const exists =
+        !!branch &&
+        (await this.git(project.rootPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) !== null;
+      return {
+        place: { kind: "main", cwd: project.rootPath, workspaceId: null, branch: null },
+        joined: exists ? branch : null,
+        note: exists
+          ? `Returned to the Pond (read-only). Its Stream for ${branch} is made again when it next joins it.`
+          : "Returned to the Pond (read-only). Its old branch is gone.",
+      };
+    } finally {
+      this.moving.delete(sessionId);
+    }
   }
 
   /**

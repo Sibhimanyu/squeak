@@ -696,6 +696,12 @@ struct SessionDetail: View {
                     (NativeChatNotice.continueTitle, { Task { await model.nativeBeginHandoff(session) } }),
                 ])
             }
+            // The Duck's Stream folder is gone: a calm banner with one way on; the composer waits for it.
+            if isNative, let gone = session.streamMissing, NativeChatNotice.showsStreamMissing(session) {
+                ChatNoticeBar(text: NativeChatNotice.streamMissingText(duck: model.composerDuckName(session), gone), actions: [
+                    (NativeChatNotice.streamReturnTitle, { Task { await model.nativeRecoverStream(session) } }),
+                ])
+            }
             // A message lost to a dropped connection: the host says so, and Try again resends it (never twice).
             if isNative, NativeChatNotice.showsRetry(session) {
                 ChatNoticeBar(text: NativeChatNotice.retryText, actions: [
@@ -771,6 +777,7 @@ struct SessionDetail: View {
     // MARK: Composer
 
     private var sendBlock: String? {
+        if NativeChatNotice.showsStreamMissing(session) { return NativeChatNotice.streamBlockedReason }
         if case .unsupported(let why) = session.capabilities.send { return why }
         if session.replyTarget == nil { return "Squeak has no way to reply to this chat." }
         return nil

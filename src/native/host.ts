@@ -19,6 +19,13 @@ import { loadAgentSdk } from "./agent-sdk.js";
 import { squeakPluginPath } from "./agent-plugin.js";
 import { requireAgentBinary } from "./binaries.js";
 import { NO_CHECKPOINTS } from "./version-history.js";
+import {
+  carryTranscript,
+  folderName,
+  StreamMissingError,
+  streamMissingText,
+  type StreamMissing,
+} from "./stream-missing.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { closeWithin } from "./agent-procs.js";
 import { ClaudeRunner } from "./claude-runner.js";
@@ -225,6 +232,11 @@ export interface HostOptions {
   summaryCall?: TitleModelCall;
   /** Where the agent's own transcripts live (tests); `~/.claude/projects` otherwise. */
   projectsDir?: string;
+  /**
+   * Look at a chat's folder before any agent starts there (a missing folder is reported as such, never as a lost
+   * resume). On unless a runner factory is injected, since tests use made-up folders; they can ask for it.
+   */
+  checkFolders?: boolean;
 }
 
 /** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
@@ -362,6 +374,7 @@ export class SessionHost extends EventEmitter {
       );
     this.summaryCall = options.summaryCall ?? defaultTitleCall();
     this.projectsDir = options.projectsDir;
+    this.checkFolders = options.checkFolders ?? !options.runnerFactory;
     this.idleMs = options.idleMs ?? 30 * 60_000;
     // An injected factory (tests) is not warmed at start unless asked.
     this.warmRecentMs = options.warmRecentMs ?? (options.runnerFactory ? 0 : 30 * 60_000);
@@ -379,6 +392,7 @@ export class SessionHost extends EventEmitter {
   private readonly titler: AutoTitler | null;
   private readonly summaryCall: TitleModelCall;
   private readonly projectsDir: string | undefined;
+  private readonly checkFolders: boolean;
   /** When each running turn began: a failure card says how long it ran. */
   private readonly turnStarts = new Map<string, number>();
   private readonly lastAutoCompact = new Map<string, number>();
@@ -663,6 +677,22 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
+  /**
+   * Set when the chat's folder is gone from disk (a Stream's working copy removed). Decided here, from the disk, so
+   * every surface says the same thing; null when the folder is there, the chat is archived, or folders are not checked.
+   */
+  streamMissingOf(s: SessionRow): StreamMissing | null {
+    if (!this.checkFolders || !s.cwd || s.archivedAt || fs.existsSync(s.cwd)) return null;
+    const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
+    const branch = ws?.branch ?? this.store.duckBySession(s.id)?.branch ?? s.branch ?? null;
+    return { path: s.cwd, branch, folder: folderName(s.cwd) };
+  }
+
+  private streamMissingWords(s: SessionRow, gone: StreamMissing): string {
+    const name = this.store.duckOf(s.id).name?.trim() || s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude");
+    return streamMissingText(name, gone.folder);
+  }
+
   private withBackground(s: SessionRow, budget?: { cold: number }): SessionRow {
     const count = this.background.get(s.id) ?? 0;
     // After a restart every Claude chat's context is replayed from its stored rows: spread that over several lists
@@ -675,8 +705,10 @@ export class SessionHost extends EventEmitter {
     }
     const ducklings = this.ducklingsOf(s.id);
     const size = s.agent === "claude" && ctx ? this.sizeOf(s) : null;
+    const gone = BUSY.has(s.status) ? null : this.streamMissingOf(s);
     const row: SessionRow = {
       ...(s.status === "error" && this.retryable.has(s.id) ? { retryable: true } : {}),
+      ...(gone ? { streamMissing: gone } : {}),
       ...(size?.large && size.reason
         ? { large: { reason: size.reason, transcriptBytes: size.transcriptBytes, compacting: size.compacting } }
         : {}),
@@ -1380,6 +1412,12 @@ export class SessionHost extends EventEmitter {
     }
     // Working at once: surfaces show progress before the agent (or git) has said anything.
     this.setStatus(s.id, "working");
+    // The folder is gone: no agent can start there and nothing is snapshotted. The turn ends with the plain reason.
+    const gone = this.streamMissingOf(s);
+    if (gone) {
+      this.failTurn(s.id, this.streamMissingWords(s, gone));
+      return;
+    }
     // The start snapshot runs beside the agent; the turn's end waits for it, the send does not.
     // A plain-folder pond keeps no checkpoints: its folder may sit inside some larger repository, which must not be
     // snapshotted in its place.
@@ -1433,6 +1471,12 @@ export class SessionHost extends EventEmitter {
   private async lostResume(id: string): Promise<void> {
     const s = this.store.getSession(id);
     const text = this.sentText.get(id);
+    // Node reports a missing working folder as ENOENT on the command: that is not a lost resume.
+    const gone = s ? this.streamMissingOf(s) : null;
+    if (s && gone) {
+      this.failTurn(id, this.streamMissingWords(s, gone));
+      return;
+    }
     if (s?.agentSessionId && text && !this.resumeRetried.has(id) && !transcriptExists(s.agentSessionId)) {
       this.resumeRetried.add(id);
       this.store.clearAgentSessionId(id);
@@ -1451,8 +1495,37 @@ export class SessionHost extends EventEmitter {
     );
   }
 
+  /**
+   * A chat whose folder is gone carries on in `place` (the Pond's folder; `joined` stays the Duck's Stream): the same chat, history kept.
+   * Claude finds a transcript by the folder the agent ran in, so the transcript (and its sidecar folder) is copied to the
+   * new folder's project folder before the next resume. Refused while the chat works or when its folder is there.
+   */
+  async recoverStream(
+    id: string,
+    place: { cwd: string; workspaceId: string | null; branch: string | null },
+    note: string,
+    joined: string | null = place.branch,
+  ): Promise<SessionRow> {
+    const s = this.require(id);
+    if (BUSY.has(s.status)) throw new HostError("The chat is working. Move it when it finishes.", 409);
+    if (!this.streamMissingOf(s)) throw new HostError("This chat's folder is there, so there is nothing to move.", 409);
+    if (!fs.existsSync(place.cwd)) throw new HostError("The new folder is not there.", 409);
+    if (s.agent === "claude" && s.agentSessionId) carryTranscript(s.agentSessionId, place.cwd, this.projectsDir);
+    const stale = this.runners.get(id);
+    if (stale) {
+      this.runners.delete(id);
+      void this.closeRunner(id, stale);
+    }
+    this.store.moveSessionPlace(id, place, joined);
+    this.setStatus(id, "idle");
+    this.emitMessage(this.store.appendMessage(id, "system", "system/note", { text: note }));
+    return this.store.getSession(id)!;
+  }
+
   private openRunner(s: SessionRow): Runner {
     const id = s.id;
+    const gone = this.streamMissingOf(s);
+    if (gone) throw new StreamMissingError(this.streamMissingWords(s, gone), gone);
     const hooks: RunnerHooks = {
       onAgentSessionId: (agentId) => this.store.setAgentSessionId(id, agentId),
       onMessage: (role, kind, payload) => {

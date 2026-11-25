@@ -240,7 +240,8 @@ export interface RoomOptions {
    * Wakes a Duck with a message (the host's `send`: it starts a turn on an idle chat and waits in the queue behind a
    * running one, never mid-step). The Room wakes a Duck only on an @mention or a comment on its own card.
    */
-  deliver?: (sessionId: string, text: string) => Promise<unknown> | void;
+  /** `woke`: the Duck was Off duty and this message put it back on duty (its Stream may have been cleaned up meanwhile). */
+  deliver?: (sessionId: string, text: string, opts?: { woke: boolean }) => Promise<unknown> | void;
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
@@ -407,6 +408,7 @@ export class Room extends EventEmitter {
     if (!deliver) return;
     try {
       const targets = new Map<string, string>();
+      const woke = new Set<string>();
       const card = row.replyTo ? this.store.roomPostById(row.replyTo) : null;
       if (card?.sessionId && row.authorKind === "person") {
         targets.set(
@@ -424,12 +426,13 @@ export class Room extends EventEmitter {
           if (duck.duty === "off") {
             if (row.authorKind !== "person") continue;
             this.setDutyById(duck.id, true);
+            woke.add(sid);
           }
           targets.set(sid, `[Room] ${row.authorName} mentioned you:\n${row.text.trim()}`);
         }
       }
       for (const [sid, text] of targets) {
-        void Promise.resolve(deliver(sid, text)).catch((error) =>
+        void Promise.resolve(deliver(sid, text, { woke: woke.has(sid) })).catch((error) =>
           logger.warn("room wake failed", { error: String(error) }),
         );
       }

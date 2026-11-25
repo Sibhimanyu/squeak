@@ -139,6 +139,8 @@ export interface SessionRow {
   /** Added by the host when the chat is very large (slow, may fail): the Mac offers a new thread. Absent otherwise. */
   /** Added by the host: the last turn failed by a lost connection, so "Try again" can resend it. Absent otherwise. */
   retryable?: boolean;
+  /** Added by the host: the chat's folder (its Stream's working copy) is gone, so no agent can start there. Absent otherwise. */
+  streamMissing?: import("./stream-missing.js").StreamMissing;
   large?: { reason: "context"; transcriptBytes: number | null; compacting?: boolean };
   /** Added by the host for Claude chats: context tokens at which the chat compacts itself; null = automatic compaction is off. */
   autoCompactAt?: number | null;

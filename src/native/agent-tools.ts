@@ -98,6 +98,8 @@ export interface AgentToolDeps {
   jobs?: RoomTasks;
   /** Placement for `branch_off`, `join_branch` (flag `ducksOwnBranch`). Absent: those tools say so. */
   placement?: Placement;
+  /** Returns a chat whose Stream folder is gone to the Pond (`recover_stream`); the host's own recovery. */
+  recoverStream?: (sessionId: string) => Promise<string>;
   now?: () => number;
   /** git, injectable for tests. */
   git?: (cwd: string, args: string[]) => Promise<string>;
@@ -426,6 +428,13 @@ export const PLACEMENT_TOOLS: ToolDef[] = [
     inputSchema: obj({ duck: { type: "string" }, branch: { type: "string" }, message: { type: "string" } }),
     readOnly: false,
   },
+  {
+    name: "recover_stream",
+    description:
+      "Carry on when a duck's Stream folder has been removed from disk (it cannot run there): the duck returns to the pond's own folder (read-only), keeping its chat and history; the Stream is made again when it next joins its branch. duck: a duck's name or id in this pond (default: yourself).",
+    inputSchema: obj({ duck: { type: "string" } }),
+    readOnly: false,
+  },
 ];
 
 const PLACEMENT_NAMES = new Set(PLACEMENT_TOOLS.map((t) => t.name));
@@ -750,6 +759,8 @@ export class AgentTools {
       case "join_branch":
       case "move_to_main":
         return this.placeTool(s, name, args);
+      case "recover_stream":
+        return this.recoverStreamTool(s, args);
       case "script_output":
         return this.terminalOutput(s, str("script"), args.lines);
       case "pond_appearance":
@@ -1311,6 +1322,30 @@ export class AgentTools {
     throw new ToolError(
       `Squeak has no ${agent} chat to take a default model from, so pass model: a ${agent} model id as listed in Squeak's model picker.`,
     );
+  }
+
+  private async recoverStreamTool(s: SessionRow, args: Record<string, unknown>): Promise<string> {
+    if (!ducksOwnBranch()) throw new ToolError("Branches are not managed by ducks in this Squeak yet.");
+    const { store, recoverStream } = this.deps;
+    if (!recoverStream) throw new ToolError("Recovery is unavailable here.");
+    const wanted = typeof args.duck === "string" ? args.duck.trim() : "";
+    let target = s;
+    if (wanted) {
+      const project = projectOfSession(store, s);
+      const duck =
+        store.duckRow(wanted) ??
+        (project ? store.listDucks(project.id) : []).find((d) => d.name?.toLowerCase() === wanted.toLowerCase());
+      if (!duck || (project && duck.projectId !== project.id))
+        throw new ToolError(`No duck called ${wanted} in this pond.`);
+      const current = duck.currentSessionId ? store.getSession(duck.currentSessionId) : null;
+      if (!current) throw new ToolError(`${wanted} has no chat to move yet.`);
+      target = current;
+    }
+    try {
+      return await recoverStream(target.id);
+    } catch (error) {
+      throw new ToolError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   private async placeTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
