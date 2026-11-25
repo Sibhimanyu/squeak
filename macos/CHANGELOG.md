@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.34.2
+
+**The new layout gets its own composer.**
+
+- In the new layout (Settings › General), the composer is one field with its tools on the left, a chip above it naming the duck and model ("Pip · Opus 5.5"), and a round send button.
+- A message's time, Copy and more actions show when you point at it or tab to it, instead of under every message. Code blocks keep their Copy button.
+
 ## 2.34.1
 
 **Tabs stay put; the Room reads like a room.**
