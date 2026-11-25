@@ -317,11 +317,10 @@ struct WorkbenchSidebar: View {
 
     private func openWorkspace(_ workspace: SidebarWorkspace) {
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
-        if let open = model.focus.chat, workspace.chats.contains(where: { $0.key == open }),
-           !WorkbenchPrefs.shared.closed.isClosed(open.stringValue, in: workspace.id) {
+        if let open = model.focus.chat, workspace.chats.contains(where: { $0.key == open }) {
             model.select(open)
         } else if let chat = workspace.chats.first {
-            // A stream whose tabs were all closed opens its newest chat, its tab back on the strip.
+            // A click opens exactly that one tab.
             WorkbenchPrefs.shared.forgetClosed(chat.key, in: workspace.id)
             model.select(chat.key)
         }

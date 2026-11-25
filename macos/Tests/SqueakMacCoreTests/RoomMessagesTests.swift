@@ -369,7 +369,6 @@ struct RoomMessagesTests {
         #expect(RoomDucks.subtitle(people: 2, ducks: 5) == "2 people \u{00B7} 5 ducks on duty")
         #expect(RoomDucks.subtitle(people: 1, ducks: 1) == "1 person \u{00B7} 1 duck on duty")
         #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks on duty")
-        #expect(RoomDucks.closeTooltip(name: "Marlow") == "Close \u{2014} Marlow goes off duty")
         #expect(RoomDucks.cleanName("  Pip ") == "Pip" && RoomDucks.cleanName("") == nil && RoomDucks.cleanName(String(repeating: "x", count: 33)) == nil)
         #expect(RoomDucks.cleanRole("") == .clear && RoomDucks.cleanRole(" Builder ") == .set("Builder") && RoomDucks.cleanRole(String(repeating: "x", count: 81)) == nil)
     }

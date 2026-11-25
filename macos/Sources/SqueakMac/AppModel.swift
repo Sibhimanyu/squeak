@@ -351,135 +351,144 @@ final class AppModel {
         set { publishIfChanged(chatStore, \.liveSteps, newValue) }
     }
     private(set) var pinned: Set<SessionKey> { didSet { if pinned != oldValue { inputsChanged() } } }
-    /// Every stream's open tabs and the selected one: app state, so they survive Home, the Dashboard, other ponds,
-    /// Settings and a relaunch. Every thread opens through `select`/`openInStream`, which only ever adds a tab.
-    private(set) var streamTabs = StreamTabs()
+    /// Every Pond's open tabs: app state owned by `TabStore` alone (nothing else computes a strip), so they survive Home, the
+    /// Dashboard, other ponds, Settings and a relaunch. A tab exists because the person opened it; Squeak adds none.
+    private(set) var tabStore = TabStore()
 
-    /// The tab row for a stream: its saved tabs resolved to live threads, in order. A stream not touched yet shows
-    /// its active chats, as before.
+    /// The key of a Pond's tab list: the pond (repo) the workspace belongs to, the same in ducks mode and stream mode and
+    /// before or after the directory loads.
+    func tabPond(_ workspace: SidebarWorkspace) -> String { workspace.repo ?? workspace.id }
+
+    /// The chat a Duck tab shows: the Duck's newest chat, or the chat itself for a tab no Duck owns. Nil while the list does
+    /// not carry it (the tab stays saved and shows again when it does).
+    func chat(for tab: TabItem) -> HostSession? {
+        guard tab.kind == .duck else { return nil }
+        if let key = tab.chatKey { return SessionKey(stringValue: key).flatMap { session($0) } }
+        var best: HostSession?
+        for s in allSessions where s.duckId == tab.id && s.archivedAt == nil {
+            if let b = best, (b.lastActivityAt ?? .distantPast) >= (s.lastActivityAt ?? .distantPast) { continue }
+            best = s
+        }
+        return best
+    }
+
+    /// The Duck identity a chat key stands for in a tab (its Duck id, else `chat:<key>`).
+    func duckIdentity(ofChat key: String) -> String {
+        SessionKey(stringValue: key).flatMap { session($0) }.map(TabItem.duckID(of:)) ?? TabItem.chatPrefix + key
+    }
+
+    /// The tab row for a Pond: its saved Duck tabs as chats, in the saved order, nothing added, nothing hidden.
     func streamThreads(_ workspace: SidebarWorkspace) -> [HostSession] {
-        let all = pondPageTree.projects.flatMap(\.workspaces).first { $0.id == workspace.id }?.chats ?? workspace.chats
-        // Ducks mode: the pond's ducks, one tab each (a moved duck's newest chat stands for it).
-        func ducks(_ list: [HostSession]) -> [HostSession] { workspace.isDucks ? DuckList.collapse(list, pool: all + workspace.chats) : list }
-        guard streamTabs.hasStrip(workspace.id) else { return ducks(workspace.chats) }
-        // The open chat stands in while the list does not carry it yet (a new thread).
-        let standIn = selectedSession.map { [$0] } ?? []
-        let byKey = Dictionary((all + workspace.chats + standIn).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
-        return ducks(streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil })
+        tabStore.tabs(tabPond(workspace)).compactMap { chat(for: $0) }
     }
 
     /// The one way into a thread from anywhere (Dashboard, sidebar, Needs you, pond page, search, notifications, the
-    /// menu-bar panel, a new thread's result): its stream opens with a tab for it, added once and selected; no other
-    /// tab is touched.
+    /// menu-bar panel, a new thread's result): its Duck's tab opens (or is switched to) and is selected.
     func openInStream(_ key: SessionKey) {
         // Ducks mode: a duck's tab is its current chat, so a click on any of its chats opens that one.
         if ducksMode, let s = session(key) { select(DuckOpen.target(s, ducksMode: true, pool: allSessions).key); return }
         select(key)
     }
 
-    /// The open chat always has its tab (restored or set without `select`).
-    func ensureTab(for key: SessionKey) {
-        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key),
-              !streamTabs.tabs(place.workspace.id).contains(.thread(key.stringValue)) else { return }
-        registerTab(key)
-    }
-
-    /// The strip showing `workspace` has the open chat's tab even when the catalog does not list the chat yet (a new
-    /// thread), and a closed-tab memory never hides the chat that is open.
-    func ensureTab(for key: SessionKey, in workspace: SidebarWorkspace) {
-        WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id)
-        let closed = WorkbenchPrefs.shared.closed
-        let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
-        if streamTabs.ensureOpen(.thread(key.stringValue), in: workspace.id, seed: seed) { saveStreamTabs() }
-    }
-
+    /// Opens the tab of the chat the person chose: switches to it when open, else inserts it after the current tab.
     private func registerTab(_ key: SessionKey) {
-        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key) ?? stripPlace(of: key) else { return }
-        let closed = WorkbenchPrefs.shared.closed
-        let seed = place.workspace.chats.map { StreamTab.thread($0.key.stringValue) }
-            .filter { !closed.isClosed($0.id, in: place.workspace.id) }
-        streamTabs.open(.thread(key.stringValue), in: place.workspace.id, seed: seed)
-        saveStreamTabs()
+        guard let s = session(key), let place = stripPlace(of: key) else { return }
+        let pond = tabPond(place.workspace)
+        tabStore.open(.of(s), in: pond)
+        saveTabs(pond)
     }
 
-    /// A file tab opened in the stream joins the saved strip where it was opened (after the selected tab), once; a tab
-    /// restored from the strip is already there and is left alone.
+    /// A file tab opened in the Pond joins its list where it was opened (after the current tab), once; a tab restored from
+    /// the list is already there and is left alone.
     ///
-    /// Preview tabs: a file opens in the stream's preview tab, replacing the file or artifact that was previewing (a
+    /// Preview tabs: a file opens in the Pond's preview tab, replacing the file or artifact that was previewing (a
     /// double-click, `pinOnOpen`, opens it as a normal tab). A preview with unsaved edits is pinned, never replaced.
     func fileTabOpened(_ path: String, in workspace: SidebarWorkspace, files: FilesModel? = nil) {
-        let tab = StreamTab.file(path)
-        guard !streamTabs.tabs(workspace.id).contains(tab) else { return }
-        let closed = WorkbenchPrefs.shared.closed
-        let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+        let tab = TabItem.file(path), pond = tabPond(workspace)
+        guard !tabStore.contains(tab, in: pond) else { return }
         if files?.pinOnOpen.remove(path) != nil {
-            streamTabs.open(tab, in: workspace.id, seed: seed)
+            tabStore.open(tab, in: pond)
         } else {
-            pinDirtyPreview(in: workspace.id, files: files)
-            let replaced = streamTabs.openPreview(tab, in: workspace.id, seed: seed)
+            pinDirtyPreview(in: pond, files: files)
+            let replaced = tabStore.openPreview(tab, in: pond)
             if let replaced, replaced.kind == .file { files?.close(replaced.id, force: true) }
         }
-        saveStreamTabs()
+        saveTabs(pond)
     }
 
     /// A preview file with unsaved edits is kept: it is pinned before another click would replace it.
-    func pinDirtyPreview(in workspace: String, files: FilesModel?) {
-        guard let p = streamTabs.previewTab(workspace), p.kind == .file, files?.open.first(where: { $0.path == p.id })?.dirty == true else { return }
-        streamTabs.pin(p, in: workspace)
+    func pinDirtyPreview(in pond: String, files: FilesModel?) {
+        guard let p = tabStore.previewTab(pond), p.kind == .file, files?.open.first(where: { $0.path == p.id })?.dirty == true else { return }
+        tabStore.pin(p, in: pond)
     }
 
     /// Keeps the tab open: it stops being the preview, so the next single click opens a new one.
-    func pinTab(_ tab: StreamTab, in workspace: SidebarWorkspace) {
-        if streamTabs.pin(tab, in: workspace.id) { saveStreamTabs() }
+    func pinTab(_ tab: TabItem, in workspace: SidebarWorkspace) {
+        let pond = tabPond(workspace)
+        if tabStore.pin(tab, in: pond) { saveTabs(pond) }
     }
 
     func fileTabClosed(_ path: String, in workspace: SidebarWorkspace) {
-        guard streamTabs.tabs(workspace.id).contains(.file(path)) else { return }
-        streamTabs.close(.file(path), in: workspace.id)
-        saveStreamTabs()
+        let pond = tabPond(workspace)
+        guard tabStore.contains(.file(path), in: pond) else { return }
+        tabStore.close(.file(path), in: pond)
+        saveTabs(pond)
     }
 
     func fileTabSelected(_ path: String, in workspace: SidebarWorkspace) {
-        if streamTabs.select(.file(path), in: workspace.id) { saveStreamTabs() }
+        let pond = tabPond(workspace)
+        if tabStore.select(.file(path), in: pond) { saveTabs(pond) }
     }
 
-    /// A saved file tab whose file is gone is forgotten when the stream's tabs are restored.
+    /// A saved file tab whose file is gone closes itself when the Pond's tabs are restored.
     func forgetFileTabs(_ paths: [String], in workspace: SidebarWorkspace) {
         guard !paths.isEmpty else { return }
         let gone = Set(paths)
-        if streamTabs.prune(exists: { $0.kind != .file || !gone.contains($0.id) }) { saveStreamTabs() }
+        saveTabs(tabStore.prune(exists: { $0.kind != .file || !gone.contains($0.id) }))
     }
 
-    func closeStreamTab(_ key: SessionKey, in workspace: String) -> SessionKey? {
-        let next = streamTabs.close(.thread(key.stringValue), in: workspace)
-        saveStreamTabs()
-        return next.flatMap { $0.kind == .thread ? SessionKey(stringValue: $0.id) : nil }
+    /// Closes a Duck's tab and only that (never its duty). Returns the chat of the tab that becomes current, if it is a chat.
+    func closeDuckTab(_ s: HostSession, in workspace: SidebarWorkspace) -> SessionKey? {
+        let pond = tabPond(workspace)
+        let next = tabStore.close(.of(s), in: pond)
+        saveTabs(pond)
+        return next.flatMap { chat(for: $0)?.key }
     }
 
-    /// A duck moved (ducks mode): its new chat takes the old tab's slot and selection; nothing closes and reopens.
-    func replaceStreamTab(_ old: StreamTab, with new: StreamTab, in workspace: String) {
-        if streamTabs.replace(old, with: new, in: workspace) { saveStreamTabs() }
-    }
-
-    /// Puts a chat, file or artifact tab where a drop (or the keyboard) landed it in the stream's strip.
+    /// Puts a chat, file or artifact tab where a drop (or the keyboard) landed it in the Pond's strip.
     @discardableResult
-    func moveStreamTab(_ source: StreamTab, to landing: TabDrop.Landing<StreamTab>, workspace: SidebarWorkspace) -> Bool {
-        let moved = streamTabs.move(source, to: landing, in: workspace.id)
-        if moved { saveStreamTabs() }
+    func moveTab(_ source: TabItem, to landing: TabDrop.Landing<TabItem>, workspace: SidebarWorkspace) -> Bool {
+        let pond = tabPond(workspace)
+        let moved = tabStore.move(source, to: landing, in: pond)
+        if moved { saveTabs(pond) }
         return moved
     }
 
-    /// Drops saved tabs whose thread was archived. A thread merely missing from a partial snapshot is only hidden
-    /// (`streamThreads` resolves what is there), never forgotten.
-    func pruneStreamTabs() {
-        let archived = Set(ThreadArchive.archived(allSessions).map { $0.key.stringValue })
-        guard !archived.isEmpty, streamTabs.prune(exists: { $0.kind != .thread || !archived.contains($0.id) }) else { return }
-        saveStreamTabs()
+    /// A tab whose thing no longer exists closes itself: a Duck with no live chat left (deleted, or every chat archived).
+    /// A chat the list merely does not carry yet (a partial snapshot) keeps its tab. Also turns `chat:<key>` tabs into
+    /// Duck ids as the chats are learned.
+    func pruneTabs() {
+        let sessions = allSessions
+        var known = Set<String>(), alive = Set<String>()
+        for s in sessions {
+            let id = TabItem.duckID(of: s)
+            known.insert(id)
+            if s.archivedAt == nil { alive.insert(id) }
+        }
+        var changed = Set(tabStore.adoptDucks { key in SessionKey(stringValue: key).flatMap { self.session($0)?.duckId } })
+        changed.formUnion(tabStore.prune(exists: { $0.kind != .duck || !known.contains($0.id) || alive.contains($0.id) }))
+        saveTabs(Array(changed))
     }
 
-    private func saveStreamTabs() {
-        guard !demoMode, !captureMode, let data = try? JSONEncoder().encode(streamTabs) else { return }
-        defaults.set(data, forKey: "streamTabs")
+    /// A Duck was deleted: its tab closes in every Pond.
+    func closeTabs(ofDuck id: String) {
+        saveTabs(tabStore.prune(exists: { $0 != .duck(id) }))
+    }
+
+    private func saveTabs(_ pond: String) { saveTabs([pond]) }
+    private func saveTabs(_ ponds: [String]) {
+        guard !demoMode, !captureMode else { return }
+        for pond in ponds { tabStore.save(pond: pond, to: defaults) }
     }
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
@@ -532,8 +541,7 @@ final class AppModel {
         enabledAddons = saved
         let on = AddonRegistry.shared.apps.filter { saved.contains($0.id) }
         broker = Broker(adapters: SessionSources.adapters(client: client, native: NativeHostClient.beside(client), addons: on), cache: cache, draftStore: draftStore)
-        if !demoMode, !captureMode, let data = d.data(forKey: "streamTabs"),
-           let saved = try? JSONDecoder().decode(StreamTabs.self, from: data) { streamTabs = saved }
+        if !demoMode, !captureMode { tabStore = TabStore(restoring: d) }
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
         notificationsEnabled = d.object(forKey: "notifications") as? Bool ?? true
@@ -1245,20 +1253,18 @@ final class AppModel {
     /// (a double-click) keeps it as a normal tab.
     func openArtifact(pond: String, path: String, pin: Bool = false) {
         if let ctx = artifactContext(pond: pond), let place = stripPlace(of: ctx.key) {
-            let workspace = place.workspace
-            let closed = WorkbenchPrefs.shared.closed
-            let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
-            let tab = StreamTab.artifact(pond: pond, path: path)
+            let workspace = place.workspace, pondTabs = tabPond(workspace)
+            let tab = TabItem.artifact(pond: pond, path: path)
             let files = ctx.cwd.flatMap { $0.isEmpty ? nil : filesModel(root: $0) }
             if pin {
-                if streamTabs.tabs(workspace.id).contains(tab) { streamTabs.pin(tab, in: workspace.id); streamTabs.select(tab, in: workspace.id) }
-                else { streamTabs.open(tab, in: workspace.id, seed: seed) }
+                if tabStore.contains(tab, in: pondTabs) { tabStore.pin(tab, in: pondTabs); tabStore.select(tab, in: pondTabs) }
+                else { tabStore.open(tab, in: pondTabs) }
             } else {
-                pinDirtyPreview(in: workspace.id, files: files)
-                let replaced = streamTabs.openPreview(tab, in: workspace.id, seed: seed)
+                pinDirtyPreview(in: pondTabs, files: files)
+                let replaced = tabStore.openPreview(tab, in: pondTabs)
                 if let replaced, replaced.kind == .file { files?.close(replaced.id, force: true) }
             }
-            saveStreamTabs()
+            saveTabs(pondTabs)
             if lastChat != ctx.key { select(ctx.key) }
             // Nothing else is the shown tab, so clicking any of them is a change the strip can see.
             for f in filesModels.values { f.showChat() }
@@ -1297,12 +1303,10 @@ final class AppModel {
         case .refuse(let why): return .refused(why)
         case .open(let tab):
             showConversationWindow()
-            let workspace = place.workspace
-            let closed = WorkbenchPrefs.shared.closed
-            let seed = workspace.chats.map { StreamTab.thread($0.key.stringValue) }.filter { !closed.isClosed($0.id, in: workspace.id) }
+            let pondTabs = tabPond(place.workspace)
             let files = filesModel(root: cwd)
-            streamTabs.open(.file(tab), in: workspace.id, seed: seed)
-            saveStreamTabs()
+            tabStore.open(.file(tab), in: pondTabs)
+            saveTabs(pondTabs)
             select(chat.key)
             DockStore.shared.deselectTerminals(.centre); DockStore.shared.deselectDucklings(.centre)
             DockStore.shared.update { $0.selectChats() }
@@ -1313,8 +1317,9 @@ final class AppModel {
 
     /// Closes an artifact tab; when it was the one on screen, the chat comes back.
     func closeArtifactTab(pond: String, path: String, in workspace: SidebarWorkspace) {
-        streamTabs.close(.artifact(pond: pond, path: path), in: workspace.id)
-        saveStreamTabs()
+        let tabs = tabPond(workspace)
+        tabStore.close(.artifact(pond: pond, path: path), in: tabs)
+        saveTabs(tabs)
         if location == .artifact(pond: pond, path: path) { leaveArtifact() }
     }
 
@@ -1365,6 +1370,14 @@ final class AppModel {
     /// The remembered chat of a pond, when it still exists.
     func resumableChat(pond key: String) -> SessionKey? {
         placeMemory.lastChat(pond: key).flatMap { session($0) != nil ? $0 : nil }
+    }
+
+    /// The remembered chat of a pond when it still has its tab open: opening a pond returns to what was left open, and never
+    /// opens a tab the person closed (or never opened); a pond with no such tab opens on its Dashboard.
+    func resumableOpenChat(pond key: String) -> SessionKey? {
+        guard let chat = resumableChat(pond: key), let s = session(chat), let place = stripPlace(of: chat),
+              tabStore.contains(.of(s), in: tabPond(place.workspace)) else { return nil }
+        return chat
     }
 
     /// Visits are recorded once per turn of the run loop, so a page that is cleared on the way to another is not a stop.

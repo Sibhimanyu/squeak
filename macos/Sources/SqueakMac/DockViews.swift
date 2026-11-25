@@ -347,7 +347,7 @@ private struct DockTabDrop: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         let dock = DockStore.shared
-        if zone == .centre, let centre, let tab = StreamTab.of(item), tab.kind == .file {
+        if zone == .centre, let centre, let tab = TabItem.of(item), tab.kind == .file {
             content.modifier(TabReorderDrop(target: .centreStrip, item: tab, order: centre.order, dragged: centre.dragged) { text, landing in
                 performCentreStreamDrop(text, landing: landing, in: centre, model: model)
             })
@@ -365,9 +365,9 @@ private struct DockTabDrop: ViewModifier {
 /// The centre strip's saved tabs (chats, files, canvases) in the order drawn, for the drop and keyboard decisions.
 @MainActor struct CentreStreamContext {
     var workspace: SidebarWorkspace
-    var order: [StreamTab]
+    var order: [TabItem]
     /// The stream tab being dragged along the strip right now, if there is one.
-    var dragged: StreamTab? { StreamTab.of(DockStore.shared.dragging) ?? DockStore.shared.draggingArtifact }
+    var dragged: TabItem? { TabItem.of(DockStore.shared.dragging, duck: AppModel.shared.duckIdentity(ofChat:)) ?? DockStore.shared.draggingArtifact }
 }
 
 private struct CentreStreamKey: EnvironmentKey { static let defaultValue: CentreStreamContext? = nil }
@@ -380,16 +380,16 @@ extension EnvironmentValues {
 
 /// A tab dropped on a centre-strip tab: a chat, file or canvas lands before or after it (a chat or file from a side
 /// zone comes home first); any other tab goes to the centre as before.
-@MainActor func performCentreStreamDrop(_ text: String, landing: TabDrop.Landing<StreamTab>?, in ctx: CentreStreamContext, model: AppModel) -> Bool {
+@MainActor func performCentreStreamDrop(_ text: String, landing: TabDrop.Landing<TabItem>?, in ctx: CentreStreamContext, model: AppModel) -> Bool {
     let dock = DockStore.shared
-    var moving: StreamTab?
+    var moving: TabItem?
     if let artifact = ArtifactDragPayload.decode(text) {
         moving = artifact
     } else if let item = DockItemPayload.decode(text) {
         switch item {
         case .thread(let key):
             if dock.threads.isDocked(key) { dock.moveThread(key, to: .centre) }
-            moving = .thread(key)
+            moving = .duck(model.duckIdentity(ofChat: key))
         case .file(let path):
             if dock.files.zone(of: path) != .centre { dockMoveFile(path, to: .centre, model: model) }
             moving = .file(path)
@@ -400,7 +400,7 @@ extension EnvironmentValues {
     dock.dragging = nil
     dock.draggingArtifact = nil
     guard let moving else { return false }
-    if let landing { model.moveStreamTab(moving, to: landing, workspace: ctx.workspace) }
+    if let landing { model.moveTab(moving, to: landing, workspace: ctx.workspace) }
     return true
 }
 

@@ -6,9 +6,9 @@ public enum StripEntry: Hashable, Sendable {
     case placeholder
 }
 
-/// Which thread tabs the strip shows and which is selected, given where the centre is. The strip is the same on a
-/// chat and on a New thread page in its workspace: the page is a selected placeholder beside the chats, and the chat
-/// that is open always has its tab (even before the list carries it), so a start never shows the old set alone.
+/// Which tab is selected and where the New chat placeholder sits, given where the centre is. The saved tabs are the
+/// `TabStore`'s and are never added to here: the strip is the same on a chat and on a New thread page, where the page is
+/// a selected placeholder beside the tabs. A chat on screen without a tab shows none; Squeak does not add tabs by itself.
 public struct StripPlan: Equatable, Sendable {
     public var entries: [StripEntry]
     public var selected: StripEntry?
@@ -24,9 +24,7 @@ public struct StripPlan: Equatable, Sendable {
             insert(.placeholder)
             return StripPlan(entries: entries, selected: .placeholder)
         case .chat(let key):
-            let id = key.stringValue
-            if !threads.contains(id) { insert(.thread(id)) }
-            return StripPlan(entries: entries, selected: .thread(id))
+            return StripPlan(entries: entries, selected: .thread(key.stringValue))
         default:
             return StripPlan(entries: entries, selected: nil)
         }

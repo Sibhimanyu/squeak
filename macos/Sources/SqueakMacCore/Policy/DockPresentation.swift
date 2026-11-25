@@ -117,7 +117,7 @@ public final class DockStore {
     /// A panel being dragged right now (not saved): zones that could take it show their drop strips.
     public var dragging: DockItem?
     /// An artifact tab being dragged along the centre strip (not saved); cleared with `dragging`.
-    public var draggingArtifact: StreamTab?
+    public var draggingArtifact: TabItem?
     /// The panel tab under the pointer (not observed): a drag that starts there is a panel drag.
     @ObservationIgnored public var hoveredTab: DockItem?
     /// Set by the window: a Pond panel dropped on the centre opens the pond dashboard instead of docking.

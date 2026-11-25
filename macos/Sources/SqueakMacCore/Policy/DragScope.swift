@@ -92,8 +92,8 @@ public enum DragScope {
 public enum ArtifactDragPayload {
     public static let prefix = "squeak-dock-artifact:"
     public static func encode(pond: String, path: String) -> String { prefix + ArtifactTabID.make(pond: pond, path: path) }
-    public static func decode(_ text: String) -> StreamTab? {
+    public static func decode(_ text: String) -> TabItem? {
         guard text.hasPrefix(prefix), ArtifactTabID.parse(String(text.dropFirst(prefix.count))) != nil else { return nil }
-        return StreamTab(.artifact, String(text.dropFirst(prefix.count)))
+        return TabItem(.artifact, String(text.dropFirst(prefix.count)))
     }
 }

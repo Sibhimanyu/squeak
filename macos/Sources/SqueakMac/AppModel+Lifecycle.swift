@@ -13,7 +13,7 @@ extension AppModel {
         sessionKeysRevision = sessionSet.revision
         updateDirectorySignature()
         guard SessionSetDiff.shouldPrune(sig) else { return }
-        pruneStreamTabs()
+        pruneTabs()
         let dock = DockStore.shared
         dock.pruneThreads(keeping: Set(sig.keys.map(\.stringValue)))
         dock.pruneDucklings(keeping: sig.keys)

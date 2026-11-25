@@ -205,13 +205,6 @@ public struct DuckHeaderChrome: Equatable, Sendable {
     }
 }
 
-/// The tab strip in ducks mode: the pond's ducks, in the saved order, the open chat always among them.
-public enum DuckTabPlan {
-    public static func plan(location: WorkbenchLocation, previous: String?, ducks: [DuckRow]) -> StripPlan {
-        StripPlan.plan(location: location, previous: previous, threads: ducks.map { $0.session.key.stringValue })
-    }
-}
-
 /// "Group by branch" in the sidebar, remembered per pond (a JSON list of pond keys in one preference string).
 public enum DuckGroupPrefs {
     public static func ponds(_ raw: String) -> Set<String> {

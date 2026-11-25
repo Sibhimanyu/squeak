@@ -75,7 +75,7 @@ enum WorkbenchNav {
     /// without, its home, as the breadcrumb and a closed last tab ask.
     static func openProject(_ model: AppModel, key: String, resuming: Bool = true) {
         Signposts.interval(Signposts.Name.pondOpen) {
-            if resuming, let chat = model.resumableChat(pond: key) { model.select(chat) }
+            if resuming, let chat = model.resumableOpenChat(pond: key) { model.select(chat) }
             else { model.location = .pondHome(pond: key) }
         }
     }

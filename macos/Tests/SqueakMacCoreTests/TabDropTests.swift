@@ -69,9 +69,9 @@ final class TabDropTests: XCTestCase {
 
     // MARK: Saved strip
 
-    func testStreamTabsMoveAfterAndBefore() {
-        let a = StreamTab.thread("a"), f = StreamTab.file("x"), v = StreamTab.artifact(pond: "p", path: "/c.html")
-        var t = StreamTabs()
+    func testTabStoreMoveAfterAndBefore() {
+        let a = TabItem.duck("a"), f = TabItem.file("x"), v = TabItem.artifact(pond: "p", path: "/c.html")
+        var t = TabStore()
         t.open(a, in: "w"); t.open(f, in: "w"); t.open(v, in: "w")
         XCTAssertEqual(t.tabs("w"), [a, f, v])
         XCTAssertTrue(t.move(a, to: .init(anchor: v, side: .after), in: "w"))
@@ -81,17 +81,7 @@ final class TabDropTests: XCTestCase {
         // No change, a missing tab, itself: nothing moves.
         XCTAssertFalse(t.move(v, to: .init(anchor: f, side: .before), in: "w"))
         XCTAssertFalse(t.move(v, to: .init(anchor: v, side: .after), in: "w"))
-        XCTAssertFalse(t.move(.thread("gone"), to: .init(anchor: v, side: .after), in: "w"))
-    }
-
-    func testStripCanCarryCanvasTabsInPlace() {
-        let a = StreamTab.thread("a"), v = StreamTab.artifact(pond: "p", path: "/c.html"), b = StreamTab.thread("b")
-        var t = StreamTabs()
-        t.open(a, in: "w"); t.open(v, in: "w"); t.open(b, in: "w")
-        let plain = t.strip("w", hasThread: { _ in true }, isOpen: { _ in true }, openFiles: [])
-        XCTAssertEqual(plain, [a, b])
-        let withCanvas = t.strip("w", hasThread: { _ in true }, isOpen: { _ in true }, openFiles: [], withArtifacts: true)
-        XCTAssertEqual(withCanvas, [a, v, b])
+        XCTAssertFalse(t.move(.duck("gone"), to: .init(anchor: v, side: .after), in: "w"))
     }
 
     func testArtifactDragPayloadRoundTripsAndOnlyTheCentreTakesIt() {
@@ -106,11 +96,12 @@ final class TabDropTests: XCTestCase {
         XCTAssertNil(DragKind.accepted(text, on: .edgeStrip(.right)))
     }
 
-    func testStreamTabOfADockItem() {
-        XCTAssertEqual(StreamTab.of(.thread("k")), .thread("k"))
-        XCTAssertEqual(StreamTab.of(.file("/x")), .file("/x"))
-        XCTAssertNil(StreamTab.of(.panel(.code)))
-        XCTAssertNil(StreamTab.of(nil))
+    func testTabItemOfADockItem() {
+        XCTAssertEqual(TabItem.of(.thread("k")), .duck("chat:k"))
+        XCTAssertEqual(TabItem.of(.thread("k"), duck: { _ in "d1" }), .duck("d1"))
+        XCTAssertEqual(TabItem.of(.file("/x")), .file("/x"))
+        XCTAssertNil(TabItem.of(.panel(.code)))
+        XCTAssertNil(TabItem.of(nil))
     }
 
     // MARK: Fit
