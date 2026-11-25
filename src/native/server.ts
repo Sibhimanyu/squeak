@@ -215,6 +215,7 @@ export class NativeServer {
         store: options.store,
         ...(options.supportDir ? { attachmentsDir: path.join(options.supportDir, "room-attachments") } : {}),
         members: (id) => this.pondMembers(id),
+        helpers: (id) => host.helpersOf(id),
         deliver: async (id, text, o) => {
           if (o?.woke) await this.restoreWoken(id);
           return host.send(id, text, { room: true });
@@ -563,7 +564,7 @@ export class NativeServer {
       ducks: (id) =>
         this.room
           .listDucks(id)
-          .map((d) => ({ duty: d.duty, working: d.state === "working", needsYou: d.state === "waiting" })),
+          .map((d) => ({ duty: d.duty, working: d.activity === "working", needsYou: d.activity === "needsYou" })),
     });
     return { ...built, pondOwnThreads: flag("pondOwnThreads"), ducksOwnBranch: flag("ducksOwnBranch") };
   }

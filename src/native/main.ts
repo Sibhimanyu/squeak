@@ -93,6 +93,7 @@ export async function runHost(supportDir: string): Promise<void> {
     ownerName: () => flotilla?.service?.identity.name ?? null,
     attachmentsDir: path.join(supportDir, "room-attachments"),
     members: (id) => server?.pondMembers(id) ?? 0,
+    helpers: (id) => host.helpersOf(id),
     deliver: (id, text) => host.send(id, text, { room: true }),
   });
   attachSqueakPosts(host, store, room);
