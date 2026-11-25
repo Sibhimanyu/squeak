@@ -138,10 +138,15 @@ struct WorkbenchCentre: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Pond tint (§3.5): a very faint wash from the top edge, fading out over the header and the tab strip.
+        // Pond tint (§3.5). A Duck page carries a visible gradient in the Pond's colour from behind the subheader, easing into the
+        // chat ground over ~220pt; elsewhere the wash stays a very faint one over the header and the tab strip.
         .background(alignment: .top) {
-            LinearGradient(colors: [PondColour.wash(PondColour.openPond(shell), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: newDuck && workspace != nil ? DuckSubheader.height + 56 : Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
+            if newDuck && workspace != nil {
+                DuckPondGradient(pond: PondColour.openPond(shell)).allowsHitTesting(false)
+            } else {
+                LinearGradient(colors: [PondColour.wash(PondColour.openPond(shell), .workbenchTop), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Metrics.header + Metrics.tabStrip).allowsHitTesting(false)
+            }
         }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.lastChat) { _, key in

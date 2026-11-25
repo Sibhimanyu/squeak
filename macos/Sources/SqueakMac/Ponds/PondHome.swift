@@ -384,7 +384,7 @@ struct PondHomeView: View {
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
             }
-            Text(model.ducksMode ? "Each duck works on its own branch, or on main read-only. Ask one to branch off or work with another." : "Each stream is a separate working folder. Its ducks work with the same files.")
+            Text(model.ducksMode ? "Ducks work across the whole Pond and choose which Streams to join." : "Each stream is a separate working folder. Its ducks work with the same files.")
                 .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
@@ -778,6 +778,44 @@ struct PondFlockSection: View {
     }
 }
 
+/// The one top bar's layout, from plain data: the same view draws the live bar and the offscreen snapshots. Spacing alone
+/// separates logo, name, switch and tabs (`PondBarMetrics`); the controls share one height and are centred with air above
+/// and below.
+struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
+    let name: String
+    let subtitle: String
+    var leadingInset: CGFloat = 0
+    let switchSelection: Binding<PondPage?>
+    var hasTabs = true
+    @ViewBuilder let tile: () -> Tile
+    @ViewBuilder let tabs: () -> Tabs
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
+            // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
+            HStack(spacing: CGFloat(PondBarMetrics.logoGap)) {
+                tile()
+                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
+            }
+            .help(subtitle)
+            .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
+            RoomSegmented(
+                items: PondPage.allCases.map(Optional.some), selection: switchSelection,
+                title: { $0?.title ?? "" }, height: CGFloat(PondBarMetrics.controlHeight), capsule: true)
+                .fixedSize().accessibilityLabel("Pond view")
+                .padding(.leading, CGFloat(PondBarMetrics.sectionGap))
+            if hasTabs { tabs().padding(.leading, CGFloat(PondBarMetrics.sectionGap)) }
+            if !hasTabs { Spacer(minLength: 0) }
+            trailing().padding(.leading, CGFloat(PondBarMetrics.trailingGap))
+        }
+        .padding(.horizontal, CGFloat(PondBarMetrics.endInset)).frame(height: CGFloat(PondBarMetrics.height))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+}
+
 /// The one top bar of the new layout: the same view, in the same place, on the Dashboard, the Room, an item and inside a Duck
 /// (WorkbenchCentre hosts it above every page, so it never moves or rebuilds).
 struct PondSharedHeader: View {
@@ -798,39 +836,32 @@ struct PondSharedHeader: View {
         let name = PondsModel.shared.name(key: key)
         let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
         let subtitle = RoomDucks.subtitle(people: people, ducks: RoomDucks.headerDucks(threads).count)
-        HStack(spacing: Space.m) {
-            if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
-            // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
-            HStack(spacing: Space.s) {
+        let centre = PondCentre(page: RoomViewPref.shared.mode(for: key), duck: inDuck ? (strip?.row.selectedDuck ?? "") : nil,
+                                item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil)
+        PondTopBar(
+            name: name, subtitle: subtitle, leadingInset: leadingInset,
+            switchSelection: Binding<PondPage?>(get: { centre.switchSelection },
+                set: { page in
+                    guard let page else { return }
+                    // One source of truth for what the centre shows (PondCentre): the switch writes it, the page reads it.
+                    var next = centre
+                    next.switchTo(page)
+                    if centre.item != nil { model.leavePondItem(pond: key) }
+                    RoomViewPref.shared.set(next.page, for: key)
+                    // Flow: from inside a Duck, the switch goes to that page of the Pond.
+                    if inDuck { model.openPondHome(key) }
+                }),
+            hasTabs: !(strip?.isEmpty ?? true),
+            tile: {
                 PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,
-                         projectId: PondsModel.shared.native(key: key)?.id, size: 28)
-                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                    .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
-            }
-            .help(subtitle)
-            .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
-            RoomSegmented(
-                items: PondPage.allCases.map(Optional.some),
-                selection: Binding<PondPage?>(get: { itemShowing || inDuck ? nil : RoomViewPref.shared.mode(for: key) },
-                    set: { page in
-                        guard let page else { return }
-                        model.leavePondItem(pond: key)
-                        RoomViewPref.shared.set(page, for: key)
-                        // Flow: from inside a Duck, the switch goes to that page of the Pond.
-                        if inDuck { model.openPondHome(key) }
-                    }),
-                title: { $0?.title ?? "" }, height: 28)
-                .fixedSize().accessibilityLabel("Pond view")
-            if let workspace, let strip {
-                // Flow: the divider only separates the page switch from the Ducks and items that follow it.
-                if !strip.isEmpty { Rectangle().fill(Theme.line).frame(width: 1, height: 22).accessibilityHidden(true) }
-                PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true)
-                    .id(workspace.project.id).frame(maxWidth: .infinity)
-            }
-            if strip?.isEmpty ?? true { Spacer(minLength: 0) }
-            PondHeaderMenu(key: key)
-        }
-        .padding(.horizontal, Space.xl).frame(height: Metrics.header).background(WindowDragArea())
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+                         projectId: PondsModel.shared.native(key: key)?.id, size: 32)
+            },
+            tabs: {
+                if let workspace, let strip {
+                    PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true).id(workspace.project.id)
+                }
+            },
+            trailing: { PondHeaderMenu(key: key) })
+        .background(WindowDragArea())
     }
 }

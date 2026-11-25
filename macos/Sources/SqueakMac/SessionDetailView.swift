@@ -545,8 +545,14 @@ struct SessionDetail: View {
         return rowCache.choiceLayout(for: m)
     }
 
-    private var topFade: some View {
-        LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 24)
+    @ViewBuilder private var topFade: some View {
+        // A Duck page's chat starts below the subheader, which has its own hairline: a ground-coloured fade would be a grey
+        // band across the Pond gradient there.
+        if WorkPaneActions.isDuckView(session) {
+            Color.clear.frame(height: 0)
+        } else {
+            LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 24)
+        }
     }
 
     /// The reader reached the top: render older rows already loaded, else ask the host for the next page. Either way the

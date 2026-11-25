@@ -15,6 +15,8 @@ struct SqueakMacApp: App {
     }()
 
     init() {
+        // `--snapshots`: render fixture views offscreen to PNGs and exit, before anything else starts (Snapshots.swift).
+        if SnapshotRunner.requested { SnapshotRunner.runAndExit() }
         if Self.reportsEnabled {
             Heresay.configure(key: "pk_SBtaP3xDs3fa2b9BRe62tEnq", url: URL(string: "https://heresay-sibhi.web.app")!, nudge: .all, crashReports: .send)
         }

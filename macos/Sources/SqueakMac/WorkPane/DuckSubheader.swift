@@ -36,6 +36,9 @@ struct DuckSubheader: View {
             moreMenu
         }
         .padding(.horizontal, Space.xl).frame(height: Self.height)
+        // The chat starts below this row and is clipped at its edge: a hairline makes that edge read as intended, so no text
+        // shows through half-faded behind the chips.
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
     /// The Streams this Duck is in, from the host's roster (join order).
@@ -125,5 +128,25 @@ private struct StreamChip: View {
         .buttonStyle(.plain).pointerHand().onHover { hovering = $0 }
         .help(DuckStreams.chipHelp(chip))
         .accessibilityLabel(chip.isPond ? "Pond. Shows its changes" : "Stream \(chip.label). Shows its changes")
+    }
+}
+
+/// The Duck page's gradient: the Pond's colour at full wash behind the subheader, easing out over `PondWash.duckFadeHeight`
+/// into the chat ground (eased stops, so no band edge). Same treatment in light and dark; the colour resolves per appearance.
+struct DuckPondGradient: View {
+    let colour: Color
+
+    init(pond: String?) { colour = PondColour.wash(pond, .duckTop) }
+    init(colour: Color) { self.colour = colour }
+
+    var body: some View {
+        let steps = 16
+        LinearGradient(
+            stops: (0...steps).map { i in
+                let f = Double(i) / Double(steps)
+                return Gradient.Stop(color: colour.opacity(PondWash.duckFade(at: f)), location: f)
+            },
+            startPoint: .top, endPoint: .bottom)
+            .frame(height: CGFloat(PondWash.duckFadeHeight))
     }
 }

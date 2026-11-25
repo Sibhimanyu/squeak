@@ -81,42 +81,10 @@ struct PondWorkspaceTabStrip: View {
     private var selected: TabItem? { strip.currentItem ?? strip.row.selectedDuck.map(TabItem.duck) }
 
     private var scroller: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
-                        ForEach(tabs) { tab in
-                            PondOvalTab(tab: tab, label: tab.duck == nil ? label(for: tab.item) : nil, selected: selected == tab.item,
-                                        updated: live.isUpdated(tab.item) && selected != tab.item, gone: live.goneState(tab.item) != nil,
-                                        select: { select(tab.item) }, close: { close(tab) })
-                                .id(tab.item)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: embedded ? Metrics.header : DuckRowMetrics.height)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .background {
-                        GeometryReader { content in
-                            let frame = content.frame(in: .named(viewport))
-                            let edges = PondStripOverflow(contentStart: frame.minX, contentEnd: frame.maxX, viewport: geometry.size.width)
-                            Color.clear.onChange(of: edges, initial: true) { _, value in overflow = value }
-                        }
-                    }
-                }
-                .coordinateSpace(name: viewport)
-                .scrollIndicators(.hidden)
-                .mask {
-                    HStack(spacing: 0) {
-                        if overflow.leading { LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 8) }
-                        Rectangle()
-                        if overflow.trailing { LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 8) }
-                    }
-                }
-                .onChange(of: selected, initial: true) { _, tab in
-                    if let tab { proxy.scrollTo(tab) }
-                }
-            }
-        }
+        PondTabsRow(
+            tabs: tabs, selected: selected, height: embedded ? PondBarMetrics.height : DuckRowMetrics.height,
+            label: { label(for: $0) }, updated: { live.isUpdated($0) }, gone: { live.goneState($0) != nil },
+            select: select, close: close, overflow: $overflow)
     }
 
     private var tabList: some View {
@@ -181,6 +149,10 @@ struct PondItemLabel {
     let help: String
     let colourSeed: String?
 
+    init(title: String, symbol: String, help: String? = nil, colourSeed: String? = nil) {
+        self.title = title; self.symbol = symbol; self.help = help ?? title; self.colourSeed = colourSeed
+    }
+
     @MainActor init(item: TabItem, workspace: PondWorkspace, model: AppModel) {
         let source = item.diffSource.flatMap { SessionKey(stringValue: $0.session) }.flatMap { model.session($0) }
         let nativeId = source.flatMap(NativeAdapter.nativeId)
@@ -231,7 +203,7 @@ struct PondItemLabel {
 /// working; the amber triangle when it needs you) and what it is doing. An item's has an icon and its name. The selected
 /// tab is raised: `surface-raised` fill and a `lineStrong` border (no shadow inside the window). Labels may shorten, with the
 /// full text as the tooltip; they never wrap.
-private struct PondOvalTab: View {
+struct PondOvalTab: View {
     let tab: PondStripTab
     let label: PondItemLabel?
     let selected: Bool
@@ -243,35 +215,38 @@ private struct PondOvalTab: View {
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
-    static let height: CGFloat = 38
-    static let maxWidth: CGFloat = 220
+    static let height = CGFloat(PondBarMetrics.controlHeight)
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button(action: select) { content.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .disabled(tab.duck?.opensChat == false)
-                .help(help)
-                .accessibilityLabel(help.replacingOccurrences(of: "\n", with: ", "))
-                .accessibilityValue(updated ? "updated" : "")
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityAction(named: Text("Close tab")) { if tab.closable { close() } }
-            if tab.closable {
-                Button(action: close) {
-                    Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: Self.height).contentShape(Rectangle())
+        let isDuck = tab.duck != nil
+        content.contentShape(Rectangle())
+            .onTapGesture { if tab.duck?.opensChat != false { select() } }
+            .frame(minWidth: isDuck ? nil : CGFloat(PondBarMetrics.itemTabWidth.lowerBound), alignment: .leading)
+            .frame(maxWidth: CGFloat(isDuck ? PondBarMetrics.duckTabMaxWidth : PondBarMetrics.itemTabWidth.upperBound), alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(height: Self.height)
+            // The close control floats over the tab's trailing edge on hover and reserves no room of its own, so a tab is as
+            // wide as its content.
+            .overlay(alignment: .trailing) {
+                if tab.closable, hovering {
+                    Button(action: close) {
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: 22)
+                            .background(selected ? Theme.surfaceRaised : Theme.surface, in: Circle()).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).padding(.trailing, 6)
+                    .help("Close").accessibilityLabel("Close \(tab.title ?? label?.title ?? "tab")")
                 }
-                .buttonStyle(.plain)
-                .help("Close").accessibilityLabel("Close \(tab.title ?? label?.title ?? "tab")")
-                .opacity(hovering ? 1 : 0).disabled(!hovering).accessibilityHidden(!hovering)
             }
-        }
-        .padding(.trailing, tab.closable ? 3 : 0)
-        .frame(maxWidth: Self.maxWidth).fixedSize(horizontal: true, vertical: false)
-        .frame(height: Self.height)
-        .background(selected ? Theme.surfaceRaised : Theme.surface, in: Capsule())
-        .overlay { Capsule().strokeBorder(selected ? Theme.lineStrong : Theme.line).allowsHitTesting(false) }
-        .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
-        .onHover { hovering = $0 }
+            .background(selected ? Theme.surfaceRaised : Theme.surface, in: Capsule())
+            .overlay { Capsule().strokeBorder(selected ? Theme.lineStrong : Theme.line).allowsHitTesting(false) }
+            .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
+            .onHover { hovering = $0 }
+            .help(help)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(help.replacingOccurrences(of: "\n", with: ", "))
+            .accessibilityValue(updated ? "updated" : "")
+            .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+            .accessibilityAction(named: Text("Close tab")) { if tab.closable { close() } }
     }
 
     private var help: String { tab.help ?? label?.help ?? "" }
@@ -294,7 +269,7 @@ private struct PondOvalTab: View {
                     }
                 }
             }
-            .padding(.leading, 10).padding(.trailing, 12)
+            .padding(.horizontal, 12)
         } else if let label {
             HStack(spacing: 6) {
                 label.icon
@@ -306,7 +281,64 @@ private struct PondOvalTab: View {
                 }
             }
             .foregroundStyle(selected ? Theme.ink : Theme.muted)
-            .padding(.leading, 12).padding(.trailing, tab.closable ? 4 : 12)
+            .padding(.horizontal, 14)
         }
+    }
+}
+
+/// The tab row: oval tabs at their natural width (a Duck's up to 280pt, an item's between 96 and 200), scrolling only when the
+/// bar is really full. Data in, taps out, so the offscreen snapshots draw the same row the app does.
+struct PondTabsRow: View {
+    let tabs: [PondStripTab]
+    let selected: TabItem?
+    var height = CGFloat(PondBarMetrics.height)
+    let label: (TabItem) -> PondItemLabel
+    var updated: (TabItem) -> Bool = { _ in false }
+    var gone: (TabItem) -> Bool = { _ in false }
+    var select: (TabItem) -> Void = { _ in }
+    var close: (PondStripTab) -> Void = { _ in }
+    @Binding var overflow: PondStripOverflow
+    @Namespace private var viewport
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: CGFloat(PondBarMetrics.tabGap)) {
+                        ForEach(tabs) { tab in
+                            PondOvalTab(tab: tab, label: tab.duck == nil ? label(tab.item) : nil, selected: selected == tab.item,
+                                        updated: updated(tab.item) && selected != tab.item, gone: gone(tab.item),
+                                        select: { select(tab.item) }, close: { close(tab) })
+                                .id(tab.item)
+                        }
+                    }
+                    // A little room each side so the first and last outlines are never clipped by the scroll view.
+                    .padding(.horizontal, 2)
+                    .frame(height: height)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background {
+                        GeometryReader { content in
+                            let frame = content.frame(in: .named(viewport))
+                            let edges = PondStripOverflow(contentStart: frame.minX, contentEnd: frame.maxX, viewport: geometry.size.width)
+                            Color.clear.onChange(of: edges, initial: true) { _, value in overflow = value }
+                        }
+                    }
+                }
+                .coordinateSpace(name: viewport)
+                .scrollIndicators(.hidden)
+                .mask {
+                    HStack(spacing: 0) {
+                        if overflow.leading { LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 8) }
+                        Rectangle()
+                        if overflow.trailing { LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 8) }
+                    }
+                }
+                .onChange(of: selected, initial: true) { _, tab in
+                    if let tab { proxy.scrollTo(tab) }
+                }
+            }
+        }
+        // The strip is as wide as its tabs, so a bar with room leaves the rest empty rather than stretching tabs.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

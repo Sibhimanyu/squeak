@@ -14,6 +14,9 @@ public enum PondWash {
         case pondHeader
         /// The workbench's top edge: a gradient from this to nothing, over the window ground.
         case workbenchTop
+        /// A Duck page: a visible gradient in the Pond's colour from behind the subheader, fading into the chat ground
+        /// (`PondWash.duckFade`). Much stronger than `workbenchTop`; the guard still keeps ink and muted AA at its densest point.
+        case duckTop
         /// The selected tab's 2 pt underline (a line, not a wash: the accent itself, already 3:1 on the card).
         case tabIndicator
         /// The composer's focus ring.
@@ -24,6 +27,7 @@ public enum PondWash {
             case .selectedRow: dark ? 0.12 : 0.10
             case .pondHeader: dark ? 0.10 : 0.08
             case .workbenchTop: dark ? 0.08 : 0.06
+            case .duckTop: dark ? 0.32 : 0.26
             case .tabIndicator: 1.0
             case .focusRing: dark ? 0.55 : 0.45
             }
@@ -33,10 +37,21 @@ public enum PondWash {
         public func ground(dark: Bool) -> PondTint.RGB? {
             switch self {
             case .selectedRow, .pondHeader: PondTint.RGB(hex: dark ? Tokens.Dark.selected : Tokens.Light.selected)
-            case .workbenchTop: PondTint.RGB(hex: dark ? Tokens.Dark.bg : Tokens.Light.bg)
+            case .workbenchTop, .duckTop: PondTint.RGB(hex: dark ? Tokens.Dark.bg : Tokens.Light.bg)
             case .tabIndicator, .focusRing: nil
             }
         }
+    }
+
+    /// How far down a Duck page the wash reaches, in points: it fades out over this, with no band edge.
+    public static let duckFadeHeight = 220.0
+
+    /// The wash's strength at `fraction` (0 top, 1 end) of the fade: a smooth ease-out (smootherstep), 1 at the top, exactly 0 and
+    /// flat at the end, so the gradient has no visible edge where it stops.
+    public static func duckFade(at fraction: Double) -> Double {
+        let t = min(max(fraction, 0), 1)
+        let s = t * t * t * (t * (t * 6 - 15) + 10)
+        return 1 - s
     }
 
     /// Text that must stay readable on a wash: ink and muted (WCAG 2 AA, 4.5:1).
