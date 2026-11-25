@@ -56,6 +56,13 @@ public enum TranscriptColumn {
         guard container > 1 else { return nil }
         return min(container, cap).rounded(.down)
     }
+
+    /// The most the column may take: only ever an upper bound. Never used as a minimum: a minimum taken from the measured
+    /// container makes a ScrollView report that width back as its own size, so the container could never measure
+    /// narrower and the chat stayed wide when a pane opened beside it (clipped on both sides).
+    public static func maxWidth(container: CGFloat, cap: CGFloat) -> CGFloat {
+        fixedWidth(container: container, cap: cap) ?? cap
+    }
 }
 
 /// Typeset heights by (message id, content hash, width), for layouts whose height is a pure function of those. A

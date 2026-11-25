@@ -926,15 +926,15 @@ struct SessionDetail: View {
     }
 }
 
-/// The transcript column at one exact width once the container is measured (`TranscriptColumn.fixedWidth`), so the stack
+/// The transcript column, at most `TranscriptColumn.maxWidth` wide and never wider than the container, so the stack
 /// is proposed a single width and its text is typeset once per width; the flexible cap only until the first reading.
 private struct TranscriptColumnWidth: ViewModifier {
     let container: CGFloat
     let cap: CGFloat
 
     func body(content: Content) -> some View {
-        // One view shape either way (identity stays put when the first reading lands).
-        let width = TranscriptColumn.fixedWidth(container: container, cap: cap)
-        return content.frame(minWidth: width ?? 0, maxWidth: width ?? cap)
+        // An upper bound only, never a minimum: a minimum from the measured width pins the ScrollView at its old size when
+        // the centre narrows (a work pane opening), so the chat overflowed both sides instead of reflowing.
+        content.frame(maxWidth: TranscriptColumn.maxWidth(container: container, cap: cap))
     }
 }

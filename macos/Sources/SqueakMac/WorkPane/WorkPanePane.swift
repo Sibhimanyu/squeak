@@ -2,8 +2,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md 8.12: the work pane beside a Duck's chat. A header with the Duck's name, the pin and a close control, a
-// segmented picker (Changes / Files / Canvas / Terminal), then the existing view for that choice, hosted as it is.
+// DESIGN.md 8.12: the work pane beside a Duck's chat. A header with the Duck's name, the pin and a close control, then
+// the existing view the rail chose (Changes / Files / Artifacts / Terminal), hosted as it is. The rail is the only switcher.
 
 struct WorkPanePane: View {
     let session: HostSession
@@ -48,11 +48,6 @@ struct WorkPanePane: View {
             }
             .padding(.horizontal, Space.m)
             .frame(height: Metrics.header - 8)
-            Picker("View", selection: Binding(get: { view }, set: { store.open($0, duck: duck) })) {
-                ForEach(WorkPaneView.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden()
-            .padding(.horizontal, Space.m).padding(.bottom, Space.s)
         }
     }
 
@@ -60,7 +55,7 @@ struct WorkPanePane: View {
         switch view {
         case .changes: WorkPaneChanges(session: session)
         case .files: WorkPaneFiles(session: session)
-        case .canvas: WorkPaneCanvas(session: session)
+        case .artifacts: WorkPaneArtifacts(session: session)
         case .terminal: WorkPaneTerminal(session: session)
         }
     }
@@ -137,14 +132,14 @@ private struct WorkPaneFiles: View {
     }
 }
 
-private struct WorkPaneCanvas: View {
+private struct WorkPaneArtifacts: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
 
     var body: some View {
         if case .artifact(let pond, let path) = model.location {
             VStack(spacing: 0) {
-                WorkPaneBack(title: "Canvas") { model.leaveArtifact() }
+                WorkPaneBack(title: "Artifacts") { model.leaveArtifact() }
                 ArtifactViewerPage(pond: pond, path: path, embedded: true).id(path)
             }
         } else if let remote = StreamArtifactsPin.remoteKey(for: session) {
@@ -152,7 +147,7 @@ private struct WorkPaneCanvas: View {
         } else if let project = StreamArtifactsPin.projectId(for: session) {
             ArtifactsTab(projectId: project)
         } else {
-            Text("This Duck's Pond has no canvases yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+            Text("This Duck's Pond has no artifacts yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }

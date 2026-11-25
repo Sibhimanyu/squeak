@@ -2,7 +2,7 @@ import Foundation
 import SqueakMacCore
 
 extension Notification.Name {
-    /// Something was opened (a file, a diff, a canvas, a shell): in the new layout the work pane shows it. `userInfo`:
+    /// Something was opened (a file, a diff, an artifact, a shell): in the new layout the work pane shows it. `userInfo`:
     /// "view" (a `WorkPaneView` raw value) and optionally "root" (the folder it belongs to). The old layout ignores it.
     static let squeakWorkPaneOpen = Notification.Name("SqueakWorkPaneOpen")
 }

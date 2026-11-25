@@ -29,15 +29,15 @@ import Testing
         p.open(.files, duck: "a")
         p.switched(to: "b")
         #expect(p.shown == nil)
-        p.open(.canvas, duck: "b")
+        p.open(.artifacts, duck: "b")
         p.switched(to: "a")
         #expect(p.shown == nil)
         p.toggle(.changes, duck: "a")
         p.close()
         p.switched(to: "b")
-        p.open(.canvas, duck: "b")
+        p.open(.artifacts, duck: "b")
         #expect(p.memory["a"]?.view == .changes)
-        #expect(p.memory["b"]?.view == .canvas)
+        #expect(p.memory["b"]?.view == .artifacts)
     }
 
     @Test func pinnedPaneStaysOpenAcrossDucksAndCarriesViewToANewDuck() {
@@ -92,12 +92,12 @@ import Testing
 
     @Test func savedStateKeepsPinViewsAndWidthsButNotOpenness() throws {
         var p = WorkPane()
-        p.open(.canvas, duck: "a")
+        p.open(.artifacts, duck: "a")
         p.setWidth(480, duck: "a")
         p.setPinned(true)
         let back = try JSONDecoder().decode(WorkPane.self, from: JSONEncoder().encode(p))
         #expect(back.pinned)
-        #expect(back.memory["a"] == WorkPane.Memory(view: .canvas, width: 480))
+        #expect(back.memory["a"] == WorkPane.Memory(view: .artifacts, width: 480))
         #expect(!back.isOpen)
     }
 
@@ -122,5 +122,12 @@ import Testing
         #expect(WorkPaneMetrics.badge(count: 250) == "99+")
         #expect(WorkPaneMetrics.duckKey(duckId: "d1", sessionKey: "s") == "duck:d1")
         #expect(WorkPaneMetrics.duckKey(duckId: nil, sessionKey: "s") == "chat:s")
+    }
+
+    @Test func oldCanvasViewReadsBackAsArtifacts() throws {
+        let json = #"{"pinned":true,"memory":{"a":{"view":"canvas","width":480}}}"#
+        let p = try JSONDecoder().decode(WorkPane.self, from: Data(json.utf8))
+        #expect(p.memory["a"]?.view == .artifacts)
+        #expect(WorkPaneView.artifacts.title == "Artifacts")
     }
 }

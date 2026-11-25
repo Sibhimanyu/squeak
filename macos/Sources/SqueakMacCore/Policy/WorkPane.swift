@@ -1,19 +1,29 @@
 import Foundation
 
 // DESIGN.md 8.12, New layout stage 2: a Duck's view is the chat plus a slim icon rail; clicking a rail icon opens a work
-// pane beside the chat (Changes, Files, Canvas or Terminal). Everything the window needs to decide about it lives here,
+// pane beside the chat (Changes, Files, Artifacts or Terminal). Everything the window needs to decide about it lives here,
 // pure: which view shows, open and close, the pin, and each Duck's remembered view and width. The views only draw.
 
 /// What the work pane can show. The rail lists them in this order.
 public enum WorkPaneView: String, CaseIterable, Codable, Identifiable, Sendable {
-    case changes, files, canvas, terminal
+    case changes, files, artifacts, terminal
     public var id: String { rawValue }
+
+    /// A saved `canvas` (this view's old name) reads back as Artifacts; an unknown value is a decoding error as before.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        let migrated = raw == "canvas" ? "artifacts" : raw
+        guard let v = WorkPaneView(rawValue: migrated) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown work pane view \(raw)"))
+        }
+        self = v
+    }
 
     public var title: String {
         switch self {
         case .changes: "Changes"
         case .files: "Files"
-        case .canvas: "Canvas"
+        case .artifacts: "Artifacts"
         case .terminal: "Terminal"
         }
     }
@@ -23,7 +33,7 @@ public enum WorkPaneView: String, CaseIterable, Codable, Identifiable, Sendable 
         switch self {
         case .changes: "plus.forwardslash.minus"
         case .files: "folder"
-        case .canvas: "square.on.square.dashed"
+        case .artifacts: "photo.on.rectangle"
         case .terminal: "terminal"
         }
     }
@@ -102,7 +112,7 @@ public struct WorkPane: Equatable, Codable, Sendable {
         if isOpen, memory[duck] == nil, let carried { memory[duck] = Memory(view: carried, width: nil) }
     }
 
-    /// Opens `view` for `duck` (an icon, or a Duck opening something: a shown file, a canvas, a diff). Selects the Duck.
+    /// Opens `view` for `duck` (an icon, or a Duck opening something: a shown file, an artifact, a diff). Selects the Duck.
     public mutating func open(_ view: WorkPaneView, duck: String) {
         current = duck
         isOpen = true

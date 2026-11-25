@@ -33,4 +33,10 @@ import Testing
         #expect(publishIfChanged(&v, [1, 2, 3]))
         #expect(v == [1, 2, 3])
     }
+
+    @Test func transcriptColumnIsOnlyAnUpperBound() {
+        #expect(TranscriptColumn.maxWidth(container: 0, cap: 760) == 760)
+        #expect(TranscriptColumn.maxWidth(container: 500.7, cap: 760) == 500)
+        #expect(TranscriptColumn.maxWidth(container: 1400, cap: 760) == 760)
+    }
 }

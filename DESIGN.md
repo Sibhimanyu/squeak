@@ -1274,20 +1274,20 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   search) shows at the end of the row while it is open and leaves with it; showing it never changes its duty (Off duty
   stays a separate action). Clicking an avatar shows that Duck's chat in the centre; clicking Room shows the Room. The
   Dashboard stays on the existing Room | Dashboard switch and shows the same row with nothing selected. Tabs are hidden
-  (the tab code stays for the old layout; in a Duck view files, canvases, diffs and terminals open in the work pane).
+  (the tab code stays for the old layout; in a Duck view files, artifacts, diffs and terminals open in the work pane).
 - **Room = home, with the Pond panel on the right.** In the Room the right side is the Pond panel, not the generic inspector:
   who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`). It lists host
   values and decides nothing. In a Duck view the right inspector is hidden.
 - **Duck view = chat + slim icon rail + work pane (stage 2, built).** A 52pt rail at the right edge of the chat holds
-  Changes, Files, Canvas and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
+  Changes, Files, Artifacts and Terminal icons (SF Symbols; selected: `selected` fill and a 3pt duck-yellow bar at its left
   edge; a duck-yellow count badge on Changes with the changed-file count, "99+" past 99). Clicking an icon opens the work
   pane beside the chat (inside the Duck view, 420pt by default, 300 to 720, resizable); clicking the same icon closes it.
-  The pane header carries the Duck's name, a pin and a close control, then a segmented Changes / Files / Canvas / Terminal
-  picker, then the existing view hosted as it is: the changed-files list with the diff review, the Files browser with
-  the file viewer, the Pond's canvases with the canvas viewer and editor, and the Duck's shell (shell chips and "New shell"
+  The pane header carries the Duck's name, a pin and a close control, then the existing view the rail chose (the rail is the
+  only switcher; the header has no picker), hosted as it is: the changed-files list with the diff review, the Files browser with
+  the file viewer, the Pond's artifacts (canvases among them) with their viewer and editor, and the Duck's shell (shell chips and "New shell"
   appear with a second shell). A viewer inside the pane has a slim back row to its list. The pin keeps the pane open when
   you switch Ducks (it shows that Duck's last view); unpinned, it closes on a switch. The pane remembers its last view and
-  its width per Duck. It opens only when something is opened (a rail icon, a file, diff or canvas a Duck shows, a clicked
+  its width per Duck. It opens only when something is opened (a rail icon, a file, diff or artifact a Duck shows, a clicked
   path, the Code and Terminal shortcuts), never because data changed. There is no bottom dock or drawer and no right
   inspector in a Duck view; the Terminal lives in the pane. The pane slides in at `motion-standard` (ease-out) while the
   chat takes its final width at once, so the chat reflows once with no travel. Decisions (which view, open, close, pin,
