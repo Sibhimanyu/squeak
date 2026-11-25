@@ -79,7 +79,17 @@ struct ConversationView: View {
     private var minContentWidth: CGFloat {
         let right = InspectorStash.rightVisible(dock.layout, files: dock.files, terminals: dock.activeTerminals, threads: dock.threads, ducklings: dock.ducklings) && !dock.layout.right.collapsed
             && !model.focus.isSettings && model.selectedSession != nil
-        return CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.focus.isSettings || !sidebarHidden, rightShown: right))
+        let base = CGFloat(PaneLayoutSolver.minimumWindowWidth(sidebarShown: model.focus.isSettings || !sidebarHidden, rightShown: right))
+        // New layout Duck view: the rail always, and the work pane's own minimum while it is open.
+        guard !model.focus.isSettings, isNewDuckView else { return base }
+        let pane = WorkPaneStore.shared.pane.shown != nil ? CGFloat(WorkPaneMetrics.range.lowerBound) : 0
+        return base + CGFloat(WorkPaneMetrics.railWidth) + pane
+    }
+
+    /// The new layout's Duck view: a chat in a Pond this Mac hosts, with the rail and work pane (DESIGN.md 8.12).
+    private var isNewDuckView: Bool {
+        guard model.focus.page == .chat, roomContext == nil else { return false }
+        return WorkPaneActions.isDuckView(model.selectedSession)
     }
 
     var body: some View {
@@ -129,8 +139,10 @@ struct ConversationView: View {
         let homeCtx = false
         // New layout (DESIGN.md 8.12): a Duck's view has no right inspector (stage 2 adds the icon rail and work pane); the
         // Room's right side is the Pond panel. A Pond with no host project here keeps today's zone.
-        let newDuckView = chatOpen && roomCtx == nil && MacLayoutPreference.shared.isNew
-            && (model.selectedSession.flatMap { PondsModel.shared.key(of: $0) }.map { DuckAvatarRowView.isAvailable(pond: $0) } ?? false)
+        let newDuckView = chatOpen && roomCtx == nil && WorkPaneActions.isDuckView(model.selectedSession)
+        let workPane = WorkPaneStore.shared.pane
+        let duckSession = newDuckView ? model.selectedSession : nil
+        let paneView = duckSession.flatMap { workPane.current == WorkPaneActions.duckKey($0) ? workPane.shown : nil }
         let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
@@ -143,7 +155,14 @@ struct ConversationView: View {
         let showsInspector = showsInspectorWanted && solved.rightShown
         let sidebarW = solved.sidebar
         let inspectorW = solved.right
-        let toggleRightPane: () -> Void = { guard rightAvailable || roomCtx != nil || homeCtx else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
+        let toggleRightPane: () -> Void = {
+            if let duckSession {
+                let duck = WorkPaneActions.duckKey(duckSession)
+                let now = WorkPaneStore.shared.pane
+                if now.current == duck, now.shown != nil { WorkPaneStore.shared.close() } else { WorkPaneStore.shared.open(now.memory[duck]?.view ?? .changes, duck: duck) }
+                return
+            }
+            guard rightAvailable || roomCtx != nil || homeCtx else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
         let paneOpen = chatOpen || roomCtx != nil || homeCtx
         HStack(spacing: 0) {
             // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
@@ -171,7 +190,7 @@ struct ConversationView: View {
             // The workbench stays mounted under Settings (its chat keeps its scroll, focus and state); Settings is a layer
             // above it, present only while shown.
             ZStack(alignment: .topLeading) {
-                let placement = (chatOpen && roomCtx == nil) ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
+                let placement = (chatOpen && roomCtx == nil && !newDuckView) ? DockBottomPlacement.of(layout, files: dockFiles, terminals: dockTerminals, threads: dockThreads, ducklings: dockDucklings) : .none
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         WorkbenchCentre(
@@ -186,6 +205,23 @@ struct ConversationView: View {
                     // measured window, which could come up short and leave gaps); its minimum keeps overflow impossible.
                     .frame(minWidth: PaneWidths.centreMin, maxWidth: .infinity)
                     .clipped()
+                    // The chat takes its final width at once and reflows once; only the pane itself slides.
+                    .transaction(value: paneView) { $0.animation = nil }
+                    if let duckSession {
+                        if let paneView {
+                            let paneW = CGFloat(WorkPaneMetrics.drawn(stored: workPane.storedWidth(duck: WorkPaneActions.duckKey(duckSession)), window: windowWidth, sidebar: sidebarHidden ? 0 : sidebarW))
+                            WorkPanePane(session: duckSession, view: paneView, width: paneW)
+                                .id(WorkPaneActions.duckKey(duckSession))
+                                .overlay(alignment: .leading) {
+                                    PaneResizeHandle(
+                                        edge: .leading, width: Binding(get: { paneW }, set: { WorkPaneStore.shared.setWidth($0, duck: WorkPaneActions.duckKey(duckSession)) }),
+                                        range: WorkPaneMetrics.range, fallback: WorkPaneMetrics.defaultWidth,
+                                        window: windowWidth, otherPane: (sidebarHidden ? 0 : sidebarW) + WorkPaneMetrics.railWidth)
+                                }
+                                .transition(paneTransition(.trailing)).zIndex(1)
+                        }
+                        WorkPaneRail(session: duckSession)
+                    }
                     if showsInspector, paneOpen {
                         VStack(spacing: 0) {
                             if let roomCtx {
@@ -225,6 +261,11 @@ struct ConversationView: View {
         .animation(Motion.standard, value: sidebarHidden)
         .animation(Motion.standard, value: showingSettings)
         .animation(Motion.standard, value: showsInspector && paneOpen)
+        .animation(Motion.standard, value: paneView)
+        .onChange(of: duckSession.map(WorkPaneActions.duckKey), initial: true) { _, key in
+            if let key { WorkPaneStore.shared.switched(to: key) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakWorkPaneOpen)) { note in WorkPaneActions.open(note, model: model) }
         .onChange(of: dock.isTerminalShowing, initial: true) { _, showing in
             if showing { TerminalHost.shared.focusPending = true }
             KeyFocus.shared.setTerminalOpen(showing)
@@ -263,14 +304,15 @@ struct ConversationView: View {
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in toggleRightPane() }
         // ⌥⌘C shows the Code panel, or closes it when it is the one showing; a diff opened anywhere shows it too.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in dock.update { $0.toggle(.code) } }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in dock.update { $0.show(.code) } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in if !WorkPaneActions.toggle(.changes, model: model) { dock.update { $0.toggle(.code) } } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in if !WorkPaneActions.open(.changes, model: model) { dock.update { $0.show(.code) } } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowFiles)) { _ in
+            if WorkPaneActions.open(.files, model: model) { return }
             inspectorTabRaw = InspectorTab.files.rawValue
             dock.update { $0.show(.code) }
         }
         // ⌘J shows the terminal wherever it is docked, or closes it when it is the one showing.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in TerminalActions.toggle(model) }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in if !WorkPaneActions.toggle(.terminal, model: model) { TerminalActions.toggle(model) } }
         .background(ConversationWindowReader())
         .commandPalette()
         .background {
@@ -279,7 +321,15 @@ struct ConversationView: View {
                 Button("Toggle Sidebar") { toggleSidebar() }
                     .keyboardShortcut("\\", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
-                    Button("Inspector: \(t.title)") { inspectorTabRaw = t.rawValue; dock.update { $0.show(.code) } }
+                    Button("Inspector: \(t.title)") {
+                        // New layout: Files and Changes are work pane views; Review is the diff inside Changes.
+                        let view: WorkPaneView = t == .files ? .files : .changes
+                        if WorkPaneActions.open(view, model: model) {
+                            if t == .review, let cwd = model.selectedSession?.cwd, !cwd.isEmpty { model.filesModel(root: cwd).showReview() }
+                            return
+                        }
+                        inspectorTabRaw = t.rawValue; dock.update { $0.show(.code) }
+                    }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
                 GitShortcuts()

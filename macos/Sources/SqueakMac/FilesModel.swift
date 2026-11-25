@@ -159,6 +159,7 @@ final class FilesModel {
         note = nil
         selection = path
         if pin { if open.contains(where: { $0.path == path }) { pinRequest = PinRequest(path: path) } else { pinOnOpen.insert(path) } }
+        WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
             activePath = existing.path
             if let line { existing.jump = LineJump(line: line) }
@@ -285,6 +286,7 @@ final class FilesModel {
         note = nil
         let path = url.path
         selection = nil
+        WorkPaneActions.announce(.files, root: root)
         if let existing = open.first(where: { $0.path == path }) {
             activePath = path
             if let line { existing.jump = LineJump(line: line) }
