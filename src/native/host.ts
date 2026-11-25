@@ -292,6 +292,8 @@ export function defaultRunnerFactory(
         });
 }
 
+/** Approvals that "Skip approvals" answers: tools, commands and file edits (never a plan or a question). */
+const SKIPPABLE: ReadonlySet<RequestKind> = new Set<RequestKind>(["tool", "command", "file_change"]);
 export class SessionHost extends EventEmitter {
   private readonly store: NativeStore;
   private readonly factory: RunnerFactory;
@@ -1136,6 +1138,8 @@ export class SessionHost extends EventEmitter {
   private autoAllow(id: string, kind: RequestKind, payload: unknown): boolean {
     // A pond member's message is running: a rule the starter kept for their own turns does not cover it (docs/ponds.md).
     if (this.guestTurns.has(id)) return false;
+    // Skip approvals switched on mid-turn: Codex fixed the turn's approval policy when it started, so it still asks.
+    if (this.store.getSession(id)?.permissionMode === "bypassPermissions" && SKIPPABLE.has(kind)) return true;
     const cwd = this.store.getSession(id)?.cwd;
     const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload, cwd));
     if (!rule) return false;
@@ -1222,7 +1226,7 @@ export class SessionHost extends EventEmitter {
     // "Skip approvals" allows what is already waiting, and it holds for the next call too.
     if (permissionMode === "bypassPermissions") {
       for (const r of this.store.openRequests(id)) {
-        if (r.kind === "tool" && this.pending.has(r.id)) this.settle(r.id, { decision: "allow" });
+        if (SKIPPABLE.has(r.kind) && this.pending.has(r.id)) this.settle(r.id, { decision: "allow" });
       }
     }
   }

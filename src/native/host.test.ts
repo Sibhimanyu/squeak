@@ -506,6 +506,23 @@ describe("live permissions, background work, fast sends", () => {
     expect(store.openRequests(s.id).map((r) => r.kind)).toEqual(["plan"]);
   });
 
+  it("skip approvals also allows a waiting Codex command or file edit, and the ones the running turn asks next", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const command = runners[0]!.hooks.onRequest("command", { command: "git status" });
+    const edit = runners[0]!.hooks.onRequest("file_change", { item: null });
+    void runners[0]!.hooks.onRequest("question", { questions: [] });
+    await host.setMode(s.id, "bypassPermissions");
+    await expect(command).resolves.toEqual({ decision: "allow" });
+    await expect(edit).resolves.toEqual({ decision: "allow" });
+    expect(store.openRequests(s.id).map((r) => r.kind)).toEqual(["question"]);
+    // The turn began ask-first, so Codex keeps asking: the host answers for the person now.
+    expect(runners[0]!.hooks.tryAutoAllow?.("command", { command: "ls" })).toBe(true);
+    expect(runners[0]!.hooks.tryAutoAllow?.("plan", {})).toBe(false);
+    await host.setMode(s.id, "default");
+    expect(runners[0]!.hooks.tryAutoAllow?.("command", { command: "ls" })).toBe(false);
+  });
+
   it("setMode saves a valid mode and never throws when the agent refuses it", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
