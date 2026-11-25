@@ -260,6 +260,25 @@ Each area: what it is for, what exists today, and the target. Areas without a ta
 - **Today:** File browser, search and Markdown preview. The default Mac layout puts Terminal in the Duck's Work Pane. Classic layout uses its dock.
 - **Target:** unchanged.
 
+### Workspace: rail, tools and tabs (Mac, new layout)
+
+- **Today:** the Room and the Duck view have a slim icon rail (Changes, Files, Artifacts, Terminal) that opens a side work pane; the Dashboard has none.
+- **Target:**
+  - **One rail everywhere.** The Dashboard, the Room and every Duck view show the same rail on the right: Changes, Files, Artifacts, Tasks, Notebook, Terminal.
+  - **Tools open lists, items open as tabs.** Changes, Files, Artifacts and Tasks open a one-shot popover list anchored to the icon (no pin). Picking an item opens it as a tab in the centre and closes the popover. Picking a Task opens its Duck. Notebook opens as a tab. Terminal opens in the pane beside the chat, the pane's only use.
+  - **What each list shows.** Changes: on the Dashboard and in the Room, every Duck's changed files grouped by Duck and branch; in a Duck, that Duck's only. Artifacts: the whole Pond, the current Duck's own first. Files: search, then Recent (opened or shown by Ducks), then the tree of the Pond folder (or the Duck's Stream).
+  - **The strip.** One strip at the top of the centre: on-duty Ducks as circles (they cannot be closed; they leave when Off duty; an opened Off-duty Duck sits at the end while it is open), a thin divider, then opened items as round-ended pills (icon, short name, close on hover; a diff pill carries a dot in its Duck's colour). Pills scroll sideways with an edge fade, and a "⋯" at the end lists them all. The Dashboard | Room switch stays in the Pond header.
+  - **Tabs belong to the Pond**, persist per Pond (by project id), and keep the tab rules: one click opens one tab, clicking an open item switches to it, new tabs go right after the current one, nothing opens a tab by itself, closing never changes duty. A Duck showing a file adds a pill without taking focus.
+  - **The centre shows one thing:** the Dashboard, the Room, a Duck's chat or an opened item.
+  - **Diff tabs.** Picking a file opens its diff; "Review all from <Duck>" opens all that Duck's changes in one tab. The header names the Duck and branch with "Ask <Duck> to fix…"; a line comment goes to the Duck as a message. The review-all tab carries merge and PR controls.
+  - **Artifact tabs** show the artifact full size (canvases stay hand-editable) with one header: name, Duck, and one Export menu (the formats that fit, Reveal in Finder, Copy path). Zoom is ⌘+ / ⌘− / ⌘0.
+  - **Live tabs.** An open diff, file or artifact updates in place when its Duck changes it, keeping scroll; an "updated" mark shows on a pill you are not on. When the source is gone (merged, Duck deleted, file removed), the tab says so with Close and never closes by itself.
+  - **Keyboard.** ⌘W closes the current item tab (does nothing on a Duck or the Room); ⌘1–9 jump to strip tabs; ⌃Tab cycles. Esc steps back (list, pane, Duck to Room, Room to Dashboard).
+  - **Every control has a flow.** No control is added without a named user flow; labels never truncate or wrap.
+  - **Room.** Reply quotes a message into the composer and @mentions its sender; there are no threads.
+  - **No Archived.** Archived chats become Off-duty Ducks; the sidebar has no Archived entry.
+  - **Scope.** Mac new layout only; the classic layout is unchanged; iPhone and web follow later.
+
 ### Heresay
 
 - **Today:** Report a Problem and crash reports on Mac and iPhone; report button on web.
