@@ -196,6 +196,19 @@ struct ChatSeenLogTests {
         #expect(!log.isUnread(done(30), now: now))
     }
 
+    @Test func aNoteAfterASeenFinishDoesNotMakeTheChatUnread() {
+        var log = ChatSeenLog()
+        var chat = done(600)
+        chat.lastTurnEndedAt = now.addingTimeInterval(-600)
+        log.markOpened(chat, now: now)
+        // A system note (a move, a rename) moves last activity, but no turn ended.
+        chat.lastActivityAt = now.addingTimeInterval(-30)
+        #expect(!log.isUnread(chat, now: now))
+        // A real new finish still counts.
+        chat.lastTurnEndedAt = now.addingTimeInterval(-10)
+        #expect(log.isUnread(chat, now: now))
+    }
+
     @Test func onlyRecentFinishesCountAndOnlyFinishedChats() {
         let log = ChatSeenLog()
         #expect(!log.isUnread(done(2 * 86_400), now: now))

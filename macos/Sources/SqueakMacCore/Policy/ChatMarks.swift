@@ -119,8 +119,9 @@ public struct ChatSeenLog: Codable, Sendable, Equatable {
         self.baseline = baseline
     }
 
-    /// Turn-end time of a finished chat: its last activity.
-    static func turnEnd(_ s: HostSession) -> Date? { s.state == .finished ? s.lastActivityAt : nil }
+    /// Turn-end time of a finished chat: when its last turn ended. Last activity is only the fallback (a host that
+    /// serves no turn end): a note or rename moves activity but is never a finished turn.
+    static func turnEnd(_ s: HostSession) -> Date? { s.state == .finished ? (s.lastTurnEndedAt ?? s.lastActivityAt) : nil }
 
     public func isUnread(_ s: HostSession, now: Date = Date()) -> Bool {
         guard let end = Self.turnEnd(s), SessionGrouping.isRecent(s, now: now) else { return false }

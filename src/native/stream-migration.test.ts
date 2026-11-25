@@ -86,8 +86,18 @@ describe("moveDucksToPond", () => {
     expect(fs.readFileSync(path.join(folder, ID, "side.txt"), "utf8")).toBe("sidecar");
     // the old copy stays
     expect(fs.existsSync(path.join(h.projects, claudeProjectFolder(a.wt), `${ID}.jsonl`))).toBe(true);
-    expect(h.store.messagesAfter(a.s.id).some((m) => m.kind === "system/note")).toBe(true);
+    // the move note is housekeeping: kept, but out of the feed and out of the chat's last activity
+    expect(h.store.messagesAfter(a.s.id).some((m) => m.kind === "system/note")).toBe(false);
     expect(joinedStreamDirs(h.store, h.store.getSession(a.s.id)!)).toEqual([a.wt]); // what the agent may edit
+  });
+
+  it("does not change a chat's last activity", async () => {
+    const h = setup();
+    const a = h.stream("feat-a");
+    h.store.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run("2026-01-01T00:00:00.000Z", a.s.id);
+    await moveDucksToPond({ store: h.store, projectsDir: h.projects });
+    expect(h.store.getSession(a.s.id)!.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(h.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE hidden=1").get()).toEqual({ n: 1 });
   });
 
   it("is once and idempotent: a second run, or a chat already in the Pond folder, changes nothing", async () => {
@@ -131,8 +141,10 @@ describe("moveDucksToPond", () => {
     expect(duck.branch).toBe("feat-a");
     expect(h.store.duckStreams(duck.id)).toEqual([]); // no folder to be in; open_stream makes it again
     expect(fs.existsSync(path.join(h.projects, claudeProjectFolder(h.repo), `${ID}.jsonl`))).toBe(true);
-    const note = h.store.messagesAfter(a.s.id).find((m) => m.kind === "system/note")!;
-    expect((note.payload as { text: string }).text).toMatch(/join it again with open_stream/);
+    const note = h.store.db
+      .prepare("SELECT payload FROM messages WHERE session_id=? AND kind='system/note'")
+      .get(a.s.id) as { payload: string };
+    expect((JSON.parse(note.payload) as { text: string }).text).toMatch(/join it again with open_stream/);
   });
 
   it("a missing working copy whose branch is gone records no branch", async () => {
@@ -143,8 +155,10 @@ describe("moveDucksToPond", () => {
     git(h.repo, "branch", "-D", "feat-a");
     await moveDucksToPond({ store: h.store, projectsDir: h.projects });
     expect(h.store.duckBySession(a.s.id)!.branch).toBeNull();
-    const note = h.store.messagesAfter(a.s.id).find((m) => m.kind === "system/note")!;
-    expect((note.payload as { text: string }).text).toMatch(/branch is gone/);
+    const note = h.store.db
+      .prepare("SELECT payload FROM messages WHERE session_id=? AND kind='system/note'")
+      .get(a.s.id) as { payload: string };
+    expect((JSON.parse(note.payload) as { text: string }).text).toMatch(/branch is gone/);
   });
 
   it("Codex: moves the chat and keeps its thread id; nothing is copied (a thread resumes by id from disk)", async () => {
@@ -181,5 +195,48 @@ describe("moveDucksToPond", () => {
     host.start();
     await vi.waitFor(() => expect(h.store.getSession(a.s.id)!.cwd).toBe(h.repo));
     await host.stop();
+  });
+});
+
+describe("repairHousekeepingNotes", () => {
+  const MOVE = "Moved to the project's folder (read-only). Its old branch is gone.";
+  const make = (store: NativeStore) =>
+    store.createSession({ cwd: "/x", agent: "claude", model: "m", permissionMode: "default", title: null } as never);
+
+  it("hides the move notes and restores last activity to before them, once", async () => {
+    const store = new NativeStore(":memory:");
+    const s = make(store);
+    const real = store.appendMessage(s.id, "agent", "assistant", { text: "done" });
+    store.setStatus(s.id, "idle", true);
+    const before = store.getSession(s.id)!.updatedAt;
+    await new Promise((r) => setTimeout(r, 5));
+    store.appendMessage(s.id, "system", "system/note", { text: MOVE }); // old behaviour: bumps activity
+    expect(store.getSession(s.id)!.updatedAt > before).toBe(true);
+    // a chat that moved on after its note is left alone
+    const t = make(store);
+    store.appendMessage(t.id, "system", "system/note", { text: MOVE });
+    await new Promise((r) => setTimeout(r, 5));
+    store.appendMessage(t.id, "user", "user/text", { text: "hi" });
+    const tAt = store.getSession(t.id)!.updatedAt;
+
+    expect(store.repairHousekeepingNotes()).toBe(1);
+    expect(store.getSession(s.id)!.updatedAt).toBe(real.createdAt);
+    expect(store.messagesAfter(s.id).map((m) => m.kind)).toEqual(["assistant"]);
+    expect(store.getSession(t.id)!.updatedAt).toBe(tAt);
+    expect(store.messagesAfter(t.id).map((m) => m.kind)).toEqual(["user/text"]);
+    // idempotent
+    expect(store.repairHousekeepingNotes()).toBe(0);
+    expect(store.getSession(s.id)!.updatedAt).toBe(real.createdAt);
+  });
+
+  it("a quiet note leaves last activity alone and stays visible", () => {
+    const store = new NativeStore(":memory:");
+    const s = make(store);
+    const before = store.getSession(s.id)!.updatedAt;
+    store.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run("2026-01-01T00:00:00.000Z", s.id);
+    store.appendMessage(s.id, "system", "system/note", { text: "x" }, undefined, { quiet: true });
+    expect(before).toBeTruthy();
+    expect(store.getSession(s.id)!.updatedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(store.messagesAfter(s.id)).toHaveLength(1);
   });
 });

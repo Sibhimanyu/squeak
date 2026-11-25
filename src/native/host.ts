@@ -507,6 +507,12 @@ export class SessionHost extends EventEmitter {
     } catch (error) {
       logHostError("archived to off duty", error);
     }
+    // Notes the Ducks-to-Pond move wrote counted as activity: hide them and restore the chats' last activity (once).
+    try {
+      this.store.repairHousekeepingNotes();
+    } catch (error) {
+      logHostError("hide move notes", error);
+    }
     // Chats that run in a Stream's working copy move to the Pond's folder and join that Stream (once).
     if (ducksOwnBranch()) {
       void moveDucksToPond({ store: this.store, ...(this.projectsDir ? { projectsDir: this.projectsDir } : {}) }).catch(
@@ -998,11 +1004,18 @@ export class SessionHost extends EventEmitter {
       }),
     );
     this.emitMessage(
-      this.store.appendMessage(id, "system", "system/note", {
-        text: `Continued in "${next.title ?? "a new thread"}"`,
-        linkedSessionId: next.id,
-        link: "to",
-      }),
+      this.store.appendMessage(
+        id,
+        "system",
+        "system/note",
+        {
+          text: `Continued in "${next.title ?? "a new thread"}"`,
+          linkedSessionId: next.id,
+          link: "to",
+        },
+        undefined,
+        { quiet: true },
+      ),
     );
     await this.send(next.id, text);
     return this.store.getSession(next.id)!;
@@ -1547,7 +1560,7 @@ export class SessionHost extends EventEmitter {
     }
     this.store.moveSessionPlace(id, place, joined);
     this.setStatus(id, "idle");
-    this.emitMessage(this.store.appendMessage(id, "system", "system/note", { text: note }));
+    this.emitMessage(this.store.appendMessage(id, "system", "system/note", { text: note }, undefined, { quiet: true }));
     return this.store.getSession(id)!;
   }
 

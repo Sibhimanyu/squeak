@@ -248,6 +248,10 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE sessions ADD COLUMN title_stage INTEGER;
   `,
+  // Housekeeping notes (Squeak's own, written by migrations): kept in the table, never served to a surface.
+  `
+  ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -1149,6 +1153,12 @@ export class NativeStore {
     kind: string,
     payload: unknown,
     author?: MessageAuthor,
+    /**
+     * Housekeeping: Squeak's own bookkeeping, not something that happened in the chat. `quiet` leaves the chat's
+     * last activity alone (a note must never make a finished chat look new); `hidden` also keeps the row out of
+     * every feed (it stays in the table).
+     */
+    housekeeping?: { quiet?: boolean; hidden?: boolean },
   ): MessageRow {
     const createdAt = nowIso();
     // Screenshots and huge outputs stay in the agent's own transcript; the row keeps what a surface draws.
@@ -1158,7 +1168,9 @@ export class NativeStore {
         "INSERT INTO messages (session_id,role,kind,payload,created_at,author_id,author_name) VALUES (?,?,?,?,?,?,?)",
       )
       .run(sessionId, role, kind, JSON.stringify(payload ?? null), createdAt, author?.id ?? null, author?.name ?? null);
-    this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId);
+    if (housekeeping?.hidden) this.db.prepare("UPDATE messages SET hidden=1 WHERE seq=?").run(info.lastInsertRowid);
+    if (!housekeeping?.quiet && !housekeeping?.hidden)
+      this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId);
     if (this.ftsAvailable) {
       const text = searchableText(kind, payload);
       if (text) {
@@ -1184,7 +1196,7 @@ export class NativeStore {
   messagesAfter(sessionId: string, after = 0, limit = 500): MessageRow[] {
     return (
       this.db
-        .prepare("SELECT * FROM messages WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?")
+        .prepare("SELECT * FROM messages WHERE session_id=? AND seq>? AND hidden=0 ORDER BY seq LIMIT ?")
         .all(sessionId, after, Math.max(1, Math.min(limit, 5000))) as Row[]
     ).map((r) => ({
       seq: r.seq as number,
@@ -1223,7 +1235,7 @@ export class NativeStore {
   /** The newest `limit` rows with seq < `before` (no bound when null), oldest first: a chat's tail, and the page before a cursor. */
   messagesBefore(sessionId: string, before: number | null, limit = 500): MessageRow[] {
     const rows = this.db
-      .prepare("SELECT * FROM messages WHERE session_id=? AND seq<? ORDER BY seq DESC LIMIT ?")
+      .prepare("SELECT * FROM messages WHERE session_id=? AND seq<? AND hidden=0 ORDER BY seq DESC LIMIT ?")
       .all(sessionId, before ?? Number.MAX_SAFE_INTEGER, Math.max(1, Math.min(limit, 5000))) as Row[];
     return rows.reverse().map((r) => ({
       seq: r.seq as number,
@@ -1972,6 +1984,42 @@ export class NativeStore {
         n += 1;
       }
       this.db.prepare("INSERT INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
+    })();
+    return n;
+  }
+
+  /**
+   * Once (recorded in `host_migrations`): the "Moved to the project's folder" notes the Ducks-to-Pond move wrote
+   * counted as chat activity, so every moved chat looked new. Hides them and puts each chat's last activity back to
+   * its last real message (or its last turn end, or its start), but only where the note was the latest thing to touch
+   * it. Returns how many chats were restored.
+   */
+  repairHousekeepingNotes(): number {
+    const NAME = "hide-move-notes";
+    if (this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(NAME)) return 0;
+    let n = 0;
+    this.db.transaction(() => {
+      const notes = this.db
+        .prepare(
+          `SELECT seq, session_id, created_at FROM messages WHERE role='system' AND kind='system/note' AND hidden=0
+             AND payload LIKE '{"text":"Moved to the project''s folder (read-only).%'`,
+        )
+        .all() as Row[];
+      for (const note of notes) {
+        this.db.prepare("UPDATE messages SET hidden=1 WHERE seq=?").run(note.seq);
+        const s = this.db
+          .prepare("SELECT updated_at, last_turn_ended_at, created_at FROM sessions WHERE id=?")
+          .get(note.session_id) as Row | undefined;
+        if (!s || (s.updated_at as string) > (note.created_at as string)) continue;
+        const last = this.db
+          .prepare("SELECT MAX(created_at) AS at FROM messages WHERE session_id=? AND hidden=0")
+          .get(note.session_id) as Row;
+        const candidates = [last.at, s.last_turn_ended_at].filter((x): x is string => typeof x === "string");
+        const at = candidates.length ? candidates.sort().at(-1)! : (s.created_at as string);
+        this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(at, note.session_id);
+        n += 1;
+      }
+      this.db.prepare("INSERT OR IGNORE INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
     })();
     return n;
   }

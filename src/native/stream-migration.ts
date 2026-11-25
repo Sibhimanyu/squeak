@@ -72,13 +72,20 @@ export async function moveDucksToPond(o: {
         { cwd: project.rootPath, workspaceId: null, branch: null },
         joins || alive ? ws.branch : null,
       );
-      store.appendMessage(s.id, "system", "system/note", {
-        text: joins
-          ? `Moved to the project's folder (read-only). You are still in branch ${ws.branch}: edit it by its full path.`
-          : alive
-            ? `Moved to the project's folder (read-only). Branch ${ws.branch} has no working copy now; join it again with open_stream.`
-            : "Moved to the project's folder (read-only). Its old branch is gone.",
-      });
+      store.appendMessage(
+        s.id,
+        "system",
+        "system/note",
+        {
+          text: joins
+            ? `Moved to the project's folder (read-only). You are still in branch ${ws.branch}: edit it by its full path.`
+            : alive
+              ? `Moved to the project's folder (read-only). Branch ${ws.branch} has no working copy now; join it again with open_stream.`
+              : "Moved to the project's folder (read-only). Its old branch is gone.",
+        },
+        undefined,
+        { hidden: true },
+      );
       result.moved += 1;
       if (gone) result.missing += 1;
     }

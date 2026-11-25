@@ -107,8 +107,8 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE room_posts DROP COLUMN detail; ALTER TABLE room_posts DROP COLUMN reply_to;");
     old.db.exec("DROP TABLE pond_notebook;");
     old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
-    old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage;"); // the title stage is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 22}`);
+    old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden;"); // the newest columns
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 23}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -157,8 +157,8 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE room_posts DROP COLUMN detail; ALTER TABLE room_posts DROP COLUMN reply_to;");
     old.db.exec("DROP TABLE pond_notebook;");
     old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
-    old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage;"); // the title stage is the newest
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 18}`);
+    old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden;"); // the newest columns
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 19}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -283,8 +283,8 @@ describe("NativeStore", () => {
       old.db.exec("DROP TABLE pond_notebook;");
       old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
       old.db.exec("DROP TABLE host_migrations; DROP TABLE deleted_duck_chats;"); // the No Archived migration is the newest
-      old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage;"); // the title stage is the newest
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 10}`);
+      old.db.exec("ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden;"); // the newest columns
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 11}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };
