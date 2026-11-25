@@ -355,9 +355,22 @@ final class AppModel {
     /// Dashboard, other ponds, Settings and a relaunch. A tab exists because the person opened it; Squeak adds none.
     private(set) var tabStore = TabStore()
 
-    /// The key of a Pond's tab list: the pond (repo) the workspace belongs to, the same in ducks mode and stream mode and
-    /// before or after the directory loads.
-    func tabPond(_ workspace: SidebarWorkspace) -> String { workspace.repo ?? workspace.id }
+    /// The key of a Pond's tab list: the Pond's id (its native project id, the directory key), read from the placement every
+    /// chat carries. Never a name. Empty while no chat of the workspace is placed yet: the strip then draws nothing and
+    /// `TabStore` ignores the key, so nothing is saved under a guess.
+    func tabPond(_ workspace: SidebarWorkspace) -> String {
+        workspace.chats.lazy.compactMap { PondsModel.shared.key(of: $0) }.first ?? ""
+    }
+
+    func tabPond(of session: HostSession) -> String { PondsModel.shared.key(of: session) ?? "" }
+
+    /// Chats opened before their Pond's id was known: opened as soon as it is (never under a name).
+    @ObservationIgnored private var pendingTabOpens: [SessionKey] = []
+    func flushPendingTabs() {
+        let keys = pendingTabOpens
+        pendingTabOpens = []
+        for k in keys { registerTab(k) }
+    }
 
     /// The chat a Duck tab shows: the Duck's newest chat, or the chat itself for a tab no Duck owns. Nil while the list does
     /// not carry it (the tab stays saved and shows again when it does).
@@ -392,8 +405,9 @@ final class AppModel {
 
     /// Opens the tab of the chat the person chose: switches to it when open, else inserts it after the current tab.
     private func registerTab(_ key: SessionKey) {
-        guard let s = session(key), let place = stripPlace(of: key) else { return }
-        let pond = tabPond(place.workspace)
+        guard let s = session(key) else { return }
+        let pond = tabPond(of: s)
+        guard !pond.isEmpty else { if !pendingTabOpens.contains(key) { pendingTabOpens.append(key) }; return }
         tabStore.open(.of(s), in: pond)
         saveTabs(pond)
     }
@@ -449,7 +463,7 @@ final class AppModel {
 
     /// Closes a Duck's tab and only that (never its duty). Returns the chat of the tab that becomes current, if it is a chat.
     func closeDuckTab(_ s: HostSession, in workspace: SidebarWorkspace) -> SessionKey? {
-        let pond = tabPond(workspace)
+        let pond = tabPond(of: s)
         let next = tabStore.close(.of(s), in: pond)
         saveTabs(pond)
         return next.flatMap { chat(for: $0)?.key }
@@ -468,6 +482,7 @@ final class AppModel {
     /// A chat the list merely does not carry yet (a partial snapshot) keeps its tab. Also turns `chat:<key>` tabs into
     /// Duck ids as the chats are learned.
     func pruneTabs() {
+        flushPendingTabs()
         let sessions = allSessions
         var known = Set<String>(), alive = Set<String>()
         for s in sessions {
@@ -475,7 +490,9 @@ final class AppModel {
             known.insert(id)
             if s.archivedAt == nil { alive.insert(id) }
         }
-        var changed = Set(tabStore.adoptDucks { key in SessionKey(stringValue: key).flatMap { self.session($0)?.duckId } })
+        // An old Ducks strip finds its Pond through its chats' placement (never by name).
+        var changed = Set(tabStore.adoptLegacy(in: defaults) { key in SessionKey(stringValue: key).flatMap { self.session($0) }.flatMap { PondsModel.shared.key(of: $0) } })
+        changed.formUnion(tabStore.adoptDucks { key in SessionKey(stringValue: key).flatMap { self.session($0)?.duckId } })
         changed.formUnion(tabStore.prune(exists: { $0.kind != .duck || !known.contains($0.id) || alive.contains($0.id) }))
         saveTabs(Array(changed))
     }
@@ -488,7 +505,7 @@ final class AppModel {
     private func saveTabs(_ pond: String) { saveTabs([pond]) }
     private func saveTabs(_ ponds: [String]) {
         guard !demoMode, !captureMode else { return }
-        for pond in ponds { tabStore.save(pond: pond, to: defaults) }
+        for pond in ponds where !pond.isEmpty { tabStore.save(pond: pond, to: defaults) }
     }
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
@@ -1253,7 +1270,7 @@ final class AppModel {
     /// (a double-click) keeps it as a normal tab.
     func openArtifact(pond: String, path: String, pin: Bool = false) {
         if let ctx = artifactContext(pond: pond), let place = stripPlace(of: ctx.key) {
-            let workspace = place.workspace, pondTabs = tabPond(workspace)
+            let pondTabs = tabPond(of: ctx)
             let tab = TabItem.artifact(pond: pond, path: path)
             let files = ctx.cwd.flatMap { $0.isEmpty ? nil : filesModel(root: $0) }
             if pin {
@@ -1303,7 +1320,7 @@ final class AppModel {
         case .refuse(let why): return .refused(why)
         case .open(let tab):
             showConversationWindow()
-            let pondTabs = tabPond(place.workspace)
+            let pondTabs = tabPond(of: chat)
             let files = filesModel(root: cwd)
             tabStore.open(.file(tab), in: pondTabs)
             saveTabs(pondTabs)
@@ -1376,7 +1393,7 @@ final class AppModel {
     /// opens a tab the person closed (or never opened); a pond with no such tab opens on its Dashboard.
     func resumableOpenChat(pond key: String) -> SessionKey? {
         guard let chat = resumableChat(pond: key), let s = session(chat), let place = stripPlace(of: chat),
-              tabStore.contains(.of(s), in: tabPond(place.workspace)) else { return nil }
+              tabStore.contains(.of(s), in: tabPond(of: s)) else { return nil }
         return chat
     }
 

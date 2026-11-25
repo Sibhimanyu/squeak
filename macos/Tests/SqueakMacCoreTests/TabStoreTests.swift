@@ -27,6 +27,33 @@ import Testing
         #expect(store.tabs("other").isEmpty)
     }
 
+    // MARK: Identity
+
+    /// Two Ponds can share a repo or folder name; each is its own project id and keeps its own list.
+    @Test func twoPondsWithTheSameNameKeepSeparateLists() {
+        let d = defaults()
+        var store = TabStore()
+        store.open(a, in: "project-1")
+        store.open(b, in: "project-2")
+        store.open(.file("/f"), in: "project-2")
+        #expect(store.tabs("project-1") == [a])
+        #expect(store.tabs("project-2") == [b, .file("/f")])
+        store.save(pond: "project-1", to: d); store.save(pond: "project-2", to: d)
+        let back = TabStore(restoring: d)
+        #expect(back.tabs("project-1") == [a])
+        #expect(back.tabs("project-2") == [b, .file("/f")])
+    }
+
+    @Test func aPondNotKnownYetOpensAndSavesNothing() {
+        var store = TabStore()
+        store.open(a, in: "")
+        store.openPreview(.file("x"), in: "")
+        #expect(store.tabs("").isEmpty)
+        let d = defaults()
+        store.save(pond: "", to: d)
+        #expect(d.data(forKey: TabStore.defaultsKey("")) == nil)
+    }
+
     // MARK: Open / switch / insert after current
 
     @Test func openingWhatIsAlreadyOpenSwitchesToItNeverADuplicate() {
@@ -224,28 +251,49 @@ import Testing
     }}
     """
 
-    @Test func theSavedDucksStripOfEachPondBecomesItsListOnceAndStreamStripsAreDropped() {
+    /// The chats' placement (their Pond's id), as the app knows it from the host: never the name the old strip was saved under.
+    private func pondOf(_ key: String) -> String? { key.hasSuffix(":s1") || key.hasSuffix(":s2") ? "project-1" : nil }
+
+    @Test func theSavedDucksStripWaitsForItsPondIdThenBecomesThatPondsList() {
         let d = defaults()
         d.set(Data(legacy.utf8), forKey: TabStore.legacyKey)
-        let store = TabStore(restoring: d)
-        #expect(store.tabs("greenroom") == [.duck("chat:claude-squeak:squeak-native:s1"), .file("/a.txt"), .duck("chat:claude-squeak:squeak-native:s2")])
-        #expect(store.current("greenroom") == .duck("chat:claude-squeak:squeak-native:s2"))
-        #expect(store.tabs("empty").isEmpty)
-        #expect(store.tabs("greenroom//Users/x/greenroom").isEmpty)
+        var store = TabStore(restoring: d)
+        // Not placed yet: nothing is guessed by name.
+        #expect(store.tabs("greenroom").isEmpty)
+        let early = store.adoptLegacy(in: d) { _ in nil }
+        #expect(early.isEmpty)
+        let adopted = store.adoptLegacy(in: d, pondOf: pondOf)
+        #expect(adopted == ["project-1"])
+        #expect(store.tabs("project-1") == [.duck("chat:claude-squeak:squeak-native:s1"), .file("/a.txt"), .duck("chat:claude-squeak:squeak-native:s2")])
+        #expect(store.current("project-1") == .duck("chat:claude-squeak:squeak-native:s2"))
+        #expect(store.tabs("greenroom").isEmpty)
         #expect(d.data(forKey: TabStore.legacyKey) == nil)
-        // The second run reads the new keys, not the old blob.
+        #expect(d.data(forKey: TabStore.legacyPondKey("greenroom")) == nil)
+        // Once adopted, a second run neither migrates again nor finds it waiting.
         d.set(Data(legacy.utf8), forKey: TabStore.legacyKey)
-        let again = TabStore(restoring: d)
-        #expect(again.tabs("greenroom") == store.tabs("greenroom"))
+        var again = TabStore(restoring: d)
+        let nothing = again.adoptLegacy(in: d, pondOf: pondOf)
+        #expect(nothing.isEmpty)
+        #expect(again.tabs("project-1") == store.tabs("project-1"))
+    }
+
+    @Test func aWaitingStripSurvivesARelaunchBeforeItsPondIsKnown() {
+        let d = defaults()
+        d.set(Data(legacy.utf8), forKey: TabStore.legacyKey)
+        _ = TabStore(restoring: d)
+        var relaunched = TabStore(restoring: d)
+        let adopted = relaunched.adoptLegacy(in: d, pondOf: pondOf)
+        #expect(adopted == ["project-1"])
     }
 
     @Test func migratedChatKeysMapToDuckIds() {
         let d = defaults()
         d.set(Data(legacy.utf8), forKey: TabStore.legacyKey)
         var store = TabStore(restoring: d)
+        store.adoptLegacy(in: d, pondOf: pondOf)
         store.adoptDucks { key in key.hasSuffix(":s1") ? "duck-1" : key.hasSuffix(":s2") ? "duck-2" : nil }
-        #expect(store.tabs("greenroom") == [.duck("duck-1"), .file("/a.txt"), .duck("duck-2")])
-        #expect(store.current("greenroom") == .duck("duck-2"))
+        #expect(store.tabs("project-1") == [.duck("duck-1"), .file("/a.txt"), .duck("duck-2")])
+        #expect(store.current("project-1") == .duck("duck-2"))
     }
 
     @Test func unreadableLegacyDataMigratesToNothing() {

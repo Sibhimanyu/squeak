@@ -106,6 +106,7 @@ final class PondsModel {
             // Ducks mode changes how the tree is built: every derived list and the focus read again.
             if oldValue?.ducksMode != directory?.ducksMode { AppModel.shared.inputsChanged() }
             if let directory, directoryLoad.loaded { AppModel.shared.prunePonds(live: directory.liveKeys) }
+            if directory != nil { AppModel.shared.flushPendingTabs() }
         }
     }
     /// Stashed own-Mac threads: the daemon's word (docs/ponds.md); every pond list is read through it.

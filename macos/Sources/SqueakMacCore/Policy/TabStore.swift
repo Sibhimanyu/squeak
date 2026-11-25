@@ -8,7 +8,8 @@ import Foundation
 /// - `open` switches to a tab that is already open (never a duplicate), else inserts the new one right after the current.
 /// - A Duck is one tab, by its Duck id, so it follows the Duck to its newest chat. Closing a tab changes nothing else.
 /// - A tab whose thing is gone closes itself (`prune`).
-/// - One list per Pond, persisted under one key per Pond and restored as it was left.
+/// - One list per Pond, keyed by the Pond's id (its native project id, never a name), persisted under one key per Pond and
+///   restored as it was left. An empty key means the Pond is not known yet: nothing is opened or saved under it.
 public struct TabStore: Equatable, Sendable {
     public struct Strip: Codable, Equatable, Sendable {
         public var tabs: [TabItem] = []
@@ -23,6 +24,8 @@ public struct TabStore: Equatable, Sendable {
     }
 
     private var ponds: [String: Strip] = [:]
+    /// Old strips waiting for their Pond's id (see `adoptLegacy`), by the name they were saved under.
+    private var legacy: [String: Strip] = [:]
     public init() {}
 
     // MARK: Reading
@@ -41,6 +44,7 @@ public struct TabStore: Equatable, Sendable {
     /// Opens `item`: switches to it when it is already open, else inserts it right after the current tab (at the end when
     /// there is none). It becomes the current tab.
     public mutating func open(_ item: TabItem, in pond: String) {
+        guard !pond.isEmpty else { return }
         var strip = ponds[pond] ?? Strip()
         Self.insert(item, into: &strip)
         strip.current = item
@@ -52,6 +56,7 @@ public struct TabStore: Equatable, Sendable {
     /// preview: it opens normally. Returns the preview it replaced, so the caller can let go of what it showed.
     @discardableResult
     public mutating func openPreview(_ item: TabItem, in pond: String) -> TabItem? {
+        guard !pond.isEmpty else { return nil }
         guard item.kind == .file || item.kind == .artifact else { open(item, in: pond); return nil }
         var strip = ponds[pond] ?? Strip()
         if strip.tabs.contains(item) { strip.current = item; ponds[pond] = strip; return nil }
@@ -148,6 +153,24 @@ public struct TabStore: Equatable, Sendable {
         return changed
     }
 
+    /// Gives each old Ducks strip to its Pond once the Pond is known: the Pond of the first chat in the strip that `pondOf`
+    /// can place (by id, never by name). A strip whose Pond already has a list is dropped; one with no chat placed yet waits.
+    /// Saves the Pond lists and forgets the old keys in `defaults`. Returns the Ponds that got a list.
+    @discardableResult
+    public mutating func adoptLegacy(in defaults: UserDefaults, pondOf: (String) -> String?) -> [String] {
+        var adopted: [String] = []
+        for (name, strip) in legacy {
+            if strip.tabs.isEmpty { legacy[name] = nil; defaults.removeObject(forKey: Self.legacyPondKey(name)); continue }
+            var found: String?
+            for t in strip.tabs { if let key = t.chatKey, let p = pondOf(key), !p.isEmpty { found = p; break } }
+            guard let pond = found else { continue }
+            if ponds[pond] == nil { ponds[pond] = strip; save(pond: pond, to: defaults); adopted.append(pond) }
+            legacy[name] = nil
+            defaults.removeObject(forKey: Self.legacyPondKey(name))
+        }
+        return adopted
+    }
+
     private static func insert(_ item: TabItem, into strip: inout Strip) {
         guard !strip.tabs.contains(item) else { return }
         if let cur = strip.current, let at = strip.tabs.firstIndex(of: cur) { strip.tabs.insert(item, at: at + 1) }
@@ -164,16 +187,26 @@ public extension TabStore {
     static let legacyKey = "streamTabs"
 
     static func defaultsKey(_ pond: String) -> String { keyPrefix + pond }
+    /// Where an old Ducks strip waits, by the name it was saved under, until its Pond's id is known.
+    static let legacyPrefix = "tabs.legacy."
+    static func legacyPondKey(_ name: String) -> String { legacyPrefix + name }
 
     /// The lists saved in `defaults`, one per Pond. The first time, the old strips are migrated (and the old key dropped).
     init(restoring defaults: UserDefaults) {
         self.init()
         if !defaults.bool(forKey: Self.migratedKey) {
             if let data = defaults.data(forKey: Self.legacyKey) {
-                for (pond, strip) in Self.migrate(legacy: data) { ponds[pond] = strip; save(pond: pond, to: defaults) }
+                for (name, strip) in Self.migrate(legacy: data) {
+                    legacy[name] = strip
+                    if let blob = try? JSONEncoder().encode(strip) { defaults.set(blob, forKey: Self.legacyPondKey(name)) }
+                }
             }
             defaults.removeObject(forKey: Self.legacyKey)
             defaults.set(true, forKey: Self.migratedKey)
+        }
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.legacyPrefix) {
+            guard let data = defaults.data(forKey: key), let strip = try? JSONDecoder().decode(Strip.self, from: data) else { continue }
+            legacy[String(key.dropFirst(Self.legacyPrefix.count))] = strip
         }
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.keyPrefix) {
             guard let data = defaults.data(forKey: key), let strip = try? JSONDecoder().decode(Strip.self, from: data) else { continue }
@@ -187,8 +220,9 @@ public extension TabStore {
         defaults.set(data, forKey: Self.defaultsKey(pond))
     }
 
-    /// The old saved strips as Pond lists. Only a Pond's Ducks strip (workspace id `<pond>/ducks`) becomes its list, its
-    /// chats as `chat:<key>` Duck identities (`adoptDucks` turns those into Duck ids); per-stream strips are dropped.
+    /// The old saved strips, by the name they were saved under. Only a Pond's Ducks strip (workspace id `<name>/ducks`)
+    /// survives, its chats as `chat:<key>` Duck identities (`adoptDucks` turns those into Duck ids); per-stream strips are
+    /// dropped. The name only holds the strip: `adoptLegacy` finds the Pond through the chats' placement.
     static func migrate(legacy data: Data) -> [String: Strip] {
         struct Old: Decodable {
             struct Tab: Decodable { var kind: String; var id: String }
