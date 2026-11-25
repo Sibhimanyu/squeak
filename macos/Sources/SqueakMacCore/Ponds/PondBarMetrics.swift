@@ -9,6 +9,12 @@ public enum PondBarMetrics {
     public static let controlHeight = 36.0
     /// Air above and below the controls.
     public static var verticalInset: Double { (height - controlHeight) / 2 }
+    /// The row every embedded strip draws in: exactly the bar's height, never a different token (a shorter row inside the bar
+    /// scrolls its taller content to the top and drops the tabs below the switch).
+    public static var rowHeight: Double { height }
+    /// Where a control's top edge sits in the bar, and its centre line: the switch and every tab share both.
+    public static var controlTop: Double { verticalInset }
+    public static var controlMidY: Double { controlTop + controlHeight / 2 }
     /// The Duck subheader under the bar, on the same surface.
     public static let subheaderHeight = 40.0
     /// The chat's soft top fade, so text never shows through behind the controls (no band edge, no hairline).

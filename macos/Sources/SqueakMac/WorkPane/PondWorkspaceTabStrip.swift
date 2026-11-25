@@ -21,7 +21,7 @@ struct PondWorkspaceTabStrip: View {
         VStack(spacing: 0) {
             if !strip.isEmpty {
                 if embedded {
-                    stripRow.frame(height: Metrics.header)
+                    stripRow.frame(height: CGFloat(PondBarMetrics.rowHeight))
                 } else {
                     stripRow
                         .padding(.horizontal, Space.m)

@@ -41,4 +41,11 @@ import Testing
         #expect(PondBarMetrics.surfaceHeight <= PondQuietTint.fadeHeight)
         #expect(PondBarMetrics.chatFadeHeight > 0 && PondBarMetrics.chatFadeHeight <= 40)
     }
+
+    @Test func switchAndTabsShareOneRowAndCentreLine() {
+        // The embedded strip's row is the bar's height, so its tabs centre where the switch does.
+        #expect(PondBarMetrics.rowHeight == PondBarMetrics.height)
+        #expect(PondBarMetrics.controlMidY == PondBarMetrics.height / 2)
+        #expect(PondBarMetrics.controlTop + PondBarMetrics.controlHeight + PondBarMetrics.verticalInset == PondBarMetrics.height)
+    }
 }
