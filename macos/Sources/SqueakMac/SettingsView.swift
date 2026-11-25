@@ -454,6 +454,7 @@ struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     private let hotKeys = HotKeyCenter.shared
     private let floatingDuck = FloatingDuckController.shared
+    private let layoutPreference = MacLayoutPreference.shared
     @State private var loginOn = LoginItem.isEnabled
     @State private var loginError: String?
 
@@ -489,6 +490,11 @@ struct GeneralSettings: View {
                 .disabled(model.captureMode || model.demoMode)
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
+            }
+            SettingsCard(title: "Layout", subtitle: "Try the redesigned window while it is built in stages.", symbol: "rectangle.3.group") {
+                Toggle(isOn: Binding(get: { layoutPreference.isNew }, set: { layoutPreference.isNew = $0 })) {
+                    SettingsControlLabel(title: "New layout", detail: "Ducks as a row of faces instead of tabs, a Pond panel beside the Room and colour tiles for Ponds.")
+                }
             }
             SettingsCard(title: "Disk", subtitle: "Streams leave folders and branches behind. See them with their sizes and clean up what is safe.", symbol: "internaldrive") {
                 Button("Clean up disk\u{2026}") { DiskCleanupCenter.shared.open() }.buttonStyle(SecondaryButtonStyle())

@@ -127,7 +127,11 @@ struct ConversationView: View {
         // The Dashboard keeps its right zone too (its shells and "+"), open or closed by the same dock toggle as a chat's.
         // The Dashboard has no right zone (owner, 2026-11-24): it is a full-width board.
         let homeCtx = false
-        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen)
+        // New layout (DESIGN.md 8.12): a Duck's view has no right inspector (stage 2 adds the icon rail and work pane); the
+        // Room's right side is the Pond panel. A Pond with no host project here keeps today's zone.
+        let newDuckView = chatOpen && roomCtx == nil && MacLayoutPreference.shared.isNew
+            && (model.selectedSession.flatMap { PondsModel.shared.key(of: $0) }.map { DuckAvatarRowView.isAvailable(pond: $0) } ?? false)
+        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
             window: windowWidth,
@@ -184,7 +188,10 @@ struct ConversationView: View {
                     .clipped()
                     if showsInspector, paneOpen {
                         VStack(spacing: 0) {
-                            if let roomCtx { RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW) }
+                            if let roomCtx {
+                                if MacLayoutPreference.shared.isNew { RoomPondPanelView(key: roomCtx.key, projectId: roomCtx.projectId, width: inspectorW) }
+                                else { RoomRightColumn(projectId: roomCtx.projectId, key: roomCtx.key, width: inspectorW) }
+                            }
                             else if homeCtx { HomeInspectorZone(width: inspectorW) }
                             else { DockRightColumn(session: model.selectedSession, width: inspectorW) }
                             if placement == .underRight { DockBottomZone(session: model.selectedSession, columnHeight: columnHeight).frame(width: inspectorW)
@@ -235,7 +242,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && (rightAvailable || roomCtx != nil || homeCtx), window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && !newDuckView && (rightAvailable || roomCtx != nil || homeCtx), window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)

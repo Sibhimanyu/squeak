@@ -1260,6 +1260,38 @@ pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
   New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access.
   Chat details and New chat use the same inset, surfaces and button styles.
 
+### 8.12 New layout (owner-approved 2026-11-25; staged, behind Settings > This Mac > General > "New layout", off by default)
+
+The window is redesigned from Squeak's own model: a Pond is a place, Ducks are teammates you see as faces, and what a Duck
+produces sits beside its chat. The old layout stays exactly as it is while the setting is off; the setting is read through
+`MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
+
+- **Duck avatar row instead of tabs.** The centre top is a row of round avatars: a "Room" avatar first, then the Pond's
+  on-duty Ducks (`DuckAvatarRow`). Each avatar is the brand thread duck (`duckThread.png`, template, tinted, never redrawn)
+  in the Duck's own colour from its colour seed, on a soft tile of that colour, with the Duck's name beside it. The working
+  glyph shows only on working Ducks (corner, per section 8.1); a Duck waiting on you carries the amber triangle; no coloured
+  dots. The selected avatar is raised (`selected` fill, `lineStrong` ring). A Duck opened while Off duty (from the roster or
+  search) shows at the end of the row while it is open and leaves with it; showing it never changes its duty (Off duty
+  stays a separate action). Clicking an avatar shows that Duck's chat in the centre; clicking Room shows the Room. The
+  Dashboard stays on the existing Room | Dashboard switch and shows the same row with nothing selected. Tabs are hidden
+  (the tab code stays for the old layout and for files, canvases and terminals until stage 2 moves them).
+- **Room = home, with the Pond panel on the right.** In the Room the right side is the Pond panel, not the generic inspector:
+  who is present, the Ducks working, Tasks waiting or blocked, and a link to the Notebook (`RoomPondPanel`). It lists host
+  values and decides nothing. In a Duck view the right inspector is hidden.
+- **Duck view = chat + slim icon rail + work pane (stage 2, planned).** A 52pt rail at the right of the chat holds Changes,
+  Files, Canvas and Terminal icons (selected: `selected` fill, a 3pt duck-yellow bar at its left edge, count badges
+  on Changes). Clicking one opens a 420pt work pane beside the chat with a segmented header (Changes / Files / Canvas /
+  Terminal) and the Duck's name. The Terminal opens in the same work pane: no bottom dock or drawer in this layout.
+- **Composer and messages (stage 3, planned).** Tool icons (attach, mention, command, voice) sit inside the field on its
+  left, a model chip floats above the field's left edge, and the send button is a round duck-yellow disc (`ink` glyph on
+  `duck`, 12.9:1). A message's footer (copy, time, retry) shows only on hover.
+- **Pond rows (sidebar).** A tile in the Pond's own colour carrying its initial, the name, a duck-yellow count badge for
+  chats not opened yet (`PondRowMarks`), and the amber `triangle-alert` when something waits on you. No coloured state dots
+  (section 3.3).
+- **Colour.** The accent is the duck's yellow plus each Pond's own colour (section 3.5). State colours keep their meaning.
+- **Stages.** 1: setting, Duck row, Pond panel, Pond rows (built). 2: icon rail and work pane (planned). 3: composer and
+  hover-only footer (planned). The new layout becomes the default only after a debug-build pass by the owner.
+
 ## 9. Voice and copy
 
 ### Vocabulary
