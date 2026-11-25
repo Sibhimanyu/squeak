@@ -87,6 +87,7 @@ extension AppModel {
         }
         for d in wanted {
             let ref = DucklingRef(session: s.key, taskId: d.id)
+            if openDuckling(ref) { continue }
             if let pond { PondOrigin.shared.opened(tab: PondOrigin.ducklingTab(ref), pond: pond, page: page) }
             DockStore.shared.openDuckling(ref)
         }

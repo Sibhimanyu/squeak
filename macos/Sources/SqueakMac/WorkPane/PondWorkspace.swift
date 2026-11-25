@@ -59,7 +59,51 @@ extension AppModel {
 
     func closePondItem(_ item: TabItem) {
         guard let workspace = pondWorkspace else { return }
+        let wasCurrent = tabStore.currentPondItem(workspace.project.id) == item
         updatePondItems(in: workspace.project.id) { $0.closePondItem(item, in: workspace.project.id) }
+        if wasCurrent { returnToParent(of: item, pond: workspace.pond) }
+    }
+
+    /// Closing a Duckling's tab shows its parent Duck's chat again.
+    private func returnToParent(of item: TabItem, pond: String) {
+        guard let source = item.ducklingSource, let key = SessionKey(stringValue: source.session), session(key) != nil else { return }
+        openFromPond(key, pond: pond, page: RoomViewPref.shared.mode(for: pond))
+    }
+
+    /// Opens a Duckling as a tab right after its parent Duck's, over the parent's chat. False when the new layout has no Pond
+    /// for the chat (the classic dock then shows it).
+    @discardableResult
+    func openDuckling(_ ref: DucklingRef) -> Bool {
+        guard let parent = session(ref.session), let pond = PondsModel.shared.key(of: parent), let workspace = PondWorkspace(pond: pond),
+              WorkPaneActions.isDuckView(parent) else { return false }
+        let page = RoomViewPref.shared.mode(for: pond)
+        let tab = TabItem.duckling(session: ref.session.stringValue, task: ref.taskId, parentDuck: parent.duckId ?? parent.key.stringValue)
+        // The parent's chat first (the one source of truth for what the centre shows is PondCentre), then the pill over it.
+        applyCentre(pond: pond, openDuck: { _ in openFromPond(ref.session, pond: pond, page: page) }) { $0.deepLink(duck: tab.parentDuck ?? "") }
+        if selectedSession?.key != ref.session { openFromPond(ref.session, pond: pond, page: page) }
+        updatePondItems(in: workspace.project.id) { $0.openPondItem(tab, in: workspace.project.id) }
+        RailPopoverState.shared.close()
+        return true
+    }
+
+    /// Opens a Duckling in the new layout's strip, else in the classic dock.
+    func openDucklingAnywhere(_ ref: DucklingRef) {
+        if !openDuckling(ref) { DockStore.shared.openDuckling(ref) }
+    }
+
+    func isDucklingOpen(_ ref: DucklingRef) -> Bool {
+        guard let parent = session(ref.session), let pond = PondsModel.shared.key(of: parent), let workspace = PondWorkspace(pond: pond) else {
+            return DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .centre] == ref
+        }
+        return tabStore.currentPondItem(workspace.project.id)?.ducklingSource.map { $0.session == ref.session.stringValue && $0.task == ref.taskId } == true
+    }
+
+    /// Esc on a Duckling's tab: back to the chat of the Duck that started it.
+    func escapeCentre(pond: String) {
+        let item = PondWorkspace(pond: pond).flatMap { tabStore.currentPondItem($0.project.id) }
+        applyCentre(pond: pond, openDuck: { _ in
+            if let item { returnToParent(of: item, pond: pond) }
+        }) { $0.escape() }
     }
 
     /// Return to the Pond page or Duck underneath and keep the item open.
@@ -71,7 +115,8 @@ extension AppModel {
     @discardableResult
     func closeCurrentPondItem() -> Bool {
         guard let workspace = pondWorkspace else { return false }
-        updatePondItems(in: workspace.project.id) { $0.closeCurrentPondItem(in: workspace.project.id) }
+        guard let item = tabStore.currentPondItem(workspace.project.id) else { return true }
+        closePondItem(item)
         return true
     }
 

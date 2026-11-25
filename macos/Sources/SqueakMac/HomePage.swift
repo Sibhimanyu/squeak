@@ -197,7 +197,7 @@ private struct DashboardWorkspaceCard: View {
         if let chat, let set = chat.ducklings, !set.items.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(set.items.prefix(4)) { d in
-                    Button { model.select(chat.key); DockStore.shared.openDuckling(DucklingRef(session: chat.key, taskId: d.id)) } label: {
+                    Button { model.select(chat.key); model.openDucklingAnywhere(DucklingRef(session: chat.key, taskId: d.id)) } label: {
                         HStack(spacing: 6) {
                             DucklingStatusMark(duckling: d).frame(width: 14)
                             Text(verbatim: d.chipText()).font(Typo.meta).foregroundStyle(d.status == .failed ? Theme.negative : Theme.muted).lineLimit(1)

@@ -46,8 +46,8 @@ enum WindowEscape {
             isNewLayout: isNew, overlayOpen: window.attachedSheet != nil, paneOpen: pane.shown != nil,
             page: page, turnRunning: false)
         if window.attachedSheet == nil, step != .closePane, let workspace = model.pondWorkspace,
-           PondCentre(page: RoomViewPref.shared.mode(for: workspace.pond), item: model.tabStore.currentPondItem(workspace.project.id)).escapeStep == .deselectItem {
-            model.applyCentre(pond: workspace.pond) { $0.escape() }
+           PondCentre(page: RoomViewPref.shared.mode(for: workspace.pond), item: model.tabStore.currentPondItem(workspace.project.id)).item != nil {
+            model.escapeCentre(pond: workspace.pond)
             return true
         }
         switch step {

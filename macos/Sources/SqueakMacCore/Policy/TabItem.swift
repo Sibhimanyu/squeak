@@ -10,7 +10,12 @@ public struct TabItem: Codable, Hashable, Sendable {
     /// chat's folder says nothing about a Stream's files). Absent on a tab saved before Streams, or for a Duck outside any
     /// Stream: that tab reads through the Duck's chat as it always did.
     public var stream: TabStream?
-    public init(_ kind: Kind, _ id: String, stream: TabStream? = nil) { self.kind = kind; self.id = id; self.stream = stream }
+    /// A duckling tab's parent Duck (its Duck id, else the parent chat's key), which places the pill right after that Duck's
+    /// tab and is where Esc and close go back to. Absent on every other tab, and on a duckling tab saved without it.
+    public var parentDuck: String?
+    public init(_ kind: Kind, _ id: String, stream: TabStream? = nil, parentDuck: String? = nil) {
+        self.kind = kind; self.id = id; self.stream = stream; self.parentDuck = parentDuck
+    }
 
     /// A Duck's tab, by its Duck id (or `chat:<key>`, see `duckID(of:)`).
     public static func duck(_ id: String) -> TabItem { TabItem(.duck, id) }
@@ -39,14 +44,21 @@ public struct TabItem: Codable, Hashable, Sendable {
 
     var isPondItem: Bool {
         switch kind {
-        case .file, .artifact, .diff, .reviewAll, .notebook: true
-        case .duck, .duckling: false
+        case .file, .artifact, .diff, .reviewAll, .notebook, .duckling: true
+        case .duck: false
         }
     }
     /// An artifact or canvas opened as a tab; `id` is `ArtifactTabID.make`.
     public static func artifact(pond: String, path: String) -> TabItem { TabItem(.artifact, ArtifactTabID.make(pond: pond, path: path)) }
-    /// A duckling the person clicked: its parent chat and its task.
-    public static func duckling(session: String, task: String) -> TabItem { TabItem(.duckling, "\(session)\u{1F}\(task)") }
+    /// A duckling the person clicked: its parent chat, its task and the parent's Duck.
+    public static func duckling(session: String, task: String, parentDuck: String? = nil) -> TabItem {
+        TabItem(.duckling, ScopedTabID.make(session, task), parentDuck: parentDuck)
+    }
+    /// The parent chat and task of a duckling tab.
+    public var ducklingSource: (session: String, task: String)? {
+        guard kind == .duckling else { return nil }
+        return ScopedTabID.parse(id).map { ($0.scope, $0.path) }
+    }
 
     public static let chatPrefix = "chat:"
     /// The identity of the Duck a chat belongs to: its Duck id, else the chat itself (a session no Duck owns).

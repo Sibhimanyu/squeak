@@ -12,7 +12,7 @@ public struct PondCentre: Equatable, Sendable {
     }
 
     /// What Esc does next.
-    public enum EscapeStep: Equatable, Sendable { case deselectItem, toRoom, toDashboard, nothing }
+    public enum EscapeStep: Equatable, Sendable { case deselectItem, toParentDuck, toRoom, toDashboard, nothing }
 
     /// The pond page underneath everything: the one the switch last picked, remembered while a Duck or item covers it.
     public private(set) var page: PondPage
@@ -94,7 +94,7 @@ public struct PondCentre: Equatable, Sendable {
 
     public var escapeStep: EscapeStep {
         switch shows {
-        case .item: .deselectItem
+        case .item(let tab): tab.kind == .duckling && tab.parentDuck != nil ? .toParentDuck : .deselectItem
         case .duck: .toRoom
         case .page(.room): .toDashboard
         case .page(.dashboard): .nothing
@@ -104,6 +104,8 @@ public struct PondCentre: Equatable, Sendable {
     public mutating func escape() {
         switch escapeStep {
         case .deselectItem: item = nil
+        // A Duckling's tab goes back to the Duck that started it, whatever chat is open underneath.
+        case .toParentDuck: if let parent = item?.parentDuck { selectDuck(parent) }
         case .toRoom: switchTo(.room)
         case .toDashboard: switchTo(.dashboard)
         case .nothing: break

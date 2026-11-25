@@ -62,12 +62,19 @@ private enum Fixtures {
     static let pip = DuckRowAvatar(
         id: "pip", name: "Pip", colourSeed: "pip", presence: .working, presenceLine: "Working", sessionId: "s2", title: "Fix login redirect")
 
-    static func tabs(withPip: Bool = false) -> [PondStripTab] {
+    static func tabs(withPip: Bool = false, duckling: Bool = false) -> [PondStripTab] {
         var out = [PondStripTab(item: .duck("dhol"), duck: dhol, closable: false, title: PondTabStatus.title(for: dhol),
                                 status: PondTabStatus.fullLine(for: dhol))]
         if withPip {
             out.append(PondStripTab(item: .duck("pip"), duck: pip, closable: false, title: PondTabStatus.title(for: pip),
                                     status: PondTabStatus.fullLine(for: pip, activity: "editing auth.ts")))
+        }
+        if duckling {
+            let tab = TabItem.duckling(session: "s1", task: "t1", parentDuck: "dhol")
+            let record = Duckling(id: "t1", title: "Review the diff", status: .running, startedAt: Date().addingTimeInterval(-38))
+            out += PondWorkspaceStrip(roster: RoomRoster.roster([PondDuck(id: "dhol", name: "Dhol", currentSessionId: "s1")]),
+                                      place: .dashboard, items: [tab], current: nil)
+                .tabs(ducklings: [tab: record]).filter { $0.item == tab }
         }
         out.append(PondStripTab(item: TabItem(.notebook, "nb"), duck: nil, closable: true, title: nil, status: nil))
         return out
@@ -80,8 +87,8 @@ private enum Fixtures {
     }
 
     /// The real top bar from fixture data. `selected` is what the centre shows.
-    static func bar(width: Double, centre: PondCentre, withPip: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
-        let tabs = tabs(withPip: withPip)
+    static func bar(width: Double, centre: PondCentre, withPip: Bool = false, duckling: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
+        let tabs = tabs(withPip: withPip, duckling: duckling)
         return PondTopBar(
             name: name, subtitle: "2 people, 2 ducks on duty", leadingInset: 0,
             switchSelection: .constant(centre.switchSelection), hasTabs: true,
@@ -214,6 +221,9 @@ private enum Fixtures {
                 }
                 add("bar-duck-and-notebook-\(n)-\(label)", w, 56, dark: dark,
                     barOnSurface(width: w, centre: PondCentre(page: .room, duck: "dhol"), withPip: true, dark: dark))
+                add("bar-duckling-tab-selected-\(n)-\(label)", w, 56, dark: dark,
+                    barOnSurface(width: w, centre: PondCentre(page: .room, duck: "dhol", item: TabItem.duckling(session: "s1", task: "t1", parentDuck: "dhol")),
+                                 duckling: true, dark: dark))
                 add("bar-notebook-selected-\(n)-\(label)", w, 56, dark: dark,
                     barOnSurface(width: w, centre: PondCentre(page: .room, item: TabItem(.notebook, "nb")), dark: dark))
             }
@@ -222,8 +232,8 @@ private enum Fixtures {
     }
 
     /// The bar alone, on the top surface's tint (as it sits in the app).
-    static func barOnSurface(width: Double, centre: PondCentre, withPip: Bool = false, seed: PondSeed = greenroom, dark: Bool) -> some View {
-        bar(width: width, centre: centre, withPip: withPip, seed: seed)
+    static func barOnSurface(width: Double, centre: PondCentre, withPip: Bool = false, duckling: Bool = false, seed: PondSeed = greenroom, dark: Bool) -> some View {
+        bar(width: width, centre: centre, withPip: withPip, duckling: duckling, seed: seed)
             .frame(width: width, height: 56)
             .background(alignment: .top) { DuckPondGradient(colour: gradientColour(seed: seed, dark: dark)) }
             .background(Theme.bg)

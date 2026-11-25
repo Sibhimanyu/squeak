@@ -57,8 +57,8 @@ struct DucklingsBar: View {
 
     private func chip(_ d: Duckling) -> some View {
         let ref = DucklingRef(session: session.key, taskId: d.id)
-        let open = DockStore.shared.ducklings.selected[DockStore.shared.ducklings.zone(of: ref) ?? .centre] == ref
-        return Button { DockStore.shared.openDuckling(ref) } label: {
+        let open = model.isDucklingOpen(ref)
+        return Button { model.openDucklingAnywhere(ref) } label: {
             HStack(spacing: 5) {
                 DucklingStatusMark(duckling: d)
                 ChipText(duckling: d)

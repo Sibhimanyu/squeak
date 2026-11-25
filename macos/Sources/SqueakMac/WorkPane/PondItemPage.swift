@@ -59,7 +59,13 @@ struct PondItemPage: View {
                         .frame(maxWidth: 640, alignment: .leading)
                         .padding(Space.l).frame(maxWidth: .infinity, alignment: .top)
                 }
-            case .duck, .duckling:
+            case .duckling:
+                if let source = item.ducklingSource, let key = SessionKey(stringValue: source.session), let parent = model.session(key) {
+                    DucklingPanel(session: parent, chip: model.ducklings(for: parent)?.items.first { $0.id == source.task }, taskId: source.task, centred: true)
+                } else {
+                    unavailable("This duckling’s Duck is unavailable.")
+                }
+            case .duck:
                 EmptyView()
             }
         }

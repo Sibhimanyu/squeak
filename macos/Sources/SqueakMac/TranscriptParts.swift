@@ -210,7 +210,7 @@ struct ToolCallRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                if let ref = ducklingRef { DockStore.shared.openDuckling(ref); return }
+                if let ref = ducklingRef { model.openDucklingAnywhere(ref); return }
                 guard expandable else { return }
                 withAnimation(Motion.standard) { open.toggle() }
             } label: { row }

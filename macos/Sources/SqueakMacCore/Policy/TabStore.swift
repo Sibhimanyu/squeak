@@ -59,7 +59,11 @@ public struct TabStore: Equatable, Sendable {
         var strip = ponds[pond] ?? Strip()
         if ponds[pond] == nil { strip.workspaceOnly = true }
         var items = strip.workspaceItems ?? WorkspaceItems()
-        Self.insert(item, into: &items.tabs, after: items.current, otherwiseFirst: true)
+        if item.kind == .duckling {
+            Self.insertDuckling(item, into: &items.tabs)
+        } else {
+            Self.insert(item, into: &items.tabs, after: items.current, otherwiseFirst: true)
+        }
         if focus { items.current = item }
         strip.workspaceItems = items
         ponds[pond] = strip
@@ -79,7 +83,8 @@ public struct TabStore: Equatable, Sendable {
     @discardableResult
     public mutating func closePondItem(_ item: TabItem, in pond: String) -> Bool {
         guard var items = ponds[pond]?.workspaceItems, let index = items.tabs.firstIndex(of: item) else { return false }
-        if items.current == item { items.current = Self.neighbour(of: index, in: items.tabs) }
+        // A Duckling's tab closes back to its parent Duck (no item current), never sideways to a neighbouring item.
+        if items.current == item { items.current = item.kind == .duckling ? nil : Self.neighbour(of: index, in: items.tabs) }
         items.tabs.remove(at: index)
         ponds[pond]?.workspaceItems = items
         return true
@@ -229,6 +234,14 @@ public struct TabStore: Equatable, Sendable {
         guard !tabs.contains(item) else { return }
         let index = current.flatMap { tabs.firstIndex(of: $0) }.map { $0 + 1 } ?? (otherwiseFirst ? 0 : tabs.count)
         tabs.insert(item, at: index)
+    }
+
+    /// A Duckling's pill goes after the ones its parent already has, else first among the items (the strip draws it right
+    /// after the parent Duck's tab, see `PondWorkspaceStrip.tabs`).
+    private static func insertDuckling(_ item: TabItem, into tabs: inout [TabItem]) {
+        guard !tabs.contains(item) else { return }
+        let siblings = tabs.indices.filter { tabs[$0].kind == .duckling && tabs[$0].parentDuck == item.parentDuck }
+        tabs.insert(item, at: (siblings.last ?? -1) + 1)
     }
 
     private static func neighbour(of index: Int, in tabs: [TabItem]) -> TabItem? {

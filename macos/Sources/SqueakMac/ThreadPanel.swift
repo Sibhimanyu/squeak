@@ -124,7 +124,7 @@ struct ThreadPanel: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 ForEach(g.helpers) { h in
                     Button {
-                        if !h.isShell { DockStore.shared.openDuckling(DucklingRef(session: s.key, taskId: h.id)) }
+                        if !h.isShell { model.openDucklingAnywhere(DucklingRef(session: s.key, taskId: h.id)) }
                     } label: {
                     HStack(spacing: Space.s) {
                         Lucide(h.isShell ? .terminal : .users, size: 13, color: Theme.muted)

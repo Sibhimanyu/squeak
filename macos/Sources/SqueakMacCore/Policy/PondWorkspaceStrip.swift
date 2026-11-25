@@ -1,3 +1,5 @@
+import Foundation
+
 /// The centre strip in the new layout. The roster owns duty and Duck order. The tab store owns opened items.
 public struct PondWorkspaceStrip: Equatable, Sendable {
     public let row: DuckRowModel
@@ -14,16 +16,29 @@ public struct PondWorkspaceStrip: Equatable, Sendable {
 
     /// Every tab of the one bar in order: on-duty Ducks first (never closable), then an Off-duty Duck whose chat is showing,
     /// then the opened items. `activity` is the open Duck's current step ("editing auth.ts"), which only that Duck knows.
-    public func tabs(activity: String? = nil) -> [PondStripTab] {
-        let ducks = row.ducks.map { duck in
-            PondStripTab(
+    /// A Duckling's pill follows its parent Duck's tab (`ducklings` has the host's record of each, by tab); the other items follow all Ducks.
+    public func tabs(activity: String? = nil, ducklings: [TabItem: Duckling] = [:], now: Date = Date()) -> [PondStripTab] {
+        func pill(_ item: TabItem) -> PondStripTab {
+            guard item.kind == .duckling else { return PondStripTab(item: item, duck: nil, closable: true, title: nil, status: nil) }
+            let parent = item.parentDuck.flatMap { id in row.ducks.first { $0.id == id } }
+            return PondStripTab(
+                item: item, duck: nil, closable: true, title: PondDucklingTab.title(ducklings[item]),
+                status: PondDucklingTab.status(parent: parent?.name, duckling: ducklings[item], now: now))
+        }
+        var out: [PondStripTab] = []
+        for duck in row.ducks {
+            out.append(PondStripTab(
                 item: .duck(duck.id), duck: duck, closable: !duck.onDuty,
                 title: PondTabStatus.title(for: duck),
-                status: PondTabStatus.fullLine(for: duck, activity: duck.id == row.selectedDuck ? activity : nil))
+                status: PondTabStatus.fullLine(for: duck, activity: duck.id == row.selectedDuck ? activity : nil)))
+            out += items.filter { $0.kind == .duckling && $0.parentDuck == duck.id }.map(pill)
         }
-        return ducks + items.map { PondStripTab(item: $0, duck: nil, closable: true, title: nil, status: nil) }
+        let placed = Set(out.map(\.item))
+        let rest = items.filter { !placed.contains($0) }
+        // A Duckling whose parent is not in the row follows the Ducks, before the other items.
+        return out + (rest.filter { $0.kind == .duckling } + rest.filter { $0.kind != .duckling }).map(pill)
     }
-    private var order: [TabItem] { row.ducks.filter(\.opensChat).map { .duck($0.id) } + items }
+    private var order: [TabItem] { tabs().compactMap { $0.duck.map { !$0.opensChat } == true ? nil : $0.item } }
     private var selection: TabItem? { currentItem ?? row.selectedDuck.map(TabItem.duck) }
 
     public func target(at index: Int) -> TabItem? {
@@ -110,5 +125,28 @@ public enum PondTabStatus {
         text = text.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, text != "Starting" else { return nil }
         return text.prefix(1).lowercased() + text.dropFirst()
+    }
+}
+
+/// What a Duckling's pill says, from the host's record of it.
+public enum PondDucklingTab {
+    /// Line 1: the Duckling's task title.
+    public static func title(_ duckling: Duckling?) -> String {
+        let title = (duckling?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Duckling" : title
+    }
+
+    /// Line 2: "<parent> \u{00B7} Working \u{00B7} 38s" while it runs, "<parent> \u{00B7} Done" once it ends. The tab stays after it ends.
+    public static func status(parent: String?, duckling: Duckling?, now: Date = Date()) -> String {
+        let state: String
+        switch duckling?.status {
+        case .running?:
+            state = ["Working", duckling?.elapsed(now: now)].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        case .failed?: state = "Failed"
+        case .stopped?: state = "Stopped"
+        case .unknown?: state = "Unknown"
+        case .done?, nil: state = "Done"
+        }
+        return [parent, state].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
     }
 }

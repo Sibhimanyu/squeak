@@ -65,7 +65,14 @@ struct PondWorkspaceTabStrip: View {
     /// The open Duck's current step: only that Duck's chat is loaded here, so only its tab can say "editing auth.ts".
     private var tabs: [PondStripTab] {
         let working = model.activity.isEmpty ? nil : ChatTimeline.workingLabel(model.activity)
-        return strip.tabs(activity: working)
+        // A Duckling's pill reads the host's record of it (its parent chat's set), so it keeps saying "Done" after it ends.
+        var records: [TabItem: Duckling] = [:]
+        for item in strip.items {
+            guard let source = item.ducklingSource, let key = SessionKey(stringValue: source.session), let parent = model.session(key),
+                  let record = model.ducklings(for: parent)?.items.first(where: { $0.id == source.task }) else { continue }
+            records[item] = record
+        }
+        return strip.tabs(activity: working, ducklings: records)
     }
 
     private var selected: TabItem? { strip.currentItem ?? strip.row.selectedDuck.map(TabItem.duck) }
@@ -177,7 +184,11 @@ struct PondItemLabel {
             title = "Notebook"
             help = "Pond Notebook"
             symbol = "book.closed"
-        case .duck, .duckling:
+        case .duckling:
+            title = "Duckling"
+            help = title
+            symbol = "bubble.left"
+        case .duck:
             title = item.id
             help = title
             symbol = "bubble.left"
@@ -232,7 +243,7 @@ struct PondOvalTab: View {
     static let height = CGFloat(PondBarMetrics.controlHeight)
 
     var body: some View {
-        let isDuck = tab.duck != nil
+        let isDuck = tab.duck != nil || tab.item.kind == .duckling
         content.contentShape(Rectangle())
             .onTapGesture { if tab.duck?.opensChat != false { select() } }
             .frame(minWidth: isDuck ? nil : CGFloat(PondBarMetrics.itemTabWidth.lowerBound), alignment: .leading)
@@ -284,6 +295,15 @@ struct PondOvalTab: View {
                         Text(verbatim: tab.status ?? "").font(.system(size: 11)).foregroundStyle(Theme.muted)
                             .lineLimit(1).truncationMode(.tail)
                     }
+                }
+            }
+            .padding(.horizontal, 12)
+        } else if tab.item.kind == .duckling {
+            HStack(spacing: 8) {
+                DucklingView(parentId: tab.item.parentDuck ?? tab.item.id, parentSize: 20).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: tab.title ?? "Duckling").font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    Text(verbatim: tab.status ?? "").font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
                 }
             }
             .padding(.horizontal, 12)
