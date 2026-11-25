@@ -20,7 +20,7 @@ struct DuckAvatarRowView: View {
     static func isShown(pond key: String, place: DuckRowPlace) -> Bool {
         guard let project = PondsModel.shared.native(key: key) else { return false }
         let threads = PondRoomStore.shared.model(for: project.id).feed.threads
-        let ducks = RoomRosterStore.shared.model(for: project.id).ducks ?? threads.map(PondDuck.init(thread:))
+        let ducks = RoomRosterStore.shared.model(for: project.id).list
         return !DuckAvatarRow.build(roster: RoomRoster.roster(ducks, threads: threads), place: place).isEmpty
     }
 
@@ -49,23 +49,14 @@ private struct DuckAvatarRowContent: View {
 
     var body: some View {
         let threads = room.feed.threads
-        let ducks = roster.ducks ?? threads.map(PondDuck.init(thread:))
+        let ducks = roster.list
         let row = DuckAvatarRow.build(roster: RoomRoster.roster(ducks, threads: threads), place: place)
         // Nothing on duty and no Duck open: no strip at all (the pond header's Dashboard | Room switch is the way to the Room).
         // The sidebar's toggle then sits in the pond header, which carries the clearance itself.
         VStack(spacing: 0) { if !row.isEmpty { strip(row) } }
-        // The roster is the host's list: refreshed when the Room's threads change and slowly while a Duck's chat is open
-        // (the Room is not running then).
-        .task(id: threads) {
-            try? await Task.sleep(for: .milliseconds(250))
-            if !Task.isCancelled { await roster.refresh(host: model.nativeHost) }
-        }
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(6))
-                if !Task.isCancelled { await roster.refresh(host: model.nativeHost) }
-            }
-        }
+        // The roster is the host's list, read through its one shared model (one poll; the Room's changes ask for an early read).
+        .task { roster.keepFresh(host: model.nativeHost) }
+        .onChange(of: threads) { roster.refreshSoon(host: model.nativeHost) }
     }
 
     private func strip(_ row: DuckRowModel) -> some View {

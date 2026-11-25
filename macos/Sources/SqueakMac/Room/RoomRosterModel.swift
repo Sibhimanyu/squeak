@@ -8,6 +8,11 @@ import SqueakMacCore
 final class RoomRosterModel {
     let projectId: String
     private(set) var ducks: [PondDuck]?
+    /// The Pond's Ducks, the one list every view draws (empty until the host first answers).
+    var list: [PondDuck] { ducks ?? [] }
+    /// The one feed: a single poll per Pond, however many views read this model.
+    private var poll: Task<Void, Never>?
+    static let pollSeconds = 5
     /// The daemon's dashboard numbers; nil from an older daemon (the page then counts its rows).
     private(set) var counts: PondCounts?
     /// Chats whose duck is off duty: the dashboard's Off duty filter.
@@ -18,6 +23,29 @@ final class RoomRosterModel {
     private(set) var creating = false
 
     init(projectId: String) { self.projectId = projectId }
+
+    /// Starts the Pond's one refresh loop (idempotent): every view reads this model and none fetches on its own.
+    func keepFresh(host: NativeHostClient) {
+        guard poll == nil else { return }
+        poll = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh(host: host)
+                try? await Task.sleep(for: .seconds(Self.pollSeconds))
+            }
+        }
+    }
+
+    /// Asks for an early read after the Room changed: many callers in a burst make one fetch, through this same model.
+    func refreshSoon(host: NativeHostClient) {
+        guard soon == nil else { return }
+        soon = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            self?.soon = nil
+            await self?.refresh(host: host)
+        }
+    }
+    private var soon: Task<Void, Never>?
 
     func refresh(host: NativeHostClient) async {
         guard let r = try? await DuckClient(host: host).roster(project: projectId) else { return }

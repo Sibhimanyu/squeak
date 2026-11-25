@@ -61,8 +61,16 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var offDuty: PondOffDutyNote? = nil
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
-    /// Ducks mode: the duck's branch ("main" on main), the row's small mono label; nil otherwise.
-    public var branch: String? = nil
+    /// The host's roster line for this Duck ("Working \u{00B7} 1 duckling on x", "Idle \u{00B7} 4m", "off duty 3d ago"), drawn as sent.
+    public var statusLine: String? = nil
+    /// The host's heading (name on duty, chat title off duty).
+    public var heading: String? = nil
+    /// The Duck's Stream chips ("Pond" when it is in none). Never a folder branch.
+    public var streamLabels: [String] = []
+    /// A thread of another Mac that matches no Duck of this Pond: shown under "From the flock", never counted toward duty.
+    public var isFlock = false
+    /// The Duck behind the row (the roster's id); nil for a flock thread.
+    public var duckId: String? = nil
     /// "Repeating a failing step: <label> ×N" for that row.
     public var loopSentence: String? = nil
     public var hostingLabel: String {
@@ -108,6 +116,8 @@ public struct PondHomeLayout: Sendable, Equatable {
     public var fromFlock: [PondChatRow]
     /// How many chats each person is in, by member id.
     public var chatCounts: [String: Int]
+    /// The people in each cloud thread, by thread id (a roster row that matches a thread shows them).
+    public var threadPeople: [String: [PondChatPerson]] = [:]
 
     public var isEmpty: Bool { workspaces.isEmpty && fromFlock.isEmpty }
     /// Every thread the page shows: this Mac's chats in its workspaces plus other Macs' threads (a shared chat of this Mac is
@@ -119,6 +129,72 @@ public struct PondHomeLayout: Sendable, Equatable {
     public static func emptyBranches(_ workspaces: [NativeWorkspace], projectId: String?, chats: [HostSession]) -> [NativeWorkspace] {
         guard let projectId else { return [] }
         return workspaces.filter { w in w.projectId == projectId && w.state != "archived" && !chats.contains { $0.cwd == w.path } }
+    }
+
+    /// Rows the Pond's Duck list holds: every roster Duck, not a flock thread.
+    public var dutyCount: Int { threads.filter { !$0.isFlock }.count }
+
+    /// The roster as the page draws it (the one list of a Pond's Ducks): one row per host Duck, in the host's order and with the
+    /// host's words. This Mac's chat only supplies what a click opens; another Mac's thread joins the Duck whose chat it is, else
+    /// waits in "From the flock" and never counts. Nothing of the daemon's /state rows is rebuilt here.
+    public static func buildRoster(
+        ducks: [PondDuck], sessions: [HostSession], detail: PondDetail?, me: String,
+        hostIdFor: (HostSession) -> String?, hiddenThreads: Set<String> = [], ownThreads: Bool = true
+    ) -> PondHomeLayout {
+        let base = build(
+            project: nil, detail: detail, me: me, hostIdFor: hostIdFor, hiddenThreads: hiddenThreads, ownThreads: ownThreads)
+        let threads = detail?.threads ?? []
+        let you = PondChatPerson(id: detail?.meMember?.id ?? "me", name: me, you: true, live: .none, lastAt: nil)
+        var bySession: [String: HostSession] = [:]
+        for s in sessions { if let id = hostIdFor(s) { bySession[id] = s } }
+        var used = Set<String>()
+        func peopleOf(_ t: PondThread) -> [PondChatPerson] {
+            base.threadPeople[t.id] ?? [you]
+        }
+        let sorted = RoomRoster.roster(ducks).onDuty + RoomRoster.roster(ducks).offDuty
+        let rows = sorted.map { d -> PondChatRow in
+            let s = d.sessionId.flatMap { bySession[$0] }
+            let thread = d.sessionId.flatMap { sid in threads.first { $0.sessionId == sid } }
+            if let thread { used.insert(thread.id) }
+            let state: PondThreadState
+            switch d.activity {
+            case .working: state = .working
+            case .needsYou: state = .needsYou
+            case .error: state = .failed
+            case .idle: state = .finished
+            }
+            var row = PondChatRow(
+                id: s?.key.stringValue ?? "duck:" + d.id, title: (d.chatTitle ?? "").isEmpty ? d.heading : d.chatTitle!, agent: s?.agent ?? d.agent, state: state,
+                mark: nil, lastAt: d.lastActiveAt.map { Date(timeIntervalSince1970: Double($0) / 1000) }, local: s?.key,
+                pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: d.ducklingsRunning,
+                isLooping: s?.isLoopingNow ?? false, loopSentence: s?.loopingSentence, people: thread.map(peopleOf) ?? [you])
+                .withPrivate(thread?.isPrivate ?? false)
+            row.onDuty = d.onDuty
+            row.statusLine = d.presenceLine
+            row.heading = d.heading
+            row.streamLabels = d.streamLabels
+            row.duckId = d.id
+            if !d.onDuty { row.offDuty = PondOffDutyNote(line: d.presenceLine, summary: d.lastSummary) }
+            return row
+        }
+        var flock: [PondChatRow] = []
+        for t in threads where !used.contains(t.id) && !hiddenThreads.contains(t.id) {
+            var row = PondChatRow(
+                id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled duck" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
+                mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: peopleOf(t))
+            if t.mode == .own { row.poweredBy = PondOwnThreads.poweredBy(nest: t.nestName ?? t.nest, ownThreads: ownThreads) }
+            row.isFlock = true
+            flock.append(row)
+        }
+        flock.sort {
+            let a = $0.lastAt ?? .distantPast, b = $1.lastAt ?? .distantPast
+            return a != b ? a > b : $0.title.localizedCompare($1.title) == .orderedAscending
+        }
+        var card = PondWorkspaceCard(id: "ducks", name: "Ducks", title: nil, branch: nil, mark: nil, chats: rows)
+        card.isDucks = true
+        var counts: [String: Int] = [:]
+        for r in rows + flock { for p in r.people { counts[p.id, default: 0] += 1 } }
+        return PondHomeLayout(workspaces: rows.isEmpty ? [] : [card], fromFlock: flock, chatCounts: counts, threadPeople: base.threadPeople)
     }
 
     public static func build(
@@ -169,7 +245,6 @@ public struct PondHomeLayout: Sendable, Equatable {
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
                 if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false; made.offDuty = offDutyNotes[id] ?? PondOffDutyNote(line: "Off duty") }
-                if ws.isDucks { made.branch = DuckRow(session: s, isMain: main?.contains(s) ?? false).label }
                 return made
             }
             var card = PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
@@ -227,7 +302,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         let all = cards.flatMap(\.chats) + flock
         var counts: [String: Int] = [:]
         for r in all { for p in r.people { counts[p.id, default: 0] += 1 } }
-        return PondHomeLayout(workspaces: cards, fromFlock: order(flock), chatCounts: counts)
+        return PondHomeLayout(workspaces: cards, fromFlock: order(flock), chatCounts: counts, threadPeople: Dictionary(uniqueKeysWithValues: threads.map { ($0.id, people($0)) }))
     }
 }
 
@@ -252,10 +327,10 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
     public func includes(_ row: PondChatRow) -> Bool {
         switch self {
         case .all: true
-        case .onDuty: row.onDuty
-        case .needsYou: row.onDuty && row.state == .needsYou
-        case .working: row.onDuty && (row.state == .working || row.ducklingsRunning > 0)
-        case .offDuty: !row.onDuty
+        case .onDuty: row.onDuty && !row.isFlock
+        case .needsYou: row.onDuty && !row.isFlock && row.state == .needsYou
+        case .working: row.onDuty && !row.isFlock && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
+        case .offDuty: !row.onDuty && !row.isFlock
         case .shared: row.shared
         }
     }
@@ -281,6 +356,6 @@ extension PondHomeLayout {
             guard !copy.chats.isEmpty || (card.chats.isEmpty && scope == .all && matches(branch)) else { return nil }
             return copy
         }
-        return PondHomeLayout(workspaces: cards, fromFlock: fromFlock.filter { includes($0) }, chatCounts: chatCounts)
+        return PondHomeLayout(workspaces: cards, fromFlock: fromFlock.filter { includes($0) }, chatCounts: chatCounts, threadPeople: threadPeople)
     }
 }

@@ -12,23 +12,27 @@ private func chat(_ id: String, state: SessionState = .idle) -> HostSession {
 
 @Suite("Pond dashboard counts")
 struct PondCountsTests {
-    private func layout(off: Set<String> = []) -> PondHomeLayout {
+    /// The host's roster for the five chats: a, e working (e is off duty), b needs you, c and d idle (d off duty).
+    private func layout() -> PondHomeLayout {
         let chats = [chat("a", state: .working), chat("b", state: .blocked), chat("c"), chat("d"), chat("e", state: .working)]
-        let p = SidebarTreeBuilder.build(chats, now: t0).projects[0]
-        return PondHomeLayout.build(project: p, detail: nil, me: "Me", hostIdFor: { $0.key.hostSessionId }, offDutySessions: off)
+        func duck(_ id: String, _ activity: PondDuckActivity, off: Bool = false) -> PondDuck {
+            var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), duty: off ? .off : .on, currentSessionId: id)
+            d.activity = activity
+            return d
+        }
+        let ducks = [duck("a", .working), duck("b", .needsYou), duck("c", .idle), duck("d", .idle, off: true), duck("e", .working, off: true)]
+        return PondHomeLayout.buildRoster(ducks: ducks, sessions: chats, detail: nil, me: "Me", hostIdFor: { $0.key.hostSessionId })
     }
 
-    @Test func fallbackCountsLikeTheDaemon() {
-        let l = layout(off: ["d", "e"])
-        let c = PondCounts.fallback(rows: l.threads)
-        #expect(c == PondCounts(onDuty: 3, working: 1, needsYou: 1, offDuty: 2, total: 5))
+    @Test func tilesCountExactlyTheListedRows() {
+        let l = layout()
+        #expect(l.dutyCount == 5)
+        #expect(l.count(in: .onDuty) == 3 && l.count(in: .offDuty) == 2 && l.count(in: .working) == 1 && l.count(in: .needsYou) == 1)
     }
 
     @Test func sentCountsWinAndTilesFilterByDuty() {
-        let l = layout(off: ["d", "e"])
+        let l = layout()
         let sent = PondCounts(onDuty: 9, working: 8, needsYou: 7, offDuty: 6, total: 15)
-        #expect(PondCounts.resolve(sent, rows: l.threads) == sent)
-        #expect(PondCounts.resolve(nil, rows: l.threads).onDuty == 3)
         #expect(sent.count(.offDuty) == 6)
         #expect(PondCounts.secondary(.offDuty, sent) == "15 in all")
         #expect(PondCounts.secondary(.onDuty, sent) == nil)

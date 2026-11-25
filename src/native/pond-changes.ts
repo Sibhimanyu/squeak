@@ -132,12 +132,9 @@ export class PondChangesReader {
     const project = store.getProject(projectId);
     if (!project) return null;
     const isGit = project.kind === "git";
-    // A Duck may be in several Streams: one entry per (Duck, Stream), a Duck's entries together in join order. An
-    // old Duck with only a `place` counts as being in that one Stream.
-    const streamsOf = (d: ReturnType<Room["listDucks"]>[number]): Array<{ workspaceId: string; branch: string }> => {
-      if (d.streams?.length) return d.streams;
-      return d.place?.kind === "stream" ? [{ workspaceId: d.place.workspaceId, branch: d.place.branch }] : [];
-    };
+    // A Duck may be in several Streams: one entry per (Duck, Stream), a Duck's entries together in join order.
+    const streamsOf = (d: ReturnType<Room["listDucks"]>[number]): Array<{ workspaceId: string; branch: string }> =>
+      d.streams ?? [];
     const streams = room.listDucks(projectId).filter((d) => streamsOf(d).length > 0);
     const picked = streams.slice(0, POND_CHANGES_MAX_DUCKS);
 

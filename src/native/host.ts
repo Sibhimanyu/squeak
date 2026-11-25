@@ -664,6 +664,19 @@ export class SessionHost extends EventEmitter {
     return list;
   }
 
+  /** A chat's Ducklings for the Pond roster: how many run, whether they keep it working, and what the first is on. */
+  helpersOf(id: string): { running: number; keepWorking: boolean; task?: string } | null {
+    const list = this.ducklingsOf(id);
+    if (!list) return null;
+    const session = this.store.getSession(id);
+    const task = list.items.find((d) => d.status === "running")?.title;
+    return {
+      running: list.running,
+      keepWorking: !!session && !BUSY.has(session.status) && helpersKeepWorking(list, Date.now()),
+      ...(task ? { task } : {}),
+    };
+  }
+
   /** One helper's panel: its brief, its own steps from the stored rows, its report. Null when the chat has no such helper. */
   ducklingDetail(id: string, taskId: string): DucklingDetail | null {
     const tracker = this.trackerOf(id);

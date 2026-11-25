@@ -122,7 +122,20 @@ export interface DuckStream {
   title?: string;
 }
 
-/** One duck of the pond with its current place (GET .../ducks). */
+/** A Duck's Ducklings as the host knows them (`SessionHost.helpersOf`). */
+export interface DuckHelpers {
+  /** How many are running now. */
+  running: number;
+  /** They keep the Duck working although its turn ended (`helpersKeepWorking`). */
+  keepWorking: boolean;
+  /** What the first running Duckling is on. */
+  task?: string;
+}
+
+/** One Duck's activity, decided once on the host: working means its turn runs or its Ducklings still work. */
+export type DuckActivity = "working" | "needsYou" | "idle" | "error";
+
+/** One duck of the pond (GET .../ducks): the only list of a Pond's Ducks, every surface draws it. */
 export interface DuckView {
   id: string;
   projectId: string;
@@ -137,9 +150,18 @@ export interface DuckView {
   duty: "on" | "off";
   /** The duck's current session; absent for a duck that has not worked yet. */
   currentSessionId?: string;
-  place?: DuckPlace;
   /** The Streams it has joined, in order; absent when it is in none (the Pond itself). */
   streams?: DuckStream[];
+  /** The Stream chips as drawn: each Stream's title (else its branch), or "Pond" when it is in none. Never a folder branch. */
+  streamLabels: string[];
+  /** Working when the turn runs or any Duckling still works; needsYou when it waits on the person. */
+  activity: DuckActivity;
+  /** How many Ducklings run for it now. */
+  ducklingsRunning: number;
+  /** The one status line every surface shows: "Working · 1 duckling on <task>", "Needs you", "Idle · 4m", "off duty 3d ago". */
+  statusLine: string;
+  /** What the Duck is called: its name on duty, its chat title off duty. */
+  heading: string;
   /** Members' own ducks (design only, `pondOwnThreads` stays off): which Mac runs this duck. Never set today. */
   nest?: string;
   /** Members' own ducks (design only): the member whose machine this duck runs on ("Powered by ..."). Never set today. */
@@ -289,6 +311,8 @@ export interface RoomOptions {
   deliver?: (sessionId: string, text: string, opts?: { woke: boolean }) => Promise<unknown> | void;
   /** Writes the summary of a Duck-to-Duck message its sender left out: on-device first, Haiku after. */
   summaryWriters?: SummaryWriterPort[];
+  /** A chat's Ducklings now (the host's `helpersOf`). Absent: none run (tests with no host). */
+  helpers?: (sessionId: string) => DuckHelpers | null;
 }
 
 /** Emits `post` (a `RoomPostRow`) for every new post. */
@@ -1075,23 +1099,38 @@ export class Room extends EventEmitter {
     const s = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
     const created = Date.parse(duck.createdAt) || 0;
     const at = s ? Date.parse(s.updatedAt) : created;
-    const place = this.placeOf(s);
-    const streams = this.streamsOf(duck.id);
+    // A Duck not yet moved to joined Streams still reads as in the Stream its chat runs in (never a folder branch).
+    const own = this.streamsOf(duck.id);
+    const place = own.length === 0 ? this.placeOf(s) : undefined;
+    const placed = place ? this.store.getWorkspace(place.workspaceId) : null;
+    const streams: DuckStream[] = place
+      ? [{ workspaceId: place.workspaceId, branch: place.branch, ...(placed?.title ? { title: placed.title } : {}) }]
+      : own;
+    const helpers = s ? (this.options.helpers?.(s.id) ?? null) : null;
+    const activity = this.activityOf(s, helpers);
+    const name = duck.name ?? (s ? agentName(s) : (duck.lastName ?? "Duck"));
+    const chatTitle = s?.title?.trim() || undefined;
+    const lastActiveAt = Number.isFinite(at) ? at : created;
+    const ducklingsRunning = helpers?.running ?? 0;
     return {
       id: duck.id,
       projectId: duck.projectId,
       // Off duty the name is released: the Duck reads by its chat title (`lastName` is history only).
-      name: duck.name ?? (s ? agentName(s) : (duck.lastName ?? "Duck")),
+      name,
       ...(duck.lastName && !duck.name ? { lastName: duck.lastName } : {}),
-      ...(s?.title?.trim() ? { chatTitle: s.title.trim() } : {}),
+      ...(chatTitle ? { chatTitle } : {}),
       ...(duck.role ? { role: duck.role } : {}),
       colourSeed: duck.colourSeed,
       duty: duck.duty,
       ...(s ? { currentSessionId: s.id } : {}),
-      ...(place ? { place } : {}),
       ...(streams.length ? { streams } : {}),
-      state: s ? threadState(s.status, s.lastTurnEndedAt) : "idle",
-      lastActiveAt: Number.isFinite(at) ? at : created,
+      streamLabels: streams.length ? streams.map((x) => x.branch || x.title?.trim() || "Stream") : ["Pond"],
+      activity,
+      ducklingsRunning,
+      statusLine: statusLineOf(activity, duck.duty, ducklingsRunning, helpers?.task, lastActiveAt, this.now()),
+      heading: duck.duty === "off" ? (chatTitle ?? name) : name,
+      state: activity === "needsYou" ? "waiting" : activity,
+      lastActiveAt,
       ...(duck.duty === "off" && s ? this.lastSummaryOf(s.id) : {}),
       sessions: this.store.duckSessionIds(duck.id).length,
       notebook: duck.notebook,
@@ -1104,11 +1143,29 @@ export class Room extends EventEmitter {
     return text ? { lastSummary: text.length > 160 ? `${text.slice(0, 159)}…` : text } : {};
   }
 
-  /** Every duck of the pond worth listing (sessionless ones, and those whose chat was active in 30 days). */
+  /** The working rule, once: the turn runs or its Ducklings still work; else waiting on the person, an error, or idle. */
+  private activityOf(s: SessionRow | null, helpers: DuckHelpers | null): DuckActivity {
+    const state = s ? threadState(s.status, s.lastTurnEndedAt) : "idle";
+    if (state === "waiting") return "needsYou";
+    if (state === "error") return "error";
+    if (state === "working" || helpers?.keepWorking) return "working";
+    return "idle";
+  }
+
+  /**
+   * The Pond's roster, the only list of its Ducks: every Duck that is not archived (nameless ones and closed imports
+   * too, so they stay Off duty), whatever its age, keyed by Duck id, newest activity first.
+   */
   listDucks(projectId: string): DuckView[] {
-    return this.duckCandidates(projectId, 30 * 24 * 3_600_000, { offDuty: true })
-      .map((c) => this.duckView(c.duck))
-      .sort((a, b) => b.lastActiveAt - a.lastActiveAt || a.id.localeCompare(b.id));
+    if (!this.store.getProject(projectId)) return [];
+    this.sessionsOf(projectId); // makes ducks for chats that have none
+    const out: DuckView[] = [];
+    for (const duck of this.store.listDucks(projectId)) {
+      const session = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
+      if (session?.archivedAt) continue;
+      out.push(this.duckView(duck));
+    }
+    return out.sort((a, b) => b.lastActiveAt - a.lastActiveAt || a.id.localeCompare(b.id));
   }
 
   /** The pond dashboard's numbers over the ducks `listDucks` lists (`fleet/pond-counts.ts`). */
@@ -1116,8 +1173,8 @@ export class Room extends EventEmitter {
     return pondCounts(
       this.listDucks(projectId).map((d) => ({
         duty: d.duty,
-        working: d.state === "working",
-        needsYou: d.state === "waiting",
+        working: d.activity === "working",
+        needsYou: d.activity === "needsYou",
       })),
     );
   }
@@ -1138,7 +1195,8 @@ export class Room extends EventEmitter {
     const ended = this.log.lastEnded(s.id);
     const endedAt = ended ? Date.parse(ended.at) : NaN;
     const on = m?.working && !(m.done && m.done.seq > m.working.seq) ? m.working : undefined;
-    const state = threadState(s.status, s.lastTurnEndedAt);
+    const base = threadState(s.status, s.lastTurnEndedAt);
+    const state = base === "idle" && this.options.helpers?.(s.id)?.keepWorking ? "working" : base;
     const turns = this.reader.turns(s.id);
     const last = turns[turns.length - 1];
     const open = last && last.endedAt === undefined ? last : undefined;
@@ -1334,6 +1392,42 @@ function projectIdOf(store: NativeStore, s: SessionRow): string {
 
 export function agentName(s: SessionRow): string {
   return s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude");
+}
+
+function agoShort(ms: number): string {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
+}
+
+/** The status line of a Duck, written once for every surface. */
+export function statusLineOf(
+  activity: DuckActivity,
+  duty: "on" | "off",
+  running: number,
+  task: string | undefined,
+  lastActiveAt: number,
+  now: number,
+): string {
+  if (duty === "off") {
+    const ago = agoShort(now - lastActiveAt);
+    return ago === "now" ? "off duty just now" : `off duty ${ago} ago`;
+  }
+  switch (activity) {
+    case "working": {
+      if (running < 1) return "Working";
+      const on = task?.trim() ? ` on ${task.trim()}` : "";
+      return `Working · ${running} duckling${running === 1 ? "" : "s"}${on}`;
+    }
+    case "needsYou":
+      return "Needs you";
+    case "error":
+      return "Error";
+    default:
+      return `Idle · ${agoShort(now - lastActiveAt)}`;
+  }
 }
 
 function threadState(status: string, lastTurnEndedAt: string | null): RoomThread["state"] {

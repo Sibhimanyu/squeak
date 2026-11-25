@@ -121,7 +121,13 @@ struct PondHomeView: View {
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
 
     private var layout: PondHomeLayout {
-        PondHomeLayout.build(
+        // Ducks mode: the host's roster is the one list of the Pond's Ducks; this Mac's chats only say what a click opens.
+        if model.ducksMode, let roster {
+            return PondHomeLayout.buildRoster(
+                ducks: roster.list, sessions: localSessions, detail: detail, me: person, hostIdFor: { model.hostId($0) },
+                hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
+        }
+        return PondHomeLayout.build(
             project: model.pondProject(key), detail: detail, me: person,
             emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
@@ -171,7 +177,7 @@ struct PondHomeView: View {
         .background(Theme.bg)
         .onAppear { ponds.note = nil }
         .pondHeartbeat(pond: pond?.id)
-        .task(id: native?.id) { if native != nil { await roster?.refresh(host: model.nativeHost) } }
+        .task(id: native?.id) { roster?.keepFresh(host: model.nativeHost) }
     }
 
     // MARK: Identity and overview
@@ -339,7 +345,7 @@ struct PondHomeView: View {
     }
 
     private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
-        let counts = PondCounts.resolve(roster?.counts, rows: layout.threads)
+        let counts = roster?.counts ?? PondCounts.none
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: compact ? 2 : 4), spacing: 12) {
             ForEach(PondDashboardScope.tiles, id: \.self) { item in
                 let count = counts.count(item) + (item == .needsYou && role.canApproveJoins ? (detail?.joins.count ?? 0) : 0)
@@ -403,7 +409,7 @@ struct PondHomeView: View {
             .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
             if scope != .all || !query.isEmpty {
                 HStack {
-                    Text("\(filtered.threadCount) of \(layout.threadCount) ducks · \(scope.title)")
+                    Text("\(filtered.dutyCount) of \(layout.dutyCount) ducks · \(scope.title)")
                         .font(Typo.meta).foregroundStyle(Theme.muted)
                     Spacer()
                     Button("Reset") { scope = .all; query = "" }.buttonStyle(.borderless).font(Typo.meta)
@@ -424,7 +430,6 @@ struct PondHomeView: View {
             } else {
                 PondWorkspacesView(layout: filtered, members: detail?.members ?? [], showsHeading: false, open: open)
             }
-            if model.ducksMode, !chrome.isRemote { DuckBranchesList(rows: model.duckRows(pond: key, fromPage: true)) }
             archivedThreads
         }
     }
@@ -832,10 +837,9 @@ struct PondSharedHeader: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let threads = PondRoomStore.shared.model(for: projectId, member: member).feed.threads
         let name = PondsModel.shared.name(key: key)
         let people = PondsModel.shared.detail(key: key)?.members.count ?? 1
-        let subtitle = RoomDucks.subtitle(people: people, ducks: RoomDucks.headerDucks(threads).count)
+        let subtitle = RoomDucks.subtitle(people: people, counts: PondsModel.shared.native(key: key).flatMap { RoomRosterStore.shared.model(for: $0.id).counts })
         let centre = PondCentre(page: RoomViewPref.shared.mode(for: key), duck: inDuck ? (strip?.row.selectedDuck ?? "") : nil,
                                 item: itemShowing ? (strip?.currentItem ?? TabItem(.notebook, "")) : nil)
         PondTopBar(

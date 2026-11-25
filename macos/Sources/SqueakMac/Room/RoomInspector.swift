@@ -97,7 +97,7 @@ struct RoomInspector: View {
         }
     }
 
-    private var allDucks: [PondDuck] { roster.ducks ?? room.feed.threads.map(PondDuck.init(thread:)) }
+    private var allDucks: [PondDuck] { roster.list }
 
     private var ducksList: some View {
         let all = RoomRoster.roster(allDucks, threads: room.feed.threads)
@@ -140,10 +140,8 @@ struct RoomInspector: View {
             if !searching, !offDuty.rows.isEmpty { offDutyGroup(offDuty) }
             if let e = roster.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).padding(.horizontal, 6).padding(.top, 4) }
         }
-        .task(id: room.feed.threads) {
-            try? await Task.sleep(for: .milliseconds(250))
-            if !Task.isCancelled { await roster.refresh(host: model.nativeHost) }
-        }
+        .task { roster.keepFresh(host: model.nativeHost) }
+        .onChange(of: room.feed.threads) { roster.refreshSoon(host: model.nativeHost) }
         .sheet(item: $editing) { e in
             DuckEditSheet(edit: e) { text in
                 let field: RoomDuckField = e.field == .name ? (RoomDucks.cleanName(text).map { .set($0) } ?? .unchanged) : (RoomDucks.cleanRole(text) ?? .unchanged)
@@ -246,7 +244,7 @@ private struct DuckRow: View {
         HStack(alignment: .center, spacing: 0) {
             Button(action: open) { info.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(duck.heading)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.placeChip ?? ""). \(duck.presenceLine)")
+                .accessibilityLabel("\(duck.heading)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.streamLabels.joined(separator: ", ")). \(duck.presenceLine)")
                 .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
             if hover || !duck.onDuty {
                 HStack(spacing: 2) {
@@ -286,7 +284,7 @@ private struct DuckRow: View {
                     case .idle, .off: EmptyView()
                     }
                     Text(verbatim: duck.presenceLine).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
-                    if let chip = duck.placeChip {
+                    if let chip = duck.streamLabels.joined(separator: ", ") as String?, !chip.isEmpty {
                         Text(verbatim: chip).font(.system(size: 10)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                             .padding(.horizontal, 5).frame(height: 16).background(Theme.selected, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }

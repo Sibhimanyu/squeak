@@ -18,7 +18,7 @@ import SqueakMacCore
 
     func strip(place: DuckRowPlace, store: TabStore) -> PondWorkspaceStrip {
         PondWorkspaceStrip(
-            roster: RoomRoster.roster(roster.ducks ?? threads.map(PondDuck.init(thread:)), threads: threads),
+            roster: RoomRoster.roster(roster.list, threads: threads),
             place: place, items: store.pondItems(project.id), current: store.currentPondItem(project.id))
     }
 }

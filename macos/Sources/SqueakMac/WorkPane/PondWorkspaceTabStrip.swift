@@ -31,18 +31,8 @@ struct PondWorkspaceTabStrip: View {
                 }
             }
         }
-        .task(id: visible ? workspace.threads : nil) {
-            guard visible else { return }
-            try? await Task.sleep(for: .milliseconds(250))
-            if !Task.isCancelled { await workspace.roster.refresh(host: model.nativeHost) }
-        }
-        .task(id: visible) {
-            guard visible else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(6))
-                if !Task.isCancelled { await workspace.roster.refresh(host: model.nativeHost) }
-            }
-        }
+        .task(id: visible ? workspace.project.id : nil) { if visible { workspace.roster.keepFresh(host: model.nativeHost) } }
+        .onChange(of: workspace.threads) { workspace.roster.refreshSoon(host: model.nativeHost) }
         // Live tabs: an open diff, file or artifact is read again every few seconds, so a pill you are not on can say
         // "updated" and a tab whose source is gone can say so.
         .task(id: visible ? workspace.project.id : nil) {
