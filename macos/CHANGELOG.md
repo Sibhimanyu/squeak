@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.34.5
+
+**One rail, one top bar, and things open as tabs.**
+
+- Every page (Dashboard, Room and each duck) has the same tools on the right: Changes, Files, Artifacts, Tasks, Notebook and Terminal. Changes, Files, Artifacts and Tasks open a short list; pick something and it opens as a tab. Terminal opens beside the chat.
+- The pond's name, the Dashboard | Room switch, your ducks (as circles) and open tabs share one bar at the top. Open tabs belong to the pond and come back after a restart. ⌘1–9 jump to a tab, ⌃Tab cycles, ⌘W closes the current one.
+- Changes on the Dashboard and in the Room lists every duck's changed files, grouped by duck. "Review all from Pip" opens a duck's whole change set, with merge and pull request controls; "Ask Pip to fix…" sends a note to that duck.
+- An artifact opens full size with one header and one Export menu. Zoom with ⌘= / ⌘- / ⌘0.
+- Open tabs update when a duck changes them; a dot marks one that changed while you were elsewhere. If a branch is merged or a file is removed, its tab says so instead of vanishing.
+- Reply in the Room quotes a message and mentions who said it.
+- The / list shows all your skills, including ones from plugins such as mattpocock-skills; typing part of a name finds it.
+- Archived chats are now off-duty ducks, and the sidebar no longer has an Archived section.
+
 ## 2.34.4
 
 **The Room is a chat.**
