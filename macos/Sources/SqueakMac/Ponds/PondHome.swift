@@ -40,10 +40,13 @@ struct PondRouteView: View {
             Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
         } else if case .home(let project) = route, let room = roomProject(project) {
             // New layout (DESIGN.md 8.12): the Duck row sits above both pages (Room and Dashboard), so it does not slide.
+            let rowPlace: DuckRowPlace = RoomViewPref.shared.mode(for: project) == .room ? .room : .dashboard
             if MacLayoutPreference.shared.isNew, DuckAvatarRowView.isAvailable(pond: project) {
+                // Nobody on duty: the row is not drawn, and the pond header below carries the sidebar clearance itself.
+                let rowShown = DuckAvatarRowView.isShown(pond: project, place: rowPlace)
                 VStack(spacing: 0) {
-                    DuckAvatarRowView(key: project, place: RoomViewPref.shared.mode(for: project) == .room ? .room : .dashboard, leadingInset: sidebarClearance)
-                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: 0) { standard(clearance: 0) }
+                    DuckAvatarRowView(key: project, place: rowPlace, leadingInset: sidebarClearance)
+                    PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: rowShown ? 0 : sidebarClearance) { standard(clearance: rowShown ? 0 : sidebarClearance) }
                 }
             } else {
                 PondSpace(key: project, projectId: room.id, member: room.member, leadingInset: sidebarClearance) { standard() }
@@ -136,9 +139,11 @@ struct PondHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                    PondForYouCard(key: key)
                     nextSteps(layout)
                     overview(layout, compact: geometry.size.width < 650)
                     if !joins.isEmpty { joinsGroup(joins) }
+                    presence
                     // The people, invites and pond controls live in the inspector beside this page (`PondInspector`).
                     threads(layout).frame(maxWidth: .infinity, alignment: .leading)
                     if let native, !chrome.isRemote { CanvasesSection(pondKey: key, projectId: native.id) }
@@ -304,6 +309,32 @@ struct PondHomeView: View {
         if let owner = pond.ownerName, role != .owner { parts.append("owned by \(owner)") }
         if role == .viewer { parts.append(PondThreadStatus.viewerLine) }
         return parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// Who is here, the Tasks waiting and the Notebook: what the Room's side panel shows, here because the Dashboard has no
+    /// side panel. The Ducks working are the Working tile above and the list below, so they are not repeated.
+    @ViewBuilder private var presence: some View {
+        if let native, !chrome.isRemote {
+            let panel = PondPresence.panel(key: key, projectId: native.id)
+            VStack(alignment: .leading, spacing: 12) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        presenceCard { PondPeopleSection(panel: panel) }
+                        presenceCard { PondTasksSection(panel: panel) }
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        presenceCard { PondPeopleSection(panel: panel) }
+                        presenceCard { PondTasksSection(panel: panel) }
+                    }
+                }
+                PondNotebookRow(key: key)
+            }
+        }
+    }
+
+    private func presenceCard<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        content().padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {

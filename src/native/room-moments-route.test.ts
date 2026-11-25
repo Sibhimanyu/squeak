@@ -42,6 +42,7 @@ describe("the host's room moments route, read through the daemon's client", () =
       permissionMode: "default",
       title: "Maple",
     });
+    store.updateDuck(store.duckForSession(duck.id, project.id)!.id, { name: "Maple" });
     const client = new NativeHostClient({
       baseUrl: `http://127.0.0.1:${port}`,
       token: () => fs.readFileSync(tokenPath, "utf8").trim(),

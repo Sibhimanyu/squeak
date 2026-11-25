@@ -23,10 +23,8 @@ import Testing
         #expect(RoomRoster.offDutyGroup(ducks, now: now).more == 0)
     }
 
-    @Test func subtitleSaysHowManyAreOffDuty() {
-        #expect(RoomDucks.subtitle(people: 1, ducks: 0, offDuty: 48) == "1 person \u{00B7} 48 ducks off duty")
-        #expect(RoomDucks.subtitle(people: 1, ducks: 0, offDuty: 1) == "1 person \u{00B7} 1 duck off duty")
-        #expect(RoomDucks.subtitle(people: 2, ducks: 3, offDuty: 9) == "2 people \u{00B7} 3 ducks on duty")
+    @Test func subtitleNeverCountsOffDutyDucks() {
+        #expect(RoomDucks.subtitle(people: 2, ducks: 3) == "2 people \u{00B7} 3 ducks on duty")
         #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks on duty")
     }
 }

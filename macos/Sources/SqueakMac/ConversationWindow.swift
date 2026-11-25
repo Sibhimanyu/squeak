@@ -131,6 +131,8 @@ struct ConversationView: View {
         // any window width the solver can fit, with its own open/closed choice.
         let focus = model.focus
         let roomCtx = roomContext
+        // The Dashboard has no side panel: its content (who is here, Tasks, Notebook) is in the page. Only the Room has one.
+        let roomPanel = roomCtx.map { RoomViewPref.shared.mode(for: $0.key) == .room } ?? false
         let showingSettings = focus.isSettings
         // The right zone belongs to the page: a chat's dock column, or a pond home's room inspector.
         let chatOpen = focus.page == .chat && model.selectedSession != nil
@@ -143,7 +145,7 @@ struct ConversationView: View {
         let workPane = WorkPaneStore.shared.pane
         let duckSession = newDuckView ? model.selectedSession : nil
         let paneView = duckSession.flatMap { workPane.current == WorkPaneActions.duckKey($0) ? workPane.shown : nil }
-        let showsInspectorWanted = roomCtx != nil ? roomInspectorOpen : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
+        let showsInspectorWanted = roomCtx != nil ? (roomInspectorOpen && roomPanel) : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
         // One solver decides every width, so the panes can never add up to more than the window.
         let solved = PaneLayoutSolver.solve(
             window: windowWidth,
@@ -162,7 +164,7 @@ struct ConversationView: View {
                 if now.current == duck, now.shown != nil { WorkPaneStore.shared.close() } else { WorkPaneStore.shared.open(now.memory[duck]?.view ?? .changes, duck: duck) }
                 return
             }
-            guard rightAvailable || roomCtx != nil || homeCtx else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
+            guard roomCtx != nil ? roomPanel : (rightAvailable || homeCtx) else { return }; if roomCtx != nil { roomInspectorOpen.toggle() } else if homeCtx { dock.update { $0.setCollapsed(!$0.right.collapsed, for: .right) } } else { dock.update { $0.toggleRight() } } }
         let paneOpen = chatOpen || roomCtx != nil || homeCtx
         HStack(spacing: 0) {
             // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
@@ -283,7 +285,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && !newDuckView && (rightAvailable || roomCtx != nil || homeCtx), window: windowWidth, sidebarWidth: sidebarW,
+                    leftOpen: !sidebarHidden, rightOpen: showsInspector && paneOpen, showsRight: paneOpen && !newDuckView && (roomCtx != nil ? roomPanel : (rightAvailable || homeCtx)), window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: toggleRightPane
                 )
                 .animation(Motion.standard, value: sidebarHidden)

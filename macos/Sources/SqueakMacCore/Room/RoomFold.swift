@@ -39,6 +39,30 @@ public enum RoomFold {
         return out
     }
 
-    /// "+3 earlier".
-    public static func earlierLabel(_ n: Int) -> String { "+\(n) earlier" }
+    /// The Duck a folded run belongs to, by the name the row shows.
+    public static func owner(of line: RoomSystemLine) -> String? {
+        if let s = line.status { return s.name }
+        if let h = line.handoff { return h.from }
+        return nil
+    }
+
+    /// The fold row's words: "Show 4 earlier from Ruby 2", then "Hide 4 earlier" once open.
+    public static func earlierLabel(_ n: Int, from name: String? = nil, open: Bool = false) -> String {
+        if open { return "Hide \(n) earlier" }
+        guard let name, !name.isEmpty else { return "Show \(n) earlier" }
+        return "Show \(n) earlier from \(name)"
+    }
+}
+
+/// One text rule for every Room row (a Duck's message, a handoff note, a state line): up to `lines` lines, then an inline
+/// "Show more". Decided from the text alone, so a row never changes height after it is first drawn.
+public enum RoomRowText {
+    public static let lines = 3
+    /// Roughly three lines of the reading column.
+    static let characters = 240
+
+    public static func isLong(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count > characters || t.split(separator: "\n", omittingEmptySubsequences: false).count > lines
+    }
 }

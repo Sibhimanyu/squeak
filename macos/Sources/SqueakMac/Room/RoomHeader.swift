@@ -71,14 +71,13 @@ struct RoomHeader: View {
         let pond = ponds.pond(key: key)
         let name = ponds.name(key: key)
         let people = ponds.detail(key: key)?.members.count ?? 1
-        let offDuty = ponds.native(key: key).map { RoomRoster.roster(RoomRosterStore.shared.model(for: $0.id).ducks ?? []).offDuty.count } ?? 0
         HStack(spacing: Space.m) {
             if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
             PondTile(name: name, pondId: pond?.id, projectId: ponds.native(key: key)?.id, size: 28)
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count, offDuty: offDuty)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             // New layout: the Duck row above the page carries the Ducks, so the header does not repeat them.

@@ -185,6 +185,8 @@ private struct MessageBubble: View {
     var open: (() -> Void)?
     @State private var hover = false
     @Environment(\.roomLatestTaskable) private var latestTaskable
+    @State private var expanded = false
+    private var clamped: Bool { !mine && RoomRowText.isLong(text) && !expanded }
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
@@ -195,11 +197,10 @@ private struct MessageBubble: View {
                 case .normal: EmptyView()
                 }
                 Text(verbatim: text).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(clamped ? RoomRowText.lines : nil).fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 13).padding(.vertical, 8)
-            .background(mine ? Theme.selectedStrong : Theme.surface, in: shape)
-            .overlay { if !mine { shape.strokeBorder(Theme.line) } }
+            .padding(.horizontal, mine ? 13 : 0).padding(.vertical, mine ? 8 : 0)
+            .background(mine ? Theme.selectedStrong : .clear, in: shape)
             .frame(maxWidth: 640, alignment: mine ? .trailing : .leading)
             .opacity(message.pending ? 0.6 : 1)
             .onTapGesture { open?() }
@@ -207,6 +208,13 @@ private struct MessageBubble: View {
             .contextMenu {
                 if message.canMakeTask, let id = message.postId { Button("Make task") { makeJob(id) } }
                 Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+            }
+            if !mine, RoomRowText.isLong(text) {
+                Button { expanded.toggle() } label: {
+                    Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(minHeight: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
             }
             if message.failed { Button("Not sent. Retry") { retry(message.id) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.negative) }
             if message.canMakeTask, let id = message.postId {
@@ -437,17 +445,20 @@ private struct RoomSystemView: View {
     var body: some View {
         if line.earlier.isEmpty { single }
         else {
-            // A folded run: its latest line, with "+N earlier" to open the rest in place (ids are the lines' own).
-            VStack(alignment: .leading, spacing: 2) {
+            // A folded run: one row above the latest line ("Show 4 earlier from Ruby 2"), lined up with the names, that opens
+            // the run's older lines right under it. The row never moves and nothing already drawn is replaced (ids are the lines' own).
+            VStack(alignment: .leading, spacing: 8) {
+                Button { showEarlier.toggle() } label: {
+                    Text(verbatim: RoomFold.earlierLabel(line.earlier.count, from: RoomFold.owner(of: line), open: showEarlier))
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .padding(.leading, RoomRowMetrics.textInset).frame(maxWidth: .infinity, minHeight: 24, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
+                .accessibilityLabel(RoomFold.earlierLabel(line.earlier.count, from: RoomFold.owner(of: line), open: showEarlier))
                 if showEarlier {
                     ForEach(line.earlier) { e in RoomSystemView(line: e, act: act, comment: comment, open: open) }
                 }
                 single
-                Button { showEarlier.toggle() } label: {
-                    Text(verbatim: showEarlier ? "Hide earlier" : RoomFold.earlierLabel(line.earlier.count))
-                        .font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.leading, 26).frame(height: 20).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityLabel(showEarlier ? "Hide earlier updates" : "\(line.earlier.count) earlier updates")
             }
         }
     }
@@ -477,18 +488,25 @@ private struct RoomSystemView: View {
     }
 }
 
-/// A duck's note to another duck: the same left edge as every duck message (avatar column, then name row and body).
-private struct RoomHandoffCard: View {
-    let note: RoomHandoff
+/// The one row every Duck-side line of the Room uses (a Duck's note to another Duck, a state moment): avatar column, then a
+/// name row (name, what it did, time) and the text. Text shows up to three lines, then "Show more" inline; there is no
+/// bordered bubble and no chevron. Whether it clamps is decided from the text alone (`RoomRowText`), so a row never changes
+/// height after it is drawn.
+struct RoomEventRow<Extra: View>: View {
+    let avatar: AnyView
+    let name: String
+    /// A handoff's receiver ("Quill 2 \u{2192} Dot 2").
+    var to: String?
+    /// What the Duck did, quietly after the name ("finished").
+    var verb: String?
+    var verbColour: Color = Theme.muted
     let at: Int64
+    let text: String
+    var markdown = false
     var open: (() -> Void)?
-    @State private var disclosure: RoomDisclosure
+    @ViewBuilder var extra: () -> Extra
+    @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    init(note: RoomHandoff, at: Int64, open: (() -> Void)?) {
-        self.note = note; self.at = at; self.open = open
-        _disclosure = State(initialValue: note.disclosure)
-    }
 
     private var style: MessageStyle {
         var s = MessageStyle.reading
@@ -496,57 +514,83 @@ private struct RoomHandoffCard: View {
         return s
     }
 
-    private var shape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16, style: .continuous)
-    }
-
     var body: some View {
-        let collapsed = note.isLong && !disclosure.isOpen
-        HStack(alignment: .top, spacing: 11) {
-            if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) }
+        let long = RoomRowText.isLong(text)
+        let clamped = long && !expanded
+        HStack(alignment: .top, spacing: RoomRowMetrics.gap) {
+            avatar
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    (Text(verbatim: note.from).fontWeight(.semibold).foregroundStyle(Theme.ink)
-                        + Text(verbatim: " \u{2192} ").foregroundStyle(Theme.muted)
-                        + Text(verbatim: note.to ?? "another duck").fontWeight(.semibold).foregroundStyle(note.to == nil ? Theme.muted : Theme.ink))
-                        .font(.system(size: 13)).lineLimit(1)
+                    headline.font(.system(size: 13)).lineLimit(1)
                         .onTapGesture { open?() }.pointerHand(open != nil)
                     Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    if !disclosure.isOpen {
-                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
-                            HStack(spacing: 6) {
-                                Text(verbatim: note.summary).font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1)
-                                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted)
-                            }
-                            .frame(minHeight: 24).contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                if !text.isEmpty {
+                    Group {
+                        if markdown {
+                            MessageText(markdown: text, style: style)
+                                .frame(maxHeight: clamped ? CGFloat(RoomRowText.lines) * 22 : nil, alignment: .top).clipped()
+                                .mask(alignment: .top) {
+                                    VStack(spacing: 0) {
+                                        Rectangle()
+                                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: clamped ? 20 : 0)
+                                    }
+                                }
+                        } else {
+                            Text(verbatim: text).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink)
+                                .lineLimit(clamped ? RoomRowText.lines : nil).fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
                         }
-                        .buttonStyle(.plain).pointerHand().accessibilityLabel("Show this note")
-                    } else {
-                    MessageText(markdown: note.body, style: style)
-                        .frame(maxHeight: collapsed ? 6 * 22 : nil, alignment: .top).clipped()
-                        .mask(alignment: .top) {
-                            VStack(spacing: 0) {
-                                Rectangle()
-                                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: collapsed ? 24 : 0)
-                            }
-                        }
-                    Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
-                        Text("Show less").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .frame(minHeight: 24).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Show less of this note")
+                    .frame(maxWidth: 640, alignment: .leading)
+                    if long {
+                        Button { withAnimation(reduceMotion ? nil : Motion.standard) { expanded.toggle() } } label: {
+                            Text(expanded ? "Show less" : "Show more").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                                .frame(minHeight: 22).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).pointerHand().accessibilityLabel(expanded ? "Show less" : "Show more")
                     }
                 }
-                .padding(.horizontal, 13).padding(.vertical, 8)
-                .background(Theme.surface, in: shape)
-                .overlay(shape.strokeBorder(Theme.line))
-                .frame(maxWidth: 640, alignment: .leading)
+                extra()
             }
             Spacer(minLength: 60)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
+    }
+
+    private var headline: Text {
+        var t = Text(verbatim: name).fontWeight(.semibold).foregroundStyle(Theme.ink)
+        if let to { t = t + Text(verbatim: " \u{2192} ").foregroundStyle(Theme.muted) + Text(verbatim: to).fontWeight(.semibold).foregroundStyle(Theme.ink) }
+        if let verb { t = t + Text(verbatim: " \(verb)").foregroundStyle(verbColour) }
+        return t
+    }
+}
+
+enum RoomRowMetrics {
+    static let avatar: CGFloat = 36
+    static let gap: CGFloat = 11
+    /// Where a row's text starts: under this a fold row lines up with the names above it.
+    static var textInset: CGFloat { avatar + gap }
+}
+
+extension RoomEventRow where Extra == EmptyView {
+    init(avatar: AnyView, name: String, to: String? = nil, verb: String? = nil, verbColour: Color = Theme.muted, at: Int64, text: String, markdown: Bool = false, open: (() -> Void)? = nil) {
+        self.init(avatar: avatar, name: name, to: to, verb: verb, verbColour: verbColour, at: at, text: text, markdown: markdown, open: open, extra: { EmptyView() })
+    }
+}
+
+/// A duck's note to another duck.
+private struct RoomHandoffCard: View {
+    let note: RoomHandoff
+    let at: Int64
+    var open: (() -> Void)?
+
+    var body: some View {
+        RoomEventRow(
+            avatar: AnyView(Group { if let id = note.fromSessionId { DuckAvatar(sessionId: id, agent: note.agent) } else { PersonAvatar(name: note.from) } }),
+            name: note.from, to: note.to ?? "another duck", at: at, text: note.body, markdown: true, open: open)
     }
 }
 
@@ -585,7 +629,7 @@ private struct RoomCanvasCardView: View {
     }
 }
 
-/// A duck's state change in one line ("Pip took it: Redo settings"); a chevron opens its detail (a plan card's spec).
+/// A duck's state change ("Pip finished"): the same row as a note; a plan card opens its spec inline.
 private struct RoomStatusLineView: View {
     let status: RoomStatusLine
     let at: Int64
@@ -598,34 +642,25 @@ private struct RoomStatusLineView: View {
     @Environment(\.roomMemberView) private var memberView
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if let id = status.sessionId { DuckAvatar(sessionId: id, agent: status.agent).scaleEffect(0.7).frame(width: 20, height: 20) }
-                (Text(verbatim: status.name).fontWeight(.semibold).foregroundStyle(Theme.ink)
-                    + Text(verbatim: " \(status.verb): ").foregroundStyle(status.kind == .blocked ? Theme.negative : Theme.muted)
-                    + Text(verbatim: status.summary).foregroundStyle(Theme.ink))
-                    .font(.system(size: 12)).lineLimit(disclosure.isOpen ? nil : 1)
-                    .onTapGesture { open?() }.pointerHand(open != nil)
-                Text(verbatim: RoomRipples.clock(at)).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.subtle)
-                if status.isExpandable {
-                    Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
-                        Image(systemName: disclosure.isOpen ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted).frame(width: 20, height: 20).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).pointerHand().accessibilityLabel(disclosure.isOpen ? "Hide detail" : "Show detail")
+        RoomEventRow(
+            avatar: AnyView(Group { if let id = status.sessionId { DuckAvatar(sessionId: id, agent: status.agent) } else { Color.clear.frame(width: RoomRowMetrics.avatar, height: RoomRowMetrics.avatar) } }),
+            name: status.name, verb: status.verb, verbColour: status.kind == .blocked ? Theme.negative : Theme.muted,
+            at: at, text: status.summary, open: open
+        ) {
+            ForEach(status.canvases) { RoomCanvasCardView(card: $0, memberView: memberView) }
+            if status.isExpandable {
+                Button { withAnimation(reduceMotion ? nil : Motion.standard) { disclosure.toggle() } } label: {
+                    Text(disclosure.isOpen ? "Hide detail" : "Show detail").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(minHeight: 22).contentShape(Rectangle())
                 }
+                .buttonStyle(.plain).pointerHand()
             }
-            ForEach(status.canvases) { RoomCanvasCardView(card: $0, memberView: memberView).padding(.leading, 26) }
             if disclosure.isOpen, let d = status.detail {
-                MessageText(markdown: d, style: .reading)
-                    .padding(.horizontal, 13).padding(.vertical, 8).background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
-                    .frame(maxWidth: 640, alignment: .leading)
+                MessageText(markdown: d, style: .reading).frame(maxWidth: 640, alignment: .leading)
                 if let card = status.commentTarget { commentBox(card) }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 2)
-        .accessibilityElement(children: .contain)
+        .padding(.vertical, 2)
     }
 }
 

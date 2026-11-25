@@ -167,6 +167,8 @@ export interface RoomThread {
 export type { RoomAsk, RoomDucklings, RoomProgress, RoomTurn } from "./room-turns.js";
 
 export const DUCK_NAME_MAX = 32;
+/** What a Duck's row says when the host has no identity for it. */
+export const NEUTRAL_DUCK_NAME = "A Duck";
 export const DUCK_ROLE_MAX = 80;
 
 export const ROOM_TURNS_MAX = 100;
@@ -549,11 +551,21 @@ export class Room extends EventEmitter {
     return this.store.roomPostsBySession(sessionId, since).some((p) => p.kind === kind);
   }
 
-  /** The name of the Duck a chat belongs to, else the chat's title; null only when the chat is gone. */
+  /** The name of the Duck a chat belongs to, else a neutral "A Duck" (never the chat's title); null only when the chat is gone. */
   private receiverName(sessionId: string): string | null {
-    const s = this.store.getSession(sessionId);
-    if (!s) return null;
-    return this.store.duckBySession(sessionId)?.name ?? agentName(s);
+    if (!this.store.getSession(sessionId)) return null;
+    return this.store.duckBySession(sessionId)?.name?.trim() || NEUTRAL_DUCK_NAME;
+  }
+
+  /**
+   * Who a post is from, as the feed shows it. A Duck's post reads as the Duck's name, resolved here from its identity
+   * (by session id) every time the feed is served, so rows stored when posts carried the chat's title read right too.
+   * A chat title is never a sender: with no identity the row says "A Duck". People and Squeak keep their stored name.
+   */
+  senderName(r: RoomPostRow): string {
+    if (r.authorKind !== "agent") return r.authorName;
+    const name = r.sessionId ? this.store.duckBySession(r.sessionId)?.name?.trim() : undefined;
+    return name || NEUTRAL_DUCK_NAME;
   }
 
   /** The wire form of posts, with their attachments and the receiving Duck's name. */
@@ -565,7 +577,13 @@ export class Room extends EventEmitter {
     return rows.map((r) => {
       const a = atts.get(r.id);
       const toName = r.toSessionId ? this.receiverName(r.toSessionId) : null;
-      return { ...toRoomPost(r), ...(toName ? { toName } : {}), ...(a?.length ? { attachments: a } : {}) };
+      const post = toRoomPost(r);
+      return {
+        ...post,
+        author: { ...post.author, name: this.senderName(r) },
+        ...(toName ? { toName } : {}),
+        ...(a?.length ? { attachments: a } : {}),
+      };
     });
   }
 

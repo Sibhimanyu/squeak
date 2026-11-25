@@ -902,6 +902,8 @@ describe("room MCP tools", () => {
     const a = p.chat("Uploader");
     const b = p.chat("Parser");
     const other = pond(h.store, "other").chat("Elsewhere");
+    h.store.updateDuck(h.store.duckForSession(a.id, p.project.id)!.id, { name: "Uploader" });
+    h.store.updateDuck(h.store.duckForSession(b.id, p.project.id)!.id, { name: "Parser" });
     expect(
       (await tools(h, a.id, "post_to_room", { kind: "working", text: "Wiring retry\ninto uploader" })).isError,
     ).toBeFalsy();
