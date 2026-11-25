@@ -20,11 +20,11 @@ struct PondItemPage: View {
                 if let source = item.diffSource, let key = SessionKey(stringValue: source.session),
                    let session = model.session(key), let root = session.cwd, !root.isEmpty {
                     if let path = source.path {
-                        PondDiffPage(session: session, path: path, files: model.filesModel(root: root)) {
+                        PondDiffTab(session: session, path: path, files: model.filesModel(root: root)) {
                             model.closePondItem(item)
                         }
                     } else {
-                        ReviewView(files: model.filesModel(root: root), session: session, showsBackButton: false)
+                        PondReviewAllTab(session: session, files: model.filesModel(root: root))
                     }
                 } else {
                     unavailable("This Duck’s changes are unavailable.")
@@ -76,29 +76,6 @@ private struct PondFilePage: View {
             await files.loadPondFile(path)
             read = true
         }
-    }
-}
-
-private struct PondDiffPage: View {
-    let session: HostSession
-    let path: String
-    let files: FilesModel
-    let close: () -> Void
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let key = session.key.hostSessionId
-        let store = model.changesStore(for: key)
-        Group {
-            if let changes = store.changes, !changes.files.contains(where: { $0.path == path }) {
-                PondItemUnavailable(message: "This file no longer has a diff.", close: close)
-            } else {
-                ScrollView {
-                    DiffFileSection(store: store, session: session, path: path, collapsible: false, files: files)
-                }
-            }
-        }
-        .task(id: key) { await store.refresh(sessionKey: key, visible: true, activityChanged: true) }
     }
 }
 
