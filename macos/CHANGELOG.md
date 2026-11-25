@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.34.4
+
+**The Room is a chat.**
+
+- Messages sit in bubbles: yours on the right in the pond's colour, people and ducks on the left with their picture and name. A run of messages from one sender is grouped under one name.
+- Status lines ("finished", "took it") are small centred lines; a duck's run of them folds into one ("Ruby 2 · 4 updates"). Tasks show as cards.
+- Click a duck's picture or name anywhere in the Room to open its chat.
+- Show more appears only when a message is really cut off, and a clamped message no longer shows half a line.
+- The Room has no side panel. Its icon rail opens the pond's Files, Artifacts and Terminal beside the chat.
+- Switching between Dashboard and Room keeps the header still and only moves the page below.
+- The @ and / lists open as a small list just above the box, starting at the character you typed.
+- Esc steps back: closes a list or pane, then goes from a duck's chat to the Room, then to the Dashboard. It no longer leaves full screen.
+
 ## 2.34.3
 
 **The new layout is now the default, and the Room and Dashboard are calmer.**
