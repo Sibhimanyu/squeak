@@ -37,10 +37,11 @@ final class PondLiveTabsModel {
             guard let source = item.diffSource, let key = SessionKey(stringValue: source.session) else { return .unknown }
             let session = model.session(key)
             guard let session else { return PondTabSources.diff(duckExists: false, merged: false, changes: nil, path: source.path) }
-            let store = model.changesStore(for: key.hostSessionId)
+            // The Stream's own store and git state: the Duck's chat folder is the Pond's, not where the diff lives.
+            let store = model.changesStore(for: key.hostSessionId, route: DiffRoute(session: source.session, stream: source.stream))
             await store.refresh(sessionKey: key.hostSessionId, visible: true)
             return PondTabSources.diff(
-                duckExists: true, merged: model.gitStatus(session)?.pr?.state == .merged,
+                duckExists: true, merged: model.gitStatus(session, stream: source.stream)?.pr?.state == .merged,
                 changes: store.changes?.files, path: source.path)
         case .file:
             guard let source = item.fileSource else { return .unknown }

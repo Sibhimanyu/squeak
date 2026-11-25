@@ -190,10 +190,13 @@ struct PondItemLabel {
         case .diff:
             let path = item.diffSource?.path ?? item.id
             title = ChangesPresentation.fileName(path)
-            help = [duckName, path].compactMap { $0 }.joined(separator: " · ")
+            help = [duckName, item.diffSource?.stream?.branch, path].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             symbol = "plus.forwardslash.minus"
         case .reviewAll:
-            title = duckName.map { "Review \($0)" } ?? "Review all changes"
+            // A Duck in two Streams has two review tabs: the branch tells them apart.
+            let streamBranch = item.diffSource?.stream?.branch
+            let branch = (streamBranch?.isEmpty ?? true) ? nil : streamBranch
+            title = duckName.map { "Review \($0)" + (branch.map { " · \($0)" } ?? "") } ?? "Review all changes"
             help = title
             symbol = "square.stack"
         case .artifact:

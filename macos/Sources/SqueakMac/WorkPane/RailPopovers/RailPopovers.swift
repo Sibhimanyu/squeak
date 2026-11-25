@@ -160,13 +160,18 @@ struct RailChangesPopover: View {
         section.sessionKey.flatMap { SessionKey(stringValue: $0) }.flatMap { model.session($0) }
     }
 
+    /// The section's Stream: a diff opened from it is read in that Stream's folder, not the Duck's chat folder.
+    private func stream(_ section: RailChangeSection) -> TabStream? {
+        section.streamId.map { TabStream(workspaceId: $0, branch: section.branch ?? "") }
+    }
+
     private func open(_ row: RailChangeRow, in section: RailChangeSection) {
-        if let session = session(section) { model.openPondDiff(session: session, path: row.path) }
+        if let session = session(section) { model.openPondDiff(session: session, path: row.path, stream: stream(section)) }
         close()
     }
 
     private func reviewAll(_ section: RailChangeSection) {
-        if let session = session(section) { model.openPondDiff(session: session, path: nil) }
+        if let session = session(section) { model.openPondDiff(session: session, path: nil, stream: stream(section)) }
         close()
     }
 }

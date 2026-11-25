@@ -40,9 +40,22 @@ final class ChangesStore {
     @ObservationIgnored private let host: NativeHostClient?
     /// The host's id for this chat; nil unless it is a Squeak chat.
     @ObservationIgnored private let hostId: String?
+    /// The Stream (host workspace id) this store reads: its files are not in the Duck's chat folder (the Pond's), so the
+    /// list and every patch come from the Stream's own folder. nil: the chat's folder, as before Streams.
+    @ObservationIgnored private let stream: String?
 
-    init(client: DaemonClient, demo: Bool, host: NativeHostClient? = nil, hostId: String? = nil) {
-        self.client = client; self.demo = demo; self.host = host; self.hostId = hostId
+    init(client: DaemonClient, demo: Bool, host: NativeHostClient? = nil, hostId: String? = nil, stream: String? = nil) {
+        self.client = client; self.demo = demo; self.host = host; self.hostId = hostId; self.stream = stream
+    }
+
+    private func readChanges(sessionKey: String) async throws -> DaemonChanges? {
+        if let stream, let host { return try await host.streamChanges(workspaceId: stream) }
+        return try await client.changes(sessionKey: sessionKey)
+    }
+
+    private func readPatch(sessionKey: String, path: String) async throws -> DaemonChangePatch? {
+        if let stream, let host { return try await host.streamChangePatch(workspaceId: stream, path: path) }
+        return try await client.changePatch(sessionKey: sessionKey, path: path)
     }
 
     var isNative: Bool { host != nil && hostId != nil }
@@ -66,7 +79,7 @@ final class ChangesStore {
         else { return }
         reading = true
         defer { reading = false }
-        let read = try? await client.changes(sessionKey: sessionKey)
+        let read = try? await readChanges(sessionKey: sessionKey)
         lastRead = Date()
         guard let read else {
             // Older daemon, no folder, not a repository: nothing to draw, and nothing to say but "no changes".
@@ -90,7 +103,7 @@ final class ChangesStore {
     func patch(for path: String, sessionKey: String) async -> DaemonChangePatch? {
         let stamp = changes?.files.first { $0.path == path }.map { "\($0.status)/\($0.added)/\($0.removed)" } ?? ""
         if let cached = filePatches[path], patchStamps[path] == stamp { return cached }
-        guard let read = try? await client.changePatch(sessionKey: sessionKey, path: path) else { return filePatches[path] }
+        guard let read = try? await readPatch(sessionKey: sessionKey, path: path) else { return filePatches[path] }
         filePatches[path] = read; patchStamps[path] = stamp
         return read
     }
@@ -104,7 +117,7 @@ final class ChangesStore {
 
     private func loadPatch(sessionKey: String, path: String, quiet: Bool) async {
         if !quiet { patchLoading = true }
-        let read = try? await client.changePatch(sessionKey: sessionKey, path: path)
+        let read = try? await readPatch(sessionKey: sessionKey, path: path)
         guard selectedPath == path else { return }
         patchLoading = false
         if let read, read != patch { patch = read }
@@ -151,11 +164,19 @@ extension ChangesStore {
 
 extension AppModel {
     /// One store per chat, so the header and the inspector share a single read.
-    func changesStore(for sessionKey: String) -> ChangesStore {
-        if let existing = changesStores[sessionKey] { return existing }
+    func changesStore(for sessionKey: String) -> ChangesStore { changesStore(for: sessionKey, route: .chat(sessionKey: sessionKey)) }
+
+    /// A diff or review tab's store: the Stream's own (`route`), kept apart from the Duck's chat store and from the
+    /// Duck's other Streams. The comments it posts still go to the Duck's chat.
+    func changesStore(for sessionKey: String, route: DiffRoute) -> ChangesStore {
+        let cacheKey = route.cacheKey
+        if let existing = changesStores[cacheKey] { return existing }
         let nativeId = sessionKey.hasPrefix(NativeAdapter.keyPrefix) ? String(sessionKey.dropFirst(NativeAdapter.keyPrefix.count)) : nil
-        let store = ChangesStore(client: client, demo: demoMode || captureMode, host: nativeId == nil ? nil : nativeHost, hostId: nativeId)
-        changesStores[sessionKey] = store
+        var stream: String?
+        if case .stream(let id) = route { stream = id }
+        let store = ChangesStore(client: client, demo: demoMode || captureMode, host: nativeId == nil && stream == nil ? nil : nativeHost,
+                                 hostId: nativeId, stream: stream)
+        changesStores[cacheKey] = store
         return store
     }
 }

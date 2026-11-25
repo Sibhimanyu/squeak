@@ -7,8 +7,11 @@ import SqueakMacCore
 // workspace menu, project settings. The host decides everything (src/native/git-actions.ts); this only asks and draws.
 
 struct MergeConfirm: Identifiable, Equatable {
-    var id: String { hostId }
+    var id: String { workspaceId ?? hostId }
+    /// The Duck's chat (a Squeak chat's host id).
     var hostId: String
+    /// The Stream the merge acts on (its branch, not the Pond's folder); nil for a chat's own folder.
+    var workspaceId: String? = nil
     var pr: NativePullRequest
     var base: String
     var method: String
@@ -62,25 +65,52 @@ extension AppModel {
 
     /// Reads the chat's git state when the policy says so, never twice at once. A chat with no Squeak workspace (the
     /// host answers 400) has no cluster and no PR tab content.
-    func refreshGit(_ s: HostSession, visible: Bool, activityChanged: Bool = false) async {
-        guard !demoMode, !captureMode, pollGate.presence != .hidden || activityChanged, let id = hostId(s), !git.reading.contains(id),
+    func refreshGit(_ s: HostSession, visible: Bool, activityChanged: Bool = false, stream: TabStream? = nil) async {
+        guard !demoMode, !captureMode, pollGate.presence != .hidden || activityChanged, hostId(s) != nil, let id = gitKey(s, stream: stream),
+              !git.reading.contains(id),
               GitPresentation.shouldRefresh(visible: visible, activityChanged: activityChanged, lastRead: git.lastRead[id], now: Date())
         else { return }
         git.reading.insert(id)
         defer { git.reading.remove(id) }
-        let read = try? await nativeHost.gitStatus(sessionId: id)
+        let read: NativeGitStatus?
+        if let stream, !stream.workspaceId.isEmpty { read = try? await nativeHost.streamGitStatus(workspaceId: stream.workspaceId) }
+        else { read = try? await nativeHost.gitStatus(sessionId: id) }
         git.lastRead[id] = Date()
         git.set(id, read)
     }
 
-    func gitStatus(_ s: HostSession) -> NativeGitStatus? { hostId(s).flatMap { git.entry($0).status } }
+    /// Where a chat's git state is kept: per Stream when the view is a Stream's (a Duck in two Streams has two states,
+    /// neither of them the Pond folder's), else the chat's own.
+    func gitKey(_ s: HostSession, stream: TabStream?) -> String? {
+        if let stream, !stream.workspaceId.isEmpty { return "stream:\(stream.workspaceId)" }
+        return hostId(s)
+    }
+
+    /// The Stream a diff of this Duck belongs to when the place that opened it names none (the file browser): its only
+    /// Stream, or the one that changed `path`. nil for a Duck in no Stream, which reads through its chat as before.
+    func defaultStream(of s: HostSession, path: String?) -> TabStream? {
+        guard let workspace = pondWorkspace,
+              let streams = workspace.roster.ducks?.first(where: { $0.id == s.duckId })?.streams, !streams.isEmpty else { return nil }
+        var changed: [String: [String]] = [:]
+        for d in PondChangesStore.shared.model(for: workspace.project.id).changes?.ducks ?? [] where d.duckId == s.duckId {
+            changed[d.workspaceId] = d.changes.files.map(\.path)
+        }
+        return TabStream.resolve(streams: streams, changedPaths: changed, path: path)
+    }
+
+    /// The folder a Stream's tab reads files from: the Stream's own, else the chat's.
+    func streamRoot(_ stream: TabStream?) -> String? {
+        stream.flatMap { st in git.workspaces.first { $0.id == st.workspaceId }?.path }
+    }
+
+    func gitStatus(_ s: HostSession, stream: TabStream? = nil) -> NativeGitStatus? { gitKey(s, stream: stream).flatMap { git.entry($0).status } }
 
     // MARK: Actions
 
     /// Sends the action's prompt to the chat; it shows as the person's own message, like any send. Merge asks first.
-    func runGitAction(_ s: HostSession, _ kind: GitActionKind) {
-        guard let id = hostId(s), git.busy == nil else { return }
-        if kind == .merge { askMerge(s); return }
+    func runGitAction(_ s: HostSession, _ kind: GitActionKind, stream: TabStream? = nil) {
+        guard let id = hostId(s), let key = gitKey(s, stream: stream), git.busy == nil else { return }
+        if kind == .merge { askMerge(s, stream: stream); return }
         if demoMode { native.note = "Demo data: nothing is sent."; return }
         git.busy = kind
         native.note = nil
@@ -88,10 +118,16 @@ extension AppModel {
             guard let self else { return }
             defer { git.busy = nil }
             do {
-                let r = try await nativeHost.gitAction(sessionId: id, action: kind)
+                // On a Stream the prompt is filled from the Stream's branch and goes to the Duck that works there.
+                let r: (queued: Bool, prompt: String, sessionId: String?)
+                if let stream, !stream.workspaceId.isEmpty {
+                    r = try await nativeHost.streamGitAction(workspaceId: stream.workspaceId, sessionId: id, action: kind)
+                } else {
+                    r = try await nativeHost.gitAction(sessionId: id, action: kind)
+                }
                 AppLog.info("native git action sent")
                 await broker.refreshTranscript()
-                git.lastRead[id] = nil
+                git.lastRead[key] = nil
                 // A review on its own model runs in a new chat: show it.
                 if let started = r.sessionId { await openStartedChat(hostSessionId: started) }
             } catch let e as NativeHostError {
@@ -103,17 +139,18 @@ extension AppModel {
     }
 
     /// The confirm sheet names the PR, the method (the project's own) and where it lands.
-    func askMerge(_ s: HostSession) {
-        guard let id = hostId(s), let status = git.entry(id).status, let pr = status.pr, GitPresentation.isEnabled(.merge, status) else { return }
+    func askMerge(_ s: HostSession, stream: TabStream? = nil) {
+        guard let id = hostId(s), let key = gitKey(s, stream: stream), let status = git.entry(key).status, let pr = status.pr, GitPresentation.isEnabled(.merge, status) else { return }
         if demoMode { native.note = "Demo data: nothing is merged."; return }
         Task { [weak self] in
             guard let self else { return }
             var method = "squash"
-            if let ws = git.workspace(path: s.cwd), let settings = try? await nativeHost.projectSettings(projectId: ws.projectId) {
+            let ws = stream.flatMap { st in git.workspaces.first { $0.id == st.workspaceId } } ?? git.workspace(path: s.cwd)
+            if let ws, let settings = try? await nativeHost.projectSettings(projectId: ws.projectId) {
                 method = settings.effective.mergeMethod
             }
             git.mergeError = nil
-            git.mergeConfirm = MergeConfirm(hostId: id, pr: pr, base: status.base, method: method)
+            git.mergeConfirm = MergeConfirm(hostId: id, workspaceId: stream?.workspaceId, pr: pr, base: status.base, method: method)
         }
     }
 
@@ -125,12 +162,18 @@ extension AppModel {
             guard let self else { return }
             defer { git.merging = false }
             do {
-                _ = try await nativeHost.merge(sessionId: confirm.hostId)
+                // Merge acts on the Stream's branch when the tab is a Stream's, never on the Pond's folder.
+                if let workspaceId = confirm.workspaceId { _ = try await nativeHost.streamMerge(workspaceId: workspaceId) }
+                else { _ = try await nativeHost.merge(sessionId: confirm.hostId) }
                 AppLog.info("native pull request merged")
                 git.mergeConfirm = nil
-                git.lastRead[confirm.hostId] = nil
+                let key = confirm.workspaceId.map { "stream:\($0)" } ?? confirm.hostId
+                git.lastRead[key] = nil
                 // Merged from review-all with no Duck selected: refresh the merged Duck's own chat, not the selection.
-                if let s = allSessions.first(where: { hostId($0) == confirm.hostId }) { await refreshGit(s, visible: true, activityChanged: true) }
+                if let s = allSessions.first(where: { hostId($0) == confirm.hostId }) {
+                    let stream = confirm.workspaceId.map { TabStream(workspaceId: $0, branch: "") }
+                    await refreshGit(s, visible: true, activityChanged: true, stream: stream)
+                }
             } catch let e as NativeHostError {
                 git.mergeError = e.reason
             } catch {
@@ -139,8 +182,8 @@ extension AppModel {
         }
     }
 
-    func openPullRequest(_ s: HostSession) {
-        if let status = gitStatus(s), let url = GitPresentation.prURL(status) { NSWorkspace.shared.open(url) }
+    func openPullRequest(_ s: HostSession, stream: TabStream? = nil) {
+        if let status = gitStatus(s, stream: stream), let url = GitPresentation.prURL(status) { NSWorkspace.shared.open(url) }
     }
 
     // MARK: Workspaces

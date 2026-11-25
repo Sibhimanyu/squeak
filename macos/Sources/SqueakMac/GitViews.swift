@@ -9,19 +9,20 @@ import SwiftUI
 /// Keeps one chat's git state fresh while the window shows it: every 10 s, and at once when its activity changed.
 private struct GitRefresher: ViewModifier {
     let session: HostSession
+    var stream: TabStream?
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         content
-            .task(id: session.key.stringValue) {
+            .task(id: session.key.stringValue + (stream?.workspaceId ?? "")) {
                 while !Task.isCancelled {
-                    await model.refreshGit(session, visible: scenePhase != .background)
+                    await model.refreshGit(session, visible: scenePhase != .background, stream: stream)
                     try? await Task.sleep(for: .seconds(GitPresentation.refreshInterval))
                 }
             }
             .onChange(of: model.activity.count) {
-                Task { await model.refreshGit(session, visible: scenePhase != .background, activityChanged: true) }
+                Task { await model.refreshGit(session, visible: scenePhase != .background, activityChanged: true, stream: stream) }
             }
     }
 }
@@ -32,13 +33,15 @@ private struct GitRefresher: ViewModifier {
 /// has no Squeak workspace.
 struct GitCluster: View {
     let session: HostSession
+    /// The Stream whose branch this acts on (a review tab's); nil: the chat's own folder.
+    var stream: TabStream?
     /// The branch chip; the centre's breadcrumb carries the branch now, so the header turns it off.
     var showsBranch = true
     @Environment(AppModel.self) private var model
     @State private var checksOpen = false
 
     var body: some View {
-        let status = model.gitStatus(session)
+        let status = model.gitStatus(session, stream: stream)
         HStack(spacing: Space.s) {
             if showsBranch { branchChip(status) }
             // A pond in a plain folder has no repository: no Git actions, no pull request.
@@ -47,11 +50,11 @@ struct GitCluster: View {
                 actionsMenu(status)
             }
         }
-        .modifier(GitRefresher(session: session))
+        .modifier(GitRefresher(session: session, stream: stream))
     }
 
     private func branchChip(_ status: NativeGitStatus?) -> some View {
-        let branch = status?.branch ?? session.branch
+        let branch = status?.branch ?? stream?.branch ?? session.branch
         return Group {
             if let branch, !branch.isEmpty {
                 HStack(spacing: 4) {
@@ -73,7 +76,7 @@ struct GitCluster: View {
         case .action(let kind)?:
             let busy = model.git.busy == kind
             // Secondary, never the duck: the composer's Send holds the one primary on screen (§8.10).
-            Button { model.runGitAction(session, kind) } label: {
+            Button { model.runGitAction(session, kind, stream: stream) } label: {
                 HStack(spacing: 6) {
                     if busy { TideGlyph(color: Theme.muted, grid: .mini).opacity(0.7) }
                     Text(kind.title).lineLimit(1).fixedSize()
@@ -100,17 +103,17 @@ struct GitCluster: View {
     private func actionsMenu(_ status: NativeGitStatus) -> some View {
         SqueakMenu {
             ForEach(GitActionKind.menuOrder, id: \.self) { kind in
-                Button(kind.title) { model.runGitAction(session, kind) }
+                Button(kind.title) { model.runGitAction(session, kind, stream: stream) }
                     .disabled(!GitPresentation.isEnabled(kind, status) || model.git.busy != nil)
             }
             Divider()
-            Button("Open PR in browser") { model.openPullRequest(session) }.disabled(GitPresentation.prURL(status) == nil)
+            Button("Open PR in browser") { model.openPullRequest(session, stream: stream) }.disabled(GitPresentation.prURL(status) == nil)
             // Checks left the panel's tabs: the pull request and its checks open from here.
             Button("Pull request and checks…") { checksOpen = true }
         } label: {
             Lucide(.chevronDown, size: 12, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
         }
-        .popover(isPresented: $checksOpen, arrowEdge: .bottom) { PRTab(session: session).frame(width: 380, height: 420) }
+        .popover(isPresented: $checksOpen, arrowEdge: .bottom) { PRTab(session: session, stream: stream).frame(width: 380, height: 420) }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help(GitPresentation.note(status) ?? "Git actions")
         .accessibilityLabel("Git actions")
@@ -196,10 +199,11 @@ struct MergeConfirmSheet: View {
 /// actions. Refreshes like Changes (10 s while on screen).
 struct PRTab: View {
     let session: HostSession
+    var stream: TabStream?
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let entry = model.hostId(session).map { model.git.entry($0) }
+        let entry = model.gitKey(session, stream: stream).map { model.git.entry($0) }
         ScrollView {
             VStack(alignment: .leading, spacing: Space.m) {
                 if model.hostId(session) == nil {
@@ -213,7 +217,7 @@ struct PRTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Space.m)
         }
-        .modifier(GitRefresher(session: session))
+        .modifier(GitRefresher(session: session, stream: stream))
     }
 
     private func quiet(_ text: String) -> some View {
@@ -255,15 +259,15 @@ struct PRTab: View {
         let rest = GitActionKind.menuOrder.filter { $0 != primary && GitPresentation.isEnabled($0, status) }
         VStack(alignment: .leading, spacing: Space.s) {
             if let primary {
-                Button(primary.title) { model.runGitAction(session, primary) }
+                Button(primary.title) { model.runGitAction(session, primary, stream: stream) }
                     .buttonStyle(SecondaryButtonStyle()).disabled(model.git.busy != nil)
             }
             ForEach(rest, id: \.self) { kind in
-                Button(kind.title) { model.runGitAction(session, kind) }
+                Button(kind.title) { model.runGitAction(session, kind, stream: stream) }
                     .buttonStyle(QuietButtonStyle()).disabled(model.git.busy != nil)
             }
             if GitPresentation.prURL(status) != nil {
-                Button("Open PR in browser") { model.openPullRequest(session) }.buttonStyle(QuietButtonStyle())
+                Button("Open PR in browser") { model.openPullRequest(session, stream: stream) }.buttonStyle(QuietButtonStyle())
             }
         }
     }

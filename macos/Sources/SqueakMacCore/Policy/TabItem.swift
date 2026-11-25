@@ -6,15 +6,21 @@ public struct TabItem: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case duck, file, artifact, duckling, diff, reviewAll, notebook }
     public var kind: Kind
     public var id: String
-    public init(_ kind: Kind, _ id: String) { self.kind = kind; self.id = id }
+    /// The Stream a diff or review tab reads (ADR 0003: a Duck runs in the Pond's folder and edits in joined Streams, so its
+    /// chat's folder says nothing about a Stream's files). Absent on a tab saved before Streams, or for a Duck outside any
+    /// Stream: that tab reads through the Duck's chat as it always did.
+    public var stream: TabStream?
+    public init(_ kind: Kind, _ id: String, stream: TabStream? = nil) { self.kind = kind; self.id = id; self.stream = stream }
 
     /// A Duck's tab, by its Duck id (or `chat:<key>`, see `duckID(of:)`).
     public static func duck(_ id: String) -> TabItem { TabItem(.duck, id) }
     public static func file(_ id: String) -> TabItem { TabItem(.file, id) }
     /// A file in a Pond may belong to any of its Streams, or be shown from outside the Stream.
     public static func pondFile(root: String, path: String) -> TabItem { .file(ScopedTabID.make(root, path)) }
-    public static func diff(session: String, path: String) -> TabItem { TabItem(.diff, ScopedTabID.make(session, path)) }
-    public static func reviewAll(session: String) -> TabItem { TabItem(.reviewAll, session) }
+    public static func diff(session: String, path: String, stream: TabStream? = nil) -> TabItem {
+        TabItem(.diff, ScopedTabID.make(session, path), stream: stream)
+    }
+    public static func reviewAll(session: String, stream: TabStream? = nil) -> TabItem { TabItem(.reviewAll, session, stream: stream) }
     public static let notebook = TabItem(.notebook, "notebook")
 
     public var fileSource: (root: String, path: String)? {
@@ -22,10 +28,11 @@ public struct TabItem: Codable, Hashable, Sendable {
         return ScopedTabID.parse(id).map { ($0.scope, $0.path) }
     }
 
-    public var diffSource: (session: String, path: String?)? {
+    /// The Duck's chat, the file (nil for review-all) and the Stream every reader resolves diffs, status, merge and PR by.
+    public var diffSource: (session: String, path: String?, stream: TabStream?)? {
         switch kind {
-        case .diff: ScopedTabID.parse(id).map { ($0.scope, $0.path) }
-        case .reviewAll: (id, nil)
+        case .diff: ScopedTabID.parse(id).map { ($0.scope, $0.path, stream) }
+        case .reviewAll: (id, nil, stream)
         default: nil
         }
     }
@@ -56,6 +63,49 @@ public struct TabItem: Codable, Hashable, Sendable {
         case .thread(let k)?: return .duck(duck(k))
         case .file(let p)?: return .file(p)
         default: return nil
+        }
+    }
+}
+
+/// A Stream by its host workspace id, with its branch for the header. What a diff or review tab carries beside the Duck.
+public struct TabStream: Codable, Hashable, Sendable {
+    public var workspaceId: String
+    public var branch: String
+    public init(workspaceId: String, branch: String) { self.workspaceId = workspaceId; self.branch = branch }
+}
+
+extension TabStream {
+    /// The Stream a diff opened from a place that does not name one belongs to: the Duck's only Stream, else the one whose
+    /// changed files include `path`, else its first. nil when the Duck is in none (it then reads through its chat).
+    public static func resolve(streams: [RoomStream], changedPaths: [String: [String]], path: String?) -> TabStream? {
+        guard let first = streams.first else { return nil }
+        let pick = streams.count > 1
+            ? (path.flatMap { p in streams.first { changedPaths[$0.workspaceId]?.contains(p) == true } } ?? first) : first
+        return TabStream(workspaceId: pick.workspaceId, branch: pick.branch)
+    }
+}
+
+/// How a diff or review tab's readers reach its files: through the Stream's folder when the tab carries one, else through
+/// the Duck's chat (a tab saved before Streams, or a Duck outside any Stream). One decision for every reader (changes,
+/// patches, git status, merge, PR), so none can fall back to the chat's folder by accident.
+public enum DiffRoute: Equatable, Sendable {
+    case stream(workspaceId: String)
+    case chat(sessionKey: String)
+
+    public init(session: String, stream: TabStream?) {
+        if let stream, !stream.workspaceId.isEmpty { self = .stream(workspaceId: stream.workspaceId) } else { self = .chat(sessionKey: session) }
+    }
+
+    public init?(_ item: TabItem) {
+        guard let source = item.diffSource else { return nil }
+        self.init(session: source.session, stream: source.stream)
+    }
+
+    /// The key a read cache is kept under: distinct per Stream, so one Duck's two Streams never share a list.
+    public var cacheKey: String {
+        switch self {
+        case .stream(let id): "stream:\(id)"
+        case .chat(let key): key
         }
     }
 }

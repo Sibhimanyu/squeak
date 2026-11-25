@@ -128,9 +128,13 @@ export class PondChangesReader {
   }
 
   /** One Stream's whole change list (every file, uncapped but for the reader's own cap); null when the Stream is gone. */
-  async readStream(
-    workspaceId: string,
-  ): Promise<{ workspaceId: string; branch: string; base: string | null; files: ChangeFile[]; totals: ChangeSet["totals"] } | null> {
+  async readStream(workspaceId: string): Promise<{
+    workspaceId: string;
+    branch: string;
+    base: string | null;
+    files: ChangeFile[];
+    totals: ChangeSet["totals"];
+  } | null> {
     const found = this.streamFolder(workspaceId);
     if (!found) return null;
     const set = await this.changeSet(found.dir, found.target);

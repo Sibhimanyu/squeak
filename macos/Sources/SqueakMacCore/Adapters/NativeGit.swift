@@ -274,6 +274,45 @@ extension NativeHostClient {
         return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["method"]?.string ?? "squash"
     }
 
+    // MARK: By Stream (a Duck edits in joined Streams, not in its chat's folder: ADR 0003)
+
+    /// One Stream's changed files; nil when the Stream is gone, archived or not a repository (404).
+    public func streamChanges(workspaceId: String) async throws -> DaemonChanges? {
+        do {
+            return try JSONDecoder.native(DaemonChanges.self, try await call("GET", "/native/workspaces/\(Self.id(workspaceId))/changes", timeout: 15))
+        } catch NativeHostError.http(404, _) { return nil }
+    }
+
+    /// One listed file's diff in a Stream; nil when it is not in the Stream's change list.
+    public func streamChangePatch(workspaceId: String, path: String) async throws -> DaemonChangePatch? {
+        do {
+            return try JSONDecoder.native(
+                DaemonChangePatch.self,
+                try await call("GET", "/native/workspaces/\(Self.id(workspaceId))/changes/file?path=\(Self.id(path))", timeout: 15))
+        } catch NativeHostError.http(404, _) { return nil }
+    }
+
+    public func streamGitStatus(workspaceId: String) async throws -> NativeGitStatus {
+        try JSONDecoder.native(NativeGitStatus.self, try await call("GET", "/native/workspaces/\(Self.id(workspaceId))/git", timeout: 15))
+    }
+
+    /// The action's prompt, filled from the Stream's branch and base, goes to `sessionId` (the Duck that works there).
+    public func streamGitAction(workspaceId: String, sessionId: String, action: GitActionKind) async throws -> (queued: Bool, prompt: String, sessionId: String?) {
+        precondition(action != .merge, "merge has its own call")
+        let r = try await call(
+            "POST", "/native/workspaces/\(Self.id(workspaceId))/actions/\(action.rawValue)",
+            body: .object(["sessionId": .string(sessionId)]), timeout: 20, maybeSent: true)
+        let j = try? JSONDecoder().decode(NativeJSON.self, from: r)
+        return (j?["queued"]?.bool ?? false, j?["prompt"]?.string ?? "", j?["sessionId"]?.string)
+    }
+
+    /// `gh pr merge` on the Stream's branch (never the Pond's folder).
+    public func streamMerge(workspaceId: String) async throws -> String {
+        let r = try await call(
+            "POST", "/native/workspaces/\(Self.id(workspaceId))/actions/merge", body: .object(["confirm": .bool(true)]), timeout: 90, maybeSent: true)
+        return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["method"]?.string ?? "squash"
+    }
+
     public func workspaceLog(workspaceId: String) async throws -> NativeWorkspaceLog {
         try JSONDecoder.native(NativeWorkspaceLog.self, try await call("GET", "/native/workspaces/\(Self.id(workspaceId))/log"))
     }
