@@ -178,7 +178,8 @@ describe("People sheet routes (issue #138)", () => {
     expect((await call(deps, "DELETE", `/ponds/${POND}`, as("sibhi"), { name: "greenroom" })).status).toBe(204);
     expect(await people.getPond(POND)).toBeNull();
     expect(await people.isMember(POND, "asha")).toBe(false);
-    expect(rows.has(`acctponds/asha\u0000${POND}`)).toBe(false);
+    // the Member's index row stays a week, marked deleted, so a device that missed the note still says so (#128)
+    expect(JSON.parse(rows.get(`acctponds/asha\u0000${POND}`)!)).toMatchObject({ deleted: true });
     expect(JSON.parse(rows.get(`channels/${POND}/devreqs\u0000pn-delete-sibhi`)!)).toMatchObject({ act: "delete" });
   });
 });

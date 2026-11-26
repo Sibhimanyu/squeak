@@ -260,22 +260,22 @@ own key; the member is the account those keys belong to.
   device's Pond is `status: "pending"` with `connecting: true` and the sentence "Connecting: waiting for <Owner>’s Mac" until the
   Owner's Mac seals the key; the Mac draws it with no button. The web signs in, asks `GET /account/ponds` on load and requests each pond
   it does not hold. The iPhone reads shared Pond and Room views through the Mac. See “The Room on iPhone” below.
-- **Leave, Remove and Delete (issue #128).** Both ends are final at once in the relay: the membership row ends (feed and blob reads
-  are refused, the live hub drops their subscriptions) and every device of the account is marked revoked. `POST /account/pond-leaves
-{ pondId }` is the person leaving (409 for the Owner, idempotent, also covers someone in the people table but not yet in the index);
-  `POST /ponds/<id>/members/<userId>/remove` is the Owner removing them from the web (204; 404 not a member; 409 the Owner; deletes the
-  index row). Removing accounts through `members/accounts` is a removal too. The relay writes one note
-  `devreqs/acct-<userId>` = `{ v:1, reqId, userId, accountGone:true, reason: "left"|"removed"|"deleted", at }`; the Owner's Mac reads it in
-  its device pass (`adoptDeviceRequests`, `readAccountGone`) and runs `applyAccountGone`: drops the member, rotates the key, writes the
-  Room line ("Asha left", said by the person; a removal reads "Sibhi removed Asha"), and records the person in `pond.departed`. Their
-  posts stay in the Room as "<name> (left)" or "Former member" (`author.standing` in the cloud Room doc, read by `Room.toPosts` and the
-  Member's Room read). Their own Mac deletes its copy when it next learns it was removed (`wipeLocalCopy`: snapshot, file cache,
-  in-memory Room state, a "wiped" event, `pond.keys` emptied), and at once when leaving. Accepting a new invite clears the revocations
-  and the note, so coming back is the same person with every key version. **Delete a Pond** (Owner): each Member's device is sealed a
-  `{ removed, deleted }` note first and given `deleteGraceMs` (2 s) to read it, then tokens end and the cloud documents go. The device
-  then shows `status: "removed"`, `deleted: true` and "<Pond> was deleted." (card title "<Pond> was deleted"); a device that missed the
-  note reads the ordinary "You were removed". Mac UI: Pond ⋯ › "Leave <Pond>…", the sidebar row's secondary-click "Leave pond…", one
-  confirm ("Your messages stay in the Room under your name. To come back you need a new invite from <Owner>.").
+- **Leave, Remove and Delete (issue #128).** Each is final at once in the relay (`ejectAccount`): the membership row ends (feed and
+  blob reads are refused, the live hub drops their subscriptions through `withRemovalNotice`) and every device of the account is marked
+  revoked. The routes are #138's: `POST /account/pond-leaves { pondId }` (the person leaving; 409 for the Owner; idempotent; also covers
+  someone in the people table but not yet in the index), `DELETE /ponds/<id>/members/<userId>` (the Owner removing; 404 not a member;
+  409 the Owner; deletes the index row) and `DELETE /ponds/<id> { name }`. `members/accounts` removals are a removal too. Each leaves the
+  `peopleNote` (`devreqs/pn-<act>-<userId>`); the Owner's Mac reads it in its device pass and `applyPeopleNote` runs
+  `applyAccountGone`: drops the member, rotates the key, writes the Room line ("Asha left", said by the person; "Sibhi removed Asha"),
+  and records the person in `pond.departed`. Their posts stay in the Room as "<name> (left)" or "Former member" (`author.standing` in
+  the cloud Room doc, read by `Room.toPosts` and the Member's Room read). Their own Mac deletes its copy when it next learns it was
+  removed (`wipeLocalCopy`: snapshot, file cache, in-memory Room state, a "wiped" event, `pond.keys` emptied), and at once when leaving.
+  Accepting a new invite clears the revocations and the notes, so coming back is the same person with every key version.
+  **Delete a Pond:** the Owner's Mac seals each Member's device a `{ removed, deleted }` note and waits `deleteGraceMs` (2 s) before ending
+  tokens; the relay's `DELETE /ponds/<id>` also keeps each Member's index row for a week marked `deleted: true` (listed by
+  `GET /account/ponds`, dropped after a week), so a device that missed the note still reads it. The device shows `status: "removed"`,
+  `deleted: true` and "<Pond> was deleted." Mac UI: Pond ⋯ › "Leave <Pond>…", the sidebar row's "Leave pond…", one confirm ("Your
+  messages stay in the Room under your name. To come back you need a new invite from <Owner>.").
 - **Migration.** Nothing is rewritten. Existing documents are one-device members. An owner's Mac adds the accounts of members that
   have an `accountId` to the relay index at its first pass after the update; a member who joined with no `accountId` stays one device
   and is invited again by email to attach an account. The email copy "you can add the Mac app later" is now true.

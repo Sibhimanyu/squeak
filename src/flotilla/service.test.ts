@@ -192,6 +192,30 @@ describe("a left pond is not asked for again, across a restart", () => {
     expect(left).toEqual([pond.id]);
   });
 
+  it("a device that missed the delete note reads the relay's 'deleted' record: \"<Pond> was deleted.\"", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    const B = c.mac("Aarav");
+    await admitMember(A.service, B.service, pond.id, "member");
+    await B.service.refresh(pond.id);
+    const asked: string[] = [];
+    const other = c.mac("Aarav", {
+      dir: B.dir,
+      relay: {
+        accountPonds: async () => [{ pondId: pond.id, name: "Greenroom", ownerKey: "k", deleted: true as const }],
+        requestDevice: async (r: { pondId: string }) => {
+          asked.push(r.pondId);
+          throw new Error("refused");
+        },
+      },
+    });
+    await other.service.syncAccountPonds();
+    const row = (await other.service.list()).find((p) => p.id === pond.id)!;
+    expect(row).toMatchObject({ status: "removed", deleted: true, statusLine: "Greenroom was deleted." });
+    expect(asked).toEqual([]);
+  });
+
   it("a relay without the leave route leaves the leave to the owner's Mac", async () => {
     const c = cloud();
     const A = c.mac("Sibhi", { owner: true });
