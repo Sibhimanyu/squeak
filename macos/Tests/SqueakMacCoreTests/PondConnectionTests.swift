@@ -87,6 +87,9 @@ import Testing
         #expect(t.line("delete:p") == "Squeak couldn\u{2019}t delete the Pond. The cloud didn\u{2019}t confirm it.")
         t.begin("invite:p", .invite)
         #expect(t.line("invite:p") == "Inviting\u{2026}")
-        #expect(EmailInviteText.sending(2) == "Inviting\u{2026}")
+        t.begin("withdraw:p:i", .withdraw)
+        #expect(t.line("withdraw:p:i") == "Withdrawing\u{2026}")
+        t.begin("resend:p:i", .resend)
+        #expect(t.line("resend:p:i") == "Resending\u{2026}")
     }
 }

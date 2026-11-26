@@ -13,7 +13,8 @@ import { FlotillaBridge, type BridgeOptions, type HostPort, type ShareableArtifa
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
 import { ARTIFACT_CHUNK_BYTES, ARTIFACT_FETCH_PER_HOUR, MAX_ARTIFACT_BYTES } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
@@ -49,11 +50,10 @@ function mac(name: string, options: BridgeOptions = {}, clock?: { now: number })
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-art-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
     ...(clock ? { now: () => clock.now } : {}),
   });
   const bridge = new FlotillaBridge(service, new FakeHost(), { flushMs: 60_000, ...options });
@@ -133,9 +133,7 @@ describe("a member reads the owner's artifacts", () => {
       [B, "member"],
       [V, "viewer"],
     ] as const) {
-      await m.service.join((await A.service.invite(pondId, role)).code);
-      for (const j of (await A.service.view(pondId)).joins)
-        await A.service.decideJoin(pondId, j.requestId, { approve: true });
+      await admitMember(A.service, m.service, pondId, role);
       await m.service.refresh(pondId);
     }
   });

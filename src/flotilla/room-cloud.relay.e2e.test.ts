@@ -18,6 +18,7 @@ import { NativeStore } from "../native/store.js";
 import type { SessionRow } from "../native/types.js";
 import { FlotillaBridge } from "./bridge.js";
 import { randomId } from "./crypto.js";
+import { admitMember } from "./admit-member.test-fixture.js";
 import { FakeHost, session } from "./journey-support.js";
 import { HttpPondRelay } from "./relay.js";
 import { RoomSync } from "./room-sync.js";
@@ -156,7 +157,6 @@ async function mac(user: TestUser) {
   const account = {
     name: () => user.name,
     email: () => user.email,
-    attest: async () => (await relay.attest()).token,
     names: async (ids: string[]) => relay.names(ids),
   };
   let ownerId = "";
@@ -166,19 +166,17 @@ async function mac(user: TestUser) {
     supportDir: dir,
     nest: `${user.name}-mac`,
     location,
-    inviteLinkBase: "https://x.test/join",
     relay,
     now: () => clock.t,
     wakeDebounceMs: 0,
     wakeMinIntervalMs: 0,
     presenceOf: async () => (ownerId ? [{ memberId: ownerId, online: !ownerAway.v }] : []),
-    storeFor: (loc, pondToken, joinAttest) => {
+    storeFor: (loc, pondToken) => {
       const at = loc as { provider: string; relayUrl: string; relayKey?: string };
       if (pondToken) {
         return new CatalystStore({
           baseUrl: at.relayUrl,
           pondToken,
-          ...(joinAttest ? { joinAttest } : {}),
           fetch: doFetch,
           socket: streams.socket,
         });
@@ -243,11 +241,8 @@ const user = (name: string): TestUser => ({
 });
 
 async function admit(owner: Mac, pondId: string, who: Mac, email: string) {
-  await who.service.join((await owner.service.invite(pondId, "member", email)).link!);
-  for (const j of (await owner.service.view(pondId)).joins) {
-    await owner.service.decideJoin(pondId, j.requestId, { approve: true });
-  }
-  await who.service.refresh(pondId);
+  void email;
+  await admitMember(owner.service, who.service, pondId, "member", { id: user(who.name).userId });
 }
 
 /** What the cloud holds of one kind, read with a Mac's own key (the relay's list route). */

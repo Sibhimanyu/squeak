@@ -14,22 +14,11 @@ export interface IssuedToken {
  * (docs/ponds.md, "Scoped tokens"). Tests pass a double; with a Firebase store there is none and nothing is issued.
  */
 export interface PondRelay {
-  /** The relay's base URL: the one part of the store an invite may carry. */
+  /** The relay's base URL. */
   readonly url: string;
-  /** `email` (a join token only) pins the invite: the relay accepts the join request only from that signed-in account. */
-  issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number, email?: string): Promise<IssuedToken>;
-  /** Ends a member's (or an invite's) token at once: the relay checks a revocation on every request. */
+  issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number): Promise<IssuedToken>;
+  /** Ends a member's token at once: the relay checks a revocation on every request. */
   revoke(pondId: string, memberId: string): Promise<void>;
-  /**
-   * A joiner's proof of which Squeak account this Mac belongs to (10 min), sent beside the join request. Only the relay
-   * says who the account is: a joiner cannot claim an account that is not theirs. Absent where there is no relay account.
-   */
-  attest?(): Promise<IssuedToken>;
-  /**
-   * `POST /ponds/<id>/invites/email`: the relay sends each address its invitation through Catalyst Mail (the join token
-   * behind each link is already bound to that address). Throws `RelayRefused` with the status (429 limit, 503 mail).
-   */
-  inviteEmail?(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }>;
   /** The display names these account ids signed in with (at most 50 per call), plus this Mac's own account. */
   names?(ids: string[]): Promise<AccountNames>;
   /**
@@ -98,14 +87,6 @@ export interface DeviceRequestBody {
   nest: string | null;
 }
 
-export interface InviteMail {
-  emails: string[];
-  /** The link each address gets, keyed by the lower-cased address. */
-  inviteUrls: Record<string, string>;
-  pondName: string;
-  inviterName: string;
-}
-
 export interface AccountNames {
   names: Record<string, { name: string; email?: string }>;
   self?: { userId: string; name?: string; email?: string };
@@ -150,14 +131,8 @@ export class HttpPondRelay implements PondRelay {
     return response;
   }
 
-  async issue(
-    pondId: string,
-    memberId: string,
-    scope: TokenScope,
-    ttlSec: number,
-    email?: string,
-  ): Promise<IssuedToken> {
-    const sent = { pondId, memberId, scope, ttlSec, ...(email ? { email } : {}) };
+  async issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number): Promise<IssuedToken> {
+    const sent = { pondId, memberId, scope, ttlSec };
     const body = (await (await this.post("/pond-token", sent)).json()) as Record<string, unknown>;
     if (typeof body.token !== "string" || typeof body.expiresAt !== "number") {
       throw new Error("catalyst pond-token: unexpected answer");
@@ -167,36 +142,6 @@ export class HttpPondRelay implements PondRelay {
 
   async revoke(pondId: string, memberId: string): Promise<void> {
     await this.post("/pond-revoke", { pondId, memberId });
-  }
-
-  async attest(): Promise<IssuedToken> {
-    const response = await this.fetchImpl(`${this.url}/account/join-attest`, {
-      method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
-      body: "{}",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new RelayRefused(response.status);
-    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!body || typeof body.token !== "string" || typeof body.expiresAt !== "number") {
-      throw new Error("catalyst join-attest: unexpected answer");
-    }
-    return { token: body.token, expiresAt: body.expiresAt };
-  }
-
-  async inviteEmail(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }> {
-    const response = await this.fetchImpl(`${this.url}/ponds/${encodeURIComponent(pondId)}/invites/email`, {
-      method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
-      body: JSON.stringify(mail),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) throw new RelayRefused(response.status);
-    const body = (await response.json().catch(() => null)) as { sent?: unknown; failed?: unknown } | null;
-    const list = (v: unknown): string[] =>
-      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-    if (!body || !Array.isArray(body.sent)) throw new Error("catalyst invites/email: unexpected answer");
-    return { sent: list(body.sent), failed: list(body.failed) };
   }
 
   async names(ids: string[]): Promise<AccountNames> {

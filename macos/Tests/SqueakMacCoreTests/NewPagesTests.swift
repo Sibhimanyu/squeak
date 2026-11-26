@@ -43,16 +43,8 @@ import Testing
         #expect(f.kind == .blank && !f.canCreate && f.buttonTitle == "Create pond")
         f.setName("Orchard")
         #expect(f.canCreate)
-        #expect(NewPondKind.allCases == [.blank, .folder, .clone, .invite])
-        #expect(NewPondKind.allCases.map(\.title) == ["Start a new pond", "A folder on this Mac", "Clone a repository", "Join someone\u{2019}s pond"])
-    }
-
-    @Test func joiningTypesNoName() {
-        var f = NewPondForm()
-        f.setName("rubberducky")
-        f.kind = .invite
-        f.inviteCode = "squeak-pond:abc"
-        #expect(f.name == "rubberducky" && PondInviteText.canJoin(code: f.inviteCode))
+        #expect(NewPondKind.allCases == [.blank, .folder, .clone])
+        #expect(NewPondKind.allCases.map(\.title) == ["Start a new pond", "A folder on this Mac", "Clone a repository"])
     }
 
     @Test func nameFillsFromTheHostUnlessTyped() {
@@ -93,12 +85,6 @@ import Testing
         f.kind = .clone
         #expect(!f.canCreate)
         f.cloneURL = " owner/repo "
-        #expect(f.canCreate)
-        f.kind = .invite
-        #expect(!f.canCreate && f.buttonTitle == "Join pond")
-        f.inviteCode = "two words"
-        #expect(!f.canCreate)
-        f.inviteCode = "abc123"
         #expect(f.canCreate)
     }
 

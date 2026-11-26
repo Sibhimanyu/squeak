@@ -258,7 +258,6 @@ describe("tenant isolation", () => {
   it("a Mac key cannot write the relay-owned kinds the relay key cannot", async () => {
     const { f, a } = await twoMacs();
     expect((await put(f, a, MAC_A, "devreqs")).status).toBe(403);
-    expect((await put(f, a, MAC_A, "joinids")).status).toBe(403);
   });
 
   it("hosted publishes only the opaque tag; self-hosted is unchanged", async () => {

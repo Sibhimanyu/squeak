@@ -33,7 +33,6 @@ public enum PondRole: String, Sendable, Equatable, Codable {
 
     public var canMessage: Bool { self != .viewer }
     public var canInvite: Bool { self == .owner }
-    public var canApproveJoins: Bool { self == .owner }
     public var canRemoveMembers: Bool { self == .owner }
     /// What the role picker says.
     public var word: String {
@@ -410,80 +409,6 @@ public struct PondHold: Sendable, Equatable, Decodable {
     }
 }
 
-/// A request to join, waiting for an owner's Mac to approve it (`joins` of `GET /ponds/<id>`).
-public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
-    public var id: String
-    public var name: String
-    /// The role the invite offered; the owner decides.
-    public var role: PondRole
-    /// The requester's machine; nil for a web guest.
-    public var nest: String?
-    public var isWeb: Bool
-    /// The sign-in provider's verified email and name for a web guest; nil from an older daemon.
-    public var verifiedEmail: String?
-    public var verifiedName: String?
-    /// The owner's decision on this request while the host runs it ("working") or after it failed ("failed", with a sentence); nil from an older daemon.
-    public var decisionState: String?
-    public var decisionApprove: Bool?
-    public var decisionError: String?
-    /// When it was asked; nil from an older host.
-    public var requestedAt: Date?
-    /// Three words from the owner's key, this joiner's key and the pond: the joiner's waiting screen shows the same three.
-    public var words: [String] = []
-
-    /// "Approving…" while the host works, its sentence when it failed, nothing otherwise.
-    public var decisionLine: String? {
-        switch decisionState {
-        case "working": return decisionApprove == false ? "Declining\u{2026}" : "Approving\u{2026}"
-        case "failed": return decisionError ?? "That didn\u{2019}t go through. Try again."
-        default: return nil
-        }
-    }
-    public var decisionFailed: Bool { decisionState == "failed" }
-    public var isDeciding: Bool { decisionState == "working" }
-
-    /// What to call the requester: the verified name when there is one.
-    public var displayName: String {
-        if let n = verifiedName, !n.isEmpty { return n }
-        return name.isEmpty ? "Someone" : name
-    }
-
-    /// "Priya, priya@gmail.com, verified, wants to join"
-    public var accessibilityLabel: String {
-        verifiedEmail.map { "\(displayName), \($0), verified, wants to join" } ?? "\(displayName) wants to join"
-    }
-
-    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName, decision, requestedAt, words }
-    enum DecisionKeys: String, CodingKey { case state, approve, error, line }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .requestId)
-        name = c.lenient(String.self, .name) ?? ""
-        role = PondRole(raw: c.lenient(String.self, .role))
-        nest = c.lenient(String.self, .nest)
-        isWeb = c.lenient(String.self, .client) == "web"
-        verifiedEmail = (try? c.decodeIfPresent(String.self, forKey: .verifiedEmail)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
-        verifiedName = (try? c.decodeIfPresent(String.self, forKey: .verifiedName)).flatMap { $0 }
-        if let d = try? c.nestedContainer(keyedBy: DecisionKeys.self, forKey: .decision) {
-            decisionState = d.lenient(String.self, .state)
-            decisionApprove = d.lenient(Bool.self, .approve)
-            decisionError = d.lenient(String.self, .line) ?? d.lenient(String.self, .error)
-        }
-        requestedAt = PondTime.decode(c, CodingKeys.requestedAt)
-        words = c.lenient([String].self, .words) ?? []
-    }
-
-    public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false,
-                verifiedEmail: String? = nil, verifiedName: String? = nil,
-                decisionState: String? = nil, decisionApprove: Bool? = nil, decisionError: String? = nil, requestedAt: Date? = nil) {
-        self.requestedAt = requestedAt
-        self.id = id; self.name = name; self.role = role; self.nest = nest; self.isWeb = isWeb
-        self.verifiedEmail = verifiedEmail; self.verifiedName = verifiedName
-        self.decisionState = decisionState; self.decisionApprove = decisionApprove; self.decisionError = decisionError
-    }
-}
-
 /// Who is here right now: online, which thread they look at, and the thread they are typing in (the host writes the
 /// thread id, not a flag).
 public struct PondPresenceEntry: Sendable, Equatable, Decodable {
@@ -541,14 +466,11 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     public var ripples: [RippleEntry]
     public var presence: [PondPresenceEntry]
     public var holds: [PondHold]
-    public var joins: [JoinRequest]
     public var me: PondMe?
-    /// The owner's invites with their states; empty for anyone else and from an older host.
-    public var invites: [PondInviteEntry]
     /// Ducks Members asked for that wait for the Owner: every one on the Owner's Mac, a Member's own on theirs; empty from an older host.
     public var starts: [PondPendingStart]
 
-    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, joins, me, invites, starts, offline, asOf, offlineLine }
+    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, me, starts, offline, asOf, offlineLine }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -558,9 +480,7 @@ public struct PondDetail: Sendable, Equatable, Decodable {
         ripples = c.list(RippleEntry.self, .ripples)
         presence = c.list(PondPresenceEntry.self, .presence)
         holds = c.list(PondHold.self, .holds)
-        joins = c.list(JoinRequest.self, .joins)
         me = c.lenient(PondMe.self, .me)
-        invites = c.list(PondInviteEntry.self, .invites)
         starts = c.list(PondPendingStart.self, .starts)
         // The contract puts `offline` on the pond; a host may also write it beside it.
         if c.lenient(Bool.self, .offline) == true { pond.offline = true }
@@ -570,13 +490,12 @@ public struct PondDetail: Sendable, Equatable, Decodable {
 
     public init(
         pond: PondSummary, members: [FlockMember] = [], threads: [PondThread] = [], ripples: [RippleEntry] = [],
-        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], joins: [JoinRequest] = [], me: PondMe? = nil, invites: [PondInviteEntry] = [],
+        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], me: PondMe? = nil,
         starts: [PondPendingStart] = []
     ) {
-        self.invites = invites
         self.starts = starts
         self.pond = pond; self.members = members; self.threads = threads; self.ripples = ripples
-        self.presence = presence; self.holds = holds; self.joins = joins; self.me = me
+        self.presence = presence; self.holds = holds; self.me = me
     }
 
     /// This Mac's person: the member the host marks `you`, else the one `me` names.
@@ -617,53 +536,6 @@ extension KeyedDecodingContainer {
     func list<T: Decodable>(_ type: T.Type, _ key: Key) -> [T] {
         (try? decodeIfPresent([Failable<T>].self, forKey: key))?.compactMap(\.value) ?? []
     }
-}
-
-/// `POST /ponds/<id>/invites`.
-public struct PondInvite: Sendable, Equatable, Decodable {
-    /// The invite's id (to revoke it); nil from an older host.
-    public var id: String?
-    public var code: String
-    public var expiresAt: Date?
-    /// `https://<host>/join#<code>`, only when the host has an invite link base; the code stays in the fragment.
-    public var link: String?
-    /// A short code (`K7P-4QD`, `{ short: true }`): then `code` is empty, `expiresAt` is the code's ten minutes and
-    /// there is no long code to share. A person shares the long one through "Share a link instead".
-    public var short: String?
-
-    enum CodingKeys: String, CodingKey { case id, code, expiresAt, link, short }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = flexString(c, .id)
-        short = c.lenient(String.self, .short).flatMap { $0.isEmpty ? nil : $0 }
-        code = short == nil ? try c.decode(String.self, forKey: .code) : (c.lenient(String.self, .code) ?? "")
-        expiresAt = PondTime.decode(c, CodingKeys.expiresAt)
-        link = c.lenient(String.self, .link)
-    }
-
-    public init(code: String, expiresAt: Date?, link: String? = nil, id: String? = nil, short: String? = nil) {
-        self.id = id; self.code = code; self.expiresAt = expiresAt; self.link = link; self.short = short
-    }
-
-    /// What a person copies: the short code when there is one, else the link when the host made one, else the code.
-    public var shareable: String { short ?? link ?? code }
-}
-
-/// `POST /ponds/join`: the request is written and an owner's Mac must approve it.
-public struct PondJoinResult: Sendable, Equatable, Decodable {
-    public var pondId: String
-    public var status: String
-
-    enum CodingKeys: String, CodingKey { case pondId, status }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        pondId = try c.decode(String.self, forKey: .pondId)
-        status = c.lenient(String.self, .status) ?? "pending"
-    }
-
-    public var isPending: Bool { status != "approved" }
 }
 
 // MARK: Thread events
@@ -742,50 +614,6 @@ public struct ThreadEventPage: Sendable, Equatable, Decodable {
     public init(events: [ThreadEvent], lastSeq: Int) { self.events = events; self.lastSeq = lastSeq }
 }
 
-
-/// One invite in the owner's list (`invites` of `GET /ponds/<id>`).
-public struct PondInviteEntry: Sendable, Equatable, Identifiable, Decodable {
-    public enum State: String, Sendable, Equatable { case pending, accepted, declined, expired, revoked }
-
-    public var id: String
-    public var role: PondRole
-    public var state: State
-    public var createdAt: Date?
-    public var expiresAt: Date?
-    /// The name of the person who used it (accepted or declined).
-    public var usedBy: String?
-    /// Kept by the host for a pending invite so the owner can copy it again.
-    public var link: String?
-    public var code: String?
-    /// A short code that is still unspent and unexpired, with when it lapses.
-    public var short: String?
-    public var shortExpiresAt: Date?
-
-    enum CodingKeys: String, CodingKey { case id, role, state, createdAt, expiresAt, usedBy, link, code, short, shortExpiresAt }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = flexString(c, .id) ?? UUID().uuidString
-        role = PondRole(raw: c.lenient(String.self, .role))
-        state = c.lenient(String.self, .state).flatMap(State.init(rawValue:)) ?? .pending
-        createdAt = PondTime.decode(c, CodingKeys.createdAt)
-        expiresAt = PondTime.decode(c, CodingKeys.expiresAt)
-        usedBy = c.lenient(String.self, .usedBy).flatMap { $0.isEmpty ? nil : $0 }
-        link = c.lenient(String.self, .link)
-        code = c.lenient(String.self, .code)
-        short = c.lenient(String.self, .short).flatMap { $0.isEmpty ? nil : $0 }
-        shortExpiresAt = PondTime.decode(c, CodingKeys.shortExpiresAt)
-    }
-
-    public init(id: String, role: PondRole = .member, state: State = .pending, createdAt: Date? = nil, expiresAt: Date? = nil, usedBy: String? = nil, link: String? = nil, code: String? = nil,
-                short: String? = nil, shortExpiresAt: Date? = nil) {
-        self.id = id; self.role = role; self.state = state; self.createdAt = createdAt; self.expiresAt = expiresAt
-        self.usedBy = usedBy; self.link = link; self.code = code; self.short = short; self.shortExpiresAt = shortExpiresAt
-    }
-
-    /// What a person copies: the link when the host kept one, else the code; nil when it kept neither.
-    public var shareable: String? { link ?? code }
-}
 
 /// The answer to a member's message (`POST .../messages`): queued behind the starter's Mac, sent, or refused with the
 /// host's reason sentence. An older host answers `{ queued }` only.

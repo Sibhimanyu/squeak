@@ -6,7 +6,7 @@ import Foundation
 // sentence and Try again. Nothing here ever shows a result that was not confirmed.
 
 public enum PondActionKind: String, Sendable, Equatable {
-    case invite, remove, leave, delete
+    case invite, resend, withdraw, remove, leave, delete
 }
 
 extension PondActionWords {
@@ -14,6 +14,8 @@ extension PondActionWords {
     public static func pending(_ kind: PondActionKind, who: String?) -> String {
         switch kind {
         case .invite: "Inviting\u{2026}"
+        case .resend: "Resending\u{2026}"
+        case .withdraw: "Withdrawing\u{2026}"
         case .remove: who.map { "Removing \($0)\u{2026}" } ?? "Removing\u{2026}"
         case .leave: "Leaving\u{2026}"
         case .delete: "Deleting\u{2026}"
@@ -24,6 +26,8 @@ extension PondActionWords {
     public static func done(_ kind: PondActionKind, who: String?) -> String {
         switch kind {
         case .invite: "Invited."
+        case .resend: "Sent again."
+        case .withdraw: "Withdrawn."
         case .remove: "\(who ?? "They") was removed."
         case .leave: "You left."
         case .delete: "Deleted."
@@ -36,6 +40,8 @@ extension PondActionWords {
     public static func failure(_ kind: PondActionKind, who: String?, reason: String?) -> String {
         let what: String = switch kind {
         case .invite: "invite"
+        case .resend: "resend the invite"
+        case .withdraw: "withdraw the invite"
         case .remove: "remove \(who ?? "them")"
         case .leave: "leave the Pond"
         case .delete: "delete the Pond"

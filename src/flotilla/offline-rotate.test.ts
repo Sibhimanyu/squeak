@@ -8,7 +8,8 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaService, OFFLINE_WRITE } from "./service.js";
 import { FlotillaError } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -41,23 +42,19 @@ function flaky(inner: CloudStore): CloudStore & { down: boolean } {
 function mac(name: string, nest: string | null = name + "-mac") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-off-"));
   dirs.push(dir);
-  const store = verifying(flaky(new RtdbRest(url)));
+  const store = flaky(new RtdbRest(url));
   const service = new FlotillaService({
     store,
     supportDir: dir,
     account: named(name),
     nest,
-    inviteLinkBase: "https://x.test/join",
   });
   return { dir, store, service };
 }
 
 async function join(owner: ReturnType<typeof mac>, guest: ReturnType<typeof mac>, pondId: string, name: string) {
-  const { link } = await owner.service.invite(pondId, "member");
-  await guest.service.join(link!);
-  const requestId = (await owner.service.view(pondId)).joins.find((j) => j.name === name)!.requestId;
-  await owner.service.decideJoin(pondId, requestId, { approve: true });
-  await guest.service.refresh(pondId);
+  void name;
+  await admitMember(owner.service, guest.service, pondId, "member");
 }
 
 describe("offline pond details", () => {

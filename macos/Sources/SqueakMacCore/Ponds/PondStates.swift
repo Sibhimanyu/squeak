@@ -138,97 +138,11 @@ public enum PondFreshness: Sendable, Equatable {
 // MARK: Needs-you count
 
 public enum PondBadge {
-    /// The sidebar badge and menu-bar count: the host's threads waiting plus, for an owner, the join requests nobody has answered.
+    /// The sidebar badge and menu-bar count: the host's threads waiting.
     public static func count(pond: PondSummary, detail: PondDetail?) -> Int {
         guard pond.state == .active || pond.state == .local else { return 0 }
-        let joins = (detail?.myRole ?? pond.role).canApproveJoins ? (detail?.joins.count ?? 0) : 0
-        return pond.needsYou + joins
+        return pond.needsYou
     }
-
-    /// Ponds this person owns that are shared: their requests are read even when the pond is not open.
-    public static func readsJoins(_ pond: PondSummary) -> Bool { pond.role.canApproveJoins && pond.state == .active && !pond.local }
-}
-
-// MARK: Join cards (owner)
-
-public enum JoinCardText {
-    /// "From Priya's MacBook" / "From a web browser".
-    public static func source(_ j: JoinRequest) -> String {
-        if j.isWeb { return "From a web browser" }
-        if let nest = j.nest, !nest.isEmpty { return "From \(nest)" }
-        return "From Squeak on a Mac"
-    }
-
-    /// "priya@gmail.com \u{00B7} Verified" (a sign-in provider vouched for the address), else nil.
-    public static func email(_ j: JoinRequest) -> String? { j.verifiedEmail.map { "\($0) \u{00B7} Verified" } }
-
-    public static func title(_ j: JoinRequest, pond: String?) -> String {
-        "\(j.displayName) wants to join" + (pond.map { " \($0)" } ?? "")
-    }
-
-    /// What the card says about its decision: the local press first ("Approving…" the instant it is pressed), then the host's
-    /// word, and a failure as one sentence that says what to do.
-    public static func decisionLine(_ j: JoinRequest, pressing: Bool?) -> (text: String, failed: Bool)? {
-        if let pressing { return (pressing ? "Approving\u{2026}" : "Declining\u{2026}", false) }
-        guard let host = j.decisionLine else { return nil }
-        if j.decisionFailed {
-            let verb = j.decisionApprove == false ? "decline" : "approve"
-            let again = j.decisionApprove == false ? "Decline" : "Approve"
-            return ("Couldn\u{2019}t \(verb) \(j.displayName): \(host.hasSuffix(".") ? String(host.dropLast()) : host). \(again) to try again.", true)
-        }
-        return (host, false)
-    }
-
-    public static let hint = "Approve only people you know."
-}
-
-// MARK: Invites list (owner)
-
-public struct PondInviteRow: Sendable, Equatable, Identifiable {
-    public var id: String
-    public var title: String
-    public var line: String
-    public var pending: Bool
-    public var canCopy: Bool
-    public var canRevoke: Bool
-    public var tone: PondStateCard.Tone
-    /// Pending, or used/ended less than a day ago; the rest fold under "Earlier invites".
-    public var recent: Bool
-}
-
-public enum PondInvites {
-    public static func rows(_ invites: [PondInviteEntry], now: Date) -> [PondInviteRow] {
-        invites.sorted {
-            let a = $0.createdAt ?? .distantPast, b = $1.createdAt ?? .distantPast
-            return a != b ? a > b : $0.id < $1.id
-        }.map { row($0, now: now) }
-    }
-
-    public static func row(_ i: PondInviteEntry, now: Date) -> PondInviteRow {
-        // A pending invite past its expiry is expired, whatever the host last wrote.
-        let lapsed = i.state == .pending && (i.expiresAt.map { $0 <= now } ?? false)
-        let state: PondInviteEntry.State = lapsed ? .expired : i.state
-        let by = i.usedBy.map { $0.isEmpty ? "Someone" : $0 } ?? "Someone"
-        let title = "\(i.role.word) invite"
-        let line: String
-        var tone = PondStateCard.Tone.calm
-        switch state {
-        case .pending: line = "Waiting for someone to use it" + (PondInviteText.expiry(i.expiresAt, now: now).map { " \u{00B7} \($0)" } ?? "")
-        case .accepted: line = "\(by) joined"
-        case .declined: line = "\(by) was declined"; tone = .problem
-        case .expired: line = "Expired"; tone = .problem
-        case .revoked: line = "Revoked"; tone = .problem
-        }
-        let reference = i.createdAt ?? i.expiresAt ?? now
-        let pending = state == .pending
-        return PondInviteRow(
-            id: i.id, title: title, line: line, pending: pending, canCopy: pending && i.shareable != nil, canRevoke: pending, tone: tone,
-            recent: pending || now.timeIntervalSince(reference) < 24 * 3600)
-    }
-
-    public static let earlierTitle = "Earlier invites"
-    public static let revokeWarning = "The link and code stop working."
-    public static let oneEach = "Each invite is for one person."
 }
 
 // MARK: Members (owner's list)
@@ -395,7 +309,7 @@ public enum PondThreadStatus {
 // MARK: Notifications from list and view transitions
 
 public struct PondNote: Sendable, Equatable, Identifiable {
-    public enum Kind: Sendable, Equatable { case joinRequest, joined, approved, declined, expired, revoked, removed, threadNeedsYou }
+    public enum Kind: Sendable, Equatable { case joined, approved, declined, expired, revoked, removed, threadNeedsYou }
     public var id: String
     public var kind: Kind
     public var title: String
@@ -424,14 +338,10 @@ public enum PondNotes {
         }
     }
 
-    /// The owner's: each join request not seen before, and each new member. `oldJoins` nil means the pond was not read yet,
-    /// so nothing is announced from a first read except requests still waiting (each is announced once by `seen`).
-    public static func owner(pond: PondSummary, old: PondDetail?, new: PondDetail, seen: Set<String>) -> [PondNote] {
-        guard new.myRole.canApproveJoins else { return [] }
+    /// The owner's: each new member (the person accepted an invite). A pond not read yet announces nothing from its first read.
+    public static func owner(pond: PondSummary, old: PondDetail?, new: PondDetail) -> [PondNote] {
+        guard new.myRole == .owner else { return [] }
         var out: [PondNote] = []
-        for j in new.joins where !seen.contains(j.id) && j.decisionState != "working" {
-            out.append(PondNote(id: "pond-join-\(j.id)", kind: .joinRequest, title: "\(j.displayName) wants to join \(pond.name)", body: JoinCardText.source(j) + ". " + JoinCardText.hint, pondId: pond.id))
-        }
         if let old {
             let known = Set(old.members.map(\.id))
             for m in new.members where !m.you && !known.contains(m.id) {

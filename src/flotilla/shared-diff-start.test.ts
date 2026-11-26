@@ -12,7 +12,8 @@ import { FlotillaBridge, type BridgeOptions, type HostPort } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
 import { MAX_DIFF_RESULT_BYTES, START_PER_HOUR, type ChangedFiles } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
@@ -95,11 +96,10 @@ function mac(name: string, options: BridgeOptions = {}, clock?: { now: number })
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
     ...(clock ? { now: () => clock.now } : {}),
   });
   const host = new FakeHost();
@@ -156,9 +156,7 @@ describe("a member reads the changes of someone else's thread", () => {
       [B, "member"],
       [V, "viewer"],
     ] as const) {
-      await m.service.join((await A.service.invite(pondId, role)).code);
-      for (const j of (await A.service.view(pondId)).joins)
-        await A.service.decideJoin(pondId, j.requestId, { approve: true });
+      await admitMember(A.service, m.service, pondId, role);
       await m.service.refresh(pondId);
     }
     A.host.sessions.set("s1", session("s1"));
@@ -315,9 +313,7 @@ describe("a member starts a thread on the owner's Mac", () => {
       [B, "member"],
       [V, "viewer"],
     ] as const) {
-      await m.service.join((await A.service.invite(pondId, role)).code);
-      for (const j of (await A.service.view(pondId)).joins)
-        await A.service.decideJoin(pondId, j.requestId, { approve: true });
+      await admitMember(A.service, m.service, pondId, role);
       await m.service.refresh(pondId);
     }
   });

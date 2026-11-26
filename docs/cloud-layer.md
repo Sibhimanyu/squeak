@@ -59,16 +59,18 @@ Who is in a Pond lives in server-readable Catalyst Data Store tables; what peopl
 - What it offers, grouped. Accounts: `upsertAccount` (names come from sign-in), `getAccount`, `accountByEmail`.
   Devices: `addDevice`, `devicesOf`, `removeDevice`, `setPushToken`, `pushTokensOf`. Ponds: `createPond` (the Owner becomes
   the first member), `getPond`, `pondsOf`, `pondIds`. Memberships: `addMember`, `removeMember`, `isMember`, `membershipOf`,
-  `membersOf`. Invites: `createInvite`, `settleInvite` (joined, declined, withdrawn, expired), `getInvite`, `invitesOf`,
-  `pendingInvitesFor`. Clean start: `cleanStart`. Refusals are `PeopleError` with a stable `code` (`already-member`,
+  `membersOf`. Invites: `createInvite`, `acceptInvite`, `declineInvite`, `withdrawInvite`, `inviteAgain`, `settleInvite`,
+  `getInvite`, `invitesOf`, `listInvites`, `pendingInvitesFor` (see "Invitations" below). Clean start: `cleanStart`. Refusals are `PeopleError` with a stable `code` (`already-member`,
   `pond-full`, `invite-pending`, `invite-exists`, `pond-exists`, `device-taken`, `not-member`, `owner`, `not-pending`,
+  `was-withdrawn`, `was-expired`, `was-declined`, `was-joined`, `still-pending`, `joined`, `wrong-address`,
   `no-invite`, `no-pond`, `invalid`); routes map them to statuses. Later tickets build on this: #120 (sequence numbers and the
-  change feed) reads `isMember` and `membersOf`, #126 (invites) uses the invite calls, #128 (removal) uses `removeMember`.
+  change feed) reads `isMember` and `membersOf`, #128 (removal) uses `removeMember`.
 - Rules live in the tables, not in code that reads then writes, because Data Store has no transactions and `IsUnique`
   is per column: the membership key is `pondId:userId` (unique); the 10-person cap is ten slot rows `pondId:0..9`
-  (a taken slot is refused by the unique key); one pending invite per address per Pond is a lock row
+  (a taken slot is refused by the unique key; a pending invite holds a slot too, owner `invite:<id>`, so the cap counts
+  pending people, and the slot passes to the person when they join); one pending invite per address per Pond is a lock row
   `pondId:sha256(email)` that is deleted when the invite is settled (an expired invite's lock is cleared by the next invite
-  to that address). A membership row is written first, so a duplicate is refused before any slot is touched.
+  to that address, and deleting the lock is also the claim that lets only one of Join, Decline and Withdraw win). A membership row is written first, so a duplicate is refused before any slot is touched.
 - Names (accounts, devices, Ponds) are stored escaped (backslash doubled, characters above U+FFFF as `\u{hex}`) because Data
   Store turns 4-byte UTF-8 into `?`; `people.js` encodes and decodes, so callers see plain text. Times are epoch-ms bigint
   columns, never `CREATEDTIME`. Lookup values in ZCQL may not contain `'`, `\` or control characters (refused, never escaped).
@@ -315,22 +317,50 @@ kind }` registers or refreshes one (20 per account; `pond-devices` registers too
   of SHA-256 of the key) = `{ v:1, reqId, userId, email, name, publicKey, boxKey, client, nest, at }`, announces it, and answers
   `{ reqId, token, expiresAt }` (a join-scope token, 24 h, for that device id).
 
-## Invite email (relay 1.6.0, Catalyst Mail)
+## Invitations (#126: email only, one relay record)
 
-`POST /ponds/<pondId>/invites/email` (a Mac's own key, or the operator's relay key; the Mac must own the pond's channel):
-strict body `{ emails: [1..10 addresses], inviteUrls: { <lower-cased address>: <link> }, pondName, inviterName }`, nothing
-else. Each address is checked with a simple strict pattern (max 254 characters); each link must be
-`https://squeak.onslate.in/join#<base64url code>` (the relay will not mail a link to anywhere else); names are one line,
-HTML-escaped in the body. One email per address, subject `<inviter> invited you to <pond> on Squeak`, plain words, no
-tracking. Catalyst Mail sends one body per message (`@zcatalyst/mail` 1.0.0, `sendMail({ from_email, to_email, subject,
-content, html_mode })`), so the email is HTML with the bare link also in the text; `mail.js` also builds the plain-text
-version for the day the API takes both. Limits in `invite-mail`: 10 emails per pond per hour, 20 per Mac per day (an
-operator-key call counts as "operator"). Answers `200 { sent, failed }` (partial failure lists the addresses),
-`400 { error: "body" | "links" | "ids" }`, `429 { error: "busy" }`, `503 { error: "mail", reason }` when nothing went out
-(sender not set up, quota): a fixed sentence, never the SDK's words. The sender is `SQUEAK_MAIL_FROM` (an env variable of the
-function and AppSail; `deploy-hosted.sh` and `deploy-appsail.sh` pass it through when it is set; unset = 503, no mail).
-A join refused for the wrong email is now `403 { error: "email", masked: "p***@e***.com" }`. `/account/handoff` also accepts
-a return to `https://squeak.onslate.in/join` (exactly).
+The invite is one row in `people_invites` and the only source of truth: **pending**, then **joined**, **declined**,
+**expired** (7 days; a pending row past `expiresAt` reads, and is settled, as expired at the moment it lapsed) or
+**withdrawn**, each with `settledAt`. Nothing else decides it: the Owner's Mac, the email and every cached list only draw
+the record. There are no codes, short codes, copied links or web guests; the invite never carries the Pond key (a person who
+joins is a Member in the cloud at once, and Connecting until the Owner's Mac seals the key to their devices).
+
+Owner routes (an account token, or the Owner's Mac's own key; the caller's account must own the Pond, else 403; the first
+invite makes the Pond exist in the cloud with that account as Owner):
+
+- `POST /ponds/<id>/invites { emails: [1..10], role: "member" | "viewer", pondName }` answers `200 { results: [{ email, ok,
+  mailed, invite } | { email, ok: false, error, message }] }`. Each refusal is a plain sentence: "<email> is already in this
+  Pond.", "<email> already has a pending invitation.", "This Pond holds 10 people, counting invitations. Withdraw an
+  invitation or remove someone first.", "<x> is not an email address." The email goes out through the mail path (below); a
+  failed send leaves the invite pending (`mailed: false`) and Resend tries again.
+- `GET /ponds/<id>/invites` answers `{ invites: [...] }`: one invite per address (the newest), newest first, each with
+  `inviteId, email, role, state, invitedBy, createdAt, expiresAt, settledAt` and, when the address has an account, `name` and
+  `userId`. A finished invite clears 7 days after it was reached. Joined ones are returned too: the person is in Members.
+- `POST /ponds/<id>/invites/<inviteId>/resend` (pending only), `/withdraw` (pending only) and `/again { role? }` (declined,
+  expired or withdrawn only: a new pending record replaces the old one). `409 { error, message }` when the invite is not in
+  that state.
+
+The invited person (an account token or Mac key, signed in): `GET /invites` lists the pending invitations for the account's
+verified address (`inviteId, pondId, pond, inviter, role, expiresAt`); `POST /invites/<id>/accept` and `/decline`. Only that
+address may use it: another account gets `403 { error: "wrong-address", masked: "p***@e***.com" }` and the invite stays
+pending; a used, withdrawn or expired one is `409 { error: "was-...", message }`. `GET /invites/preview?code=<inviteId>` (no
+sign-in) is unchanged (masked address, state, first names). Removed: the long-code and link invites, six-character codes,
+`POST /ponds/<id>/invites/email` (it took links), `POST /account/join-attest`, email-pinned join tokens (`pins`), the
+`joinids` kind and the `joins` write of a join-scope token (it only reads now); `/account/handoff` returns to `/invite`
+(exactly) instead of `/join`.
+
+The Room lines for a join and a decline (none for withdraw) are written by the Owner's Mac when it reads the record
+(`src/flotilla/pond-people.ts`, each once); the relay stores no Room content.
+
+### The email
+
+One email per address, subject `<inviter> invited you to <pond> on Squeak`, plain words, no tracking, the button goes to
+`https://squeak.onslate.in/invite?code=<inviteId>` (the invite page is ticket 3i). Catalyst Mail sends one body per message
+(`@zcatalyst/mail` 1.0.0, `sendMail({ from_email, to_email, subject, content, html_mode })`), so the email is HTML with the
+bare link also in the text; `mail.js` also builds the plain-text version. Limits in `invite-mail`: 20 emails per account per
+day. A failure to send is `mailed: false`, with the provider's words in the function's log only. The sender is
+`SQUEAK_MAIL_FROM` (an env variable of the function and AppSail; `deploy-hosted.sh` and `deploy-appsail.sh` pass it through
+when it is set; unset = nothing is sent and every result says `mailed: false`).
 
 Catalyst Mail's free tier is **100 emails a month for the whole account**, then **$0.001 per email**.
 
@@ -343,7 +373,7 @@ docs and the SDK README and was not clicked through here, so check the labels):
    verification the console shows: SPF and DKIM records) and verify it from the confirmation email Catalyst sends.
 3. Set `SQUEAK_MAIL_FROM` to that exact address (`SQUEAK_MAIL_FROM=... deploy-hosted.sh`, and for AppSail the same variable
    to `deploy-appsail.sh`, or in the function's and AppSail's environment variables in the console), then redeploy the
-   relay. Until then the Mac's Send invites answers "Squeak couldn't send email right now".
+   relay. Until then invitations are made but no email goes out (`mailed: false`).
 
 ## Squeak's hosted relay: per-Mac keys
 

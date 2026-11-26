@@ -15,6 +15,7 @@ import { CatalystStore, type StreamSocket } from "../cloud/catalyst-store.js";
 import { createCloudStore } from "../cloud/config.js";
 import { FlotillaBridge } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
+import { admitMember } from "./admit-member.test-fixture.js";
 import { FakeHost, session } from "./journey-support.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
@@ -175,7 +176,6 @@ async function mac(user: TestUser, nest: string | null = `${user.name}-mac`) {
   const account = {
     name: () => user.name,
     email: () => user.email,
-    attest: async () => (await relay.attest()).token,
     names: async (ids: string[]) => relay.names(ids),
   };
   const stores: CatalystStore[] = [];
@@ -185,17 +185,15 @@ async function mac(user: TestUser, nest: string | null = `${user.name}-mac`) {
     supportDir: dir,
     nest,
     location,
-    inviteLinkBase: "https://x.test/join",
     relay,
     wakeDebounceMs: 0,
     wakeMinIntervalMs: 0,
-    storeFor: (loc, pondToken, joinAttest) => {
+    storeFor: (loc, pondToken) => {
       const at = loc as { provider: string; relayUrl: string; relayKey?: string };
       if (pondToken) {
         const s = new CatalystStore({
           baseUrl: at.relayUrl,
           pondToken,
-          ...(joinAttest ? { joinAttest } : {}),
           fetch: doFetch,
           socket: streams.socket,
         });
@@ -209,7 +207,7 @@ async function mac(user: TestUser, nest: string | null = `${user.name}-mac`) {
   const host = new FakeHost();
   const bridge = new FlotillaBridge(service, host, { flushMs: 60_000 });
   bridge.start();
-  return { dir, service, host, bridge, name: user.name, key, relay };
+  return { dir, service, host, bridge, name: user.name, key, relay, userId: user.userId };
 }
 
 /** A signed command built by hand, as a hostile or buggy member would, written through that member's own store. */
@@ -240,20 +238,14 @@ describe("the multiplayer journey over the real relay", () => {
     B = await mac({ userId: "u-aarav", email: "aarav@example.com", name: "Aarav" });
   });
 
-  it("1. create, publish, account invite, join, approve: the member sees the pond", async () => {
+  it("1. create, publish, add a member: the member sees the pond", async () => {
     const pond = await A.service.createPond({
       name: "Site",
       projectId: "p1",
       gitRemote: "git@github.com:acme/site.git",
     });
     pondId = pond.id;
-    // Pinned to Aarav's account: another account's join attestation would be refused by the relay.
-    const made = await A.service.invite(pondId, "member", "aarav@example.com");
-    await B.service.join(made.link!);
-    const [join] = (await A.service.view(pondId)).joins;
-    expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
-    await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await B.service.refresh(pondId);
+    await admitMember(A.service, B.service, pondId, "member", { id: B.userId });
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
     expect(view.members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
@@ -347,7 +339,7 @@ describe("the multiplayer journey over the real relay", () => {
       (await call(`/list?prefix=${encodeURIComponent(`channels/${other}/threads`)}`)).status,
     ).toBeGreaterThanOrEqual(400);
     const doc = { box: "x", at: 1 };
-    for (const kind of ["joinids", "devreqs", "devresults", "hist"]) {
+    for (const kind of ["devreqs", "devresults", "hist"]) {
       const r = await call(`/doc?path=${encodeURIComponent(`channels/${pondId}/${kind}/d1`)}`, "PUT", { doc });
       expect(r.status, kind).toBeGreaterThanOrEqual(400);
     }
@@ -365,13 +357,10 @@ describe("the multiplayer journey over the real relay", () => {
     expect(res.status).toBe(401);
   });
 
-  it("8. joins on the web, then their Mac picks up the pond by signing in: no invite, code or approval", async () => {
+  it("8. a member on the web, then their Mac picks up the pond by signing in: no invite, code or approval", async () => {
     const carol = { userId: "u-carol", email: "carol@example.com", name: "Carol" };
     const web = await mac(carol, null);
-    await web.service.join((await A.service.invite(pondId, "member", carol.email)).link!);
-    const [join] = (await A.service.view(pondId)).joins;
-    await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await web.service.refresh(pondId);
+    await admitMember(A.service, web.service, pondId, "member", { id: web.userId });
     expect((await web.service.view(pondId)).me.role).toBe("member");
     // later she signs in on her Mac: it asks, the owner's Mac adds the device, the pond appears
     const laptop = await mac(carol);
@@ -388,6 +377,6 @@ describe("the multiplayer journey over the real relay", () => {
 
   it("the relay refuses what a Mac key may not do", async () => {
     const wrong = new HttpPondRelay(BASE, "z".repeat(43), toLocal(deviceUrl), true);
-    await expect(wrong.attest()).rejects.toBeInstanceOf(RelayRefused);
+    await expect(wrong.accountPonds()).rejects.toBeInstanceOf(RelayRefused);
   });
 });

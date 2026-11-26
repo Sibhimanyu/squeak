@@ -5,7 +5,7 @@ import { logger } from "../utils/logger.js";
 /** A pond thread the person starts without naming a mode begins in Skip approvals, like `NEW_THREAD_PERMISSION_MODE` in native/server.ts. */
 const NEW_THREAD_MODE = "bypassPermissions";
 import { CatalystStore } from "../cloud/catalyst-store.js";
-import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
+import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
 import { Artifacts } from "../native/artifacts.js";
 import type { HostEvent } from "../native/host.js";
@@ -21,7 +21,8 @@ import { MainRepoFinder } from "../fleet/repo-identity.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
 import { computerName, oldDefaults } from "./person.js";
-import { HttpPondRelay, RelayRefused } from "./relay.js";
+import { HttpPondRelay } from "./relay.js";
+import { HttpPondInvites } from "./invites-port.js";
 import { RoomSync } from "./room-sync.js";
 import { FlotillaService, type AccountPort } from "./service.js";
 import { FlotillaError, type ChangedFiles } from "./types.js";
@@ -211,10 +212,6 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   const account: AccountPort = {
     name: () => (where?.provider === "catalyst" && where.hosted ? (hostedAccount()?.name ?? null) : null),
     email: () => (where?.provider === "catalyst" && where.hosted ? (hostedAccount()?.email ?? null) : null),
-    attest: async () => {
-      if (!catalystRelay || where?.provider !== "catalyst" || !where.hosted) throw new RelayRefused(401);
-      return (await catalystRelay.attest()).token;
-    },
     names: async (ids) => (catalystRelay ? catalystRelay.names(ids) : { names: {} }),
   };
   // The one live stream of this Mac (squeak-live) tells the service its connection state; absent, the old path runs.
@@ -228,22 +225,15 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     supportDir: deps.supportDir,
     nest: computerName(),
     ...(where ? { location: where } : {}),
-    // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
-    ...(where?.provider === "catalyst" &&
-    guestInviteBase(where.hosted ? { appUrl: new URL(where.relayUrl).origin } : config?.catalyst)
-      ? {
-          inviteLinkBase: guestInviteBase(
-            where.hosted ? { appUrl: new URL(where.relayUrl).origin } : config?.catalyst,
-          )!,
-        }
-      : {}),
-    // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
+    // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member holds
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
     ...(catalystRelay ? { relay: catalystRelay } : {}),
-    storeFor: (loc, pondToken, joinAttest) => {
+    ...(where?.provider === "catalyst"
+      ? { invites: new HttpPondInvites(where.relayUrl, where.relayKey, undefined, where.hosted === true) }
+      : {}),
+    storeFor: (loc, pondToken) => {
       const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
-      if (at.provider === "catalyst" && pondToken)
-        return new CatalystStore({ baseUrl: at.relayUrl, pondToken, ...(joinAttest ? { joinAttest } : {}) });
+      if (at.provider === "catalyst" && pondToken) return new CatalystStore({ baseUrl: at.relayUrl, pondToken });
       if (at.provider === "catalyst" && !("relayKey" in at))
         throw new Error("This pond has no access on this Mac yet.");
       return createCloudStore(at as CloudLocation);

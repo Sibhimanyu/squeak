@@ -131,34 +131,30 @@ describe("flotilla routes", () => {
     const view = await h.call("GET", `/native/ponds/${id}`);
     expect(view.json.members).toHaveLength(1);
     expect(view.json.me.role).toBe("owner");
-    const invite = await h.call("POST", `/native/ponds/${id}/invites`, { role: "member" });
-    expect(invite.json.code).toMatch(/^squeak-pond:/);
-    expect((await h.call("POST", `/native/ponds/${id}/invites`, { role: "boss" })).status).toBe(400);
-    expect((await h.call("POST", "/native/ponds/join", { code: "squeak-pond:zz" })).status).toBe(400);
-    // Invite by email: a strict body; with no Catalyst relay here it is a plain 503, never a code or a crash.
-    const byEmail = (b: unknown) => h.call("POST", `/native/ponds/${id}/invites/email`, b);
-    expect((await byEmail({ emails: "a@b.co" })).status).toBe(400);
-    expect((await byEmail({ emails: ["a@b.co"], extra: 1 })).status).toBe(400);
-    expect((await byEmail({ emails: ["a@b.co"], role: "owner" })).status).toBe(400);
-    expect((await byEmail({ emails: ["nope"] })).status).toBe(400);
-    expect((await byEmail({ emails: ["a@b.co"] })).status).toBe(503);
-    expect((await h.call("POST", `/native/ponds/${id}/invites/email`, { emails: ["a@b.co"] }, "wrong")).status).toBe(
-      401,
-    );
     expect((await h.call("GET", "/native/ponds/nope")).status).toBe(404);
+    // The old ways in are gone: no code, no link, no join request, no approval route.
+    expect((await h.call("POST", `/native/ponds/${id}/invites/email`, { emails: ["a@b.co"] })).status).toBe(404);
+    expect((await h.call("POST", `/native/ponds/${id}/invites`, { role: "member", short: true })).status).toBe(400);
+    expect((await h.call("DELETE", `/native/ponds/${id}/invites/anything`)).status).toBe(404);
+    // The one way in is email: People, and an invite by address (this Mac has no relay here, so it says so).
+    const people = await h.call("GET", `/native/ponds/${id}/people`);
+    expect(people.status).toBe(200);
+    expect(people.json).toMatchObject({ cap: 10, invites: [] });
+    expect(people.json.members).toHaveLength(1);
+    const sent = await h.call("POST", `/native/ponds/${id}/invites`, { emails: ["a@b.co"], role: "member" });
+    expect([sent.status, sent.json.error]).toEqual([
+      503,
+      "Invites need Squeak's cloud. Sign in to Squeak, then try again.",
+    ]);
+    expect((await h.call("POST", `/native/ponds/${id}/invites`, { emails: "a@b.co" })).status).toBe(400);
+    expect((await h.call("POST", `/native/ponds/${id}/invites/i1/resend`, {})).status).toBe(503);
+    expect((await h.call("POST", `/native/ponds/${id}/invites/i1/explode`, {})).status).toBe(404);
+    expect((await h.call("POST", "/native/ponds/join", { code: "x" })).status).toBe(404);
+    expect((await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true })).status).toBe(404);
+    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id })).status).toBe(404);
   });
 
-  it("a join decision answers 202 at once; wait:true answers with the outcome", async () => {
-    const h = await boot(true);
-    const id = (await h.call("POST", "/native/ponds", { name: "P", projectId: "proj-P" })).json.pond.id;
-    const quick = await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true });
-    expect(quick.status).toBe(202);
-    expect(quick.json).toEqual({ ok: true, state: "working" });
-    const waited = await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true, wait: true });
-    expect(waited.status).toBe(404);
-  });
-
-  it("POST /ponds/local makes a local pond once; a first invite publishes it", async () => {
+  it("POST /ponds/local makes a local pond once", async () => {
     const h = await boot(true, "git@github.com:a/b.git", () => ({
       projects: () => [{ id: "proj-c", name: "Conductor repo", rootPath: "/tmp/c" }],
     }));
@@ -175,9 +171,7 @@ describe("flotilla routes", () => {
     const list = await h.call("GET", "/native/ponds");
     expect(list.json.ponds).toHaveLength(1);
     expect(list.json.cloud).toBe(true);
-    const invite = await h.call("POST", `/native/ponds/${one.json.pond.id}/invites`, { role: "member" });
-    expect(invite.json.code).toMatch(/^squeak-pond:/);
-    expect((await h.call("GET", "/native/ponds")).json.ponds[0].local).toBeUndefined();
+    expect((await h.call("GET", "/native/ponds")).json.ponds[0].local).toBe(true);
   });
 
   it("shares a chat, serves its events, and takes a message from its starter", async () => {
@@ -355,14 +349,6 @@ describe("flotilla routes", () => {
         model: "m",
       }),
     ).toBeNull();
-  });
-
-  it("cancel-join takes exactly the pond's id and refuses an active pond", async () => {
-    const h = await boot(true);
-    const id = (await h.call("POST", "/native/ponds", { name: "Mine", projectId: "proj-Mine" })).json.pond.id as string;
-    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id, x: 1 })).status).toBe(400);
-    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: "other" })).status).toBe(400);
-    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id })).status).toBe(409);
   });
 
   it("streams `changed` with no content", async () => {

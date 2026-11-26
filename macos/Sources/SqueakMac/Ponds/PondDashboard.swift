@@ -67,9 +67,8 @@ struct PondHomeView: View {
     var body: some View {
         let plan = ponds.dashboardHeader(key: key)
         let ducks = PondDuckSections.build(layout)
-        let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
         let needs = PondDashboardNeedsYou.build(
-            rows: ducks.onDuty + ducks.offDuty, tasks: room?.feed.jobs ?? [], joins: joins, role: role, ownerName: pond?.ownerName,
+            rows: ducks.onDuty + ducks.offDuty, tasks: room?.feed.jobs ?? [], role: role, ownerName: pond?.ownerName,
             starts: detail?.starts ?? [])
         let latest = PondLatest.build(room?.feed.rows.map(\.post) ?? [])
         let blocks = PondDashboardBlocks.of(needsYou: needs.count, ducks: ducks, latest: latest.count)
@@ -77,7 +76,7 @@ struct PondHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header(plan)
-                    if blocks.needsYou { needsYou(needs, ducks: ducks, joins: joins) }
+                    if blocks.needsYou { needsYou(needs, ducks: ducks) }
                     if blocks.emptyGuide { emptyGuide } else { ducksBlock(ducks, blocks: blocks) }
                     if blocks.latest { latestBlock(latest) }
                 }
@@ -92,6 +91,7 @@ struct PondHomeView: View {
         // A pond's mark clicked while this page is already open: Needs you is the first block, so there is nothing to scroll to.
         .onChange(of: PondScopeRequest.shared.pending[key]) { _, asked in if asked != nil { _ = PondScopeRequest.shared.take(pond: key) } }
         .pondHeartbeat(pond: pond?.id)
+        .task(id: pond?.id) { if let id = pond?.id { await ponds.loadPeople(id) } }
         .task(id: native?.id) { roster?.keepFresh(host: model.nativeHost) }
         // The Latest block reads the Room even while the Room page is not open (a quiet catch-up, never a second stream).
         .task(id: room?.projectId) { if let room { await room.warm(host: model.nativeHost) } }
@@ -101,10 +101,15 @@ struct PondHomeView: View {
     // MARK: Header
 
     private func header(_ plan: PondDashboardHeader) -> some View {
-        let people = detail.map { PondFlock.ordered($0.members, presence: $0.presence) } ?? []
-        let avatars = PondAvatarRow.build(
-            people: people.isEmpty ? [(id: "me", name: person, you: true)] : people.map { (id: $0.id, name: PersonName.shown($0), you: $0.you) },
-            pendingInvites: role.canInvite ? (detail?.invites.filter { $0.state == .pending }.count ?? 0) : 0)
+        // The avatars are the People route's members and pending invites; until it answers, the Pond detail's own members.
+        let avatars: PondAvatarRow
+        if let people = pond.flatMap({ ponds.people[$0.id] }) {
+            avatars = PondAvatarRow.build(people)
+        } else {
+            let members = detail.map { PondFlock.ordered($0.members, presence: $0.presence) } ?? []
+            avatars = PondAvatarRow.build(
+                members: members.isEmpty ? [(id: "me", name: person, you: true)] : members.map { (id: $0.id, name: PersonName.shown($0), you: $0.you) })
+        }
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 14) {
                 PondTile(name: project, pondId: pond?.id, projectId: native?.id, size: 44)
@@ -141,16 +146,16 @@ struct PondHomeView: View {
     }
 
     private func avatarRow(_ row: PondAvatarRow) -> some View {
-        // Flow: the avatars open the Pond's people (its settings, where members and invites are listed).
-        Button { model.openSettings(.pond(key)) } label: {
+        // Flow: the avatars open the People sheet (members, then invitations), on this page.
+        Button { if let p = pond { ponds.sheet = .people(pondId: p.id) } } label: {
             HStack(spacing: -6) {
                 ForEach(row.items) { item in
                     switch item {
                     case .person(let id, let name, let you):
                         FlockAvatar(member: FlockMember(id: id, name: name, you: you), online: false, size: 28)
                             .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
-                    case .pending:
-                        Image(systemName: "envelope").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    case .pending(_, let initial):
+                        Text(verbatim: initial).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
                             .frame(width: 28, height: 28)
                             .overlay(Circle().strokeBorder(Theme.lineStrong, lineWidth: 1.5))
                             .background(Theme.bg, in: Circle())
@@ -213,13 +218,11 @@ struct PondHomeView: View {
 
     // MARK: Needs you
 
-    private func needsYou(_ items: [PondDashboardNeedsYouItem], ducks: PondDuckSections, joins: [JoinRequest]) -> some View {
+    private func needsYou(_ items: [PondDashboardNeedsYouItem], ducks: PondDuckSections) -> some View {
         PondSection("Needs you") {
             VStack(spacing: 8) {
                 ForEach(items) { item in
                     switch item.kind {
-                    case .join(let requestId):
-                        if let pond, let join = joins.first(where: { $0.id == requestId }) { JoinRequestCard(pond: pond, join: join) }
                     default:
                         PondNeedsYouRow(
                             item: item, open: { openNeeds(item, ducks: ducks) }, act: { act($0, on: item) },
@@ -396,7 +399,7 @@ private struct PondNeedsYouRow: View {
             case .startApproval:
                 Button("Decline") { decideStart(false) }.buttonStyle(SecondaryButtonStyle())
                 Button("Approve") { decideStart(true) }.buttonStyle(PondPrimaryButtonStyle())
-            case .taskWaiting, .startWaiting, .join: EmptyView()
+            case .taskWaiting, .startWaiting: EmptyView()
             }
         }
         .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 12)

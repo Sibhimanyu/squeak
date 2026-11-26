@@ -8,7 +8,8 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaBridge, type BridgeOptions } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FakeHost, session } from "./journey-support.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 import { FlotillaService } from "./service.js";
 
 // Roles are Owner, Member and Viewer (docs/ponds.md, "Who can do what"); Ducks that exist before the first invite are
@@ -32,11 +33,10 @@ function mac(name: string, options: BridgeOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-roles-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
   });
   const host = new FakeHost();
   const bridge = new FlotillaBridge(service, host, { flushMs: 60_000, ...options });
@@ -61,9 +61,7 @@ async function rawCommand(who: Mac, pondId: string, body: Record<string, unknown
 }
 
 async function admit(A: Mac, pondId: string, who: Mac, role: "member" | "viewer"): Promise<void> {
-  await who.service.join((await A.service.invite(pondId, role)).code);
-  for (const j of (await A.service.view(pondId)).joins)
-    await A.service.decideJoin(pondId, j.requestId, { approve: true });
+  await admitMember(A.service, who.service, pondId, role);
   await who.service.refresh(pondId);
 }
 

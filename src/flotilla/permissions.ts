@@ -25,7 +25,7 @@ export interface Actor {
   role: Role;
 }
 
-export const POND_ACTIONS = ["view-pond", "invite", "decide-join", "remove-member", "start-thread"] as const;
+export const POND_ACTIONS = ["view-pond", "invite", "remove-member", "start-thread"] as const;
 export const THREAD_ACTIONS = [
   "view-thread",
   "set-private",
@@ -64,7 +64,6 @@ function pondLevel(actor: Actor, action: PondAction): Decision {
     case "view-pond":
       return yes;
     case "invite":
-    case "decide-join":
     case "remove-member":
       return actor.role === "owner" ? yes : no("Only an owner can do that.");
     case "start-thread":

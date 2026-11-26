@@ -41,10 +41,6 @@ final class NewPondState {
     var form = NewPondForm()
     var busy = false
     var error: String?
-    /// The pending request this page sent (or found for the same invite): the waiting card shows instead of the form.
-    var waitingPondId: String?
-    /// The request is on its way ("Joining\u{2026}").
-    var joining = false
     /// One line above the choices ("Make a pond first: …") when a thread or stream led here.
     var notice: String?
     /// Which GitHub sign-in a clone uses, as the host reports it (nil until asked: nothing is claimed).
@@ -52,7 +48,7 @@ final class NewPondState {
     /// A private repository waits for the person's yes before it is cloned.
     var confirmPrivate = false
 
-    func reset() { form = NewPondForm(); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil; confirmPrivate = false }
+    func reset() { form = NewPondForm(); busy = false; error = nil; notice = nil; confirmPrivate = false }
 
     /// Reads the gh sign-in once the clone choice is open; a host that cannot answer leaves the line out.
     func loadSignIn(model: AppModel) async {
@@ -72,19 +68,13 @@ final class NewPondState {
     }
 
     func create(model: AppModel, privateConfirmed: Bool = false) {
-        guard form.canCreate, !busy, !joining else { return }
-        // The same invite while its request is still waiting shows the card; no second request goes out.
-        if form.kind == .invite, let pending = PondJoinWaiting.pending(forInvite: form.inviteCode, in: PondsModel.shared.ponds) {
-            waitingPondId = pending.id
-            return
-        }
+        guard form.canCreate, !busy else { return }
         busy = true
-        joining = form.kind == .invite
         error = nil
         let f = form
         Task { [weak self] in
             guard let self else { return }
-            defer { busy = false; joining = false }
+            defer { busy = false }
             switch f.kind {
             case .blank:
                 let home = NSHomeDirectory()
@@ -118,17 +108,6 @@ final class NewPondState {
                 }
                 let (project, problem) = await ProjectActions.shared.clone(model, url: url, name: f.name)
                 finish(model, project, problem)
-            case .invite:
-                let ponds = PondsModel.shared
-                guard let code = PondInviteText.cleaned(f.inviteCode),
-                      let r = await ponds.join(code: code, account: model.account) else {
-                    error = PondsModel.shared.note ?? "That invite didn\u{2019}t work."
-                    return
-                }
-                await ponds.refresh()
-                if r.isPending { waitingPondId = r.pondId } else {
-                    AppModel.shared.openPondHome(ponds.ponds.first { $0.id == r.pondId }.map { ponds.key(forPond: $0) } ?? "")
-                }
             }
         }
     }
@@ -148,11 +127,7 @@ struct NewPondPage: View {
         NewPageFrame(title: "New pond") {
             VStack(alignment: .leading, spacing: Space.l) {
                 if let notice = state.notice { Text(notice).font(Typo.body).foregroundStyle(Theme.muted) }
-                if let id = state.waitingPondId, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) {
-                    JoinWaitingCard(pond: pond) { NewChatController.shared.hide(); state.reset() }
-                } else {
                 formBody
-                }
             }
             .confirmationDialog(
                 CloneSignIn.privateQuestion(repo: state.signIn?.repo, login: state.signIn?.login), isPresented: $state.confirmPrivate, titleVisibility: .visible
@@ -162,12 +137,6 @@ struct NewPondPage: View {
             } message: {
                 Text(verbatim: CloneSignIn.privateMessage(login: state.signIn?.login))
             }
-            .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
-                // Approved while the page is open: it is a normal pond now.
-                if status == "active" || status == "local", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
-                    state.reset(); AppModel.shared.openPondHome(PondsModel.shared.key(forPond: p))
-                }
-            }
         }
     }
 
@@ -175,12 +144,10 @@ struct NewPondPage: View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: Space.l) {
             Group {
-                if state.form.kind != .invite {
-                    NCField("Name") {
-                        TextField("Pond name",
-                                  text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
-                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
-                    }
+                NCField("Name") {
+                    TextField("Pond name",
+                              text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
+                        .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
                 }
                 VStack(spacing: Space.s) {
                     choice(.blank, icon: .plus) {
@@ -208,22 +175,14 @@ struct NewPondPage: View {
                         }
                         .task { await state.loadSignIn(model: model) }
                     }
-                    choice(.invite, icon: .users) {
-                        TextField("Paste the invite link or code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
-                            .onSubmit { state.create(model: model) }.accessibilityLabel("Invite link or code")
-                    }
-                }
-                // A name is never typed: people in the pond see the name on the Squeak account.
-                if state.form.kind == .invite, model.account.state?.linked != true {
-                    SignInToJoinLine(account: model.account)
                 }
                 if let e = state.error { ProblemLine(text: e) }
                 HStack {
                     Spacer()
                     if state.busy { ProgressView().controlSize(.small) }
-                    Button(state.joining ? "Joining\u{2026}" : state.form.buttonTitle) { state.create(model: model) }
+                    Button(state.form.buttonTitle) { state.create(model: model) }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                        .disabled(!state.form.canCreate || state.busy || state.joining)
+                        .disabled(!state.form.canCreate || state.busy)
                 }
             }
         }

@@ -51,41 +51,10 @@ import Testing
         #expect(PondFreshness.of(detail: nil, pond: off, reading: false, failed: false).line?.hasPrefix("Can\u{2019}t reach Squeak\u{2019}s cloud. Showing what was here at") == true)
     }
 
-    @Test func badgeAddsJoinsForOwnersOnly() throws {
+    @Test func badgeIsTheThreadsWaiting() {
         let p = PondSummary(id: "a", name: "g", role: .owner, needsYou: 1)
-        let j = JoinRequest(id: "j", name: "Priya")
-        #expect(PondBadge.count(pond: p, detail: PondDetail(pond: p, joins: [j], me: PondMe(id: "m", role: .owner))) == 2)
-        let m = PondSummary(id: "a", name: "g", role: .member, needsYou: 1)
-        #expect(PondBadge.count(pond: m, detail: PondDetail(pond: m, joins: [j], me: PondMe(id: "m", role: .member))) == 1)
+        #expect(PondBadge.count(pond: p, detail: PondDetail(pond: p, me: PondMe(id: "m", role: .owner))) == 1)
         #expect(PondBadge.count(pond: PondSummary(id: "a", name: "g", status: "removed"), detail: nil) == 0)
-    }
-
-    @Test func joinCardsNameWhoIsAskingAndSayHowADecisionWent() {
-        let web = JoinRequest(id: "j", name: "Priya", isWeb: true, verifiedEmail: "p@x.com")
-        #expect(JoinCardText.source(web) == "From a web browser" && JoinCardText.email(web) == "p@x.com \u{00B7} Verified")
-        #expect(JoinCardText.source(JoinRequest(id: "j", name: "P", nest: "Priya's MacBook")) == "From Priya's MacBook")
-        let failed = JoinRequest(id: "j", name: "Priya", decisionState: "failed", decisionApprove: true, decisionError: "The pond can't be reached")
-        let line = JoinCardText.decisionLine(failed, pressing: nil)
-        #expect(line?.failed == true && line?.text == "Couldn\u{2019}t approve Priya: The pond can't be reached. Approve to try again.")
-        #expect(JoinCardText.decisionLine(failed, pressing: true)?.text == "Approving\u{2026}")
-        #expect(JoinCardText.decisionLine(JoinRequest(id: "j", name: "P"), pressing: nil) == nil)
-    }
-
-    @Test func inviteRowsShowEveryStateNewestFirst() {
-        let list = [
-            PondInviteEntry(id: "1", state: .pending, createdAt: now.addingTimeInterval(-3600), expiresAt: now.addingTimeInterval(7200), link: "https://x/join#c"),
-            PondInviteEntry(id: "2", state: .accepted, createdAt: now.addingTimeInterval(-100), usedBy: "Priya"),
-            PondInviteEntry(id: "3", role: .viewer, state: .declined, createdAt: now.addingTimeInterval(-200), usedBy: "Raj"),
-            PondInviteEntry(id: "4", state: .revoked, createdAt: now.addingTimeInterval(-90_000)),
-            PondInviteEntry(id: "5", state: .pending, createdAt: now.addingTimeInterval(-90_000), expiresAt: now.addingTimeInterval(-10)),
-        ]
-        let rows = PondInvites.rows(list, now: now)
-        #expect(rows.map(\.id) == ["2", "3", "1", "4", "5"])
-        #expect(rows[0].line == "Priya joined" && !rows[0].canRevoke)
-        #expect(rows[1].title == "Viewer invite" && rows[1].line == "Raj was declined")
-        #expect(rows[2].line == "Waiting for someone to use it \u{00B7} Expires in 2 h" && rows[2].canRevoke && rows[2].canCopy)
-        #expect(rows[3].line == "Revoked" && !rows[3].recent)
-        #expect(rows[4].line == "Expired" && !rows[4].canRevoke)
     }
 
     @Test func memberRowsAreHonestAboutPresence() {
@@ -145,14 +114,11 @@ import Testing
     @Test func ownerAndMemberNotifications() {
         let pond = PondSummary(id: "a", name: "greenroom", role: .owner)
         let me = FlockMember(id: "m", name: "Sibhi", role: .owner, you: true)
-        let j = JoinRequest(id: "j1", name: "Priya", nest: "Priya's Mac")
-        let new = PondDetail(pond: pond, members: [me], joins: [j], me: PondMe(id: "m", role: .owner))
-        let notes = PondNotes.owner(pond: pond, old: nil, new: new, seen: [])
-        #expect(notes.map(\.title) == ["Priya wants to join greenroom"])
-        #expect(PondNotes.owner(pond: pond, old: nil, new: new, seen: ["j1"]).isEmpty)
+        let new = PondDetail(pond: pond, members: [me], me: PondMe(id: "m", role: .owner))
+        #expect(PondNotes.owner(pond: pond, old: nil, new: new).isEmpty)
         let priya = FlockMember(id: "p", name: "Priya", role: .member)
         let after = PondDetail(pond: pond, members: [me, priya], me: PondMe(id: "m", role: .owner))
-        #expect(PondNotes.owner(pond: pond, old: new, new: after, seen: []).map(\.title) == ["Priya joined greenroom"])
+        #expect(PondNotes.owner(pond: pond, old: new, new: after).map(\.title) == ["Priya joined greenroom"])
 
         let mp = PondSummary(id: "a", name: "greenroom", role: .member)
         func d(_ state: String, _ line: String? = nil) -> PondDetail {
@@ -173,12 +139,12 @@ import Testing
 
     @Test func newDecodesAreOptionalAndStableOnToday() throws {
         let d = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"a","name":"g"},"members":[{"id":"m","name":"A"}],"threads":[{"id":"t","title":"T"}],"holds":[{"requestId":"r","heldBy":"m","heldByName":"Aarav","until":1800000000000}]}"#.utf8))
-        #expect(d.invites.isEmpty && d.threads[0].asks == nil && d.threads[0].stateLine == nil && d.members[0].lastSeenAt == nil)
+        #expect(d.threads[0].asks == nil && d.threads[0].stateLine == nil && d.members[0].lastSeenAt == nil)
         let w = try JSONDecoder().decode(PondThread.self, from: Data(#"{"id":"t","title":"T","waitingOn":"question"}"#.utf8))
         #expect(w.waitingOn == "question" && d.threads[0].waitingOn == nil)
         #expect(d.holds[0].byName == "Aarav" && d.holds[0].by == "m")
-        let full = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"a","name":"g","offline":true},"invites":[{"id":"i","role":"viewer","state":"accepted","usedBy":"Priya"}],"joins":[{"requestId":"j","name":"P","decision":{"state":"failed","line":"nope"}}]}"#.utf8))
-        #expect(full.pond.offline && full.invites[0].usedBy == "Priya" && full.joins[0].decisionError == "nope")
+        let full = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"a","name":"g","offline":true}}"#.utf8))
+        #expect(full.pond.offline)
         let r = try JSONDecoder().decode(PondSendResult.self, from: Data(#"{"state":"refused","line":"Viewers can read but not send."}"#.utf8))
         #expect(r.state == .refused && r.line == "Viewers can read but not send.")
         #expect(try JSONDecoder().decode(PondSendResult.self, from: Data(#"{"queued":true}"#.utf8)).state == .queued)

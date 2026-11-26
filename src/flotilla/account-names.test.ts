@@ -10,7 +10,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { CatalystStore } from "../cloud/catalyst-store.js";
 import type { CloudStore } from "../cloud/store.js";
 import { HttpPondRelay } from "./relay.js";
-import { FlotillaService, SIGNED_OUT_MEMBER, SIGN_IN_TO_JOIN, type AccountPort } from "./service.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { FlotillaService, SIGNED_OUT_MEMBER, type AccountPort } from "./service.js";
 
 // Names come only from sign-in (docs/ponds.md, "Names"), against the real relay handler over an in-memory store.
 const require = createRequire(import.meta.url);
@@ -72,7 +73,6 @@ function world() {
     const port: AccountPort = {
       name: () => claim || null,
       email: () => email,
-      attest: async () => (await relay.attest()).token,
       names: (ids) => relay.names(ids),
     };
     return { port, relay, macKey };
@@ -96,15 +96,9 @@ function setup() {
   const w = world();
   const ownerAccount = w.account("uO", "sibhi@example.com", "Sibhi R");
   const location = { provider: "catalyst", relayUrl: RELAY_URL, relayKey: KEY };
-  const storeFor = (loc: unknown, token?: string | null, joinAttest?: string): CloudStore => {
+  const storeFor = (loc: unknown, token?: string | null): CloudStore => {
     const l = loc as typeof location;
-    if (token)
-      return new CatalystStore({
-        baseUrl: l.relayUrl,
-        pondToken: token,
-        ...(joinAttest ? { joinAttest } : {}),
-        fetch: w.fetch,
-      });
+    if (token) return new CatalystStore({ baseUrl: l.relayUrl, pondToken: token, fetch: w.fetch });
     return new CatalystStore({ baseUrl: l.relayUrl, relayKey: l.relayKey, fetch: w.fetch });
   };
   let clock = Date.now();
@@ -125,52 +119,26 @@ function setup() {
 }
 
 describe("names come only from sign-in", () => {
-  it("joining needs a signed-in Squeak account, and says so plainly; nothing is left behind", async () => {
+  it("the owner shows the member's name from the relay's account, not from what the member's Mac claims", async () => {
     const { w, ownerAccount, mk } = setup();
     const A = mk("Sibhi", true, ownerAccount.port);
     const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
-    const { code } = await A.invite(pond.id, "member");
-    const signedOut = w.account("uX", "x@example.com", null);
-    const refusing: AccountPort = {
-      ...signedOut.port,
-      attest: async () => {
-        const { RelayRefused } = await import("./relay.js");
-        throw new RelayRefused(401);
-      },
-    };
-    const B = mk("Aarav", false, refusing);
-    await expect(B.join(code)).rejects.toThrow(SIGN_IN_TO_JOIN);
-    expect(await B.list()).toEqual([]);
-  });
-
-  it("the owner writes the member's name from the relay's account, not from what the joiner sent", async () => {
-    const { w, ownerAccount, mk } = setup();
-    const A = mk("Sibhi", true, ownerAccount.port);
-    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
-    const { code } = await A.invite(pond.id, "member");
-    // the joiner's own Mac claims "Eve the Admin" as its name; the relay knows the account as Aarav Rao
+    // the member's own Mac claims "Eve the Admin" as its name; the relay knows the account as Aarav Rao
     const acct = w.account("uA", "aarav@example.com", "Aarav Rao", "Eve the Admin");
     const B = mk("Aarav", false, acct.port);
-    await (B.join as (code: string, typed?: string) => Promise<unknown>)(code, "Typed Name");
-    const [req] = (await A.view(pond.id)).joins;
-    expect(req).toMatchObject({ name: "Aarav Rao", verifiedEmail: "aarav@example.com" });
-    await A.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A, B, pond.id, "member", { id: "uA" });
+    await A.refresh(pond.id);
     const flock = (await A.view(pond.id)).members;
     expect(flock.map((m) => m.name).sort()).toEqual(["Aarav Rao", "Sibhi R"]);
-    expect(w.rows.get(`channels/${pond.id}/joinids|${req!.requestId}`)).toBeUndefined();
   });
 
   it("a member without a verified account is the Signed-out member; the claimed name is not used", async () => {
     const { w, ownerAccount, mk } = setup();
     const A = mk("Sibhi", true, ownerAccount.port);
     const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
-    const { code } = await A.invite(pond.id, "viewer");
-    // a joiner with no attestation at all (an older client): the relay saw nobody sign in
+    // a member with no account behind them (an older client): the relay never saw anybody sign in
     const old = mk("Old Mac", false, null);
-    await old.join(code);
-    const [req] = (await A.view(pond.id)).joins;
-    expect(req!.name).toBe(SIGNED_OUT_MEMBER);
-    await A.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A, old, pond.id, "viewer");
     expect((await A.view(pond.id)).members.map((m) => m.name)).toContain(SIGNED_OUT_MEMBER);
     expect(w.rows.size).toBeGreaterThan(0);
   });
@@ -188,12 +156,9 @@ describe("names come only from sign-in", () => {
     };
     const A = mk("Sibhi", true, counted);
     const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
-    const { code } = await A.invite(pond.id, "member");
     const acct = w.account("uA", "aarav@example.com", "Aarav Rao");
     const B = mk("Aarav", false, acct.port);
-    await B.join(code);
-    const [req] = (await A.view(pond.id)).joins;
-    await A.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A, B, pond.id, "member", { id: "uA" });
     await A.refresh(pond.id);
     expect(calls).toBe(1);
     // the person changes their name at their sign-in provider; the relay hears it at their next sign-in
@@ -207,12 +172,11 @@ describe("names come only from sign-in", () => {
     expect((await A.view(pond.id)).members.map((m) => m.name)).toContain("Aarav R. Rao");
   });
 
-  it("there is no way to rename yourself: no such method, and a typed name is ignored", () => {
+  it("there is no way to rename yourself: no such method", () => {
     const { mk, ownerAccount } = setup();
     const A = mk("Sibhi", true, ownerAccount.port) as unknown as Record<string, unknown>;
     for (const name of ["rename", "renameMe", "setName", "setDisplayName", "updateProfile"]) {
       expect(typeof A[name]).not.toBe("function");
     }
-    expect(FlotillaService.prototype.join.length).toBe(1);
   });
 });

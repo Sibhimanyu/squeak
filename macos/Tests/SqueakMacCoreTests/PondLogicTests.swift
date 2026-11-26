@@ -50,20 +50,11 @@ struct PondLogicTests {
         #expect(rows[1].title == "Untitled duck" && rows[0].agent == "claude" && rows[0].starterName == "Me" && rows[0].pondThread == nil)
     }
 
-    @Test func joinRequestDecodesWithAndWithoutVerifiedIdentity() throws {
-        let old = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j1","name":"Priya","client":"web"}"#.utf8))
-        #expect(old.verifiedEmail == nil && old.verifiedName == nil)
-        #expect(old.displayName == "Priya" && old.accessibilityLabel == "Priya wants to join")
-        let new = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j2","name":"p","client":"web","verifiedEmail":"priya@gmail.com","verifiedName":"Priya"}"#.utf8))
-        #expect(new.verifiedEmail == "priya@gmail.com" && new.verifiedName == "Priya")
-        #expect(new.accessibilityLabel == "Priya, priya@gmail.com, verified, wants to join")
-    }
-
-    @Test func needsYouCountsJoinRequestsOnlyForAnOwner() {
+    @Test func needsYouCountsTheThreadsWaiting() {
         var d = PondDetail(
             pond: PondSummary(id: "p", name: "O", role: .owner), members: [FlockMember(id: "m", name: "Me", role: .owner, you: true)],
-            threads: [thread("a", "blocked", 0), thread("b", "working", 0)], joins: [JoinRequest(id: "j", name: "Dev")])
-        #expect(PondHomeThreads.needsYouCount(d) == 2)
+            threads: [thread("a", "blocked", 0), thread("b", "working", 0)])
+        #expect(PondHomeThreads.needsYouCount(d) == 1)
         d.members = [FlockMember(id: "m", name: "Me", role: .member, you: true)]
         #expect(PondHomeThreads.needsYouCount(d) == 1)
     }
@@ -118,7 +109,7 @@ struct PondLogicTests {
     }
 
     @Test func roleDecidesWhoMayDoWhat() {
-        #expect(PondRole.owner.canInvite && PondRole.owner.canApproveJoins && PondRole.owner.canRemoveMembers)
+        #expect(PondRole.owner.canInvite && PondRole.owner.canRemoveMembers)
         #expect(!PondRole.member.canInvite && PondRole.member.canMessage)
         #expect(!PondRole.viewer.canMessage)
         #expect(PondRole(raw: "nonsense") == .viewer && PondRole(raw: nil) == .viewer)
@@ -148,15 +139,6 @@ struct PondHoldTests {
         #expect(PondHolds.refused(by: "Aarav") == "Aarav is answering")
         #expect(PondHolds.refused(by: "Aarav is answering") == "Aarav is answering")
         #expect(PondHolds.refused(by: nil) == "Someone else is answering")
-    }
-
-    @Test func inviteExpiryAndJoinInput() {
-        #expect(PondInviteText.expiry(t0.addingTimeInterval(59 * 60), now: t0) == "Expires in 59 min")
-        #expect(PondInviteText.expiry(t0.addingTimeInterval(-1), now: t0) == "Expired")
-        #expect(PondInviteText.expiry(nil, now: t0) == nil)
-        #expect(PondInviteText.cleaned("  abc.def\n") == "abc.def")
-        #expect(PondInviteText.cleaned("two words") == nil)
-        #expect(PondInviteText.canJoin(code: "abc") && !PondInviteText.canJoin(code: "  "))
     }
 }
 

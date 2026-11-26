@@ -3,8 +3,10 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md §8.10, Pond sheets: invite by email (addresses, a role, Send invites),
-// join with a pasted code. Controls say what they do; Pond and Flock only name things.
+// DESIGN.md 8.10 sheets, docs/spec.md "People and remote", mocks 2026-11-26/pond-dashboard (invite-sheet, people-sheet).
+// Two sheets over the Pond's Dashboard: Invite (email tokens, a role, Send) and People (members, then invitations). What
+// they say and offer is decided in SqueakMacCore (`InviteSheetPlan`, `PeopleSheetPlan`); this only draws it. Actions that wait
+// on the cloud say so in place (Inviting…, Withdrawing…) and a failure stays there with Try again.
 
 extension View {
     /// Presents `PondsModel.sheet` over this view.
@@ -13,127 +15,125 @@ extension View {
         return sheet(item: $ponds.sheet) { sheet in
             switch sheet {
             case .invite(let pondId): InvitePondSheet(pondId: pondId)
-            case .join: JoinPondSheet()
+            case .people(let pondId): PeopleSheet(pondId: pondId)
             }
         }
     }
 }
 
-private struct SheetFrame<Content: View>: View {
-    let title: String
-    let content: Content
-    init(_ title: String, @ViewBuilder _ content: () -> Content) { self.title = title; self.content = content() }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.l) {
-            Text(verbatim: title).font(Typo.title).foregroundStyle(Theme.ink)
-            content
-        }
-        .padding(Space.xl).frame(width: 440).background(Theme.surface)
-    }
-}
-
 // MARK: Invite
 
-/// Invite by email (docs/ponds.md): type addresses, pick what they can do, send. Each person gets a link and joins by
-/// signing in with that address: no code, no QR, no second approval. "Copy invite link" is a small secondary action.
 struct InvitePondSheet: View {
     let pondId: String
     @Environment(\.dismiss) private var dismiss
-    @State private var role: PondRole = .member
-    @State private var list = EmailInviteList()
+    @State private var plan: InviteSheetPlan
     @State private var draft = ""
-    @State private var sending = false
-    @State private var rows: [EmailInviteRow] = []
-    @State private var error: String?
-    @State private var linkCopy = CopyFeedback()
-    @State private var makingLink = false
-    @State private var now = Date()
     @FocusState private var fieldFocused: Bool
     private var ponds: PondsModel { .shared }
     private var pondName: String { ponds.ponds.first { $0.id == pondId }?.name ?? "the pond" }
-    private var sent: Bool { !rows.isEmpty }
+    private var key: String { "invite:\(pondId)" }
+    private var sending: Bool { ponds.actions.isPending(key) }
+
+    init(pondId: String) {
+        self.pondId = pondId
+        let people = PondsModel.shared.people[pondId]
+        _plan = State(initialValue: InviteSheetPlan(
+            used: people?.used ?? PondsModel.shared.details[pondId]?.members.count ?? 1, cap: people?.cap ?? 10))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
             header
-            if sent { results } else { form }
-            buttons
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Email addresses").font(Typo.footnote).foregroundStyle(Theme.muted)
+                field
+                if let line = plan.problemLine {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Lucide(.triangleAlert, size: 12, color: Theme.negative)
+                        Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+                if let failed = ponds.actions.failure(key) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        Button(PondActionWords.tryAgain) { send() }.buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Role").font(Typo.footnote).foregroundStyle(Theme.muted)
+                HStack(spacing: Space.m) { ForEach(InviteSheetPlan.roles, id: \.self) { roleCard($0) } }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .contain).accessibilityLabel("They can")
+            }
+            Divider().overlay(Theme.line)
+            footer
         }
-        .padding(Space.xl).frame(width: 480).background(Theme.surface)
-        .animation(Motion.standard, value: rows)
+        .padding(Space.xl).frame(width: 520).background(Theme.surface)
         .onAppear { ponds.note = nil; fieldFocused = true }
+        .task { await ponds.loadPeople(pondId) }
+        .onChange(of: ponds.people[pondId]) { _, people in
+            if let people { plan.setPlaces(used: people.used, cap: people.cap) }
+        }
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: Space.m) {
             PondTile(name: pondName, pondId: pondId, projectId: ponds.directory?.pond(pondId: pondId)?.projectId, size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: EmailInviteText.headline(pond: pondName)).font(Typo.title).foregroundStyle(Theme.ink)
-                Text(verbatim: EmailInviteText.subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
+                Text(verbatim: InviteSheetPlan.headline(pond: pondName)).font(Typo.title).foregroundStyle(Theme.ink)
+                Text(verbatim: InviteSheetPlan.subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    // MARK: Form
-
-    private var form: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            VStack(alignment: .leading, spacing: Space.s) {
-                if !list.addresses.isEmpty {
-                    FlowChips(items: list.addresses) { address in
-                        HStack(spacing: Space.xs) {
-                            Text(verbatim: address).font(Typo.footnote).foregroundStyle(Theme.ink).lineLimit(1)
-                            Button { list.remove(address) } label: { Lucide(.x, size: 10, color: Theme.muted) }
-                                .buttonStyle(.plain).accessibilityLabel("Remove \(address)")
-                        }
-                        .padding(.horizontal, Space.s).padding(.vertical, 3)
-                        .background(PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: Radius.chip))
+    private var field: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            if !plan.tokens.isEmpty {
+                FlowChips(items: plan.tokens.map(\.address)) { address in
+                    let token = plan.tokens.first { $0.address == address }
+                    let bad = token.map { !$0.valid || $0.refusal != nil } ?? false
+                    HStack(spacing: Space.xs) {
+                        Text(verbatim: address).font(Typo.footnote).foregroundStyle(Theme.ink).lineLimit(1)
+                        Button { plan.remove(address) } label: { Lucide(.x, size: 10, color: Theme.muted) }
+                            .buttonStyle(.plain).accessibilityLabel("Remove \(address)")
                     }
+                    .padding(.horizontal, Space.s).padding(.vertical, 3)
+                    .background(PondColour.tint(pondId), in: Capsule())
+                    .overlay(Capsule().strokeBorder(bad ? Theme.negative : Color.clear, lineWidth: 1))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(bad ? "\(address), can\u{2019}t be invited" : address)
                 }
-                TextField(list.addresses.isEmpty ? EmailInviteText.placeholder : "Add another", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1...3)
-                    .focused($fieldFocused)
-                    .onChange(of: draft) { _, text in
-                        // A separator (comma, space, return) or a paste turns what is typed into tokens.
-                        if text.rangeOfCharacter(from: EmailInviteList.separators) != nil { commit(text) }
-                    }
-                    .onSubmit { commit(draft); if list.canSend { send() } }
-                    .accessibilityLabel("Email addresses")
             }
-            .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
-            .overlay(RoundedRectangle(cornerRadius: Radius.control).stroke(Theme.line))
-            HStack(spacing: Space.m) { ForEach([PondRole.member, .viewer], id: \.self) { roleCard($0) } }
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityElement(children: .contain).accessibilityLabel("They can")
-            Text(verbatim: EmailInviteText.note).font(Typo.footnote).foregroundStyle(Theme.muted)
-            if let line = errorLine {
-                Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
-            }
+            TextField(plan.tokens.isEmpty ? InviteSheetPlan.firstPlaceholder : InviteSheetPlan.placeholder, text: $draft)
+                .textFieldStyle(.plain).font(Typo.body).foregroundStyle(Theme.ink)
+                .focused($fieldFocused)
+                .onChange(of: draft) { _, text in
+                    // A separator (comma, space, return) or a paste turns what is typed into tokens.
+                    if text.rangeOfCharacter(from: InviteSheetPlan.separators) != nil { commit() }
+                }
+                .onSubmit { commit(); if plan.canSend { send() } }
+                .accessibilityLabel("Email addresses")
         }
-    }
-
-    private var errorLine: String? {
-        if let error { return error }
-        if list.overflow { return EmailInviteText.tooMany() }
-        if let bad = list.rejected.first { return EmailInviteText.notAnAddress(bad) }
-        return nil
+        .padding(Space.m).frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+        .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).stroke(Theme.line))
     }
 
     private func roleCard(_ r: PondRole) -> some View {
-        let on = role == r
-        return Button { withAnimation(Motion.quick) { role = r } } label: {
+        let on = plan.role == r
+        return Button { withAnimation(Motion.quick) { plan.role = r } } label: {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack {
-                    Lucide(r == .viewer ? .eye : .messageSquare, size: 16, color: Theme.ink)
-                    Text(verbatim: InviteSheetText.roleTitle(r)).font(Typo.heading).foregroundStyle(Theme.ink)
+                    Text(verbatim: r.word).font(Typo.heading).foregroundStyle(Theme.ink)
                     Spacer()
                     if on { Lucide(.check, size: 14, color: Theme.ink) }
                 }
-                Text(verbatim: InviteSheetText.roleBlurb(r)).font(Typo.footnote).foregroundStyle(Theme.muted)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: InviteSheetPlan.roleBlurb(r)).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
             .padding(Space.m).frame(maxWidth: .infinity, alignment: .topLeading)
             .background(on ? PondColour.tint(pondId) : Theme.selected, in: RoundedRectangle(cornerRadius: Radius.card))
@@ -141,221 +141,217 @@ struct InvitePondSheet: View {
             .contentShape(RoundedRectangle(cornerRadius: Radius.card))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(InviteSheetText.roleTitle(r)). \(InviteSheetText.roleBlurb(r))")
+        .accessibilityLabel("\(r.word). \(InviteSheetPlan.roleBlurb(r))")
         .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
     }
 
-    // MARK: Results
-
-    private var results: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            ForEach(rows) { row in
-                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                    Lucide(row.sent ? .check : .x, size: 12, color: row.sent ? Theme.success : Theme.negative)
-                    Text(verbatim: row.email).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: Space.s)
-                    Text(verbatim: row.line).font(Typo.footnote).foregroundStyle(row.sent ? Theme.muted : Theme.negative)
-                        .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.trailing)
-                }
-                .accessibilityElement(children: .combine)
-            }
-            if rows.contains(where: { $0.sent }) {
-                Text(verbatim: "They\u{2019}re in as soon as they open the link and sign in with that address.")
-                    .font(Typo.footnote).foregroundStyle(Theme.muted)
-            }
-        }
-    }
-
-    // MARK: Buttons
-
-    private var buttons: some View {
+    private var footer: some View {
         HStack {
-            if !sent {
-                Button(linkCopy.label(makingLink ? "Making a link\u{2026}" : EmailInviteText.copyLink, now: now)) { copyLink() }
-                    .buttonStyle(.plain).font(Typo.footnote).foregroundStyle(Theme.muted).disabled(makingLink)
-                    .help(EmailInviteText.linkNote)
-            }
+            Text(verbatim: plan.placesLine).font(Typo.footnote).foregroundStyle(Theme.muted)
             Spacer()
-            if sent {
-                if rows.contains(where: { !$0.sent }) {
-                    Button("Try the rest again") { retryFailed() }.buttonStyle(SecondaryButtonStyle())
-                }
-                Button("Done") { dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-            } else {
-                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-                Button(sending ? EmailInviteText.sending(list.count) : EmailInviteText.send) { send() }
-                    .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                    .disabled(sending || !(list.canSend || EmailAddress.isValid(draft)))
-            }
+            Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+            Button(sending ? PondActionWords.pending(.invite, who: nil) : plan.sendTitle) { send() }
+                .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                .disabled(sending || !(plan.canSend || (draftIsAddress && !plan.tokens.contains { $0.refusal != nil })))
         }
     }
 
-    // MARK: Actions
+    private var draftIsAddress: Bool { EmailAddress.isValid(draft) }
 
-    private func commit(_ text: String) {
-        list.dismissRejected()
-        list.add(text)
-        // Text that is not an address stays in the field so it can be fixed; the rest became tokens.
-        draft = list.rejected.joined(separator: " ")
-        error = nil
+    private func commit() {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { draft = ""; return }
+        plan.add(draft)
+        draft = ""
     }
 
     private func send() {
-        if !draft.isEmpty { commit(draft) }
-        guard list.canSend, !sending else { return }
-        sending = true; error = nil
-        let emails = list.addresses
+        commit()
+        guard plan.canSend, !sending else { return }
+        let emails = plan.sendable, role = plan.role
         Task {
-            defer { sending = false }
-            if let result = await ponds.inviteByEmail(pond: pondId, emails: emails, role: role) {
-                withAnimation(Motion.standard) { rows = EmailInviteRow.rows(from: result) }
-            } else {
-                error = ponds.note ?? "That didn\u{2019}t go through"
-            }
-        }
-    }
-
-    private func retryFailed() {
-        let failed = rows.filter { !$0.sent }.map(\.email)
-        var next = EmailInviteList()
-        next.add(failed.joined(separator: " "))
-        list = next; rows = []; draft = ""; error = nil
-    }
-
-    /// The small secondary action: a link anyone can open, which still waits for the owner's approval.
-    private func copyLink() {
-        guard !makingLink else { return }
-        makingLink = true
-        Task {
-            defer { makingLink = false }
-            if let made = await ponds.invite(pond: pondId, role: role), let link = made.link {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(link, forType: .string)
-                now = Date(); linkCopy.copied(at: now)
-                try? await Task.sleep(for: .seconds(CopyFeedback.holdFor + 0.05))
-                now = Date()
-            } else {
-                error = ponds.note ?? "That didn\u{2019}t go through"
-            }
+            guard let results = await ponds.sendInvites(pond: pondId, emails: emails, role: role) else { return }
+            withAnimation(Motion.standard) { plan.apply(results) }
+            if plan.isDone { dismiss() }
         }
     }
 }
 
-// MARK: Join
+// MARK: People
 
-struct JoinPondSheet: View {
+struct PeopleSheet: View {
+    let pondId: String
     @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        SheetFrame("Join a pond") { JoinPondForm(dismiss: { dismiss() }) }
-    }
-}
-
-/// The join form, in the sheet and inline on the Create page.
-struct JoinPondForm: View {
-    var dismiss: () -> Void
-    /// The sheet has Cancel and Close; the page is already where the person is.
-    var inline = false
-    @State private var code = ""
-    @Environment(AppModel.self) private var model
-    @State private var phase: Phase = .entering
+    @State private var removing: PeopleSheetPlan.MemberRow?
     private var ponds: PondsModel { .shared }
-
-    enum Phase: Equatable { case entering, sending, waiting(pondId: String), joined(pondId: String) }
+    private var pond: PondSummary? { ponds.ponds.first { $0.id == pondId } }
+    private var pondName: String { pond?.name ?? "the pond" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
-            switch phase {
-            case .entering, .sending:
-                TextField("Type the code (K7P-4QD) or paste an invite link", text: $code).textFieldStyle(.roundedBorder).font(Typo.code)
-                    .onSubmit { if phase == .entering, PondInviteText.canJoin(code: code) { ask() } }
-                // A name is never typed: the pond shows the name on the Squeak account.
-                if model.account.state?.linked != true { SignInToJoinLine(account: model.account) }
-                Text("An owner approves you on their Mac before you see anything.").font(Typo.footnote).foregroundStyle(Theme.muted)
-                if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }
-                HStack {
-                    Spacer()
-                    if !inline { Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction) }
-                    let askButton = Button(phase == .sending ? "Asking\u{2026}" : "Ask to join") { ask() }
-                        .buttonStyle(PondPrimaryButtonStyle())
-                        .disabled(phase == .sending || !PondInviteText.canJoin(code: code))
-                    if inline { askButton } else { askButton.keyboardShortcut(.defaultAction) }
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: PeopleSheetPlan.title(pond: pondName)).font(Typo.title).foregroundStyle(Theme.ink)
+                    if let people = ponds.people[pondId] {
+                        Text(verbatim: PeopleSheetPlan.make(people, now: Date()).subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    }
                 }
-            case .waiting(let id):
-                HStack(spacing: Space.s) {
-                    StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
-                    Text("Waiting for the owner to approve").font(Typo.label).foregroundStyle(Theme.ink)
-                }
-                if let words = ponds.ponds.first(where: { $0.id == id })?.words, !words.isEmpty { MatchingWords(words: words, hint: InviteSheetText.wordsHintJoiner(owner: ponds.ponds.first(where: { $0.id == id })?.ownerName)) }
-                Text(inline ? "The pond appears in the sidebar once you\u{2019}re approved." : "You can close this. The pond appears in the sidebar once you\u{2019}re approved.")
-                    .font(Typo.body).foregroundStyle(Theme.muted)
-                if !inline {
-                    HStack { Spacer(); Button("Close") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction) }
-                }
-                Color.clear.frame(height: 0).task(id: id) { await waitForApproval(id) }
-            case .joined(let id):
-                let pond = ponds.ponds.first { $0.id == id }?.name ?? "the pond"
-                Text(verbatim: "You\u{2019}re in \(pond).").font(Typo.body).foregroundStyle(Theme.ink)
-                HStack {
-                    Spacer()
-                    Button("Open") { AppModel.shared.openPondHome(ponds.ponds.first { $0.id == id }.map { ponds.key(forPond: $0) } ?? id); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                }
+                Spacer()
+                Button { dismiss() } label: { Lucide(.x, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close")
             }
-        }
-        .onAppear { ponds.note = nil }
-    }
-
-    private func ask() {
-        guard let clean = PondInviteText.cleaned(code) else { return }
-        phase = .sending
-        Task {
-            if let r = await ponds.join(code: clean, account: model.account) {
-                phase = r.isPending ? .waiting(pondId: r.pondId) : .joined(pondId: r.pondId)
+            if let people = ponds.people[pondId] {
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    content(PeopleSheetPlan.make(people, now: ctx.date))
+                }
             } else {
-                phase = .entering
+                Text("Reading the people\u{2026}").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+        }
+        .padding(Space.xl).frame(width: 580).background(Theme.surface)
+        .onAppear { ponds.note = nil }
+        .task { await ponds.loadPeople(pondId) }
+        .confirmationDialog(
+            "Remove \(removing?.name ?? "this person") from \(pondName)?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let m = removing { Task { await ponds.removeMember(pond: pondId, member: m.id) } }
+                removing = nil
+            }
+            Button("Cancel", role: .cancel) { removing = nil }
+        } message: {
+            Text("The pond\u{2019}s key changes, so they can\u{2019}t read anything new. Their own Mac keeps what it already has.")
+        }
+    }
+
+    private var canWrite: Bool { ponds.freshness(pond).canWrite }
+
+    private func content(_ plan: PeopleSheetPlan) -> some View {
+        VStack(alignment: .leading, spacing: Space.l) {
+            section("Members") { ForEach(plan.members) { memberRow($0) } }
+            if !plan.invites.isEmpty { section("Invitations") { ForEach(plan.invites) { inviteRow($0) } } }
+            if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled) }
+            if !canWrite, let why = ponds.freshness(pond).writesDisabledReason {
+                Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted)
+            }
+            if plan.canInvite || !plan.invites.isEmpty {
+                Divider().overlay(Theme.line)
+                HStack {
+                    if !plan.invites.isEmpty { Text(verbatim: PeopleSheetPlan.finishedFootnote).font(Typo.footnote).foregroundStyle(Theme.muted) }
+                    Spacer()
+                    if plan.canInvite {
+                        Button { ponds.startInvite(pondId: pondId, account: AppModel.shared.account) } label: { Label("Invite", systemImage: "envelope") }
+                            .buttonStyle(PondPrimaryButtonStyle()).disabled(!canWrite)
+                    }
+                }
             }
         }
     }
 
-    /// Reads the list until the pond is in it: the owner's approval is what puts it there.
-    private func waitForApproval(_ id: String) async {
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(4))
-            await ponds.refresh()
-            if let p = ponds.ponds.first(where: { $0.id == id }) { phase = .joined(pondId: p.id); return }
+    private func section<C: View>(_ title: String, @ViewBuilder _ rows: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(verbatim: title).font(Typo.footnote).foregroundStyle(Theme.muted).padding(.bottom, Space.s)
+            Divider().overlay(Theme.line)
+            rows()
         }
     }
-}
 
+    // MARK: Members
 
-/// Joining needs the Squeak account, because the name people see is the account's. Said plainly, with the way in.
-struct SignInToJoinLine: View {
-    let account: AccountModel
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-            Text(verbatim: PondJoinGate.signInLine).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            if account.canSignIn {
-                Button("Sign in") { account.openSignIn(from: .pond("")) }.buttonStyle(SecondaryButtonStyle())
+    private func memberRow(_ m: PeopleSheetPlan.MemberRow) -> some View {
+        let removeKey = "remove:\(pondId):\(m.id)"
+        let removingNow = ponds.actions.isPending(removeKey)
+        let changing = ponds.isBusy("role:\(pondId):\(m.id)")
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.m) {
+                FlockAvatar(member: FlockMember(id: m.id, name: m.name, you: m.you), online: false, size: 36)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(verbatim: m.name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                        if m.you { Text("(you)").font(Typo.label).foregroundStyle(Theme.muted) }
+                    }
+                    Text(verbatim: m.email).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
+                Spacer(minLength: Space.s)
+                if let seen = m.seen { Text(verbatim: seen).font(Typo.footnote).foregroundStyle(Theme.muted) }
+                roleControl(m).frame(width: 96, alignment: .leading)
+                Group {
+                    if m.canRemove {
+                        Button(removingNow ? "Removing\u{2026}" : "Remove") { removing = m }
+                            .buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.negative)
+                            .disabled(removingNow || changing || !canWrite)
+                    } else { Color.clear }
+                }
+                .frame(width: 76, alignment: .trailing)
+            }
+            if let failed = ponds.actions.failure(removeKey) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                    Button(PondActionWords.tryAgain) { Task { await ponds.retry(action: removeKey, pond: pondId) } }.buttonStyle(SecondaryButtonStyle())
+                }
             }
         }
+        .padding(.vertical, Space.s)
+        .opacity(removingNow ? 0.6 : 1)
+        .overlay(alignment: .bottom) { Divider().overlay(Theme.line) }
     }
-}
 
-/// The three words both sides of a join see: the owner's approval card and the joiner's waiting card, so a relay that
-/// swapped a key shows different words on the two screens (docs/ponds.md, "Matching words").
-struct MatchingWords: View {
-    let words: [String]
-    let hint: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            Text(verbatim: JoinWords.line(words)).font(Typo.heading.monospaced()).foregroundStyle(Theme.ink).textSelection(.enabled)
-            Text(verbatim: hint).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder private func roleControl(_ m: PeopleSheetPlan.MemberRow) -> some View {
+        if m.roleChoices.isEmpty {
+            Text(verbatim: m.role.word).font(Typo.label).foregroundStyle(Theme.muted)
+        } else {
+            SqueakPicker("Role", selection: Binding(get: { m.role }, set: { new in Task { await ponds.setRole(pond: pondId, member: m.id, role: new) } })) {
+                SqueakOptions(m.roleChoices) { SqueakChoice(title: $0.word, value: $0) }
+            }
+            .labelsHidden().pickerStyle(.menu).fixedSize().disabled(!canWrite).accessibilityLabel("Role for \(m.name)")
         }
-        .padding(.horizontal, Space.m).padding(.vertical, Space.s).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Matching words: \(words.joined(separator: ", ")). \(hint)")
+    }
+
+    // MARK: Invitations
+
+    private func actionKey(_ a: PeopleSheetPlan.InviteAction, _ id: String) -> String {
+        "\(a == .resend ? "resend" : a == .withdraw ? "withdraw" : "again"):\(pondId):\(id)"
+    }
+
+    private func inviteRow(_ r: PeopleSheetPlan.InviteRow) -> some View {
+        let keys = r.actions.map { actionKey($0, r.id) }
+        let working = keys.first { ponds.actions.isPending($0) }
+        let failedKey = keys.first { ponds.actions.offersTryAgain($0) }
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.m) {
+                Image(systemName: "envelope").font(.system(size: 13)).foregroundStyle(Theme.muted).frame(width: 36, height: 36)
+                    .overlay(Circle().strokeBorder(Theme.lineStrong, lineWidth: 1.5))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: r.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                    if let sub = r.subtitle { Text(verbatim: sub).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle) }
+                    Text(verbatim: working.flatMap { ponds.actions.line($0) } ?? r.line).font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: Space.s)
+                ForEach(r.actions, id: \.self) { action in
+                    switch action {
+                    case .resend: Button("Resend") { run(action, r) }.buttonStyle(SecondaryButtonStyle())
+                    case .withdraw: Button("Withdraw") { run(action, r) }.buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.negative)
+                    case .inviteAgain: Button("Invite again") { run(action, r) }.buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+                .disabled(working != nil || !canWrite)
+            }
+            if let failedKey, let failed = ponds.actions.failure(failedKey) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                    Button(PondActionWords.tryAgain) { Task { await ponds.retry(action: failedKey, pond: pondId) } }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
+        }
+        .padding(.vertical, Space.s)
+        .overlay(alignment: .bottom) { Divider().overlay(Theme.line) }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func run(_ action: PeopleSheetPlan.InviteAction, _ row: PeopleSheetPlan.InviteRow) {
+        guard let record = ponds.people[pondId]?.invites.first(where: { $0.id == row.id }) else { return }
+        Task { await ponds.inviteAction(action, pond: pondId, invite: record) }
     }
 }

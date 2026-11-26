@@ -5,7 +5,7 @@
 //
 //   pt.<pondId>.<memberId>.<expiresAtSeconds>.<mac>   guest   (a web or iPhone device of a member): tcmds, joins, holds, rposts
 //   pm.<pondId>.<memberId>.<expiresAtSeconds>.<mac>   member  (a Mac member): the guest kinds plus threads and tevents
-//   pj.<pondId>.<inviteId>.<expiresAtSeconds>.<mac>   join    (carried by an invite): writes the join request only
+//   pj.<pondId>.<deviceId>.<expiresAtSeconds>.<mac>   join    (a new device of a member, until the Owner's Mac seals the key): reads only
 //
 // Reads are of sealed documents in the pond's own channel for every scope; writes never reach members, keys or pond.
 const crypto = require("node:crypto");
@@ -16,8 +16,8 @@ const MEMBER = /^[A-Za-z0-9_-]{1,64}$/;
 const GUEST_WRITE = new Set(["tcmds", "joins", "holds", "rposts"]);
 /** A Mac member also starts threads, so it writes its threads and their event batches. */
 const MEMBER_WRITE = new Set([...GUEST_WRITE, "threads", "tevents"]);
-/** An invite's token writes the join request and nothing else. */
-const JOIN_WRITE = new Set(["joins"]);
+/** A joining device's token (an account's new device) only reads: what the Owner's Mac seals for it is read, nothing is written. */
+const JOIN_WRITE = new Set();
 const SCOPES = {
   guest: { prefix: "pt", domain: "squeak-pond-token", write: GUEST_WRITE },
   member: { prefix: "pm", domain: "squeak-pond-token-member", write: MEMBER_WRITE },
@@ -80,7 +80,7 @@ const noticeTag = (channelId) =>
 // over its own prefix and fields. The signed-in user's email rides inside (signed), so the relay stores nothing at issue.
 const TICKET_USER = /^[A-Za-z0-9_-]{1,64}$/;
 // One signed shape for two jobs, told apart by prefix and by the domain tag inside the MAC, so neither verifies as the other.
-const KINDS_SIGNED = { al: "squeak-account-link", at: "squeak-account-app", ja: "squeak-join-attest" };
+const KINDS_SIGNED = { al: "squeak-account-link", at: "squeak-account-app" };
 const ticketMac = (key, prefix, userId, exp, emailB64) =>
   crypto
     .createHmac("sha256", String(key))
@@ -126,24 +126,11 @@ function issueAppToken(key, userId, email, nowMs, ttlMs) {
 }
 const verifyAppToken = (key, token, nowMs) => verifySigned("at", key, token, nowMs);
 
-/**
- * A join attestation (x-squeak-join-attest): minted for a Mac by its own key (so the relay, not the joiner, says which
- * account it is), good for minutes, and accepted only on a join request. It is not an account token: no account route
- * reads a "ja" value, so it can neither provision a Mac nor mint anything.
- */
-function issueJoinAttest(key, userId, email, nowMs, ttlMs) {
-  const r = issueSigned("ja", key, userId, email, nowMs, ttlMs);
-  return r && { token: r.value, expiresAt: r.expiresAt };
-}
-const verifyJoinAttest = (key, token, nowMs) => verifySigned("ja", key, token, nowMs);
-
 module.exports = {
   issueTicket,
   verifyTicket,
   issueAppToken,
   verifyAppToken,
-  issueJoinAttest,
-  verifyJoinAttest,
   issue,
   verify,
   pondStreamName,

@@ -4,11 +4,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelDoc, CloudStore } from "../cloud/store.js";
-import { named, verifying } from "./named-account.test-fixture.js";
-import { FlotillaService, SIGNED_OUT_MEMBER, type AccountPort } from "./service.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
+import { FlotillaService, type AccountPort } from "./service.js";
 
-// A person's name has one source: their Squeak account (name, else email). Nothing on the Mac, in a pond or in a
-// joiner's request can change how a person is shown.
+// A person's name has one source: their Squeak account (name, else email). Nothing on the Mac or in a pond can change how a person is shown.
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 
 function memoryStore(): CloudStore {
@@ -27,7 +27,6 @@ function account(state: { name: string | null; email: string | null }): AccountP
   return {
     name: () => state.name,
     email: () => state.email,
-    attest: async () => "t",
     names: async () => ({ names: {} }),
   };
 }
@@ -81,40 +80,23 @@ describe("a person's name is their account's", () => {
     expect(s.me.name).not.toBe("mac-login-name");
   });
 
-  describe("a joiner", () => {
-    const pair = (verified: boolean) => {
+  describe("a member", () => {
+    it("is shown by their account's name, with its email", async () => {
       const store = memoryStore();
       const mk = (label: string, owner: boolean) =>
         new FlotillaService({
-          store: verified ? verifying(store) : store,
+          store,
           supportDir: fs.mkdtempSync(path.join(os.tmpdir(), "name-source-")),
           account: named(label, `${label.toLowerCase()}@example.test`),
           nest: `${label}-mac`,
           ...(owner ? { location: LOCATION } : {}),
-          storeFor: () => (verified ? verifying(store) : store),
+          storeFor: () => store,
         });
-      return { owner: mk("Owner", true), joiner: mk("Bea", false) };
-    };
-
-    it("is shown by the account the relay saw sign the request, with its email", async () => {
-      const { owner, joiner } = pair(true);
+      const owner = mk("Owner", true);
       const pond = await owner.createPond({ name: "P", projectId: "proj-P" });
-      await joiner.join((await owner.invite(pond.id, "member")).code);
-      const [req] = (await owner.view(pond.id)).joins;
-      expect(req).toMatchObject({ name: "Bea", verifiedEmail: "bea@example.test" });
-      await owner.decideJoin(pond.id, req!.requestId, { approve: true });
+      await admitMember(owner, mk("Bea", false), pond.id, "member");
       const bea = (await owner.view(pond.id)).members.find((m) => !m.you)!;
       expect(bea).toMatchObject({ name: "Bea", email: "bea@example.test" });
-    });
-
-    it("is never shown by the name their own app wrote when nothing verifies the sign-in", async () => {
-      const { owner, joiner } = pair(false);
-      const pond = await owner.createPond({ name: "P", projectId: "proj-P" });
-      await joiner.join((await owner.invite(pond.id, "member")).code);
-      const [req] = (await owner.view(pond.id)).joins;
-      expect(req!.name).toBe(SIGNED_OUT_MEMBER);
-      await owner.decideJoin(pond.id, req!.requestId, { approve: true });
-      expect((await owner.view(pond.id)).members.find((m) => !m.you)!.name).toBe(SIGNED_OUT_MEMBER);
     });
   });
 });

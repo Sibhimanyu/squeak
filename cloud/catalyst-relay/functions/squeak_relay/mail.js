@@ -7,15 +7,6 @@ const EMAIL_STRICT =
 const normEmail = (e) => String(e).trim().toLowerCase();
 const validEmail = (e) => typeof e === "string" && e.length <= 254 && EMAIL_STRICT.test(e.trim());
 
-/** The only places an invite link may point: the web app's join page, with the code in the fragment (never sent to a server). */
-const INVITE_LINK_PREFIXES = ["https://squeak.onslate.in/join#"];
-const INVITE_LINK = /^[A-Za-z0-9_-]{20,3500}$/;
-const linkOk = (url) => {
-  if (typeof url !== "string") return false;
-  const prefix = INVITE_LINK_PREFIXES.find((p) => url.startsWith(p));
-  return !!prefix && INVITE_LINK.test(url.slice(prefix.length));
-};
-
 /** "pat.lee@example.com" -> "p***@e***.com": enough to recognise your own address, not to learn somebody else's. */
 function maskEmail(email) {
   const e = normEmail(email);
@@ -59,4 +50,4 @@ function buildInviteMail({ inviterName, pondName, email, url }) {
   return { subject, text, html };
 }
 
-module.exports = { EMAIL_STRICT, normEmail, validEmail, linkOk, maskEmail, buildInviteMail, INVITE_LINK_PREFIXES };
+module.exports = { EMAIL_STRICT, normEmail, validEmail, maskEmail, buildInviteMail };

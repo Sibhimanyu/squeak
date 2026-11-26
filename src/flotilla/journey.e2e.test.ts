@@ -9,7 +9,8 @@ import { FakeHost, session } from "./journey-support.js";
 import { FlotillaBridge } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService, type FlotillaOptions } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -31,11 +32,10 @@ function mac(name: string, nest: string | null = name + "-mac", extra: Partial<F
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest,
-    inviteLinkBase: "https://x.test/join",
     ...extra,
   });
   const host = new FakeHost();
@@ -71,18 +71,14 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
     B = mac("Aarav");
   });
 
-  it("1. create, publish, invite, join and approve: the member sees the pond", async () => {
+  it("1. create, publish and add a member: the member sees the pond", async () => {
     const pond = await A.service.createPond({
       name: "Site",
       projectId: "p1",
       gitRemote: "git@github.com:acme/site.git",
     });
     pondId = pond.id;
-    await B.service.join((await A.service.invite(pondId, "member")).link!);
-    const [join] = (await A.service.view(pondId)).joins;
-    expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
-    await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await B.service.refresh(pondId);
+    await admitMember(A.service, B.service, pondId, "member");
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
     expect(view.members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
@@ -182,8 +178,8 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
   });
 });
 
-describe("the account-based invite: a signed-in member", () => {
-  it("joins with the invite, is approved on the owner's Mac, then messages a thread", async () => {
+describe("a signed-in member", () => {
+  it("is in the Pond, then messages a thread", async () => {
     const relay = {
       url: "https://relay.example/server/squeak_relay",
       issue: async () => ({ token: "t", expiresAt: 0 }),
@@ -195,20 +191,15 @@ describe("the account-based invite: a signed-in member", () => {
       relay: relay as never,
       account,
       location: location as never,
-      storeFor: () => verifying(new RtdbRest(url)),
+      storeFor: () => new RtdbRest(url),
     });
-    const C = mac("Bea", "Bea-mac", { relay: relay as never, account, storeFor: () => verifying(new RtdbRest(url)) });
+    const C = mac("Bea", "Bea-mac", { relay: relay as never, account, storeFor: () => new RtdbRest(url) });
     const pond = await A.service.createPond({
       name: "Docs",
       projectId: "p2",
       gitRemote: "git@github.com:acme/docs.git",
     });
-    const made = await A.service.invite(pond.id, "member");
-    expect(await C.service.join(made.code)).toEqual({ pondId: pond.id, status: "pending" });
-    const [join] = (await A.service.view(pond.id)).joins;
-    expect(join).toBeDefined();
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
-    await C.service.refresh(pond.id);
+    await admitMember(A.service, C.service, pond.id, "member");
     expect((await C.service.view(pond.id)).me.role).toBe("member");
     A.host.sessions.set("d1", session("d1", { title: "Docs thread" }));
     const thread = await A.bridge.share(pond.id, "d1");

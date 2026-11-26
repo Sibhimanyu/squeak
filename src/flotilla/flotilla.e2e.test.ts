@@ -12,7 +12,8 @@ import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { openAt, randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
 import { FlotillaError } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -110,11 +111,10 @@ function mac(name: string, nest: string | null = name + "-mac") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest,
-    inviteLinkBase: "https://x.test/join",
   });
   const host = new FakeHost();
   const bridge = new FlotillaBridge(service, host, { flushMs: 60_000 });
@@ -150,41 +150,20 @@ describe("two Macs over one store", () => {
   let threadId = "";
   const SID = "s1";
 
-  it("creates a pond, invites, and a join waits for a person", async () => {
+  it("creates a pond and adds a member and a viewer", async () => {
     const pond = await A.service.createPond({
       name: "Website",
       projectId: "proj-Website",
       gitRemote: "git@github.com:acme/site.git",
     });
     pondId = pond.id;
-    const { link } = await A.service.invite(pondId, "member");
-    expect(link).toContain("https://x.test/join#");
-    expect(link).not.toContain("?");
-    expect(await B.service.join(link!)).toEqual({ pondId, status: "pending" });
-    await B.service.refresh(pondId);
-    const waiting = await B.service.view(pondId);
-    expect(waiting.pond).toMatchObject({ status: "pending", requestedRole: "member" });
-    expect(waiting.pond.statusLine).toBe("Waiting for Sibhi to approve you as a member.");
-    expect(waiting.members).toEqual([]);
-    const view = await A.service.view(pondId);
-    expect(view.joins).toHaveLength(1);
-    expect(view.joins[0]!.name).toBe("Aarav");
-    expect(view.members).toHaveLength(1);
-    await V.service.join((await A.service.invite(pondId, "viewer")).code);
-  });
-
-  it("an approval by the owner adds the member; nobody else can", async () => {
-    await expect(B.service.decideJoin(pondId, "x", { approve: true })).rejects.toThrow();
-    const joins = (await A.service.view(pondId)).joins;
-    expect(joins).toHaveLength(2);
-    for (const j of joins) await A.service.decideJoin(pondId, j.requestId, { approve: true });
-    await B.service.refresh(pondId);
-    await V.service.refresh(pondId);
+    expect((await A.service.view(pondId)).members).toHaveLength(1);
+    await admitMember(A.service, B.service, pondId, "member");
+    await admitMember(A.service, V.service, pondId, "viewer");
     const view = await B.service.view(pondId);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi", "Vera"]);
     expect(view.me.role).toBe("member");
     expect((await V.service.view(pondId)).me.role).toBe("viewer");
-    expect((await A.service.view(pondId)).joins).toHaveLength(0);
   });
 
   it("shares a thread; events arrive in order and resume by seq", async () => {
@@ -408,44 +387,12 @@ describe("two Macs over one store", () => {
   });
 });
 
-describe("web guests and the wire", () => {
-  it("two requests on one invite show once (the newest), and deciding removes both", async () => {
-    const A = mac("OwnerDup");
-    const W1 = mac("Web1", null);
-    const W2 = mac("Web2", null);
-    const pond = await A.service.createPond({ name: "Dup", projectId: "proj-Dup" });
-    const { code } = await A.service.invite(pond.id);
-    await W1.service.join(code);
-    await new Promise((r) => setTimeout(r, 5));
-    await W2.service.join(code);
-    const joins = (await A.service.view(pond.id)).joins;
-    expect(joins).toHaveLength(1);
-    expect(joins[0]).toMatchObject({ name: "Web2" });
-    await A.service.decideJoin(pond.id, joins[0]!.requestId, { approve: false });
-    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(0);
-  });
-
-  it("the same Mac joining twice keeps one request id", async () => {
-    const A = mac("OwnerRetry");
-    const B = mac("JoinerRetry");
-    const pond = await A.service.createPond({ name: "Retry", projectId: "proj-Retry" });
-    const { code } = await A.service.invite(pond.id);
-    await B.service.join(code);
-    await B.service.join(code);
-    const joins = (await A.service.view(pond.id)).joins;
-    expect(joins).toHaveLength(1);
-    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(1);
-  });
-
-  it("a member with no Nest joins, sees and messages, but cannot start a thread", async () => {
+describe("members with no Nest and the wire", () => {
+  it("a member with no Nest sees and messages, but cannot start a thread", async () => {
     const A = mac("Owner2");
     const W = mac("Web", null);
     const pond = await A.service.createPond({ name: "Docs", projectId: "proj-Docs" });
-    await W.service.join((await A.service.invite(pond.id)).code);
-    const [join] = (await A.service.view(pond.id)).joins;
-    expect(join).toMatchObject({ client: "web", nest: null });
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
-    await W.service.refresh(pond.id);
+    await admitMember(A.service, W.service, pond.id, "member");
     const view = await W.service.view(pond.id);
     expect(view.members.find((m) => m.you)).toMatchObject({ nest: null });
     await expect(
@@ -457,31 +404,6 @@ describe("web guests and the wire", () => {
     const o = await A.bridge.runCommands(pond.id);
     expect(o[0]).toMatchObject({ ok: true });
     expect(A.host.sent[0]!.text).toBe("hello from the browser");
-  });
-
-  it("a garbled invite is refused, and a denied join never becomes a member", async () => {
-    const A = mac("Owner3");
-    const B = mac("Joiner3");
-    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
-    await expect(B.service.join("squeak-pond:nonsense")).rejects.toThrow(/not valid/);
-    await B.service.join((await A.service.invite(pond.id)).code);
-    const [join] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: false });
-    await B.service.refresh(pond.id);
-    const gone = await B.service.view(pond.id);
-    expect(gone.pond).toMatchObject({ status: "declined", statusLine: "Owner3 declined your request." });
-    expect((await A.service.view(pond.id)).members).toHaveLength(1);
-  });
-
-  it("an invite's secret is checked: a join without it is not offered to the owner", async () => {
-    const A = mac("Owner5");
-    const B = mac("Joiner5");
-    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
-    const { code } = await A.service.invite(pond.id);
-    const body = JSON.parse(Buffer.from(code.replace("squeak-pond:", ""), "base64url").toString());
-    body.s = "wrongsecretwrongsecret";
-    await B.service.join(Buffer.from(JSON.stringify(body)).toString("base64url"));
-    expect((await A.service.view(pond.id)).joins).toHaveLength(0);
   });
 
   it("wakes on a store change (watch)", async () => {

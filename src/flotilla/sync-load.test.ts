@@ -6,7 +6,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { CloudStore, WatchSource } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaService } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -48,12 +49,12 @@ class Relay {
     this.dirs.push(dir);
     const store = this.store();
     const service = new FlotillaService({
-      store: verifying(store),
+      store: store,
       supportDir: dir,
       account: named(name),
       nest: `${name}'s Mac`,
       ...(owner ? { location: LOCATION } : {}),
-      storeFor: () => verifying(store),
+      storeFor: () => store,
       now: () => this.clock.t,
       wakeDebounceMs: 30,
       wakeMinIntervalMs: 0,
@@ -74,10 +75,7 @@ async function twoMembers() {
   const A = r.mac("Sibhi", true);
   const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
   const B = r.mac("Aarav");
-  await B.service.join((await A.service.invite(pond.id, "member")).code);
-  const [req] = (await A.service.view(pond.id)).joins;
-  await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
-  await B.service.refresh(pond.id);
+  await admitMember(A.service, B.service, pond.id, "member");
   return { r, A, B, pondId: pond.id };
 }
 

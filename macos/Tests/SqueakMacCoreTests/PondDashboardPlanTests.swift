@@ -91,18 +91,10 @@ import Testing
 
     // MARK: Avatars
 
-    @Test func avatarsPutYouFirstAndPendingInvitesLastAsOutlined() {
-        let row = PondAvatarRow.build(
-            people: [(id: "a", name: "Asha", you: false), (id: "s", name: "Sibhi", you: true)], pendingInvites: 1)
-        #expect(row.items == [.person(id: "s", name: "Sibhi", you: true), .person(id: "a", name: "Asha", you: false), .pending(index: 0)])
+    @Test func avatarsBeforeThePeopleRouteAnswersAreTheMembersYouFirst() {
+        let row = PondAvatarRow.build(members: [(id: "a", name: "Asha", you: false), (id: "s", name: "Sibhi", you: true)])
+        #expect(row.items == [.person(id: "s", name: "Sibhi", you: true), .person(id: "a", name: "Asha", you: false)])
         #expect(row.more == 0)
-    }
-
-    @Test func avatarsCapWithAMoreCount() {
-        let people = (0..<7).map { (id: "p\($0)", name: "P\($0)", you: $0 == 0) }
-        let row = PondAvatarRow.build(people: people, pendingInvites: 2)
-        #expect(row.items.count == PondAvatarRow.cap)
-        #expect(row.more == 4)
     }
 
     // MARK: Ducks order
@@ -161,15 +153,15 @@ import Testing
 
     // MARK: Needs you
 
-    @Test func ownerSeesDucksTaskApprovalsAndJoinsMemberSeesOwnWaitingTaskAsWords() {
+    @Test func ownerSeesDucksTaskApprovalsMemberSeesOwnWaitingTaskAsWords() {
         let rows = [row("pip", .needsYou, needs: true), row("calm")]
         let ask = RoomTask(id: "t1", messageId: "m", title: "Fix auth", state: .waiting, approvalName: "Asha")
         let blocked = RoomTask(id: "t2", messageId: "m", title: "Ship it", state: .blocked)
-        let owner = PondDashboardNeedsYou.build(rows: rows, tasks: [ask, blocked], joins: [], role: .owner, ownerName: "Sibhi")
+        let owner = PondDashboardNeedsYou.build(rows: rows, tasks: [ask, blocked], role: .owner, ownerName: "Sibhi")
         #expect(owner.map(\.kind) == [.duck(rowId: "pip"), .taskApproval(taskId: "t1"), .taskBlocked(taskId: "t2")])
         #expect(owner.allSatisfy { $0.needsDecision })
 
-        let member = PondDashboardNeedsYou.build(rows: rows, tasks: [ask, blocked], joins: [], role: .member, ownerName: "Sibhi")
+        let member = PondDashboardNeedsYou.build(rows: rows, tasks: [ask, blocked], role: .member, ownerName: "Sibhi")
         #expect(member.map(\.kind) == [.duck(rowId: "pip"), .taskWaiting(taskId: "t1")])
         #expect(member.last?.line == "Waiting for Sibhi")
         #expect(member.last?.needsDecision == false)
@@ -177,31 +169,25 @@ import Testing
 
     @Test func aMembersDuckWaitsForTheOwnerWhoApprovesOrDeclinesAndTheMemberReadsWaitingForTheOwner() {
         let asked = PondPendingStart(requestId: "r1", memberId: "a", name: "Asha", title: "Login bug", text: "Fix it", mine: false)
-        let owner = PondDashboardNeedsYou.build(rows: [row("pip", .needsYou, needs: true)], tasks: [], joins: [], role: .owner, ownerName: "Sibhi", starts: [asked])
+        let owner = PondDashboardNeedsYou.build(rows: [row("pip", .needsYou, needs: true)], tasks: [], role: .owner, ownerName: "Sibhi", starts: [asked])
         #expect(owner.map(\.kind) == [.duck(rowId: "pip"), .startApproval(requestId: "r1")])
         #expect(owner.last?.title == "Login bug" && owner.last?.line == "Asha asked for this Duck" && owner.last?.needsDecision == true)
 
         let mine = PondPendingStart(requestId: "r1", memberId: "a", name: "Asha", title: "Login bug", mine: true)
-        let member = PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: "Sibhi", starts: [mine])
+        let member = PondDashboardNeedsYou.build(rows: [], tasks: [], role: .member, ownerName: "Sibhi", starts: [mine])
         #expect(member.map(\.kind) == [.startWaiting(requestId: "r1")])
         #expect(member.first?.line == "Waiting for Sibhi" && member.first?.needsDecision == false)
 
         // A Viewer, or a Member looking at someone else's request, never gets Approve.
-        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .viewer, ownerName: nil, starts: [asked]).isEmpty)
-        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: nil, starts: [asked]).isEmpty)
-        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: nil, starts: [mine]).first?.line == "Waiting for The owner")
-    }
-
-    @Test func joinsOnlyReachTheOwner() throws {
-        let join = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j1","name":"Dev","role":"member"}"#.utf8))
-        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [join], role: .owner, ownerName: nil).map(\.kind) == [.join(requestId: "j1")])
-        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [join], role: .member, ownerName: nil).isEmpty)
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], role: .viewer, ownerName: nil, starts: [asked]).isEmpty)
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], role: .member, ownerName: nil, starts: [asked]).isEmpty)
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], role: .member, ownerName: nil, starts: [mine]).first?.line == "Waiting for The owner")
     }
 
     @Test func aFailedDuckSaysWhy() {
         var r = row("x", .failed, needs: true)
         r.failed = true; r.failureText = "out of credit"
-        #expect(PondDashboardNeedsYou.build(rows: [r], tasks: [], joins: [], role: .owner, ownerName: nil).first?.line == "Failed: out of credit")
+        #expect(PondDashboardNeedsYou.build(rows: [r], tasks: [], role: .owner, ownerName: nil).first?.line == "Failed: out of credit")
     }
 
     // MARK: Latest in the Room

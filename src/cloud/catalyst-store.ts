@@ -39,12 +39,10 @@ export interface CatalystStoreOptions {
   onUnauthorized?: () => void;
   /**
    * A pond-scoped token (docs/ponds.md, "Scoped tokens"): good for one pond's channel, sent as `x-squeak-pond-token`.
-   * A member who joined by invite holds this and never the relay key; its live notices come from the pond's own
+   * A member holds this and never the relay key; its live notices come from the pond's own
    * Data Streams channel (`/pond-stream`), not the store-wide `/token`.
    */
   pondToken?: string;
-  /** A Mac joiner's attestation (`POST /account/join-attest`), sent as `x-squeak-join-attest` beside a pond token. */
-  joinAttest?: string;
   /**
    * `squeak-live` (docs/cloud-layer.md, "Live notices"): one stream per Mac, a hosted Mac's own key only. Set, the live stream
    * replaces this store's Data Streams WebSocket and its notices drive the feed reads; unset, the old notice path runs
@@ -107,7 +105,6 @@ export class CatalystStore implements CloudStore {
       : options.macKey
         ? { name: "x-squeak-mac-key", value: options.macKey }
         : { name: "x-squeak-relay", value: options.relayKey! };
-    this.joinAttest = options.joinAttest;
     this.fetchImpl = options.fetch ?? fetch;
     this.feed = new FeedMirror({
       changes: (pondId, since) => this.changes(pondId, since),
@@ -129,7 +126,6 @@ export class CatalystStore implements CloudStore {
 
   private readonly pollMs: number;
   private readonly healthyPollMs: number;
-  private readonly joinAttest: string | undefined;
 
   async get(path: string): Promise<ChannelDoc | null> {
     const response = await this.call(`/doc?path=${encodeURIComponent(path)}`, { method: "GET" }, 10_000);
@@ -140,7 +136,7 @@ export class CatalystStore implements CloudStore {
   }
 
   /**
-   * A document as the relay stores it, unparsed: for the relay's own plain-JSON documents (`joinids`), which have no
+   * A document as the relay stores it, unparsed: for the relay's own plain-JSON documents, which have no
    * `box`. Null when absent or on any failure. Not part of `CloudStore`: a Firebase store has none of them.
    */
   async getRaw(path: string): Promise<unknown | null> {
@@ -353,7 +349,6 @@ export class CatalystStore implements CloudStore {
       headers: {
         ...(init.headers as Record<string, string> | undefined),
         [this.header.name]: this.header.value,
-        ...(this.joinAttest ? { "x-squeak-join-attest": this.joinAttest } : {}),
       },
       signal: AbortSignal.timeout(timeoutMs),
     });

@@ -33,7 +33,7 @@ import Testing
         #expect(note?.contains("stays on this Mac") == true)
         #expect(note?.contains("GitHub") == true)
         #expect(FirstPondJourney.choiceNote(.blank, blankPath: nil)?.contains("~/Squeak") == true)
-        #expect(FirstPondJourney.choiceNote(.invite, blankPath: nil) == nil)
+        #expect(FirstPondJourney.choiceNote(.clone, blankPath: nil) == nil)
     }
 
     @Test func noCopyUsesTheAvoidedWords() {

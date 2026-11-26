@@ -3,7 +3,7 @@ import type http from "node:http";
 
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { FlotillaBridge } from "./bridge.js";
-import { FlotillaError, isRole, type Role } from "./types.js";
+import { FlotillaError } from "./types.js";
 import type { FlotillaService } from "./service.js";
 import type { RoomSync } from "./room-sync.js";
 
@@ -168,20 +168,45 @@ export class FlotillaRoutes {
       this.stream(ctx);
       return true;
     }
-    if (a === "join" && parts.length === 2 && method === "POST") {
-      const body = await ctx.body();
-      const code = str(body.code);
-      if (!code) throw new FlotillaError("code is required");
-      // A name is never typed: it is the signed-in account's (an old client's displayName is ignored).
-      const joined = await service.join(code);
-      service.watch(joined.pondId);
-      ctx.json(200, joined);
-      return true;
-    }
     if (!a) return false;
     const pondId = a;
     if (parts.length === 2 && method === "GET") {
       ctx.json(200, await service.view(pondId));
+      return true;
+    }
+    // People and invitations (#126): the relay's invite record, drawn as it is.
+    if (b === "people" && parts.length === 3 && method === "GET") {
+      ctx.json(200, await service.people(pondId));
+      return true;
+    }
+    if (b === "invites" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["emails", "role"]);
+      const emails = Array.isArray(body.emails) ? body.emails : null;
+      if (!emails || !emails.every((e) => typeof e === "string"))
+        throw new FlotillaError("emails must be a list of addresses");
+      const role = str(body.role) ?? "member";
+      if (role !== "member" && role !== "viewer") throw new FlotillaError("role is member or viewer");
+      ctx.json(200, await service.inviteEmails(pondId, emails as string[], role));
+      return true;
+    }
+    if (
+      b === "invites" &&
+      c &&
+      (d === "resend" || d === "withdraw" || d === "again") &&
+      parts.length === 5 &&
+      method === "POST"
+    ) {
+      const body = await ctx.body();
+      exact(body, d === "again" ? ["role"] : []);
+      if (d === "resend") ctx.json(200, await service.resendInvite(pondId, c));
+      else if (d === "withdraw") ctx.json(200, await service.withdrawInvite(pondId, c));
+      else {
+        const role = str(body.role);
+        if (role !== undefined && role !== "member" && role !== "viewer")
+          throw new FlotillaError("role is member or viewer");
+        ctx.json(200, await service.inviteAgain(pondId, c, role));
+      }
       return true;
     }
     if (b === "members" && c && parts.length === 4 && method === "DELETE") {
@@ -242,15 +267,6 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
-    if (b === "cancel-join" && parts.length === 3 && method === "POST") {
-      const body = await ctx.body();
-      if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
-        throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
-      }
-      await service.cancelJoin(pondId);
-      ctx.json(200, { ok: true });
-      return true;
-    }
     if (b === "devices" && c === "remove" && parts.length === 4 && method === "POST") {
       const body = await ctx.body();
       const memberId = str(body.memberId);
@@ -269,50 +285,6 @@ export class FlotillaRoutes {
       if (!deviceKeyId) throw new FlotillaError("the body is exactly { deviceKeyId }");
       await service.removeOwnDevice(pondId, deviceKeyId);
       ctx.json(200, { ok: true });
-      return true;
-    }
-    if (b === "invites" && parts.length === 3 && method === "POST") {
-      const inviteBody = await ctx.body();
-      const role = str(inviteBody.role) ?? "member";
-      if (!isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      const email = str(inviteBody.email) ?? undefined;
-      ctx.json(200, await service.invite(pondId, role as Role, email));
-      return true;
-    }
-    if (b === "invites" && c === "email" && parts.length === 4 && method === "POST") {
-      // Invite by email: { emails: string[], role? }. Answers { sent, failed: [{ email, reason }] }.
-      const emailBody = await ctx.body();
-      if (Object.keys(emailBody).some((k) => k !== "emails" && k !== "role")) {
-        throw new FlotillaError("the body is exactly { emails, role? }");
-      }
-      const { emails } = emailBody;
-      if (!Array.isArray(emails) || emails.some((e) => typeof e !== "string")) {
-        throw new FlotillaError("emails is a list of email addresses");
-      }
-      const emailRole = str(emailBody.role) ?? "member";
-      if (emailRole !== "member" && emailRole !== "viewer") throw new FlotillaError("role is member or viewer");
-      ctx.json(200, await service.inviteByEmail(pondId, emails as string[], emailRole as Role));
-      return true;
-    }
-    if (b === "invites" && c && parts.length === 4 && method === "DELETE") {
-      ctx.json(200, await service.revokeInvite(pondId, c));
-      return true;
-    }
-    if (b === "joins" && c && parts.length === 4 && method === "POST") {
-      const body = await ctx.body();
-      if (typeof body.approve !== "boolean") throw new FlotillaError("approve is required");
-      const role = str(body.role);
-      if (role && !isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      const input = { approve: body.approve, ...(role ? { role: role as Role } : {}) };
-      if (body.wait === true) {
-        // A caller that wants the outcome (Telegram's button) waits for it.
-        await service.decideJoin(pondId, c, input);
-        ctx.json(200, { ok: true });
-      } else {
-        // The Mac app: answered at once; the pond view carries "working" or the failure (`JoinView.decision`).
-        service.startJoinDecision(pondId, c, input);
-        ctx.json(202, { ok: true, state: "working" });
-      }
       return true;
     }
     if (b === "threads" && parts.length === 3 && method === "POST") {

@@ -7,7 +7,8 @@ import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaRoutes } from "./mount.js";
 import { FlotillaService, CLOUD_DOWN } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -57,12 +58,12 @@ class World {
     this.dirs.push(dir);
     const store = this.storeFor(name);
     const service = new FlotillaService({
-      store: verifying(store),
+      store: store,
       supportDir: dir,
       account: named(name),
       nest: options.nest === undefined ? `${name}'s Mac` : options.nest,
       ...(options.owner ? { location: LOCATION } : {}),
-      storeFor: () => verifying(store),
+      storeFor: () => store,
       now: () => this.clock.t,
       presenceOf: async () =>
         [...this.live].map(([memberId, at]) => ({ memberId, online: this.clock.t - at < 4 * 60_000, lastSeenAt: at })),
@@ -90,10 +91,7 @@ async function flock(w: World, roles: Array<{ name: string; role: "member" | "vi
   const others = [];
   for (const { name, role } of roles) {
     const M = w.mac(name);
-    await M.service.join((await A.service.invite(pond.id, role)).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
-    await M.service.refresh(pond.id);
+    await admitMember(A.service, M.service, pond.id, role);
     others.push(M);
   }
   return { A, pondId: pond.id, others };
@@ -169,75 +167,6 @@ describe("a removed member is told", () => {
   });
 });
 
-describe("a join that cannot be answered does not wait forever", () => {
-  it("a revoked invite (the relay refuses the join token) leaves no pending pond and says so", async () => {
-    const w = world();
-    const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const { code } = await A.service.invite(pond.id, "member");
-    const B = w.mac("Dev");
-    w.failing.set(B.store, "catalyst set failed: 401");
-    await expect(B.service.join(code)).rejects.toThrow("That invite is no longer valid. Ask for a new one.");
-    expect(await B.service.list()).toEqual([]);
-    w.failing.set(B.store, "fetch failed");
-    await expect(B.service.join(code)).rejects.toThrow(/wasn't sent/);
-    expect(await B.service.list()).toEqual([]);
-  });
-
-  it("an invite revoked while the request waits ends the joiner's wait as revoked", async () => {
-    const w = world();
-    const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const { code } = await A.service.invite(pond.id, "member");
-    const B = w.mac("Farah");
-    await B.service.join(code);
-    w.failing.set(B.store, "catalyst list failed: 401");
-    await B.service.refresh(pond.id);
-    const [row] = await B.service.list();
-    expect(row).toMatchObject({ status: "revoked", statusLine: "Sibhi withdrew this invite." });
-  });
-
-  it("a request on an invite that lapsed is expired, with the owner's name once it is known", async () => {
-    const w = world();
-    const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const { code } = await A.service.invite(pond.id, "member");
-    const B = w.mac("Hari");
-    await B.service.join(code);
-    await B.service.refresh(pond.id);
-    expect((await B.service.list())[0]).toMatchObject({
-      status: "pending",
-      statusLine: "Waiting for Sibhi to approve you as a member.",
-    });
-    w.clock.t += 25 * 60 * 60_000;
-    await B.service.refresh(pond.id);
-    expect((await B.service.list())[0]).toMatchObject({
-      status: "expired",
-      statusLine: "This invite expired before Sibhi answered.",
-    });
-  });
-
-  it("a declined request says so with the owner's name, and a new request after it reaches the owner", async () => {
-    const w = world();
-    const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const { code } = await A.service.invite(pond.id, "member");
-    const B = w.mac("Dev");
-    await B.service.join(code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    expect(req).toMatchObject({ name: "Dev", client: "mac", nest: "Dev's Mac", requestedAt: expect.any(Number) });
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: false });
-    await B.service.refresh(pond.id);
-    expect((await B.service.list())[0]).toMatchObject({
-      status: "declined",
-      statusLine: "Sibhi declined your request.",
-    });
-    await B.service.join(code);
-    expect((await A.service.view(pond.id)).joins).toHaveLength(1);
-    expect((await B.service.list())[0]).toMatchObject({ status: "pending" });
-  });
-});
-
 describe("the relay is slow or gone", () => {
   it("no raw transport error reaches a caller, and a pond never read gives one fixed sentence", async () => {
     const w = world();
@@ -301,20 +230,6 @@ describe("the relay is slow or gone", () => {
     };
     await A.service.view(pondId);
     expect(seen.filter((k) => k === "members")).toHaveLength(1);
-  });
-});
-
-describe("a lapsed request stays visible for a day after the lapse", () => {
-  it("greyed from the invite's end, not from when it was asked", async () => {
-    const w = world();
-    const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const inv = await A.service.invite(pond.id, "member");
-    await w.mac("Hari").service.join(inv.code);
-    w.clock.t = inv.expiresAt + 23 * 3600_000;
-    expect((await A.service.view(pond.id)).joins[0]!.decision?.line).toBe("Invite expired. Ask them to join again.");
-    w.clock.t = inv.expiresAt + 25 * 3600_000;
-    expect((await A.service.view(pond.id)).joins).toHaveLength(0);
   });
 });
 
@@ -503,19 +418,13 @@ describe("threads and messages", () => {
 });
 
 describe("names and authors", () => {
-  it("a joiner never types a name: the request and the member carry the account's name; the invite response has an id", async () => {
+  it("a member never types a name: the member carries the account's name", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
-    const inv = await A.service.invite(pond.id, "member");
-    expect(inv.id).toBeTypeOf("string");
     const B = w.mac("Aarav");
-    await B.service.join(inv.code);
     expect(B.service.me.name).toBe("Aarav");
-    const [req] = (await A.service.view(pond.id)).joins;
-    expect(req!.name).toBe("Aarav");
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
-    await B.service.refresh(pond.id);
+    await admitMember(A.service, B.service, pond.id, "member");
     expect(B.service.me.name).toBe("Aarav");
     expect((await B.service.view(pond.id)).me.name).toBe("Aarav");
     expect((await B.service.hold(pond.id, "q1")).heldBy).toBe("Aarav");
@@ -595,10 +504,7 @@ describe("one connection state (#130)", () => {
     const A = w.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const B = w.mac("Aarav", { live: () => stream });
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
-    await B.service.refresh(pond.id);
+    await admitMember(A.service, B.service, pond.id, "member");
     w.live.set(A.service.me.id, w.clock.t); // the Owner's Mac holds a live connection (#121)
     expect((await B.service.view(pond.id)).pond.connection).toEqual({ state: "live", line: "Live" });
     expect((await B.service.list())[0]!.connection?.state).toBe("live");
@@ -635,10 +541,7 @@ describe("one connection state (#130)", () => {
     const A = w.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const B = w.mac("Aarav");
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
-    await B.service.refresh(pond.id);
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.view(pond.id);
     w.failing.set(B.store, "relay down");
     const rows = await B.service.list();

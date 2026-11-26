@@ -154,15 +154,16 @@ public struct PondDashboardHeader: Sendable, Equatable {
 
 // MARK: Avatars
 
-/// The header's small avatars: people first (you first), pending invites after them as outlined ones, capped with "+N".
+/// The header's small avatars, drawn from the People route: members (you first), then one outlined avatar per pending invite
+/// (the initial of the address), capped with "+N". Finished invites never show here.
 public struct PondAvatarRow: Sendable, Equatable {
     public enum Item: Sendable, Equatable, Identifiable {
         case person(id: String, name: String, you: Bool)
-        case pending(index: Int)
+        case pending(id: String, initial: String)
         public var id: String {
             switch self {
             case .person(let id, _, _): "p:" + id
-            case .pending(let i): "i:\(i)"
+            case .pending(let id, _): "i:" + id
             }
         }
     }
@@ -172,10 +173,17 @@ public struct PondAvatarRow: Sendable, Equatable {
     public var more: Int
     public static let cap = 5
 
-    public static func build(people: [(id: String, name: String, you: Bool)], pendingInvites: Int, cap: Int = PondAvatarRow.cap) -> PondAvatarRow {
-        let ordered = people.sorted { ($0.you ? 0 : 1) < ($1.you ? 0 : 1) }
+    public static func build(_ people: PondPeople, cap: Int = PondAvatarRow.cap) -> PondAvatarRow {
+        let ordered = people.members.filter(\.you) + people.members.filter { !$0.you }
         var all: [Item] = ordered.map { .person(id: $0.id, name: $0.name, you: $0.you) }
-        all += (0..<max(pendingInvites, 0)).map { .pending(index: $0) }
+        all += people.pending.map { .pending(id: $0.id, initial: String($0.email.first.map { String($0).uppercased() } ?? "?")) }
+        return PondAvatarRow(items: Array(all.prefix(cap)), more: max(all.count - cap, 0))
+    }
+
+    /// Before the People route has answered (or on an older host): the people the Pond detail already lists, no invites.
+    public static func build(members: [(id: String, name: String, you: Bool)], cap: Int = PondAvatarRow.cap) -> PondAvatarRow {
+        let ordered = members.sorted { ($0.you ? 0 : 1) < ($1.you ? 0 : 1) }
+        let all: [Item] = ordered.map { .person(id: $0.id, name: $0.name, you: $0.you) }
         return PondAvatarRow(items: Array(all.prefix(cap)), more: max(all.count - cap, 0))
     }
 }
@@ -226,7 +234,6 @@ public struct PondDashboardNeedsYouItem: Sendable, Equatable, Identifiable {
         case startApproval(requestId: String)
         /// A Member's own Duck waiting for the Owner: words only.
         case startWaiting(requestId: String)
-        case join(requestId: String)
     }
 
     public var kind: Kind
@@ -239,17 +246,16 @@ public struct PondDashboardNeedsYouItem: Sendable, Equatable, Identifiable {
         case .duck(let id): "duck:" + id
         case .taskApproval(let id), .taskBlocked(let id), .taskWaiting(let id): "task:" + id
         case .startApproval(let id), .startWaiting(let id): "start:" + id
-        case .join(let id): "join:" + id
         }
     }
 }
 
 public enum PondDashboardNeedsYou {
-    /// Ducks that need the person, then Ducks Members asked for, then Tasks, then people asking to join. Only what the
+    /// Ducks that need the person, then Ducks Members asked for, then Tasks. Only what the
     /// host already says. A Member's Tasks and Ducks always wait for the Owner: the Owner decides, the Member reads
     /// "Waiting for Sibhi".
     public static func build(
-        rows: [PondChatRow], tasks: [RoomTask], joins: [JoinRequest], role: PondRole, ownerName: String?,
+        rows: [PondChatRow], tasks: [RoomTask], role: PondRole, ownerName: String?,
         starts: [PondPendingStart] = []
     ) -> [PondDashboardNeedsYouItem] {
         var out: [PondDashboardNeedsYouItem] = []
@@ -280,9 +286,6 @@ public enum PondDashboardNeedsYou {
         if role == .owner {
             for t in tasks where t.state == .blocked {
                 out.append(PondDashboardNeedsYouItem(kind: .taskBlocked(taskId: t.id), title: t.title, line: "Blocked", needsDecision: true))
-            }
-            for j in joins {
-                out.append(PondDashboardNeedsYouItem(kind: .join(requestId: j.id), title: j.displayName, line: "Asked to join as a \(j.role.word.lowercased())", needsDecision: true))
             }
         }
         return out

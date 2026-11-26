@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { admitMember } from "../src/flotilla/admit-member.test-fixture.js";
 import { FlotillaBridge } from "../src/flotilla/bridge.js";
 import { hostPortFor } from "../src/flotilla/index.js";
 import { FlotillaRoutes } from "../src/flotilla/mount.js";
@@ -39,7 +40,6 @@ const service = (name: string, nest: string) =>
     supportDir: fs.mkdtempSync(path.join(tmp, `${name}-`)),
     displayName: name,
     nest,
-    inviteLinkBase: "https://squeak.example/join",
     now: () => clock.now,
   });
 
@@ -125,9 +125,7 @@ const save = (name: string, r: { status: number; json: unknown }, expect: number
 };
 
 const pondId = (await A.createPond({ name: "Orchard", projectId: project.id })).id;
-await B.join((await A.invite(pondId, "member")).code);
-for (const j of (await A.view(pondId)).joins) await A.decideJoin(pondId, j.requestId, { approve: true });
-await B.refresh(pondId);
+await admitMember(A, B, pondId, "member");
 
 // The Room: a person's message, a Duck's, a Task.
 room.personPost(project.id, "Shall we start with the irrigation timer?");

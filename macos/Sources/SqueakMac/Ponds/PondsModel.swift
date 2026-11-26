@@ -9,12 +9,12 @@ import SqueakMacCore
 
 enum PondSheet: Identifiable, Equatable {
     case invite(pondId: String)
-    case join
+    case people(pondId: String)
 
     var id: String {
         switch self {
         case .invite(let id): "invite:\(id)"
-        case .join: "join"
+        case .people(let id): "people:\(id)"
         }
     }
 }
@@ -77,7 +77,6 @@ final class PondsModel {
         }
     }
     /// Join requests already announced, so a re-read never tells the owner twice.
-    @ObservationIgnored private var announcedJoins: Set<String> = []
     /// Reads in flight, and the ones that failed since the last good one: a pond with no data yet says so, never an empty flock.
     private(set) var reading: Set<String> = []
     /// Which of those reads the person should see a mark for (their own, or slow ones); `readTick` wakes the view when a quiet one turns slow.
@@ -88,8 +87,6 @@ final class PondsModel {
     private(set) var failed: Set<String> = []
     /// The list itself could not be read (nothing is known yet, or the last read failed).
     private(set) var listFailed = false
-    /// What a press on Approve/Deny is doing right now, so its card says so before the host's word arrives.
-    private(set) var pressing: [String: Bool] = [:]
     /// A removal, rename, leave, delete or key change that is running, by key, so none can be pressed twice.
     private(set) var busy: Set<String> = []
     /// The last result line of those, quiet, by pond id.
@@ -121,11 +118,10 @@ final class PondsModel {
         didSet {
             for (id, d) in details where oldValue[id] != d {
                 let before = oldValue[id]
-                var notes = PondNotes.owner(pond: d.pond, old: before, new: d, seen: announcedJoins) + PondNotes.threads(pond: d.pond, old: before, new: d)
-                // The first read of a pond announces only requests still waiting; a thread's change needs a before.
-                if before == nil { notes = notes.filter { $0.kind == .joinRequest } }
+                let notes0 = PondNotes.owner(pond: d.pond, old: before, new: d) + PondNotes.threads(pond: d.pond, old: before, new: d)
+                // A change needs a before: the first read of a pond announces nothing.
+                let notes = before == nil ? [] : notes0
                 for n in notes { Notifier.shared.postPond(n) }
-                announcedJoins.formUnion(d.joins.map(\.id))
             }
         }
     }
@@ -148,10 +144,6 @@ final class PondsModel {
     /// The sidebar badge and menu-bar count for a pond.
     func badge(_ pond: PondSummary?) -> Int { pond.map { PondBadge.count(pond: $0, detail: details[$0.id]) } ?? 0 }
 
-    /// Every join request waiting on this person, across ponds they own, with the pond it is for.
-    var allJoins: [(pond: PondSummary, join: JoinRequest)] {
-        ponds.flatMap { p in (details[p.id].map { $0.myRole.canApproveJoins ? $0.joins : [] } ?? []).map { (p, $0) } }
-    }
     /// Bridge for `PondThreadView.swift`, which sets it (reads and every other writer go through `AppModel.location`,
     /// `AppModel.openPond` and `closePondPage`). Delete once that file calls `AppModel.openPondHome`.
     var route: PondRoute? {
@@ -337,7 +329,7 @@ final class PondsModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(120))
                 looks += 1
-                await self?.refresh(joins: looks % 3 == 0)
+                await self?.refresh()
             }
         }
         defer { refresher.cancel() }
@@ -353,7 +345,7 @@ final class PondsModel {
         }
     }
 
-    func refresh(joins: Bool = true) async {
+    func refresh() async {
         guard let client else { return }
         await refreshDirectory()
         do {
@@ -367,7 +359,7 @@ final class PondsModel {
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
             for p in list where p.state == .active || p.state == .local {
-                if details[p.id] == nil || openPondIds.contains(p.id) || (joins && PondBadge.readsJoins(p)) { await load(p.id) }
+                if details[p.id] == nil || openPondIds.contains(p.id) { await load(p.id) }
             }
             if details.keys.contains(where: { id in !list.contains { $0.id == id } }) {
                 details = details.filter { id, _ in list.contains { $0.id == id } }
@@ -414,6 +406,8 @@ final class PondsModel {
                     if details[id] != d { details[id] = d }
                     if failed.contains(id) { failed.remove(id) }
                     openRequested(in: d)
+                    // People follow the Pond whenever its page is open (the Dashboard's avatars and the People sheet draw them).
+                    if openPondIds.contains(id) { await loadPeople(id) }
                 }
             } catch {
                 // The last data stays on screen, marked; never an empty pond.
@@ -456,30 +450,6 @@ final class PondsModel {
         }
     }
 
-    func invite(pond: String, role: PondRole, short: Bool = false) async -> PondInvite? {
-        guard let client else { return nil }
-        do { note = nil; return try await client.invite(pond: pond, role: role, short: short) }
-        catch let e as NativeHostError { note = e.reason; return nil }
-        catch { note = "That didn't go through"; return nil }
-    }
-
-    /// Invite by email: the host makes one email-bound invite per address and Squeak's cloud sends the links.
-    func inviteByEmail(pond: String, emails: [String], role: PondRole) async -> PondEmailInviteResult? {
-        guard let client else { return nil }
-        do { note = nil; return try await client.inviteByEmail(pond: pond, emails: emails, role: role) }
-        catch let e as NativeHostError { note = e.reason; return nil }
-        catch { note = "That didn't go through"; return nil }
-    }
-
-    /// Joining needs a Squeak account (the person's name is the account's), so a signed-out Mac says so first.
-    func join(code: String, account: AccountModel) async -> PondJoinResult? {
-        guard let client else { return nil }
-        guard account.state?.linked == true else { note = PondJoinGate.signInLine; return nil }
-        do { note = nil; return try await client.join(code: code) }
-        catch let e as NativeHostError { note = e.reason; await refresh(); return nil }
-        catch { note = "That didn't go through"; await refresh(); return nil }
-    }
-
     /// Withdraws a pending join (or clears a declined one); true when it is gone.
     @discardableResult
     func cancelJoin(pond: String) async -> Bool {
@@ -488,40 +458,6 @@ final class PondsModel {
         return ok
     }
 
-
-    /// Join requests whose decision is on its way (this press, or the host still working on it): their buttons wait, so
-    /// a second press cannot repeat it.
-    private(set) var deciding: Set<String> = []
-
-    func isDeciding(_ j: JoinRequest) -> Bool { deciding.contains(j.id) || j.isDeciding }
-
-    /// "Approving…" from the instant of the press, then the host's own word (a failure says what to do).
-    func decisionLine(_ j: JoinRequest) -> (text: String, failed: Bool)? { JoinCardText.decisionLine(j, pressing: pressing[j.id]) }
-
-    /// The host answers at once ("working"); the card then says "Approving…" until the pond view no longer lists the
-    /// request, or shows why the decision failed. A relay that takes 3-15 s a call can need over a minute for one.
-    func decideJoin(pond: String, request: String, approve: Bool, role: PondRole) async {
-        guard !deciding.contains(request) else { return }
-        deciding.insert(request)
-        pressing[request] = approve
-        let name = details[pond]?.joins.first { $0.id == request }?.displayName ?? "They"
-        defer { deciding.remove(request); pressing[request] = nil }
-        guard await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) else { return }
-        // Until the request is gone from a successful read (done) or the host says it failed, the card keeps saying what is happening.
-        for _ in 0..<90 {
-            await load(pond)
-            if let list = details[pond]?.joins, !failed.contains(pond) {
-                guard let j = list.first(where: { $0.id == request }) else {
-                    result[pond] = approve ? "\(name) joined." : "\(name) was declined."
-                    scheduleClear(pond)
-                    break
-                }
-                if !j.isDeciding { break }
-            }
-            try? await Task.sleep(for: .seconds(2))
-        }
-        await refresh(pond: pond, byPerson: true)
-    }
 
     private func scheduleClear(_ key: String) {
         Task { try? await Task.sleep(for: .seconds(5)); result[key] = nil }
@@ -541,6 +477,7 @@ final class PondsModel {
         if kind != nil { actions.confirm(key); clearAction(key) }
         if let success { result[pond] = success; scheduleClear(pond) }
         await refresh(pond: pond, byPerson: true)
+        await loadPeople(pond)
         return true
     }
 
@@ -554,6 +491,9 @@ final class PondsModel {
         let parts = key.split(separator: ":").map(String.init)
         switch parts.first {
         case "remove": if parts.count == 3 { await removeMember(pond: parts[1], member: parts[2]) }
+        case "resend", "withdraw", "again":
+            guard parts.count == 3, let invite = people[parts[1]]?.invites.first(where: { $0.id == parts[2] }) else { break }
+            await inviteAction(parts[0] == "resend" ? .resend : parts[0] == "withdraw" ? .withdraw : .inviteAgain, pond: parts[1], invite: invite)
         case "leave": _ = await leave(pond: pond)
         case "delete": _ = await deletePond(pond: pond)
         default: break
@@ -582,8 +522,50 @@ final class PondsModel {
         _ = await act("role:\(pond):\(member)", pond: pond, success: "\(name) is now a \(role.word.lowercased()).") { try await self.client!.setRole(pond: pond, member: member, role: role) }
     }
 
-    func revokeInvite(pond: String, invite: String) async {
-        _ = await act("invite:\(pond):\(invite)", pond: pond, success: "Invite revoked. The link and code stop working.") { try await self.client!.revokeInvite(pond: pond, invite: invite) }
+    // MARK: People and invites (docs/spec.md "People and remote")
+
+    /// Each Pond's People as the host last answered (members with presence and roles, the relay's invite records).
+    private(set) var people: [String: PondPeople] = [:]
+
+    /// Reads the Pond's people again; the last answer stays when the host cannot give one.
+    func loadPeople(_ pond: String) async {
+        guard let client else { return }
+        if let p = try? await client.people(pond: pond), people[pond] != p { people[pond] = p }
+    }
+
+    /// The Invite sheet's Send: the tracker says Inviting… in place and keeps a failure with Try again. Answers one outcome per
+    /// address (a refused address is `ok: false` with its sentence); nil when nothing could be asked.
+    func sendInvites(pond: String, emails: [String], role: PondRole) async -> [PondInviteOutcome]? {
+        let key = "invite:\(pond)"
+        guard let client, !busy.contains(key) else { return nil }
+        busy.insert(key); actions.begin(key, .invite)
+        defer { busy.remove(key) }
+        do {
+            let results = try await client.invite(pond: pond, emails: emails, role: role)
+            actions.clear(key)
+            await loadPeople(pond)
+            await refresh(pond: pond, byPerson: true)
+            return results
+        } catch {
+            actions.fail(key, reason: (error as? NativeHostError)?.reason)
+            return nil
+        }
+    }
+
+    /// Resend, Withdraw and Invite again on one invite row: pending in place, a failure that stays with Try again.
+    func inviteAction(_ action: PeopleSheetPlan.InviteAction, pond: String, invite: PondInviteRecord) async {
+        let (verb, kind): (String, PondActionKind) = switch action {
+        case .resend: ("resend", .resend)
+        case .withdraw: ("withdraw", .withdraw)
+        case .inviteAgain: ("again", .invite)
+        }
+        _ = await act("\(verb):\(pond):\(invite.id)", pond: pond, success: nil, kind: kind, who: invite.email) {
+            switch action {
+            case .resend: _ = try await self.client!.resendInvite(pond: pond, invite: invite.id)
+            case .withdraw: _ = try await self.client!.withdrawInvite(pond: pond, invite: invite.id)
+            case .inviteAgain: _ = try await self.client!.inviteAgain(pond: pond, invite: invite.id)
+            }
+        }
     }
 
     func rotateKey(pond: String) async {

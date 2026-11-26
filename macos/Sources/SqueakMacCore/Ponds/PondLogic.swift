@@ -115,11 +115,10 @@ public enum PondHomeThreads {
         }
     }
 
-    /// The count a pond shows beside its name in the sidebar and as a Needs you entry: threads waiting, and join
-    /// requests only for an owner (nobody else can approve them).
+    /// The count a pond shows beside its name in the sidebar and as a Needs you entry: threads waiting.
     public static func needsYouCount(_ detail: PondDetail) -> Int {
         let threads = detail.threads.filter { PondThreadState(raw: $0.state) == .needsYou }.count
-        return threads + (detail.myRole.canApproveJoins ? detail.joins.count : 0)
+        return threads
     }
 }
 
@@ -216,31 +215,6 @@ public enum PondHolds {
 
     /// Holds last 30 s and are renewed while typing: renew once most of that has passed.
     public static let renewEvery: TimeInterval = 20
-}
-
-// MARK: Invites
-
-public enum PondInviteText {
-    /// An invite's life on the host (`INVITE_TTL`, 24 h).
-    public static let lifetime: TimeInterval = 24 * 3600
-
-    /// "Expires in 59 min", "Expires in 2 h"; "Expired" once past; nil when the host gave no expiry.
-    public static func expiry(_ expiresAt: Date?, now: Date) -> String? {
-        guard let expiresAt else { return nil }
-        let left = expiresAt.timeIntervalSince(now)
-        return left <= 0 ? "Expired" : "Expires in \(PondSentence.span(left))"
-    }
-
-    /// A pasted code, trimmed; the whole of it must be one run of characters (invite codes carry no spaces).
-    public static func cleaned(_ pasted: String) -> String? {
-        // A short code may be typed in any case, with a space or a dash or none (K7P-4QD): the host reads it either way.
-        if let short = ShortCode.normalize(pasted) { return short }
-        let t = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty || t.contains(where: \.isWhitespace) ? nil : t
-    }
-
-    /// A name is never typed: it is the signed-in account's (docs/ponds.md, "Names"), so a code is all joining needs.
-    public static func canJoin(code: String) -> Bool { cleaned(code) != nil }
 }
 
 // MARK: A thread from someone else, as a transcript

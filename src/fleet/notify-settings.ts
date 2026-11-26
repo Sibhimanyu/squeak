@@ -49,7 +49,7 @@ export interface ChannelNotify {
   quota: boolean;
   /** Finishes: chats Squeak can answer (a host app's), every agent, or none. */
   finished: FinishedMode;
-  /** A pond invite: someone asked to join a pond you own, or your own request was decided. Quiet hours never hold it. */
+  /** Kept so a saved or sent setting still reads: nothing is sent for it any more (invites are email only). */
   invites: boolean;
   /**
    * Quiet hours hold back finishes, questions after a finish and stalls. A blocked approval or question
@@ -202,15 +202,6 @@ export function shouldPushTo(
 }
 
 /**
- * Whether a pond invite card (a join request for an owner, a decision for the requester) goes to this channel.
- * Like a blocked approval it waits on a person, so quiet hours do not hold it back; only a mute or the switch do.
- */
-export function shouldPushInviteTo(channel: NotifyChannel, settings: NotifySettings): boolean {
-  const mine = settings[channel];
-  return !mine.muted && mine.invites;
-}
-
-/**
  * Whether a Room moment (`fleet/room-moments.ts`) goes to this channel, now. It rides the rules that already exist:
  * a mute stops all of it; a Duck asking a person is a question (`question` switch, held back in quiet hours); a blocked
  * Task is a stall (`stalled` switch, held back in quiet hours); a Member's Task waiting for the Owner waits on a person
@@ -239,7 +230,6 @@ export function shouldPushRoomMomentTo(
 export interface NotifyFilter {
   item(item: { kind: AttentionKind; session: FleetSession }): boolean;
   quota(): boolean;
-  invite?(): boolean;
 }
 
 /**
@@ -291,7 +281,6 @@ export function channelFilter(
       const mine = store.settings[channel];
       return !mine.muted && mine.quota;
     },
-    invite: () => shouldPushInviteTo(channel, store.settings),
   };
 }
 

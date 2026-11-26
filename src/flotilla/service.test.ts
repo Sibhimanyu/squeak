@@ -7,11 +7,12 @@ import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 /**
- * The riskiest FlotillaService flows, on one shared in-memory cloud. (More lives beside it: local-ponds, states,
- * invite-states and the two-Mac e2e; this file adds the restart, retry and failure edges.)
+ * The riskiest FlotillaService flows, on one shared in-memory cloud. (More lives beside it: local-ponds, states
+ * and the two-Mac e2e; this file adds the restart, retry and failure edges.)
  */
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 
@@ -42,12 +43,12 @@ class Cloud {
     if (!options.dir) this.dirs.push(dir);
     const store = this.store();
     const service = new FlotillaService({
-      store: verifying(store),
+      store: store,
       supportDir: dir,
       account: named(name),
       nest: `${name}'s Mac`,
       ...(options.owner ? { location: LOCATION } : {}),
-      storeFor: () => verifying(store),
+      storeFor: () => store,
       ...(options.relay ? { relay: options.relay as never } : {}),
     });
     return { dir, service };
@@ -73,7 +74,7 @@ describe("a local pond publishes once and survives a restart", () => {
     const first = c.mac("Sibhi", { owner: true });
     const made = first.service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
     c.failWrites = true;
-    await expect(first.service.invite(made.id, "member")).rejects.toThrow(/try again/);
+    await expect(first.service.prepareFirstInvite(made.id)).rejects.toThrow(/try again/);
     expect(c.metaDocs()).toEqual([]);
 
     // Restart: same files, new service. The pond is still local and ensureLocalPond finds it, not a second.
@@ -82,9 +83,8 @@ describe("a local pond publishes once and survives a restart", () => {
     expect(again.service.ensureLocalPond({ name: "Alpha", projectId: "p1" }).id).toBe(made.id);
     expect((await again.service.list()).map((p) => [p.id, p.local])).toEqual([[made.id, true]]);
 
-    const invite = await again.service.invite(made.id, "member");
-    expect(invite.code).toBeTruthy();
-    await again.service.invite(made.id, "viewer");
+    await again.service.prepareFirstInvite(made.id);
+    await again.service.prepareFirstInvite(made.id);
     expect(c.metaDocs()).toHaveLength(1);
     expect((await again.service.list()).map((p) => [p.id, p.local])).toEqual([[made.id, undefined]]);
     // Once published, ensureLocalPond still returns that same pond.
@@ -92,51 +92,13 @@ describe("a local pond publishes once and survives a restart", () => {
   });
 });
 
-describe("invite, join, approve", () => {
-  it("a join is pending until the owner approves, one request per Mac; a decline never makes a member", async () => {
-    const c = cloud();
-    const A = c.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
-    const B = c.mac("Aarav");
-    const D = c.mac("Dana");
-    // (Two requests on one invite show once, the newest: each person gets their own invite.)
-    expect(await B.service.join((await A.service.invite(pond.id, "member")).code)).toMatchObject({
-      pondId: pond.id,
-      status: "pending",
-    });
-    expect(await D.service.join((await A.service.invite(pond.id, "member")).code)).toMatchObject({
-      pondId: pond.id,
-      status: "pending",
-    });
-
-    const joins = (await A.service.view(pond.id)).joins;
-    expect(joins.map((j) => j.name).sort()).toEqual(["Aarav", "Dana"]);
-    // Nobody but the owner decides.
-    await expect(B.service.decideJoin(pond.id, joins[0]!.requestId, { approve: true })).rejects.toThrow();
-
-    const aarav = joins.find((j) => j.name === "Aarav")!;
-    const dana = joins.find((j) => j.name === "Dana")!;
-    await A.service.decideJoin(pond.id, aarav.requestId, { approve: true });
-    await A.service.decideJoin(pond.id, dana.requestId, { approve: false });
-    await B.service.refresh(pond.id);
-    await D.service.refresh(pond.id);
-
-    expect((await B.service.view(pond.id)).me.role).toBe("member");
-    expect((await A.service.view(pond.id)).members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
-    expect((await A.service.view(pond.id)).joins).toEqual([]);
-    expect((await D.service.view(pond.id)).me?.role).not.toBe("member");
-  });
-});
-
-describe("a guest leaves", () => {
+describe("a member leaves", () => {
   it("is forgotten here and removed on the owner's Mac; their own cloud failure leaves them in, not half out", async () => {
     const c = cloud();
     const A = c.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
     const B = c.mac("Aarav");
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
 
     // The cloud refuses the leave note: the pond is not forgotten, so the person can try again.
@@ -161,9 +123,7 @@ describe("a left pond is not asked for again, across a restart", () => {
     const A = c.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
     const B = c.mac("Aarav");
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
     await B.service.leave(pond.id);
 
@@ -183,7 +143,7 @@ describe("a left pond is not asked for again, across a restart", () => {
         store,
         supportDir: B.dir,
         nest: "Aarav's Mac",
-        storeFor: () => verifying(store),
+        storeFor: () => store,
         relay: relayFor(),
         now: () => clock,
       });
@@ -209,9 +169,7 @@ describe("a left pond is not asked for again, across a restart", () => {
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
     const left: string[] = [];
     const B = c.mac("Aarav", { relay: { leaveAccountPond: async (id: string) => void left.push(id) } });
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
     // Another device of the account: the relay lists the pond as left; it is dropped and never asked for.
     const asked: string[] = [];
@@ -245,9 +203,7 @@ describe("a left pond is not asked for again, across a restart", () => {
         },
       },
     });
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
     await expect(B.service.leave(pond.id)).resolves.toBeUndefined();
   });
@@ -264,9 +220,7 @@ describe("a left pond is not asked for again, across a restart", () => {
         },
       },
     });
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
     await expect(B.service.leave(pond.id)).rejects.toThrow(/couldn't confirm leaving/);
     expect((await B.service.list()).map((p) => p.id)).toContain(pond.id);
@@ -280,9 +234,7 @@ describe("a left pond is not asked for again, across a restart", () => {
     const A = c.mac("Sibhi", { owner: true });
     const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
     const B = c.mac("Aarav");
-    await B.service.join((await A.service.invite(pond.id, "member")).code);
-    const [req] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await admitMember(A.service, B.service, pond.id, "member");
     await B.service.refresh(pond.id);
     await B.service.leave(pond.id);
     const store = c.store();
@@ -290,7 +242,7 @@ describe("a left pond is not asked for again, across a restart", () => {
       store,
       supportDir: B.dir,
       nest: "Aarav's Mac",
-      storeFor: () => verifying(store),
+      storeFor: () => store,
       relay: {
         accountPonds: async () => [],
         requestDevice: async () => {

@@ -568,19 +568,17 @@ struct PopupHomeFooter: View {
 
 // MARK: Ponds
 
-/// What the person's ponds need, in the menu-bar panel: join requests to answer (Approve / Deny), and a pond that is waiting,
+/// What the person's ponds need, in the menu-bar panel: a pond that is waiting,
 /// ended or can't be reached. Each says the host's own sentence; opening one goes to the pond in the window.
 struct PopupPondStates: View {
     @Environment(AppModel.self) private var model
     private var ponds: PondsModel { .shared }
 
     var body: some View {
-        let joins = ponds.allJoins
         let others = ponds.ponds.filter { PondStates.isGreyedRow($0) }
         let problems = ponds.ponds.filter { ponds.freshness($0).isProblem && !PondStates.isGreyedRow($0) }
-        if !joins.isEmpty || !others.isEmpty || !problems.isEmpty {
+        if !others.isEmpty || !problems.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(joins, id: \.join.id) { item in JoinRequestCard(pond: item.pond, join: item.join, compact: true) }
                 ForEach(others) { pond in
                     Button { open(pond) } label: { PondStateCardView(pond: pond, compact: true) }.buttonStyle(.plain)
                 }

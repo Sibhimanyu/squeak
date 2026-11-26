@@ -9,7 +9,8 @@ import { sealAt, signedText, signText } from "./crypto.js";
 import { can, capsOf, THREAD_ACTIONS, type Action, type Actor, type Context } from "./permissions.js";
 import { FlotillaService } from "./service.js";
 import type { Role } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 const actor = (role: Role, memberId: string): Actor => ({ kind: "human", memberId, role });
 const owner = actor("owner", "O");
@@ -20,8 +21,8 @@ const thread = (starter: string, isPrivate = false): Context => ({ thread: { sta
 const ok = (a: Actor, action: Action, c: Context = {}) => can(a, action, c).ok;
 
 describe("pond role", () => {
-  it("only the owner invites, decides joins and removes members", () => {
-    for (const a of ["invite", "decide-join", "remove-member"] as const) {
+  it("only the owner invites and removes members", () => {
+    for (const a of ["invite", "remove-member"] as const) {
       expect(ok(owner, a)).toBe(true);
       expect(ok(member, a)).toBe(false);
       expect(ok(viewer, a)).toBe(false);
@@ -133,18 +134,15 @@ describe("holds over a store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-perm-"));
     dirs.push(dir);
     const service = new FlotillaService({
-      store: verifying(new RtdbRest(url)),
+      store: new RtdbRest(url),
       supportDir: dir,
       account: named(name),
       nest: name + "-mac",
-      inviteLinkBase: "https://x.test/join",
     });
     return { service, dir };
   };
   async function joinAs(A: ReturnType<typeof mac>, B: ReturnType<typeof mac>, pondId: string, role: Role) {
-    await B.service.join((await A.service.invite(pondId, role as "member" | "viewer")).code);
-    for (const j of (await A.service.view(pondId)).joins)
-      await A.service.decideJoin(pondId, j.requestId, { approve: true });
+    await admitMember(A.service, B.service, pondId, role as "member" | "viewer");
     await B.service.refresh(pondId);
   }
 

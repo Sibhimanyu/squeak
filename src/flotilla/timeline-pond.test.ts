@@ -13,7 +13,8 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaService } from "./service.js";
 import { readThreadEvent } from "./types.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
@@ -68,11 +69,10 @@ function mac(name: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-tl-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
   });
   const host = new FakeHost();
   const bridge = new FlotillaBridge(service, host, { flushMs: 60_000 });
@@ -92,9 +92,7 @@ describe("the timeline across a pond", () => {
     A = mac("Sibhi");
     B = mac("Aarav");
     pondId = (await A.service.createPond({ name: "Site", projectId: "proj-Site" })).id;
-    await B.service.join((await A.service.invite(pondId, "member")).code);
-    for (const j of (await A.service.view(pondId)).joins)
-      await A.service.decideJoin(pondId, j.requestId, { approve: true });
+    await admitMember(A.service, B.service, pondId, "member");
     await B.service.refresh(pondId);
     A.host.sessions.set("s1", session("s1"));
     threadId = (await A.bridge.share(pondId, "s1")).id;

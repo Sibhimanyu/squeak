@@ -91,18 +91,6 @@ export function memberOfDevice(members: Map<string, MemberDoc>, deviceId: string
   return undefined;
 }
 
-export interface JoinRequestDoc {
-  requestId: string;
-  name: string;
-  nest: string | null;
-  client?: "mac" | "web";
-  publicKey: string;
-  /** HMAC of the invite's one-time secret over the request id and key. */
-  proof: string;
-  /** When the request was made (unix ms). Absent on old requests, which count as oldest. */
-  at?: number;
-}
-
 export interface PondThread {
   id: string;
   title: string;
@@ -520,21 +508,6 @@ export function readDeviceRequest(v: unknown): DeviceRequestDoc | null {
     client: v.client,
     nest: v.nest,
     at: v.at,
-  };
-}
-
-export function readJoinRequest(v: unknown): JoinRequestDoc | null {
-  if (!rec(v) || !s(v.requestId, 80) || !s(v.name, 100) || !s(v.publicKey, 200) || !s(v.proof, 200)) return null;
-  if (!(v.nest === null || s(v.nest, 100)) || (v.client !== undefined && v.client !== "mac" && v.client !== "web"))
-    return null;
-  return {
-    requestId: v.requestId,
-    name: v.name,
-    nest: v.nest,
-    publicKey: v.publicKey,
-    proof: v.proof,
-    ...(v.client ? { client: v.client } : {}),
-    ...(typeof v.at === "number" && Number.isFinite(v.at) ? { at: v.at } : {}),
   };
 }
 

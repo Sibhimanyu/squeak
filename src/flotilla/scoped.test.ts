@@ -12,7 +12,8 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 // The real relay handler (cloud/catalyst-relay) in process, over an in-memory store: the test double for the relay.
 const require = createRequire(import.meta.url);
@@ -115,8 +116,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
   const B = mk("Aarav", "aarav-mac");
   const W = mk("Webby", null);
   let pondId = "";
-  let code = "";
-  // A refused join writes nothing, so a missing file reads as empty.
+  // A Mac that holds no pond yet writes no file, so a missing one reads as empty.
   const pondsFile = (m: { dir: string }) => {
     const f = path.join(m.dir, "flotilla", "ponds.json");
     return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
@@ -124,48 +124,19 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
 
   beforeAll(async () => {
     pondId = (await A.service.createPond({ name: "Site", projectId: "proj-Site" })).id;
-    code = (await A.service.invite(pondId, "member")).code;
   });
 
-  it("an invite holds the relay's URL, the pond, its key, a secret and a join-only token: no relay key", () => {
-    const body = JSON.parse(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8"));
-    expect(code).not.toContain(KEY);
-    expect(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8")).not.toContain(KEY);
-    expect(body.l).toEqual({ provider: "catalyst", relayUrl: RELAY_URL });
-    expect(Object.keys(body).sort()).toEqual(["e", "jt", "k", "kv", "l", "n", "o", "on", "p", "r", "s", "v"]);
-    expect(body.jt).toMatch(/^pj\./);
-  });
-
-  it("the join token writes a join request and nothing else", async () => {
-    const body = JSON.parse(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8"));
-    const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
-    const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
-    await expect(joinOnly.set(`channels/${pondId}/threads/t1`, doc)).rejects.toThrow(/403/);
-    await expect(joinOnly.set(`channels/${pondId}/members/m1`, doc)).rejects.toThrow(/403/);
-    await expect(joinOnly.set(`channels/${pondId}/keys/m1`, doc)).rejects.toThrow(/403/);
-    await expect(joinOnly.set(`channels/${"Z".repeat(22)}/joins/r1`, doc)).rejects.toThrow(/403/);
-    await joinOnly.set(`channels/${pondId}/joins/probe`, doc);
-    await joinOnly.delete(`channels/${pondId}/joins/probe`);
-  });
-
-  it("a joiner keeps no relay key, and the approval delivers a pond token sealed to their key", async () => {
-    relay.signedIn.user = { userId: "uB", email: "aarav@example.com", name: "Aarav" };
-    expect(await B.service.join(code)).toEqual({ pondId, status: "pending" });
-    relay.signedIn.user = null;
+  it("a member keeps no relay key, and holds a pond token that is theirs alone", async () => {
+    await admitMember(A.service, B.service, pondId, "member");
     expect(pondsFile(B)).not.toContain(KEY);
     expect(JSON.parse(pondsFile(B)).ponds[pondId]).toMatchObject({
       location: { provider: "catalyst", relayUrl: RELAY_URL },
     });
-    const joins = (await A.service.view(pondId)).joins;
-    expect(joins).toHaveLength(1);
-    await A.service.decideJoin(pondId, joins[0]!.requestId, { approve: true });
-    await B.service.refresh(pondId);
     const held = JSON.parse(pondsFile(B)).ponds[pondId];
     expect(held.status).toBe("active");
     expect(held.token.value).toMatch(/^pm\./);
-    expect(pondsFile(B)).not.toContain(KEY);
     // Everything B does from here runs on the pond token.
-    expect((await B.service.view(pondId)).members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
+    expect((await B.service.view(pondId)).members).toHaveLength(2);
     await B.service.setPresence(pondId, { viewing: "t" });
     const asB = new CatalystStore({ baseUrl: RELAY_URL, pondToken: held.token.value, fetch: relay.fetch });
     const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
@@ -175,66 +146,8 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     await asB.delete(`channels/${pondId}/threads/mine`);
   });
 
-  it("the owner sees the verified email of a signed-in guest, and nothing when there is none", async () => {
-    // Anonymous: no joinids document, no verified fields.
-    relay.signedIn.user = null;
-    const anon = await A.service.invite(pondId, "viewer");
-    const A1 = mk("Anon", null);
-    await A1.service.join(anon.code);
-    let joins = (await A.service.view(pondId)).joins;
-    expect(joins).toHaveLength(1);
-    expect(joins[0]).not.toHaveProperty("verifiedEmail");
-    await A.service.decideJoin(pondId, joins[0]!.requestId, { approve: false });
-    // Signed in: the relay wrote joinids beside the request; the owner sees it; deciding removes it.
-    relay.signedIn.user = { userId: "u1", email: "Pat@Example.com", name: "Pat Lee" };
-    const signed = await A.service.invite(pondId, "viewer");
-    const A2 = mk("Pat", null);
-    await A2.service.join(signed.code);
-    const idRows = () => [...relay.rows.keys()].filter((k) => k.includes("/joinids|"));
-    expect(idRows()).toHaveLength(1);
-    joins = (await A.service.view(pondId)).joins;
-    expect(joins[0]).toMatchObject({ verifiedEmail: "Pat@Example.com", verifiedName: "Pat Lee" });
-    await A.service.decideJoin(pondId, joins[0]!.requestId, { approve: false });
-    expect(idRows()).toHaveLength(0);
-    relay.signedIn.user = null;
-  });
-
-  it("an invite pinned to an email takes a join only from that account", async () => {
-    const pinned = await A.service.invite(pondId, "viewer", "  Pat@example.com ");
-    const body = JSON.parse(Buffer.from(pinned.code.slice("squeak-pond:".length), "base64url").toString("utf8"));
-    const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
-    const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
-    relay.signedIn.user = null;
-    await expect(joinOnly.set(`channels/${pondId}/joins/p1`, doc)).rejects.toThrow(/401/);
-    relay.signedIn.user = { userId: "u2", email: "other@example.com", name: "" };
-    await expect(joinOnly.set(`channels/${pondId}/joins/p1`, doc)).rejects.toThrow(/403/);
-    relay.signedIn.user = { userId: "u1", email: "PAT@example.com", name: "" };
-    await joinOnly.set(`channels/${pondId}/joins/p1`, doc);
-    await joinOnly.delete(`channels/${pondId}/joins/p1`);
-    relay.signedIn.user = null;
-  });
-
-  it("revoking an unused invite also revokes its relay join token", async () => {
-    const inv = await A.service.invite(pondId, "viewer");
-    const body = JSON.parse(Buffer.from(inv.code.slice("squeak-pond:".length), "base64url").toString("utf8"));
-    const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
-    const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
-    relay.failing.add("/pond-revoke");
-    await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/Try again/);
-    relay.failing.delete("/pond-revoke");
-    await A.service.revokeInvite(pondId, inv.id);
-    await expect(joinOnly.set(`channels/${pondId}/joins/p2`, doc)).rejects.toThrow(/401|403/);
-  });
-
-  it("a web guest gets a guest token: it cannot start threads", async () => {
-    const link = await A.service.invite(pondId, "viewer");
-    relay.signedIn.user = { userId: "uW", email: "webby@example.com", name: "Webby" };
-    await W.service.join(link.code);
-    relay.signedIn.user = null;
-    const request = (await A.service.view(pondId)).joins[0]!;
-    expect(request).toMatchObject({ name: "Webby", nest: null, client: "web" });
-    await A.service.decideJoin(pondId, request.requestId, { approve: true });
-    await W.service.refresh(pondId);
+  it("a member with no machine (a browser) gets a guest-scope token: it cannot start threads", async () => {
+    await admitMember(A.service, W.service, pondId, "viewer");
     const held = JSON.parse(pondsFile(W)).ponds[pondId];
     expect(held.token.value).toMatch(/^pt\./);
     const asW = new CatalystStore({ baseUrl: RELAY_URL, pondToken: held.token.value, fetch: relay.fetch });
@@ -290,47 +203,6 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
       `channels/${pondId}/pond/meta`,
     );
   });
-
-  it("without a relay an invite for a Catalyst store is refused rather than carrying the key", async () => {
-    const lone = new FlotillaService({
-      store: ownerStore,
-      supportDir: dir(),
-      account: named("X"),
-      nest: "x",
-      location: ownerLocation,
-      storeFor,
-    });
-    const id = (await lone.createPond({ name: "Lone", projectId: "proj-Lone" })).id;
-    await expect(lone.invite(id)).rejects.toThrow(/Catalyst/);
-  });
-
-  it("an invite naming Catalyst without a join token, or an old one carrying a key, is refused", async () => {
-    const fresh = mk("Late", "late-mac");
-    const forged = (l: unknown, jt?: string): string =>
-      "squeak-pond:" +
-      Buffer.from(
-        JSON.stringify({
-          v: 1,
-          p: pondId,
-          k: "a",
-          kv: 1,
-          o: "o",
-          n: "n",
-          s: "s",
-          e: Date.now() + 1e6,
-          r: "member",
-          l,
-          ...(jt ? { jt } : {}),
-        }),
-      ).toString("base64url");
-    await expect(
-      fresh.service.join(forged({ provider: "catalyst", relayUrl: RELAY_URL, relayKey: KEY })),
-    ).rejects.toThrow(/not valid/);
-    await expect(
-      fresh.service.join(forged({ provider: "catalyst", relayUrl: "https://evil.example/x" }, "pj.a")),
-    ).rejects.toThrow(/not valid/);
-    expect(pondsFile(fresh)).not.toContain(KEY);
-  });
 });
 
 describe("a Firebase store keeps working, with no tokens", () => {
@@ -344,7 +216,7 @@ describe("a Firebase store keeps working, with no tokens", () => {
     await rtdb.stop();
   });
 
-  it("an invite carries the database address, and a join and approval need no relay", async () => {
+  it("a member is let in and removed with no relay", async () => {
     const location = { provider: "firebase", databaseUrl: "https://squeak-x-default-rtdb.firebaseio.com" };
     const make = (name: string, owner: boolean) =>
       new FlotillaService({
@@ -353,19 +225,12 @@ describe("a Firebase store keeps working, with no tokens", () => {
         account: named(name),
         nest: `${name}-mac`,
         ...(owner ? { location } : {}),
-        storeFor: () => verifying(new RtdbRest(url)),
+        storeFor: () => new RtdbRest(url),
       });
     const A = make("A", true);
     const B = make("B", false);
     const pond = await A.createPond({ name: "FB", projectId: "proj-FB" });
-    const { code } = await A.invite(pond.id);
-    const body = JSON.parse(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8"));
-    expect(body.l).toEqual(location);
-    expect(body.jt).toBeUndefined();
-    await B.join(code);
-    const [request] = (await A.view(pond.id)).joins;
-    await A.decideJoin(pond.id, request!.requestId, { approve: true });
-    await B.refresh(pond.id);
+    await admitMember(A, B, pond.id, "member");
     expect((await B.view(pond.id)).members).toHaveLength(2);
     await A.removeMember(pond.id, B.me.id);
     await B.refresh(pond.id);

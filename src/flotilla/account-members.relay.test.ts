@@ -13,6 +13,7 @@ import { CatalystStore, type StreamSocket } from "../cloud/catalyst-store.js";
 import { createCloudStore } from "../cloud/config.js";
 import { FlotillaBridge } from "./bridge.js";
 import { randomId } from "./crypto.js";
+import { admitMember } from "./admit-member.test-fixture.js";
 import { FakeHost, session } from "./journey-support.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
@@ -181,7 +182,6 @@ async function mac(user: TestUser, options: DeviceOptions = {}) {
   const account = {
     name: () => user.name,
     email: () => user.email,
-    attest: async () => (await relay.attest()).token,
     names: async (ids: string[]) => relay.names(ids),
   };
   const service = new FlotillaService({
@@ -190,17 +190,15 @@ async function mac(user: TestUser, options: DeviceOptions = {}) {
     supportDir: dir,
     nest,
     location,
-    inviteLinkBase: "https://x.test/join",
     relay,
     wakeDebounceMs: 0,
     wakeMinIntervalMs: 0,
-    storeFor: (loc, pondToken, joinAttest) => {
+    storeFor: (loc, pondToken) => {
       const at = loc as { provider: string; relayUrl: string; relayKey?: string };
       if (pondToken) {
         return new CatalystStore({
           baseUrl: at.relayUrl,
           pondToken,
-          ...(joinAttest ? { joinAttest } : {}),
           fetch: doFetch,
           socket: streams.socket,
         });
@@ -257,11 +255,7 @@ describe("members are accounts: a second device of the same account joins withou
       gitRemote: "git@github.com:acme/site.git",
     });
     pondId = pond.id;
-    const made = await A.service.invite(pondId, "member", AARAV.email);
-    await web.service.join(made.link!);
-    const [join] = (await A.service.view(pondId)).joins;
-    await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await web.service.refresh(pondId);
+    await admitMember(A.service, web.service, pondId, "member", { id: AARAV.userId });
     memberId = web.service.me.id;
     A.host.sessions.set("a1", session("a1", { title: "Owner thread" }));
     A.host.say("a1", "user/text", { text: "Start" }, "user");
@@ -527,10 +521,7 @@ describe("members are accounts: what must not attach", () => {
           socket: streams.socket,
         }),
     });
-    const made = await A.service.invite(pond.id, "member");
-    await anon.join(made.code!);
-    const [join] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
+    await admitMember(A.service, anon, pond.id, "member");
     const member = [...(await membersOf(A, pond.id)).values()].find((m) => m.role === "member");
     expect(member.accountId).toBeUndefined();
     // a request the relay could only have written for some account never matches it: it is dropped, nothing is added
@@ -559,10 +550,7 @@ describe("members are accounts: what must not attach", () => {
     const A = await mac(SIBHI);
     const pond = await A.service.createPond({ name: "Strict", projectId: "p3" });
     const web = await mac(AARAV, { nest: null });
-    const made = await A.service.invite(pond.id, "member", AARAV.email);
-    await web.service.join(made.link!);
-    const [join] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
+    await admitMember(A.service, web.service, pond.id, "member", { id: AARAV.userId });
     const other = await mac(AARAV);
     const mk = (over: Record<string, unknown>) => ({
       v: 1,
@@ -601,10 +589,7 @@ describe("members are accounts: what must not attach", () => {
     const A = await mac(SIBHI);
     const pond = await A.service.createPond({ name: "Cap", projectId: "p4" });
     const web = await mac(CAP, { nest: null });
-    const made = await A.service.invite(pond.id, "member", CAP.email);
-    await web.service.join(made.link!);
-    const [join] = (await A.service.view(pond.id)).joins;
-    await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
+    await admitMember(A.service, web.service, pond.id, "member", { id: CAP.userId });
     const devices: Mac[] = [];
     for (let i = 0; i < 7; i++) devices.push(await mac(CAP));
     for (const d of devices) await d.service.syncAccountPonds();
@@ -656,11 +641,6 @@ describe("your devices: one account-wide list; removing a device removes it from
   let pond1 = "";
   let pond2 = "";
 
-  const join = async (owner: Mac, id: string) => {
-    const made = await owner.service.invite(id, "member", DANA.email);
-    return made.link!;
-  };
-
   beforeAll(async () => {
     owner1 = await mac(SIBHI);
     owner2 = await mac({ userId: "u-vera", email: "vera@example.com", name: "Vera" });
@@ -675,10 +655,7 @@ describe("your devices: one account-wide list; removing a device removes it from
       [owner1, pond1],
       [owner2, pond2],
     ] as const) {
-      await web.service.join(await join(owner, id));
-      const [req] = (await owner.service.view(id)).joins;
-      await owner.service.decideJoin(id, req!.requestId, { approve: true });
-      await web.service.refresh(id);
+      await admitMember(owner.service, web.service, id, "member", { id: DANA.userId });
     }
     // what each device's periodic account sync does first: list itself under the account
     await web.service.registerSelf();

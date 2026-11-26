@@ -15,8 +15,6 @@
 //                         These three use the signed-in account (cookie) only, never a Mac key. Relay-owned pks ("avatars", "avatar-writes",
 //                         "zoho-photo", and the tenants.js "mac-keys", "mac-owners", "mac-user/<id>") are never reachable by /doc or /list:
 //                         parseDocPath/parseKindPath accept only channels/<id>/<kind>
-//   POST   /account/join-attest (a Mac's own key) -> {token, expiresAt}: 10 min proof of which account the Mac belongs to; sent as
-//                         x-squeak-join-attest on a join request, where it fills the relay-owned joinids (never an account token)
 //   POST   /account/names {ids:[userId]} (relay key or Mac key, at most 50) -> {names:{id:{name,email?}}, self?}: the display names
 //                         relay-side accounts signed in with ("names", relay-owned); a Mac key also gets its own account as self
 //   POST   /ponds/<pondId>/members/accounts {ownerKey, name?, add:[userId], remove:[userId]} (the pond's own Mac): the account
@@ -100,17 +98,16 @@ const sameKey = (given, expected) =>
   crypto.timingSafeEqual(digest(given), digest(expected));
 
 /**
- * Kinds no pond token may touch. joinids (the signed-in user behind a join request) and devreqs (a signed-in account's
+ * Kinds no pond token may touch. devreqs (a signed-in account's
  * request to add a device to its Mac) are written only by the relay itself; devresults is written by the Mac (relay key).
  */
-const RELAY_OWNED_KINDS = new Set(["joinids", "devreqs", "devresults"]);
+const RELAY_OWNED_KINDS = new Set(["devreqs", "devresults"]);
 const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
 /** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
 /** The one history document that wakes readers (the index); pages are read by id from it, so they stay quiet. */
 const HIST_INDEX = "idx";
-const NO_KEY_PUT = new Set(["joinids", "devreqs", "roomnote"]);
+const NO_KEY_PUT = new Set(["devreqs", "roomnote"]);
 const TICKET_TTL_MS = 10 * 60 * 1000;
-const JOIN_ATTEST_TTL_MS = 10 * 60 * 1000;
 const NAMES_MAX = 50;
 const APP_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -168,9 +165,9 @@ const ZOHO_ACCOUNTS = /^accounts\.zoho\.(com|in|eu|com\.au|jp|com\.cn|sa|ca)$/;
 const ZOHO_APP_PATH = "/app/index.html";
 /** The only places a sign-in handoff may return to (exact origin, no wildcard): the web app's Slate home. */
 const HANDOFF_ORIGINS = ["https://squeak.onslate.in"];
-/** Home, or the invite page (an emailed link opens /join#<code>; the code stays in the fragment, which the handoff never sees). */
+/** Home, or the invite page (an emailed link opens /invite?code=<invite id>). */
 const HANDOFF_PROVIDERS = ["zoho", "google", "email"];
-const HANDOFF_PATHS = ["/", "/index.html", "/join"];
+const HANDOFF_PATHS = ["/", "/index.html", "/invite"];
 const handoffReturn = (value) => {
   try {
     const u = new URL(String(value));
@@ -188,9 +185,10 @@ const INVITE_PREVIEW_MEMBERS = 10;
 const INVITE_MAIL_PK = "invite-mail";
 const INVITE_MAIL_MAX = 10;
 const INVITE_MAIL_PER_MAC_DAY = 20;
-const INVITE_MAIL_PER_POND_HOUR = 10;
-const INVITE_MAIL_BODY_MAX = 32 * 1024;
+const INVITE_PAGE = "https://squeak.onslate.in/invite";
 const DAY_MS = 24 * HOUR_MS;
+/** An invitation lives a week (people.js clears finished ones a week after they were reached). */
+const INVITE_TTL_MS = 7 * DAY_MS;
 const MAIL_NOT_SET = "Squeak's email isn't set up yet.";
 const MAIL_FAILED = "Squeak couldn't send the email right now. Try again later.";
 const normEmail = (e) => String(e).trim().toLowerCase();
@@ -326,49 +324,6 @@ function createRelay(deps) {
     }
   }
 
-  /**
-   * A guest's join request (the \`joins\` kind under a pj. token). Account identifies, never grants: this only decides
-   * whether the request is accepted and records who signed it in; the owner still approves on the Mac.
-   * Returns a refusal ({status, body}) or null, and writes/clears the relay-owned \`joinids\` beside the request.
-   */
-  async function joinIdentity(who, parsed, method, req) {
-    if (method === "DELETE") {
-      await deps.store.del(`channels/${parsed.channel}/joinids`, parsed.doc).catch(() => undefined);
-      return null;
-    }
-    const pin = who.scope === "join" ? await deps.store.get(`pins/${who.pondId}`, who.memberId) : null;
-    const pinned = pin ? JSON.parse(pin).email : null;
-    let user;
-    const attest = req && req.headers["x-squeak-join-attest"];
-    if (attest !== undefined) {
-      // A Mac joiner: the relay itself said which account its key belongs to (POST /account/join-attest). A bad or
-      // expired value is "signed out", never a silent anonymous join.
-      const t = scoped.verifyJoinAttest(deps.key, Array.isArray(attest) ? "" : attest, Date.now());
-      if (!t) return { status: 401, body: { error: "signin" } };
-      const rec = await namesOf(t.userId);
-      user = { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
-    } else if (req && req.headers["x-squeak-account"] !== undefined) {
-      // A browser on another origin (the web app on Slate) has no session cookie: it proves the account with Squeak's own
-      // token. Only the verified id and email count (the name comes from the relay's records); a bad or expired token is
-      // "signed out", and the cookie is never consulted behind it.
-      const given = req.headers["x-squeak-account"];
-      const t = scoped.verifyAppToken(deps.key, Array.isArray(given) ? "" : given, Date.now());
-      if (!t) return { status: 401, body: { error: "signin" } };
-      const rec = await namesOf(t.userId);
-      user = { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
-    } else {
-      user = await whoIsThis();
-      if (user) {
-        await rememberName(user);
-        if (!user.name) user.name = ((await namesOf(user.userId)) || {}).name || "";
-      }
-    }
-    if (!user && (pinned || deps.signin === "required")) return { status: 401, body: { error: "signin" } };
-    if (pinned && normEmail(user.email) !== normEmail(pinned))
-      return { status: 403, body: { error: "email", masked: mailing.maskEmail(pinned) } };
-    return { user };
-  }
-
   const feed = createFeed(deps.store);
   const live = createLiveNotices(deps.streams, log);
   /** The Room kept whole and sealed, paged out oldest first past a byte cap per Pond (room-cloud.js). */
@@ -445,12 +400,6 @@ function createRelay(deps) {
         return send(res, 200, { doc: JSON.parse(json) });
       }
       if ((method === "PUT" || method === "DELETE") && scoped.SCOPES[who.scope].write.has(parsed.kind)) {
-        let identity = null;
-        if (parsed.kind === "joins") {
-          const verdict = await joinIdentity(who, parsed, method, req);
-          if (verdict && verdict.status) return send(res, verdict.status, verdict.body);
-          identity = verdict && verdict.user;
-        }
         // A Member's post is part of the Room for good: a token may add one, never overwrite or delete anyone's (the
         // Owner's own key pages and removes).
         if (parsed.kind === "rposts" && method === "DELETE") return send(res, 403, {});
@@ -464,22 +413,6 @@ function createRelay(deps) {
           const stored = JSON.stringify(await stamp(parsed, body.doc));
           await deps.store.put(parsed.pk, parsed.doc, stored);
           if (roomCloud.isRoomKind(parsed.kind)) await roomCloud.wrote(parsed.channel, Buffer.byteLength(stored));
-          if (parsed.kind === "joins") {
-            // Always rewritten or cleared, so the email shown is that of whoever wrote the request now.
-            const idPk = `channels/${parsed.channel}/joinids`;
-            if (identity) {
-              const value = {
-                v: 1,
-                userId: identity.userId,
-                email: identity.email,
-                name: identity.name,
-                at: Date.now(),
-              };
-              await deps.store.put(idPk, parsed.doc, JSON.stringify(value));
-            } else {
-              await deps.store.del(idPk, parsed.doc).catch(() => undefined);
-            }
-          }
         } else {
           await stamp(parsed, null);
           await deps.store.del(parsed.pk, parsed.doc);
@@ -1052,69 +985,6 @@ function createRelay(deps) {
   }
 
   /**
-   * POST /ponds/<pondId>/invites/email (a Mac's own key, or the operator's): sends each address its invitation through the
-   * injected mail sender (Catalyst Mail). The join token behind each link is already bound to its address (/pond-token);
-   * this route only delivers. Strict body { emails, inviteUrls: { <email>: <link> }, pondName, inviterName }.
-   * 20 emails per Mac per day, 10 per pond per hour. A mail failure is a fixed 503 {error:"mail", reason}, never the SDK's words.
-   */
-  async function handleInviteEmail(req, res, method, mac, pondId) {
-    const out = (status, body) => send(res, status, body, NO_STORE);
-    if (method !== "POST") return out(405, {});
-    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
-    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
-    const body = await readJson(req, INVITE_MAIL_BODY_MAX);
-    const keys = Object.keys(body || {});
-    const emails = body && body.emails;
-    const urls = body && body.inviteUrls;
-    const oneLine = (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 200;
-    if (
-      keys.some((k) => !["emails", "inviteUrls", "pondName", "inviterName"].includes(k)) ||
-      !Array.isArray(emails) ||
-      emails.length < 1 ||
-      emails.length > INVITE_MAIL_MAX ||
-      !emails.every((e) => mailing.validEmail(e)) ||
-      !urls ||
-      typeof urls !== "object" ||
-      Array.isArray(urls) ||
-      !oneLine(body.pondName) ||
-      !oneLine(body.inviterName)
-    )
-      return out(400, { error: "body" });
-    const list = [...new Set(emails.map(mailing.normEmail))];
-    if (!list.every((e) => mailing.linkOk(urls[e]))) return out(400, { error: "links" });
-    if (!deps.mail || !deps.mail.send) return out(503, { error: "mail", reason: MAIL_NOT_SET });
-    const who = mac ? mac.macId : "operator";
-    // The pond's hour first, then the Mac's day; a refusal by the second gives the first back.
-    if (!(await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, list.length)))
-      return out(429, { error: "busy" });
-    if (!(await spend(INVITE_MAIL_PK, `d-${who}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, list.length))) {
-      await spend(INVITE_MAIL_PK, `p-${pondId}`, HOUR_MS, INVITE_MAIL_PER_POND_HOUR, -list.length);
-      return out(429, { error: "busy" });
-    }
-    const sent = [];
-    const failed = [];
-    for (const email of list) {
-      const m = mailing.buildInviteMail({
-        inviterName: body.inviterName,
-        pondName: body.pondName,
-        email,
-        url: urls[email],
-      });
-      try {
-        await deps.mail.send({ to: email, subject: m.subject, text: m.text, html: m.html });
-        sent.push(email);
-      } catch (error) {
-        // The provider's own words go to the function's log only (the operator reads them there), never into a response.
-        log("invite email not sent", String((error && (error.message || error.code)) || error).slice(0, 300));
-        failed.push(email);
-      }
-    }
-    // Nothing went out: say so as a failure (quota or a sender that is not set up are the usual causes), no SDK words.
-    if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed });
-    return out(200, { sent, failed });
-  }
-
-  /**
    * POST /ponds/<pondId>/members/accounts (the pond's own Mac, or the operator's key): the owner's Mac says which accounts
    * are members of the pond now. { ownerKey, name?, add: [userId], remove: [userId] }. This is the only writer of the
    * account index; a Mac that does not own the channel is refused (`channelAllowed`), so nobody can list an account in
@@ -1489,6 +1359,233 @@ function createRelay(deps) {
     return out(200, { pond: pond.name, inviter, members, state: invite.state, expiresAt: invite.expiresAt, masked });
   }
 
+  // ---- invitations (spec: People and remote, "One way in: email"; the invite is one relay record) ----
+
+  /** Where an invitation email sends people: the invite page on the web; it reads the record by this id. */
+  const inviteUrl = (inviteId) => `${INVITE_PAGE}?code=${encodeURIComponent(inviteId)}`;
+  const newInviteId = () => crypto.randomBytes(18).toString("base64url");
+  /** The fixed sentences a refusal may carry, by the rule's code (never a store's words). */
+  const INVITE_WORDS = {
+    "was-withdrawn": "This invitation was withdrawn.",
+    "was-expired": "This invitation expired.",
+    "was-declined": "This invitation was declined.",
+    "was-joined": "This invitation was already used.",
+    "not-pending": "That invitation is no longer waiting.",
+    "still-pending": "That invitation is still waiting.",
+    "no-invite": "There is no such invitation.",
+    "no-pond": "There is no such Pond.",
+  };
+  const asRefusal = (e) => {
+    if (!(e && e.name === "PeopleError")) throw e;
+    const status =
+      e.code === "invalid"
+        ? 400
+        : e.code === "no-invite" || e.code === "no-pond"
+          ? 404
+          : e.code === "wrong-address"
+            ? 403
+            : 409;
+    return { status, body: { error: e.code, message: INVITE_WORDS[e.code] || e.message } };
+  };
+
+  /** The signed-in account (account token, cookie or a Mac's own key) with the email and name sign-in gave, kept in the people tables. */
+  async function peopleUser(req, mac) {
+    const who = await accountOf(req, mac);
+    if (!who || !deps.people) return null;
+    const rec = await namesOf(who.userId).catch(() => null);
+    let email = who.email || (rec && rec.email) || "";
+    if (!email && mac) {
+      const link = parseOr(await deps.store.get("maclinks", mac.macId));
+      email = (link && link.email) || "";
+    }
+    const known = await deps.people.getAccount(who.userId).catch(() => null);
+    const name = (who.name || (rec && rec.name) || (known && known.name) || "").slice(0, 100);
+    if (email) await deps.people.upsertAccount({ userId: who.userId, email, name }).catch(() => undefined);
+    return { userId: who.userId, email, name };
+  }
+
+  /** An invite changed: wake the Pond's watchers (the Owner's Mac re-reads the record and says join and decline in the Room). */
+  const invitesChanged = (pondId) => publishNotice(`channels/${pondId}/members`, "invites").catch(() => undefined);
+
+  const inviteOut = async (invite) => {
+    const known = await deps.people.accountByEmail(invite.email);
+    return {
+      ...invite,
+      ...(known ? { userId: known.userId } : {}),
+      ...(known && known.name ? { name: known.name } : {}),
+    };
+  };
+
+  /** Sends the invitation email for a pending invite through the mail path; false (with the reason logged) when it did not go. */
+  async function mailInvite(user, pond, invite) {
+    if (!deps.mail || !deps.mail.send) return false;
+    const m = mailing.buildInviteMail({
+      inviterName: user.name || user.email || "Someone",
+      pondName: pond.name,
+      email: invite.email,
+      url: inviteUrl(invite.inviteId),
+    });
+    try {
+      await deps.mail.send({ to: invite.email, subject: m.subject, text: m.text, html: m.html });
+      return true;
+    } catch (error) {
+      // The provider's own words go to the function's log only (the operator reads them there), never into a response.
+      log("invite email not sent", String((error && (error.message || error.code)) || error).slice(0, 300));
+      return false;
+    }
+  }
+
+  /**
+   * /ponds/<pondId>/invites... (Owner only: the account that owns the Pond; a Mac's own key stands for its account).
+   *   POST  /ponds/<id>/invites {emails, role, pondName?}      one invite per address; the first one makes the Pond exist in the
+   *                                                            cloud with this account as Owner. -> {results:[{email, ok, invite? | message}]}
+   *   GET   /ponds/<id>/invites                                -> {invites:[...]} the one record per address, with its state and times
+   *   POST  /ponds/<id>/invites/<inviteId>/resend              -> {invite, mailed}
+   *   POST  /ponds/<id>/invites/<inviteId>/withdraw            -> {invite}
+   *   POST  /ponds/<id>/invites/<inviteId>/again {role?}       -> {invite, mailed}  (declined, expired or withdrawn only)
+   */
+  async function handlePondInvites(req, res, method, mac, parts) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    const [pondId, , inviteId, action] = parts;
+    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
+    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
+    const user = await peopleUser(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    let pond = await deps.people.getPond(pondId);
+    try {
+      if (!inviteId) {
+        if (method === "GET") {
+          if (!pond || pond.ownerUserId !== user.userId) return out(pond ? 403 : 200, pond ? {} : { invites: [] });
+          const invites = await Promise.all((await deps.people.listInvites(pondId)).map(inviteOut));
+          return out(200, { invites });
+        }
+        if (method !== "POST") return out(405, {});
+        const body = await readJson(req, 8 * 1024);
+        const emails = body && body.emails;
+        if (
+          !Array.isArray(emails) ||
+          emails.length < 1 ||
+          emails.length > INVITE_MAIL_MAX ||
+          (body.role !== "member" && body.role !== "viewer")
+        )
+          return out(400, { error: "body" });
+        if (pond && pond.ownerUserId !== user.userId) return out(403, {});
+        if (!pond) {
+          const name = typeof body.pondName === "string" ? body.pondName.trim().slice(0, 100) : "";
+          if (!name) return out(400, { error: "pondName" });
+          if (!user.email) return out(401, { error: "signin" });
+          pond = await deps.people.createPond({ pondId, ownerUserId: user.userId, name });
+        }
+        const list = [...new Set(emails.map((e) => (typeof e === "string" ? normEmail(e) : "")))];
+        if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, list.length)))
+          return out(429, { error: "busy" });
+        const results = [];
+        for (const email of list) {
+          if (!mailing.validEmail(email)) {
+            results.push({ email, ok: false, error: "email", message: `${email || "That"} is not an email address.` });
+            continue;
+          }
+          try {
+            const invite = await deps.people.createInvite({
+              inviteId: newInviteId(),
+              pondId,
+              email,
+              role: body.role,
+              invitedBy: user.userId,
+              expiresAt: clock() + INVITE_TTL_MS,
+            });
+            const mailed = await mailInvite(user, pond, invite);
+            results.push({ email, ok: true, mailed, invite: await inviteOut(invite) });
+          } catch (e) {
+            const r = asRefusal(e);
+            results.push({ email, ok: false, error: r.body.error, message: r.body.message });
+          }
+        }
+        if (results.some((r) => r.ok)) await invitesChanged(pondId);
+        return out(200, { results });
+      }
+      // One invite of this Pond, by the Owner.
+      if (method !== "POST") return out(405, {});
+      if (!pond || pond.ownerUserId !== user.userId) return out(pond ? 403 : 404, pond ? {} : { error: "no-pond" });
+      const existing = await deps.people.getInvite(inviteId);
+      if (!existing || existing.pondId !== pondId)
+        return out(404, { error: "no-invite", message: INVITE_WORDS["no-invite"] });
+      if (action === "withdraw") {
+        const done = await deps.people.withdrawInvite(inviteId);
+        await invitesChanged(pondId);
+        return out(200, { invite: await inviteOut(done) });
+      }
+      if (action === "resend") {
+        if (existing.state !== "pending")
+          return out(409, { error: "not-pending", message: INVITE_WORDS["not-pending"] });
+        if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY)))
+          return out(429, { error: "busy" });
+        return out(200, { invite: await inviteOut(existing), mailed: await mailInvite(user, pond, existing) });
+      }
+      if (action === "again") {
+        const body = await readJson(req, 1024);
+        if (body && body.role !== undefined && body.role !== "member" && body.role !== "viewer")
+          return out(400, { error: "body" });
+        const invite = await deps.people.inviteAgain({
+          pondId,
+          fromInviteId: inviteId,
+          inviteId: newInviteId(),
+          invitedBy: user.userId,
+          expiresAt: clock() + INVITE_TTL_MS,
+          ...(body && body.role ? { role: body.role } : {}),
+        });
+        await invitesChanged(pondId);
+        return out(200, { invite: await inviteOut(invite), mailed: await mailInvite(user, pond, invite) });
+      }
+      return out(404, {});
+    } catch (e) {
+      const r = asRefusal(e);
+      return out(r.status, r.body);
+    }
+  }
+
+  /**
+   * The invited person's side, signed in. GET /invites -> {invites:[{inviteId, pondId, pond, inviter, role, expiresAt}]} the
+   * pending invitations for the account's verified address; POST /invites/<id>/accept | /decline. Only that address may use
+   * an invitation: another account is refused with the masked address, and the invite stays pending.
+   */
+  async function handleMyInvites(req, res, method, mac, parts) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    const user = await peopleUser(req, mac);
+    if (!user || !user.email) return out(401, { error: "signin" });
+    if (parts.length === 1) {
+      if (method !== "GET") return out(405, {});
+      const invites = [];
+      for (const i of await deps.people.pendingInvitesFor(user.email)) {
+        const pond = await deps.people.getPond(i.pondId);
+        if (!pond) continue;
+        const inviter = await deps.people.getAccount(i.invitedBy);
+        invites.push({
+          inviteId: i.inviteId,
+          pondId: i.pondId,
+          pond: pond.name,
+          inviter: (inviter && inviter.name) || "Someone",
+          role: i.role,
+          expiresAt: i.expiresAt,
+        });
+      }
+      return out(200, { invites });
+    }
+    if (method !== "POST" || parts.length !== 3 || !["accept", "decline"].includes(parts[2])) return out(404, {});
+    try {
+      const done =
+        parts[2] === "accept"
+          ? await deps.people.acceptInvite(parts[1], user)
+          : await deps.people.declineInvite(parts[1], user);
+      await invitesChanged(done.pondId);
+      return out(200, { invite: await inviteOut(done) });
+    } catch (e) {
+      const r = asRefusal(e);
+      const row = r.body.error === "wrong-address" ? await deps.people.getInvite(parts[1]) : null;
+      return out(r.status, row ? { ...r.body, masked: mailing.maskEmail(row.email) } : r.body);
+    }
+  }
+
   return async function handle(req, res) {
     try {
       const url = new URL(req.url || "/", "http://relay");
@@ -1566,6 +1663,12 @@ function createRelay(deps) {
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
       if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
+      if (route === "/invites" || /^\/invites\/[^/]+\/(accept|decline)$/.test(route))
+        return await handleMyInvites(req, res, method, mac, route.split("/").slice(1));
+      {
+        const m = /^\/ponds\/([^/]+)\/invites(?:\/([^/]+)\/(resend|withdraw|again))?$/.exec(route);
+        if (m) return await handlePondInvites(req, res, method, mac, [m[1], "invites", m[2], m[3]]);
+      }
       if (route === "/account/devices" || route.startsWith("/account/devices/"))
         return await handleAccountDevices(req, res, url, route, method, mac);
       {
@@ -1678,17 +1781,6 @@ function createRelay(deps) {
       if (route === "/account/link" || route === "/account/unlink")
         return await handleAccountMac(req, res, route, method, mac);
 
-      // The Mac's own key says which account it belongs to: a short attestation for a join request (docs/ponds.md, "Names").
-      if (route === "/account/join-attest") {
-        if (method !== "POST") return send(res, 405, {});
-        if (!mac) return forbidden();
-        const rec = await namesOf(mac.userId);
-        const link = parseOr(await deps.store.get("maclinks", mac.macId));
-        const email = (link && typeof link.email === "string" && link.email) || (rec && rec.email) || "";
-        const issued = scoped.issueJoinAttest(deps.key, mac.userId, email, Date.now(), JOIN_ATTEST_TTL_MS);
-        if (!issued) return send(res, 409, { error: "signin" }, NO_STORE);
-        return send(res, 200, { token: issued.token, expiresAt: issued.expiresAt }, NO_STORE);
-      }
       // An owner's Mac resolves account ids to their display names; a Mac key also gets its own account's back as `self`.
       if (route === "/account/names") {
         if (method !== "POST") return send(res, 405, {});
@@ -1712,11 +1804,6 @@ function createRelay(deps) {
         return send(res, 200, { names, ...(self ? { self } : {}) }, NO_STORE);
       }
 
-      {
-        const m = /^\/ponds\/([^/]+)\/invites\/email$/.exec(route);
-        if (m) return await handleInviteEmail(req, res, method, mac, m[1]);
-      }
-
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});
         const body = await readJson(req, 1024);
@@ -1738,11 +1825,6 @@ function createRelay(deps) {
           body.scope === undefined ? "guest" : body.scope,
         );
         if (!issued) return send(res, 400, { error: "ids" });
-        if (body.email !== undefined) {
-          const email = typeof body.email === "string" ? normEmail(body.email) : "";
-          if (body.scope !== "join" || !EMAIL.test(email)) return send(res, 400, { error: "email" });
-          await deps.store.put(`pins/${body.pondId}`, body.memberId, JSON.stringify({ email }));
-        }
         // A new token for a member lifts an earlier revocation (a removed guest who is invited again).
         await deps.store.del(`revoked/${body.pondId}`, body.memberId);
         if (deps.streams.pondChannelId) await deps.streams.pondChannelId(body.pondId, true).catch(() => null);

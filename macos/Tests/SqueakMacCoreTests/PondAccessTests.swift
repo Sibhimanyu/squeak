@@ -158,9 +158,4 @@ struct GroupChatTests {
         #expect(PondStartThread.places(for: PondSummary(id: "p", name: "Mine", role: .owner, gitRemote: "g")).map(\.kind) == [.own])
         #expect(PondStartThread.places(for: PondSummary(id: "p", name: "Site", role: .viewer)).isEmpty)
     }
-
-    @Test func joiningNeedsSignInAndTypesNoName() {
-        #expect(PondJoinGate.needsSignIn(linked: false) && !PondJoinGate.needsSignIn(linked: true))
-        #expect(PondJoinGate.signInLine == "Sign in to Squeak to join a pond. Your name comes from your account.")
-    }
 }

@@ -173,7 +173,10 @@ export interface PhoneFlock {
   reason?: string;
 }
 
-/** What a pond's page shows beyond the list: pending invites, people waiting to join, recent activity. */
+/**
+ * What a pond's page shows beyond the list: recent activity. `invites` and `waiting` stay in the shape for a phone that
+ * decodes them; the host no longer sends either (invites are email only and live in the cloud).
+ */
 export interface PhonePondDetail {
   id: string;
   invites?: Array<{ label: string; expiresAt?: string }>;
@@ -686,20 +689,6 @@ export class NativePhone implements RemoteNative {
     const iso = (ms: unknown): string | undefined =>
       typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
     const out: PhonePondDetail = { id: pondId };
-    if (Array.isArray(view.invites)) {
-      out.invites = list(view.invites)
-        .filter((i) => i.state === "pending")
-        .map((i) => {
-          const expiresAt = iso(i.expiresAt);
-          return { label: `${clip(i.role, 20) ?? "member"} invite`, ...(expiresAt ? { expiresAt } : {}) };
-        });
-    }
-    if (Array.isArray(view.joins)) {
-      out.waiting = list(view.joins).flatMap((j) => {
-        const name = clip(j.name, MEMBER_NAME_MAX);
-        return name ? [{ name }] : [];
-      });
-    }
     if (Array.isArray(view.ripples)) {
       out.ripples = list(view.ripples)
         .flatMap((r) => {

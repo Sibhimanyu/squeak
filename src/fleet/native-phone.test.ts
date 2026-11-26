@@ -220,11 +220,6 @@ describe("NativePhone", () => {
         const bodies: Record<string, unknown> = {
           "/native/pond-order": { mode: "recent", order: ["proj"] },
           "/native/ponds/a": {
-            invites: [
-              { role: "editor", state: "pending", expiresAt: 1_700_000_000_000, code: "SECRET" },
-              { role: "viewer", state: "accepted", expiresAt: 1 },
-            ],
-            joins: [{ name: "Ravi", verifiedEmail: "r@x.y" }],
             ripples: [
               { text: "started", at: 1_700_000_000_000, actorName: "Asha" },
               { text: "joined", at: 1_700_000_100_000 },
@@ -238,14 +233,11 @@ describe("NativePhone", () => {
     const detail = await phone.pondDetail("a");
     expect(detail).toEqual({
       id: "a",
-      invites: [{ label: "editor invite", expiresAt: new Date(1_700_000_000_000).toISOString() }],
-      waiting: [{ name: "Ravi" }],
       ripples: [
         { text: "joined", at: new Date(1_700_000_100_000).toISOString() },
         { text: "started", at: new Date(1_700_000_000_000).toISOString(), who: "Asha" },
       ],
     });
-    expect(JSON.stringify(detail)).not.toMatch(/SECRET|r@x/);
     sent.length = 0;
     await phone.setPondHidden("proj", false);
     await phone.setPondOrder({ ids: ["proj"] });

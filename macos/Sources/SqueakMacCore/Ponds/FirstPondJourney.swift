@@ -29,7 +29,7 @@ public enum FirstPondJourney {
             return (blankPath.map { "Makes the folder \($0)." } ?? "Makes a folder in ~/Squeak with that name.")
                 + " It stays on this Mac; put it on GitHub later from the pond\u{2019}s \u{22EF} menu."
         case .folder: return "Your files stay where they are. Git is not needed."
-        case .clone, .invite: return nil
+        case .clone: return nil
         }
     }
 

@@ -37,26 +37,6 @@ struct PondFixtureTests {
         #expect(list[0].memberCount == 3 && list[0].threadCount == 2)
     }
 
-    @Test func inviteHasACodeALinkAndATime() async throws {
-        let invite = try await client(Replay().serve("invite")).invite(pond: "p", role: .member)
-        #expect(invite.code.hasPrefix("squeak-pond:") && invite.expiresAt != nil)
-        #expect(invite.link?.hasPrefix("https://squeak.example/join#") == true)
-        #expect(invite.link?.hasSuffix(String(invite.code.dropFirst("squeak-pond:".count))) == true)
-    }
-
-    @Test func joinIsPendingAndAnOwnerSeesTheRequestWithNestOrNot() async throws {
-        let joined = try await client(Replay().serve("join")).join(code: "c")
-        #expect(joined.isPending && !joined.pondId.isEmpty)
-        let d = try #require(try await client(Replay().serve("detail-with-joins")).detail(id: "p"))
-        #expect(d.myRole == .owner && d.members.count == 1)
-        #expect(d.joins.count == 2)
-        let aarav = try #require(d.joins.first { $0.name == "Aarav" })
-        let vera = try #require(d.joins.first { $0.name == "Vera" })
-        #expect(aarav.role == .member && aarav.nest == "Aarav's Mac" && !aarav.isWeb && !aarav.id.isEmpty)
-        #expect(vera.role == .viewer && vera.nest == nil && vera.isWeb)
-        #expect(PondHomeThreads.needsYouCount(d) == 2)
-    }
-
     @Test func aJoinerWaitingForApprovalGets409InTheHostsWords() async throws {
         do { _ = try await client(try Replay().serve("detail-pending-joiner", status: 409)).detail(id: "p"); Issue.record("should throw") }
         catch NativeHostError.http(409, let message) { #expect(message?.contains("waiting for an owner") == true) }
@@ -128,11 +108,10 @@ struct PondFixtureTests {
     }
 
     @Test func okAnswersAreJustOk() async throws {
-        let t = try Replay().serve("approve")
-        try await client(t).decideJoin(pond: "p", request: "j", approve: true, role: .member)
+        let t = try Replay().serve("remove-member")
+        try await client(t).removeMember(pond: "p", member: "m")
         _ = try await client(try Replay().serve("presence")).presence(pond: "p", viewing: "t", typingIn: "t")
         try await client(try Replay().serve("visibility")).setPrivate(pond: "p", thread: "t", isPrivate: false)
-        try await client(try Replay().serve("remove-member")).removeMember(pond: "p", member: "m")
         #expect(t.requests.count == 1)
     }
 
@@ -201,21 +180,12 @@ struct PondStartThreadTests {
     }
 
     @Test func joinWaitingIsReadFromTheHostsList() throws {
-        let body = #"{"v":1,"p":"abc123","n":"Orchard","r":"viewer"}"#
-        let code = "squeak-pond:" + Data(body.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        #expect(PondJoinWaiting.pondId(inInvite: code) == "abc123")
-        #expect(PondJoinWaiting.pondId(inInvite: "https://x.web.app/join#" + code.dropFirst(12)) == "abc123")
-        #expect(PondJoinWaiting.pondId(inInvite: "nonsense") == nil)
         let waiting = PondSummary(id: "abc123", name: "Orchard", role: .viewer, status: "pending", requestedRole: .member)
         let declined = PondSummary(id: "d", name: "Barn", status: "denied")
         let active = PondSummary(id: "a", name: "Mine")
-        // The same invite again finds its waiting request; an active or unknown pond does not.
-        #expect(PondJoinWaiting.pending(forInvite: code, in: [active, waiting])?.id == "abc123")
-        #expect(PondJoinWaiting.pending(forInvite: code, in: [active]) == nil)
         #expect(PondJoinWaiting.rows([active, waiting, declined]).map(\.id) == ["abc123", "d"])
         #expect(PondJoinWaiting.rowTitle(waiting) == "Orchard \u{00B7} Waiting for approval")
         #expect(PondJoinWaiting.rowTitle(declined) == "Barn \u{00B7} Your request was declined")
-        #expect(PondJoinWaiting.asked(waiting) == "Asked to join as a member")
         var now = waiting; now.status = "active"
         #expect(PondJoinWaiting.approved(old: [waiting, active], new: [now, active]).map(\.id) == ["abc123"])
         #expect(PondJoinWaiting.approved(old: [now], new: [now]).isEmpty)

@@ -13,13 +13,11 @@ import { flag } from "../squeak/flags.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import {
   generateMemberKey,
-  joinProof,
   memberIdOf,
   openAt,
   openFromMember,
   randomId,
   randomKey,
-  safeEqual,
   sealAt,
   sealToMember,
   SecretFile,
@@ -28,9 +26,9 @@ import {
   verifyText,
 } from "./crypto.js";
 import { can, capsOf, type Action, type Actor, type Context, type Caps } from "./permissions.js";
-import { joinWords } from "./join-words.js";
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
-import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
+import { AnnouncedInvites, buildPeople, owedLines, type PeopleView } from "./pond-people.js";
+import { InviteRefused, type InviteRecord, type InviteResult, type PondInvites } from "./invites-port.js";
 import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
 import {
@@ -60,7 +58,6 @@ import {
   POND_ID,
   readCommand,
   readHold,
-  readJoinRequest,
   readDeviceGone,
   readDeviceRequest,
   readMember,
@@ -76,13 +73,11 @@ import {
   readThreadEvent,
   type CommandDoc,
   type Hold,
-  type JoinRequestDoc,
   type MemberDoc,
   type PondMeta,
   type PondThread,
   type ThreadParticipant,
   type PresenceDoc,
-  isRole,
   type Ripple,
   type RippleKind,
   type Role,
@@ -156,53 +151,6 @@ export const noMessageWithoutAsking = (starter: string): string =>
 const LOCAL_ONLY = "This pond is only on this Mac until you invite someone.";
 const NO_CLOUD = "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond.";
 
-/** An invite's life: pending until used, then accepted or declined; or expired (computed) or revoked by the owner. */
-export type InviteState = "pending" | "accepted" | "declined" | "expired" | "revoked";
-
-interface LocalInvite {
-  secret: string;
-  role: Role;
-  expiresAt: number;
-  /** Absent on invites made before states: they read as pending until they expire. */
-  id?: string;
-  state?: InviteState;
-  /** The relay join token's member id (Catalyst), so a revoke can end the token too. */
-  tokenId?: string;
-  /**
-   * An invite by email: the (lower-cased) address its join token is bound to at the relay. A join request that proves this
-   * invite and whose relay-verified account email equals it is let in without the owner's second approval.
-   */
-  email?: string;
-  decidedAt?: number;
-  createdAt?: number;
-  /** Who it became: the name on the request that used it (accepted or declined). */
-  usedBy?: string;
-  /**
-   * The code and link of a pending invite, kept (in this 0600 file, beside the pond key they carry) so the owner can copy
-   * them again. Dropped the moment the invite is no longer pending.
-   */
-  code?: string;
-  link?: string;
-}
-
-export interface LongInvite {
-  code: string;
-  expiresAt: number;
-  link?: string;
-  id: string;
-}
-/** What an owner sees of an invite. `code` and `link` are present only while it is pending. */
-export interface InviteView {
-  id: string;
-  role: Role;
-  state: InviteState;
-  createdAt?: number;
-  expiresAt: number;
-  usedBy?: string;
-  link?: string;
-  code?: string;
-}
-
 /** A pond-scoped relay token a member holds (docs/ponds.md, "Scoped tokens"). */
 interface HeldToken {
   value: string;
@@ -213,7 +161,7 @@ interface HeldToken {
 /** A pond's state as every surface says it (docs/ponds.md, "States"). `denied` is the stored spelling of `declined`. */
 export type PondStatus = "local" | "pending" | "active" | "declined" | "expired" | "revoked" | "removed";
 type StoredStatus = "pending" | "active" | "removed" | "denied" | "revoked" | "expired";
-/** Statuses that end a join or a membership: the row stays until the person presses Remove. */
+/** Statuses that end a membership: the row stays until the person presses Remove. */
 const NEEDS_PROJECT = "A pond is made from a project. Choose a project; names are not ponds.";
 const ONE_PER_PROJECT = "That project already has a pond.";
 const TERMINAL: readonly StoredStatus[] = ["removed", "denied", "revoked", "expired"];
@@ -224,10 +172,8 @@ interface LocalPond {
   status: StoredStatus;
   /** The owner's name when this Mac has read it (the owner's member document), for the sentences about them. */
   ownerName?: string;
-  /** A joiner: when the invite lapses (from the code) and when the request went out. */
+  /** A later device waiting to be let in: when its read token lapses, and when the request went out. */
   inviteExpiresAt?: number;
-  /** A joiner holds no pond key until the owner approves: the three words the owner sees too. */
-  words?: string[];
   requestedAt?: number;
   /** When a terminal status was reached. */
   endedAt?: number;
@@ -247,9 +193,8 @@ interface LocalPond {
   /** Pond keys by version. The newest is `current`. */
   keys: Record<string, string>;
   current: number;
+  /** The relay's id of this device's request to be let in. */
   requestId?: string;
-  /** What the invite said the joiner would be, until approved. */
-  requestedRole?: Role;
   gitRemote?: string;
   /** The Squeak project this Mac made the pond from. Local only: never written to the cloud or an invite. */
   projectId?: string;
@@ -263,16 +208,15 @@ interface LocalPond {
    * (`publish`). Absent on every pond made before local ponds: those are published.
    */
   local?: boolean;
-  /** A joiner on a Catalyst relay, until approved: the invite's join-only token (writes the join request). */
-  joinToken?: string;
   /**
-   * This Mac is a device of a member who joined elsewhere (docs/ponds.md, "Members are accounts"): there is no invite
-   * and no join request, only the relay's device request, and `joinToken` is the device's read token.
+   * This Mac is a device of a member who joined elsewhere (docs/ponds.md, "Members are accounts"): there is only the
+   * relay's device request, and `joinToken` is the device's read token until the key arrives.
    */
+  joinToken?: string;
   deviceJoin?: true;
   /** The member id this Mac acts as in this pond when it is a later device of someone; absent = its own key's id. */
   memberId?: string;
-  /** A joiner on a Catalyst relay, once approved: the pond-scoped token the owner sent sealed to this key. */
+  /** A member on a Catalyst relay: the pond-scoped token the owner sent sealed to this key. */
   token?: HeldToken;
   /** An owner on a Catalyst relay: who holds a token, and until when, so it is renewed before it lapses. */
   issued?: Record<string, { expiresAt: number; scope: TokenScope }>;
@@ -281,7 +225,6 @@ interface LocalPond {
   threads: Record<string, LocalThread>;
   /** Answers to `diff` commands this Mac wrote (a `tevents` document each), until they are deleted. */
   results?: Array<{ doc: string; until: number }>;
-  invites: LocalInvite[];
   /** Nonce -> its command's expiry, kept until then. */
   nonces: Record<string, number>;
   /** The Owner's Mac: Ducks Members asked for, waiting for the Owner's Approve or Decline (never in the cloud). */
@@ -346,28 +289,23 @@ export interface FlotillaOptions {
   supportDir: string;
   /** Ignored: a name is the Squeak account's (name, else email), never a label from the Mac. Kept so callers still compile. */
   displayName?: string;
-  /** The Squeak account this Mac is signed in to. Present: joining needs it and names come from it (see `AccountPort`). */
+  /** The Squeak account this Mac is signed in to: names come from it (see `AccountPort`). */
   account?: AccountPort | null;
   /** null for a web-style member with no machine of its own (tests; the browser app does this in its own code). */
   nest: string | null;
   /** How long list() and view() wait on the relay before they answer with the last good read (default 6 s). */
   budgetMs?: number;
-  /** Base of an invite's link form, `https://<host>/join`; the code goes in the fragment. */
-  inviteLinkBase?: string;
-  /** Base of an emailed invite's link (the web app on Slate; the relay accepts only this one): default `EMAIL_INVITE_LINK_BASE`. */
-  emailInviteLinkBase?: string;
-  /**
-   * Where this Mac's store is. An invite carries only what is safe to hand out (`inviteLocation`): a Firebase
-   * database address, or a Catalyst relay's URL, never its relay key.
-   */
+  /** Where this Mac's store is: a Firebase database address, or a Catalyst relay's URL and key. */
   location?: unknown;
   /**
-   * Opens a store: with `pondToken` for a member who joined by invite (they never hold the relay key), without it
-   * for the location this Mac owns.
+   * Opens a store: with `pondToken` for a member (they never hold the relay key), without it for the location this
+   * Mac owns.
    */
-  storeFor?: (location: unknown, pondToken?: string | null, joinAttest?: string) => CloudStore;
+  storeFor?: (location: unknown, pondToken?: string | null) => CloudStore;
   /** Catalyst only: how an owner's Mac asks the relay for pond-scoped tokens. Absent with Firebase. */
   relay?: PondRelay | null;
+  /** Catalyst only: the relay's invite record (one per address, the only source of an invite's state). Absent with Firebase. */
+  invites?: PondInvites | null;
   now?: () => number;
   /**
    * The device's live stream to the cloud (`LiveClient.state`, docs/cloud-layer.md "Live notices"): "live", "reconnecting", or
@@ -384,14 +322,12 @@ export interface FlotillaOptions {
 
 /**
  * The Squeak account behind this Mac (Catalyst sign-in). A name comes only from here (docs/ponds.md, "Names"): the person
- * cannot type one, and an owner takes a joiner's name from what the relay verified, never from what the joiner wrote.
+ * cannot type one.
  */
 export interface AccountPort {
   /** The signed-in account's display name, or null when signed out. */
   name(): string | null;
   email(): string | null;
-  /** A short proof, from the relay, of which account this Mac belongs to. Throws `RelayRefused` when signed out. */
-  attest(): Promise<string>;
   /** The display names the relay holds for these account ids (an owner's Mac, to keep member names fresh). */
   names(ids: string[]): Promise<AccountNames>;
 }
@@ -436,11 +372,6 @@ export interface PondSummary {
   local?: boolean;
   /** A new device of an account already in the Pond, waiting for the Owner's Mac to seal the key: "Connecting", no button. */
   connecting?: true;
-  /** A join still waiting on an owner: what the invite offered, and when the request went out. */
-  requestedRole?: Role;
-  requestedAt?: number;
-  /** A join waiting on an owner: three words the owner's approval screen shows too (docs/ponds.md, "Matching words"). */
-  words?: string[];
   /** True when the relay could not be reached and this is the last known state (docs/ponds.md, "Offline"). */
   offline?: true;
   /** Unix ms of the last good read this came from; present only with `offline`. */
@@ -482,35 +413,9 @@ export interface MemberView {
   you: boolean;
 }
 
-export interface JoinView {
-  requestId: string;
-  name: string;
-  nest: string | null;
-  client?: "mac" | "web";
-  /** The role the invite offered; the owner decides. */
-  role: Role;
-  /** The email the relay saw signed in when the request arrived (Catalyst Hosted login); absent when none or no relay. */
-  verifiedEmail?: string;
-  verifiedName?: string;
-  requestedAt?: number;
-  /** Three words from the owner's key, this joiner's key and the pond: the joiner's screen shows the same three. */
-  words?: string[];
-  /**
-   * The owner's decision on this request while it runs or after it failed (kept 10 min; success removes the request), or
-   * why it can no longer be decided ("Invite expired - ask them to join again", kept 24 h). `line` is the sentence.
-   */
-  decision?: { state: "working" | "failed"; line: string; approve?: boolean; error?: string };
-}
-
-/** The last decision on a join request, kept in memory per request id. */
-interface DecisionState {
-  state: "working" | "done" | "failed";
-  approve: boolean;
-  error?: string;
-  at: number;
-}
-const DECISION_KEEP_MS = 10 * 60_000;
 /** An owner's Mac re-reads its members' account names at most this often per pond (one relay call per 50 members). */
+/** Most addresses in one send (the relay refuses more). */
+const MAX_EMAILS_PER_SEND = 10;
 const NAME_REFRESH_MS = 30 * 60_000;
 /** A Ripple a member writes to ask the owner's Mac to end one of their own devices: `removed my device <id>`. */
 const DEVICE_REMOVE_PREFIX = "removed my device ";
@@ -527,7 +432,6 @@ const ACCOUNT_SYNC_MS = 5 * 60_000;
 const LEFT_SKIP_MS = 24 * 60 * 60_000;
 /** What a member without a verified Squeak account is called. */
 export const SIGNED_OUT_MEMBER = "Signed-out member";
-export const SIGN_IN_TO_JOIN = "Sign in to Squeak to join a pond. Your name comes from your account.";
 
 export interface PondView {
   pond: PondSummary;
@@ -540,9 +444,6 @@ export interface PondView {
   starts?: PendingStartView[];
   presence: PresenceDoc[];
   holds: Hold[];
-  joins: JoinView[];
-  /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
-  invites?: InviteView[];
   me: { id: string; name: string; role: Role; nest: string | null; caps?: Caps };
   /** The relay could not be reached: this is the last known pond, read-only. */
   offline?: true;
@@ -570,8 +471,6 @@ const WAITING_FOR_KEY = "Waiting for the pond owner's Mac to send you the new po
 /** A pond list or view answers within this long, from the last good read when the relay is slower. */
 const DEFAULT_BUDGET_MS = 6_000;
 /** The host's own heartbeat keeps a running Mac online in every pond it is in. */
-/** A request that can no longer be decided stays visible, greyed, this long. */
-const STALE_REQUEST_KEEP_MS = 24 * 60 * 60_000;
 
 export interface CommandOutcome {
   id: string;
@@ -589,14 +488,6 @@ export interface VerifiedCommand {
 }
 
 const TINTS = ["#E8A33D", "#4C8DF6", "#3FB68B", "#E5604D", "#8E6CEF", "#D9588F", "#3AA7C9", "#7DA33B"];
-const INVITE_PREFIX = "squeak-pond:";
-const INVITE_TTL_MS = 24 * 60 * 60_000;
-/** An emailed link opens the web app's join page on Slate (the relay's mail route accepts only this origin and path). */
-export const EMAIL_INVITE_LINK_BASE = "https://squeak.onslate.in/join";
-/** An invite by email lives a week: the person may read it tomorrow. Its join token is bound to their address. */
-const EMAIL_INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
-/** A finished invite is kept this long past its expiry, so the owner can see what became of it. */
-const INVITE_KEEP_MS = 30 * 24 * 60 * 60_000;
 const RIPPLE_KEEP = 100;
 /** A scoped token lasts as long as the relay allows; the owner's Mac renews it when under 3 days remain. */
 const TOKEN_TTL_SEC = 30 * 24 * 3600;
@@ -638,8 +529,6 @@ export class FlotillaService extends EventEmitter {
   private readonly running = new Set<string>();
   private readonly dirty = new Set<string>();
   private readonly stores = new Map<string, CloudStore>();
-  /** A join in flight: the relay's attestation sent beside the request (never kept past it). */
-  private readonly joinAttests = new Map<string, string>();
   private readonly nameChecks = new Map<string, number>();
   private readonly indexChecks = new Map<string, number>();
   private readonly deviceAdds = new Map<string, number[]>();
@@ -648,8 +537,6 @@ export class FlotillaService extends EventEmitter {
   private accountSyncAt = 0;
   private accountSyncing = false;
   private readonly commandChains = new Map<string, Promise<void>>();
-  private readonly deciding = new Map<string, Promise<void>>();
-  private readonly decisions = new Map<string, DecisionState>();
   private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
   private readonly budgetMs: number;
   private statsTimer: NodeJS.Timeout | null = null;
@@ -897,49 +784,6 @@ export class FlotillaService extends EventEmitter {
     return pond;
   }
 
-  private inviteState(i: LocalInvite): InviteState {
-    if (i.state && i.state !== "pending") return i.state;
-    return i.expiresAt <= this.now() ? "expired" : "pending";
-  }
-
-  /** Persists a lapse (an unused invite past its expiry reads expired from then on) and drops long-finished ones. */
-  private sweepInvites(pond: LocalPond): void {
-    let changed = false;
-    const keep: LocalInvite[] = [];
-    for (const i of pond.invites) {
-      if (i.expiresAt + INVITE_KEEP_MS < this.now()) {
-        changed = true;
-        continue;
-      }
-      if ((!i.state || i.state === "pending") && i.expiresAt <= this.now()) {
-        i.state = "expired";
-        changed = true;
-      }
-      keep.push(i);
-    }
-    if (changed) {
-      pond.invites = keep;
-      this.save();
-    }
-  }
-
-  /** The invite a join request proves, in whatever state it is in now. */
-  private inviteFor(pond: LocalPond, requestId: string, publicKey: string, proof: string): LocalInvite | undefined {
-    return pond.invites.find((i) => safeEqual(joinProof(i.secret, requestId, publicKey), proof));
-  }
-
-  /** The unused invite a join request proves, if any: declined, revoked, accepted and expired ones never match. */
-  private pendingInviteFor(
-    pond: LocalPond,
-    requestId: string,
-    publicKey: string,
-    proof: string,
-  ): LocalInvite | undefined {
-    return pond.invites.find(
-      (i) => this.inviteState(i) === "pending" && safeEqual(joinProof(i.secret, requestId, publicKey), proof),
-    );
-  }
-
   private save(): void {
     this.pondsFile.save();
   }
@@ -948,12 +792,11 @@ export class FlotillaService extends EventEmitter {
     if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
     if (pond.location && this.options.storeFor) {
       const credential = pond.token?.value ?? pond.joinToken ?? null;
-      const attest = this.joinAttests.get(pond.id);
-      const key = JSON.stringify([pond.location, credential, attest ?? null]);
+      const key = JSON.stringify([pond.location, credential]);
       let store = this.stores.get(key);
       if (!store) {
         try {
-          store = this.options.storeFor(pond.location, credential, attest);
+          store = this.options.storeFor(pond.location, credential);
         } catch {
           throw new FlotillaError(CLOUD_DOWN, 503);
         }
@@ -1015,7 +858,6 @@ export class FlotillaService extends EventEmitter {
       ...(p.local ? { local: true } : {}),
       ...(p.kind ? { kind: p.kind } : {}),
       ...(p.gitRemote ? { gitRemote: p.gitRemote } : {}),
-      invites: p.invites,
       threads: p.threads,
       memberCount: this.snapshotFile.data.ponds[p.id]?.counts.members ?? 0,
     }));
@@ -1120,10 +962,8 @@ export class FlotillaService extends EventEmitter {
   private async put(pond: LocalPond, kind: string, docId: string, value: unknown): Promise<void> {
     const docPath = this.docPath(pond.id, kind, docId);
     const key = pond.keys[String(pond.current)];
-    // A joiner by short code holds no pond key yet: the request is sealed to the owner's own key (box tag `s`), which only
-    // the owner can open. Nothing else is ever written without the key.
-    if (!key && kind !== "joins") throw new FlotillaError("This Mac has no key for that pond yet.", 403);
-    const box = key ? `${pond.current}.${sealAt(key, docPath, value)}` : `s.${sealToMember(pond.ownerKey, value)}`;
+    if (!key) throw new FlotillaError("This Mac has no key for that pond yet.", 403);
+    const box = `${pond.current}.${sealAt(key, docPath, value)}`;
     const id = this.identity;
     // No pre-check here: a write that cannot go says so itself (below), and a pre-check built on an earlier failed read
     // refused writes that would have worked once the relay was back.
@@ -1132,7 +972,7 @@ export class FlotillaService extends EventEmitter {
         box,
         sig: signText(id.privateKey, signedText(docPath, box)),
         // A later device of a member signs as that member (its key is in the member document's `devices`).
-        device: kind === "joins" ? id.id : this.selfId(pond),
+        device: this.selfId(pond),
         at: this.now(),
       });
       // The relay tells every watcher of the channel, this Mac included; that notice is not news.
@@ -1160,10 +1000,6 @@ export class FlotillaService extends EventEmitter {
   }
 
   private openDoc(pond: LocalPond, docPath: string, doc: ChannelDoc): unknown {
-    // A join request from a joiner with no pond key yet (short code): sealed to the owner's key, opened with this Mac's.
-    if (doc.box.startsWith("s.") && /^channels\/[^/]+\/joins\/[^/]+$/.test(docPath)) {
-      return openFromMember(this.identity.privateKey, doc.box.slice(2));
-    }
     const dot = doc.box.indexOf(".");
     const key = pond.keys[doc.box.slice(0, dot)];
     if (dot < 1 || !key) throw new FlotillaError("a document is sealed with a key this Mac does not have", 403);
@@ -1237,7 +1073,6 @@ export class FlotillaService extends EventEmitter {
       ...(input.gitRemote ? { gitRemote: input.gitRemote } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       threads: {},
-      invites: [],
       nonces: {},
     };
     this.pondsFile.data.ponds[id] = pond;
@@ -1370,8 +1205,7 @@ export class FlotillaService extends EventEmitter {
     switch (pond.status) {
       case "pending":
         // Another device of an account that is already in: it is let in by the Owner's Mac itself, never by a click.
-        if (pond.deviceJoin) return `Connecting: waiting for ${pond.ownerName || "the Owner"}’s Mac`;
-        return `Waiting for ${owner} to approve you as ${pond.requestedRole === "viewer" ? "a viewer" : "a member"}.`;
+        return `Connecting: waiting for ${pond.ownerName || "the Owner"}’s Mac`;
       case "denied":
         return `${owner} declined your request.`;
       case "expired":
@@ -1418,9 +1252,6 @@ export class FlotillaService extends EventEmitter {
       statusLine: this.statusLineOf(pond, members),
       ...(pond.ownerName ? { ownerName: pond.ownerName } : {}),
       ...(pond.status === "pending" && pond.deviceJoin ? { connecting: true as const } : {}),
-      ...(pond.status === "pending" && pond.requestedRole ? { requestedRole: pond.requestedRole } : {}),
-      ...(pond.status === "pending" && pond.requestedAt ? { requestedAt: pond.requestedAt } : {}),
-      ...(pond.status === "pending" && pond.words ? { words: pond.words } : {}),
       ...(pond.local ? { local: true } : {}),
     };
   }
@@ -1604,25 +1435,14 @@ export class FlotillaService extends EventEmitter {
 
   // invites and joining
 
-  /** What an invite may say about the store: never a relay key (docs/ponds.md, "Scoped tokens"). */
-  private inviteLocation(pond: LocalPond): Record<string, unknown> | null {
-    const location = pond.location as { provider?: string; relayUrl?: string; databaseUrl?: string } | null;
-    if (location?.provider === "catalyst") {
-      const relayUrl = this.options.relay?.url ?? relayBaseUrl(location.relayUrl);
-      return relayUrl ? { provider: "catalyst", relayUrl } : null;
-    }
-    if (location?.provider === "firebase" && realtimeDatabaseOrigin(location.databaseUrl)) {
-      return { provider: "firebase", databaseUrl: location.databaseUrl };
-    }
-    return null;
-  }
-
   /**
    * The owner's first invite: a local pond is published, and every Duck already shared in it becomes Private, so
    * sharing never reveals old chats by surprise (making one visible again is one click: `setThreadPrivate`). Ducks
    * shared after this are visible. A pond that already has other members is past its first invite.
    */
-  private async prepareFirstInvite(pond: LocalPond): Promise<void> {
+  async prepareFirstInvite(pondId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
     if (pond.local) await this.publish(pond.id);
     if (pond.invited) return;
     const members = await this.members(pond).catch(() => null);
@@ -1636,655 +1456,97 @@ export class FlotillaService extends EventEmitter {
     this.save();
   }
 
-  /**
-   * An invite: the pond id and key, the owner's key, a one-time secret and where to write the join request. On a
-   * Catalyst relay that is the relay's URL and a join-only token (`jt`, the relay's, good for 24 h, writes the join
-   * request and nothing else): never the relay key, which opens every pond in the store.
-   */
-  invite(pondId: string, role?: Role, email?: string): Promise<LongInvite>;
-  invite(
-    pondId: string,
-    role: Role | undefined,
-    email: string | undefined,
-    options: { keyless: true; life?: number; linkBase?: string },
-  ): Promise<LongInvite>;
-  async invite(
-    pondId: string,
-    role: Role = "member",
-    email?: string,
-    options: { keyless?: boolean; life?: number; linkBase?: string } = {},
-  ): Promise<LongInvite> {
-    const pond = this.activePond(pondId);
-    this.allow(pond, "invite", {}, "Only an owner can invite.");
-    if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
-    // The first invite publishes a local pond (quietly), then makes the invite.
-    await this.prepareFirstInvite(pond);
-    const location = this.inviteLocation(pond);
-    const keyless = options.keyless === true;
-    const life = options.life ?? INVITE_TTL_MS;
-    let joinToken: string | undefined;
-    let tokenId: string | undefined;
-    if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
-      if (!this.options.relay) throw new FlotillaError("This Mac cannot make an invite for a Catalyst store.", 503);
-      try {
-        tokenId = `j${randomId(12)}`;
-        joinToken = (await this.options.relay.issue(pond.id, tokenId, "join", life / 1000, email)).token;
-      } catch {
-        throw new FlotillaError("The relay would not make an invite; try again.", 503);
-      }
-    }
-    const secret = randomId(16);
-    const expiresAt = this.now() + life;
-    const id = randomId(8);
-    this.sweepInvites(pond);
-    const body = {
-      v: 1,
-      p: pond.id,
-      // A keyless (emailed) invite carries no pond key: it reaches the member sealed to their key once they are let in.
-      ...(keyless ? { k: "", kv: 0 } : { k: pond.keys[String(pond.current)], kv: pond.current }),
-      o: pond.ownerKey,
-      n: pond.name,
-      s: secret,
-      e: expiresAt,
-      r: role,
-      on: this.accountLabel(),
-      // An emailed invite names the address it is for, so the page can say which account to sign in with.
-      ...(keyless && email ? { em: normalizeEmail(email) } : {}),
-      l: location,
-      ...(joinToken ? { jt: joinToken } : {}),
-    };
-    const code = INVITE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
-    // The link form keeps the secret in the fragment, which a browser never sends to any server.
-    const base = (options.linkBase ?? this.options.inviteLinkBase)?.replace(/[#?].*$/, "").replace(/\/+$/, "");
-    const link = base ? `${base}#${code.slice(INVITE_PREFIX.length)}` : undefined;
-    pond.invites.push({
-      id,
-      secret,
-      role,
-      expiresAt,
-      state: "pending",
-      createdAt: this.now(),
-      // Kept while the invite is pending so the owner can copy it again from the Invites list.
-      code,
-      ...(link ? { link } : {}),
-      ...(tokenId ? { tokenId } : {}),
-      ...(keyless && email ? { email: normalizeEmail(email) } : {}),
-    });
-    this.save();
-    return { code, expiresAt, id, ...(link ? { link } : {}) };
-  }
+  // ---- people and invitations (#126): the relay's invite record is the only source of truth ----
 
-  /**
-   * Invite by email (docs/ponds.md, "Invite by email"): one email-bound invite per address, the link sent by the relay
-   * through Catalyst Mail. Nobody types a code. When the person opens the link and signs in with that address, this Mac
-   * lets them in at once (`autoApproveEmailJoins`); any other account is refused by the relay. Addresses that could not
-   * be sent are listed with a reason and their invite is withdrawn quietly.
-   */
-  async inviteByEmail(
-    pondId: string,
-    addresses: string[],
-    role: Role = "member",
-  ): Promise<{ sent: string[]; failed: Array<{ email: string; reason: string }> }> {
-    const pond = this.activePond(pondId);
-    this.allow(pond, "invite", {}, "Only an owner can invite.");
-    if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
-    const emails = [...new Set(addresses.map((a) => (typeof a === "string" ? normalizeEmail(a) : "")))];
-    if (emails.length === 0) throw new FlotillaError("Type at least one email address.");
-    if (emails.length > MAX_EMAILS_PER_SEND) {
-      throw new FlotillaError(`Invite at most ${MAX_EMAILS_PER_SEND} people at a time.`);
-    }
-    const bad = emails.filter((e) => !isEmail(e));
-    if (bad.length) throw new FlotillaError(`That doesn't look like an email address: ${bad[0]}`);
-    await this.prepareFirstInvite(pond);
-    const relay = this.options.relay;
-    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst" || !relay?.inviteEmail) {
-      throw new FlotillaError("Invites by email need Squeak's cloud. Sign in to Squeak, then try again.", 503);
-    }
-    const failed: Array<{ email: string; reason: string }> = [];
-    const links: Record<string, string> = {};
-    const made = new Map<string, LongInvite>();
-    const linkBase = this.options.emailInviteLinkBase ?? EMAIL_INVITE_LINK_BASE;
-    for (const email of emails) {
-      try {
-        const invite = await this.invite(pondId, role, email, { keyless: true, life: EMAIL_INVITE_TTL_MS, linkBase });
-        if (!invite.link) throw new Error("no link");
-        made.set(email, invite);
-        links[email] = invite.link;
-      } catch {
-        failed.push({ email, reason: "Squeak couldn't make this invite. Try again." });
-      }
-    }
-    let sent: string[] = [];
-    if (made.size > 0) {
-      const inviterName = this.accountLabel();
-      try {
-        const result = await relay.inviteEmail(pondId, {
-          emails: [...made.keys()],
-          inviteUrls: links,
-          pondName: pond.name,
-          inviterName,
-        });
-        const ok = new Set(result.sent.map(normalizeEmail));
-        sent = [...made.keys()].filter((e) => ok.has(e));
-        for (const email of made.keys()) {
-          if (!ok.has(email)) failed.push({ email, reason: "Squeak couldn't send this email. Try again later." });
-        }
-      } catch (error) {
-        const reason =
-          error instanceof RelayRefused && error.status === 429
-            ? "Too many invitations just now. Try again in a while."
-            : error instanceof RelayRefused && error.status === 503
-              ? "Squeak couldn't send email right now. Try again later."
-              : "Squeak's cloud can't be reached, so nothing was sent. Try again.";
-        for (const email of made.keys()) failed.push({ email, reason });
-      }
-      // An invite whose email never went out must not stay live.
-      for (const [email, invite] of made) {
-        if (!sent.includes(email)) await this.dropInviteQuietly(pond, invite.id);
-      }
-    }
-    return { sent, failed };
+  private announcedInvites?: AnnouncedInvites;
+  private told(): AnnouncedInvites {
+    return (this.announcedInvites ??= new AnnouncedInvites(path.join(this.options.supportDir, "flotilla")));
   }
-
-  /** Ends an unused invite without a Ripple (its email was never sent): the relay token first, then the record. */
-  private async dropInviteQuietly(pond: LocalPond, inviteId: string): Promise<void> {
-    const invite = pond.invites.find((i) => i.id === inviteId);
-    if (!invite || this.inviteState(invite) !== "pending") return;
-    if (invite.tokenId && this.options.relay) {
-      await this.options.relay.revoke(pond.id, invite.tokenId).catch((error) =>
-        logger.warn("could not revoke the token of an invite that was not emailed", {
-          pond: pond.id,
-          error: String(error),
-        }),
-      );
-    }
-    invite.state = "revoked";
-    invite.decidedAt = this.now();
-    delete invite.code;
-    delete invite.link;
-    this.save();
+  /** The relay's invite port, or the sentence that says what is missing. */
+  private invitePort(): PondInvites {
+    const port = this.options.invites;
+    if (!port) throw new FlotillaError("Invites need Squeak's cloud. Sign in to Squeak, then try again.", 503);
+    return port;
   }
-
-  /**
-   * Lets in a join request that came on an email-bound invite from the very account that address names. Three things
-   * must hold: the request proves that invite's secret (so it came on its link), the invite is still pending, and the
-   * relay-verified email on the request (`joinids`, written from the signed-in account, never from the request) equals
-   * the invite's address. A signed-out, different or unverifiable request stays pending for the owner. The approval is
-   * the ordinary one (member from the account's name, the "joined" Ripple).
-   */
-  private async autoApproveEmailJoins(pond: LocalPond): Promise<void> {
-    if (!pond.invites.some((i) => i.email && this.inviteState(i) === "pending")) return;
-    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
-    for (const request of await this.pendingJoins(pond)) {
-      if (request.stale || !request.verifiedEmail) continue;
-      const invite = this.inviteFor(pond, request.requestId, request.publicKey, request.proof);
-      if (!invite?.email || this.inviteState(invite) !== "pending") continue;
-      if (normalizeEmail(request.verifiedEmail) !== normalizeEmail(invite.email)) continue;
-      try {
-        await this.decideJoin(pond.id, request.requestId, { approve: true });
-        this.emit("member-joined", pond.id, request.verifiedName || request.verifiedEmail || SIGNED_OUT_MEMBER);
-        this.emit("changed", pond.id);
-      } catch (error) {
-        logger.warn("could not let in an invited person", { pond: pond.id, error: String(error) });
-      }
-    }
-  }
-
-  /** Writes a join request. Nothing is granted until an owner approves it on their Mac. */
-  async join(code: string): Promise<{ pondId: string; status: "pending" }> {
-    let body: Record<string, unknown>;
+  /** A refusal from the relay keeps its plain sentence and status. */
+  private async viaRelay<T>(run: () => Promise<T>): Promise<T> {
     try {
-      const raw = code.trim();
-      const bare = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : raw.replace(INVITE_PREFIX, "");
-      body = JSON.parse(Buffer.from(bare, "base64url").toString("utf8")) as Record<string, unknown>;
-    } catch {
-      throw new FlotillaError("That invite code is not valid.");
-    }
-    const { p, o, n, s, e, k, kv } = body;
-    // An emailed invite is keyless too (`k: ""`): the pond key arrives sealed to this Mac's key once it is let in.
-    const keyless = k === "";
-    if (
-      body.v !== 1 ||
-      typeof p !== "string" ||
-      !POND_ID.test(p) ||
-      typeof k !== "string" ||
-      typeof kv !== "number" ||
-      typeof o !== "string" ||
-      typeof s !== "string" ||
-      typeof e !== "number"
-    ) {
-      throw new FlotillaError("That invite code is not valid.");
-    }
-    if (e <= this.now()) throw new FlotillaError("That invite has expired.", 410);
-    // The store location comes from an untrusted code: Catalyst needs a valid relay URL and the join token, and a
-    // relay key in it is never read.
-    const l = body.l as { provider?: unknown; relayUrl?: unknown; databaseUrl?: unknown } | null | undefined;
-    let location: unknown = null;
-    let joinToken: string | undefined;
-    if (l && l.provider === "catalyst") {
-      const relayUrl = relayBaseUrl(l.relayUrl);
-      if (!relayUrl || typeof body.jt !== "string" || !body.jt)
-        throw new FlotillaError("That invite code is not valid.");
-      location = { provider: "catalyst", relayUrl };
-      joinToken = body.jt;
-    } else if (l && l.provider === "firebase") {
-      const databaseUrl = realtimeDatabaseOrigin(l.databaseUrl);
-      if (!databaseUrl) throw new FlotillaError("That invite code is not valid.");
-      location = { provider: "firebase", databaseUrl };
-    } else if (l) {
-      throw new FlotillaError("That invite code is not valid.");
-    }
-    const existing = this.pondsFile.data.ponds[p];
-    if (existing && existing.status === "active") throw new FlotillaError("You are already in that pond.", 409);
-    // A second attempt keeps the first request (same id), so the owner sees one request, not two.
-    const retry =
-      existing && existing.status === "pending" && existing.requestId && existing.ownerKey === o ? existing : undefined;
-    // Joining needs a Squeak account, and the name is the account's: there is nothing to type and nothing to rename.
-    const account = this.options.account;
-    let attest: string | undefined;
-    if (account) {
-      try {
-        attest = await account.attest();
-      } catch (error) {
-        if (error instanceof RelayRefused) throw new FlotillaError(SIGN_IN_TO_JOIN, 401);
-        throw new FlotillaError("Squeak's cloud can't be reached, so your request wasn't sent. Try again.", 503);
-      }
-    }
-    const name = this.accountLabel();
-    const me = this.identity;
-    const requestId = retry?.requestId ?? randomId(12);
-    const at = this.now();
-    const pond: LocalPond = {
-      id: p,
-      name: typeof n === "string" ? n.slice(0, 200) : "A pond",
-      status: "pending",
-      role: "viewer",
-      ownerKey: o,
-      location,
-      ...(joinToken ? { joinToken } : {}),
-      keys: keyless ? {} : { [String(kv)]: k },
-      current: kv,
-      words: joinWords(o, me.publicKey, p),
-      requestId,
-      ...(typeof body.on === "string" && body.on ? { ownerName: body.on.slice(0, 100) } : {}),
-      inviteExpiresAt: e,
-      requestedAt: retry?.requestedAt ?? at,
-      ...(typeof body.r === "string" && isRole(body.r) ? { requestedRole: body.r as Role } : {}),
-      threads: {},
-      invites: [],
-      nonces: {},
-    };
-    this.pondsFile.data.ponds[p] = pond;
-    this.save();
-    const request: JoinRequestDoc = {
-      requestId,
-      name,
-      nest: me.nest,
-      ...(me.nest === null ? { client: "web" as const } : {}),
-      publicKey: me.publicKey,
-      proof: joinProof(s, requestId, me.publicKey),
-      at,
-    };
-    if (attest && (location as { provider?: string } | null)?.provider === "catalyst") this.joinAttests.set(p, attest);
-    try {
-      await this.put(pond, "joins", requestId, request);
+      return await run();
     } catch (error) {
-      // The request never left: nothing may stay "waiting" for an owner who cannot see it.
-      if (existing) this.pondsFile.data.ponds[p] = existing;
-      else delete this.pondsFile.data.ponds[p];
-      this.save();
-      if (FlotillaService.isAccessEnded(error)) {
-        throw new FlotillaError("That invite is no longer valid. Ask for a new one.", 403);
-      }
-      throw new FlotillaError("The pond couldn't be reached, so your request wasn't sent. Try again.", 503);
-    } finally {
-      this.joinAttests.delete(p);
-    }
-    return { pondId: p, status: "pending" };
-  }
-
-  /**
-   * Join requests an owner sees: signed by their own key and proving an invite's secret. One whose invite is unused (or
-   * was declined: the person asked again) can be decided. One whose invite lapsed, was withdrawn or was already used is
-   * kept 24 h, greyed, with the sentence for it, and cannot be approved.
-   */
-  private async pendingJoins(
-    pond: LocalPond,
-    known?: Map<string, MemberDoc>,
-  ): Promise<Array<JoinView & { publicKey: string; proof: string; stale?: string }>> {
-    type Row = JoinView & { publicKey: string; proof: string; stale?: string };
-    const best = new Map<string, { row: Row; at: number }>();
-    const [members, rows] = await Promise.all([
-      known ? Promise.resolve(known) : this.members(pond),
-      this.storeOf(pond).list(`channels/${pond.id}/joins`),
-    ]);
-    this.sweepInvites(pond);
-    const candidates: Array<{ id: string; request: JoinRequestDoc; invite: LocalInvite; stale?: string }> = [];
-    for (const { id, doc } of rows) {
-      const read = this.readSigned(pond, "joins", id, doc, (device) => {
-        // Self-signed: the document names the key, and the proof ties it to the invite.
-        try {
-          const inner = readJoinRequest(this.openDoc(pond, this.docPath(pond.id, "joins", id), doc));
-          return inner && memberIdOf(inner.publicKey) === device ? inner.publicKey : null;
-        } catch {
-          return null;
-        }
-      });
-      const request = read ? readJoinRequest(read.value) : null;
-      if (!request || request.requestId !== id || members.has(memberIdOf(request.publicKey))) continue;
-      const invite = this.inviteFor(pond, id, request.publicKey, request.proof);
-      if (!invite) continue;
-      const state = this.inviteState(invite);
-      let stale: string | undefined;
-      if (state === "expired") stale = "Invite expired. Ask them to join again.";
-      else if (state === "revoked") stale = "Invite withdrawn. Ask them to join again.";
-      else if (state === "accepted") stale = "That invite was already used. Ask them to join again.";
-      // Kept 24 h from when it became undecidable (the invite's end or its decision), not from when it was asked.
-      const since = Math.max(request.at ?? 0, state === "expired" ? invite.expiresAt : (invite.decidedAt ?? 0));
-      if (stale && this.now() - since > STALE_REQUEST_KEEP_MS) continue;
-      candidates.push({ id, request, invite, ...(stale ? { stale } : {}) });
-    }
-    const identities = await Promise.all(candidates.map((c) => this.verifiedIdentity(pond, c.id)));
-    candidates.forEach(({ id, request, invite, stale }, index) => {
-      const known = identities[index] as { verifiedName?: string; verifiedEmail?: string };
-      const row: Row = {
-        requestId: id,
-        // The name an approval will write: the verified account's, never the joiner's own claim (where something verifies).
-        name: known.verifiedName || known.verifiedEmail || SIGNED_OUT_MEMBER,
-        nest: request.nest,
-        client: request.client ?? (request.nest === null ? "web" : "mac"),
-        role: invite.role,
-        ...identities[index],
-        ...(request.at ? { requestedAt: request.at } : {}),
-        ...(stale ? {} : { words: joinWords(pond.ownerKey, request.publicKey, pond.id) }),
-        publicKey: request.publicKey,
-        proof: request.proof,
-        ...(stale ? { stale, decision: { state: "failed" as const, line: stale } } : {}),
-      };
-      // One request per invite and per key: the newest by `at` (none = oldest), ties by request id.
-      const at = request.at ?? 0;
-      for (const group of [`i:${invite.secret}`, `k:${request.publicKey}`]) {
-        const held = best.get(group);
-        if (!held || at > held.at || (at === held.at && id > held.row.requestId)) best.set(group, { row, at });
-      }
-    });
-    // A request is shown only if it is the newest in both its groups.
-    const wins = new Map<string, number>();
-    for (const { row } of best.values()) wins.set(row.requestId, (wins.get(row.requestId) ?? 0) + 1);
-    const out: Row[] = [];
-    for (const { row } of best.values()) {
-      if (wins.get(row.requestId) === 2 && !out.includes(row)) out.push(row);
-    }
-    return out;
-  }
-
-  /** Requests superseded by `winner` (same invite or same key) that are still in the store. */
-  private async supersededJoins(pond: LocalPond, winner: { requestId: string; publicKey: string; proof: string }) {
-    const invite = this.inviteFor(pond, winner.requestId, winner.publicKey, winner.proof);
-    const ids: string[] = [];
-    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/joins`)) {
-      if (id === winner.requestId) continue;
-      try {
-        const inner = readJoinRequest(this.openDoc(pond, this.docPath(pond.id, "joins", id), doc));
-        if (!inner || inner.requestId !== id) continue;
-        const sameInvite = invite && safeEqual(joinProof(invite.secret, id, inner.publicKey), inner.proof);
-        if (sameInvite || inner.publicKey === winner.publicKey) ids.push(id);
-      } catch {
-        // Not readable: not ours to remove.
-      }
-    }
-    return ids;
-  }
-
-  private async dropSuperseded(pond: LocalPond, ids: string[]): Promise<void> {
-    await Promise.all(
-      ids.map(async (id) => {
-        await this.storeOf(pond)
-          .delete(this.docPath(pond.id, "joins", id))
-          .catch((error) =>
-            logger.warn("could not remove a superseded join request", { pond: pond.id, error: String(error) }),
-          );
-        await this.dropJoinIdentity(pond, id);
-      }),
-    );
-  }
-
-  /**
-   * Who the relay saw signed in when a join request came (`joinids/<requestId>`, plain JSON the relay wrote): context for
-   * the owner's decision, never a grant. Only a Catalyst store has it; anything unreadable is simply absent.
-   */
-  private async verifiedIdentity(
-    pond: LocalPond,
-    requestId: string,
-  ): Promise<{ verifiedEmail?: string; verifiedName?: string; verifiedId?: string }> {
-    const store = this.storeOf(pond) as CloudStore & { getRaw?: (path: string) => Promise<unknown | null> };
-    if (typeof store.getRaw !== "function") return {};
-    try {
-      const raw = (await store.getRaw(this.docPath(pond.id, "joinids", requestId))) as Record<string, unknown> | null;
-      if (!raw || raw.v !== 1 || typeof raw.email !== "string" || !raw.email) return {};
-      return {
-        verifiedEmail: raw.email,
-        ...(typeof raw.name === "string" && raw.name.trim() ? { verifiedName: raw.name.trim().slice(0, 100) } : {}),
-        ...(typeof raw.userId === "string" && raw.userId ? { verifiedId: raw.userId.slice(0, 64) } : {}),
-      };
-    } catch {
-      return {};
+      if (error instanceof InviteRefused) throw new FlotillaError(error.message, error.status);
+      throw error;
     }
   }
 
   /**
-   * Who a join request is: the account the relay saw sign it (name, else email), "Signed-out member" when a relay store
-   * has no sign-in behind the request. What the joiner's own app wrote as a name is never used.
+   * Invites by email, one record each at the relay. A local Pond is published first (quietly, with its earlier Ducks Private).
+   * An address the relay refuses (already in, already invited, Pond full) comes back with its sentence and the rest go out.
    */
-  private async memberIdentity(
-    pond: LocalPond,
-    requestId: string,
-  ): Promise<{ name: string; email?: string; accountId?: string }> {
-    const v = await this.verifiedIdentity(pond, requestId);
-    if (!v.verifiedId && !v.verifiedEmail) return { name: SIGNED_OUT_MEMBER };
-    return {
-      name: v.verifiedName || v.verifiedEmail || SIGNED_OUT_MEMBER,
-      ...(v.verifiedEmail ? { email: v.verifiedEmail.slice(0, 200) } : {}),
-      ...(v.verifiedId ? { accountId: v.verifiedId } : {}),
-    };
-  }
-
-  /** The relay-owned identity note goes with the request; a relay-less store has none, and a failure is harmless. */
-  private async dropJoinIdentity(pond: LocalPond, requestId: string): Promise<void> {
-    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
-    await this.storeOf(pond)
-      .delete(this.docPath(pond.id, "joinids", requestId))
-      .catch(() => undefined);
-  }
-
-  /** A person on an owner's Mac decides. The approval is a members document the owner's key signed. */
-  /**
-   * The same decision, answered at once: the checks that need no relay run now (a 403/404 is immediate), the decision
-   * runs in the background and its outcome is kept per request id for the view (`JoinView.decision`: "working", or
-   * "failed" with a sentence). A relay of 3-15 s per call can take over a minute for one approval; a client must not
-   * wait on it.
-   */
-  startJoinDecision(pondId: string, requestId: string, input: { approve: boolean; role?: Role }): void {
+  async inviteEmails(pondId: string, emails: string[], role: Role): Promise<{ results: InviteResult[] }> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "decide-join", {}, "Only an owner can decide a join.");
-    if (input.role !== undefined && input.role !== "member" && input.role !== "viewer") {
-      throw new FlotillaError("Approve as a member or a viewer.");
-    }
-    const key = `${pondId}/${requestId}`;
-    if (this.decisions.get(key)?.state === "working") return;
-    this.decisions.set(key, { state: "working", approve: input.approve, at: this.now() });
-    void this.decideJoin(pondId, requestId, input).then(
-      () => this.decisions.set(key, { state: "done", approve: input.approve, at: this.now() }),
-      (error: unknown) =>
-        this.decisions.set(key, {
-          state: "failed",
-          approve: input.approve,
-          error: error instanceof FlotillaError ? error.message : CLOUD_DOWN,
-          at: this.now(),
-        }),
-    );
-  }
-
-  /** The recorded decision for a request, or undefined once it is done, old or never made. */
-  private decisionFor(pondId: string, requestId: string): JoinView["decision"] | undefined {
-    const key = `${pondId}/${requestId}`;
-    const d = this.decisions.get(key);
-    if (!d) return undefined;
-    if (this.now() - d.at > DECISION_KEEP_MS || d.state === "done") {
-      this.decisions.delete(key);
-      return undefined;
-    }
-    const line =
-      d.state === "working"
-        ? d.approve
-          ? "Approving..."
-          : "Declining..."
-        : `Couldn't ${d.approve ? "approve" : "decline"}: ${d.error ?? CLOUD_DOWN} Try again.`;
-    return { state: d.state, line, approve: d.approve, ...(d.error ? { error: d.error } : {}) };
-  }
-
-  async decideJoin(pondId: string, requestId: string, input: { approve: boolean; role?: Role }): Promise<void> {
-    // A second press while the first still runs (a slow relay, a button that gave no sign) joins the first decision
-    // instead of writing the member and the "joined" Ripple again.
-    const key = `${pondId}/${requestId}`;
-    const running = this.deciding.get(key);
-    if (running) return running;
-    const run = this.decideJoinOnce(pondId, requestId, input).finally(() => this.deciding.delete(key));
-    this.deciding.set(key, run);
-    return run;
-  }
-
-  private async decideJoinOnce(
-    pondId: string,
-    requestId: string,
-    input: { approve: boolean; role?: Role },
-  ): Promise<void> {
-    const pond = this.activePond(pondId);
-    this.allow(pond, "decide-join", {}, "Only an owner can decide a join.");
-    const request = (await this.pendingJoins(pond)).find((r) => r.requestId === requestId);
-    if (!request)
-      throw new FlotillaError("That request is gone: the invite may have expired or they withdrew it.", 404);
-    const store = this.storeOf(pond);
-    const invite = this.inviteFor(pond, requestId, request.publicKey, request.proof);
-    if (request.stale && input.approve) throw new FlotillaError(request.stale, 409);
-    const supersededRead = this.supersededJoins(pond, request).catch(() => [] as string[]);
-    // Who it was is what the relay verified, never what the joiner's app wrote (read before the identity note is dropped).
-    const usedBy = (await this.memberIdentity(pond, requestId)).name;
-    const consume = (state: "accepted" | "declined"): void => {
-      if (invite && !request.stale) {
-        invite.state = state;
-        invite.decidedAt = this.now();
-        invite.usedBy = usedBy;
-        delete invite.code;
-        delete invite.link;
-      }
-      this.save();
-    };
-    if (!input.approve) {
-      const superseded = await supersededRead;
-      await Promise.all([
-        store.delete(this.docPath(pond.id, "joins", requestId)),
-        this.dropJoinIdentity(pond, requestId),
-        this.dropSuperseded(pond, superseded),
-      ]);
-      consume("declined");
-      if (!request.stale) {
-        await this.ripple(pondId, `turned down ${usedBy}'s request to join`).catch(() => undefined);
-      }
-      return;
-    }
-    const role = input.role ?? request.role;
-    if (role !== "member" && role !== "viewer") throw new FlotillaError("Approve as a member or a viewer.");
-    // The member's name is what the relay verified for the account that signed the request, never what the joiner wrote.
-    const who = await this.memberIdentity(pond, requestId);
-    const member: MemberDoc = {
-      id: memberIdOf(request.publicKey),
-      name: who.name,
-      ...(who.email ? { email: who.email } : {}),
-      ...(who.accountId ? { accountId: who.accountId } : {}),
-      publicKey: request.publicKey,
-      role,
-      nest: request.nest,
-      ...(request.client ? { client: request.client } : {}),
-      addedAt: this.now(),
-    };
-    // Order that matters: the member's key reaches the relay before their member document (a member must never be listed
-    // without a key). Everything else here is independent, so the slow relay calls overlap.
-    await this.sendKeyTo(pond, member);
-    await this.writeMember(pond, member);
-    if (member.accountId) await this.indexAccounts(pond, [member.accountId], []).catch(() => undefined);
-    const superseded = await supersededRead;
-    consume("accepted");
-    // The member is in and the invite used: the cleanup and a Ripple that cannot be written (a slow relay) must not
-    // turn this into a failure.
-    await Promise.all([
-      // A leftover request is hidden once its key is a member, so a failed delete is not a failed approval.
-      store.delete(this.docPath(pond.id, "joins", requestId)).catch(() => undefined),
-      this.dropJoinIdentity(pond, requestId),
-      this.dropSuperseded(pond, superseded),
-      this.ripple(pondId, "joined", { id: member.id, name: member.name }, "joined").catch(() => undefined),
-    ]);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
+    if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
+    if (emails.length < 1 || emails.length > MAX_EMAILS_PER_SEND)
+      throw new FlotillaError(`Invite between 1 and ${MAX_EMAILS_PER_SEND} people at a time.`);
+    const port = this.invitePort();
+    await this.prepareFirstInvite(pondId);
+    const results = await this.viaRelay(() => port.create(pond.id, { emails, role, pondName: pond.name }));
+    this.emit("changed", pond.id);
+    return { results };
   }
 
   /**
-   * An owner withdraws an unused invite. Its relay join token (Catalyst) is revoked first, so a failure stops here and
-   * can be retried; a request already waiting on it is removed, and the person sees the decline sentence.
+   * Who is in a Pond and every invite as the relay holds it. A Pond nobody has been invited to has no invites to read. Reading
+   * the invites also puts the Room line a join or a decline is owed (once each).
    */
-  async revokeInvite(pondId: string, inviteId: string): Promise<{ id: string; state: InviteState }> {
+  async people(pondId: string): Promise<PeopleView> {
     const pond = this.activePond(pondId);
-    if (pond.role !== "owner") throw new FlotillaError("Only an owner can revoke an invite.", 403);
-    this.sweepInvites(pond);
-    const invite = pond.invites.find((i) => i.id === inviteId);
-    if (!invite) throw new FlotillaError("No such invite.", 404);
-    const state = this.inviteState(invite);
-    if (state === "revoked") return { id: inviteId, state };
-    if (state !== "pending") throw new FlotillaError(`That invite is already ${state}.`, 409);
-    if (
-      invite.tokenId &&
-      this.options.relay &&
-      (pond.location as { provider?: string } | null)?.provider === "catalyst"
-    ) {
-      try {
-        await this.options.relay.revoke(pond.id, invite.tokenId);
-      } catch {
-        throw new FlotillaError("Squeak couldn't reach the pond to end that invite. Try again.", 503);
-      }
+    const view = await this.view(pondId);
+    let invites: InviteRecord[] = [];
+    if (pond.role === "owner" && !pond.local && this.options.invites) {
+      invites = await this.viaRelay(() => this.options.invites!.list(pond.id));
+      await this.tellInvites(pond, invites);
     }
-    invite.state = "revoked";
-    invite.decidedAt = this.now();
-    delete invite.code;
-    delete invite.link;
-    this.save();
-    let waiting: string | undefined;
-    for (const r of await this.pendingJoinsFor(pond, invite).catch(() => [])) {
-      await this.storeOf(pond)
-        .delete(this.docPath(pond.id, "joins", r.id))
-        .catch(() => undefined);
-      await this.dropJoinIdentity(pond, r.id);
-      waiting = r.name;
-    }
-    await this.ripple(
-      pondId,
-      waiting ? `withdrew the invite ${waiting} was waiting on` : "withdrew an invite",
-      undefined,
-      "invite",
-    ).catch(() => undefined);
-    return { id: inviteId, state: "revoked" };
+    return buildPeople(view.members, invites);
   }
 
-  /** Request ids whose proof matches this invite (a revoked invite no longer lists them, so this reads the store). */
-  private async pendingJoinsFor(pond: LocalPond, invite: LocalInvite): Promise<Array<{ id: string; name: string }>> {
-    const out: Array<{ id: string; name: string }> = [];
-    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/joins`)) {
-      try {
-        const inner = readJoinRequest(this.openDoc(pond, this.docPath(pond.id, "joins", id), doc));
-        if (inner && inner.requestId === id && safeEqual(joinProof(invite.secret, id, inner.publicKey), inner.proof))
-          out.push({ id, name: inner.name });
-      } catch {
-        // Not readable: not ours to remove.
-      }
+  async resendInvite(pondId: string, inviteId: string): Promise<{ invite: InviteRecord; mailed: boolean }> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
+    return this.viaRelay(() => this.invitePort().resend(pond.id, inviteId));
+  }
+
+  async withdrawInvite(pondId: string, inviteId: string): Promise<{ invite: InviteRecord }> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
+    const invite = await this.viaRelay(() => this.invitePort().withdraw(pond.id, inviteId));
+    this.emit("changed", pond.id);
+    return { invite };
+  }
+
+  async inviteAgain(pondId: string, inviteId: string, role?: Role): Promise<{ invite: InviteRecord; mailed: boolean }> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
+    if (role !== undefined && role !== "member" && role !== "viewer")
+      throw new FlotillaError("An invite is for a member or a viewer.");
+    const made = await this.viaRelay(() => this.invitePort().again(pond.id, inviteId, role));
+    this.emit("changed", pond.id);
+    return made;
+  }
+
+  /** The Room says each join and each decline once (never a withdrawal or an expiry), in the words of the person it is about. */
+  private async tellInvites(pond: LocalPond, invites: InviteRecord[]): Promise<void> {
+    const told = this.told();
+    for (const line of owedLines(invites, told.of(pond.id))) {
+      await this.ripple(pond.id, line.text, line.who, line.kind);
+      told.mark(pond.id, line.inviteId, line.state);
     }
-    return out;
+  }
+
+  /** The Owner's own pass over the record (the relay wakes it on every change), so the Room lines come without a sheet open. */
+  private async syncInvites(pond: LocalPond): Promise<void> {
+    if (pond.role !== "owner" || pond.local || !this.options.invites) return;
+    await this.tellInvites(pond, await this.options.invites.list(pond.id));
   }
 
   /** A pond-scoped token for a member of a Catalyst pond, or undefined where there is no relay (Firebase). */
@@ -2490,7 +1752,7 @@ export class FlotillaService extends EventEmitter {
   /**
    * An owner's Mac adds a device the relay says belongs to a member's account. The relay wrote the request (no client
    * token can write that kind), so its `userId` is the verified account; it is added only when a member document of this
-   * pond carries that same `accountId`, exactly as an emailed invite's `joinids` is checked. The pond key reaches the
+   * pond carries that same `accountId`, as the relay's own record is checked. The pond key reaches the
    * device sealed to its own key before the member document lists it. A member with no `accountId` cannot attach devices.
    */
   private async adoptDeviceRequests(pond: LocalPond): Promise<void> {
@@ -2748,7 +2010,6 @@ export class FlotillaService extends EventEmitter {
           inviteExpiresAt: issued.expiresAt,
           requestedAt: at,
           threads: {},
-          invites: [],
           nonces: {},
         };
         this.save();
@@ -2879,7 +2140,6 @@ export class FlotillaService extends EventEmitter {
   async leave(pondId: string): Promise<void> {
     const stored = this.pond(pondId);
     if (stored.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
-    if (stored.status === "pending") return this.cancelJoin(pondId);
     if (stored.status !== "active") {
       this.forgetPond(pondId);
       return;
@@ -2955,7 +2215,7 @@ export class FlotillaService extends EventEmitter {
         await store.delete(this.docPath(pond.id, "members", member.id));
       }
     }
-    const kinds = ["keys", "holds", "joins", "joinids", "threads", "tevents", "tcmds", "room", "rposts", "rtasks"];
+    const kinds = ["keys", "holds", "threads", "tevents", "tcmds", "room", "rposts", "rtasks"];
     await Promise.all(
       kinds.map(async (kind) => {
         for (const { id } of await store.list(`channels/${pond.id}/${kind}`).catch(() => [])) {
@@ -2971,8 +2231,7 @@ export class FlotillaService extends EventEmitter {
   /** Remove: forgets a pond whose join or membership ended, or a request not yet decided. An active pond is never forgotten here. */
   async forget(pondId: string): Promise<void> {
     const pond = this.pond(pondId);
-    if (pond.status === "pending") return this.cancelJoin(pondId);
-    if (!TERMINAL.includes(pond.status)) {
+    if (pond.status !== "pending" && !TERMINAL.includes(pond.status)) {
       throw new FlotillaError("You're still in that pond. Leave it first.", 409);
     }
     this.forgetPond(pondId);
@@ -3054,25 +2313,27 @@ export class FlotillaService extends EventEmitter {
     this.emit("changed", pondId);
   }
 
-  /** A joiner's request: approved, declined, withdrawn, lapsed, or still waiting. Never left "waiting" on a dead invite. */
+  /**
+   * A later device of an account already in the Pond, waiting for the Owner's Mac to seal the key (docs/ponds.md, "Members
+   * are accounts"): in once its key is a member's, gone when the relay refuses its read token or the token runs out.
+   */
   private async refreshPending(pond: LocalPond): Promise<void> {
+    // A pending record that is no device's (an old join request) has nothing to wait on.
+    if (!pond.deviceJoin) return this.forgetPond(pond.id);
     const me = this.identity;
     const lapsed = (): boolean => pond.inviteExpiresAt !== undefined && this.now() >= pond.inviteExpiresAt;
     let read: { members: Map<string, MemberDoc>; raw: number };
     try {
       read = await this.membersRead(pond);
       if (read.members.size === 0 && read.raw > 0) {
-        // Approved with a newer key than the invite's: the key arrives in this member's own keys document.
+        // Let in with a newer key than the first: the key arrives in this member's own keys document.
         await this.syncKeys(pond, false);
         read = await this.membersRead(pond);
       }
     } catch (error) {
       if (!FlotillaService.isAccessEnded(error)) throw error;
       // A device's own token refused (it ran out, or the owner ended it): nothing to show, the account's ponds ask again.
-      if (pond.deviceJoin) return this.dropDeviceJoin(pond);
-      // The join token is refused: the owner withdrew the invite, or it ran out at 24 h.
-      this.markEnded(pond, lapsed() ? "expired" : "revoked");
-      return;
+      return this.dropDeviceJoin(pond);
     }
     const mine = memberOfDevice(read.members, me.id);
     if (mine) {
@@ -3095,23 +2356,8 @@ export class FlotillaService extends EventEmitter {
       return;
     }
     this.rememberOwnerName(pond, read.members);
-    if (pond.deviceJoin) {
-      // No invite and no join request document: the device's read token runs out, and the next sync asks again.
-      if (lapsed()) this.dropDeviceJoin(pond);
-      return;
-    }
-    if (lapsed()) {
-      this.markEnded(pond, "expired");
-      return;
-    }
-    if (pond.requestId && !(await this.storeOf(pond).get(this.docPath(pond.id, "joins", pond.requestId)))) {
-      // The request is gone. Approval writes the member first and deletes the request after, so look again before
-      // calling it a decline.
-      const again = await this.membersRead(pond);
-      if (memberOfDevice(again.members, me.id)) return this.refreshPending(pond);
-      this.markEnded(pond, "denied");
-      this.emit("declined", pond.id);
-    }
+    // No join request document: the device's read token runs out, and the next sync asks again.
+    if (lapsed()) this.dropDeviceJoin(pond);
   }
 
   /** A device's request that nobody answered (or whose token the relay refused) leaves nothing behind. */
@@ -3158,9 +2404,9 @@ export class FlotillaService extends EventEmitter {
     this.syncAccountPondsSoon();
     if (pond.role === "owner") {
       await this.applyQueuedActs(pond).catch(() => undefined);
-      await this.autoApproveEmailJoins(pond).catch(() => undefined);
       await this.adoptDeviceRequests(pond).catch(() => undefined);
       await this.reconcileAccountIndex(pond).catch(() => undefined);
+      await this.syncInvites(pond).catch(() => undefined);
       await this.renewTokens(pond).catch(() => undefined);
       await this.refreshMemberNames(pond).catch(() => undefined);
     }
@@ -3288,7 +2534,23 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** Starts watching every pond this Mac is in and runs one pass for each. */
+  /** The old invite records (a code carried the pond key) and join words are gone: they leave `ponds.json` too. */
+  private dropOldInvites(): void {
+    let changed = false;
+    for (const pond of Object.values(this.pondsFile.data.ponds)) {
+      const old = pond as unknown as Record<string, unknown>;
+      for (const key of ["invites", "words", "requestedRole"]) {
+        if (key in old) {
+          delete old[key];
+          changed = true;
+        }
+      }
+    }
+    if (changed) this.save();
+  }
+
   start(): void {
+    this.dropOldInvites();
     for (const id of this.pondIds()) {
       this.watch(id);
       this.wake(id);
@@ -3525,7 +2787,6 @@ export class FlotillaService extends EventEmitter {
       ripples: [],
       presence: [],
       holds: [],
-      joins: [],
       me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
     };
   }
@@ -3587,7 +2848,6 @@ export class FlotillaService extends EventEmitter {
       }),
       presence: [],
       holds: [],
-      joins: [],
     };
   }
 
@@ -3616,7 +2876,6 @@ export class FlotillaService extends EventEmitter {
         ripples: [],
         presence: [],
         holds: [],
-        joins: [],
         me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
       };
     }
@@ -3636,10 +2895,9 @@ export class FlotillaService extends EventEmitter {
       }
     }
     // Everything here is independent of everything else: one round trip's time, not ten.
-    const [holds, threadsRead, joinRows, live] = await Promise.all([
+    const [holds, threadsRead, live] = await Promise.all([
       this.holdsOf(pond, members),
       this.threadsOf(pond, members),
-      pond.role === "owner" ? this.pendingJoins(pond, members) : Promise.resolve([]),
       this.options.presenceOf ? this.options.presenceOf(pond.id).catch(() => []) : Promise.resolve([]),
     ]);
     const now = this.now();
@@ -3686,24 +2944,6 @@ export class FlotillaService extends EventEmitter {
         .map((r) => this.rippleView(pond, r, members)),
       presence,
       holds: holds.map((h) => ({ ...h, heldBy: h.by, heldByName: h.byName })),
-      joins: joinRows.map(
-        ({ requestId, name, nest, role, client, verifiedEmail, verifiedName, requestedAt, stale, words }) => {
-          const decision = stale ? { state: "failed" as const, line: stale } : this.decisionFor(pond.id, requestId);
-          return {
-            requestId,
-            name,
-            nest,
-            role,
-            ...(client ? { client } : {}),
-            ...(verifiedEmail ? { verifiedEmail } : {}),
-            ...(verifiedName ? { verifiedName } : {}),
-            ...(requestedAt ? { requestedAt } : {}),
-            ...(words ? { words } : {}),
-            ...(decision ? { decision } : {}),
-          };
-        },
-      ),
-      ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
       me: {
         id: me.id,
         name: this.nameIn(),
@@ -3730,26 +2970,6 @@ export class FlotillaService extends EventEmitter {
       if (t.private && t.title && text.includes(t.title)) text = text.replace(t.title, "a private thread");
     }
     return { ...r, text, ...(actorName ? { actorName } : {}) };
-  }
-
-  private inviteViews(pond: LocalPond): InviteView[] {
-    this.sweepInvites(pond);
-    return pond.invites
-      .filter((i): i is LocalInvite & { id: string } => typeof i.id === "string")
-      .map((i) => {
-        const state = this.inviteState(i);
-        return {
-          id: i.id,
-          role: i.role,
-          state,
-          ...(i.createdAt ? { createdAt: i.createdAt } : {}),
-          expiresAt: i.expiresAt,
-          ...(i.usedBy ? { usedBy: i.usedBy } : {}),
-          ...(state === "pending" && i.link ? { link: i.link } : {}),
-          ...(state === "pending" && i.code ? { code: i.code } : {}),
-        };
-      })
-      .sort((a, b) => (b.createdAt ?? b.expiresAt) - (a.createdAt ?? a.expiresAt));
   }
 
   // presence, ripples, holds
@@ -5018,24 +4238,6 @@ export class FlotillaService extends EventEmitter {
   }
 
   /**
-   * Withdraws this Mac's own join request (or clears a declined one): the request document is deleted, best effort, and
-   * the pending pond forgotten. An active pond is never touched.
-   */
-  async cancelJoin(pondId: string): Promise<void> {
-    const pond = this.pondsFile.data.ponds[pondId];
-    if (!pond) throw new FlotillaError("There is no such request.", 404);
-    if (pond.status !== "pending" && pond.status !== "denied") {
-      throw new FlotillaError("You are already in that pond.", 409);
-    }
-    if (pond.status === "pending" && pond.requestId) {
-      await this.storeOf(pond)
-        .delete(this.docPath(pond.id, "joins", pond.requestId))
-        .catch(() => undefined);
-    }
-    this.forgetPond(pondId);
-  }
-
-  /**
    * The start-clean migration (spec: People and remote, "Start clean"; docs/cloud-layer.md, "Clean start"), run once after
    * the cloud's Pond data was cleared. Every Pond this Mac owns becomes a local Pond again: same id, name, project and
    * key, its Ducks (threads) and Room history untouched, no cloud call. What the cloud held (invites, tokens handed out)
@@ -5059,7 +4261,6 @@ export class FlotillaService extends EventEmitter {
       pond.local = true;
       pond.location = null;
       pond.status = "active";
-      pond.invites = [];
       pond.issued = {};
       pond.nonces = {};
       pond.results = [];
@@ -5068,9 +4269,7 @@ export class FlotillaService extends EventEmitter {
         "joinToken",
         "token",
         "requestId",
-        "requestedRole",
         "inviteExpiresAt",
-        "words",
         "requestedAt",
         "endedAt",
         "recent",
@@ -5117,10 +4316,8 @@ const WRITES = [
   "renamePond",
   "deletePond",
   "rotateKey",
-  "decideJoin",
   "hold",
   "sendCommandTo",
-  "invite",
 ] as const;
 for (const name of WRITES) {
   const proto = FlotillaService.prototype as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;

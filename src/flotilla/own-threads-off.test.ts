@@ -8,7 +8,8 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { FakeHost, session } from "./journey-support.js";
 import { FlotillaBridge } from "./bridge.js";
 import { FlotillaService } from "./service.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode is off by default (docs/ponds.md, SQUEAK_POND_OWN_THREADS).
 let rtdb: FakeRtdb;
@@ -30,11 +31,10 @@ function mac(name: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
   });
   const host = new FakeHost();
   const bridge = new FlotillaBridge(service, host, { flushMs: 60_000 });
@@ -50,10 +50,7 @@ async function pond() {
     projectId: "p1",
     gitRemote: "git@github.com:acme/site.git",
   });
-  await B.service.join((await A.service.invite(created.id, "member")).link!);
-  const [join] = (await A.service.view(created.id)).joins;
-  await A.service.decideJoin(created.id, join!.requestId, { approve: true });
-  await B.service.refresh(created.id);
+  await admitMember(A.service, B.service, created.id, "member");
   return { A, B, pondId: created.id };
 }
 

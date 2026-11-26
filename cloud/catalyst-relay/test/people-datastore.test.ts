@@ -74,17 +74,19 @@ describe("people tables on Data Store", () => {
     await people.createPond({ pondId: POND, ownerUserId: "u0", name: "P 🦆" });
     expect((await people.getPond(POND))?.name).toBe("P 🦆");
     expect(await code(people.addMember({ pondId: POND, userId: "u0", role: "member" }))).toBe("already-member");
+    // One pending invite holds a place: the same address twice is refused, and the cap counts it.
+    const invite = { pondId: POND, email: "Bea@x.co", role: "member", invitedBy: "u0", expiresAt: 9999 };
+    await people.createInvite({ ...invite, inviteId: "i1" });
+    expect(await code(people.createInvite({ ...invite, inviteId: "i2" }))).toBe("invite-pending");
+    expect((await people.getInvite("i1"))?.expiresAt).toBe(9999); // a bigint read back as a number
     const adds = await Promise.all(
       Array.from({ length: 13 }, (_, i) =>
         code(people.addMember({ pondId: POND, userId: `u${i + 1}`, role: "member" })),
       ),
     );
-    expect(adds.filter((r) => r === "ok").length).toBe(MAX_MEMBERS - 1);
-    expect((await people.membersOf(POND)).length).toBe(MAX_MEMBERS);
-    const invite = { pondId: POND, email: "Bea@x.co", role: "member", invitedBy: "u0", expiresAt: 9999 };
-    await people.createInvite({ ...invite, inviteId: "i1" });
-    expect(await code(people.createInvite({ ...invite, inviteId: "i2" }))).toBe("invite-pending");
-    expect((await people.getInvite("i1"))?.expiresAt).toBe(9999); // a bigint read back as a number
+    expect(adds.filter((r) => r === "ok").length).toBe(MAX_MEMBERS - 2);
+    expect((await people.membersOf(POND)).length).toBe(MAX_MEMBERS - 1);
+    expect(await code(people.createInvite({ ...invite, email: "cy@x.co", inviteId: "i3" }))).toBe("pond-full");
   });
 
   it("reads past the 300-row page and clears in bulk of 200", async () => {

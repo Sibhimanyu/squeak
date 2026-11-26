@@ -154,14 +154,13 @@ public enum NewThreadTarget {
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {
-    case blank, folder, clone, invite
+    case blank, folder, clone
 
     public var title: String {
         switch self {
         case .blank: "Start a new pond"
         case .folder: "A folder on this Mac"
         case .clone: "Clone a repository"
-        case .invite: "Join someone\u{2019}s pond"
         }
     }
 }
@@ -204,7 +203,6 @@ public struct NewPondForm: Equatable, Sendable {
     public var name = ""
     public private(set) var folderPath: String?
     public var cloneURL = ""
-    public var inviteCode = ""
     /// The name was typed by the person: a later folder pick leaves it alone.
     private var nameEdited = false
 
@@ -218,14 +216,13 @@ public struct NewPondForm: Equatable, Sendable {
         if !nameEdited { name = (path as NSString).lastPathComponent }
     }
 
-    public var buttonTitle: String { kind == .invite ? "Join pond" : "Create pond" }
+    public var buttonTitle: String { "Create pond" }
 
     public var canCreate: Bool {
         switch kind {
         case .blank: PondFolder.sanitized(name) != nil
         case .folder: folderPath?.isEmpty == false
         case .clone: !cloneURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .invite: PondInviteText.cleaned(inviteCode) != nil
         }
     }
 }

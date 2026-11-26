@@ -1,7 +1,7 @@
 import SqueakMacCore
 import SwiftUI
 
-/// A join request that is waiting on an owner, or ended (declined, expired, withdrawn, removed): the same card on the New
+/// A Pond waiting on an invitation, or ended (declined, expired, withdrawn, removed): the same card on the New
 /// pond page and when the sidebar's row is opened. The host's pond list is the only truth, and it says every state in the
 /// host's own sentence; an ended request stays until Remove is pressed, so nobody waits on something that is over.
 struct JoinWaitingCard: View {
@@ -16,13 +16,11 @@ struct JoinWaitingCard: View {
                 PondTile(name: pond.name, pondId: pond.id, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: pond.name).font(Typo.title).foregroundStyle(Theme.ink)
-                    if pond.isWaiting { Text(verbatim: PondJoinWaiting.asked(pond)).font(Typo.footnote).foregroundStyle(Theme.muted) }
                 }
             }
             PondStateCardView(pond: pond)
-            if pond.isWaiting, !pond.words.isEmpty { MatchingWords(words: pond.words, hint: InviteSheetText.wordsHintJoiner(owner: pond.ownerName)) }
             if pond.isWaiting {
-                Text("You can close this. The pond appears in the sidebar once you\u{2019}re approved, and Squeak tells you.")
+                Text("You can close this. The pond appears in the sidebar once you\u{2019}re in, and Squeak tells you.")
                     .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }

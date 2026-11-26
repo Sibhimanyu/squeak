@@ -130,40 +130,41 @@ public struct PondsClient: Sendable {
         _ = try await host.call("POST", "\(Self.p(pond))/forget", body: .object(["pondId": .string(pond)]), timeout: 30)
     }
 
-    public func revokeInvite(pond: String, invite: String) async throws {
-        _ = try await host.call("DELETE", "\(Self.p(pond))/invites/\(NativeHostClient.id(invite))", timeout: 30)
+    // MARK: People and invites (docs/spec.md "People and remote": one way in, an email)
+
+    /// The Pond's people: members with presence and roles, and the relay's invite records. nil from a host without the route.
+    public func people(pond: String) async throws -> PondPeople? {
+        do { return try decode(PondPeople.self, try await host.call("GET", "\(Self.p(pond))/people", timeout: Self.readTimeout)) }
+        catch where Self.isAbsent(error) { return nil }
     }
 
-    // MARK: Invites and joins
-
-    /// `short: true` asks for a six-character code (10 minutes, once) instead of the long code.
-    public func invite(pond: String, role: PondRole, short: Bool = false) async throws -> PondInvite {
-        var body: [String: NativeJSON] = ["role": .string(role.rawValue)]
-        if short { body["short"] = .bool(true) }
-        return try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 60))
-    }
-
-    /// Invite by email: one email-bound invite per address, the links sent by Squeak's cloud. Answers who got one.
-    public func inviteByEmail(pond: String, emails: [String], role: PondRole) async throws -> PondEmailInviteResult {
+    /// Owner: one email invite per address. A refused address (already a Member, already invited, over the cap) comes back
+    /// as `ok: false` with a plain sentence; the call itself only fails when nothing could be asked.
+    public func invite(pond: String, emails: [String], role: PondRole) async throws -> [PondInviteOutcome] {
         let body: [String: NativeJSON] = ["emails": .array(emails.map { .string($0) }), "role": .string(role.rawValue)]
-        return try decode(PondEmailInviteResult.self, try await host.call("POST", "\(Self.p(pond))/invites/email", body: .object(body), timeout: 90))
+        return try decode(PondInviteResults.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 90)).results
     }
 
-    public func join(code: String) async throws -> PondJoinResult {
-        try decode(
-            PondJoinResult.self,
-            try await host.call("POST", "/native/ponds/join", body: .object(["code": .string(code)]), timeout: 30))
+    private func inviteCall(_ pond: String, _ invite: String, _ verb: String, body: [String: NativeJSON] = [:]) async throws -> PondInviteRecord {
+        struct R: Decodable { var invite: PondInviteRecord }
+        let path = "\(Self.p(pond))/invites/\(NativeHostClient.id(invite))/\(verb)"
+        return try decode(R.self, try await host.call("POST", path, body: .object(body), timeout: 60)).invite
     }
 
-    /// Withdraws this Mac's pending join request, or clears a declined one.
+    /// Owner: sends a pending invite's email again.
+    public func resendInvite(pond: String, invite: String) async throws -> PondInviteRecord { try await inviteCall(pond, invite, "resend") }
+
+    /// Owner: withdraws a pending invite.
+    public func withdrawInvite(pond: String, invite: String) async throws -> PondInviteRecord { try await inviteCall(pond, invite, "withdraw") }
+
+    /// Owner: a new invite to the same address after a decline, an expiry or a withdrawal; `role` keeps the old role when nil.
+    public func inviteAgain(pond: String, invite: String, role: PondRole? = nil) async throws -> PondInviteRecord {
+        try await inviteCall(pond, invite, "again", body: role.map { ["role": .string($0.rawValue)] } ?? [:])
+    }
+
+    /// Withdraws this Mac's pending request on a Pond that is waiting on the invitee side, or clears a declined one.
     public func cancelJoin(pond: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/cancel-join", body: .object(["pondId": .string(pond)]), timeout: 30)
-    }
-
-    public func decideJoin(pond: String, request: String, approve: Bool, role: PondRole = .member) async throws {
-        _ = try await host.call(
-            "POST", "\(Self.p(pond))/joins/\(NativeHostClient.id(request))",
-            body: .object(["approve": .bool(approve), "role": .string(role.rawValue)]), timeout: 30)
     }
 
     // MARK: Threads

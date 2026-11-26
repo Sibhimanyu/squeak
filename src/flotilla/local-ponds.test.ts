@@ -107,13 +107,12 @@ describe("the first invite publishes", () => {
   it("publishes once, then invites; a second invite does not publish again", async () => {
     const { service, docs, state } = make(true);
     const made = service.ensureLocalPond({ name: "Alpha", projectId: "p1", gitRemote: "https://x/y" });
-    const first = await service.invite(made.id, "member");
-    expect(first.code).toContain("squeak-pond:");
+    await service.prepareFirstInvite(made.id);
     const paths = [...docs.keys()];
     expect(paths.some((p) => p.endsWith("/pond/meta"))).toBe(true);
     expect(paths.some((p) => p.includes("/members/"))).toBe(true);
     const writes = docs.size;
-    await service.invite(made.id, "viewer");
+    await service.prepareFirstInvite(made.id);
     expect(docs.size).toBe(writes);
     expect((await service.list())[0]!.local).toBeUndefined();
     expect((await service.list()).length).toBe(1);
@@ -123,9 +122,7 @@ describe("the first invite publishes", () => {
   it("a double click makes one pond and one publish", async () => {
     const { service, docs } = make(true);
     const made = service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
-    const [a, b] = await Promise.all([service.invite(made.id), service.invite(made.id)]);
-    expect(a.code).toBeTruthy();
-    expect(b.code).toBeTruthy();
+    await Promise.all([service.prepareFirstInvite(made.id), service.prepareFirstInvite(made.id)]);
     expect([...docs.keys()].filter((p) => p.endsWith("/pond/meta"))).toHaveLength(1);
     expect(await service.list()).toHaveLength(1);
   });
@@ -134,11 +131,10 @@ describe("the first invite publishes", () => {
     const { service, state, docs } = make(true);
     const made = service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
     state.failWrites = true;
-    await expect(service.invite(made.id)).rejects.toThrow(/try again/);
+    await expect(service.prepareFirstInvite(made.id)).rejects.toThrow(/try again/);
     expect((await service.list())[0]!.local).toBe(true);
     state.failWrites = false;
-    const code = await service.invite(made.id);
-    expect(code.code).toBeTruthy();
+    await service.prepareFirstInvite(made.id);
     const list = await service.list();
     expect(list).toHaveLength(1);
     expect(list[0]!.id).toBe(made.id);
@@ -148,7 +144,7 @@ describe("the first invite publishes", () => {
   it("needs a cloud: a plain sentence and nothing changes", async () => {
     const { service } = make(false);
     const made = service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
-    await expect(service.invite(made.id)).rejects.toThrow(/Set up a cloud store/);
+    await expect(service.prepareFirstInvite(made.id)).rejects.toThrow(/Set up a cloud store/);
     expect((await service.list())[0]!.local).toBe(true);
   });
 

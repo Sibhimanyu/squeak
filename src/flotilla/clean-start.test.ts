@@ -42,7 +42,7 @@ describe("clean start on the Owner's Mac", () => {
     const { store, docs } = memoryStore();
     const service = open(dir, true, store);
     const shared = await service.createPond({ name: "Alpha", projectId: "p1" });
-    await service.invite(shared.id, "member");
+    await service.prepareFirstInvite(shared.id);
     expect((await service.list())[0]!.local).toBeUndefined();
     const key = raw(service, shared.id).keys["1"];
     const written = docs.size;
@@ -52,7 +52,7 @@ describe("clean start on the Owner's Mac", () => {
     expect(result).toEqual({ madeLocal: 1, dropped: 0 });
     const [pond] = await service.list();
     expect(pond).toMatchObject({ id: shared.id, name: "Alpha", projectId: "p1", local: true, memberCount: 1 });
-    expect(raw(service, shared.id)).toMatchObject({ local: true, location: null, invites: [], issued: {} });
+    expect(raw(service, shared.id)).toMatchObject({ local: true, location: null, issued: {} });
     expect(raw(service, shared.id).keys["1"]).toBe(key);
     expect(service.sharedPondOfProject("p1")).toBeNull();
     expect(service.hasPondForProject({ projectId: "p1" })).toBe(true);
@@ -81,8 +81,7 @@ describe("clean start on the Owner's Mac", () => {
     const shared = await service.createPond({ name: "Alpha", projectId: "p1" });
     service.startClean();
     docs.clear(); // the cloud was wiped
-    const invite = await service.invite(shared.id, "viewer");
-    expect(invite.code).toContain("squeak-pond:");
+    await service.prepareFirstInvite(shared.id);
     expect((await service.list())[0]!.local).toBeUndefined();
   });
 
@@ -105,7 +104,7 @@ describe("clean start on the Owner's Mac", () => {
     const service = open(dir, true, store);
     const shared = await service.createPond({ name: "Alpha", projectId: "p1" });
     expect(service.startClean()).toEqual({ madeLocal: 1, dropped: 0 });
-    await service.invite(shared.id, "member");
+    await service.prepareFirstInvite(shared.id);
     expect(service.startClean()).toEqual({ madeLocal: 0, dropped: 0 });
     expect(open(dir, true, store).startClean()).toEqual({ madeLocal: 0, dropped: 0 });
     expect((await service.list())[0]!.local).toBeUndefined();

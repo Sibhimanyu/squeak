@@ -22,7 +22,8 @@ import {
   roomDocOf,
 } from "./room-sync.js";
 import type { FlotillaBridge } from "./bridge.js";
-import { named, verifying } from "./named-account.test-fixture.js";
+import { admitMember } from "./admit-member.test-fixture.js";
+import { named } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -55,11 +56,10 @@ function mac(name: string, at: { now: number } = clock, presenceOf?: () => Promi
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-room-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: verifying(new RtdbRest(url)),
+    store: new RtdbRest(url),
     supportDir: dir,
     account: named(name),
     nest: name + "-mac",
-    inviteLinkBase: "https://x.test/join",
     now: () => at.now,
     ...(presenceOf ? { presenceOf } : {}),
   });
@@ -89,10 +89,7 @@ function ownerHost(service: FlotillaService, deliver?: (sessionId: string, text:
 }
 
 async function admit(owner: Mac, pondId: string, who: Mac, role: "member" | "viewer" = "member") {
-  await who.service.join((await owner.service.invite(pondId, role)).code);
-  for (const j of (await owner.service.view(pondId)).joins) {
-    await owner.service.decideJoin(pondId, j.requestId, { approve: true });
-  }
+  await admitMember(owner.service, who.service, pondId, role);
   await who.service.refresh(pondId);
 }
 
