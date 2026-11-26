@@ -89,7 +89,7 @@ struct PondRouteView: View {
             case .home(let project):
                 if let waiting = PondsModel.shared.pond(key: project), PondStates.isGreyedRow(waiting) {
                     ScrollView {
-                        JoinWaitingCard(pond: waiting) { AppModel.shared.closePondPage() }
+                        PondStateCardView(pond: waiting)
                             .frame(maxWidth: 520).padding(Space.xl).frame(maxWidth: .infinity, alignment: .top)
                     }.screen("Pond")
                 } else {

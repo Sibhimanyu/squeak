@@ -362,6 +362,7 @@ final class PondsModel {
             if !syncedAccount { syncedAccount = true; syncAccount() }
             let listed = PondOwnThreads.adjusted(listing.ponds, ownThreads: ownThreads)
             if ponds != listed { ponds = listed }
+            await refreshInvitations()
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
             for p in list where p.state == .active || p.state == .local {
@@ -456,14 +457,47 @@ final class PondsModel {
         }
     }
 
-    /// Withdraws a pending join (or clears a declined one); true when it is gone.
-    @discardableResult
-    func cancelJoin(pond: String) async -> Bool {
-        let ok = await attempt({ try await client!.cancelJoin(pond: pond) })
-        if ok { await refresh() }
-        return ok
+    /// Invitations for this Mac's account (docs/ponds.md "Invitations"): the ones to answer, and joined ones still opening.
+    /// The host reads them from the relay's one record; nothing here decides anything.
+    private(set) var invitations: [PondInvitation] = [] {
+        didSet {
+            // One notification per invite, ever: the announced ids are kept between launches.
+            let seen = Set(UserDefaults.standard.stringArray(forKey: "announcedInvitations") ?? [])
+            let r = PondInvitations.notes(list: invitations, seen: seen)
+            if r.seen != seen { UserDefaults.standard.set(Array(r.seen), forKey: "announcedInvitations") }
+            for n in r.notes { Notifier.shared.postPond(n) }
+        }
+    }
+    /// The invitations that wait on this person's answer (Join or Decline).
+    var invitationsToAnswer: [PondInvitation] { PondInvitations.toAnswer(invitations) }
+    private(set) var answering: Set<String> = []
+
+    /// Join: the Pond appears as Connecting at once; the invitation leaves the list only on the host's answer.
+    func join(invitation id: String) async {
+        guard !answering.contains(id) else { return }
+        answering.insert(id); note = nil
+        if await attempt({ try await client!.joinInvitation(id: id) }) {
+            await refreshInvitations()
+            await refresh()
+            if let pond = invitations.first(where: { $0.id == id })?.pondId ?? ponds.first(where: { $0.connecting })?.id,
+               let row = ponds.first(where: { $0.id == pond }) {
+                AppModel.shared.openPondHome(key(forPond: row))
+            }
+        }
+        answering.remove(id)
     }
 
+    func decline(invitation id: String) async {
+        guard !answering.contains(id) else { return }
+        answering.insert(id); note = nil
+        if await attempt({ try await client!.declineInvitation(id: id) }) { await refreshInvitations() }
+        answering.remove(id)
+    }
+
+    func refreshInvitations() async {
+        guard let client, let list = try? await client.invitations() else { return }
+        if list != invitations { invitations = list }
+    }
 
     private func scheduleClear(_ key: String) {
         Task { try? await Task.sleep(for: .seconds(5)); result[key] = nil }
@@ -648,9 +682,7 @@ final class PondsModel {
     /// Clears an ended pond (declined, expired, withdrawn, removed) from this Mac.
     @discardableResult
     func forget(pond: String) async -> Bool {
-        var ok = await attempt({ try await self.client!.forget(pond: pond) })
-        // A host without the route clears a declined request the old way.
-        if !ok { ok = await attempt({ try await self.client!.cancelJoin(pond: pond) }) }
+        let ok = await attempt({ try await self.client!.forget(pond: pond) })
         if ok { await refresh() }
         return ok
     }

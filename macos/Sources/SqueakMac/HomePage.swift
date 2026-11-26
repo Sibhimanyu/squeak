@@ -41,6 +41,7 @@ struct DashboardPage: View {
             Text(FirstPondJourney.noPondsDetail).font(Typo.body).foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
             Button(PondWords.newPond) { model.openNewPond() }.buttonStyle(PrimaryButtonStyle()).padding(.top, Space.xs)
+            InvitationsBlock(needsYou: true).frame(maxWidth: 420).padding(.top, Space.m)
         }
         .padding(Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -49,6 +50,7 @@ struct DashboardPage: View {
         let columns = self.columns
         return VStack(alignment: .leading, spacing: 0) {
             header
+            InvitationsBlock(needsYou: true).padding(.horizontal, Space.xl).padding(.bottom, Space.m)
             HStack(spacing: 12) {
                 SearchField(text: $query, placeholder: model.ducksMode ? "Filter ducks and branches…" : "Filter streams…")
                     .frame(maxWidth: 320)

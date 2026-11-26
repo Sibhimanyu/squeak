@@ -90,6 +90,7 @@ struct WorkbenchSidebar: View {
                                 .multilineTextAlignment(.leading).padding(.horizontal, Space.s).padding(.vertical, Space.s)
                         }.buttonStyle(.plain)
                     }
+                    InvitationsBlock()
                     waitingPonds
                     projects(sections)
                     otherSessions(sections.otherSessions)
@@ -325,13 +326,13 @@ struct WorkbenchSidebar: View {
         }
     }
 
-    /// Joins waiting on an owner (greyed) and ones the owner declined; opening one shows its waiting card.
+    /// Ponds still Connecting (joined, the Owner's Mac has not let this device in) and ended ones; opening one shows its state.
     @ViewBuilder private var waitingPonds: some View {
-        ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds).filter { PondsModel.shared.directory?.pond(pondId: $0.id) == nil }) { pond in
+        ForEach(PondStates.greyedRows(PondsModel.shared.ponds).filter { PondsModel.shared.directory?.pond(pondId: $0.id) == nil }) { pond in
             Button { model.openPondHome(PondsModel.shared.key(forPond: pond)) } label: {
                 HStack(spacing: Space.s) {
                     PondTile(name: pond.name, pondId: pond.id, size: 20)
-                    Text(verbatim: PondJoinWaiting.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
+                    Text(verbatim: PondStates.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
                 }
@@ -339,7 +340,7 @@ struct WorkbenchSidebar: View {
                 .opacity(0.7)
             }
             .buttonStyle(.plain).pointerHand()
-            .accessibilityLabel(PondJoinWaiting.rowTitle(pond))
+            .accessibilityLabel(PondStates.rowTitle(pond))
             .help(PondSidebar.tooltip(pond) ?? "")
         }
     }

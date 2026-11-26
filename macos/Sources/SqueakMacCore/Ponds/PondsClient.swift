@@ -162,9 +162,20 @@ public struct PondsClient: Sendable {
         try await inviteCall(pond, invite, "again", body: role.map { ["role": .string($0.rawValue)] } ?? [:])
     }
 
-    /// Withdraws this Mac's pending request on a Pond that is waiting on the invitee side, or clears a declined one.
-    public func cancelJoin(pond: String) async throws {
-        _ = try await host.call("POST", "\(Self.p(pond))/cancel-join", body: .object(["pondId": .string(pond)]), timeout: 30)
+    /// The invitations for this Mac's account: to answer, and joined ones whose Pond is still opening. nil from an older host.
+    public func invitations() async throws -> [PondInvitation]? {
+        struct R: Decodable { var invitations: [Failable<PondInvitation>] }
+        do { return try decode(R.self, try await host.call("GET", "/native/ponds/invitations", timeout: Self.readTimeout)).invitations.compactMap(\.value) }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
+    /// Join: the host asks the relay and answers once it has; the Pond then shows as Connecting.
+    public func joinInvitation(id: String) async throws {
+        _ = try await host.call("POST", "/native/ponds/invitations/\(NativeHostClient.id(id))/join", body: .object([:]), timeout: 60)
+    }
+
+    public func declineInvitation(id: String) async throws {
+        _ = try await host.call("POST", "/native/ponds/invitations/\(NativeHostClient.id(id))/decline", body: .object([:]), timeout: 60)
     }
 
     // MARK: Threads

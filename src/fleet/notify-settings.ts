@@ -49,8 +49,6 @@ export interface ChannelNotify {
   quota: boolean;
   /** Finishes: chats Squeak can answer (a host app's), every agent, or none. */
   finished: FinishedMode;
-  /** Kept so a saved or sent setting still reads: nothing is sent for it any more (invites are email only). */
-  invites: boolean;
   /**
    * Quiet hours hold back finishes, questions after a finish and stalls. A blocked approval or question
    * still pushes, and so does the quota alert: those wait on you or cost you something.
@@ -67,7 +65,6 @@ export type NotifyChange =
   | { question: boolean }
   | { stalled: boolean }
   | { quota: boolean }
-  | { invites: boolean }
   | { finished: FinishedMode }
   | { quiet: QuietHours | null };
 
@@ -77,7 +74,6 @@ export const DEFAULT_CHANNEL_NOTIFY: Readonly<ChannelNotify> = Object.freeze({
   question: true,
   stalled: true,
   quota: true,
-  invites: true,
   finished: "replyable",
   quiet: null,
 });
@@ -129,7 +125,6 @@ export function readNotifyChange(value: unknown): NotifyChange | null {
     case "question":
     case "stalled":
     case "quota":
-    case "invites":
       return typeof v === "boolean" ? ({ [key]: v } as NotifyChange) : null;
     case "finished":
       return readFinishedMode(v) ? { finished: readFinishedMode(v)! } : null;
@@ -160,7 +155,7 @@ export function normalizeChannel(raw: unknown): ChannelNotify {
   const out: ChannelNotify = { ...DEFAULT_CHANNEL_NOTIFY };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
   const record = raw as Record<string, unknown>;
-  for (const key of ["muted", "approval", "question", "stalled", "quota", "invites"] as const) {
+  for (const key of ["muted", "approval", "question", "stalled", "quota"] as const) {
     if (typeof record[key] === "boolean") out[key] = record[key];
   }
   const finished = readFinishedMode(record.finished);
@@ -226,7 +221,7 @@ export function shouldPushRoomMomentTo(
   }
 }
 
-/** What a channel's push path asks: may this card go, may the quota alert go, may a pond invite card go. */
+/** What a channel's push path asks: may this card go, may the quota alert go. */
 export interface NotifyFilter {
   item(item: { kind: AttentionKind; session: FleetSession }): boolean;
   quota(): boolean;

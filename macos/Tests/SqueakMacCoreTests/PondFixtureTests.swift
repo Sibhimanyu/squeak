@@ -179,16 +179,13 @@ struct PondStartThreadTests {
         #expect(b2?["private"] == nil && b2?["split"] == nil && b2?["effort"] == nil)
     }
 
-    @Test func joinWaitingIsReadFromTheHostsList() throws {
+    @Test func greyedRowsAreReadFromTheHostsList() throws {
         let waiting = PondSummary(id: "abc123", name: "Orchard", role: .viewer, status: "pending", requestedRole: .member)
         let declined = PondSummary(id: "d", name: "Barn", status: "denied")
         let active = PondSummary(id: "a", name: "Mine")
-        #expect(PondJoinWaiting.rows([active, waiting, declined]).map(\.id) == ["abc123", "d"])
-        #expect(PondJoinWaiting.rowTitle(waiting) == "Orchard \u{00B7} Waiting for approval")
-        #expect(PondJoinWaiting.rowTitle(declined) == "Barn \u{00B7} Your request was declined")
-        var now = waiting; now.status = "active"
-        #expect(PondJoinWaiting.approved(old: [waiting, active], new: [now, active]).map(\.id) == ["abc123"])
-        #expect(PondJoinWaiting.approved(old: [now], new: [now]).isEmpty)
+        #expect(PondStates.greyedRows([active, waiting, declined]).map(\.id) == ["abc123", "d"])
+        #expect(PondStates.rowTitle(waiting) == "Orchard \u{00B7} Waiting for approval")
+        #expect(PondStates.rowTitle(declined) == "Barn \u{00B7} Your request was declined")
         // The host's list decodes the new fields; an older host's list reads as active.
         let json = #"{"id":"p","name":"N","role":"viewer","status":"pending","requestedRole":"member"}"#
         let decoded = try JSONDecoder().decode(PondSummary.self, from: Data(json.utf8))

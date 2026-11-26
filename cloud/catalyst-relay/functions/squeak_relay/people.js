@@ -550,6 +550,11 @@ function createPeople(deps) {
   }
   const pendingInvitesFor = async (email) =>
     (await tables.select(T.invites, "email", normEmail(email))).map(inviteView).filter((i) => i.state === "pending");
+  /** The invites this address joined that are still within their keep time (the Owner's Mac may not have let the person in yet). */
+  const joinedInvitesFor = async (email) =>
+    (await tables.select(T.invites, "email", normEmail(email)))
+      .map(inviteView)
+      .filter((i) => i.state === "joined" && i.settledAt + FINISHED_KEEP_MS > now());
 
   // ---- clean start ----
 
@@ -596,6 +601,7 @@ function createPeople(deps) {
     invitesOf,
     listInvites,
     pendingInvitesFor,
+    joinedInvitesFor,
     cleanStart,
   };
 }

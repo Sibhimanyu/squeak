@@ -27,7 +27,13 @@ import {
 import { can, capsOf, type Action, type Actor, type Context, type Caps } from "./permissions.js";
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { AnnouncedInvites, buildPeople, owedLines, type PeopleView } from "./pond-people.js";
-import { InviteRefused, type InviteRecord, type InviteResult, type PondInvites } from "./invites-port.js";
+import {
+  InviteRefused,
+  type Invitation,
+  type InviteRecord,
+  type InviteResult,
+  type PondInvites,
+} from "./invites-port.js";
 import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
 import {
@@ -425,6 +431,8 @@ const isDeviceRipple = (text: string): boolean =>
 const DEVICE_REQUEST_MAX_MS = 24 * 60 * 60_000;
 /** An owner's Mac adds at most this many devices a minute to one pond: a stolen account token cannot spray keys. */
 const DEVICE_ADDS_PER_MINUTE = 5;
+/** How often an invited person's Mac asks the relay for its invitations. */
+const INVITATIONS_TTL_MS = 10_000;
 /** A Mac asks the relay for its account's ponds at most this often (and at sign-in). */
 const ACCOUNT_SYNC_MS = 5 * 60_000;
 /** After this device leaves a pond, the account sync leaves it alone this long. */
@@ -1334,7 +1342,9 @@ export class FlotillaService extends EventEmitter {
     );
     // A pond that is gone (forgotten, left) is gone from the cache too.
     for (const id of Object.keys(this.snapshotFile.data.ponds)) if (!live.has(id)) this.forgetSnapshot(id);
-    return out.map((row) => this.withConnection(row));
+    // Joined in the cloud, not let in yet: a Connecting row from the relay's record, replaced by the real Pond once it arrives.
+    void this.invitations().catch(() => undefined);
+    return [...out.map((row) => this.withConnection(row)), ...this.connectingRows().filter((r) => !live.has(r.id))];
   }
 
   /** The one connection state of a row (connection.ts): from the live stream, the last read and the Owner's presence. */
@@ -1543,9 +1553,132 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** The Owner's own pass over the record (the relay wakes it on every change), so the Room lines come without a sheet open. */
-  private async syncInvites(pond: LocalPond): Promise<void> {
-    if (pond.role !== "owner" || pond.local || !this.options.invites) return;
-    await this.tellInvites(pond, await this.options.invites.list(pond.id));
+  private async syncInvites(pond: LocalPond): Promise<InviteRecord[]> {
+    if (pond.role !== "owner" || pond.local || !this.options.invites) return [];
+    const invites = await this.options.invites.list(pond.id);
+    await this.tellInvites(pond, invites);
+    await this.openToJoined(pond, invites);
+    return invites;
+  }
+
+  // ---- the invited person's side (#127): the relay's record of the invitations for this Mac's account ----
+
+  private myInvitations: { at: number; list: Invitation[] } | null = null;
+
+  /**
+   * The invitations for this Mac's account, as the relay holds them: the ones to answer (`pending`) and the ones joined whose
+   * Pond the Owner's Mac has not opened to this account yet (`joined`, drawn as Connecting). Read at most every ten seconds;
+   * the last good answer stays when the cloud cannot be reached. A Pond already here is no invitation.
+   */
+  async invitations(fresh = false): Promise<Invitation[]> {
+    const port = this.options.invites;
+    if (!port?.mine) return [];
+    if (fresh || !this.myInvitations || this.now() - this.myInvitations.at >= INVITATIONS_TTL_MS) {
+      try {
+        this.myInvitations = { at: this.now(), list: await port.mine() };
+      } catch {
+        // Signed out, or the cloud did not answer: keep the last good list, try again at the next read.
+        this.myInvitations = { at: this.now(), list: this.myInvitations?.list ?? [] };
+      }
+    }
+    const open = this.myInvitations.list.filter((i) => !this.pondsFile.data.ponds[i.pondId]);
+    // Joined and waiting for the Owner's Mac: ask for this device as soon as the Pond is listed for the account. The relay stops
+    // listing the invitation the moment it is, so what was seen joined is remembered until the Pond is here.
+    for (const i of open) if (i.state === "joined") this.expecting.set(i.pondId, i);
+    for (const id of [...this.expecting.keys()]) if (this.pondsFile.data.ponds[id]) this.expecting.delete(id);
+    if (this.expecting.size > 0 && (fresh || this.now() - this.accountSyncAt >= INVITATIONS_TTL_MS)) {
+      this.accountSyncAt = 0;
+      void this.syncAccountPonds().catch(() => undefined);
+    }
+    return open;
+  }
+
+  /** Ponds this account joined in the cloud that this Mac has not been let into yet. */
+  private readonly expecting = new Map<string, Invitation>();
+
+  /** Join: the person is a Member in the cloud at once; the Pond shows as Connecting until the Owner's Mac lets this device in. */
+  async joinInvitation(inviteId: string): Promise<{ pondId: string }> {
+    const found = (await this.invitations()).find((i) => i.id === inviteId);
+    const accept = this.options.invites?.accept;
+    if (!accept) throw new FlotillaError("Invitations need Squeak's cloud. Sign in to Squeak, then try again.", 503);
+    // The state changes on the relay's answer only: a refusal leaves the invitation as it was.
+    await this.viaRelay(() => accept.call(this.options.invites, inviteId));
+    if (found) this.expecting.set(found.pondId, { ...found, state: "joined" });
+    if (this.myInvitations)
+      this.myInvitations = {
+        at: this.now(),
+        list: this.myInvitations.list.map((i) => (i.id === inviteId ? { ...i, state: "joined" as const } : i)),
+      };
+    this.emit("changed", found?.pondId ?? "");
+    return { pondId: found?.pondId ?? "" };
+  }
+
+  /** Decline asks nothing: the relay settles the invite and it is gone from the list. */
+  async declineInvitation(inviteId: string): Promise<void> {
+    const decline = this.options.invites?.decline;
+    if (!decline) throw new FlotillaError("Invitations need Squeak's cloud. Sign in to Squeak, then try again.", 503);
+    await this.viaRelay(() => decline.call(this.options.invites, inviteId));
+    if (this.myInvitations)
+      this.myInvitations = { at: this.now(), list: this.myInvitations.list.filter((i) => i.id !== inviteId) };
+    this.emit("changed", "");
+  }
+
+  /** The rows of Ponds joined in the cloud that this Mac has not been let into yet, from the last read of the relay's record. */
+  private connectingRows(): PondSummary[] {
+    return [...this.expecting.values()]
+      .filter((i) => !this.pondsFile.data.ponds[i.pondId])
+      .map((i) =>
+        this.summary(
+          {
+            id: i.pondId,
+            name: i.pondName,
+            ownerName: i.inviter,
+            status: "pending",
+            role: i.role,
+            ownerKey: "",
+            location: null,
+            deviceJoin: true,
+            keys: {},
+            current: 0,
+            threads: {},
+            nonces: {},
+          } as LocalPond,
+          0,
+          0,
+          0,
+        ),
+      );
+  }
+
+  /** Accounts that joined in the cloud and are not yet Members here: invite id to the record, per Pond, from the last pass. */
+  private readonly joining = new Map<string, Map<string, InviteRecord>>();
+  private readonly indexedJoined = new Set<string>();
+
+  /**
+   * A person who joined in the cloud has a membership there and nothing here yet. The Pond is listed under their account (with
+   * the invited role), so their devices can ask in; the request is then turned into a Member document by `adoptDeviceRequests`.
+   * An invite already made into a Member is never made again (a person removed later stays out until invited again).
+   */
+  private async openToJoined(pond: LocalPond, invites: InviteRecord[]): Promise<void> {
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    const told = this.told();
+    const members = await this.members(pond);
+    const inMembers = new Set([...members.values()].map((m) => m.accountId).filter((a): a is string => !!a));
+    const waiting = new Map<string, InviteRecord>();
+    for (const i of invites) {
+      if (i.state !== "joined" || !i.userId || inMembers.has(i.userId) || told.admitted(pond.id, i.id)) continue;
+      waiting.set(i.id, i);
+    }
+    this.joining.set(pond.id, waiting);
+    const fresh = [...waiting.values()].filter((i) => !this.indexedJoined.has(`${pond.id}/${i.id}`));
+    if (fresh.length === 0) return;
+    await this.indexAccounts(
+      pond,
+      fresh.map((i) => i.userId!),
+      [],
+      Object.fromEntries(fresh.map((i) => [i.userId!, i.role])),
+    );
+    for (const i of fresh) this.indexedJoined.add(`${pond.id}/${i.id}`);
   }
 
   /** A pond-scoped token for a member of a Catalyst pond, or undefined where there is no relay (Firebase). */
@@ -1693,11 +1826,17 @@ export class FlotillaService extends EventEmitter {
   // Members are accounts (docs/ponds.md): the owner's side
 
   /** Tells the relay which accounts are members of this pond (its per-account index); best effort, repeated by `reconcileAccountIndex`. */
-  private async indexAccounts(pond: LocalPond, add: string[], remove: string[]): Promise<void> {
+  private async indexAccounts(
+    pond: LocalPond,
+    add: string[],
+    remove: string[],
+    invited: Record<string, "member" | "viewer"> = {},
+  ): Promise<void> {
     const relay = this.options.relay;
     if (!relay?.indexAccounts || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
     const own = pond.role === "owner" ? await this.ownAccountId() : null;
-    const roles: Record<string, "owner" | "member" | "viewer"> = {};
+    // A person who joined and is not a Member document yet is listed with the role they were invited with.
+    const roles: Record<string, "owner" | "member" | "viewer"> = { ...invited };
     if (add.length > 0) {
       for (const m of (await this.members(pond)).values()) {
         if (m.accountId && add.includes(m.accountId)) roles[m.accountId] = m.role;
@@ -1788,16 +1927,54 @@ export class FlotillaService extends EventEmitter {
       const publicKey = canonicalPoint(req.publicKey);
       const boxKey = canonicalPoint(req.boxKey);
       const member = byAccount.get(req.userId);
+      // A person who joined in the cloud (the relay's invite record says so) and is no Member here yet: this is their first device.
+      const invite = member
+        ? undefined
+        : [...(this.joining.get(pond.id)?.values() ?? [])].find((i) => i.userId === req.userId);
       if (
         !publicKey ||
         !boxKey ||
-        !member ||
+        (!member && !invite) ||
         memberIdOf(publicKey) !== req.reqId ||
         now - req.at > DEVICE_REQUEST_MAX_MS
       ) {
         await this.dropDeviceRequest(pond, row.id);
         continue;
       }
+      if (!member && invite) {
+        if (boxKey !== publicKey) {
+          await this.dropDeviceRequest(pond, row.id);
+          continue;
+        }
+        if (recent.length >= DEVICE_ADDS_PER_MINUTE) break;
+        const doc: MemberDoc = {
+          id: req.reqId,
+          name: invite.name || req.name || invite.email,
+          email: invite.email,
+          accountId: invite.userId!,
+          publicKey,
+          role: invite.role,
+          nest: req.nest,
+          ...(req.client === "mac" ? {} : { client: "web" as const }),
+          addedAt: now,
+        };
+        try {
+          await this.sendKeyToDevice(pond, doc, devicesOf(doc)[0]!);
+          await this.writeMember(pond, doc);
+          this.told().markAdmitted(pond.id, invite.id);
+        } catch (error) {
+          logger.warn("could not make a joined person a member", { pond: pond.id, error: String(error) });
+          continue;
+        }
+        recent.push(now);
+        members.set(doc.id, doc);
+        byAccount.set(invite.userId!, doc);
+        this.joining.get(pond.id)?.delete(invite.id);
+        await this.dropDeviceRequest(pond, row.id);
+        this.emit("changed", pond.id);
+        continue;
+      }
+      if (!member) continue;
       const have = devicesOf(member).find((d) => d.id === req.reqId);
       if (have) {
         // Asked again (it lost its state): the key is sent again, nothing else changes.
@@ -2403,9 +2580,10 @@ export class FlotillaService extends EventEmitter {
     this.syncAccountPondsSoon();
     if (pond.role === "owner") {
       await this.applyQueuedActs(pond).catch(() => undefined);
+      // The relay's invite record first: a person who joined is listed so their devices can ask, and is made a Member when one does.
+      await this.syncInvites(pond).catch(() => undefined);
       await this.adoptDeviceRequests(pond).catch(() => undefined);
       await this.reconcileAccountIndex(pond).catch(() => undefined);
-      await this.syncInvites(pond).catch(() => undefined);
       await this.renewTokens(pond).catch(() => undefined);
       await this.refreshMemberNames(pond).catch(() => undefined);
     }

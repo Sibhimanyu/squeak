@@ -111,6 +111,15 @@ export class AnnouncedInvites {
     fs.writeFileSync(this.file, JSON.stringify(this.map), { mode: 0o600 });
   }
 
+  /** Whether this Mac already made this invite's person a Member (once: a person later removed is not let back in by it). */
+  admitted(pondId: string, inviteId: string): boolean {
+    return this.map[pondId]?.[`admit:${inviteId}`] === "joined";
+  }
+
+  markAdmitted(pondId: string, inviteId: string): void {
+    this.mark(pondId, `admit:${inviteId}`, "joined");
+  }
+
   forget(pondId: string): void {
     delete this.map[pondId];
   }

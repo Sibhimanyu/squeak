@@ -71,6 +71,6 @@ struct YourDevicesTests {
         #expect(PondStates.card(for: bare)?.line == "Connecting: waiting for Sibhi\u{2019}s Mac")
         // an ordinary request to join still waits for approval, with its button
         let ordinary = try JSONDecoder().decode(PondSummary.self, from: Data(#"{"id":"p2","name":"H","status":"pending"}"#.utf8))
-        #expect(!ordinary.connecting && PondStates.card(for: ordinary)?.title == "Waiting for approval" && PondStates.card(for: ordinary)?.button == "Cancel request")
+        #expect(!ordinary.connecting && PondStates.card(for: ordinary)?.title == "Waiting for approval" && PondStates.card(for: ordinary)?.button == nil)
     }
 }

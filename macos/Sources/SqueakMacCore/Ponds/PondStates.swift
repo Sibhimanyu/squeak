@@ -13,9 +13,9 @@ public struct PondStateCard: Sendable, Equatable {
     public var title: String
     public var line: String
     public var tone: Tone
-    /// "Remove" (the terminal states: the row stays until pressed) or "Cancel request" (pending); nil when there is nothing to press.
+    /// "Remove" (the terminal states: the row stays until pressed); nil when there is nothing to press.
     public var button: String?
-    /// Pressing the button calls forget (terminal) rather than cancel (pending).
+    /// Pressing the button calls forget.
     public var forgets: Bool
 }
 
@@ -36,7 +36,7 @@ public enum PondStates {
         case .pending:
             return PondStateCard(
                 title: "Waiting for approval", line: pond.statusLine ?? "Waiting for \(who) to approve you as a \(role).", tone: .waiting,
-                button: "Cancel request", forgets: false)
+                button: nil, forgets: false)
         case .declined:
             return PondStateCard(title: "Your request was declined", line: pond.statusLine ?? "\(owner ?? "The owner") declined your request.", tone: .problem, button: "Remove", forgets: true)
         case .expired:
@@ -54,6 +54,9 @@ public enum PondStates {
         guard let card = card(for: pond), pond.state != .local, pond.state != .active else { return pond.name }
         return "\(pond.name) \u{00B7} \(card.title)"
     }
+
+    /// The sidebar's greyed rows: Connecting ones and ended ones (declined, expired, withdrawn, removed).
+    public static func greyedRows(_ ponds: [PondSummary]) -> [PondSummary] { ponds.filter(isGreyedRow) }
 
     /// A pond that gets a greyed row of its own: waiting or ended. (An active or local pond is an ordinary row.)
     public static func isGreyedRow(_ pond: PondSummary) -> Bool { pond.state == .pending || pond.state.isTerminal }
@@ -309,7 +312,7 @@ public enum PondThreadStatus {
 // MARK: Notifications from list and view transitions
 
 public struct PondNote: Sendable, Equatable, Identifiable {
-    public enum Kind: Sendable, Equatable { case joined, approved, declined, expired, revoked, removed, threadNeedsYou }
+    public enum Kind: Sendable, Equatable { case joined, invited, approved, declined, expired, revoked, removed, threadNeedsYou }
     public var id: String
     public var kind: Kind
     public var title: String
@@ -328,7 +331,7 @@ public enum PondNotes {
                 PondNote(id: "pond-\(kind)-\(p.id)", kind: kind, title: title, body: body, pondId: p.id)
             }
             switch (was, p.state) {
-            case (.pending, .active), (.pending, .local): return note(.approved, "You\u{2019}re in \(p.name)", "\(owner ?? "The owner") approved your request.")
+            case (.pending, .active), (.pending, .local): return note(.approved, "You\u{2019}re in \(p.name)", "\(owner ?? "The owner")\u{2019}s Mac let you in.")
             case (_, .declined) where was == .pending: return note(.declined, "\(owner ?? "The owner") declined your request", p.name)
             case (_, .expired) where was == .pending: return note(.expired, "This invite expired", "\(p.name): \(p.statusLine ?? "Ask for a new one.")")
             case (_, .revoked) where was == .pending: return note(.revoked, "This invite was withdrawn", "\(p.name): \(p.statusLine ?? "Ask for a new one.")")

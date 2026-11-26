@@ -272,7 +272,7 @@ describe("invitations by email (routes)", () => {
   });
 
   it("the invited person sees pending invitations for their verified address and Joins: a Member at once", async () => {
-    const { deps, people } = world();
+    const { deps, people, rows } = world();
     const made = (await invite(deps, "sibhi", ["asha@example.com"], "viewer")).json.results[0].invite;
     await people.upsertAccount({ userId: "sibhi", email: "sibhi@example.com", name: "Sibhi" });
     const waiting = await mine(deps, "asha");
@@ -283,6 +283,7 @@ describe("invitations by email (routes)", () => {
         pond: "greenroom",
         inviter: "Sibhi",
         role: "viewer",
+        state: "pending",
         expiresAt: made.expiresAt,
       },
     ]);
@@ -290,6 +291,12 @@ describe("invitations by email (routes)", () => {
     const joined = await answer(deps, "asha", made.inviteId, "accept");
     expect(joined.json.invite).toMatchObject({ state: "joined" });
     expect(await people.membershipOf(POND, "asha")).toMatchObject({ role: "viewer" });
+    // Joined, but the Owner's Mac has not opened the Pond to the account yet: still listed, as Connecting (state "joined").
+    expect((await mine(deps, "asha")).json.invites).toEqual([
+      expect.objectContaining({ inviteId: made.inviteId, pondId: POND, state: "joined", inviter: "Sibhi" }),
+    ]);
+    // The Owner's Mac lists the account in the Pond's index: the Pond is the account's now, so the invitation goes.
+    rows.set(`acctponds/asha\u0000${POND}`, JSON.stringify({ v: 1, ownerKey: "A".repeat(87) }));
     expect((await mine(deps, "asha")).json.invites).toEqual([]);
     expect((await answer(deps, "asha", made.inviteId, "accept")).json).toMatchObject({ error: "was-joined" });
   });

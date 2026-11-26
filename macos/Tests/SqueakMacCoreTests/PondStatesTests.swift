@@ -22,7 +22,7 @@ import Testing
             #expect(c.button == "Remove" && c.forgets && c.tone == .problem && !c.line.isEmpty)
         }
         let pending = try #require(PondStates.card(for: try pond(#"{"id":"a","name":"g","status":"pending","ownerName":"Sibhi","requestedRole":"viewer"}"#)))
-        #expect(pending.line == "Waiting for Sibhi to approve you as a viewer." && pending.button == "Cancel request" && !pending.forgets)
+        #expect(pending.line == "Waiting for Sibhi to approve you as a viewer." && pending.button == nil && !pending.forgets)
         #expect(PondStates.card(for: try pond(#"{"id":"a","name":"g","status":"active"}"#)) == nil)
         let hostLine = try #require(PondStates.card(for: try pond(#"{"id":"a","name":"g","status":"declined","statusLine":"Sibhi declined your request."}"#)))
         #expect(hostLine.line == "Sibhi declined your request.")
@@ -32,7 +32,7 @@ import Testing
 
     @Test func greyedRowsCoverWaitingAndEnded() throws {
         let list = try ["pending", "active", "removed", "local", "expired"].map { try pond(#"{"id":"\#($0)","name":"n\#($0)","status":"\#($0)"}"#) }
-        #expect(PondJoinWaiting.rows(list).map(\.id) == ["pending", "removed", "expired"])
+        #expect(PondStates.greyedRows(list).map(\.id) == ["pending", "removed", "expired"])
         #expect(PondStates.rowTitle(list[2]) == "nremoved \u{00B7} You were removed")
     }
 

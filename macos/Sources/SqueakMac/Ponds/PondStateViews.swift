@@ -39,7 +39,7 @@ struct PondFreshnessStrip: View {
 // MARK: Waiting or ended
 
 /// The state card of a pond that is not an ordinary active one (the same sentences in the sidebar tooltip, home, panel
-/// and menu bar); the Remove / Cancel button clears it.
+/// and menu bar); the Remove button clears an ended one.
 struct PondStateCardView: View {
     let pond: PondSummary
     var compact = false
@@ -62,7 +62,7 @@ struct PondStateCardView: View {
                 if let button = card.button {
                     Button(busy ? "Working\u{2026}" : button) {
                         busy = true
-                        Task { _ = card.forgets ? await ponds.forget(pond: pond.id) : await ponds.cancelJoin(pond: pond.id); busy = false }
+                        Task { _ = await ponds.forget(pond: pond.id); busy = false }
                     }
                     .buttonStyle(SecondaryButtonStyle()).disabled(busy)
                 }

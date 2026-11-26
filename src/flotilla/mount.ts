@@ -118,6 +118,20 @@ export class FlotillaRoutes {
       ctx.json(200, { asked: await service.syncAccountPonds() });
       return true;
     }
+    // Invitations for this Mac's account (#127): read from the relay's record; Join and Decline change state on its answer only.
+    if (a === "invitations" && parts.length === 2 && method === "GET") {
+      ctx.json(200, { invitations: await service.invitations() });
+      return true;
+    }
+    if (a === "invitations" && b && (c === "join" || c === "decline") && parts.length === 4 && method === "POST") {
+      exact(await ctx.body(), []);
+      if (c === "join") ctx.json(200, await service.joinInvitation(b));
+      else {
+        await service.declineInvitation(b);
+        ctx.json(200, { ok: true });
+      }
+      return true;
+    }
     if (a === "account-devices" && parts.length === 2 && method === "GET") {
       // Settings > Your devices: the account's devices, one list for every Pond (nothing about devices is ever in a Pond).
       ctx.json(200, { devices: await service.accountDevices() });

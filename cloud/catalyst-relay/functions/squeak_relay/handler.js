@@ -1549,9 +1549,11 @@ function createRelay(deps) {
   }
 
   /**
-   * The invited person's side, signed in. GET /invites -> {invites:[{inviteId, pondId, pond, inviter, role, expiresAt}]} the
-   * pending invitations for the account's verified address; POST /invites/<id>/accept | /decline. Only that address may use
-   * an invitation: another account is refused with the masked address, and the invite stays pending.
+   * The invited person's side, signed in. GET /invites -> {invites:[{inviteId, pondId, pond, inviter, role, state, expiresAt}]}:
+   * the pending invitations for the account's verified address, and the ones it joined whose Pond the Owner's Mac has not yet
+   * opened to it (state "joined": the device draws "Connecting" from it until the Pond is listed under /account/ponds);
+   * POST /invites/<id>/accept | /decline. Only that address may use an invitation: another account is refused with the
+   * masked address, and the invite stays pending.
    */
   async function handleMyInvites(req, res, method, mac, parts) {
     const out = (status, body) => send(res, status, body, NO_STORE);
@@ -1560,9 +1562,9 @@ function createRelay(deps) {
     if (parts.length === 1) {
       if (method !== "GET") return out(405, {});
       const invites = [];
-      for (const i of await deps.people.pendingInvitesFor(user.email)) {
+      const row = async (i, state) => {
         const pond = await deps.people.getPond(i.pondId);
-        if (!pond) continue;
+        if (!pond) return;
         const inviter = await deps.people.getAccount(i.invitedBy);
         invites.push({
           inviteId: i.inviteId,
@@ -1570,8 +1572,16 @@ function createRelay(deps) {
           pond: pond.name,
           inviter: (inviter && inviter.name) || "Someone",
           role: i.role,
+          state,
           expiresAt: i.expiresAt,
         });
+      };
+      for (const i of await deps.people.pendingInvitesFor(user.email)) await row(i, "pending");
+      for (const i of await deps.people.joinedInvitesFor(user.email)) {
+        // Still Connecting only while this account is a Member in the cloud and the Owner's Mac has not listed the Pond for it.
+        if (!(await deps.people.isMember(i.pondId, user.userId))) continue;
+        if ((await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, i.pondId)) !== null) continue;
+        await row(i, "joined");
       }
       return out(200, { invites });
     }

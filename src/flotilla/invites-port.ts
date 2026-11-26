@@ -36,7 +36,27 @@ export class InviteRefused extends Error {
   }
 }
 
+/**
+ * An invitation as the invited person's account reads it (`GET /invites`): pending ones to answer, and ones already
+ * joined whose Pond the Owner's Mac has not opened to the account yet (`joined`: drawn as Connecting).
+ */
+export interface Invitation {
+  id: string;
+  pondId: string;
+  pondName: string;
+  /** Who invited them: the Owner's name. */
+  inviter: string;
+  role: "member" | "viewer";
+  state: "pending" | "joined";
+  expiresAt: number;
+}
+
 export interface PondInvites {
+  /** The invitee's side (the Mac's own account): the invitations waiting for it, and the ones joined but not yet open. */
+  mine?(): Promise<Invitation[]>;
+  /** Join: the person is a Member in the cloud at once. */
+  accept?(inviteId: string): Promise<InviteRecord>;
+  decline?(inviteId: string): Promise<InviteRecord>;
   create(
     pondId: string,
     input: { emails: string[]; role: "member" | "viewer"; pondName: string },
@@ -78,6 +98,28 @@ export function readInvite(raw: unknown): InviteRecord | null {
     settledAt: num(r.settledAt),
     ...(typeof r.name === "string" && r.name ? { name: r.name.slice(0, 100) } : {}),
     ...(typeof r.userId === "string" && r.userId ? { userId: r.userId } : {}),
+  };
+}
+
+/** One invitation from the relay's JSON, or null when it is not the shape. */
+export function readInvitation(raw: unknown): Invitation | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object") return null;
+  if (
+    typeof r.inviteId !== "string" ||
+    typeof r.pondId !== "string" ||
+    (r.role !== "member" && r.role !== "viewer") ||
+    (r.state !== "pending" && r.state !== "joined")
+  )
+    return null;
+  return {
+    id: r.inviteId,
+    pondId: r.pondId,
+    pondName: typeof r.pond === "string" && r.pond ? r.pond.slice(0, 200) : "A pond",
+    inviter: typeof r.inviter === "string" && r.inviter ? r.inviter.slice(0, 100) : "Someone",
+    role: r.role,
+    state: r.state,
+    expiresAt: typeof r.expiresAt === "number" && Number.isFinite(r.expiresAt) ? r.expiresAt : 0,
   };
 }
 
@@ -123,6 +165,23 @@ export class HttpPondInvites implements PondInvites {
     }
     if (!json) throw new InviteRefused(COULD_NOT_REACH, 503);
     return json;
+  }
+
+  async mine(): Promise<Invitation[]> {
+    const body = await this.call("GET", "/invites");
+    if (!Array.isArray(body.invites)) throw new InviteRefused(COULD_NOT_REACH, 503);
+    return body.invites.flatMap((row: unknown) => {
+      const one = readInvitation(row);
+      return one ? [one] : [];
+    });
+  }
+
+  async accept(inviteId: string): Promise<InviteRecord> {
+    return (await this.one(`/invites/${encodeURIComponent(inviteId)}/accept`)).invite;
+  }
+
+  async decline(inviteId: string): Promise<InviteRecord> {
+    return (await this.one(`/invites/${encodeURIComponent(inviteId)}/decline`)).invite;
   }
 
   private base = (pondId: string): string => `/ponds/${encodeURIComponent(pondId)}/invites`;

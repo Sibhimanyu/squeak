@@ -278,6 +278,23 @@ before the first person comes in), member and device tokens, `sendKeyTo` (the po
 account index, devices, roles, rotation, Private Ducks and the Room lines. A Pond's status `declined`, `expired` and `revoked`
 remain in the type so an old `ponds.json` row still reads; nothing writes them now.
 
+### The invited person's side (#127)
+
+An invitation for the Mac's account is read from the relay's record, never made up locally. Host routes (token-gated, under
+`/native/ponds`): `GET /invitations` answers `{ invitations: [{ id, pondId, pondName, inviter, role, state, expiresAt }] }`
+(`state` is `pending`, to answer, or `joined`, a Member in the cloud whose Pond the Owner's Mac has not opened to this
+account yet); `POST /invitations/<id>/join` and `/decline` change state on the relay's answer only. The list is read at most
+every ten seconds and keeps its last good answer when the cloud cannot be reached.
+
+Join makes the person a Member in the cloud at once; the Pond is a `status: "pending"`, `connecting: true` row ("Connecting:
+waiting for <Owner>’s Mac") that the real Pond replaces once the Owner's Mac, on its pass over the invite record, lists the
+account and seals the key to the device that asks (a first device is made a Member once per invite; a person removed later is
+not let back in by the same invite). Decline asks nothing of the Owner's Mac.
+
+The Mac shows pending invitations as an Invitations block in the sidebar and under Needs you on the Dashboard, each with Join
+and Decline; Join opens the Connecting Pond. One macOS notification per invite, ever (`PondInvitations.notes`, announced ids
+kept in `UserDefaults`). The old "Waiting for approval" card, its Cancel request button and `cancelJoin` are gone.
+
 ## Names (2026-11-13)
 
 Nobody types or changes a name; a person is called by their Squeak account (Catalyst sign-in: Zoho, Google, email).
