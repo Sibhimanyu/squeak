@@ -199,6 +199,10 @@ public struct PondDashboardNeedsYouItem: Sendable, Equatable, Identifiable {
         case taskBlocked(taskId: String)
         /// A Member's own Task waiting for the Owner: words only, the Member has no control over it.
         case taskWaiting(taskId: String)
+        /// A Duck a Member asked for, waiting on the Owner: Approve starts it, Decline tells the Member.
+        case startApproval(requestId: String)
+        /// A Member's own Duck waiting for the Owner: words only.
+        case startWaiting(requestId: String)
         case join(requestId: String)
     }
 
@@ -211,21 +215,35 @@ public struct PondDashboardNeedsYouItem: Sendable, Equatable, Identifiable {
         switch kind {
         case .duck(let id): "duck:" + id
         case .taskApproval(let id), .taskBlocked(let id), .taskWaiting(let id): "task:" + id
+        case .startApproval(let id), .startWaiting(let id): "start:" + id
         case .join(let id): "join:" + id
         }
     }
 }
 
 public enum PondDashboardNeedsYou {
-    /// Ducks that need the person, then Tasks, then people asking to join. Only what the host already says.
+    /// Ducks that need the person, then Ducks Members asked for, then Tasks, then people asking to join. Only what the
+    /// host already says. A Member's Tasks and Ducks always wait for the Owner: the Owner decides, the Member reads
+    /// "Waiting for Sibhi".
     public static func build(
-        rows: [PondChatRow], tasks: [RoomTask], joins: [JoinRequest], role: PondRole, ownerName: String?
+        rows: [PondChatRow], tasks: [RoomTask], joins: [JoinRequest], role: PondRole, ownerName: String?,
+        starts: [PondPendingStart] = []
     ) -> [PondDashboardNeedsYouItem] {
         var out: [PondDashboardNeedsYouItem] = []
         for r in rows where r.needsYou && !r.isFlock {
             let name = r.heading ?? r.title
             let line = r.failed ? (r.failureText.map { "Failed: \($0)" } ?? "Failed") : (r.statusLine ?? "Needs you")
             out.append(PondDashboardNeedsYouItem(kind: .duck(rowId: r.id), title: name, line: line, needsDecision: true))
+        }
+        for s in starts {
+            let title = s.title.isEmpty ? "A new duck" : s.title
+            if role == .owner, !s.mine {
+                let who = s.name.isEmpty ? "A Member" : s.name
+                out.append(PondDashboardNeedsYouItem(kind: .startApproval(requestId: s.requestId), title: title, line: "\(who) asked for this Duck", needsDecision: true))
+            } else if s.mine {
+                out.append(PondDashboardNeedsYouItem(
+                    kind: .startWaiting(requestId: s.requestId), title: title, line: "Waiting for \(PondDashboardHeader.ownerWord(ownerName))", needsDecision: false))
+            }
         }
         for t in tasks where t.state == .waiting && !t.proposed {
             guard let who = t.approvalName else { continue }

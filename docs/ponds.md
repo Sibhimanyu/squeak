@@ -24,18 +24,26 @@ A Member can read, view changes, message, steer and answer; a Viewer only reads.
 handles approvals and Stop on the Mac that runs it. A question hold expires 2 minutes after its last renewal.
 Other readers see who is answering.
 
-- **Three roles: Owner, Member, Viewer.** Only the Owner invites, removes, changes roles, approves what a Member asked for
-  and stops; approving edits and Stop stay with the Duck's starter (the Owner for ducks on the Owner's Mac). A **Viewer**
-  reads and posts nothing. A **Member** reads, posts in the Room, messages Ducks, answers questions and makes Tasks, which
-  wait for the Owner's approval. The Member's one switch is **Can start Tasks** (`MemberDoc.canStartTasks`, owner-signed,
-  in the member's own document; off by default): on, their Tasks go ahead. The Owner changes a role or the switch from
-  People (`POST /ponds/<id>/members/<memberId>/role { role }`, `.../start-tasks { on }`); both take effect on the next
-  read and every change is a Ripple. A Viewer has no switch, and a Viewer made Member again starts with it off.
-  Migration: old documents' `caps`, presets, `muted`, per-Duck `locked`/`allow`/`deny` and machine grants are ignored
-  (an old Viewer is a Viewer, every other role a Member with the switch off); the `caps` the pond view still sends is
-  derived from the role (`capsOf`) only so older clients decode it. A Member's `start` command (a new Duck on the Owner's
-  Mac) without the switch is refused with "That waits for the Owner's approval."; a Duck that waits for approval, as a
-  Task does, is not built yet.
+- **Three roles: Owner, Member, Viewer.** Only the Owner invites, removes, changes roles and decides what a Member asked
+  for. Approving edits and Stop are the Owner's alone, on every Duck in the Pond, including one a Member asked for (it
+  runs on the Owner's Mac); a Member or a Viewer never. A **Viewer** reads and posts nothing. A **Member** reads, posts in
+  the Room, messages Ducks, answers questions and makes Tasks or asks for a Duck; **Tasks and new Ducks always wait for
+  the Owner's approval**, because they spend the Owner's tokens. There are no per-Member switches (finer permissions come
+  later): an old `MemberDoc.canStartTasks` is ignored. The Owner changes a role from People
+  (`POST /ponds/<id>/members/<memberId>/role { role }`); it takes effect on the next read and is a Ripple.
+  Migration: old documents' `caps`, presets, `muted`, `canStartTasks`, per-Duck `locked`/`allow`/`deny` and machine grants
+  are ignored (an old Viewer is a Viewer, every other role a Member); the `caps` the pond view still sends is derived from
+  the role (`capsOf`) only so older clients decode it (`start` is true for a Member: it means "may ask").
+- **A Member's Duck waits for the Owner.** The Member's `start` command is verified on the Owner's Mac like any command,
+  then recorded, not run: `LocalPond.pendingStarts` (never in the cloud) holds who asked, the first message, agent, model
+  and title; a Ripple says "asked for a duck". The pond view carries `starts` (all of them on the Owner's Mac with the
+  first message; the Member's own on theirs, `mine: true`, title only, kept in `LocalPond.asked`). The Owner's Dashboard
+  shows them in Needs you with Approve and Decline: `POST /ponds/<id>/starts/<requestId>/approve` starts the Duck through
+  the normal start path (the Owner's default permission mode, never `bypassPermissions`) and delivers the first message,
+  and the Member's Mac opens it by `requestId`; `.../decline` drops it and writes a Ripple ("declined the duck ...")
+  whose `ref` is the `requestId`, which is how the Member's Mac stops showing "Waiting for <Owner>". A request lapses
+  after a day; at most ten wait per Member; one from someone no longer a Member cannot be approved. The sender's Mac
+  does not refuse a start any more; only a Viewer is refused ("Viewers can read but not send.").
 - **Private Ducks.** A Private Duck is its starter's alone: its thread document and events are never written to the cloud,
   and every reader skips one that says `private`. Ducks shared in a Pond before its first invite are set Private by that
   invite (`LocalPond.invited`; a Pond that already has other members is past it); Ducks shared after are visible. Making
@@ -43,7 +51,8 @@ Other readers see who is answering.
 - **Enforced on the thread's Mac, never trusted from the client**: `verifyCommand` reads the member list at that moment, so
   a role change takes effect on the next command and a client that skips its own check is refused with a fixed sentence
   ("Viewers can read but not send."). The sender's Mac checks the live member list too, not its cached role.
-- **Mac UI**: People menu per member (Make viewer / Make member, and a Can start Tasks check for a Member), the thread
+- **Mac UI**: People menu per member (Make viewer / Make member), the Dashboard's Needs you (Approve and Decline for a
+  Member's Task or Duck; the Member reads "Waiting for <Owner>"), the thread
   header's Private toggle, composer disabled with the reason for a Viewer, rows of own threads carry the powered-by mark.
 - **Phone and web**: the phone's pond-threads doc (`pondthreads`) carries optional `flock` and `access` (`canMessage`,
   `reason`), read by the Mac from the pond itself (`NativePhone.pondFlock`); older fields such as `locked` may still
@@ -282,7 +291,7 @@ own key; the member is the account those keys belong to.
   optional `devices: [{ id, publicKey, boxKey, client: "mac"|"web"|"ios", nest?, addedAt }]` and `primaryRetired?: true`. The
   document's own `publicKey` (and `id = memberIdOf(publicKey)`) is device number one, so every existing single-key document is
   already a one-device member and is read unchanged; old clients that do not know `devices` still decode it and simply treat the
-  member as their first key. A separate device document kind was rejected: role, "Can start Tasks", names and removal
+  member as their first key. A separate device document kind was rejected: role, names and removal
   are already one owner-signed document per member, and a second document would need its own ordering against it (a device could
   outlive a removal, or be listed before the key reached it). `id` of a device is derived from its key and a reader drops a
   device whose id is not its key's, repeats, or is past 8 (`MAX_DEVICES_PER_MEMBER`). `boxKey` is the key a pond key is sealed
@@ -290,7 +299,7 @@ own key; the member is the account those keys belong to.
   (a hash of that key) must not change, so the document keeps `publicKey` and stops counting it.
 - **Signatures.** A signed document's `device` field stays the **member id**; it verifies under any of the member's current device
   keys (`keysOfMember`). So `verifyCommand` and every reader (threads, tevents, presence, holds, ripples, tasks) accept a
-  second device without knowing about it, and thread starters, holds, nonces and "Can start Tasks" (all by member id) apply to
+  second device without knowing about it, and thread starters, holds and nonces (all by member id) apply to
   every device. A device that is not the first finds itself by its key id among members' device ids (`memberOfDevice`) and acts as
   that member (`pond.memberId`). Its `keys/<deviceId>` document (the pond key and a per-device pond token, sealed to its `boxKey`,
   signed by the owner) is read by its own key id.
@@ -455,11 +464,11 @@ A new stream gets a pond-themed name, not a bird: "Quiet Creek", "Staff Otter", 
 `{ ok: false, reason }` (a fixed sentence). Two layers, kept apart:
 
 - **Pond role** (owner, member, viewer): only the owner invites, decides joins and removes members; a viewer only
-  watches; members start threads (a Member's wait for the Owner without Can start Tasks), message, answer questions and ask
+  watches; members ask for threads (always held for the Owner's approval), message, answer questions and ask
   for a diff on a thread someone else started.
-- **Agent authority** (per thread): approving edits, shell or destructive work, pushing and stopping stay with the
-  thread's starter, whatever anyone's role (the pond's owner included); an agent never approves its own work. A
-  private thread does not exist for anyone but its starter.
+- **Agent authority** (per thread): approving edits, shell or destructive work, pushing and stopping are the Owner's
+  alone, on every Duck in the Pond, including one a Member asked for (it runs on the Owner's Mac); a Member or a Viewer
+  never, and an agent never approves its own work. A private thread does not exist for anyone but its starter.
 
 ## States and the pond contract (2026-11-13)
 

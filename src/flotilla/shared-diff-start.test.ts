@@ -155,8 +155,6 @@ describe("a member reads the changes of someone else's thread", () => {
       await m.service.join((await A.service.invite(pondId, role)).code);
       for (const j of (await A.service.view(pondId)).joins)
         await A.service.decideJoin(pondId, j.requestId, { approve: true });
-      // A Member does not start by default; the Collaborator preset does.
-      if (role === "member") await A.service.setCanStartTasks(pondId, m.service.me.id, true);
       await m.service.refresh(pondId);
     }
     A.host.sessions.set("s1", session("s1"));
@@ -285,13 +283,11 @@ describe("a member starts a thread on the owner's Mac", () => {
       await m.service.join((await A.service.invite(pondId, role)).code);
       for (const j of (await A.service.view(pondId)).joins)
         await A.service.decideJoin(pondId, j.requestId, { approve: true });
-      // A Member does not start by default; the Collaborator preset does.
-      if (role === "member") await A.service.setCanStartTasks(pondId, m.service.me.id, true);
       await m.service.refresh(pondId);
     }
   });
 
-  it("the owner's Mac makes a normal chat in the pond's folder and publishes it for everyone", async () => {
+  it("the owner's Mac makes a normal chat in the pond's folder and publishes it for everyone, once the Owner approves", async () => {
     const { requestId } = await B.service.requestStart(pondId, {
       text: "Draft the outline",
       title: "Outline",
@@ -300,6 +296,10 @@ describe("a member starts a thread on the owner's Mac", () => {
     });
     const out = await A.bridge.runCommands(pondId);
     expect(out).toEqual([expect.objectContaining({ ok: true, kind: "start" })]);
+    // Held, not started: it spends the Owner's tokens, so it waits for the Owner.
+    expect(started).toHaveLength(0);
+    expect(A.service.ownThreads()).toHaveLength(0);
+    await A.bridge.approveStart(pondId, requestId);
     // The folder: Main, in the pond's project. Never bypassPermissions, though the owner's default says so.
     expect(started[0]).toMatchObject({
       projectId: "proj1",
@@ -347,9 +347,10 @@ describe("a member starts a thread on the owner's Mac", () => {
   });
 
   it("only the owner's Mac answers a start; a member's Mac leaves it alone", async () => {
-    await B.service.requestStart(pondId, { text: "more", agent: "codex", model: "gpt-x" });
+    const { requestId } = await B.service.requestStart(pondId, { text: "more", agent: "codex", model: "gpt-x" });
     expect(await B.bridge.runCommands(pondId)).toEqual([]);
     expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "start" })]);
+    await A.bridge.approveStart(pondId, requestId);
     expect(started[1]!.spec).toMatchObject({ agent: "codex", permissionMode: "default" });
   });
 
@@ -374,9 +375,9 @@ describe("a member starts a thread on the owner's Mac", () => {
       const [o] = await A.bridge.runCommands(pondId);
       accepted.push(o!.ok);
     }
-    // Two were already used above (one before, one more).
+    // Two were already used above (one before, one more). They wait for the Owner: none has started.
     expect(accepted.filter(Boolean).length).toBe(START_PER_HOUR - 3);
-    expect(started.length - before).toBe(START_PER_HOUR - 3);
+    expect(started.length - before).toBe(0);
     clock.now += 61 * 60_000;
     await rawCommand(
       B,

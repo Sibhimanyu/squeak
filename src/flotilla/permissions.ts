@@ -6,10 +6,11 @@ import type { Role } from "./types.js";
  * test can name every cell of the matrix.
  *
  *  1. Pond role: Owner, Member, Viewer. A Viewer only reads; a Member also posts, messages, answers and asks for
- *     Tasks and Ducks (which wait for the Owner unless the Owner turned on that Member's "Can start Tasks"); only the
- *     Owner invites, removes, changes roles and approves what a Member asked for.
- *  2. Agent authority: who may message, answer, approve or stop a thread. Approving and stopping stay with the
- *     thread's starter, whatever the role; nobody else's role (the pond owner's included) reaches them.
+ *     Tasks and Ducks, which always wait for the Owner's approval (they spend the Owner's tokens); only the Owner
+ *     invites, removes, changes roles and approves what a Member asked for.
+ *  2. Agent authority: approving edits, shell and destructive actions, pushing and Stop stay with the Owner alone, on
+ *     every Duck in the Pond (a Duck a Member asked for runs on the Owner's Mac). A Member and a Viewer never, and an
+ *     agent never approves its own work. Messaging and answering are open to a Member on any Duck that is not Private.
  *
  * A Duck marked Private is its starter's alone: to everyone else it does not exist.
  * A refusal is a fixed sentence, never the content of what was refused.
@@ -89,10 +90,10 @@ function threadLevel(actor: Actor, action: ThreadAction, ctx: Context): Decision
     case "answer-question":
       return actor.role === "viewer" ? no(WATCH) : yes;
     default:
-      // Approving, pushing and stopping: the starter, whose machine and account the agent runs on. Not the pond's
-      // owner, not another member; the commands a member can send do not include them either.
+      // Approving, pushing and stopping: the Owner's alone, on every Duck in the Pond. Not a Member (not even the one
+      // whose request started the Duck), not a Viewer, and never an agent.
       if (actor.kind === "agent") return no("An agent cannot approve its own work.");
-      return starter && actor.role !== "viewer" ? yes : no("Only the thread's starter can do that.");
+      return actor.role === "owner" ? yes : no("Only the Owner can do that.");
   }
 }
 
@@ -110,8 +111,8 @@ export function can(actor: Actor, action: Action, ctx: Context = {}): Decision {
 
 /**
  * What a role may do, in the shape older clients read (`caps` on the pond view, and the Room's port). Derived, never
- * stored: a Viewer reads, a Member also messages and answers, and `start` (a Task that goes ahead without the Owner's
- * approval) is the Member's one switch, "Can start Tasks", off unless the Owner turned it on.
+ * stored: a Viewer reads; a Member also messages and answers, and `start` means "may start or ask for a Duck or Task"
+ * (a Member's always waits for the Owner's approval); the Owner just does it.
  */
 export interface Caps {
   see: boolean;
@@ -121,11 +122,7 @@ export interface Caps {
   start: boolean;
 }
 
-export function capsOf(role: Role, canStartTasks = false): Caps {
-  if (role === "owner") return { see: true, diffs: true, message: true, answer: true, start: true };
+export function capsOf(role: Role): Caps {
   if (role === "viewer") return { see: true, diffs: true, message: false, answer: false, start: false };
-  return { see: true, diffs: true, message: true, answer: true, start: canStartTasks };
+  return { see: true, diffs: true, message: true, answer: true, start: true };
 }
-
-/** Said when a Member asks for a Duck or Task that waits for the Owner (no "Can start Tasks"). */
-export const NEEDS_OWNER = "That waits for the Owner's approval.";

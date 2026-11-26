@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
-import { FlotillaBridge } from "./bridge.js";
+import { FlotillaBridge, type BridgeOptions } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FakeHost, session } from "./journey-support.js";
 import { named, verifying } from "./named-account.test-fixture.js";
@@ -28,7 +28,7 @@ afterAll(async () => {
 });
 
 type Mac = ReturnType<typeof mac>;
-function mac(name: string) {
+function mac(name: string, options: BridgeOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-roles-"));
   dirs.push(dir);
   const service = new FlotillaService({
@@ -39,7 +39,7 @@ function mac(name: string) {
     inviteLinkBase: "https://x.test/join",
   });
   const host = new FakeHost();
-  const bridge = new FlotillaBridge(service, host, { flushMs: 60_000 });
+  const bridge = new FlotillaBridge(service, host, { flushMs: 60_000, ...options });
   bridge.start();
   return { dir, service, host, bridge };
 }
@@ -109,16 +109,27 @@ describe("Ducks that exist before a Pond's first invite start Private", () => {
   });
 });
 
-describe("Viewer, Member and the Owner's switch", () => {
+describe("Viewer, Member and the Owner", () => {
   let A: Mac;
   let B: Mac;
   let V: Mac;
   let pondId = "";
   let threadId = "";
   let privateId = "";
+  const startedChats: Array<{ projectId: string; text: string; permissionMode: string }> = [];
 
   beforeAll(async () => {
-    A = mac("Sibhi2");
+    let next = 0;
+    let owner: Mac | null = null;
+    A = mac("Sibhi2", {
+      startChat: async (projectId, spec) => {
+        startedChats.push({ projectId, text: spec.text, permissionMode: spec.permissionMode });
+        const id = `n${++next}`;
+        owner!.host.sessions.set(id, session(id, { title: "New chat" }));
+        return { sessionId: id };
+      },
+    });
+    owner = A;
     B = mac("Aarav2");
     V = mac("Vera2");
     pondId = (await A.service.createPond({ name: "P", projectId: "p-roles2" })).id;
@@ -159,36 +170,106 @@ describe("Viewer, Member and the Owner's switch", () => {
     ]);
   });
 
-  it("a Member without Can start Tasks cannot start a Duck; with it the start goes to the Owner's Mac", async () => {
-    const asked = { text: "go", agent: "claude", model: "m" };
-    expect((await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)).toMatchObject({
-      role: "member",
-      canStartTasks: false,
-      caps: { start: false },
-    });
-    await expect(B.service.requestStart(pondId, asked)).rejects.toThrow(/waits for the Owner/);
-    await rawCommand(B, pondId, { kind: "start", threadId: "", ...asked });
-    expect(await A.bridge.runCommands(pondId)).toEqual([
-      expect.objectContaining({ ok: false, reason: "That waits for the Owner's approval." }),
+  it("a Member's Duck waits for the Owner: recorded with who asked and the first message, nothing started", async () => {
+    const asked = { text: "Fix the login bug", title: "Login bug", agent: "claude" as const, model: "m" };
+    const { requestId, ownerName } = await B.service.requestStart(pondId, asked);
+    expect(ownerName).toBe("Sibhi2");
+    // The Member sees it wait, without the message body.
+    const mine = (await B.service.view(pondId)).starts!;
+    expect(mine).toEqual([expect.objectContaining({ requestId, title: "Login bug", mine: true })]);
+    expect(mine[0]).not.toHaveProperty("text");
+    expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "start" })]);
+    expect(startedChats).toEqual([]);
+    expect(A.service.ownThreads().some((t) => t.thread.sessionId.startsWith("n"))).toBe(false);
+    // The Owner sees who asked and what, to Approve or Decline.
+    expect((await A.service.view(pondId)).starts).toEqual([
+      expect.objectContaining({
+        requestId,
+        name: "Aarav2",
+        title: "Login bug",
+        text: "Fix the login bug",
+        mine: false,
+      }),
     ]);
+    // A Member and a Viewer cannot decide it, by the service or the bridge.
+    for (const who of [B, V]) {
+      await expect(who.service.takeStart(pondId, requestId)).rejects.toThrow(/Only an owner/);
+      await expect(who.bridge.approveStart(pondId, requestId)).rejects.toThrow(/Only an owner/);
+      await expect(who.bridge.declineStart(pondId, requestId)).rejects.toThrow(/Only an owner/);
+    }
+    expect((await A.service.view(pondId)).starts).toHaveLength(1);
+  });
 
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
+  it("Approve starts the Duck through the normal path with the first message; the Member then sees the Duck", async () => {
+    const [waiting] = (await A.service.view(pondId)).starts!;
+    await A.bridge.approveStart(pondId, waiting!.requestId);
+    expect(startedChats).toEqual([{ projectId: "p-roles2", text: "Fix the login bug", permissionMode: "default" }]);
+    expect(A.host.notes).toContain("Aarav2 started this thread.");
+    expect((await A.service.view(pondId)).starts).toBeUndefined();
     await B.service.refresh(pondId);
-    await expect(B.service.requestStart(pondId, asked)).resolves.toBeTruthy();
+    const view = await B.service.view(pondId);
+    expect(view.starts).toBeUndefined();
+    expect(view.threads.find((t) => t.requester?.requestId === waiting!.requestId)).toMatchObject({
+      title: "Login bug",
+    });
+    // Approving twice, or a request nobody made, is a plain 404.
+    await expect(A.bridge.approveStart(pondId, waiting!.requestId)).rejects.toThrow(/no longer waiting/);
   });
 
-  it("only the Owner changes roles and the switch; a Viewer has no switch", async () => {
+  it("Decline tells the Member in one line and starts nothing", async () => {
+    const { requestId } = await B.service.requestStart(pondId, {
+      text: "Rewrite everything",
+      title: "Rewrite",
+      agent: "codex",
+      model: "m",
+    });
+    await A.bridge.runCommands(pondId);
+    await A.bridge.declineStart(pondId, requestId);
+    expect(startedChats).toHaveLength(1);
+    expect((await A.service.view(pondId)).starts).toBeUndefined();
+    await B.service.refresh(pondId);
+    const view = await B.service.view(pondId);
+    expect(view.starts).toBeUndefined();
+    const line = view.ripples.find((r) => r.ref === requestId)!;
+    expect(`${line.actorName} ${line.text}`).toBe('Aarav2 declined the duck "Rewrite"');
+  });
+
+  it("a Member made Viewer loses their waiting Ducks: they cannot be approved", async () => {
+    const { requestId } = await B.service.requestStart(pondId, { text: "later", agent: "claude", model: "m" });
+    await A.bridge.runCommands(pondId);
+    expect((await A.service.view(pondId)).starts).toHaveLength(1);
+    await A.service.changeRole(pondId, B.service.me.id, "viewer");
+    expect((await A.service.view(pondId)).starts).toBeUndefined();
+    await expect(A.bridge.approveStart(pondId, requestId)).rejects.toThrow(/no longer a member/);
+    await A.service.changeRole(pondId, B.service.me.id, "member");
+    expect(startedChats).toHaveLength(1);
+  });
+
+  it("approving edits and Stop are the Owner's alone, on every Duck: a Member's command for them is refused", async () => {
+    const mineId = A.service.ownThreads()[0]!.threadId;
+    for (const kind of ["approve", "stop"]) {
+      await rawCommand(B, pondId, { kind, threadId: mineId, requestId: "x" });
+    }
+    expect(await A.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false }),
+      expect.objectContaining({ ok: false }),
+    ]);
+    expect(A.host.responded).toEqual([]);
+  });
+
+  it("only the Owner changes roles; there is no per-Member switch to change", async () => {
     await expect(B.service.changeRole(pondId, V.service.me.id, "member")).rejects.toThrow(/Only an owner/);
-    await expect(B.service.setCanStartTasks(pondId, B.service.me.id, true)).rejects.toThrow(/Only an owner/);
-    await expect(A.service.setCanStartTasks(pondId, V.service.me.id, true)).rejects.toThrow(/Only a member/);
+    expect(await A.service.view(pondId)).toMatchObject({
+      members: expect.not.arrayContaining([expect.objectContaining({ canStartTasks: expect.anything() })]),
+    });
   });
 
-  it("a role change lands on the next read, and a Viewer made Member again starts with the switch off", async () => {
+  it("a role change lands on the next read", async () => {
     await A.service.changeRole(pondId, B.service.me.id, "viewer");
     await B.service.refresh(pondId);
     expect((await B.service.view(pondId)).me).toMatchObject({ role: "viewer", caps: { message: false, start: false } });
     await A.service.changeRole(pondId, B.service.me.id, "member");
     await B.service.refresh(pondId);
-    expect((await B.service.view(pondId)).me).toMatchObject({ role: "member", caps: { message: true, start: false } });
+    expect((await B.service.view(pondId)).me).toMatchObject({ role: "member", caps: { message: true, start: true } });
   });
 });

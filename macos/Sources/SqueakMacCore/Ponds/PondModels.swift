@@ -148,7 +148,8 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     }
 }
 
-/// What a person may do in a pond right now, as the host worked it out from their role and Can start Tasks.
+/// What a person may do in a pond right now, as the host worked it out from their role (`start` means may start or ask
+/// for a Duck: a Member's waits for the Owner).
 /// The host enforces it on every command; this only decides what the screen offers and what it says.
 public struct PondCaps: Sendable, Equatable, Decodable {
     public var see: Bool
@@ -175,8 +176,6 @@ public struct PondCaps: Sendable, Equatable, Decodable {
 public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     /// What this person may do, derived by the host from the role; nil from an older host.
     public var caps: PondCaps? = nil
-    /// A Member's one switch, "Can start Tasks" (off unless the Owner turned it on); false for an older host.
-    public var canStartTasks: Bool = false
     public var id: String
     public var name: String
     public var role: PondRole
@@ -191,13 +190,12 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     /// The account's email, drawn under the name and on hover; nil from an older host or a member with none on file.
     public var email: String? = nil
 
-    enum CodingKeys: String, CodingKey { case id, name, email, role, nest, online, you, nestName, client, lastSeenAt, caps, canStartTasks }
+    enum CodingKeys: String, CodingKey { case id, name, email, role, nest, online, you, nestName, client, lastSeenAt, caps }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         caps = c.lenient(PondCaps.self, .caps)
-        canStartTasks = c.lenient(Bool.self, .canStartTasks) ?? false
         name = c.lenient(String.self, .name) ?? ""
         email = c.lenient(String.self, .email).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         role = PondRole(raw: c.lenient(String.self, .role))
@@ -519,8 +517,10 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     public var me: PondMe?
     /// The owner's invites with their states; empty for anyone else and from an older host.
     public var invites: [PondInviteEntry]
+    /// Ducks Members asked for that wait for the Owner: every one on the Owner's Mac, a Member's own on theirs; empty from an older host.
+    public var starts: [PondPendingStart]
 
-    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, joins, me, invites, offline, asOf, offlineLine }
+    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, joins, me, invites, starts, offline, asOf, offlineLine }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -533,6 +533,7 @@ public struct PondDetail: Sendable, Equatable, Decodable {
         joins = c.list(JoinRequest.self, .joins)
         me = c.lenient(PondMe.self, .me)
         invites = c.list(PondInviteEntry.self, .invites)
+        starts = c.list(PondPendingStart.self, .starts)
         // The contract puts `offline` on the pond; a host may also write it beside it.
         if c.lenient(Bool.self, .offline) == true { pond.offline = true }
         if pond.asOf == nil { pond.asOf = PondTime.decode(c, CodingKeys.asOf) }
@@ -541,9 +542,11 @@ public struct PondDetail: Sendable, Equatable, Decodable {
 
     public init(
         pond: PondSummary, members: [FlockMember] = [], threads: [PondThread] = [], ripples: [RippleEntry] = [],
-        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], joins: [JoinRequest] = [], me: PondMe? = nil, invites: [PondInviteEntry] = []
+        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], joins: [JoinRequest] = [], me: PondMe? = nil, invites: [PondInviteEntry] = [],
+        starts: [PondPendingStart] = []
     ) {
         self.invites = invites
+        self.starts = starts
         self.pond = pond; self.members = members; self.threads = threads; self.ripples = ripples
         self.presence = presence; self.holds = holds; self.joins = joins; self.me = me
     }
@@ -551,6 +554,34 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     /// This Mac's person: the member the host marks `you`, else the one `me` names.
     public var meMember: FlockMember? { members.first { $0.you } ?? members.first { $0.id == me?.id } }
     public var myRole: PondRole { me?.role ?? meMember?.role ?? pond.role }
+}
+
+/// A Duck a Member asked for, waiting for the Owner's Approve or Decline (`starts` on the pond view). The Owner's Mac
+/// carries the first message in `text`; a Member's own Mac only the title, and `mine` is true.
+public struct PondPendingStart: Sendable, Equatable, Identifiable, Decodable {
+    public var requestId: String
+    public var memberId: String
+    public var name: String
+    public var title: String
+    public var text: String?
+    public var mine: Bool
+    public var id: String { requestId }
+
+    enum CodingKeys: String, CodingKey { case requestId, memberId, name, title, text, mine }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        requestId = try c.decode(String.self, forKey: .requestId)
+        memberId = c.lenient(String.self, .memberId) ?? ""
+        name = c.lenient(String.self, .name) ?? ""
+        title = c.lenient(String.self, .title) ?? ""
+        text = c.lenient(String.self, .text)
+        mine = c.lenient(Bool.self, .mine) ?? false
+    }
+
+    public init(requestId: String, memberId: String = "", name: String, title: String, text: String? = nil, mine: Bool = false) {
+        self.requestId = requestId; self.memberId = memberId; self.name = name; self.title = title; self.text = text; self.mine = mine
+    }
 }
 
 extension KeyedDecodingContainer {

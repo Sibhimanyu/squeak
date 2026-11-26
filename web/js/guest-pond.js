@@ -501,7 +501,7 @@ export class GuestPond {
         id: r.memberId,
         name: r.displayName,
         role: members.get(r.memberId).role,
-        caps: capsOf(members.get(r.memberId).role, members.get(r.memberId).canStartTasks),
+        caps: capsOf(members.get(r.memberId).role),
       },
       members: [...members.values()].map((m) => ({
         id: m.id,

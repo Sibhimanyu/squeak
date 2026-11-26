@@ -613,14 +613,10 @@ describe("a Member's Tasks need the Owner's approval", () => {
     await A.service.setPresence(pondId, {});
   });
 
-  it("a Member has no start permission by default; the Owner turns Can start Tasks on", async () => {
-    const view = async () => (await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)!;
-    expect((await view()).caps?.start).toBe(false);
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
-    expect((await view()).caps?.start).toBe(true);
-    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
-    expect((await view()).caps?.start).toBe(false);
-    await B.service.refresh(pondId);
+  it("a Member has no per-Member switch: the view carries no canStartTasks", async () => {
+    const view = (await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)!;
+    expect(view).not.toHaveProperty("canStartTasks");
+    expect(view.caps).toMatchObject({ message: true, answer: true });
   });
 
   it("Make task from a Member's Mac waits for the Owner, who approves it from the Room; the Member sees it wait", async () => {
@@ -656,18 +652,6 @@ describe("a Member's Tasks need the Owner's approval", () => {
     await host.jobs.act(host.project.id, made.id, { action: "drop" });
     await host.sync.idle();
     expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)).toMatchObject({ state: "dropped" });
-  });
-
-  it("with the start permission the Task is the Owner's kind: nothing waits", async () => {
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
-    await B.service.refresh(pondId);
-    const said = await bSync.post(pondId, "make it a task: tidy the header spacing");
-    await apply();
-    const made = host.jobs.list(host.project.id).find((t) => t.messageId === `m-${said.id}`)!;
-    expect(made.approval).toBeUndefined();
-    expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)?.needsApproval).toBeUndefined();
-    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
-    await B.service.refresh(pondId);
   });
 
   it("a viewer cannot make a Task, and a Make task written past the check is dropped", async () => {

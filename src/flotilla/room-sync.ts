@@ -434,7 +434,7 @@ export class RoomSync extends EventEmitter {
         from.caps.message &&
         now - doc.at <= ROOM_INBOX_LIFE_MS &&
         this.takeSlot(pondId, from.device);
-      const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.caps.start };
+      const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.role === "owner" };
       if (fine && doc.task) {
         // "Make task": the Owner's Task rules, with the approval gate for a Member without the start permission.
         try {

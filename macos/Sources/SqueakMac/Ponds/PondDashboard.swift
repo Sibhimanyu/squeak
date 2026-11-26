@@ -69,7 +69,8 @@ struct PondHomeView: View {
         let ducks = PondDuckSections.build(layout)
         let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
         let needs = PondDashboardNeedsYou.build(
-            rows: ducks.onDuty + ducks.offDuty, tasks: room?.feed.jobs ?? [], joins: joins, role: role, ownerName: pond?.ownerName)
+            rows: ducks.onDuty + ducks.offDuty, tasks: room?.feed.jobs ?? [], joins: joins, role: role, ownerName: pond?.ownerName,
+            starts: detail?.starts ?? [])
         let latest = PondLatest.build(room?.feed.rows.map(\.post) ?? [])
         let blocks = PondDashboardBlocks.of(needsYou: needs.count, ducks: ducks, latest: latest.count)
         GeometryReader { geometry in
@@ -220,7 +221,9 @@ struct PondHomeView: View {
                     case .join(let requestId):
                         if let pond, let join = joins.first(where: { $0.id == requestId }) { JoinRequestCard(pond: pond, join: join) }
                     default:
-                        PondNeedsYouRow(item: item, open: { openNeeds(item, ducks: ducks) }, act: { act($0, on: item) })
+                        PondNeedsYouRow(
+                            item: item, open: { openNeeds(item, ducks: ducks) }, act: { act($0, on: item) },
+                            decideStart: { approve in decideStart(item, approve: approve) })
                     }
                 }
             }
@@ -231,6 +234,12 @@ struct PondHomeView: View {
     private func openNeeds(_ item: PondDashboardNeedsYouItem, ducks: PondDuckSections) {
         if case .duck(let rowId) = item.kind, let row = (ducks.onDuty + ducks.offDuty).first(where: { $0.id == rowId }) { open(row); return }
         model.applyCentre(pond: key) { $0.switchTo(.room) }
+    }
+
+    /// A Member's waiting Duck: Approve starts it on this Mac through the normal path, Decline tells the Room.
+    private func decideStart(_ item: PondDashboardNeedsYouItem, approve: Bool) {
+        guard case .startApproval(let requestId) = item.kind, let pondId = pond?.id else { return }
+        Task { await ponds.decideStart(pond: pondId, request: requestId, approve: approve) }
     }
 
     private func act(_ action: RoomTaskAction, on item: PondDashboardNeedsYouItem) {
@@ -368,6 +377,7 @@ private struct PondNeedsYouRow: View {
     let item: PondDashboardNeedsYouItem
     let open: () -> Void
     let act: (RoomTaskAction) -> Void
+    let decideStart: (Bool) -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -383,7 +393,10 @@ private struct PondNeedsYouRow: View {
             case .taskApproval:
                 Button("Decline") { act(.drop) }.buttonStyle(SecondaryButtonStyle())
                 Button("Approve") { act(.approve) }.buttonStyle(PondPrimaryButtonStyle())
-            case .taskWaiting, .join: EmptyView()
+            case .startApproval:
+                Button("Decline") { decideStart(false) }.buttonStyle(SecondaryButtonStyle())
+                Button("Approve") { decideStart(true) }.buttonStyle(PondPrimaryButtonStyle())
+            case .taskWaiting, .startWaiting, .join: EmptyView()
             }
         }
         .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 12)

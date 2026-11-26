@@ -28,7 +28,7 @@ import {
   type ThreadState,
 } from "./types.js";
 import type { TimelineEvent } from "../native/timeline.js";
-import type { CommandOutcome, FlotillaService, VerifiedCommand } from "./service.js";
+import type { CommandOutcome, FlotillaService, PendingStart, VerifiedCommand } from "./service.js";
 
 /** The small port between ponds and the session host: what the bridge reads, and what a member's command may do. */
 export interface HostPort {
@@ -444,7 +444,8 @@ export class FlotillaBridge {
   /** Where a verified command meets the host. `answer` is only for a question; there is no approve or stop. */
   private async execute(pondId: string, v: VerifiedCommand): Promise<void> {
     const { cmd, from } = v;
-    if (cmd.kind === "start") return this.startFor(pondId, v);
+    // A Member's Duck spends the Owner's tokens: it is recorded as waiting and runs only when the Owner approves it.
+    if (cmd.kind === "start") return this.service.holdStart(pondId, from, cmd);
     if (cmd.kind === "artifacts" || cmd.kind === "artifact") return this.artifactsFor(pondId, v);
     const thread = v.thread;
     if (!thread) throw new FlotillaError("no such thread");
@@ -609,16 +610,37 @@ export class FlotillaBridge {
   }
 
   /**
-   * A member's `start`, on the pond owner's Mac: a chat in the pond's folder, in the owner's default permission mode and
-   * never `bypassPermissions` (it would run a stranger's words without asking), with the member as its requester and
-   * first participant. Published like any thread, so everyone sees it; the member's Mac opens it by `requestId`.
+   * The Owner approves a Member's waiting Duck: it starts through the normal path and gets the Member's first message.
+   * If it cannot start (this Mac does not hold the folder) the request stays waiting, so nothing the Member asked is lost.
    */
-  private async startFor(pondId: string, v: VerifiedCommand): Promise<void> {
-    const { cmd, from } = v;
-    const text = cmd.text?.trim();
+  async approveStart(pondId: string, requestId: string): Promise<void> {
+    const found = await this.service.takeStart(pondId, requestId);
+    try {
+      await this.startFor(pondId, found);
+    } catch (error) {
+      await this.service.restoreStart(pondId, found).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** The Owner declines: the request is dropped and the Room says so in one line. */
+  declineStart(pondId: string, requestId: string): Promise<void> {
+    return this.service.declineStart(pondId, requestId);
+  }
+
+  /**
+   * A Member's Duck on the pond owner's Mac (once the Owner approves): a chat in the pond's folder, in the owner's
+   * default permission mode and never `bypassPermissions` (it would run a stranger's words without asking), with the
+   * member as its requester and first participant. Published like any thread, so everyone sees it; the member's Mac
+   * opens it by `requestId`.
+   */
+  private async startFor(pondId: string, request: PendingStart): Promise<void> {
+    const from = { id: request.memberId, name: request.name };
+    const cmd = { text: request.text, model: request.model, title: request.title, requestId: request.requestId };
+    const text = cmd.text.trim();
     if (!text || text.length > MAX_TEXT) throw new FlotillaError("empty message");
-    const agent = cmd.agent === "codex" ? "codex" : cmd.agent === "claude" ? "claude" : null;
-    if (!agent || !cmd.model || !/^[A-Za-z0-9._:[\]/-]{1,100}$/.test(cmd.model)) {
+    const agent = request.agent;
+    if (!/^[A-Za-z0-9._:[\]/-]{1,100}$/.test(cmd.model)) {
       throw new FlotillaError("choose Claude or Codex and a model");
     }
     const projectId = this.service.projectIdOf(pondId);
@@ -642,7 +664,7 @@ export class FlotillaBridge {
     const thread = await this.share(pondId, started.sessionId, {
       mode: "shared",
       ...(cmd.title ? { title: cmd.title } : {}),
-      requester: { memberId: from.id, requestId: cmd.requestId ?? cmd.id, name: from.name },
+      requester: { memberId: from.id, requestId: cmd.requestId, name: from.name },
     });
     await this.service
       .noteParticipant(pondId, thread.id, { id: from.id, name: from.name }, this.now(), "working")

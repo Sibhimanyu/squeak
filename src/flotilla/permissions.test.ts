@@ -49,10 +49,12 @@ const talks = { ...onlyWatching, message: true, "answer-question": true, "reques
 
 describe("thread authority: role x action x starter x private", () => {
   const rows: Array<[string, Actor, Record<string, boolean>]> = [
-    ["owner (not the starter)", owner, talks],
+    // Approving edits, shell and destructive actions, pushing and Stop are the Owner's on every Duck in the Pond.
+    ["owner (not the starter)", owner, { ...everything(true), "set-private": false }],
     ["member (not the starter)", other, talks],
     ["viewer", viewer, onlyWatching],
-    ["the starter", member, everything(true)],
+    // A Member who started a Duck (their own Mac, or asked for on the Owner's) still never approves or stops.
+    ["member who is the starter", member, { ...talks, "set-private": true }],
   ];
   for (const [who, a, expected] of rows) {
     it(`${who} on an open thread`, () => {
@@ -66,7 +68,19 @@ describe("thread authority: role x action x starter x private", () => {
       for (const action of THREAD_ACTIONS) expect(ok(a, action, thread("M", true)), action).toBe(false);
       expect(can(a, "view-thread", thread("M", true))).toEqual({ ok: false, reason: "no such thread" });
     }
-    for (const action of THREAD_ACTIONS) expect(ok(member, action, thread("M", true))).toBe(true);
+    for (const action of ["view-thread", "set-private", "message", "answer-question", "request-diff"] as const) {
+      expect(ok(member, action, thread("M", true))).toBe(true);
+    }
+  });
+  it("the Owner approves edits and stops on every Duck, including one a Member started; a Member and a Viewer never", () => {
+    const acts = ["approve-edit", "approve-shell", "approve-destructive", "push-git", "stop"] as const;
+    for (const action of acts) {
+      expect(ok(owner, action, thread("M")), `owner ${action}`).toBe(true);
+      expect(ok(owner, action, thread("O")), `owner ${action} on their own`).toBe(true);
+      expect(ok(member, action, thread("M")), `starting member ${action}`).toBe(false);
+      expect(ok(other, action, thread("M")), `member ${action}`).toBe(false);
+      expect(ok(viewer, action, thread("M")), `viewer ${action}`).toBe(false);
+    }
   });
   it("an agent never approves, pushes or stops, even for its starter", () => {
     const agent: Actor = { kind: "agent", memberId: "M", role: "member" };
@@ -80,18 +94,14 @@ describe("thread authority: role x action x starter x private", () => {
   });
   it("names fixed reasons", () => {
     expect(can(viewer, "message", thread("M"))).toEqual({ ok: false, reason: "viewers only watch" });
-    expect(can(owner, "approve-shell", thread("M"))).toEqual({
-      ok: false,
-      reason: "Only the thread's starter can do that.",
-    });
+    expect(can(member, "approve-shell", thread("M"))).toEqual({ ok: false, reason: "Only the Owner can do that." });
   });
 });
 
 describe("roles", () => {
-  it("a Member's one switch, Can start Tasks, is off unless the Owner turned it on; a Viewer never has it", () => {
-    expect(capsOf("member")).toEqual({ see: true, diffs: true, message: true, answer: true, start: false });
-    expect(capsOf("member", true).start).toBe(true);
-    expect(capsOf("viewer", true)).toEqual({ see: true, diffs: true, message: false, answer: false, start: false });
+  it("there is no per-Member switch: caps come from the role alone, and a Member's start waits for the Owner", () => {
+    expect(capsOf("member")).toEqual({ see: true, diffs: true, message: true, answer: true, start: true });
+    expect(capsOf("viewer")).toEqual({ see: true, diffs: true, message: false, answer: false, start: false });
     expect(capsOf("owner").start).toBe(true);
   });
   it("a Viewer cannot post, message, answer or start anything", () => {

@@ -536,9 +536,12 @@ final class PondsModel {
         _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.") { try await self.client!.removeMember(pond: pond, member: member) }
     }
 
-    func setCanStartTasks(pond: String, member: String, on: Bool) async {
-        let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
-        _ = await act("role:\(pond):\(member)", pond: pond, success: on ? "\(name) can start Tasks." : "\(name)\u{2019}s Tasks wait for you.") { try await self.client!.setCanStartTasks(pond: pond, member: member, on: on) }
+    /// Owner: a Member's waiting Duck is approved (it starts) or declined (the Room says so).
+    func decideStart(pond: String, request: String, approve: Bool) async {
+        _ = await act("start:\(pond):\(request)", pond: pond, success: approve ? "Duck approved." : "Duck declined.") {
+            if approve { try await self.client!.approveStart(pond: pond, request: request) }
+            else { try await self.client!.declineStart(pond: pond, request: request) }
+        }
     }
 
     func setRole(pond: String, member: String, role: PondRole) async {

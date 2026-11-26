@@ -385,8 +385,8 @@ struct PondThreadView: View {
         }
     }
 
-    /// Shown so people know why the thread waits. Approving stays with the starter on their own Mac: the control is here,
-    /// disabled, and its tooltip says who can.
+    /// Shown so people know why the thread waits. Approving edits is the Owner's alone: the control is here, disabled for
+    /// a Member or a Viewer, and its tooltip says who can.
     private func approval(label: String, resolved: Bool) -> some View {
         let gate = access.gate(.approve)
         return HStack(alignment: .top, spacing: Space.s) {

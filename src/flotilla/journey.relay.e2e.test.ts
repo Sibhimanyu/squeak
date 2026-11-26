@@ -253,7 +253,6 @@ describe("the multiplayer journey over the real relay", () => {
     const [join] = (await A.service.view(pondId)).joins;
     expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
     await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     await B.service.refresh(pondId);
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
@@ -314,7 +313,6 @@ describe("the multiplayer journey over the real relay", () => {
     ]);
     expect(A.host.sent.map((s) => s.text)).not.toContain("forged");
     await A.service.changeRole(pondId, B.service.me.id, "member");
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     expect((await B.bridge.message(pondId, shared, "back")).ok).toBe(true);
     await A.bridge.runCommands(pondId);
   });

@@ -175,6 +175,23 @@ import Testing
         #expect(member.last?.needsDecision == false)
     }
 
+    @Test func aMembersDuckWaitsForTheOwnerWhoApprovesOrDeclinesAndTheMemberReadsWaitingForTheOwner() {
+        let asked = PondPendingStart(requestId: "r1", memberId: "a", name: "Asha", title: "Login bug", text: "Fix it", mine: false)
+        let owner = PondDashboardNeedsYou.build(rows: [row("pip", .needsYou, needs: true)], tasks: [], joins: [], role: .owner, ownerName: "Sibhi", starts: [asked])
+        #expect(owner.map(\.kind) == [.duck(rowId: "pip"), .startApproval(requestId: "r1")])
+        #expect(owner.last?.title == "Login bug" && owner.last?.line == "Asha asked for this Duck" && owner.last?.needsDecision == true)
+
+        let mine = PondPendingStart(requestId: "r1", memberId: "a", name: "Asha", title: "Login bug", mine: true)
+        let member = PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: "Sibhi", starts: [mine])
+        #expect(member.map(\.kind) == [.startWaiting(requestId: "r1")])
+        #expect(member.first?.line == "Waiting for Sibhi" && member.first?.needsDecision == false)
+
+        // A Viewer, or a Member looking at someone else's request, never gets Approve.
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .viewer, ownerName: nil, starts: [asked]).isEmpty)
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: nil, starts: [asked]).isEmpty)
+        #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [], role: .member, ownerName: nil, starts: [mine]).first?.line == "Waiting for The owner")
+    }
+
     @Test func joinsOnlyReachTheOwner() throws {
         let join = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j1","name":"Dev","role":"member"}"#.utf8))
         #expect(PondDashboardNeedsYou.build(rows: [], tasks: [], joins: [join], role: .owner, ownerName: nil).map(\.kind) == [.join(requestId: "j1")])

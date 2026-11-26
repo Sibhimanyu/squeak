@@ -16,19 +16,23 @@ struct PondAccessTests {
         #expect(a.canAnswer)
     }
 
-    @Test func theOwnerOfThePondIsStillOnlyAMemberOnSomeoneElsesThread() {
-        let a = access(.owner)
-        #expect(!a.gate(.approve).enabled && !a.gate(.stop).enabled)
-        #expect(a.gate(.message).enabled)
+    @Test func theOwnerApprovesEditsAndStopsOnEveryDuckIncludingOneAMemberStarted() {
+        for mine in [false, true] {
+            let a = access(.owner, mine: mine)
+            #expect(a.gate(.approve) == ThreadAccess.Gate(enabled: true, tooltip: nil, visible: true))
+            #expect(a.gate(.stop) == ThreadAccess.Gate(enabled: true, tooltip: nil, visible: true))
+        }
+        #expect(access(.owner).gate(.message).enabled)
     }
 
-    @Test func approveAndStopStayWithTheStarterAsDisabledControlsWithAReason() {
-        let a = access(.member)
-        #expect(a.gate(.approve) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can approve on their duck", visible: true))
-        #expect(a.gate(.stop) == ThreadAccess.Gate(enabled: false, tooltip: "Only Aarav can stop on their duck", visible: true))
-        #expect(access(.member, starterName: "").gate(.stop).tooltip == "Only the starter can stop on their duck")
-        let mine = access(.member, mine: true)
-        #expect(mine.gate(.approve).enabled && mine.gate(.stop).enabled && mine.gate(.approve).tooltip == nil)
+    @Test func aMemberNeverApprovesOrStopsEvenOnTheDuckTheyStartedAndAViewerNeverEither() {
+        for role in [PondRole.member, .viewer] {
+            for mine in [false, true] {
+                let a = access(role, mine: mine)
+                #expect(a.gate(.approve) == ThreadAccess.Gate(enabled: false, tooltip: "Only the Owner can approve edits", visible: true))
+                #expect(a.gate(.stop) == ThreadAccess.Gate(enabled: false, tooltip: "Only the Owner can stop a duck", visible: true))
+            }
+        }
     }
 
     @Test func aViewerWatchesOnlyAndTheComposerIsOneMutedLine() {

@@ -198,12 +198,11 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
-    // The Member's one switch, "Can start Tasks" (the owner's; off by default).
-    if (b === "members" && c && d === "start-tasks" && parts.length === 5 && method === "POST") {
-      const body = await ctx.body();
-      exact(body, ["on"]);
-      if (typeof body.on !== "boolean") throw new FlotillaError("on is true or false");
-      await service.setCanStartTasks(pondId, c, body.on);
+    // A Member's Duck waits for the Owner: Approve starts it (through the normal start path), Decline tells the Room.
+    if (b === "starts" && c && (d === "approve" || d === "decline") && parts.length === 5 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      if (d === "approve") await bridge.approveStart(pondId, c);
+      else await bridge.declineStart(pondId, c);
       ctx.json(200, { ok: true });
       return true;
     }

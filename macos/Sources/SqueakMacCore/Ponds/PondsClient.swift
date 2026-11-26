@@ -202,9 +202,14 @@ public struct PondsClient: Sendable {
         _ = try await host.call("POST", "\(Self.p(pond))/share", body: .object(["sessionId": .string(sessionId), "private": .bool(isPrivate)]), timeout: 30)
     }
 
-    /// Owner: a Member's one switch, Can start Tasks, live and without a rejoin.
-    public func setCanStartTasks(pond: String, member: String, on: Bool) async throws {
-        _ = try await host.call("POST", "\(Self.p(pond))/members/\(NativeHostClient.id(member))/start-tasks", body: .object(["on": .bool(on)]), timeout: 60)
+    /// Owner: approve a Duck a Member asked for. It starts through the normal path and gets the Member's first message.
+    public func approveStart(pond: String, request: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/starts/\(NativeHostClient.id(request))/approve", body: .object([:]), timeout: 60)
+    }
+
+    /// Owner: decline a Duck a Member asked for; the Room says so in one line.
+    public func declineStart(pond: String, request: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/starts/\(NativeHostClient.id(request))/decline", body: .object([:]), timeout: 60)
     }
 
     public func setPrivate(pond: String, thread: String, isPrivate: Bool) async throws {

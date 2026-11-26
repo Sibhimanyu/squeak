@@ -82,7 +82,6 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
     const [join] = (await A.service.view(pondId)).joins;
     expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
     await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     await B.service.refresh(pondId);
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
@@ -162,19 +161,15 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
     const mine = await B.service.view(pondId);
     expect(mine.me).toMatchObject({ role: "viewer", caps: { message: false, answer: false, start: false } });
     await A.service.changeRole(pondId, B.service.me.id, "member");
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     expect((await B.bridge.message(pondId, shared, "back")).ok).toBe(true);
     await A.bridge.runCommands(pondId);
   });
 
-  it("7. Can start Tasks is the Member's one switch: off, a start is refused calmly; on, it is allowed", async () => {
-    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
-    await expect(B.service.assertCanStart(pondId)).rejects.toThrow(/waits for the Owner/);
-    // The Member's own thread is still shown: nothing but the Owner's approval is gated.
+  it("7. there is no per-Member switch: a Member is a Member, and their own thread stays shown", async () => {
     expect((await A.service.threads(pondId)).some((t) => t.id === own)).toBe(true);
-    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
-    await expect(B.service.assertCanStart(pondId)).resolves.toBeUndefined();
-    expect((await B.service.view(pondId)).members.find((m) => m.you)).toMatchObject({ canStartTasks: true });
+    const you = (await B.service.view(pondId)).members.find((m) => m.you)!;
+    expect(you).not.toHaveProperty("canStartTasks");
+    expect(you.caps).toMatchObject({ message: true, answer: true });
   });
 
   it("9. the member leaves; the owner's Mac removes them and nothing new reads", async () => {

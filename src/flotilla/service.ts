@@ -26,7 +26,7 @@ import {
   signText,
   verifyText,
 } from "./crypto.js";
-import { can, capsOf, NEEDS_OWNER, type Action, type Actor, type Context, type Caps } from "./permissions.js";
+import { can, capsOf, type Action, type Actor, type Context, type Caps } from "./permissions.js";
 import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import { joinWords } from "./join-words.js";
 import { normalizeShortCode } from "./short-code.js";
@@ -287,6 +287,42 @@ interface LocalPond {
   invites: LocalInvite[];
   /** Nonce -> its command's expiry, kept until then. */
   nonces: Record<string, number>;
+  /** The Owner's Mac: Ducks Members asked for, waiting for the Owner's Approve or Decline (never in the cloud). */
+  pendingStarts?: PendingStart[];
+  /** A Member's Mac: Ducks this person asked for that the Owner has not answered yet. */
+  asked?: AskedStart[];
+}
+
+/** A Member's request for a Duck, held on the Owner's Mac until the Owner decides. `requestId` is the Member's own. */
+export interface PendingStart {
+  requestId: string;
+  memberId: string;
+  /** The Member's name when they asked; the view reads the current one. */
+  name: string;
+  text: string;
+  agent: "claude" | "codex";
+  model: string;
+  title?: string;
+  at: number;
+}
+
+/** What a Member's Mac remembers of its own request, to say "Waiting for Sibhi". */
+export interface AskedStart {
+  requestId: string;
+  title: string;
+  at: number;
+}
+
+/** One Duck waiting for the Owner, as a surface draws it. `mine` is true on the Member's own Mac. */
+export interface PendingStartView {
+  requestId: string;
+  memberId: string;
+  name: string;
+  title: string;
+  /** The first message (the Owner sees what they are approving); absent on a Member's Mac. */
+  text?: string;
+  at: number;
+  mine: boolean;
 }
 
 interface Identity {
@@ -409,10 +445,8 @@ export interface MemberView {
   /** The member's machine's name (null for a browser). */
   nestName: string | null;
   client: "mac" | "web";
-  /** What this member may do now, derived from the role and `canStartTasks`; kept so an older client's shape decodes. */
+  /** What this member may do now, derived from the role; kept so an older client's shape decodes. */
   caps?: Caps;
-  /** A Member's one switch, "Can start Tasks" (absent for an Owner or a Viewer). */
-  canStartTasks?: boolean;
   /** Presence heartbeat younger than 45 s. */
   online: boolean;
   /** Not sent any more (no device appears in a pond); kept so an older client's shape still type-checks. */
@@ -484,6 +518,8 @@ export interface PondView {
   members: MemberView[];
   threads: PondThread[];
   ripples: Array<Ripple & { actorName?: string }>;
+  /** Ducks waiting for the Owner's approval: all of them on the Owner's Mac, a Member's own on theirs. */
+  starts?: PendingStartView[];
   presence: PresenceDoc[];
   holds: Hold[];
   /** Tasks with their live claim folded in, most recently changed first. Only with `?coordination=1`: nothing draws them. */
@@ -574,6 +610,9 @@ const SUMMARY_TTL_MS = 20_000;
 /** Said when a member's own-Mac thread is asked for while the stashed mode is off (docs/ponds.md). */
 export const OWN_THREADS_OFF =
   "Running a thread on your own Mac in someone else's pond is switched off. Use Runs on the owner's Mac.";
+/** A Member may have this many requests waiting for the Owner's approval at once; a request lapses after a day. */
+const PENDING_STARTS_PER_MEMBER = 10;
+const PENDING_START_LIFE_MS = 24 * 60 * 60_000;
 
 export class FlotillaService extends EventEmitter {
   private readonly now: () => number;
@@ -2709,38 +2748,15 @@ export class FlotillaService extends EventEmitter {
     const pond = this.activePond(pondId);
     if (pond.role === "owner" || pond.local) return;
     if (!flag("pondOwnThreads")) throw new FlotillaError(OWN_THREADS_OFF, 403);
-    const members = await this.allowLive(pond, "start-thread", {}, VIEWERS_READ);
-    if (!this.capsIn(pond, members, this.selfId(pond)).start) throw new FlotillaError(NEEDS_OWNER, 403);
+    // The stashed own-Mac mode (flag on) runs on the Member's own Mac with their own account, so it spends nothing of
+    // the Owner's; a Duck that runs on the Owner's Mac is asked for with `requestStart` and waits for approval.
+    await this.allowLive(pond, "start-thread", {}, VIEWERS_READ);
   }
 
-  /** What a member may do in this pond now (derived from their role and "Can start Tasks"; the owner always may). */
+  /** What a member may do in this pond now (derived from their role; the owner always may). */
   private capsIn(pond: LocalPond, members: Map<string, MemberDoc>, memberId: string): Caps {
     if (pond.role === "owner" && memberId === this.identity.id) return capsOf("owner");
-    const m = members.get(memberId);
-    return capsOf(m?.role ?? pond.role, m?.canStartTasks === true);
-  }
-
-  /**
-   * Owner: turn a Member's one switch, "Can start Tasks", on or off. Off (the default), their Tasks wait for the
-   * Owner's approval; on, they go ahead. The member's document is signed again; no one else is touched.
-   */
-  async setCanStartTasks(pondId: string, memberId: string, on: boolean): Promise<void> {
-    const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can change what a member may do.");
-    if (memberId === this.identity.id) throw new FlotillaError("An owner's access can't be changed.");
-    if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
-    const found = (await this.members(pond)).get(memberId);
-    if (!found) throw new FlotillaError("No such member.", 404);
-    if (found.role !== "member") throw new FlotillaError("Only a member can be let start Tasks.", 400);
-    if ((found.canStartTasks === true) === on) return;
-    const next: MemberDoc = { ...found };
-    if (on) next.canStartTasks = true;
-    else delete next.canStartTasks;
-    await this.writeMember(pond, next);
-    await this.ripple(pondId, on ? `let ${found.name} start Tasks` : `${found.name} no longer starts Tasks`).catch(
-      () => undefined,
-    );
-    this.emit("changed", pondId);
+    return capsOf(members.get(memberId)?.role ?? pond.role);
   }
 
   /** Owner: a member becomes a viewer or a member. Their member document is signed again; the key does not change. */
@@ -2754,8 +2770,6 @@ export class FlotillaService extends EventEmitter {
     if (!found) throw new FlotillaError("No such member.", 404);
     if (found.role === role) return;
     const changed: MemberDoc = { ...found, role };
-    // "Can start Tasks" is a Member's switch: a Viewer has none, and a Viewer made Member again starts with it off.
-    delete changed.canStartTasks;
     await this.writeMember(pond, changed);
     await this.ripple(pondId, `made ${found.name} ${role === "viewer" ? "a viewer" : "a member"}`).catch(
       () => undefined,
@@ -3605,9 +3619,11 @@ export class FlotillaService extends EventEmitter {
     ripples.sort((a, b) => b.at - a.at);
     const threads = threadsRead.map((t) => this.decorateThread(t, online, me.id));
     const needsYou = this.needsCount(pond, threads);
+    const starts = this.startsView(pond, members, me, ripples, threads);
     return {
       pond: this.summary(pond, members.size, threads.length, needsYou),
       cloud: this.hasCloud(),
+      ...(starts.length ? { starts } : {}),
       members: [...members.values()].map((m) => ({
         id: m.id,
         name: this.shownName(pond, m),
@@ -3617,9 +3633,8 @@ export class FlotillaService extends EventEmitter {
         nest: m.nest,
         nestName: m.nest,
         client: m.client ?? (m.nest === null ? "web" : "mac"),
-        // Derived from the role and "Can start Tasks", in the shape older clients read.
-        caps: capsOf(m.role, m.canStartTasks === true),
-        ...(m.role === "member" ? { canStartTasks: m.canStartTasks === true } : {}),
+        // Derived from the role, in the shape older clients read.
+        caps: capsOf(m.role),
         online: online.has(m.id),
         // A person once. Nothing about their devices is in a pond (docs/ponds.md, "Members are accounts").
         ...(m.id === me.id ? { lastSeenAt: now } : beat.has(m.id) ? { lastSeenAt: beat.get(m.id)! } : {}),
@@ -3762,6 +3777,7 @@ export class FlotillaService extends EventEmitter {
     text: string,
     onBehalf?: { id: string; name: string },
     kind?: RippleKind,
+    ref?: string,
   ): Promise<string> {
     const pond = this.activePond(pondId);
     const at = this.now();
@@ -3773,6 +3789,7 @@ export class FlotillaService extends EventEmitter {
       text: text.slice(0, 500),
       ...(onBehalf ? { onBehalf: { id: onBehalf.id.slice(0, 64), name: onBehalf.name.slice(0, 100) } } : {}),
       ...(kind ? { kind } : {}),
+      ...(ref ? { ref: ref.slice(0, 80) } : {}),
     };
     await this.put(pond, "ripples", id, ripple);
     // Keep the feed short: forget the oldest beyond a hundred.
@@ -3914,7 +3931,7 @@ export class FlotillaService extends EventEmitter {
             device: read.device,
             role: member.role,
             name: this.shownName(pond, member),
-            caps: capsOf(member.role, member.canStartTasks === true),
+            caps: capsOf(member.role),
           });
         }
         return out;
@@ -3963,9 +3980,6 @@ export class FlotillaService extends EventEmitter {
     // Stashed: a member's own thread (their agent on their Mac) is never published unless SQUEAK_POND_OWN_THREADS is on.
     if (input.mode === "own" && !input.requester && pond.role !== "owner" && !flag("pondOwnThreads")) {
       throw new FlotillaError(OWN_THREADS_OFF, 403);
-    }
-    if (pond.role !== "owner" && !this.capsIn(pond, await this.members(pond), this.identity.id).start) {
-      throw new FlotillaError(NEEDS_OWNER, 403);
     }
     if (this.identity.nest === null) throw new FlotillaError("A web guest has no machine to run a thread on.", 403);
     const threadId = randomId(10);
@@ -4223,18 +4237,12 @@ export class FlotillaService extends EventEmitter {
     lifeMs = 5 * 60_000,
   ): Promise<{ id: string; starterName: string }> {
     const pond = this.activePond(pondId);
-    const members = await this.allowLive(
-      pond,
-      COMMAND_ACTION[input.kind],
-      { thread: { starter: "", private: false } },
-      VIEWERS_READ,
-    );
+    await this.allowLive(pond, COMMAND_ACTION[input.kind], { thread: { starter: "", private: false } }, VIEWERS_READ);
     const me = this.meIn(pond);
     const threads = await this.threadsOf(pond);
     const thread = threads.find((t) => t.id === threadId);
     if (!thread || thread.private) throw new FlotillaError("That thread is no longer shared with the pond.", 404);
     if (thread.starter === me.id) throw new FlotillaError("That is your own thread.");
-    if (input.kind === "start" && !this.capsIn(pond, members, me.id).start) throw new FlotillaError(NEEDS_OWNER, 403);
     if ((input.kind === "message" || input.kind === "steer") && !FlotillaService.asks(thread.permissionMode)) {
       throw new FlotillaError(noMessageWithoutAsking(thread.starterName), 403, { refused: true });
     }
@@ -4580,8 +4588,6 @@ export class FlotillaService extends EventEmitter {
     const ownerId = memberIdOf(pond.ownerKey);
     const owner = members.get(ownerId);
     if (!owner) throw new FlotillaError("Can't reach Squeak's cloud.", 503);
-    // Stopped early, calmly; the Owner's Mac refuses the same way for a client that skips this.
-    if (!this.capsIn(pond, members, this.selfId(pond)).start) throw new FlotillaError(NEEDS_OWNER, 403);
     const text = input.text.trim();
     if (!text) throw new FlotillaError("empty message");
     const now = this.now();
@@ -4599,7 +4605,136 @@ export class FlotillaService extends EventEmitter {
       requestId: randomId(10),
     };
     await this.put(pond, "tcmds", cmd.id, cmd);
+    // Remembered here so this Mac can say "Waiting for <Owner>" until the Duck appears or the Owner declines.
+    pond.asked = [
+      ...(pond.asked ?? []).filter((a) => now - a.at < PENDING_START_LIFE_MS),
+      { requestId: cmd.requestId!, title: (cmd.title ?? text).replace(/\s+/g, " ").slice(0, 80), at: now },
+    ].slice(-PENDING_STARTS_PER_MEMBER);
+    this.save();
+    this.emit("changed", pondId);
     return { requestId: cmd.requestId!, ownerName: owner.name };
+  }
+
+  /**
+   * The Owner's Mac: a Member's verified `start` is recorded as waiting (who asked and the first message) and shown to
+   * the Owner to Approve or Decline. Nothing runs, and nothing is spent, until then. Said to the Room in one line.
+   */
+  async holdStart(pondId: string, from: { id: string; name: string }, cmd: CommandDoc): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner") throw new FlotillaError("Only the Owner's Mac holds a Duck for approval.", 403);
+    const text = cmd.text?.trim();
+    const agent = cmd.agent === "codex" ? "codex" : cmd.agent === "claude" ? "claude" : null;
+    if (!text || !agent || !cmd.model) throw new FlotillaError("choose Claude or Codex and a model");
+    const requestId = cmd.requestId ?? cmd.id;
+    const now = this.now();
+    const kept = (pond.pendingStarts ?? []).filter((p) => now - p.at < PENDING_START_LIFE_MS);
+    if (kept.some((p) => p.requestId === requestId)) return;
+    if (kept.filter((p) => p.memberId === from.id).length >= PENDING_STARTS_PER_MEMBER) {
+      throw new FlotillaError("too many ducks waiting for approval");
+    }
+    pond.pendingStarts = [
+      ...kept,
+      {
+        requestId,
+        memberId: from.id,
+        name: from.name,
+        text,
+        agent,
+        model: cmd.model,
+        ...(cmd.title ? { title: cmd.title } : {}),
+        at: now,
+      },
+    ];
+    this.save();
+    this.emit("changed", pondId);
+    await this.ripple(pondId, "asked for a duck", { id: from.id, name: from.name }).catch(() => undefined);
+  }
+
+  /** The Owner takes one waiting request to run it (nothing is left behind), or hears it is gone. */
+  async takeStart(pondId: string, requestId: string): Promise<PendingStart> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "remove-member", {}, "Only an owner can approve a duck.");
+    const found = (pond.pendingStarts ?? []).find((p) => p.requestId === requestId);
+    if (!found) throw new FlotillaError("That duck is no longer waiting.", 404);
+    const from = (await this.members(pond)).get(found.memberId);
+    if (!from || from.role !== "member") {
+      pond.pendingStarts = (pond.pendingStarts ?? []).filter((p) => p.requestId !== requestId);
+      this.save();
+      this.emit("changed", pondId);
+      throw new FlotillaError(`${found.name} is no longer a member, so that duck was dropped.`, 409);
+    }
+    pond.pendingStarts = (pond.pendingStarts ?? []).filter((p) => p.requestId !== requestId);
+    this.save();
+    this.emit("changed", pondId);
+    return { ...found, name: this.shownName(pond, from) };
+  }
+
+  /** A taken request that could not start goes back to waiting (its place by time kept). */
+  async restoreStart(pondId: string, request: PendingStart): Promise<void> {
+    const pond = this.activePond(pondId);
+    if ((pond.pendingStarts ?? []).some((p) => p.requestId === request.requestId)) return;
+    pond.pendingStarts = [...(pond.pendingStarts ?? []), request];
+    this.save();
+    this.emit("changed", pondId);
+  }
+
+  /** The Owner declines: the request is dropped and the Room says so in one line, naming the request for its Member's Mac. */
+  async declineStart(pondId: string, requestId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "remove-member", {}, "Only an owner can decline a duck.");
+    const found = (pond.pendingStarts ?? []).find((p) => p.requestId === requestId);
+    if (!found) throw new FlotillaError("That duck is no longer waiting.", 404);
+    pond.pendingStarts = (pond.pendingStarts ?? []).filter((p) => p.requestId !== requestId);
+    this.save();
+    this.emit("changed", pondId);
+    const title = (found.title ?? found.text).replace(/\s+/g, " ").slice(0, 60);
+    await this.ripple(
+      pondId,
+      `declined the duck "${title}"`,
+      { id: found.memberId, name: found.name },
+      undefined,
+      requestId,
+    ).catch(() => undefined);
+  }
+
+  /** What waits for the Owner, for the pond view: all of it for the Owner, a Member's own for that Member. */
+  private startsView(
+    pond: LocalPond,
+    members: Map<string, MemberDoc>,
+    me: { id: string; name: string },
+    ripples: Ripple[],
+    threads: PondThread[],
+  ): PendingStartView[] {
+    const now = this.now();
+    if (pond.role === "owner") {
+      const live = (pond.pendingStarts ?? []).filter(
+        (p) => now - p.at < PENDING_START_LIFE_MS && members.get(p.memberId)?.role === "member",
+      );
+      return live
+        .map((p) => ({
+          requestId: p.requestId,
+          memberId: p.memberId,
+          name: this.shownName(pond, members.get(p.memberId)!),
+          title: (p.title ?? p.text).replace(/\s+/g, " ").slice(0, 80),
+          text: p.text.slice(0, 500),
+          at: p.at,
+          mine: false,
+        }))
+        .sort((a, b) => a.at - b.at);
+    }
+    const answered = new Set<string>();
+    for (const r of ripples) if (r.ref) answered.add(r.ref);
+    for (const t of threads) if (t.requester?.requestId) answered.add(t.requester.requestId);
+    return (pond.asked ?? [])
+      .filter((a) => now - a.at < PENDING_START_LIFE_MS && !answered.has(a.requestId))
+      .map((a) => ({
+        requestId: a.requestId,
+        memberId: me.id,
+        name: this.nameIn(),
+        title: a.title,
+        at: a.at,
+        mine: true,
+      }));
   }
 
   /** At most `START_PER_HOUR` starts per member per pond per hour; kept in memory (a restart is a fresh hour). */
@@ -4725,9 +4860,6 @@ export class FlotillaService extends EventEmitter {
       thread: { starter: this.selfId(pond), private: false },
     });
     if (!verdict.ok) return VIEWERS_READ;
-    // "Can start Tasks", read from the member document now: a client that skips its own composer check is still refused
-    // here. (Nothing else is a switch: a Viewer is refused above, a Member may message, answer and read.)
-    if (cmd.kind === "start" && !capsOf(from.role, from.canStartTasks === true).start) return NEEDS_OWNER;
     // Code (changed files, patches) leaves this Mac only for a member at the "git" level: the owner's own flag is on, the
     // pond has a Git remote and the member has a machine of their own. Anyone else is remote, whatever their client claims.
     if (

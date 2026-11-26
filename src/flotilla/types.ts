@@ -39,12 +39,6 @@ export interface MemberDoc {
   /** A seam for Catalyst sign-in; unused today. */
   accountId?: string;
   /**
-   * The Member's one switch, "Can start Tasks" (off when absent): their Tasks and Ducks go ahead without the Owner's
-   * approval. Signed with the document. Older documents carried `caps`; it is ignored (a Collaborator is a Member with
-   * this off, a Viewer stays a Viewer).
-   */
-  canStartTasks?: true;
-  /**
    * The member's other devices (docs/ponds.md, "Members are accounts"): added by the owner's Mac for a device signed in to
    * the same account as `accountId`. `publicKey` above is device number one. Absent on every older document.
    */
@@ -187,6 +181,8 @@ export interface Ripple {
   onBehalf?: { id: string; name: string };
   /** Optional: Ripples written before kinds existed have none. An unknown kind reads as absent. */
   kind?: RippleKind;
+  /** The request this Ripple answers (a declined Duck start: the Member's Mac drops that request from its waiting list). */
+  ref?: string;
 }
 
 export interface Hold {
@@ -458,7 +454,6 @@ export function readMember(v: unknown): MemberDoc | null {
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
     ...(s(v.email, 200) ? { email: v.email as string } : {}),
-    ...(v.canStartTasks === true && v.role === "member" ? { canStartTasks: true as const } : {}),
     ...(Array.isArray(v.devices) && v.devices.length > 0 ? { devices: readDevices(v.devices) } : {}),
     ...(v.primaryRetired === true && Array.isArray(v.devices) && v.devices.length > 0
       ? { primaryRetired: true as const }
@@ -595,6 +590,7 @@ export function readRipple(v: unknown): Ripple | null {
     text: v.text,
     ...(onBehalf ? { onBehalf } : {}),
     ...(kind ? { kind } : {}),
+    ...(s(v.ref, 80) ? { ref: v.ref as string } : {}),
   };
 }
 

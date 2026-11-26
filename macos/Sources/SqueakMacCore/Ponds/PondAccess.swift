@@ -11,7 +11,7 @@ public struct ThreadAccess: Sendable, Equatable {
         case message, steer, answer
         /// Read the thread's changes.
         case viewChanges
-        /// Kept by the starter, on the starter's own Mac: neither exists as a command on the wire.
+        /// The Owner's alone, on every Duck in the Pond: neither exists as a command a Member can send.
         case approve, stop
         /// Only the starter decides who sees a thread.
         case togglePrivate
@@ -58,6 +58,10 @@ public struct ThreadAccess: Sendable, Equatable {
         return .open(placeholder: working ? "Message, \u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer" : "Message")
     }
 
+    /// Approving edits and Stop are the Owner's alone, on every Duck in the Pond (a Duck a Member asked for runs on the
+    /// Owner's Mac). A Member or a Viewer sees the control disabled with this reason.
+    static func ownerOnly(_ what: String) -> String { "Only the Owner can \(what)" }
+
     public func gate(_ action: Action) -> Gate {
         switch action {
         case .message, .steer, .answer:
@@ -72,9 +76,9 @@ public struct ThreadAccess: Sendable, Equatable {
         case .viewChanges:
             return Gate(enabled: true, tooltip: nil, visible: true)
         case .approve:
-            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can approve on their duck", visible: true)
+            return Gate(enabled: role == .owner, tooltip: role == .owner ? nil : Self.ownerOnly("approve edits"), visible: true)
         case .stop:
-            return Gate(enabled: isMine, tooltip: isMine ? nil : "Only \(starter) can stop on their duck", visible: true)
+            return Gate(enabled: role == .owner, tooltip: role == .owner ? nil : Self.ownerOnly("stop a duck"), visible: true)
         case .togglePrivate:
             return Gate(enabled: isMine, tooltip: nil, visible: isMine)
         }

@@ -24,14 +24,13 @@ export function readMeta(v) {
 
 /**
  * What a role may do, in the shape the pages read (src/flotilla/permissions.ts `capsOf`): a Viewer reads; a Member also
- * messages and answers, and `start` (a Task that goes ahead without the Owner's approval) is their one switch,
- * "Can start Tasks", off unless the Owner turned it on.
+ * messages and answers, and `start` means "may start or ask for a Duck or Task" (a Member's always waits for the
+ * Owner's approval). There is no per-Member switch.
  */
-export function capsOf(role, canStartTasks = false) {
+export function capsOf(role) {
   const base = { see: true, diffs: true, message: true, answer: true, start: true };
-  if (role === "owner") return base;
   if (role === "viewer") return { ...base, message: false, answer: false, start: false };
-  return { ...base, start: canStartTasks === true };
+  return base;
 }
 
 export const MAX_DEVICES_PER_MEMBER = 8;
@@ -104,7 +103,6 @@ export function readMember(v) {
     nest: v.nest,
     client: v.client,
     addedAt: v.addedAt,
-    ...(v.canStartTasks === true && v.role === "member" ? { canStartTasks: true } : {}),
     ...(withDevices ? { devices: readDevices(v.devices) } : {}),
     ...(withDevices && v.primaryRetired === true ? { primaryRetired: true } : {}),
   };

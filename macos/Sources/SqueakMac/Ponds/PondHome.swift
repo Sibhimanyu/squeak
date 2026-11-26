@@ -286,16 +286,7 @@ struct PondFlockSection: View {
             ForEach(PondMembers.rolesToChangeTo(m), id: \.self) { r in
                 Button("Make \(r.word.lowercased())") { if let p = pond { Task { await ponds.setRole(pond: p.id, member: m.id, role: r) } } }
             }
-            if m.role != .owner {
-                Divider()
-                if PondRoles.offersStartTasks(m, viewerIsOwner: true) {
-                    Button((m.canStartTasks ? "\u{2713} " : "") + PondRoles.startTasksTitle) {
-                        if let p = pond { Task { await ponds.setCanStartTasks(pond: p.id, member: m.id, on: !m.canStartTasks) } }
-                    }
-                    .help(PondRoles.startTasksNote)
-                    Divider()
-                }
-            }
+            if m.role != .owner { Divider() }
             Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
     }
 
