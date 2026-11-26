@@ -1621,16 +1621,22 @@ export class FlotillaService extends EventEmitter {
         this.myInvitations = { at: this.now(), list: this.myInvitations?.list ?? [] };
       }
     }
-    const open = this.myInvitations.list.filter((i) => !this.pondsFile.data.ponds[i.pondId]);
+    const open = this.myInvitations.list.filter((i) => !this.holds(i.pondId));
     // Joined and waiting for the Owner's Mac: ask for this device as soon as the Pond is listed for the account. The relay stops
     // listing the invitation the moment it is, so what was seen joined is remembered until the Pond is here.
     for (const i of open) if (i.state === "joined") this.expecting.set(i.pondId, i);
-    for (const id of [...this.expecting.keys()]) if (this.pondsFile.data.ponds[id]) this.expecting.delete(id);
+    for (const id of [...this.expecting.keys()]) if (this.holds(id)) this.expecting.delete(id);
     if (this.expecting.size > 0 && (fresh || this.now() - this.accountSyncAt >= INVITATIONS_TTL_MS)) {
       this.accountSyncAt = 0;
       void this.syncAccountPonds().catch(() => undefined);
     }
     return open;
+  }
+
+  /** This device holds the Pond as one it is in or waiting for; a removed, denied or expired entry is only a note of what was. */
+  private holds(pondId: string): boolean {
+    const pond = this.pondsFile.data.ponds[pondId];
+    return !!pond && !TERMINAL.includes(pond.status);
   }
 
   /** Ponds this account joined in the cloud that this Mac has not been let into yet. */
@@ -1643,7 +1649,17 @@ export class FlotillaService extends EventEmitter {
     if (!accept) throw new FlotillaError("Invitations need Squeak's cloud. Sign in to Squeak, then try again.", 503);
     // The state changes on the relay's answer only: a refusal leaves the invitation as it was.
     await this.viaRelay(() => accept.call(this.options.invites, inviteId));
-    if (found) this.expecting.set(found.pondId, { ...found, state: "joined" });
+    if (found) {
+      // Coming back (docs/spec.md "Coming back"): what this device kept of the earlier stay (a removed Pond's note, the day's
+      // "do not ask to be added back" after a leave) must not stand in the way of the new invitation.
+      const stale = this.pondsFile.data.ponds[found.pondId];
+      if (stale && TERMINAL.includes(stale.status)) this.forgetPond(found.pondId);
+      if (this.pondsFile.data.leftUntil?.[found.pondId] !== undefined) {
+        delete this.pondsFile.data.leftUntil[found.pondId];
+        this.pondsFile.save();
+      }
+      this.expecting.set(found.pondId, { ...found, state: "joined" });
+    }
     if (this.myInvitations)
       this.myInvitations = {
         at: this.now(),
@@ -1666,7 +1682,7 @@ export class FlotillaService extends EventEmitter {
   /** The rows of Ponds joined in the cloud that this Mac has not been let into yet, from the last read of the relay's record. */
   private connectingRows(): PondSummary[] {
     return [...this.expecting.values()]
-      .filter((i) => !this.pondsFile.data.ponds[i.pondId])
+      .filter((i) => !this.holds(i.pondId))
       .map((i) =>
         this.summary(
           {
@@ -2230,7 +2246,7 @@ export class FlotillaService extends EventEmitter {
         const existing = this.pondsFile.data.ponds[entry.pondId];
         const lapsed =
           existing?.deviceJoin && existing.status === "pending" && (existing.inviteExpiresAt ?? 0) <= this.now();
-        if (existing && !lapsed) continue;
+        if (existing && !TERMINAL.includes(existing.status) && !lapsed) continue;
         if ((this.deviceSkips.get(entry.pondId) ?? 0) > this.now()) continue;
         if ((this.pondsFile.data.leftUntil?.[entry.pondId] ?? 0) > this.now()) continue;
         if (!POND_ID.test(entry.pondId)) continue;
@@ -2522,6 +2538,9 @@ export class FlotillaService extends EventEmitter {
         await this.revokeToken(pond, member.id, "Squeak couldn't end a member's access. Try again.");
       }
     }
+    // The cloud's people records end with the Pond, so a browser or another device of a Member reads "<Pond> was deleted" too.
+    // Best effort: a relay without the route (or one that already ended it, when the web asked) changes nothing here.
+    await this.options.relay?.deletePond?.(pond.id, pond.name).catch(() => undefined);
     const store = this.storeOf(pond);
     // Members first: from then on everyone else reads "removed".
     for (const member of members.values()) {
@@ -4634,6 +4653,10 @@ export class FlotillaService extends EventEmitter {
     this.watches.get(pondId)?.();
     this.watches.delete(pondId);
     delete this.pondsFile.data.ponds[pondId];
+    // An invitation read before this (a joined one waiting for the Owner's Mac) must not bring the Pond back as Connecting.
+    this.expecting.delete(pondId);
+    if (this.myInvitations)
+      this.myInvitations = { ...this.myInvitations, list: this.myInvitations.list.filter((i) => i.pondId !== pondId) };
     this.save();
     this.lastPresence.delete(pondId);
     this.echoes.delete(pondId);

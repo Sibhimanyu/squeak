@@ -13,6 +13,7 @@ Read only the file for the area you are touching. `AGENTS.md` at the root is the
 - `usage-and-cost.md` — pricing, cost reader, Codex quota, Claude rate limits and the usage endpoint
 - `runtime.md` — proxy, native modules, launch agents, bot polling, sleep and pmset
 - `misc.md` — Telegram formatting, one fleet process, lint configs, ask-format, call voices
+- `people-journey.md` — the People and remote journey: the CI test on the relay double and the daily smoke on the dev relay
 - `cleanup.md` — code-health backlog and conventions
 - `issue-tracker.md`, `triage-labels.md`, `domain.md` — config for the mattpocock engineering skills (GitHub issues, triage labels, glossary/ADR rules)
 

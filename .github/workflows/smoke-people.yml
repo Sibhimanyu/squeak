@@ -1,0 +1,38 @@
+name: People smoke (dev relay)
+
+# The People and remote journey, daily, against the real development relay (docs/agents/people-journey.md). It runs only when the
+# repository has the secrets; without them the job is skipped, not red. Never point it at the production relay.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SQUEAK_SMOKE_RELAY_URL: ${{ secrets.SQUEAK_SMOKE_RELAY_URL }}
+      SQUEAK_SMOKE_OWNER_TOKEN: ${{ secrets.SQUEAK_SMOKE_OWNER_TOKEN }}
+      SQUEAK_SMOKE_INVITEE_TOKEN: ${{ secrets.SQUEAK_SMOKE_INVITEE_TOKEN }}
+      SQUEAK_SMOKE_MEMBER_TOKEN: ${{ secrets.SQUEAK_SMOKE_MEMBER_TOKEN }}
+    steps:
+      - name: Check the secrets are configured
+        id: configured
+        run: |
+          if [ -n "$SQUEAK_SMOKE_RELAY_URL" ] && [ -n "$SQUEAK_SMOKE_OWNER_TOKEN" ] && [ -n "$SQUEAK_SMOKE_INVITEE_TOKEN" ] && [ -n "$SQUEAK_SMOKE_MEMBER_TOKEN" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "People smoke skipped: SQUEAK_SMOKE_* secrets are not configured."
+          fi
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.configured.outputs.run == 'true'
+        run: npm ci
+      - if: steps.configured.outputs.run == 'true'
+        run: npx tsx scripts/smoke-people.ts

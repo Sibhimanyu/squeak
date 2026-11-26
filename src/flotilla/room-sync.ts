@@ -630,6 +630,12 @@ export class RoomSync extends EventEmitter {
       }
       const held = await port.list("room");
       for (const d of held) {
+        // A copy of a post the Member's own signed document already carries (written while they were out of the Pond, marked
+        // "(left)") goes: the Member's document is the post, and it carries no mark once they are back.
+        if (this.inbox(pondId).has(d.id)) {
+          await port.remove("room", d.id).catch(() => undefined);
+          continue;
+        }
         const read = readRoomDoc(d.value);
         // A document written before detail, canvases or replyTo travelled is not what the Room holds now: it is written again.
         if (

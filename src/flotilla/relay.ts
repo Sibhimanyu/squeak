@@ -39,6 +39,11 @@ export interface PondRelay {
    * index entry `left` and `accountPonds` then lists it with `left: true`. Absent or refused on an older relay.
    */
   leaveAccountPond?(pondId: string): Promise<void>;
+  /**
+   * The Owner's Mac ends the Pond in the cloud's people records too (`DELETE /ponds/<id> {name}`): every membership and invite,
+   * and each account's index row kept a week as "deleted", so a browser or another device reads "<Pond> was deleted".
+   */
+  deletePond?(pondId: string, name: string): Promise<void>;
   /** The account's devices (`GET /account/devices`), `thisDevice` marking `selfId`. Throws `RelayRefused`. */
   accountDevices?(selfId: string): Promise<AccountDevice[]>;
   /** Lists this device under the account (`POST /account/devices`); idempotent. */
@@ -213,6 +218,16 @@ export class HttpPondRelay implements PondRelay {
       method: "POST",
       headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       body: JSON.stringify({ pondId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+  }
+
+  async deletePond(pondId: string, name: string): Promise<void> {
+    const response = await this.fetchImpl(`${this.url}/ponds/${encodeURIComponent(pondId)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey, ...macClientHeaders() },
+      body: JSON.stringify({ name }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new RelayRefused(response.status);

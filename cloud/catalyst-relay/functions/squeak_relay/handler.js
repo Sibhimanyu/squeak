@@ -1087,6 +1087,8 @@ function createRelay(deps) {
         lastActivityAt: head.at || (typeof v.at === "number" ? v.at : 0),
         seqHead: head.seq,
         counts: { members, ducks },
+        // The Owner ended it: the index row stays a week so a device that missed the note reads "<Pond> was deleted".
+        ...(v.deleted === true ? { deleted: true } : {}),
       });
     }
     ponds.sort((a, b) => b.lastActivityAt - a.lastActivityAt || (a.pondId < b.pondId ? -1 : 1));
