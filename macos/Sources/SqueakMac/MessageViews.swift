@@ -82,6 +82,10 @@ struct MessageView: View {
                 HistoryEditor(handle: history)
             } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {
                 VStack(alignment: .leading, spacing: 8) {
+                    // New layout: the pictures stay where they were typed, as the composer's chips (a click shows one).
+                    if MacLayoutPreference.shared.isNew, !pictures.paths.isEmpty {
+                        InlineMessageText(text: message.text, folder: linker?.cwd)
+                    } else {
                     if !pictures.words.isEmpty || pictures.paths.isEmpty { Text(verbatim: pictures.words) }
                     if !pictures.paths.isEmpty {
                         PictureFlow {
@@ -90,6 +94,7 @@ struct MessageView: View {
                                               maxWidth: Metrics.workbenchColumn * CGFloat(Tokens.Workbench.userBubbleMaxFraction) - 28, alwaysShow: true)
                             }
                         }
+                    }
                     }
                 }
                     .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
@@ -341,6 +346,9 @@ struct SteerCard: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: 3) {
             VStack(alignment: .leading, spacing: 6) {
+                if MacLayoutPreference.shared.isNew, !parts.paths.isEmpty {
+                    InlineMessageText(text: text, folder: cwd ?? linker?.cwd, font: Typo.body, color: waiting ? Theme.muted : Theme.ink)
+                } else {
                 if !parts.words.isEmpty {
                     Text(verbatim: parts.words).font(Typo.body).foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
                 }
@@ -351,6 +359,7 @@ struct SteerCard: View {
                                           maxWidth: 320, alwaysShow: true)
                         }
                     }
+                }
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)

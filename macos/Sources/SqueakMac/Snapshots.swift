@@ -20,10 +20,10 @@ enum SnapshotRunner {
         let dir = args.firstIndex(of: "--snapshots").flatMap { i in args.indices.contains(i + 1) && !args[i + 1].hasPrefix("-") ? args[i + 1] : nil }
             ?? "/tmp/squeak-snapshots"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        // `--group composer`: only that group's shots (the composer mocks); default: the UI shots.
+        // `--group composer`: only that group's shots (the live composer card, ComposerSnapshots.swift); default: the UI shots.
         let group = args.firstIndex(of: "--group").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } ?? "ui"
         var written: [String] = []
-        for shot in Fixtures.shots() + ComposerMockScenes.shots() where shot.group == group {
+        for shot in Fixtures.shots() + ComposerSnapshots.shots() where shot.group == group {
             let path = "\(dir)/\(shot.name).png"
             if render(shot, to: path) { written.append(path) }
         }
@@ -55,22 +55,6 @@ struct Shot {
     var dark = false
     let view: AnyView
     var group = "ui"
-}
-
-extension ComposerMockScenes {
-    /// Both directions in every state, light and dark: `A-idle-dark`, `B-working-light`, …
-    static func shots() -> [Shot] {
-        var out: [Shot] = []
-        for (label, dark) in [("light", false), ("dark", true)] {
-            for (name, state) in states() {
-                out.append(Shot(name: "A-\(name)-\(label)", width: Metrics.readingColumn + 2 * Metrics.readingInset, height: 460, dark: dark,
-                                view: AnyView(scene(ComposerMockA(state: state, now: now), dark: dark)), group: "composer"))
-                out.append(Shot(name: "B-\(name)-\(label)", width: Metrics.readingColumn + 2 * Metrics.readingInset, height: 460, dark: dark,
-                                view: AnyView(scene(ComposerMockB(state: state, now: now), dark: dark)), group: "composer"))
-            }
-        }
-        return out
-    }
 }
 
 @MainActor

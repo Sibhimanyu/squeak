@@ -675,7 +675,8 @@ struct SessionDetail: View {
                 }
                 .frame(height: 40)
             }
-            if let set = ducklings, DucklingWords.barText(set) != nil {
+            // New layout: the ducklings are the composer card's status line (`ducklingStatus`), not a bar of their own.
+            if !MacLayoutPreference.shared.isNew, let set = ducklings, DucklingWords.barText(set) != nil {
                 DucklingsBar(session: session, set: set, readyLine: dock.readyLine, onStop: session.turnOpen == true ? { stop() } : nil)
             }
             if isNative, working, let loop = session.looping {
@@ -888,7 +889,8 @@ struct SessionDetail: View {
             onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
             picker: pickerSource,
             pondId: PondsModel.shared.key(of: session),
-            duckName: model.composerDuckName(session)
+            status: ducklingStatus,
+            folder: session.cwd
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)
@@ -899,6 +901,18 @@ struct SessionDetail: View {
                 NativeModelMenu(session: session)
             }
         }
+    }
+
+    /// The card's status line: this chat's ducklings (chips open as tabs, "+N" lists the rest), the ready line, and the quiet
+    /// Stop while Claude's turn waits on one. Nil without ducklings; the line hides itself once the last chip has gone.
+    private var ducklingStatus: AnyView? {
+        guard let set = ducklings else { return nil }
+        let key = session.key
+        return AnyView(DucklingStatusLine(
+            parentId: key.stringValue, set: set, readyLine: dock.readyLine,
+            onStop: session.turnOpen == true ? { stop() } : nil,
+            isOpen: { [model] d in model.isDucklingOpen(DucklingRef(session: key, taskId: d.id)) },
+            open: { [model] d in model.openDucklingAnywhere(DucklingRef(session: key, taskId: d.id)) }))
     }
 
     /// `@` lists the chat's folder; `/` lists a Claude chat Squeak runs by its init message, else custom commands.

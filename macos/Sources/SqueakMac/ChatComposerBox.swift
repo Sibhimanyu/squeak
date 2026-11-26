@@ -3,9 +3,9 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The conversation's composer, one rounded box like a chat app's: the text on top (it grows to about eight
-/// lines, then scrolls) and one control row under it inside the same box: + at the left, the chat's
-/// model · effort, the mic, and a round Send. Dictation replaces the text with a level meter and never sends.
+/// The conversation's composer. New layout: the unified card (`ComposerCard`): the ducklings' status line, the text
+/// (eight lines, then it scrolls) and one toolbar. Classic layout: one rounded box, the text on top and one control row
+/// under it (model · effort, mode, attach, ring, +, mic, Send). Dictation replaces the text with a level meter and never sends.
 struct ChatComposerBox<Setup: View>: View {
     @Binding var text: String
     let placeholder: String
@@ -44,8 +44,11 @@ struct ChatComposerBox<Setup: View>: View {
     var picker: ComposerPickerSource?
     /// The pond this chat sits in: its accent draws the focus ring (§3.5). Nil: the neutral ring.
     var pondId: String?
-    /// The duck's name, drawn first in the new layout's chip above the field ("Pip · Opus 5.5 · Medium").
-    var duckName: String?
+    /// The new layout's status line at the card's top edge (the chat's ducklings); it draws its own band and nothing while
+    /// nothing runs.
+    var status: AnyView?
+    /// The chat's folder: a sent picture's token names a path inside it (its chip reads the thumbnail from there).
+    var folder: String?
     @ViewBuilder var setup: () -> Setup
 
     @State private var dictation = DictationController()
@@ -55,6 +58,7 @@ struct ChatComposerBox<Setup: View>: View {
     @State private var fieldHandle = ComposerFieldHandle()
     @State private var caret = 0
     @State private var focused = false
+    @State private var chips = InlineChipSource()
 
     /// About twice the old box: room for two or three lines before it grows.
     @State private var pickerDirection: SuggestionPlacement.Direction = .up
@@ -76,9 +80,22 @@ struct ChatComposerBox<Setup: View>: View {
                     localFocus += 1
                 }
             }
-            .onChange(of: chatID) { _, _ in dictation.cancel() }
+            .onChange(of: chatID) { _, _ in dictation.cancel(); wireInline() }
+            .onAppear { wireInline() }
+            .onChange(of: text) { _, new in if tray?.inline == true { tray?.retain(pendingIds: InlineAttachments.pendingIds(in: new)) } }
             .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in if editable, let tray, !tray.isFull { tray.pick() } }
             .onDisappear { dictation.cancel() }
+    }
+
+    /// New layout: pictures go in where the caret is, as chips (`InlineAttachments`); a paste, a drop and the paperclip all
+    /// land through the tray's `onInsert`.
+    private func wireInline() {
+        guard MacLayoutPreference.shared.isNew else { return }
+        chips.tray = tray
+        chips.folder = folder
+        let handle = fieldHandle, binding = $text
+        tray?.onInsert = { handle.insertAtCaret($0) }
+        tray?.onDropped = { id in binding.wrappedValue = InlineAttachments.removing(pendingId: id, from: binding.wrappedValue) }
     }
 
     /// Where the typed `@` or `/` sits (window x): the `@` and `/` list opens from it, above the field's own box.
@@ -141,40 +158,41 @@ struct ChatComposerBox<Setup: View>: View {
     }
 
 
-    // MARK: New layout (DESIGN.md §8.12, stage 3)
+    // MARK: New layout (DESIGN.md §8.12): the unified card (Direction A)
 
-    /// One rounded field with its tools inside on the left (attach, @, /, mic, the context ring) and a round duck-yellow
-    /// Send at the right; above it a small chip line: the duck, its model and effort (the existing picker), the mode, and
-    /// the working glyph while the agent works. Every function and key of the old box is kept.
+    /// One card: the status line (ducklings, only while they run; `status`), the text, and one toolbar with attach, @, /,
+    /// the model and the mode at the left and the context ring, dictation and Send at the right. Every function and key of
+    /// the old box is kept.
     private var newBox: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            chipLine
-            VStack(alignment: .leading, spacing: 4) {
-                if let tray { ImageStrip(tray: tray).padding(.leading, 4) }
-                HStack(alignment: .bottom, spacing: 4) {
-                    HStack(spacing: 0) { newTools }.frame(height: 32)
-                    if dictation.state.showsMeter {
-                        DictationBar(dictation: dictation).frame(minHeight: 32)
-                    } else {
-                        newField
-                    }
-                    newSend.frame(height: 32)
-                }
-                DictationNotice(dictation: dictation)
+        ComposerCard(focused: focused && editable, pondId: pondId) {
+            if let status { status }
+        } top: {
+            if let tray { ImageStrip(tray: tray).padding(.leading, 4) }
+        } field: {
+            if dictation.state.showsMeter {
+                DictationBar(dictation: dictation).frame(minHeight: 34)
+            } else {
+                newField
             }
-            .padding(.leading, 8).padding(.trailing, 8).padding(.vertical, 8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.lineStrong.opacity(0.7)))
-            .overlay {
-                if focused, editable, pondId != nil {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(PondColour.focusRing(pondId), lineWidth: 1.5)
-                        .allowsHitTesting(false).transition(.opacity)
-                }
+            DictationNotice(dictation: dictation)
+        } leading: {
+            newTools
+            ComposerToolbarDivider()
+            HStack(spacing: 6) {
+                ComposerToolbarChip { setup() }
+                if let mode { ModeChip(mode: mode, onPick: onMode, toolbar: true) }
             }
-            .animation(Motion.quick, value: focused)
-            .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected, triggerX: triggerX) {
-                ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
+        } trailing: {
+            if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText, popover: contextPopover, onCompact: onCompact) }
+            micButton
+            if let hint = ComposerDesign.sendHint(working: working, hasText: canSend, primary: sendDefault.primary),
+               ComposerPrompt.button(phase: phase, hasContent: canSend, canStop: canStop) != .stop {
+                ComposerSendHint(text: hint)
             }
+            newSend.padding(.leading, 4)
+        }
+        .suggestionPopup(isPresented: pick.isOpen, direction: $pickerDirection, selected: pick.selected, triggerX: triggerX) {
+            ComposerPickerList(model: pick, direction: pickerDirection, onPick: accept)
         }
     }
 
@@ -192,22 +210,25 @@ struct ChatComposerBox<Setup: View>: View {
             },
             onCommandReturn: cardReply == nil ? { keySend(.command) } : nil,
             onContentHeight: { contentHeight = $0 },
+            lineHeight: 22,
+            chips: chips,
             onImages: editable && tray != nil ? { tray?.add($0) } : nil,
             onCaret: { caret = $0 },
             onPickerKey: pickerKeyHandler,
             handle: fieldHandle,
             onFocus: { focused = $0 }
         )
-        .frame(height: min(max(contentHeight, 32), maxH))
-        .overlay(alignment: .trailing) {
+        .composerFieldFrame(contentHeight)
+        .overlay(alignment: .topTrailing) {
             if editable, text.isEmpty {
                 Text("\u{2318}L").font(.system(size: 11)).foregroundStyle(Theme.subtle).allowsHitTesting(false)
+                    .padding(.top, 8).padding(.trailing, 6)
                     .accessibilityHidden(true).help("\u{2318}L focuses the message field")
             }
         }
     }
 
-    /// Attach, mention, command, dictate and the context ring: icons only, quiet until pressed.
+    /// Attach, mention and command: icons only, quiet until pressed.
     @ViewBuilder private var newTools: some View {
         if editable, let tray {
             AttachButton(tray: tray, symbol: .paperclip)
@@ -216,48 +237,15 @@ struct ChatComposerBox<Setup: View>: View {
                 .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
                 .accessibilityLabel("Attach unavailable")
         }
-        triggerButton("@", label: "Mention a file", help: "Mention a file (@)")
-        triggerButton("/", label: "Run a command", help: "Run a command (/)")
-        micButton
-        if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText, popover: contextPopover, onCompact: onCompact) }
-    }
-
-    private func triggerButton(_ mark: String, label: String, help: String) -> some View {
-        Button { insertTrigger(mark) } label: {
-            Text(verbatim: mark).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(editable ? Theme.muted : Theme.subtle)
-                .frame(width: 28, height: 28).contentShape(Circle())
-        }
-        .buttonStyle(.plain).pointerHand(editable).disabled(!editable)
-        .help(help).accessibilityLabel(label)
-    }
-
-    /// Above the field: "Pip · [Opus 5.5 Medium ⌄]" (the picker), the mode, then the working glyph. Fixed height so the
-    /// field never moves when the glyph or a chip comes and goes.
-    private var chipLine: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                let lead = ComposerChip.line(duck: duckName, model: nil, effort: nil)
-                if !lead.isEmpty {
-                    Text(verbatim: lead).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(verbatim: "\u{00B7}").font(.system(size: 12)).foregroundStyle(Theme.subtle)
-                }
-                setup()
-            }
-            .padding(.horizontal, 10).frame(minHeight: 26)
-            .background(Theme.sidebar, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.line))
-            if let mode { ModeChip(mode: mode, onPick: onMode) }
-            if working { WorkingGlyph(slot: 24, grid: .compact).accessibilityLabel("Working") }
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 6).frame(height: 28)
+        ComposerTriggerButton(mark: "@", label: "Mention a file", help: "Mention a file (@)", enabled: editable) { insertTrigger("@") }
+        ComposerTriggerButton(mark: "/", label: "Run a command", help: "Run a command (/)", enabled: editable) { insertTrigger("/") }
     }
 
     /// Send as a round duck-yellow disc with an `ink` arrow (12.9:1); Stop keeps its own meaning and square glyph.
     @ViewBuilder private var newSend: some View {
         let ready = canSend && !dictation.isActive
         if ComposerPrompt.button(phase: phase, hasContent: canSend, canStop: canStop) == .stop {
-            Button(action: onStop) { RoundStopLabel() }
+            Button(action: onStop) { RoundStopLabel().frame(width: 32, height: 32) }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop")
                 .shortcutHint("Stop this turn", .stop)
@@ -522,6 +510,8 @@ struct ContextPopoverView: View {
 struct ModeChip: View {
     let mode: ComposerMode
     var onPick: ((ComposerMode) -> Void)?
+    /// In the composer card's toolbar: the word for every mode (Skip approvals too), 28pt like the model chip, a 12% fill and no border.
+    var toolbar = false
 
     private var tint: Color {
         switch mode.tone {
@@ -565,7 +555,22 @@ struct ModeChip: View {
         }
     }
 
-    private var chip: some View {
+    @ViewBuilder private var chip: some View {
+        if toolbar { toolbarChip } else { classicChip }
+    }
+
+    private var toolbarChip: some View {
+        HStack(spacing: 5) {
+            Lucide(glyph, size: 12, color: tint)
+            Text(verbatim: mode.word).font(.system(size: 12, weight: .medium)).foregroundStyle(tint).lineLimit(1)
+        }
+        .fixedSize()
+        .padding(.horizontal, 8).frame(height: 28)
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+    }
+
+    private var classicChip: some View {
         let label = NativeModes.chipLabel(mode)
         return HStack(spacing: 5) {
             Lucide(glyph, size: 13, color: tint)

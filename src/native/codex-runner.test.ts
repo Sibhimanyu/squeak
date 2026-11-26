@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CodexRunner, SKIP_APPROVALS, codexPolicyFor, type CodexClient } from "./codex-runner.js";
 import type { RequestKind, Resolution, RunnerHooks, SessionStatus } from "./types.js";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 class FakeClient extends EventEmitter {
   calls: { method: string; arg: unknown }[] = [];
@@ -35,6 +38,7 @@ function setup(
   answer: (kind: RequestKind) => Resolution = () => ({ decision: "allow" }),
   mode = "default",
   resume?: string,
+  cwd = "/w",
 ) {
   const client = new FakeClient();
   const log = {
@@ -62,7 +66,7 @@ function setup(
     onExit: () => {},
   };
   const runner = new CodexRunner({
-    cwd: "/w",
+    cwd,
     model: "gpt-6.1-terra",
     effort: "low",
     permissionMode: mode,
@@ -452,5 +456,31 @@ describe("CodexRunner", () => {
       model: "gpt-next",
       effort: "high",
     });
+  });
+});
+
+describe("pictures named in the text", () => {
+  it("go to Codex as localImage items after their token, the text unchanged", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "squeak-codex-img-"));
+    mkdirSync(path.join(dir, ".context/attachments/ab"), { recursive: true });
+    writeFileSync(path.join(dir, ".context/attachments/ab/image-1.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const { client, runner } = setup(undefined, "default", undefined, dir);
+    const token = "@⟦image-1.png⟧(.context%2Fattachments%2Fab%2Fimage-1.png)";
+    await runner.send(`see ${token} here`);
+    await tick();
+    const input = (client.startTurn.mock.calls[0]![0] as { input: unknown }).input;
+    expect(input).toEqual([
+      { type: "text", text: `see ${token}`, text_elements: [] },
+      { type: "localImage", path: realpathSync(path.join(dir, ".context/attachments/ab/image-1.png")) },
+      { type: "text", text: " here", text_elements: [] },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("stay a plain string when there is no picture", async () => {
+    const { client, runner } = setup();
+    await runner.send("plain");
+    await tick();
+    expect((client.startTurn.mock.calls[0]![0] as { input: unknown }).input).toBe("plain");
   });
 });

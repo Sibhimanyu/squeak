@@ -1370,14 +1370,23 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   inspector in a Duck view; the Terminal lives in the pane. The pane slides in at `motion-standard` (ease-out) while the
   chat takes its final width at once, so the chat reflows once with no travel. Decisions (which view, open, close, pin,
   per-Duck memory and width) are `WorkPane` in SqueakMacCore; the views only draw them.
-- **Composer and messages (stage 3, built).** The composer (the chat's and the Room's, `ChatComposerBox`, `RoomComposer`) is
-  one rounded field (radius 22). Its tools sit inside on the left: attach, `@` mention, `/` command, dictate and the context
-  ring (icons only). Send is a 32pt round disc, `duck` fill with an `ink` arrow (12.9:1); while the agent works it keeps its
-  menu (queue / steer, ↵ and ⌘↵) and Stop keeps its square glyph and meaning. The model and effort picker is a small chip
-  above the field's left edge: "Pip · Opus 5.5 · Medium" (the duck's name, then the existing picker, so ⌘/ and ⇧⌘E work as
-  before); the mode chip follows it and the working glyph sits at its end while the agent works, so nothing animates in the
-  button row. In the Room the chip says "Room · everyone" or the duck or person the message goes to, and opens the chooser.
-  Pasted and dropped images, drafts, ⌘L, ⇧⌘D and the pickers are unchanged. A message's footer is not drawn: time, duration,
+- **Composer and messages (stage 3; the unified card since 2026-11-26, owner's pick of Direction A).** The composer (the
+  chat's, the Room's and New duck's: `ChatComposerBox`, `RoomComposer`, `NewThreadComposer`, all on `ComposerCard`) is one
+  `surface` card, `radius-panel`, in three bands. At the top edge a 34pt status line, only while ducklings run or recently
+  finished (`DucklingStatusLine`): the duckling mark, the ready line or "2 ducklings working", as many whole chips as fit
+  (titles cut at a word, never by the edge) and "+N" for the rest (a menu), and the quiet Stop while Claude's turn waits on
+  one. Then the text at 14/22, growing a line at a time to eight lines and then scrolling inside, its cut lines faded
+  (`ComposerDesign`). At the bottom one fixed 36pt toolbar, pinned so no icon moves: attach, `@`, `/`, a divider, the model
+  and effort picker and the mode chip (the word always, Skip approvals included, both 28pt) at the left; the context ring,
+  dictate and Send at the right. Send is a 32pt round disc, `duck` fill with an `ink` arrow (12.9:1); while the agent works
+  and words are typed "Steers now · ⌘↩ to queue" sits beside it and it keeps its queue / steer menu (↵ and ⌘↵); Stop keeps
+  its square glyph and meaning. The Room keeps only what has a flow there: attach, `@`, who it goes to ("Room · everyone"
+  or the duck or person, in the model's place), dictate and Send. New duck's toolbar holds its agent, preset and Options,
+  then "↩ starts" and Start. A pasted, dropped or picked picture goes in where the caret is, as an inline chip (a 16pt
+  thumbnail and the name on a `selected` pill, radius 6, 22pt): one character to the caret and Backspace, copied and pasted
+  as its token, a click shows it in Quick Look, ✕ on hover removes it. The stored text keeps Conductor's token at that
+  place; a sent message draws the same chips where they were typed, and the host sends the picture itself after its token
+  (Claude: an image block; Codex: `localImage`). Drafts, ⌘L, ⇧⌘D and the pickers are unchanged. A message's footer is not drawn: time, duration,
   Copy and "…" are one small raised bar (`MessageActionBar`) that floats over the message's top trailing corner while the
   pointer is over the message or a control of the bar has the keyboard (`MessageActionBarState` in SqueakMacCore). It is an
   overlay that only changes opacity, so a row never moves; it stays in the tree so Tab reaches Copy and VoiceOver reads it.

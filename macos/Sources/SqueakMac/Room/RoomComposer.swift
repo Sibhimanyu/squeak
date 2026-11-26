@@ -94,53 +94,72 @@ struct RoomComposer: View {
     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.line))
     }
 
-    // MARK: New layout (DESIGN.md §8.12, stage 3): the same field as the chat composer
+    // MARK: New layout (DESIGN.md §8.12): the same composer card as the chat (Direction A)
 
+    /// The chat's card with only what has a flow in the Room: attach, `@` (the chooser), who it goes to ("Room · everyone"
+    /// or the duck or person, the chip that opens the chooser), dictation and Send. No model, mode, context ring, steer hint or
+    /// ducklings line: a Room message starts no turn of its own, so none of them has anything to act on here.
     private var newBox: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            chipLine
-            VStack(alignment: .leading, spacing: 4) {
-                RoomAttachmentStrip(tray: tray).padding(.leading, 4)
-                if let reply = room.reply { quoteBlock(reply.quote) }
-                HStack(alignment: .bottom, spacing: 4) {
-                    HStack(spacing: 0) {
-                        RoomAttachButton(tray: tray)
-                        Button { chooser.toggle() } label: {
-                            Text(verbatim: "@").font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(Theme.muted)
-                                .frame(width: 28, height: 28).contentShape(Circle())
-                        }
-                        .buttonStyle(.plain).pointerHand().accessibilityLabel("Choose who this goes to").help("Send to a duck or a person")
-                        .popover(isPresented: $chooser, arrowEdge: .top) {
-                            picker(RoomMention.candidates(query: "", threads: room.feed.threads, people: people), everyone: true)
-                        }
-                        micButton
-                    }
-                    .frame(height: 32)
-                    if dictation.state.showsMeter {
-                        DictationBar(dictation: dictation).frame(minHeight: 32)
-                    } else {
-                        ComposerField(
-                            text: $room.draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
-                            focusToken: focusToken,
-                            moveCaretToEndOnFocus: room.reply != nil,
-                            onSend: submit, onContentHeight: { contentHeight = $0 },
-                            onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
-                        )
-                        .frame(height: min(max(contentHeight, 32), 140))
-                    }
-                    Button(action: submit) { DuckSendDisc(enabled: canSend) }
-                        .buttonStyle(.plain).disabled(!canSend).accessibilityLabel("Send").frame(height: 32)
-                }
-                DictationNotice(dictation: dictation)
+        ComposerCard(focused: focused) {
+            EmptyView()
+        } top: {
+            RoomAttachmentStrip(tray: tray).padding(.leading, 4)
+            if let reply = room.reply { quoteBlock(reply.quote) }
+        } field: {
+            if dictation.state.showsMeter {
+                DictationBar(dictation: dictation).frame(minHeight: 34)
+            } else {
+                ComposerField(
+                    text: $room.draft, sendKey: .returnSends, placeholder: "Message \(pondName), or @ a duck\u{2026}",
+                    focusToken: focusToken,
+                    moveCaretToEndOnFocus: room.reply != nil,
+                    onSend: submit, onContentHeight: { contentHeight = $0 }, lineHeight: 22,
+                    onImages: { tray.addImages($0) }, onFiles: { tray.add($0) }, onPickerKey: pickerKey, handle: fieldHandle, onFocus: { focused = $0 }
+                )
+                .composerFieldFrame(contentHeight)
             }
-            .padding(8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(focused ? Theme.lineStrong : Theme.lineStrong.opacity(0.7)))
-            .suggestionPopup(
-                isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted,
-                triggerX: mentionX, rowHeight: 38
-            ) {
-                picker(candidates, chrome: false)
+            DictationNotice(dictation: dictation)
+        } leading: {
+            RoomAttachButton(tray: tray)
+            ComposerTriggerButton(mark: "@", label: "Choose who this goes to", help: "Send to a duck or a person") { chooser.toggle() }
+                .popover(isPresented: $chooser, arrowEdge: .top) {
+                    picker(RoomMention.candidates(query: "", threads: room.feed.threads, people: people), everyone: true)
+                }
+            ComposerToolbarDivider()
+            toChip
+        } trailing: {
+            micButton
+            Button(action: submit) { DuckSendDisc(enabled: canSend) }
+                .buttonStyle(.plain).disabled(!canSend).accessibilityLabel("Send").padding(.leading, 4)
+        }
+        .suggestionPopup(
+            isPresented: mention != nil && !candidates.isEmpty, direction: $pickerDirection, selected: highlighted,
+            triggerX: mentionX, rowHeight: 38
+        ) {
+            picker(candidates, chrome: false)
+        }
+    }
+
+    /// Who it goes to, in the toolbar where the chat has its model: "Room · everyone", or the duck or person picked (with ✕
+    /// to send to the whole pond again). A press opens the chooser.
+    private var toChip: some View {
+        HStack(spacing: 2) {
+            ComposerToolbarChip {
+                Button { chooser.toggle() } label: {
+                    HStack(spacing: 6) {
+                        if case .thread(let id, _) = to { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 14) }
+                        Text(verbatim: to == .everyone ? "Room \u{00B7} everyone" : "To \(to.label)").font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.ink).lineLimit(1)
+                        Lucide(.chevronDown, size: 10, color: Theme.muted)
+                    }
+                    .padding(.horizontal, 8).frame(maxHeight: .infinity).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
+            }
+            .accessibilityLabel(to == .everyone ? "Sending to everyone in the room. Press to choose who" : "Sending to \(to.label). Press to choose who")
+            if to != .everyone {
+                Button { to = .everyone } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22).contentShape(Circle()) }
+                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Send to the whole pond instead")
             }
         }
     }
@@ -164,30 +183,6 @@ struct RoomComposer: View {
         }
         .padding(.horizontal, 6)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
-    }
-
-    /// Above the field: who it goes to ("Room \u{00B7} everyone", or the duck or person picked), tappable to change.
-    private var chipLine: some View {
-        HStack(spacing: 8) {
-            Button { chooser.toggle() } label: {
-                HStack(spacing: 6) {
-                    if case .thread(let id, _) = to { ThreadDuckView(id: id, agent: room.feed.threads.first { $0.sessionId == id }?.agent, size: 14) }
-                    Text(verbatim: to == .everyone ? "Room \u{00B7} everyone" : "To \(to.label)").font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.ink).lineLimit(1)
-                    Lucide(.chevronDown, size: 11, color: Theme.muted)
-                }
-                .padding(.horizontal, 10).frame(minHeight: 26).contentShape(Capsule())
-            }
-            .buttonStyle(.plain).pointerHand()
-            .background(Theme.sidebar, in: Capsule()).overlay(Capsule().strokeBorder(Theme.line))
-            .accessibilityLabel(to == .everyone ? "Sending to everyone in the room. Press to choose who" : "Sending to \(to.label). Press to choose who")
-            if to != .everyone {
-                Button { to = .everyone } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.muted).frame(width: 22, height: 22).contentShape(Circle()) }
-                    .buttonStyle(.plain).pointerHand().accessibilityLabel("Send to the whole pond instead")
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 6).frame(height: 28)
     }
 
     private var bar: some View {

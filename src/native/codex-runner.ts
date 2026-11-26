@@ -1,8 +1,14 @@
 import { codexContextFrom } from "./context-usage.js";
-import type { CodexApprovalPolicy, CodexSandboxMode, ServerRequestEnvelope } from "../adapters/codex-app-server.js";
+import type {
+  CodexApprovalPolicy,
+  CodexSandboxMode,
+  CodexUserInput,
+  ServerRequestEnvelope,
+} from "../adapters/codex-app-server.js";
 import type { CodexNotification } from "../types.js";
 import { MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import type { RequestKind, Runner, RunnerHooks } from "./types.js";
+import { codexInput } from "./inline-images.js";
 
 /** Codex config overrides that give a thread Squeak's tools (streamable HTTP MCP server). */
 export function codexMcpConfig(mcp: McpEndpoint): Record<string, unknown> {
@@ -36,14 +42,14 @@ export interface CodexClient {
   compactThread?(o: { threadId: string }): Promise<void>;
   startTurn(o: {
     threadId: string;
-    input: string;
+    input: CodexUserInput;
     cwd?: string | null;
     model?: string | null;
     effort?: string | null;
     approvalPolicy?: CodexApprovalPolicy;
     sandboxPolicy?: Record<string, unknown>;
   }): Promise<{ turnId: string }>;
-  steerTurn(o: { threadId: string; expectedTurnId: string; input: string }): Promise<void>;
+  steerTurn(o: { threadId: string; expectedTurnId: string; input: CodexUserInput }): Promise<void>;
   interruptTurn(o: { threadId: string; turnId: string }): Promise<void>;
   respond(id: number | string, result: Record<string, unknown>): Promise<void>;
   respondError(id: number | string, error: { code: number; message: string }): Promise<void>;
@@ -309,7 +315,7 @@ export class CodexRunner implements Runner {
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.
     const { turnId } = await this.options.client.startTurn({
       threadId,
-      input: text,
+      input: this.input(text),
       cwd: this.runCwd(),
       model: this.model,
       effort: this.effort,
@@ -321,7 +327,11 @@ export class CodexRunner implements Runner {
 
   async steer(text: string): Promise<boolean> {
     if (!this.threadId || !this.turnId) return false;
-    await this.options.client.steerTurn({ threadId: this.threadId, expectedTurnId: this.turnId, input: text });
+    await this.options.client.steerTurn({
+      threadId: this.threadId,
+      expectedTurnId: this.turnId,
+      input: this.input(text),
+    });
     return true;
   }
 
@@ -368,6 +378,12 @@ export class CodexRunner implements Runner {
   }
 
   /** Where a turn runs: the chat's folder, or (read-only root with joined Streams) the first Stream's working copy. */
+  /** The text as it is, or (with pictures named in it) text and `localImage` items in order (inline-images.ts). */
+  private input(text: string): CodexUserInput {
+    const items = codexInput(text, this.options.cwd);
+    return items.length === 1 && items[0]!.type === "text" ? text : items;
+  }
+
   private runCwd(): string {
     return (this.options.readOnlyRoot ? this.streams()[0] : undefined) ?? this.options.cwd;
   }

@@ -29,14 +29,32 @@ enum ImagePasteboard {
 @MainActor @Observable
 final class ImageTray {
     struct Item: Identifiable {
-        let id = UUID()
+        var id = UUID()
         let image: PreparedImage
         let thumb: NSImage
+        /// What its inline chip shows (the file's own name, or "image-N.png" for a paste).
+        var name = "image.png"
     }
 
     private(set) var items: [Item] = []
     private(set) var preparing = 0
     var error: String?
+    /// Inline mode (the new layout's card): each picture is inserted where the caret is, as a pending token
+    /// (`InlineAttachments.pendingToken`), the moment it is pasted, dropped or picked; the field draws it as a chip.
+    /// Nil: the classic strip of thumbnails above the field, and the pictures go after the words on send.
+    var onInsert: ((String) -> Void)?
+    /// Inline mode: a picture could not be read; its token is taken out of the text.
+    var onDropped: ((String) -> Void)?
+    private var names: [UUID: String] = [:]
+
+    var inline: Bool { onInsert != nil }
+    func item(pendingId: String) -> Item? { items.first { $0.id.uuidString == pendingId } }
+    func isPreparing(pendingId: String) -> Bool { UUID(uuidString: pendingId).map { names[$0] != nil && item(pendingId: pendingId) == nil } ?? false }
+    /// Drops pictures whose chip was deleted from the text.
+    func retain(pendingIds: [String]) {
+        let keep = Set(pendingIds)
+        if items.contains(where: { !keep.contains($0.id.uuidString) }) { items.removeAll { !keep.contains($0.id.uuidString) } }
+    }
 
     var isFull: Bool { items.count + preparing >= ImageAttachments.maxImages }
     var hasImages: Bool { !items.isEmpty }
@@ -46,6 +64,13 @@ final class ImageTray {
             guard !isFull else { error = "Up to \(ImageAttachments.maxImages) images per message."; return }
             error = nil
             preparing += 1
+            let id = UUID()
+            let name: String = {
+                if case .file(let url) = source, !url.lastPathComponent.isEmpty { return url.lastPathComponent }
+                return "image-\(items.count + preparing).png"
+            }()
+            names[id] = name
+            onInsert?(InlineAttachments.pendingToken(name: name, id: id.uuidString))
             Task { [weak self] in
                 let prepared = await Task.detached(priority: .userInitiated) { () -> PreparedImage? in
                     switch source {
@@ -59,9 +84,12 @@ final class ImageTray {
                 }.value
                 guard let self else { return }
                 preparing -= 1
+                let name = names[id] ?? "image.png"
                 if let prepared, let thumb = NSImage(data: prepared.data) {
-                    items.append(Item(image: prepared, thumb: thumb))
+                    items.append(Item(id: id, image: prepared, thumb: thumb, name: name))
                 } else {
+                    names[id] = nil
+                    onDropped?(id.uuidString)
                     error = "Squeak can only attach images it can read (PNG, JPEG, HEIC, TIFF, GIF)."
                 }
             }
@@ -69,7 +97,7 @@ final class ImageTray {
     }
 
     func remove(_ id: UUID) { items.removeAll { $0.id == id }; error = nil }
-    func clear() { items = []; error = nil }
+    func clear() { items = []; names = [:]; error = nil }
 
     /// The attach button: a system open panel for images.
     func pick() {
@@ -85,6 +113,15 @@ final class ImageTray {
     /// What to send for `text`: unchanged without images; otherwise the images are saved under `folder` and
     /// the text names them. Throws, with nothing sent and the images still here, when they cannot be saved.
     func outgoing(text: String, folder: String?) throws -> String {
+        if inline {
+            // Each picture goes where its chip is: the pending tokens become the saved paths, in place.
+            let ids = InlineAttachments.pendingIds(in: text)
+            let named = ids.compactMap { id in item(pendingId: id) }
+            guard !named.isEmpty else { return InlineAttachments.resolve(text, refs: [:]) }
+            guard let folder, !folder.isEmpty else { throw ImageAttachmentError.folderMissing }
+            let refs = try ImageAttachments.save(named.map(\.image), into: folder)
+            return InlineAttachments.resolve(text, refs: Dictionary(uniqueKeysWithValues: zip(named.map(\.id.uuidString), refs)))
+        }
         guard hasImages else { return text }
         guard let folder, !folder.isEmpty else { throw ImageAttachmentError.folderMissing }
         let refs = try ImageAttachments.save(items.map(\.image), into: folder)
@@ -93,6 +130,7 @@ final class ImageTray {
 
     /// Runs `outgoing` and shows a failure under the thumbnails; nil means "do not send".
     func prepareToSend(text: String, folder: String?) -> String? {
+        if inline, preparing > 0 { error = "One moment: an image is still being prepared."; return nil }
         do { return try outgoing(text: text, folder: folder) } catch {
             self.error = (error as? ImageAttachmentError)?.errorDescription ?? "Squeak couldn't save the image."
             return nil
@@ -105,9 +143,10 @@ struct ImageStrip: View {
     let tray: ImageTray
 
     var body: some View {
-        if !tray.items.isEmpty || tray.preparing > 0 || tray.error != nil {
+        // Inline mode: the pictures are chips in the text; only a problem is said here.
+        if !tray.inline && (!tray.items.isEmpty || tray.preparing > 0) || tray.error != nil {
             VStack(alignment: .leading, spacing: 6) {
-                if !tray.items.isEmpty || tray.preparing > 0 {
+                if !tray.inline && (!tray.items.isEmpty || tray.preparing > 0) {
                     HStack(spacing: 8) {
                         ForEach(tray.items) { item in
                             Image(nsImage: item.thumb).resizable().scaledToFill()

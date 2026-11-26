@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -241,6 +243,25 @@ describe("ClaudeRunner", () => {
     await r.send("hello");
     await tick();
     expect(f.calls[0]).toMatchObject({ env: { HTTPS_PROXY: "http://corp:1", CLAUDE_CODE_ENTRYPOINT: "squeak" } });
+  });
+
+  it("sends a picture named in the text right after its token, the token left in place", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "squeak-claude-img-"));
+    mkdirSync(path.join(dir, ".context/attachments/ab"), { recursive: true });
+    writeFileSync(path.join(dir, ".context/attachments/ab/image-1.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const f = fakeQuery();
+    const { h } = hooks();
+    const r = new ClaudeRunner({ cwd: dir, model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    const token = "@⟦image-1.png⟧(.context%2Fattachments%2Fab%2Fimage-1.png)";
+    await r.send(`before ${token} after`);
+    await tick();
+    const content = (f.inputs[0] as { message: { content: unknown } }).message.content;
+    expect(content).toEqual([
+      { type: "text", text: `before ${token}` },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } },
+      { type: "text", text: " after" },
+    ]);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("takes the session id from init, streams deltas, and a success result ends the turn idle", async () => {

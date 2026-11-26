@@ -66,7 +66,7 @@ interface ResumeThreadOptions {
 
 interface StartTurnOptions {
   threadId: string;
-  input: string;
+  input: CodexUserInput;
   cwd?: string | null;
   model?: string | null;
   effort?: string | null;
@@ -79,7 +79,7 @@ interface StartTurnOptions {
 interface SteerTurnOptions {
   threadId: string;
   expectedTurnId: string;
-  input: string;
+  input: CodexUserInput;
 }
 
 interface InterruptTurnOptions {
@@ -102,8 +102,15 @@ function withOptionalFields(base: Record<string, unknown>, optional: Record<stri
   };
 }
 
-function buildTextInput(text: string): Array<{ type: "text"; text: string; text_elements: [] }> {
-  return [{ type: "text", text, text_elements: [] }];
+/** A turn's input: plain text, or text and `localImage` items in the order the person wrote them. */
+export type CodexUserInput =
+  | string
+  | Array<{ type: "text"; text: string; text_elements: [] } | { type: "localImage"; path: string }>;
+
+function buildTextInput(
+  input: CodexUserInput,
+): Array<{ type: "text"; text: string; text_elements: [] } | { type: "localImage"; path: string }> {
+  return typeof input === "string" ? [{ type: "text", text: input, text_elements: [] }] : input;
 }
 
 function buildCollaborationMode(model?: string | null, effort?: string | null): Record<string, unknown> {
