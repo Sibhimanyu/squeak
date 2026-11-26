@@ -599,7 +599,7 @@ describe("one connection state (#130)", () => {
     const [req] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
     await B.service.refresh(pond.id);
-    await A.service.setPresence(pond.id, { online: true });
+    w.live.set(A.service.me.id, w.clock.t); // the Owner's Mac holds a live connection (#121)
     expect((await B.service.view(pond.id)).pond.connection).toEqual({ state: "live", line: "Live" });
     expect((await B.service.list())[0]!.connection?.state).toBe("live");
 

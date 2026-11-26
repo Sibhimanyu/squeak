@@ -3598,7 +3598,7 @@ export class FlotillaService extends EventEmitter {
       if (!members.has(l.memberId)) continue;
       if (l.online) online.add(l.memberId);
       if (l.lastSeenAt) beat.set(l.memberId, l.lastSeenAt);
-    this.ownerSeen.set(pond.id, pond.role === "owner" || online.has(memberIdOf(pond.ownerKey)));
+      this.ownerSeen.set(pond.id, pond.role === "owner" || online.has(memberIdOf(pond.ownerKey)));
     }
     // The Ripples feed is this Owner's Mac's own record of what happened (the Room carries the same lines).
     const ripples: Ripple[] = [...(pond.recent ?? [])];
