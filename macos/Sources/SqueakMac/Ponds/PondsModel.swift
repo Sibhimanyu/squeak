@@ -111,8 +111,8 @@ final class PondsModel {
         }
     }
     /// Invitations waiting for this account, as the Invitations block reads them from the cloud. First launch looks here to
-    /// decide whether the person was invited (`SetupFlow.entry`); it stays 0 until that block fills it.
-    var pendingInvitationCount = 0
+    /// decide whether the person was invited (`SetupFlow.entry`); it is the same list the block draws.
+    var pendingInvitationCount: Int { PondInvitations.toAnswer(invitations).count }
     /// Ponds this person made on this Mac, and Ponds other people shared with them (first launch reads both).
     var ownPondCount: Int { directory?.ponds.filter { !$0.isJoined }.count ?? 0 }
     var joinedPondCount: Int { directory?.ponds.filter(\.isJoined).count ?? 0 }

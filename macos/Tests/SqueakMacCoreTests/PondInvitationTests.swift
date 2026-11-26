@@ -39,4 +39,17 @@ import Testing
         let notes = PondNotes.joiner(old: [connecting], new: [active])
         #expect(notes.map(\.kind) == [.approved] && notes[0].title == "You\u{2019}re in Orchard")
     }
+
+    @Test func aSignedInInviteeWithNoPondOfTheirOwnLandsOnInvitations() {
+        let pending = PondInvitation(id: "i1", pondId: "p1", pondName: "Orchard", inviter: "Sibhi")
+        let joined = PondInvitation(id: "i2", pondId: "p2", pondName: "Barn", inviter: "Sam", state: .joined)
+        func entry(_ list: [PondInvitation]) -> SetupEntry {
+            SetupFlow(SetupFlowFacts(setup: SetupFacts(service: .notInstalled), signedIn: true,
+                                     pendingInvitations: PondInvitations.toAnswer(list).count, ownPonds: 0, joinedPonds: 0),
+                      progress: SetupProgress()).entry
+        }
+        #expect(entry([pending]) == .invitations)
+        // A joined one is no longer waiting on an answer; nothing is left to answer.
+        #expect(entry([joined]) != .invitations)
+    }
 }
