@@ -9,7 +9,7 @@ import { AccountTicketError, type AccountRelay } from "../cloud/account.js";
 import type { CloudLocation } from "../cloud/location.js";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { generateMemberKey, openFromMember } from "../flotilla/crypto.js";
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { RemoteBridge } from "./remote-bridge.js";
 import { pairingCode, seal } from "./remote-crypto.js";
 

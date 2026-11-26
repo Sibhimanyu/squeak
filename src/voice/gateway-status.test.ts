@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { GatewayStatusReader, gatewayRouteView } from "./gateway-status.js";
 import { sealGatewayStatus } from "./gateway-status-protocol.js";
 import { resultPath } from "./relay-protocol.js";

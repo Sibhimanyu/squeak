@@ -1,4 +1,4 @@
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { openBody, sealBody } from "./relay-protocol.js";
 import { cleanVersion } from "./addon-update.js";
 

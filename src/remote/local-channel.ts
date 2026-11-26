@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 
 import { logger } from "../utils/logger.js";
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import {
   HEADER_MAC,
   HEADER_NONCE,

@@ -64,10 +64,8 @@ const schema = z.object({
   /** Firebase project for the phone channel (docs/remote-channel.md). Unset: no phone. */
   SQUEAK_REMOTE_PROJECT: z.string().optional(),
   /**
-   * The project's Realtime Database URL. Set: the phone channel moves there
-   * and streams instead of polling Firestore. Set it once the phone runs a
-   * build that can follow (Squeak for iPhone 1.6+); an older one stops
-   * seeing updates until it is updated.
+   * The project's Realtime Database URL: the old Firebase store, kept for what still reads it
+   * (docs/cloud-layer.md, "What is still on Firebase").
    */
   SQUEAK_REMOTE_DATABASE_URL: z.string().optional(),
   /**
@@ -148,7 +146,7 @@ export interface SqueakConfig {
   /** Null when switched off. */
   handsAppPath: string | null;
   remoteProjectId: string | null;
-  /** Null: the channel stays on Firestore. */
+  /** Null: no Realtime Database is configured. */
   remoteDatabaseUrl: string | null;
   /** Whether a phone may ask for a session's whole turn (live-turn.ts). */
   remoteVerbose: boolean;

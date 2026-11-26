@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { open, seal } from "../remote/remote-crypto.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import type { CallScript } from "./dialog.js";
 import { readClips, type Clip } from "./clips.js";
 import { readQuality, type CallQuality } from "./line-quality.js";

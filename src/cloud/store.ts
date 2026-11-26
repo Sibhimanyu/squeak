@@ -3,7 +3,13 @@
  * surface of `RtdbRest`, which implements it unchanged, and `CatalystStore`, the second implementation.
  */
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+/** One sealed channel document: what every store keeps, whatever the provider. */
+export interface ChannelDoc {
+  box: string;
+  sig?: string;
+  device?: string;
+  at?: number;
+}
 
 /** Why a watch woke: a notice from the stream, the safety poll, a (re)connect, or the first call. */
 export type WatchSource = "stream" | "poll" | "open" | "first";

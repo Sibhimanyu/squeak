@@ -1,7 +1,7 @@
 {
   "rules": {
     // Squeak's remote channel and Cliq relay in the Realtime Database: the
-    // same untrusted pipe as firestore.rules (docs/remote-channel.md). Bodies
+    // untrusted pipe (docs/remote-channel.md). Bodies
     // are sealed with a key only the Mac and paired phones hold, commands are
     // signed, and the Mac verifies both. These rules only keep the pipe to one
     // shape under an unguessable id. Nothing above a channel's collections is

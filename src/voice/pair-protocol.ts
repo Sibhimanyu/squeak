@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { realtimeDatabaseOrigin, relayBaseUrl, validRelayKey, type CloudLocation } from "../cloud/location.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { openBody, sealBody } from "./relay-protocol.js";
 
 /**

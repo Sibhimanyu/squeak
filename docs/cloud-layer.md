@@ -8,7 +8,7 @@ offers **Retry** after a connection error. See [Feature flags](flags.md) for the
 
 `CloudStore` (`src/cloud/store.ts`) provides `get`, `set`, `delete`, `list` and `watch`. A watch is a signal
 to read again. The daemon uses `CatalystStore` and the iPhone uses `CatalystClient`. Both retain a Realtime
-Database implementation for older installs.
+Database implementation for older installs (see "What is still on Firebase").
 
 ## Catalyst transport
 
@@ -24,6 +24,21 @@ Database implementation for older installs.
 
 An iPhone or browser signs in with the Mac's account. The Mac authorizes each device and seals its channel details
 to that device's key. See [Remote channel](remote-channel.md#web-accounts-2026-11-10).
+
+## What is still on Firebase
+
+Firestore is gone from the daemon: no `FirestoreRest`, no Firestore rules, no Firestore Cliq inbox or Deluge handlers.
+`ChannelDoc` lives in `src/cloud/store.ts`. The Realtime Database client (`src/remote/rtdb-rest.ts`, with `fake-rtdb.ts` as
+the in-memory double most tests use) stays, for what is still live:
+
+- The old store a Mac announces its signed `move` from, and `cloud.json` `"active": "firebase"` for a Mac not yet signed in:
+  paired iPhones (`CatalystClient` keeps its Realtime Database fallback) follow the move.
+- The voice add-on's rendezvous database (`RENDEZVOUS_DATABASE`, `src/voice/claim-protocol.ts`) and the Home Assistant
+  gateway's own store, which older add-ons still open.
+- The Cliq inbox in the Realtime Database, read next to the Catalyst `cliq` kind until the handlers are pasted again.
+- The web app (`web/js/rtdb.js`) for a browser paired before Catalyst, and `firebase/` Hosting for `/app`.
+
+Remove each when its owner is gone; the remaining ticket steps (older Mac apps refused, `/app` redirect) come first.
 
 When sign-in moves a Mac from an older store, the daemon writes a sealed, signed `state/move` document on that store.
 Compatible paired phones and voice gateways verify it and move to the new location. The Mac reads the old store for

@@ -14,7 +14,7 @@ import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { PhoneImageResult } from "./phone-image.js";
 import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/reply-types.js";
 import type { FleetSession } from "../fleet/types.js";
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import type { NewChatWorkspace } from "../fleet/new-chat.js";
 import type { StartChatOutcome } from "../fleet/chat-starter.js";
 import {
@@ -2453,7 +2453,6 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-rtdb-"));
     dirs.push(dir);
     const store = new WatchingStore();
-    const firestore = new MemoryStore();
     const sends: string[] = [];
     const replier = {
       lastTurnText: () => "Pick one?",
@@ -2474,7 +2473,6 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
       configPath: path.join(dir, "remote.json"),
       projectId: "squeak-test",
       store,
-      announce: firestore,
       databaseUrl: DB,
       replier,
       snapshot: () => snapshot,
@@ -2483,7 +2481,7 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
     });
     const pairing = bridge.startPairing();
     const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
-    return { bridge, store, firestore, sends, payload, channel: `channels/${payload.c}`, phone: device() };
+    return { bridge, store, sends, payload, channel: `channels/${payload.c}`, phone: device() };
   }
 
   afterEach(() => {
@@ -2493,15 +2491,6 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
   it("puts the database URL in the pairing code", () => {
     expect(streaming().payload.r).toBe(DB);
     expect(fixture().payload.r).toBeUndefined();
-  });
-
-  it("announces the database, sealed with the channel key, in Firestore for phones paired before the move", async () => {
-    const { bridge, firestore, channel, payload } = streaming();
-    await bridge.tick();
-    await bridge.tick();
-    const doc = firestore.docs.get(`${channel}/state/transport`)!;
-    expect(open(payload.k, doc.box)).toEqual({ r: DB });
-    expect(firestore.docs.size).toBe(1);
   });
 
   it("watches only what phones write: presence, pairing and commands", async () => {
@@ -2572,14 +2561,6 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
     await vi.advanceTimersByTimeAsync(5);
     expect(list.mock.calls.filter(([p]) => p === `${channel}/pairing`).length).toBeGreaterThanOrEqual(2);
     bridge.stop();
-  });
-
-  it("an announcement that fails never holds up the pass", async () => {
-    const { bridge, firestore, store, channel, payload, phone } = streaming();
-    vi.spyOn(firestore, "set").mockRejectedValue(new Error("firestore down"));
-    await store.set(`${channel}/pairing/iphone-1`, { box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }) });
-    await bridge.tick();
-    expect((bridge.status() as { pending: unknown[] }).pending).toHaveLength(1);
   });
 });
 

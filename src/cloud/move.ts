@@ -13,7 +13,7 @@
  */
 
 import { open, seal } from "../remote/remote-crypto.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "./store.js";
 import { openBody, sealBody } from "../voice/relay-protocol.js";
 import { grantFields, readLocation, type CloudLocation } from "./location.js";
 import type { CloudStore } from "./store.js";

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { CloudStore } from "../cloud/store.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaRoutes } from "./mount.js";
 import { FlotillaService, CLOUD_DOWN } from "./service.js";
 

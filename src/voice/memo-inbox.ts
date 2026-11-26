@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import type { CloudStore } from "../cloud/store.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/reply-types.js";
 import { logger } from "../utils/logger.js";

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -42,18 +42,15 @@ export function signCliqBox(secret: string, box: string): string {
   return createHmac("sha256", secret).update(box, "utf8").digest("hex");
 }
 
-/** The calls the relay needs: `RtdbRest` (streamed) or `FirestoreRest` (polled) in real use. */
+/** The calls the relay needs: `RtdbRest` or the Catalyst `CloudStore` in real use. */
 export interface RelayStore {
   list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
   delete(path: string): Promise<void>;
   watch?(path: string, onChange: () => void, options?: { onError?: (error: Error) => void }): () => void;
 }
 
-/** Ids of records read from the legacy store carry this, so a delete goes back to where they came from. */
-const LEGACY = "legacy~";
 /** Ids of records read from the Firebase inbox a Catalyst Mac still reads during the switch. */
 const FIREBASE = "firebase~";
-const FIREBASE_LEGACY = "firebase-legacy~";
 
 /** Signatures already acted on, so a copied record cannot run twice. */
 export interface SeenSignatures {
@@ -64,32 +61,25 @@ export interface SeenSignatures {
 /**
  * The Mac's side of the Cliq relay. On Catalyst the handlers PUT `{box, sig, at}` to the relay's `cliq` kind and this
  * lists, watches (Data Streams) and deletes it through the daemon's cloud store; the rest of this comment is the
- * original Firebase design, which is kept while a Mac is still on Firebase.
+ * original Realtime Database design, which is kept while a Mac is still on it.
  * Zoho would not let the Mac read Cliq
  * (`oauth_app_blocked` for a Self Client on a managed org), but Cliq's
  * handlers can post out, so they write each record to
- * `cliq/<relay>/inbox` in the Firebase project the phone channel already
- * uses, and this reads it.
+ * `cliq/<relay>/inbox` in the Firebase Realtime Database, and this reads it.
  *
- * Firestore is an untrusted pipe here, as it is for the phone. A record
+ * The database is an untrusted pipe here, as it is for the phone. A record
  * counts only if its box carries a valid HMAC from the secret that lives in
  * the handlers and in Squeak's `.env`; anything else is deleted unread. The
  * channel then checks who sent it, how old it is, and which card it names.
  */
 export class CliqRelayInbox {
   private readonly store: RelayStore;
-  /**
-   * Firestore, read as well while the relay lives in the Realtime Database:
-   * handlers pasted before the move still post there until they are pasted
-   * again, and their records must not be stranded.
-   */
-  private readonly legacy: RelayStore | null;
   private readonly collection: string;
   /**
    * During the move to Catalyst: the Firebase inbox (`cliq/<relay>/inbox`) the bot's handlers still post to until
    * the owner pastes the new ones. Read as well as the Catalyst kind, same verification, one seen-set.
    */
-  private readonly firebase: { store: RelayStore; legacy: RelayStore | null; collection: string } | null;
+  private readonly firebase: { store: RelayStore; collection: string } | null;
   private readonly secret: string;
   private readonly seen: SeenSignatures;
   /** Signatures of the records the last `list` returned, by document id. */
@@ -97,23 +87,20 @@ export class CliqRelayInbox {
 
   constructor(options: {
     store: RelayStore;
-    legacy?: RelayStore | null;
     relayId: string;
     secret: string;
     seen: SeenSignatures;
     /** The relay is the Catalyst relay's `cliq` kind (channels/<relayId>/cliq), not `cliq/<relayId>/inbox`. */
     catalyst?: boolean;
     /** Catalyst only: the Firebase stores to keep reading while handlers are not yet re-pasted. */
-    firebase?: { store: RelayStore; legacy?: RelayStore | null } | null;
+    firebase?: { store: RelayStore } | null;
   }) {
     this.store = options.store;
-    this.legacy = options.legacy ?? null;
     this.collection = options.catalyst ? `channels/${options.relayId}/cliq` : `cliq/${options.relayId}/inbox`;
     this.firebase =
       options.catalyst && options.firebase
         ? {
             store: options.firebase.store,
-            legacy: options.firebase.legacy ?? null,
             collection: `cliq/${options.relayId}/inbox`,
           }
         : null;
@@ -131,11 +118,6 @@ export class CliqRelayInbox {
       if (!this.firebase) throw error;
       primaryError = error;
     }
-    if (this.legacy) {
-      // A legacy store that is down must not hold up the live one.
-      const old = await this.legacy.list(this.collection).catch(() => []);
-      listed.push(...old.map(({ id, doc }) => ({ id: `${LEGACY}${id}`, doc })));
-    }
     if (this.firebase) {
       // A Firebase that is down must not hold up Catalyst.
       let fbFailed = false;
@@ -146,10 +128,6 @@ export class CliqRelayInbox {
       if (primaryError && fbFailed) throw primaryError;
       if (primaryError) this.warnPrimary(primaryError);
       listed.push(...fb.map(({ id, doc }) => ({ id: `${FIREBASE}${id}`, doc })));
-      if (this.firebase.legacy) {
-        const old = await this.firebase.legacy.list(this.firebase.collection).catch(() => []);
-        listed.push(...old.map(({ id, doc }) => ({ id: `${FIREBASE_LEGACY}${id}`, doc })));
-      }
     }
     const records: CliqInboxRecord[] = [];
     const inThisPass = new Set<string>();
@@ -220,11 +198,6 @@ export class CliqRelayInbox {
     if (this.firebase) {
       if (id.startsWith(FIREBASE))
         return this.firebase.store.delete(`${this.firebase.collection}/${id.slice(FIREBASE.length)}`);
-      if (id.startsWith(FIREBASE_LEGACY) && this.firebase.legacy)
-        return this.firebase.legacy.delete(`${this.firebase.collection}/${id.slice(FIREBASE_LEGACY.length)}`);
-    }
-    if (this.legacy && id.startsWith(LEGACY)) {
-      return this.legacy.delete(`${this.collection}/${id.slice(LEGACY.length)}`);
     }
     return this.store.delete(`${this.collection}/${id}`);
   }

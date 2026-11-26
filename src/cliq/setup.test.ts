@@ -27,8 +27,14 @@ describe("setEnvValues", () => {
 
 describe("runCliqRelay", () => {
   it("makes a relay once, keeps it on a rerun, and never prints the secret", () => {
-    const file = tempEnv("SQUEAK_REMOTE_PROJECT=squeak-test\n");
-    const first = runCliqRelay(file, { SQUEAK_REMOTE_PROJECT: "squeak-test" }, []);
+    const file = tempEnv(
+      "SQUEAK_REMOTE_DATABASE_URL=https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app\n",
+    );
+    const first = runCliqRelay(
+      file,
+      { SQUEAK_REMOTE_DATABASE_URL: "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app" },
+      [],
+    );
     const env = Object.fromEntries(
       fs
         .readFileSync(file, "utf8")
@@ -44,30 +50,48 @@ describe("runCliqRelay", () => {
     expect(fs.statSync(handlers).mode & 0o777).toBe(0o600);
     const scripts = fs.readFileSync(handlers, "utf8");
     expect(scripts).toContain(`zoho.encryption.hmacsha256("${env.SQUEAK_CLIQ_RELAY_SECRET}",box,"hex")`);
-    expect(scripts).toContain(
-      `/projects/squeak-test/databases/(default)/documents/cliq/${env.SQUEAK_CLIQ_RELAY_ID}/inbox`,
-    );
+    expect(scripts).toContain(`/cliq/${env.SQUEAK_CLIQ_RELAY_ID}/inbox.json`);
+    expect(scripts).not.toContain("firestore.googleapis.com");
 
-    runCliqRelay(file, { SQUEAK_REMOTE_PROJECT: "squeak-test", ...env }, []);
+    runCliqRelay(
+      file,
+      { SQUEAK_REMOTE_DATABASE_URL: "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app", ...env },
+      [],
+    );
     expect(fs.readFileSync(file, "utf8")).toContain(`SQUEAK_CLIQ_RELAY_SECRET=${env.SQUEAK_CLIQ_RELAY_SECRET}`);
 
-    runCliqRelay(file, { SQUEAK_REMOTE_PROJECT: "squeak-test", ...env }, ["--rotate"]);
+    runCliqRelay(
+      file,
+      { SQUEAK_REMOTE_DATABASE_URL: "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app", ...env },
+      ["--rotate"],
+    );
     expect(fs.readFileSync(file, "utf8")).not.toContain(`SQUEAK_CLIQ_RELAY_SECRET=${env.SQUEAK_CLIQ_RELAY_SECRET}`);
   });
 
-  it("needs the Firebase project", () => {
-    expect(() => runCliqRelay(tempEnv(""), {}, [])).toThrow(/SQUEAK_REMOTE_PROJECT/);
+  it("needs the Realtime Database URL", () => {
+    expect(() => runCliqRelay(tempEnv(""), {}, [])).toThrow(/SQUEAK_REMOTE_DATABASE_URL/);
   });
 });
 
 describe("cliqHandlerScripts", () => {
   it("writes the three handlers, each signing and posting its record", () => {
-    const scripts = cliqHandlerScripts({ projectId: "p", relayId: "r".repeat(43), secret: "s".repeat(64) });
+    const scripts = cliqHandlerScripts({
+      projectId: "p",
+      relayId: "r".repeat(43),
+      secret: "s".repeat(64),
+      databaseUrl: "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app",
+    });
     expect(scripts.match(/zoho\.encryption\.hmacsha256/g)).toHaveLength(3);
     expect(scripts.match(/invokeurl/g)).toHaveLength(3);
     for (const kind of ['"kind","message"', '"kind","button"', '"kind","reply"']) {
       expect(scripts).toContain(kind);
     }
+  });
+
+  it("no longer writes handlers that post to Firestore: with no store at all it refuses", () => {
+    expect(() => cliqHandlerScripts({ projectId: "p", relayId: "r".repeat(43), secret: "s".repeat(64) })).toThrow(
+      /SQUEAK_REMOTE_DATABASE_URL/,
+    );
   });
 });
 
@@ -105,7 +129,7 @@ describe("cliqHandlerScripts on Catalyst", () => {
     expect(scripts).not.toContain("inbox.json");
   });
 
-  it("runs without SQUEAK_REMOTE_PROJECT and prints the new handlers on --rotate", () => {
+  it("runs without a database URL and prints the new handlers on --rotate", () => {
     const file = tempEnv("");
     const lines = runCliqRelay(file, {}, ["--rotate"], {
       provider: "catalyst",
@@ -118,6 +142,6 @@ describe("cliqHandlerScripts on Catalyst", () => {
     expect(text).toContain(`"x-squeak-cliq":"${key}"`);
     expect(text).not.toContain("x-squeak-relay");
     expect(text).not.toContain("R".repeat(43));
-    expect(() => runCliqRelay(tempEnv(""), {}, [], null)).toThrow(/SQUEAK_REMOTE_PROJECT/);
+    expect(() => runCliqRelay(tempEnv(""), {}, [], null)).toThrow(/SQUEAK_REMOTE_DATABASE_URL/);
   });
 });

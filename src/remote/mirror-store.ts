@@ -1,4 +1,4 @@
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import type { ChannelStore } from "./remote-bridge.js";
 import { logger } from "../utils/logger.js";
 

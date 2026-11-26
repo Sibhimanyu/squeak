@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { DocTree } from "../remote/mirror-store.js";
 import { GatewayPairing, type PairStore } from "./pairing-window.js";
 import {

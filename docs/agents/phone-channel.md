@@ -76,6 +76,6 @@ squeak-e2e` first, or it tests yesterday's phone. A format an older phone
 - The iPhone app is released with `ios/scripts/release.sh "notes"`; bump
   `MARKETING_VERSION` in `ios/project.yml` or SideStore never offers it. The
   file is served as `.zip` because Spark refuses `.ipa` on new projects.
-- `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` turns the channel on. The
+- Signing in (hosted relay) turns the channel on; `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` is only a gate on an old Firebase setup. The
   channel secret lives only in `~/Library/Application Support/squeak/remote.json`
   (0600) and in paired phones' Keychains.

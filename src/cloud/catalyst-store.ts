@@ -10,7 +10,7 @@
 
 import { createHash } from "node:crypto";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "./store.js";
 import { onNetworkChange } from "../remote/network-change.js";
 import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 

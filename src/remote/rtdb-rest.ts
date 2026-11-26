@@ -1,21 +1,17 @@
 /**
- * The channel's documents in Firebase's Realtime Database, over REST: the same
- * four verbs as FirestoreRest, plus `watch`, which streams changes so neither
- * side has to poll.
+ * The channel's documents in Firebase's Realtime Database, over REST: get, set,
+ * list and delete, plus `watch`, which streams changes as Server-Sent Events so
+ * neither side has to poll. Kept for what still lives there (docs/cloud-layer.md,
+ * "What is still on Firebase"): the voice add-on's rendezvous, the Cliq inbox,
+ * and the old store a Mac announces its move from.
  *
- * Why the Realtime Database and not Firestore: it bills for bytes stored and
- * downloaded, never per read or write, and its REST API streams changes as
- * Server-Sent Events, which plain `fetch` (and the phone's URLSession) can
- * read without an SDK. A phone that watches a working session is many small
- * writes a minute; on Firestore each is a billed write plus a billed read.
- *
- * Unauthenticated, exactly like the Firestore channel: the rules
+ * Unauthenticated: the rules
  * (firebase/database.rules.json) allow only the channel shape under an
  * unguessable id, and every body is sealed (and, for commands, signed). See
  * docs/remote-channel.md.
  */
 
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { onNetworkChange } from "./network-change.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;

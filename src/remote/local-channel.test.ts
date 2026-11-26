@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { ReplyOutcome } from "../fleet/reply-types.js";
 import type { FleetSession } from "../fleet/types.js";
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { LocalAdvertiser, LocalChannelServer, parseDoc, parseTarget } from "./local-channel.js";
 import {
   HEADER_MAC,

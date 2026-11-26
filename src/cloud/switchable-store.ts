@@ -6,7 +6,7 @@
  * watch listens to both. Writes go to the current store only.
  */
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "./store.js";
 import type { CloudLocation } from "./location.js";
 import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 

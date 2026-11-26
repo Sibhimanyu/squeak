@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { DocTree } from "../remote/mirror-store.js";
 import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
 import { phoneLine } from "./gateway-main.js";

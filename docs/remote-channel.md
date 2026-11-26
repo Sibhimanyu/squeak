@@ -118,8 +118,7 @@ else on the machine. Each of those is a separate, later decision.
   session, backgrounds, or its presence lapses (60s), so a turn's thinking
   does not sit in the database afterwards. Only for a session the phone can
   already see, only with a paired phone, and only on the Realtime Database
-  (Firestore's rules have no `live`, and a write a second is what it bills
-  for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
+  (a write a second is what it bills for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
   phone's plain `{ at }` presence keeps working. Measured on the live
   project: the turn arrived 786 ms after the phone opened the session.
   The chat history that comes with it is kept on the phone (2026-10-23,

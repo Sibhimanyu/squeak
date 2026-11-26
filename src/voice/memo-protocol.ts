@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { readAudioClips, readClip, type Clip } from "./clips.js";
 import { CLOCK_SKEW_MS, isRecord, openBody, sealBody } from "./relay-protocol.js";
 import { readFillers, type Fillers } from "./fillers.js";

@@ -3,7 +3,7 @@ import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
 import type { ChoiceOption } from "../fleet/choices.js";
 import type { CallScript } from "./dialog.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import { audioPath, callAudioId, sealAudio } from "./memo-protocol.js";
 import {
   newCallId,

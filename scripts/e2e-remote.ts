@@ -1,12 +1,11 @@
 // End-to-end test of the phone channel over the REAL Firebase project:
 // the Mac's RemoteBridge and the phone's own Swift channel code (squeak-e2e),
-// talking through live Firestore. The only fakes are the chat (a recorded
+// talking through the live Realtime Database. The only fakes are the chat (a recorded
 // replier, so no agent is touched) and your eyes on the pairing code.
 //
 //   npx tsx scripts/e2e-remote.ts [firebase-project-id]
 //
-// With SQUEAK_E2E_DATABASE_URL set, the channel runs on that Realtime
-// Database instead (the emulator works: http://127.0.0.1:9000?ns=<name>).
+// SQUEAK_E2E_DATABASE_URL names the Realtime Database the channel runs on (the emulator works: http://127.0.0.1:9000?ns=<name>).
 // The bridge then runs on its own, woken only by the stream, so the run
 // proves nothing waits for a poll.
 //
@@ -24,7 +23,6 @@ import path from "node:path";
 
 import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import { FakeRtdb } from "../src/remote/fake-rtdb.js";
-import { FirestoreRest } from "../src/remote/firestore-rest.js";
 import { LocalChannelServer } from "../src/remote/local-channel.js";
 import { MirrorStore } from "../src/remote/mirror-store.js";
 import { RemoteBridge } from "../src/remote/remote-bridge.js";
@@ -66,7 +64,8 @@ const session = {
 const localMode = process.env.SQUEAK_E2E_LOCAL === "1";
 const fake = localMode && !process.env.SQUEAK_E2E_DATABASE_URL ? new FakeRtdb() : null;
 const databaseUrl = (await fake?.start()) ?? process.env.SQUEAK_E2E_DATABASE_URL ?? null;
-const cloudStore = databaseUrl ? new RtdbRest(databaseUrl) : new FirestoreRest(project);
+if (!databaseUrl) throw new Error("Set SQUEAK_E2E_LOCAL=1 (an in-memory database) or SQUEAK_E2E_DATABASE_URL.");
+const cloudStore = new RtdbRest(databaseUrl);
 const mirror = localMode ? new MirrorStore(cloudStore) : null;
 const store = mirror ?? cloudStore;
 let localServer: LocalChannelServer | null = null;

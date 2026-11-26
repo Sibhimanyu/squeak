@@ -67,7 +67,7 @@ import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { CloudLocation } from "../cloud/location.js";
 import { movePath, sealPhoneMove } from "../cloud/move.js";
-import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import type { ChatModel } from "../fleet/chat-models.js";
 import { checkWorkSplit, describeSplit, SPLIT_WORKERS, type SplitWorker, type WorkSplit } from "../fleet/work-split.js";
 import { PhoneAttachments } from "../fleet/phone-attachments.js";
@@ -1056,10 +1056,7 @@ export interface RemoteBridgeDependencies {
    */
   onSnapshot?: ((listener: (snapshot: FleetSnapshot) => void) => () => void) | null;
   /**
-   * The Realtime Database URL when `store` is one. It goes into the pairing
-   * code, and is announced, sealed with the channel key, in Firestore's
-   * `state/transport` through `announce`, so a phone paired before the move
-   * follows without pairing again.
+   * The Realtime Database URL when `store` is one. It goes into the pairing code.
    */
   databaseUrl?: string | null;
   /**
@@ -1067,7 +1064,6 @@ export interface RemoteBridgeDependencies {
    * (Catalyst). Absent: `databaseUrl` as before.
    */
   location?: (() => CloudLocation | null) | null;
-  announce?: ChannelStore | null;
   /**
    * The channel id a new channel should take (the hosted relay's Mac id, which the account provisioned before the
    * bridge existed). Used only when this Mac has no channel yet and the id is 22+ url-safe characters.
@@ -1268,7 +1264,6 @@ export class RemoteBridge {
   private watching: { channelId: string; stops: Array<() => void> } | null = null;
   /** A change arrived during a pass; run another as soon as it ends. */
   private dirty = false;
-  private announcedFor = "";
   /** The session the phone's last presence said it is watching in verbose mode. */
   private presenceWatching: string | null = null;
   /** The pond whose thread list is published for the phone (`pond-threads.ts`), with what was last written. */
@@ -1716,7 +1711,6 @@ export class RemoteBridge {
     this.config = null;
     this.pending.clear();
     this.stopWatches();
-    this.announcedFor = "";
     try {
       fs.rmSync(this.deps.configPath, { force: true });
     } catch {
@@ -1749,7 +1743,6 @@ export class RemoteBridge {
       const config = this.config;
       this.ensureWatches();
       if (config) {
-        await this.announceTransport(config);
         await this.readPresence(config);
         this.updateLive();
         await this.updatePondThreads(config).catch((error: unknown) =>
@@ -2391,27 +2384,6 @@ export class RemoteBridge {
       return;
     }
     this.schedule(WATCH_DEBOUNCE_MS);
-  }
-
-  /** Tell phones paired before the move where the channel lives now. Once per channel per run. */
-  private async announceTransport(config: RemoteConfig): Promise<void> {
-    const url = this.deps.databaseUrl;
-    const store = this.deps.announce;
-    if (!url || !store || this.announcedFor === config.channelId) {
-      return;
-    }
-    try {
-      await store.set(this.channel(config, "state", "transport"), {
-        box: seal(config.key, { r: url }),
-        at: this.now(),
-      });
-      this.announcedFor = config.channelId;
-    } catch (error) {
-      // Best effort, retried next pass; it must never hold up a command.
-      logger.warn("remote transport announcement failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   /** Whether a phone is looking now (its presence within the window), so live readings are worth taking. */

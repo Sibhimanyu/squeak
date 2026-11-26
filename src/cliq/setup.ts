@@ -48,8 +48,7 @@ export interface RelaySettings {
 
 /**
  * The Deluge that ends every handler: sign the record and post it to the
- * relay. Both stores answer a create with a `name`: Firestore the document's,
- * the Realtime Database the new key.
+ * relay. The Realtime Database answers a create with a `name`, the new key.
  */
 function postToRelay(settings: RelaySettings, failure: string): string {
   if (settings.catalyst) {
@@ -89,21 +88,7 @@ if(response.get("name") == null)
 	${failure}
 }`;
   }
-  const url = `https://firestore.googleapis.com/v1/projects/${settings.projectId}/databases/(default)/documents/cliq/${settings.relayId}/inbox`;
-  return `box = record.toString();
-sig = zoho.encryption.hmacsha256("${settings.secret}",box,"hex");
-payload = {"fields":{"box":{"stringValue":box},"sig":{"stringValue":sig},"at":{"integerValue":zoho.currenttime.toLong().toString()}}};
-response = invokeurl
-[
-	url :"${url}"
-	type :POST
-	parameters:payload.toString()
-	headers:{"Content-Type":"application/json"}
-];
-if(response.get("name") == null)
-{
-	${failure}
-}`;
+  throw new Error("Cliq's relay needs Squeak's cloud or SQUEAK_REMOTE_DATABASE_URL.");
 }
 
 /** The three handlers' code, with this Mac's relay filled in (docs/cliq.md explains each). */
@@ -208,8 +193,8 @@ export function writeCliqRelay(
   options: { rotate: boolean; rotateKey?: boolean; relayId?: string; cliqKey?: string },
 ): WrittenRelay {
   const projectId = env.SQUEAK_REMOTE_PROJECT?.trim() ?? "";
-  if (cloud?.provider !== "catalyst" && !projectId) {
-    throw new Error("Set SQUEAK_REMOTE_PROJECT first: the relay lives in that Firebase project.");
+  if (cloud?.provider !== "catalyst" && !remoteDatabaseUrl(env.SQUEAK_REMOTE_DATABASE_URL)) {
+    throw new Error("Set SQUEAK_REMOTE_DATABASE_URL first: the relay lives in that Realtime Database.");
   }
   const { rotate } = options;
   const rotateKey = options.rotateKey ?? rotate;
@@ -265,8 +250,8 @@ export function runCliqRelay(
     catalyst
       ? "They post to the Squeak cloud relay (Catalyst) with a write-only Cliq key; paste all three into Cliq."
       : databaseUrl
-        ? "They post to the Realtime Database. Until they are pasted, records still arriving in Firestore are read too."
-        : "They post to Firestore. Set SQUEAK_REMOTE_DATABASE_URL and run this again to stream instead of polling.",
+        ? "They post to the Realtime Database."
+        : "Set SQUEAK_REMOTE_DATABASE_URL (or move to Squeak's cloud) and run this again.",
     env.SQUEAK_CLIQ_OWNER_ID && env.SQUEAK_CLIQ_OWNER_EMAIL
       ? "Restart Squeak to turn on two-way Cliq."
       : "Set SQUEAK_CLIQ_OWNER_ID and SQUEAK_CLIQ_OWNER_EMAIL too (docs/cliq.md), then restart Squeak.",

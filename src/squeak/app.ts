@@ -75,7 +75,6 @@ import type { IngressControl } from "../fleet/hook-ingress.js";
 import { AddonHost } from "../addon-host.js";
 import type { AddonConfig } from "../addons.js";
 import { lastAgentMessage } from "../fleet/terminal-reply.js";
-import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CloudControl } from "../cloud/control.js";
 import { HostedCloud, deferMoveRequested, hostedRelayUrl } from "../cloud/hosted.js";
@@ -691,7 +690,7 @@ export class SqueakApp {
           await this.cloud.set(movePath(relay.channel), sealAddonMove(relay.key, target, Date.now()));
       },
     });
-    const cloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
+    const cloudStore = bridgeProjectId ? this.cloud : null;
     // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
     const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
     this.remote =
@@ -714,10 +713,6 @@ export class SqueakApp {
             },
             // A device of the linked account added without a code: always told (a security event, not muted).
             onOwnDeviceAdded: ({ text }) => this.announce(text),
-            announce:
-              config.remoteDatabaseUrl && cloudLocation?.provider !== "catalyst"
-                ? new FirestoreRest(bridgeProjectId)
-                : null,
             replier: this.router,
             // Squeak's own chats: the open request in full, answering it, starting a chat (src/fleet/native-phone.ts).
             native: new NativePhone({
@@ -2710,19 +2705,14 @@ export class SqueakApp {
     firebase?: { store: RelayStore; legacy?: RelayStore | null } | null;
   } {
     if (this.cloud?.location?.provider === "catalyst") {
-      // During the switch the bot's handlers may still post to Firebase: read that inbox too (docs/cliq.md).
-      const firebase = projectId
-        ? this.config.remoteDatabaseUrl
-          ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
-          : { store: new FirestoreRest(projectId) }
-        : null;
+      // During the switch the bot's handlers may still post to the Realtime Database: read that inbox too (docs/cliq.md).
+      const firebase =
+        projectId && this.config.remoteDatabaseUrl ? { store: new RtdbRest(this.config.remoteDatabaseUrl) } : null;
       return { store: this.cloud, catalyst: true, firebase };
     }
-    if (!projectId)
-      throw new Error("Cliq's relay is in Firebase here: set SQUEAK_REMOTE_PROJECT, or move to Catalyst.");
-    return this.config.remoteDatabaseUrl
-      ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
-      : { store: new FirestoreRest(projectId) };
+    if (!this.config.remoteDatabaseUrl)
+      throw new Error("Cliq's relay is in Firebase here: set SQUEAK_REMOTE_DATABASE_URL, or move to Catalyst.");
+    return { store: new RtdbRest(this.config.remoteDatabaseUrl) };
   }
 
   /**
@@ -2751,7 +2741,7 @@ export class SqueakApp {
               inbox: this.logCliqInbox(
                 new CliqRelayInbox({
                   // On Catalyst: the relay's `cliq` kind, watched by Data Streams. Otherwise streamed from the
-                  // Realtime Database when configured, still reading Firestore for handlers pasted before the move.
+                  // Realtime Database.
                   ...this.cliqInboxStores(twoWay.projectId),
                   relayId: twoWay.relayId,
                   secret: twoWay.relaySecret,

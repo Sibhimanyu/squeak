@@ -9,7 +9,7 @@ import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
 import type { CloudStore, WatchSource } from "../cloud/store.js";
 import { logger } from "../utils/logger.js";
 import { flag } from "../squeak/flags.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc } from "../cloud/store.js";
 import {
   generateMemberKey,
   joinProof,
