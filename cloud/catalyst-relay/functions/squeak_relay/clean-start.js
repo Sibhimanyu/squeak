@@ -1,17 +1,19 @@
 // Clean start (docs/cloud-layer.md, "Clean start"; spec: People and remote, "Start clean"): clears every Pond from the cloud so
 // shared Ponds begin again from their Owners' Macs, which keep every Pond and Duck. What goes: the Pond tables
-// (people.js cleanStart), each Pond's sealed documents (every kind under channels/<pondId>/), its pins and revocations, its
+// (people.js cleanStart), each Pond's sealed documents (every kind under channels/<pondId>/), its change feed, its pins and revocations, its
 // channel claim, and the account Pond indexes (acctponds/<userId>). What stays: accounts, devices, push tokens, and every
 // Mac's own channel (the iPhone's way in; a Mac's key and its channel id are the same id, so those ids are skipped).
 // The store cannot list partitions, so Pond ids are gathered from the Pond table, the account indexes of every known
 // account, and whatever the operator names (`pondIds`, `userIds`).
 const { CHANNEL, KINDS } = require("./rules");
+const { createFeed } = require("./feed");
 
 const MAC_OWNERS = "mac-owners";
 const ACCT_PONDS_PK = "acctponds";
 const USER = /^[A-Za-z0-9_.:-]{1,64}$/;
 
 function createCleanStart({ store, people }) {
+  const feed = createFeed(store);
   async function wipePartition(pk) {
     const rows = await store.list(pk);
     for (const r of rows) await store.del(pk, r.doc);
@@ -41,6 +43,7 @@ function createCleanStart({ store, people }) {
       for (const kind of KINDS) documents += await wipePartition(`channels/${id}/${kind}`);
       documents += await wipePartition(`pins/${id}`);
       documents += await wipePartition(`revoked/${id}`);
+      documents += await feed.wipe(id);
       await store.del("channel-owners", id);
     }
     return { ponds: wiped, documents, indexes, people: people ? await people.cleanStart() : null };

@@ -39,6 +39,8 @@
 //   POST   /admin/clean-start {confirm:"wipe-cloud-ponds", pondIds?, userIds?} (relay key only; 403 unless the relay runs with
 //                         SQUEAK_CLEAN_START=on, the development environment) -> 200 {ponds, documents, indexes, people}: clears every
 //                         Pond from the cloud (clean-start.js); Mac channels, accounts and devices stay
+//   GET    /changes?pond=&since=<seq|head>&limit=  -> 200 {changes:[{seq,kind,id,doc|null}], next, more} (feed.js; key, Mac key, pond
+//                         token or an account token whose account is a member; 404 when the store keeps no feed)
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
@@ -70,6 +72,7 @@
 const crypto = require("node:crypto");
 const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
 const scoped = require("./scoped");
+const { createFeed, FEED_KINDS } = require("./feed");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 const { createCleanStart } = require("./clean-start");
@@ -349,6 +352,35 @@ function createRelay(deps) {
     return { user };
   }
 
+  const feed = createFeed(deps.store);
+  /**
+   * Gives a content write the Pond's next seq (feed.js) and returns the document to store: the same one with `seq` added
+   * (an older client ignores the field), or the document untouched when the kind is not Pond content or the store has no
+   * feed. A delete passes doc null and is recorded as a tombstone. The feed row is written first, so a seq that a reader
+   * sees always has its document.
+   */
+  async function stamp(parsed, doc) {
+    if (!feed.enabled || !FEED_KINDS.has(parsed.kind)) return doc;
+    const seq = await feed.append(parsed.channel, { kind: parsed.kind, id: parsed.doc, doc });
+    return doc && seq !== null ? { ...doc, seq } : doc;
+  }
+
+  /**
+   * GET /changes?pond=<id>&since=<seq|head>&limit=<n>: the Pond's content changes after `since`, oldest first, at most 100
+   * a page: { changes: [{seq, kind, id, doc|null}], next, more }. `doc` null is a delete. since=head returns only the
+   * current end as `next`, so a device that is about to read a whole list can start its cursor first. 404 when the
+   * store keeps no feed. The caller has already been checked against the Pond.
+   */
+  async function sendChanges(res, url, pondId) {
+    if (!feed.enabled) return send(res, 404, { error: "no-feed" }, NO_STORE);
+    const sinceText = url.searchParams.get("since") ?? "0";
+    const since = sinceText === "head" ? "head" : /^\d{1,12}$/.test(sinceText) ? Number(sinceText) : -1;
+    const limitText = url.searchParams.get("limit");
+    if (since === -1 || (limitText !== null && !/^\d{1,4}$/.test(limitText)))
+      return send(res, 400, { error: "since" }, NO_STORE);
+    return send(res, 200, await feed.changes(pondId, since, limitText === null ? 100 : Number(limitText)), NO_STORE);
+  }
+
   /** A web guest: one pond's channel, by a scoped token, never the relay key. */
   async function handleGuest(req, res, url, route, method, given) {
     const who = scoped.verify(deps.key, given, Date.now());
@@ -387,7 +419,7 @@ function createRelay(deps) {
         if (method === "PUT") {
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
-          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
+          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(await stamp(parsed, body.doc)));
           if (parsed.kind === "joins") {
             // Always rewritten or cleared, so the email shown is that of whoever wrote the request now.
             const idPk = `channels/${parsed.channel}/joinids`;
@@ -405,12 +437,17 @@ function createRelay(deps) {
             }
           }
         } else {
+          await stamp(parsed, null);
           await deps.store.del(parsed.pk, parsed.doc);
         }
         await publishNotice(parsed.pk, parsed.doc);
         return send(res, 204);
       }
       return send(res, 403, {});
+    }
+    if (route === "/changes" && method === "GET") {
+      if (url.searchParams.get("pond") !== who.pondId) return send(res, 403, {});
+      return await sendChanges(res, url, who.pondId);
     }
     if (route === "/list" && method === "GET") {
       const parsed = parseKindPath(url.searchParams.get("prefix"));
@@ -1341,6 +1378,22 @@ function createRelay(deps) {
         await publishNotice(parsed.pk, parsed.doc);
         return send(res, 200, { ok: true });
       }
+      // A signed-in account reads its Pond's changes if the people tables say it is a member (people.js isMember); a Pond
+      // that is not theirs, a removed member and a Relay without the tables all read as 403, never as an empty feed.
+      if (
+        route === "/changes" &&
+        !mac &&
+        req.headers["x-squeak-account"] !== undefined &&
+        !req.headers["x-squeak-relay"]
+      ) {
+        if (method !== "GET") return send(res, 405, {});
+        const user = await accountUser(req, true);
+        if (!user) return send(res, 401, undefined, NO_STORE);
+        const pondId = url.searchParams.get("pond");
+        if (!scoped.POND.test(pondId || "") || !deps.people || !(await deps.people.isMember(pondId, user.userId)))
+          return send(res, 403, {}, NO_STORE);
+        return await sendChanges(res, url, pondId);
+      }
       const given = req.headers["x-squeak-pond-token"];
       if (!mac && given !== undefined && !req.headers["x-squeak-relay"])
         return await handleGuest(req, res, url, route, method, given);
@@ -1514,17 +1567,26 @@ function createRelay(deps) {
           const stored = JSON.stringify(body.doc);
           if (mac && !(await tenants.chargeBytes(mac, Buffer.byteLength(stored))))
             return send(res, 429, { error: "quota" });
-          await deps.store.put(parsed.pk, parsed.doc, stored);
+          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(await stamp(parsed, body.doc)));
           await publishNotice(parsed.pk, parsed.doc);
           // A Cliq handler (Deluge) reads the answer's body to tell success from a bare 401, and a 204 has none.
           return parsed.kind === "cliq" ? send(res, 200, { ok: true }) : send(res, 204);
         }
         if (method === "DELETE") {
+          await stamp(parsed, null);
           await deps.store.del(parsed.pk, parsed.doc);
           await publishNotice(parsed.pk, parsed.doc);
           return send(res, 204);
         }
         return send(res, 405, {});
+      }
+
+      if (route === "/changes") {
+        if (method !== "GET") return send(res, 405, {});
+        const pondId = url.searchParams.get("pond");
+        if (!scoped.POND.test(pondId || "")) return send(res, 400, { error: "pond" }, NO_STORE);
+        if (mac && !(await tenants.channelAllowed(mac, pondId))) return forbidden();
+        return await sendChanges(res, url, pondId);
       }
 
       if (route === "/list") {

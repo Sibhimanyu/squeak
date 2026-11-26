@@ -77,6 +77,38 @@ Who is in a Pond lives in server-readable Catalyst Data Store tables; what peopl
   SDK calls (`new Datastore(app).table()`, `new ZCQL(app).executeZCQLQuery()`) are **unmeasured against a live project**;
   the live test plan in `cloud-spike-2026-11.md` covers them.
 
+## Sequence numbers and the change feed
+
+Every content write in a Pond (kinds in `feed.js` `FEED_KINDS`: pond, members, joins, threads, tevents, presence, holds,
+tcmds, ripples, keys, grants, tasks, claims, locks, room, rposts, rtasks) gets the Pond's next `seq`; a device asks what
+changed since a seq and gets only those documents. Code: `functions/squeak_relay/feed.js`, the daemon side in
+`src/cloud/change-feed.ts`.
+
+- **The counter (no transactions, no conditional update).** A seq is a row: `feed/<pondId>` / `<seq as 12 digits>` holds the
+  change itself (`{seq, kind, id, doc|null, at}`, a delete is `doc: null`). A writer takes seq n by _inserting_ row n, which
+  the unique `(pk, doc)` key lets only one writer do (`store.claim`, insert only). A refused insert means another writer
+  holds n: walk to the end of the log (`store.range`) and try the next number, up to 40 tries, then 503. Unique, because the
+  store refuses a second insert; gapless and ordered, because a writer only tries n after rows below n were seen (the walk
+  reads them; the hint is written after its row); atomic with the content, because the row carries the document, so a reader
+  never sees a seq whose document is not there yet. `feedhead/<pondId>` is a lower-bound hint written every 8 seqs so the
+  walk reads a few rows, not all; losing it costs reads, never correctness. Rejected: a counter row read-then-written
+  (loses increments under concurrency), and a seq reserved before the document is written (leaves a hole a reader may
+  step over).
+- **Routes.** `GET /changes?pond=<id>&since=<seq|head>&limit=<1..100>` answers `{changes:[{seq,kind,id,doc|null}], next, more}`,
+  oldest first; `since=head` returns only the end as `next`. Callers: the operator key, a Mac key (`channelAllowed`), a pond
+  token of that Pond, or an `x-squeak-account` token whose account `people.isMember(pondId, userId)` (a non-member, a
+  removed member, or a relay without the people tables is 403). 404 when the store has no `claim`/`range` (feed off).
+- **Old clients.** The stored document also gets `seq` (an extra field older clients ignore); `/doc` and `/list` are unchanged
+  and the iPhone app keeps using them.
+- **Daemon.** `CatalystStore.list` of a content kind goes through `FeedMirror`: first open of a Pond = `since=head`, one list
+  of that kind, one catch-up read; afterwards every list of that Pond is one `/changes` read applied to a mirror held per
+  Pond (cursor) and kind. A relay without the feed, or a token it refuses, turns the mirror off and lists plainly.
+- **Known limits.** The mirror and cursors live in the daemon's memory, so a restart is a first open again. The log is not
+  compacted yet, and a Pond reset by clean start restarts at seq 1 (clients restart too). The canonical `/doc` row of a
+  document written by two writers at once can hold the earlier seq's content; the feed, in seq order, is the truth.
+  `claim` and `range` on NoSQL (`index.js`) are **unmeasured against a live project**: insert refusing an existing key, and
+  query results ascending by sort key with a `start_key`. Add them to the live test plan.
+
 ### Clean start
 
 The release clears all cloud Pond data; every Pond and Duck stays on the Owner's Mac and shared Ponds become local again.

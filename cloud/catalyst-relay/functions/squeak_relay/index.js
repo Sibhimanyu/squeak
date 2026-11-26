@@ -68,6 +68,33 @@ function storeFor(app) {
     async del(pk, doc) {
       await table.deleteItems({ keys: keysOf(pk, doc) });
     },
+    // The change feed's two operations (feed.js). UNMEASURED against a live project: insertItems is assumed to refuse an
+    // existing (pk, doc) key, and query results to come back ascending by sort key; the live test plan checks both.
+    async claim(pk, doc, json) {
+      try {
+        await table.insertItems({ item: keysOf(pk, doc).addString("data", json).addNumber("at", Date.now()) });
+        return true;
+      } catch (e) {
+        // Refused: the row is there (someone else holds this seq). Anything else is a real failure.
+        if ((await table.fetchItem({ keys: keysOf(pk, doc) }).catch(() => null))?.get?.[0]?.item) return false;
+        throw e;
+      }
+    },
+    async range(pk, afterDoc, limit) {
+      const rows = [];
+      let startKey = afterDoc ? keysOf(pk, afterDoc) : undefined;
+      for (let page = 0; page < 20 && rows.length < limit; page++) {
+        const r = await query(pk, Math.min(limit - rows.length + (startKey ? 1 : 0), 100), startKey);
+        for (const d of r.get ?? []) {
+          const doc = d.item?.getString("doc");
+          const json = d.item?.getString("data");
+          if (doc && json && (!afterDoc || doc > afterDoc)) rows.push({ doc, json });
+        }
+        startKey = r.next_token ?? r.start_key;
+        if (!startKey) break;
+      }
+      return rows.slice(0, limit);
+    },
     async list(pk) {
       const rows = [];
       let startKey;

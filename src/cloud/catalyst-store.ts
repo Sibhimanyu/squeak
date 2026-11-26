@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 
 import type { ChannelDoc } from "./store.js";
+import { FeedMirror, type FeedPage } from "./change-feed.js";
 import { onNetworkChange } from "../remote/network-change.js";
 import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 
@@ -74,6 +75,7 @@ export class CatalystStore implements CloudStore {
   private readonly scoped: boolean;
   private readonly fetchImpl: FetchLike;
   private readonly hub: StreamHub;
+  private readonly feed: FeedMirror;
 
   constructor(options: CatalystStoreOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "");
@@ -89,6 +91,10 @@ export class CatalystStore implements CloudStore {
         : { name: "x-squeak-relay", value: options.relayKey! };
     this.joinAttest = options.joinAttest;
     this.fetchImpl = options.fetch ?? fetch;
+    this.feed = new FeedMirror({
+      changes: (pondId, since) => this.changes(pondId, since),
+      listPlain: (collection) => this.listPlain(collection),
+    });
     this.hub = new StreamHub({
       token: () => this.token(),
       socket: options.socket ?? ((url) => new WebSocket(url) as unknown as StreamSocket),
@@ -150,7 +156,35 @@ export class CatalystStore implements CloudStore {
     await ensureOk(response, "set");
   }
 
+  /**
+   * A collection's documents. A Pond's content kinds go through the change feed (change-feed.ts): after the first read of a
+   * Pond, listing it is one feed read, not a re-read of the whole kind. Every other collection, and any relay without a
+   * feed, takes the plain list.
+   */
   async list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>> {
+    return (await this.feed.list(collection)) ?? (await this.listPlain(collection));
+  }
+
+  /** One `GET /changes` (relay feed.js): a page, or null when this relay or this caller has no feed (404, 400, 401, 403). */
+  private async changes(pondId: string, since: number | "head"): Promise<FeedPage | null> {
+    const response = await this.call(
+      `/changes?pond=${encodeURIComponent(pondId)}&since=${since}`,
+      { method: "GET" },
+      10_000,
+    );
+    if ([400, 401, 403, 404].includes(response.status)) return null;
+    await ensureOk(response, "changes");
+    const body = (await response.json()) as Partial<FeedPage>;
+    if (!Array.isArray(body.changes) || typeof body.next !== "number") return null;
+    const changes = body.changes.flatMap((c) => {
+      if (!c || typeof c.seq !== "number" || typeof c.kind !== "string" || typeof c.id !== "string") return [];
+      const doc = c.doc === null ? null : toDoc(c.doc);
+      return c.doc !== null && !doc ? [] : [{ seq: c.seq, kind: c.kind, id: c.id, doc }];
+    });
+    return { changes, next: body.next, more: body.more === true };
+  }
+
+  private async listPlain(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>> {
     const response = await this.call(`/list?prefix=${encodeURIComponent(collection)}`, { method: "GET" }, 10_000);
     await ensureOk(response, "list");
     const body = (await response.json()) as { items?: unknown };
