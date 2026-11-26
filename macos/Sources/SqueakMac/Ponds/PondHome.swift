@@ -492,7 +492,8 @@ struct PondHomeView: View {
             }
             return
         }
-        AppModel.shared.closePondPage()
+        // The New duck page opens over the Pond it was started from, so Esc and Cancel return there. Leaving the Pond
+        // first (closePondPage) made the open chat or the Dashboard the place to return to.
         if let native {
             if MainPlace(project: native) != nil {
                 // A git pond starts in Main, its own folder; the "In:" control above the message picks a stream instead.

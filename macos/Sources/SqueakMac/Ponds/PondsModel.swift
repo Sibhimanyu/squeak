@@ -629,12 +629,22 @@ final class PondsModel {
     func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
                      effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false,
                      main: Bool = false, place: DuckPlace? = nil) async -> Bool {
+        await startedThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId, effort: effort,
+                            permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main, place: place).ok
+    }
+
+    /// Starts the thread and returns what the host made, so the caller can open that Duck's page. `ok` is false when the
+    /// host did not take it (`note` says why); `thread` is nil from a host that answers without one.
+    func startedThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
+                       effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false,
+                       main: Bool = false, place: DuckPlace? = nil) async -> (ok: Bool, thread: PondThread?) {
+        var made: PondThread?
         let ok = await attempt({
-            _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
-                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main, place: place)
+            made = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
+                                                 effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main, place: place)
         })
         if ok { await refresh(pond: pond, byPerson: true) } else { HeresayBridge.trouble() }
-        return ok
+        return (ok, made)
     }
 
     // MARK: Threads

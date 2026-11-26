@@ -16,6 +16,8 @@ final class NewThreadState {
     var fixedPlace = false
     var loading = true
     var starting = false
+    /// The start in flight or failed: "Starting…", the messages held meanwhile, and the sentence a failure shows.
+    var duck = DuckStart()
     var error: String?
     /// Reached with nothing to start in (the stream went away): the page shows its empty state instead of an error.
     var noTarget = false
@@ -117,6 +119,7 @@ final class NewThreadState {
         fixedPlace = conductorWorkspaceId != nil || (projectId != nil && workspaceId != nil && !AppModel.shared.ducksMode)
         loading = true
         starting = false
+        duck = DuckStart()
         focus += 1
         loadTask = Task { [weak self] in
             let models = await model.newChatModels()
@@ -179,12 +182,38 @@ final class NewThreadState {
         }
     }
 
+    /// Enter while a Duck is starting: the message is held on the Mac and goes to the Duck once the host confirms.
+    func holdTyped() {
+        guard !images.hasImages, duck.hold(form.trimmedText) else { return }
+        form.text = ""
+    }
+
+    private func deliver(_ text: String, key: SessionKey?, thread: (pond: String, id: String)?, model: AppModel) async {
+        if let key {
+            switch await model.send(text, to: key) {
+            case .accepted?: return
+            default: break
+            }
+        } else if let thread {
+            if await PondsModel.shared.send(pond: thread.pond, thread: thread.id, text: text, mode: .queue) { return }
+        }
+        PondsModel.shared.note = "A message sent while the duck was starting wasn\u{2019}t delivered."
+    }
+
     func start(model: AppModel, openInWindow: Bool = true, done: @escaping () -> Void) {
         guard canStart, let modelId = form.modelId else { return }
         starting = true
         error = nil
         guard let text = images.prepareToSend(text: form.trimmedText, folder: folder) else { starting = false; return }
         let hadImages = images.hasImages
+        // The page stays and the box stays open: it empties for what is typed next, which is held until the host confirms.
+        // The first message comes back into the box if the start fails.
+        let original = form.text
+        let holdable = conductorWorkspace == nil && pond?.runsOnOwner != true && !model.demoMode
+        duck.begin(holds: holdable)
+        if holdable { form.text = "" }
+        var opened: SessionKey?
+        var openedThread: (pond: String, id: String)?
         let sends = NewChatIn.placement(line: placeKind, chosen: .init(main: startsInMain, newWorkspace: false, workspaceId: place?.id, place: nil))
         Task { [weak self] in
             guard let self else { return }
@@ -208,11 +237,17 @@ final class NewThreadState {
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let pond {
                 let ponds = PondsModel.shared
-                started = await ponds.startThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
-                                                  workspaceId: sends.workspaceId, effort: form.effort,
-                                                  permissionMode: NativeModes.permissionMode(form.mode),
-                                                  split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
-                                                  isPrivate: pond.isPrivate, main: sends.main, place: sends.place)
+                let made = await ponds.startedThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
+                                                     workspaceId: sends.workspaceId, effort: form.effort,
+                                                     permissionMode: NativeModes.permissionMode(form.mode),
+                                                     split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
+                                                     isPrivate: pond.isPrivate, main: sends.main, place: sends.place)
+                started = made.ok
+                // The new Duck's page opens (never the Pond page it was started from).
+                if let thread = made.thread, made.ok {
+                    opened = model.openStartedPondThread(thread, pondId: pond.pondId)
+                    openedThread = (pond.pondId, thread.id)
+                }
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let main, ducksMode {
                 // Ducks mode: Pond-wide, no place named; the host's ChatStarter starts it in the pond's main folder.
@@ -222,6 +257,7 @@ final class NewThreadState {
                     split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), place: sends.place)
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
+                opened = key
                 problem = why
             } else if let main, startsInMain || newStream {
                 // Main runs in the pond's own folder (no stream); "New stream" asks the host for one.
@@ -231,6 +267,7 @@ final class NewThreadState {
                     split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), main: startsInMain)
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
+                opened = key
                 problem = why
             } else if let place {
                 let spec = NativeNewSession(
@@ -239,15 +276,21 @@ final class NewThreadState {
                     split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), workspaceId: place.id)
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
+                opened = key
                 problem = why
             }
             starting = false
             if started {
                 form.text = ""
                 if hadImages { images.clear() }
+                // The host confirmed: what was typed meanwhile goes to the Duck, in order.
+                for message in duck.confirm() { await deliver(message, key: opened, thread: openedThread, model: model) }
                 done()
             } else {
-                error = problem // the words stay
+                let why = problem ?? "That didn\u{2019}t go through"
+                duck.fail(why)
+                error = why // the words stay: the first message comes back, held ones wait for Try again
+                if form.text.isEmpty { form.text = original }
             }
         }
     }
@@ -306,7 +349,7 @@ struct NewThreadComposer: View {
                 ImageStrip(tray: state.images)
                 ComposerField(
                     text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
-                    isEnabled: !state.starting, focusToken: state.focus, onSend: start, onEscape: onEscape,
+                    isEnabled: state.duck.inputOpen, focusToken: state.focus, onSend: start, onEscape: onEscape,
                     fontSize: compact ? 13 : 14, onImages: state.hasPlace ? { state.images.add($0) } : nil,
                     onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle)
                     .padding(.horizontal, 6)
@@ -329,6 +372,7 @@ struct NewThreadComposer: View {
                     Lucide(.triangleAlert, size: Metrics.icon, color: Theme.negative)
                     Text(e).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
+                if state.duck.canRetry { Button(DuckStart.retryLabel) { start() }.buttonStyle(SecondaryButtonStyle()).disabled(!state.canStart) }
                 ReportProblemButton(problem: e, place: "New duck")
                 if model.addons.conductorLink?.isLinkProblem(e) == true {
                     Button("Open Extensions settings") { model.openSettings(.addons) }.buttonStyle(SecondaryButtonStyle())
@@ -336,7 +380,7 @@ struct NewThreadComposer: View {
             }
             }
         }
-        .disabled(state.starting)
+        .disabled(state.starting && !state.duck.holds)
         .onChange(of: state.form.text) { _, new in picker.pick.refresh(text: new, caret: picker.caret) }
         .onChange(of: picker.caret) { _, new in picker.pick.refresh(text: state.form.text, caret: new) }
         .onChange(of: pickerSource.identity) { _, _ in picker.pick.use(pickerSource); picker.pick.refresh(text: state.form.text, caret: picker.caret) }
@@ -520,7 +564,7 @@ struct NewThreadComposer: View {
         } field: {
             ComposerField(
                 text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
-                isEnabled: !state.starting, focusToken: state.focus, onSend: start, onEscape: onEscape,
+                isEnabled: state.duck.inputOpen, focusToken: state.focus, onSend: start, onEscape: onEscape,
                 onContentHeight: { cardHeight = $0 },
                 fontSize: compact ? 13 : 14, lineHeight: 22, chips: chips, onImages: state.hasPlace ? { state.images.add($0) } : nil,
                 onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle, onFocus: { fieldFocused = $0 })
@@ -536,7 +580,7 @@ struct NewThreadComposer: View {
                 optionsChip
             }
         } trailing: {
-            if state.starting { ProgressView().controlSize(.small).padding(.trailing, 6) }
+            if let line = state.duck.statusLine { startingLabel(line) }
             if !compact { ComposerSendHint(text: "\u{21A9} starts") }
             Button(NewThreadRules.startLabel) { start() }
                 .buttonStyle(PrimaryButtonStyle())
@@ -557,6 +601,16 @@ struct NewThreadComposer: View {
         .onChange(of: state.form.text) { _, new in state.images.retain(pendingIds: InlineAttachments.pendingIds(in: new)) }
     }
 
+    /// "Starting…" with what was sent meanwhile, held until the host confirms.
+    private func startingLabel(_ line: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(verbatim: state.duck.held.isEmpty ? line : "\(line) \(state.duck.held.count) waiting")
+                .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+        }
+        .padding(.trailing, 6)
+    }
+
     private func insertTrigger(_ mark: String) {
         let t = state.form.text
         state.form.text = t + (t.isEmpty || t.hasSuffix(" ") || t.hasSuffix("\n") ? "" : " ") + mark
@@ -572,7 +626,7 @@ struct NewThreadComposer: View {
             optionsChip
             if state.hasPlace { AttachButton(tray: state.images, size: 26) }
             Spacer(minLength: 4)
-            if state.starting { ProgressView().controlSize(.small) }
+            if let line = state.duck.statusLine { startingLabel(line) }
             Text("↵ starts · ⇧↵ newline").font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
                 .opacity(compact ? 0 : 1).frame(maxWidth: compact ? 0 : nil)
             Button(NewThreadRules.startLabel) { start() }
@@ -692,7 +746,9 @@ struct NewThreadComposer: View {
         }
     }
 
-    private func start() { state.start(model: model, openInWindow: openInWindow, done: onStarted) }
+    private func start() {
+        if state.starting { state.holdTyped() } else { state.start(model: model, openInWindow: openInWindow, done: onStarted) }
+    }
 }
 
 /// New thread on the desktop: the title, then the component, centred.

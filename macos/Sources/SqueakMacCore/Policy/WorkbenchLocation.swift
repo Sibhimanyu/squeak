@@ -58,6 +58,13 @@ public enum WorkbenchLocation: Equatable, Hashable, Codable, Sendable {
     /// Where the centre falls back to when a page over it closes: the open chat, else the Dashboard.
     public static func resting(chat: SessionKey?) -> WorkbenchLocation { chat.map { .chat($0) } ?? .home }
 
+    /// Where Esc or Cancel from a Settings page or a creation page returns to: the last place that was not one of those
+    /// (nor an artifact layer). Opening a creation page never changes it, so a New duck page opened from a Pond returns to
+    /// that Pond; callers must not leave the Pond first (that made the Dashboard or the last chat the place to return to).
+    public static func returnPlace(afterShowing shown: WorkbenchLocation, current: WorkbenchLocation) -> WorkbenchLocation {
+        shown.isSettings || shown.composePage != nil || shown.isArtifact ? current : shown
+    }
+
     /// The Settings page on screen, if any.
     public var settingsSection: SettingsSection? { if case .settings(let s) = self { return s } else { return nil } }
 

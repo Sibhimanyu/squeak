@@ -1248,7 +1248,7 @@ final class AppModel {
         if !location.isArtifact { artifactBase = location }
         if let key = location.chatKey { rememberPlace(of: key) }
         if let section = location.settingsSection { lastSettingsSection = section }
-        if !location.isSettings, location.composePage == nil, !location.isArtifact { returnLocation = location }
+        returnLocation = WorkbenchLocation.returnPlace(afterShowing: location, current: returnLocation)
         // The loaded chat follows: a chat loads, the Dashboard and Usage clear it, any other page leaves it under itself.
         switch location {
         case .chat(let key): loadChat(key)

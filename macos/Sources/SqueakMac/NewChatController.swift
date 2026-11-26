@@ -142,6 +142,21 @@ extension AppModel {
         }
     }
 
+    /// Opens the Duck a Pond start just made: its chat when this Mac lists it, else the Pond's page for the thread. Never
+    /// the Pond page it was started from. Returns the local chat's key, when there is one.
+    @discardableResult
+    func openStartedPondThread(_ thread: PondThread, pondId: String) -> SessionKey? {
+        let ponds = PondsModel.shared
+        let key = ponds.ponds.first { $0.id == pondId }.map { ponds.key(forPond: $0) } ?? pondId
+        let local = StartedThreadOpen.localKey(of: thread, among: allSessions.map(\.key))
+        switch StartedThreadOpen.destination(thread: thread, pond: key, pondId: pondId, local: local) {
+        case .chat(let chat): open(chat)
+        case let at: location = at
+        }
+        showConversationWindow()
+        return local
+    }
+
     /// The sidebar's top "Create".
     func openNewPond() { NewChatController.shared.open(NewPages.page(for: .sidebarCreate)) }
 
