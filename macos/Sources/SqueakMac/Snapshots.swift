@@ -20,8 +20,10 @@ enum SnapshotRunner {
         let dir = args.firstIndex(of: "--snapshots").flatMap { i in args.indices.contains(i + 1) && !args[i + 1].hasPrefix("-") ? args[i + 1] : nil }
             ?? "/tmp/squeak-snapshots"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // `--group composer`: only that group's shots (the live composer card, ComposerSnapshots.swift); default: the UI shots.
+        let group = args.firstIndex(of: "--group").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } ?? "ui"
         var written: [String] = []
-        for shot in Fixtures.shots() {
+        for shot in Fixtures.shots() + ComposerSnapshots.shots() where shot.group == group {
             let path = "\(dir)/\(shot.name).png"
             if render(shot, to: path) { written.append(path) }
         }
@@ -52,6 +54,7 @@ struct Shot {
     let height: Double
     var dark = false
     let view: AnyView
+    var group = "ui"
 }
 
 @MainActor

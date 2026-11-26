@@ -1,4 +1,5 @@
 import AppKit
+import SqueakMacCore
 import SwiftUI
 
 /// A plain-text multi-line field. Return either sends (quick composer) or inserts a
@@ -20,6 +21,10 @@ struct ComposerField: NSViewRepresentable {
     /// Reports the height the text wants (inset included), so a container can grow with it.
     var onContentHeight: ((CGFloat) -> Void)?
     var fontSize: CGFloat = 14
+    /// A fixed line height (the composer card's 14/22); nil: the font's own. The reported height is then whole lines.
+    var lineHeight: CGFloat?
+    /// Inline chips (`InlineAttachments`): each token in `text` is drawn as one chip character; nil: tokens are plain text.
+    var chips: InlineChipSource?
     /// ⌥↩: the quick composer's "steer into the running turn". Nil: ⌥↩ is a plain Return.
     var onOptionReturn: (() -> Void)?
     /// Images pasted (⌘V with an image and no text) or dropped on the field. Nil: the field takes none.
@@ -58,6 +63,8 @@ struct ComposerField: NSViewRepresentable {
         tv.autoresizingMask = [.width]
         tv.textContainer?.widthTracksTextView = true
         tv.placeholder = placeholder
+        tv.chips = chips
+        if let lineHeight { tv.applyLineHeight(lineHeight) }
         tv.setAccessibilityLabel("Message")
         tv.onCommandReturn = { [weak coordinator = context.coordinator] in coordinator?.parent.commandReturn() }
         tv.onOptionReturn = { [weak coordinator = context.coordinator] in
@@ -74,7 +81,14 @@ struct ComposerField: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let tv = scroll.documentView as? PlaceholderTextView else { return }
-        if tv.string != text { tv.string = text }
+        tv.chips = chips
+        if tv.storageText != text {
+            tv.setStorageText(text)
+            if lineHeight != nil { tv.reapplyLineHeight() }
+        } else if chips != nil {
+            // A thumbnail may have arrived: chips draw what the source has now.
+            tv.needsDisplay = true
+        }
         tv.placeholder = placeholder
         tv.onImages = onImages
         tv.onFiles = onFiles
@@ -107,15 +121,16 @@ struct ComposerField: NSViewRepresentable {
         init(_ parent: ComposerField) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            parent.text = tv.string
+            guard let tv = notification.object as? PlaceholderTextView else { return }
+            tv.renderTypedTokens()
+            parent.text = tv.storageText
             reportHeight(tv)
-            parent.onCaret?(tv.selectedRange().location)
+            parent.onCaret?(tv.storageOffset(ofDisplay: tv.selectedRange().location))
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            parent.onCaret?(tv.selectedRange().location)
+            guard let tv = notification.object as? PlaceholderTextView else { return }
+            parent.onCaret?(tv.storageOffset(ofDisplay: tv.selectedRange().location))
         }
 
         private var lastHeight: CGFloat = 0
@@ -165,6 +180,193 @@ struct ComposerField: NSViewRepresentable {
 
 final class PlaceholderTextView: NSTextView {
     var placeholder = ""
+    /// Inline chips: tokens in the text are drawn as one attachment character each (`InlineAttachments`).
+    var chips: InlineChipSource?
+    private(set) var hoveredChip: NSTextAttachment?
+    /// Set by `applyLineHeight`: every line is this tall, glyphs centred in it (the placeholder too).
+    private(set) var fixedLineHeight: CGFloat?
+
+    func applyLineHeight(_ height: CGFloat) {
+        fixedLineHeight = height
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = height
+        style.maximumLineHeight = height
+        defaultParagraphStyle = style
+        var typing = typingAttributes
+        typing[.paragraphStyle] = style
+        typing[.baselineOffset] = lineCentring
+        typing[.font] = font
+        typingAttributes = typing
+        reapplyLineHeight()
+    }
+
+    /// Text set from outside (a draft, a picked mention) takes the same line height.
+    func reapplyLineHeight() {
+        guard fixedLineHeight != nil, let storage = textStorage, storage.length > 0 else { return }
+        let all = NSRange(location: 0, length: storage.length)
+        storage.addAttributes([.paragraphStyle: defaultParagraphStyle ?? .default, .baselineOffset: lineCentring], range: all)
+    }
+
+    // MARK: Inline chips
+
+    private var baseAttributes: [NSAttributedString.Key: Any] {
+        var a: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 14), .foregroundColor: NSColor.labelColor]
+        if fixedLineHeight != nil {
+            a[.paragraphStyle] = defaultParagraphStyle ?? .default
+            a[.baselineOffset] = lineCentring
+        }
+        return a
+    }
+
+    /// The stored text: every chip character back as its token, exactly as stored.
+    var storageText: String { storage(of: NSRange(location: 0, length: (string as NSString).length)) }
+
+    func storage(of range: NSRange) -> String {
+        guard chips != nil, let storage = textStorage, string.contains(InlineAttachments.attachmentCharacter) else {
+            return (string as NSString).substring(with: range)
+        }
+        var out = ""
+        storage.enumerateAttribute(.squeakToken, in: range) { value, r, _ in
+            if let raw = value as? String {
+                // One token per attachment character in the run.
+                let chars = (storage.string as NSString).substring(with: r)
+                for c in chars { out += c == InlineAttachments.attachmentCharacter ? raw : String(c) }
+            } else {
+                out += (storage.string as NSString).substring(with: r).replacingOccurrences(of: String(InlineAttachments.attachmentCharacter), with: "")
+            }
+        }
+        return out
+    }
+
+    /// The stored offset of a caret in the view (a chip before it counts as its whole token).
+    func storageOffset(ofDisplay offset: Int) -> Int {
+        guard chips != nil else { return offset }
+        return (storage(of: NSRange(location: 0, length: min(offset, (string as NSString).length))) as NSString).length
+    }
+
+    /// Shows `text`: with chips, each token becomes one chip character; without, the plain text.
+    func setStorageText(_ text: String) {
+        guard chips != nil, text.contains("@⟦"), let storage = textStorage else {
+            string = text
+            return
+        }
+        let out = NSMutableAttributedString()
+        let attrs = baseAttributes
+        for seg in InlineAttachments.segments(text) {
+            switch seg {
+            case .text(let t): out.append(NSAttributedString(string: t, attributes: attrs))
+            case .token(let t):
+                out.append(InlineChipAttachment.string(t, source: chips, hovered: { [weak self] a in self?.hoveredChip === a }, attributes: attrs))
+            }
+        }
+        storage.setAttributedString(out)
+        typingAttributes = attrs
+    }
+
+    /// A token typed or pasted as text becomes a chip, the caret staying after it.
+    func renderTypedTokens() {
+        guard chips != nil, string.contains("@⟦") else { return }
+        let text = storageText
+        guard !InlineAttachments.tokens(in: text).isEmpty else { return }
+        let caret = storageOffset(ofDisplay: selectedRange().location)
+        setStorageText(text)
+        setSelectedRange(NSRange(location: InlineAttachments.displayOffset(ofStorage: caret, in: text), length: 0))
+    }
+
+    /// Puts `token` where the caret is, with a space either side where the words need one, as one undoable edit.
+    func insertAtCaret(_ token: String) {
+        window?.makeFirstResponder(self)
+        let range = selectedRange()
+        let ns = string as NSString
+        let before = range.location > 0 ? ns.substring(with: NSRange(location: range.location - 1, length: 1)) : "\n"
+        let after = NSMaxRange(range) < ns.length ? ns.substring(with: NSRange(location: NSMaxRange(range), length: 1)) : "\n"
+        let insert = (before.rangeOfCharacter(from: .whitespacesAndNewlines) == nil ? " " : "") + token
+            + (after.rangeOfCharacter(from: .whitespacesAndNewlines) == nil ? " " : "")
+        if shouldChangeText(in: range, replacementString: insert) {
+            replaceCharacters(in: range, with: insert)
+            didChangeText()
+        }
+    }
+
+    /// Takes a chip (and only it) out, as one undoable edit.
+    func removeChip(at index: Int) {
+        let r = NSRange(location: index, length: 1)
+        if shouldChangeText(in: r, replacementString: "") {
+            replaceCharacters(in: r, with: "")
+            didChangeText()
+        }
+    }
+
+    /// The chip under a point (view coordinates): its character index and rect.
+    func chip(at point: NSPoint) -> (index: Int, rect: NSRect, token: String)? {
+        guard chips != nil, let lm = layoutManager, let tc = textContainer, let storage = textStorage, storage.length > 0 else { return nil }
+        let p = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        var fraction: CGFloat = 0
+        let glyph = lm.glyphIndex(for: p, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+        let index = lm.characterIndexForGlyph(at: glyph)
+        guard index < storage.length, let raw = storage.attribute(.squeakToken, at: index, effectiveRange: nil) as? String else { return nil }
+        let rect = lm.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: tc)
+            .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        return rect.contains(point) ? (index, rect, raw) : nil
+    }
+
+    private func setHovered(_ a: NSTextAttachment?) {
+        guard a !== hoveredChip else { return }
+        hoveredChip = a
+        needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.userInfo?["chips"] != nil }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: ["chips": true]))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard chips != nil else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if let hit = chip(at: p) {
+            setHovered(textStorage?.attribute(.attachment, at: hit.index, effectiveRange: nil) as? NSTextAttachment)
+            NSCursor.pointingHand.set()
+        } else {
+            setHovered(nil)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        setHovered(nil)
+    }
+
+    /// A click on a chip opens its preview; on its ✕ (shown on hover) removes it. Anywhere else is the text's.
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        guard let hit = chip(at: p), let token = InlineAttachments.tokens(in: hit.token).first else { return super.mouseDown(with: event) }
+        if p.x >= hit.rect.maxX - InlineChipImage.removeSlot - 2 {
+            setHovered(nil)
+            removeChip(at: hit.index)
+        } else {
+            chips?.open(token)
+        }
+    }
+
+    /// Copy and cut carry the stored tokens, so a chip pasted back (here or in another composer) is the same chip.
+    override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard chips != nil else { return super.writeSelection(to: pboard, types: types) }
+        let text = selectedRanges.map { storage(of: $0.rangeValue) }.joined(separator: "\n")
+        pboard.clearContents()
+        return pboard.setString(text, forType: .string)
+    }
+
+    /// TextKit puts a tall line's extra space above the glyphs; raising them by half of it centres them.
+    private var lineCentring: CGFloat {
+        guard let fixedLineHeight, let font else { return 0 }
+        let natural = NSLayoutManager().defaultLineHeight(for: font)
+        return max(0, (fixedLineHeight - natural) / 2)
+    }
+
     var onCommandReturn: (() -> Void)?
     /// True when it took the key; false lets ⌥↩ be an ordinary Return.
     var onOptionReturn: (() -> Bool)?
@@ -233,7 +435,14 @@ final class PlaceholderTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attrs: [NSAttributedString.Key: Any] = [.font: font ?? .systemFont(ofSize: 14), .foregroundColor: NSColor.placeholderTextColor]
-        placeholder.draw(at: NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5), y: textContainerInset.height), withAttributes: attrs)
+        let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5), y: textContainerInset.height)
+        if fixedLineHeight != nil {
+            // Laid out like the text itself (same line height and centring), so typing never moves the first line.
+            // Level with the first typed line (TextKit's fixed-height line plus `lineCentring`), measured in the snapshots.
+            placeholder.draw(at: NSPoint(x: origin.x, y: origin.y - lineCentring * 0.4), withAttributes: attrs)
+        } else {
+            placeholder.draw(at: origin, withAttributes: attrs)
+        }
     }
 }
 
@@ -247,7 +456,8 @@ final class ComposerFieldHandle {
 
     /// The window x (the SwiftUI global x) of the character at UTF-16 `offset`: where the typed `@` or `/` sits, which the
     /// suggestion list anchors to. Nil when the field is not laid out yet.
-    func windowX(ofCharacterAt offset: Int) -> CGFloat? {
+    func windowX(ofCharacterAt storageOffset: Int) -> CGFloat? {
+        let offset = displayOffset(storageOffset)
         guard let tv = textView, let lm = tv.layoutManager, tv.window != nil, offset >= 0, offset <= (tv.string as NSString).length else { return nil }
         let glyph = lm.glyphIndexForCharacter(at: min(offset, max((tv.string as NSString).length - 1, 0)))
         let line = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
@@ -255,7 +465,18 @@ final class ComposerFieldHandle {
         return tv.convert(NSPoint(x: x, y: 0), to: nil).x
     }
 
-    func replace(_ range: NSRange, with string: String) {
+    /// A stored offset (what the pickers compute on the text) as the view's offset: chips are one character there.
+    private func displayOffset(_ storageOffset: Int) -> Int {
+        guard let tv = textView as? PlaceholderTextView, tv.chips != nil else { return storageOffset }
+        return InlineAttachments.displayOffset(ofStorage: storageOffset, in: tv.storageText)
+    }
+
+    /// Puts a token at the caret (an inline picture), as one undoable edit.
+    func insertAtCaret(_ token: String) { (textView as? PlaceholderTextView)?.insertAtCaret(token) }
+
+    func replace(_ storageRange: NSRange, with string: String) {
+        let start = displayOffset(storageRange.location)
+        let range = NSRange(location: start, length: displayOffset(NSMaxRange(storageRange)) - start)
         guard let tv = textView, NSMaxRange(range) <= (tv.string as NSString).length else { return }
         tv.window?.makeFirstResponder(tv)
         if tv.shouldChangeText(in: range, replacementString: string) {

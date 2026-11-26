@@ -75,6 +75,97 @@ struct DucklingsBar: View {
     }
 }
 
+/// The new layout's ducklings, as the composer card's status line (`ComposerStatusBand`): the duckling mark, the ready line
+/// or "2 ducklings working", as many whole chips as fit (titles cut at a word) and "+N" for the rest, and the quiet Stop
+/// while Claude's turn waits on one. Draws nothing once the last chip has gone. Plain data, so snapshots draw it too.
+struct DucklingStatusLine: View {
+    let parentId: String
+    let set: DucklingSet
+    var readyLine: String?
+    var onStop: (() -> Void)?
+    var isOpen: (Duckling) -> Bool = { _ in false }
+    var open: (Duckling) -> Void = { _ in }
+    var now: Date?
+
+    var body: some View {
+        Group {
+            if let now {
+                content(now: now)
+            } else if set.running == 0 {
+                TimelineView(.periodic(from: .now, by: 5)) { context in content(now: context.date) }
+            } else {
+                content(now: Date())
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private func content(now: Date) -> some View {
+        let text = DucklingWords.barText(set, now: now)
+        if ComposerDesign.showsStatus(barText: text), let text {
+            let chips = set.barItems(now: now)
+            ComposerStatusBand {
+                HStack(spacing: 6) {
+                    DucklingView(parentId: parentId, parentSize: ThreadDuck.Size.sidebarRow).accessibilityHidden(true)
+                    Text(verbatim: ComposerDesign.statusLead(barText: text, readyLine: readyLine))
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                }
+                ViewThatFits(in: .horizontal) {
+                    ForEach(ComposerDesign.fitOptions(count: chips.count), id: \.self) { k in
+                        HStack(spacing: 6) {
+                            ForEach(chips.prefix(k)) { chip($0, now: now) }
+                            if let more = ComposerDesign.overflowLabel(total: chips.count, shown: k) { overflow(more, rest: Array(chips.dropFirst(k))) }
+                        }
+                        .fixedSize()
+                    }
+                }
+                .layoutPriority(-1)
+                Spacer(minLength: 0)
+                if let onStop {
+                    Button("Stop", action: onStop)
+                        .buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+                        .help("Stop this turn").accessibilityLabel("Stop")
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
+    private func chip(_ d: Duckling, now: Date) -> some View {
+        let opened = isOpen(d)
+        return Button { open(d) } label: {
+            HStack(spacing: 5) {
+                DucklingStatusMark(duckling: d)
+                Text(verbatim: ComposerDesign.chipTitle(d.title, maxCharacters: 26))
+                    .foregroundStyle(d.status == .failed ? Theme.negative : Theme.ink)
+                if let age = d.elapsed(now: now) { Text(verbatim: age).foregroundStyle(Theme.subtle).monospacedDigit() }
+            }
+            .font(.system(size: 11.5)).lineLimit(1).fixedSize()
+            .padding(.horizontal, 8).frame(height: 22)
+            .background(opened ? Theme.selectedStrong : Theme.selected, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Watch this duckling: \(d.chipText(now: now))")
+        .accessibilityLabel("\(d.title), \(d.statusWord)")
+    }
+
+    /// "+2": a menu of the ducklings that did not fit; picking one opens it, as its chip would.
+    private func overflow(_ label: String, rest: [Duckling]) -> some View {
+        SqueakMenu {
+            ForEach(rest) { d in Button(d.chipText()) { open(d) } }
+        } label: {
+            Text(verbatim: label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.muted).monospacedDigit()
+                .padding(.horizontal, 7).frame(height: 22)
+                .overlay(RoundedRectangle(cornerRadius: Radius.chip, style: .continuous).strokeBorder(Theme.lineStrong))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
+        .help("Show the other ducklings")
+        .accessibilityLabel("\(rest.count) more ducklings")
+    }
+}
+
 /// A chip's text; only a running chip's elapsed time ticks, in this leaf.
 private struct ChipText: View {
     let duckling: Duckling

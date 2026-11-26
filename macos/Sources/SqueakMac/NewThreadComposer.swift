@@ -264,6 +264,9 @@ struct NewThreadComposer: View {
     @Environment(AppModel.self) private var model
     @State private var optionsOpen = false
     @State private var picker = ComposerPickerDriver()
+    @State private var cardHeight: CGFloat = 0
+    @State private var fieldFocused = false
+    @State private var chips = InlineChipSource()
 
     /// `@` lists the folder the duck starts in; `/` lists the chosen agent's skills and commands there, so it follows the model chip.
     private var pickerSource: ComposerPickerSource {
@@ -292,6 +295,13 @@ struct NewThreadComposer: View {
             if state.loading {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(Theme.muted) }
                     .font(.system(size: 13)).frame(maxWidth: .infinity, minHeight: 90)
+            } else if MacLayoutPreference.shared.isNew {
+                card
+                if state.form.trimmedText.count > NewChatForm.maxLength {
+                    Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
+                        .font(Typo.meta).foregroundStyle(Theme.negative)
+                }
+                if let pond = state.pond, NewDuckControls.showsPrivate(people: state.people, runsOnOwner: pond.runsOnOwner) { shareRow }
             } else {
                 ImageStrip(tray: state.images)
                 ComposerField(
@@ -493,6 +503,64 @@ struct NewThreadComposer: View {
             Text(verbatim: branch ?? "no branch").foregroundStyle(Theme.ink)
         }
         .font(.system(size: 13)).lineLimit(1)
+    }
+
+    // MARK: Card (new layout)
+
+    /// New duck in the chat's composer card: the text (three lines at least, then it grows to eight and scrolls), and one
+    /// toolbar: attach, @ and / (they insert the trigger and open the list), the agent and model, the preset and Options,
+    /// then "↵ starts" and Start. No status line: nothing runs yet.
+    private var card: some View {
+        @Bindable var state = state
+        @Bindable var picker = picker
+        return ComposerCard(focused: fieldFocused) {
+            EmptyView()
+        } top: {
+            ImageStrip(tray: state.images)
+        } field: {
+            ComposerField(
+                text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
+                isEnabled: !state.starting, focusToken: state.focus, onSend: start, onEscape: onEscape,
+                onContentHeight: { cardHeight = $0 },
+                fontSize: compact ? 13 : 14, lineHeight: 22, chips: chips, onImages: state.hasPlace ? { state.images.add($0) } : nil,
+                onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle, onFocus: { fieldFocused = $0 })
+                .composerFieldFrame(cardHeight, minLines: compact ? 2 : 3)
+        } leading: {
+            if state.hasPlace { AttachButton(tray: state.images, symbol: .paperclip) }
+            ComposerTriggerButton(mark: "@", label: "Mention a file", help: "Mention a file (@)") { insertTrigger("@") }
+            ComposerTriggerButton(mark: "/", label: "Run a command", help: "Run a command (/)") { insertTrigger("/") }
+            ComposerToolbarDivider()
+            HStack(spacing: 6) {
+                agentChip
+                presetChip
+                optionsChip
+            }
+        } trailing: {
+            if state.starting { ProgressView().controlSize(.small).padding(.trailing, 6) }
+            if !compact { ComposerSendHint(text: "\u{21A9} starts") }
+            Button(NewThreadRules.startLabel) { start() }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(!state.canStart)
+        }
+        .imageDrop(state.images)
+        .suggestionPopup(isPresented: picker.pick.isOpen, direction: $picker.direction, selected: picker.pick.selected, triggerX: picker.triggerX) {
+            ComposerPickerList(model: picker.pick, direction: picker.direction, onPick: picker.accept)
+        }
+        .onAppear {
+            // Pictures go in where the caret is, as chips, the same as in a chat's card.
+            chips.tray = state.images
+            chips.folder = state.folder
+            let handle = picker.handle, state = state
+            state.images.onInsert = { handle.insertAtCaret($0) }
+            state.images.onDropped = { id in state.form.text = InlineAttachments.removing(pendingId: id, from: state.form.text) }
+        }
+        .onChange(of: state.form.text) { _, new in state.images.retain(pendingIds: InlineAttachments.pendingIds(in: new)) }
+    }
+
+    private func insertTrigger(_ mark: String) {
+        let t = state.form.text
+        state.form.text = t + (t.isEmpty || t.hasSuffix(" ") || t.hasSuffix("\n") ? "" : " ") + mark
+        state.focus += 1
     }
 
     // MARK: Chips

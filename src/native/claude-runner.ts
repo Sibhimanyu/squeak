@@ -14,6 +14,7 @@ import { requireAgentBinary } from "./binaries.js";
 import { isInside } from "./placement.js";
 import { READ_ONLY_TOOLS } from "./rules.js";
 import { ResumeFailedError, type RequestKind, type Runner, type RunnerHooks } from "./types.js";
+import { claudeContent, withoutEchoedImages } from "./inline-images.js";
 
 /** The slice of the Agent SDK's `Query` the runner uses; tests pass a fake. */
 export interface ClaudeQuery extends AsyncIterable<Record<string, unknown>> {
@@ -416,7 +417,7 @@ export class ClaudeRunner implements Runner {
     }
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
     if (type === "assistant" || type === "user") this.trackForegroundHelpers(type, msg);
-    hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
+    hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, type === "user" ? withoutEchoedImages(msg) : msg);
     if (type === "result") this.onResult(msg);
     this.noteEcho(type, msg);
   }
@@ -749,7 +750,9 @@ export class ClaudeRunner implements Runner {
   private pushUser(text: string): string {
     const uuid = randomUUID();
     this.awaited.push(uuid);
-    this.input!.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, uuid });
+    // Pictures named in the text go in after their token, so Claude sees each where it was pasted (inline-images.ts).
+    const content = claudeContent(text, this.options.cwd);
+    this.input!.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid });
     return uuid;
   }
 
