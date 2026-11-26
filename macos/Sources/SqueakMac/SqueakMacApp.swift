@@ -86,24 +86,27 @@ struct SqueakCommands: Commands {
             Button("Settings…") { model.openSettings() }
                 .keyboardShortcut(",", modifiers: .command)
         }
-        CommandGroup(after: .appInfo) {
-            Button("Check for updates…") { model.updater.checkForUpdates(reveal: true) }
-                .disabled(!model.updater.canCheck && !model.updater.isBusy)
-        }
-        // Sidebar, Inspector and every panel now live in Window (Photoshop-style); View keeps the system's own items.
-        CommandGroup(replacing: .sidebar) {}
-        // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
-        // full screen; Close Window is added beside them because ⌘W closes the open tab first.
-        // Window lists every panel with a checkmark when open (choose to open or close), then the Workspace submenu.
-        CommandGroup(before: .windowList) {
-            WindowPanelMenuItems()
-            Divider()
-            Menu("Workspace") { DockWorkspaceMenuItems() }
-            Divider()
-        }
-        CommandGroup(after: .windowArrangement) {
-            Button("Close Window") { (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil) }
-                .registryShortcut(.closeWindow)
+        // Grouped: older SwiftUI (Swift 6.3, CI) takes at most 10 items in a Commands body.
+        Group {
+            CommandGroup(after: .appInfo) {
+                Button("Check for updates…") { model.updater.checkForUpdates(reveal: true) }
+                    .disabled(!model.updater.canCheck && !model.updater.isBusy)
+            }
+            // Sidebar, Inspector and every panel now live in Window (Photoshop-style); View keeps the system's own items.
+            CommandGroup(replacing: .sidebar) {}
+            // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
+            // full screen; Close Window is added beside them because ⌘W closes the open tab first.
+            // Window lists every panel with a checkmark when open (choose to open or close), then the Workspace submenu.
+            CommandGroup(before: .windowList) {
+                WindowPanelMenuItems()
+                Divider()
+                Menu("Workspace") { DockWorkspaceMenuItems() }
+                Divider()
+            }
+            CommandGroup(after: .windowArrangement) {
+                Button("Close Window") { (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil) }
+                    .registryShortcut(.closeWindow)
+            }
         }
         CommandMenu("Ponds") {
             Button("Move Pond Up") { NotificationCenter.default.post(name: .squeakMovePond, object: -1) }
