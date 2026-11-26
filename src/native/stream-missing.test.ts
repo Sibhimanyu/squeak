@@ -134,23 +134,47 @@ const errorText = (h: Rig, id: string): string | undefined => {
 };
 
 describe("a Duck whose Stream folder is gone", () => {
-  it("a message says so plainly: no lost-resume wording, no agent started, the state is host-computed", async () => {
+  it("a message moves the Duck to the Pond, resumes its session, delivers the message once and adds one note", async () => {
     const h = await start();
-    const { ws, s } = await duckOnStream(h);
+    const { ws, s, agentId } = await duckOnStream(h);
     removeWorktree(h, ws);
 
     const res = await h.call("POST", `/native/sessions/${s.id}/messages`, { text: "compact" });
     expect(res.status).toBe(200);
-    await until(() => h.store.getSession(s.id)?.status === "error");
+    await until(() => h.sent.length > 0);
 
-    expect(h.store.getSession(s.id)?.status).toBe("error");
-    expect(errorText(h, s.id)).toBe(streamMissingText("Ruby 2", path.basename(ws.path)));
-    expect(errorText(h, s.id)).not.toMatch(/earlier conversation/);
-    expect(h.started).toHaveLength(0);
-    expect(h.sent).toHaveLength(0);
+    const moved = h.store.getSession(s.id)!;
+    expect(moved.cwd).toBe(h.repo);
+    expect(moved.workspaceId).toBeNull();
+    expect(moved.agentSessionId).toBe(agentId);
+    expect(h.sent).toEqual([{ session: s.id, cwd: h.repo, text: "compact" }]);
+    expect(h.started).toHaveLength(1);
+    expect(h.store.messagesAfter(s.id, 0).some((m) => m.kind === "system/error")).toBe(false);
+    const folder = path.basename(ws.path);
+    const notes = h.store
+      .messagesAfter(s.id, 0)
+      .filter((m) => m.kind === "system/note")
+      .map((m) => (m.payload as { text: string }).text);
+    expect(notes).toEqual([`${folder[0]!.toUpperCase()}${folder.slice(1)} is gone; Ruby works in the Pond now`]);
+    expect(h.store.messagesAfter(s.id, 0).filter((m) => m.kind === "user/text")).toHaveLength(1);
 
     const listed = (await h.call("GET", "/native/sessions")).json.sessions.find((x: SessionRow) => x.id === s.id);
-    expect(listed.streamMissing).toEqual({ path: ws.path, branch: ws.branch, folder: path.basename(ws.path) });
+    expect(listed.streamMissing).toBeUndefined();
+  });
+
+  it("a message when the Pond's own folder is gone too fails with the plain sentence", async () => {
+    const h = await start();
+    const { ws, s } = await duckOnStream(h);
+    removeWorktree(h, ws);
+    fs.renameSync(h.repo, `${h.repo}-moved`);
+    try {
+      await h.call("POST", `/native/sessions/${s.id}/messages`, { text: "compact" });
+      await until(() => h.store.getSession(s.id)?.status === "error");
+      expect(errorText(h, s.id)).toBe(streamMissingText("Ruby 2", path.basename(ws.path)));
+      expect(h.sent).toHaveLength(0);
+    } finally {
+      fs.renameSync(`${h.repo}-moved`, h.repo);
+    }
   });
 
   it("an agent that exits while resuming in a folder that vanished is not a lost resume", async () => {

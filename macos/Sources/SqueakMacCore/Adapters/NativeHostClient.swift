@@ -968,12 +968,6 @@ public struct NativeHostClient: Sendable {
         return (j["resent"]?.bool ?? false, j["reason"]?.string)
     }
 
-    /// "Return to the Pond": a Duck whose Stream folder is gone carries on in the Pond's own folder, the same chat with its
-    /// history. 409 when the folder is there after all or the chat works.
-    public func recoverStream(id: String) async throws {
-        _ = try await call("POST", "/native/sessions/\(Self.id(id))/recover-stream", body: .object([:]), timeout: 60)
-    }
-
     /// The opening message for a new thread that continues this chat: a cheap model's summary, which the person edits.
     public func handoffDraft(id: String) async throws -> String {
         let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/handoff-draft", body: .object([:]), timeout: 60))

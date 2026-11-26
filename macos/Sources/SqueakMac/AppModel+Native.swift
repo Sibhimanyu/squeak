@@ -569,18 +569,6 @@ extension AppModel {
         await refreshNative(s)
     }
 
-    /// "Return to the Pond": the host moves the same chat to the Pond's folder (history kept), then it runs.
-    func nativeRecoverStream(_ s: HostSession) async {
-        if demoMode { native.note = "Demo data: nothing is moved."; return }
-        guard let c = nativeControls(for: s) else { return }
-        let r = await c.recoverStream(s)
-        switch r {
-        case .done: break
-        case .refused(let why), .failed(let why): native.note = why
-        }
-        await refreshNative(s)
-    }
-
     /// Opens the summary for editing: the host's cheap model writes it; if it cannot, the field opens empty with a sentence.
     func nativeBeginHandoff(_ s: HostSession) async {
         if demoMode { native.note = "Demo data: no duck is started."; return }

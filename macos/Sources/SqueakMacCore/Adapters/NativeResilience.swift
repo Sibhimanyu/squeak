@@ -102,19 +102,15 @@ public enum NativeChatNotice {
 
     public static func showsRetry(_ s: HostSession) -> Bool { s.retryable == true && s.state == .error }
 
-    // The Duck's Stream folder is gone: the host says so, the banner offers one way on, the composer waits.
-    public static let streamReturnTitle = "Return to the Pond"
-    /// Why the composer is off while the folder is gone.
-    public static let streamBlockedReason = "its Stream folder is gone. Return it to the Pond above."
+    // A Duck whose Stream folder is gone is never locked out: the host moves it to the Pond when a message arrives and
+    // says so in one note. The Mac draws nothing special for it.
 
-    /// The banner's sentence; the Mac draws the host's facts (`streamMissing`) and the Duck's name.
-    public static func streamMissingText(duck: String, _ gone: StreamMissing) -> String {
-        let who = duck.trimmingCharacters(in: .whitespaces).isEmpty ? "This Duck" : duck
-        return "\(who)'s Stream folder (\(gone.folder)) is gone, so it can't run there."
+    /// Why the composer is off, or nil when a message can be sent. A missing Stream folder is not a reason.
+    public static func sendBlock(_ s: HostSession) -> String? {
+        if case .unsupported(let why) = s.capabilities.send { return why }
+        if s.replyTarget == nil { return "Squeak has no way to reply to this chat." }
+        return nil
     }
-
-    /// Shown whenever the host reports the folder gone; the button is a real flow (`recoverStream`).
-    public static func showsStreamMissing(_ s: HostSession) -> Bool { s.streamMissing != nil }
 
     /// The line a link note shows: "Continued from …" and "Continued in …" arrive as the host's own sentence.
     public static func isLinkNote(_ text: String) -> Bool { text.hasPrefix("Continued from ") || text.hasPrefix("Continued in ") }

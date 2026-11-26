@@ -17,7 +17,7 @@ import {
 } from "./agent-tools.js";
 import { codexMcpConfig } from "./codex-runner.js";
 import { SessionHost } from "./host.js";
-import { NativeServer } from "./server.js";
+import { mcpEndpointAt, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import type { Runner, RunnerHooks, SessionRow } from "./types.js";
 import { WorkspaceManager } from "./workspaces.js";
@@ -449,5 +449,15 @@ describe("tool names", () => {
       "mcp_servers.squeak.url": "http://127.0.0.1:1/mcp/x",
       "mcp_servers.squeak.http_headers": { Authorization: "Bearer t" },
     });
+  });
+});
+
+describe("tools for a chat started before the server listens", () => {
+  it("the address and token are known up front and are the ones the listening server hands out", async () => {
+    // A message queued behind a stopped turn starts during host startup; its agent must not run without tools.
+    const h = await start();
+    const id = chat(h, h.dir, "early").id;
+    const port = Number(new URL(h.base).port);
+    expect(mcpEndpointAt(path.join(h.dir, "hook-token"), port, id)).toEqual(h.server.mcpEndpoint(id));
   });
 });

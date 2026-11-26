@@ -12,7 +12,7 @@ import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
 import { startSystemProxy } from "../squeak/system-proxy.js";
 import { adoptLoginShellPath } from "./shell-env.js";
-import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
+import { DEFAULT_HOST_PORT, mcpEndpointAt, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
 import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/index.js";
@@ -66,11 +66,14 @@ export async function runHost(supportDir: string): Promise<void> {
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.
   let server: NativeServer | null = null;
+  const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
+  const hostTokenPath = defaultHookInstallPaths(supportDir).tokenPath;
   // Late-bound like the server: ponds exist only after the host.
   let flotilla: Flotilla | null = null;
   const host = new SessionHost({
     store,
-    mcpFor: (id) => server?.mcpEndpoint(id) ?? null,
+    // Before the server exists (host.start() restarts queued turns) the address is still known: never run without tools.
+    mcpFor: (id) => server?.mcpEndpoint(id) ?? mcpEndpointAt(hostTokenPath, port, id),
     claudeAiConnectors: () => new AgentSettings(supportDir).get().claudeAiConnectors,
     ownerName: () => flotilla?.service?.identity.name ?? null,
     titleCall: onDeviceTitleCall({
@@ -177,7 +180,6 @@ export async function runHost(supportDir: string): Promise<void> {
   if (process.env.SQUEAK_AGENT_SDK_PREFETCH !== "off" && !agentSdkPresent()) {
     setTimeout(() => void prefetchAgentSdk(), 5_000).unref();
   }
-  const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
   // Ponds: on for everyone (local ponds need no cloud); SQUEAK_FLOTILLA=off constructs nothing from src/flotilla.
   let shared: { sources: WorkspaceSources; placement: Placement; tools: AgentTools } | null = null;
   if (flotillaEnabled()) {

@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 
 import { flag } from "../squeak/flags.js";
-import type { DuckRow, NativeStore } from "./store.js";
+import { stripNumberSuffix, type DuckRow, type NativeStore } from "./store.js";
 import type { AgentKind, ProjectRow, SessionRow, WorkspaceRow } from "./types.js";
 import { NO_STREAMS } from "./version-history.js";
 import type { WorkspaceSources } from "./workspace-sources.js";
@@ -508,15 +509,16 @@ export class Placement {
       // git still lists the vanished folder as a worktree of its branch; forget it so the branch can be joined again
       await this.git(project.rootPath, ["worktree", "prune"]);
       const branch = duck?.branch ?? ws?.branch ?? s.branch ?? null;
+      const folder = path.basename(s.cwd.replace(/\/+$/, "")) || s.cwd;
+      const gone = folder.charAt(0).toUpperCase() + folder.slice(1);
+      const who = stripNumberSuffix(duck?.name?.trim() || duck?.lastName?.trim() || s.title?.trim() || "The Duck");
       const exists =
         !!branch &&
         (await this.git(project.rootPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) !== null;
       return {
         place: { kind: "main", cwd: project.rootPath, workspaceId: null, branch: null },
         joined: exists ? branch : null,
-        note: exists
-          ? `Returned to the Pond (read-only). Its Stream for ${branch} is made again when it next joins it.`
-          : "Returned to the Pond (read-only). Its old branch is gone.",
+        note: `${gone} is gone; ${who} works in the Pond now`,
       };
     } finally {
       this.moving.delete(sessionId);

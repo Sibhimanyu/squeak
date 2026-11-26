@@ -172,6 +172,18 @@ function optionalTitle(v: unknown): string | undefined {
   return v.trim() || undefined;
 }
 
+/**
+ * Where chat `sessionId`'s agent reaches Squeak's tools on a host that listens (or is about to) on `port`. The address
+ * and token are fixed before the server starts, so a chat started during startup (a message queued behind a stopped
+ * turn) still gets the tools; with none, the agent would run all its life without them.
+ */
+export function mcpEndpointAt(tokenPath: string, port: number, sessionId: string): McpEndpoint {
+  return {
+    url: `http://127.0.0.1:${port}/mcp/${sessionId}`,
+    token: mcpTokenFor(HookIngressServer.ensureToken(tokenPath), sessionId),
+  };
+}
+
 /** Loopback only, token on every route, no CORS header: any web page can reach 127.0.0.1. */
 export class NativeServer {
   private server: http.Server | null = null;
@@ -341,6 +353,9 @@ export class NativeServer {
   }
 
   async start(): Promise<number> {
+    this.options.host.streamRecovery = async (id) => {
+      if (ducksOwnBranch()) await this.returnToPond(id);
+    };
     this.token = HookIngressServer.ensureToken(this.options.tokenPath);
     this.server = http.createServer((req, res) => void this.handle(req, res));
     await new Promise<void>((resolve, reject) => {

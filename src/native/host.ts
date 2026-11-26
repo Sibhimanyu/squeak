@@ -715,6 +715,9 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
+  /** Set by the server: moves a chat whose Stream folder is gone to the Pond (placement decides where, then `recoverStream`). */
+  streamRecovery?: (id: string) => Promise<void>;
+
   /**
    * Set when the chat's folder is gone from disk (a Stream's working copy removed). Decided here, from the disk, so
    * every surface says the same thing; null when the folder is there, the chat is archived, or folders are not checked.
@@ -874,7 +877,18 @@ export class SessionHost extends EventEmitter {
       this.pendingInput.enqueue(id, text, options.author, options.clientNonce, options.room);
       return { queued: true };
     }
-    await this.startTurn(s, text, false, options.author, undefined, {
+    // A Duck whose Stream folder is gone has nothing to lose in the Pond: it moves there (same chat, same agent
+    // session) and this message goes on to it. If the move cannot be made, the turn fails with the plain reason.
+    let current = s;
+    if (this.streamRecovery && this.streamMissingOf(s)) {
+      try {
+        await this.streamRecovery(id);
+        current = this.require(id);
+      } catch (error) {
+        logHostError(`recover stream ${id}`, error);
+      }
+    }
+    await this.startTurn(current, text, false, options.author, undefined, {
       clientNonce: options.clientNonce,
       room: options.room,
     });
