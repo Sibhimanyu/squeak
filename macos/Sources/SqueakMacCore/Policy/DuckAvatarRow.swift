@@ -33,14 +33,25 @@ public struct DuckRowAvatar: Equatable, Sendable, Identifiable {
     public var onDuty: Bool { presence != .off }
     /// The working glyph shows only on a working Duck.
     public var showsWorkingGlyph: Bool { presence == .working }
-    /// The amber triangle shows only on a Duck waiting on the person.
-    public var needsYou: Bool { presence == .waiting }
+    /// The Duck needs the person by the host's one rule: waiting, or a failure not yet seen (any duty).
+    public var needsYou: Bool { presence == .waiting || failed }
+    /// The host says its chat failed and the person has not seen it: the circle-x badge, not the triangle.
+    public var failed: Bool = false
+    /// The failure's own words (the badge's tooltip); nil when the host sent none.
+    public var failureText: String? = nil
+    /// What the badge says, for the tooltip and VoiceOver: why it failed, or that it waits.
+    public var needsYouWords: String? {
+        if failed { return failureText.map { "Failed: \($0)" } ?? "Failed" }
+        return presence == .waiting ? "Waiting on you" : nil
+    }
     public var opensChat: Bool { sessionId != nil }
 
     public init(
         id: String, name: String, colourSeed: String, agent: String? = nil, presence: RoomDuckPresence, presenceLine: String,
-        sessionId: String? = nil, streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true
+        sessionId: String? = nil, streams: [RoomStream] = [], title: String? = nil, wearsName: Bool = true,
+        failed: Bool = false, failureText: String? = nil
     ) {
+        self.failed = failed; self.failureText = failureText
         self.id = id; self.name = name; self.colourSeed = colourSeed; self.agent = agent; self.presence = presence
         self.presenceLine = presenceLine; self.sessionId = sessionId; self.streams = streams; self.title = title
         self.wearsName = wearsName
@@ -64,7 +75,8 @@ public struct DuckRowModel: Equatable, Sendable {
 public enum DuckAvatarRow {
     public static func build(roster: DuckRoster, place: DuckRowPlace) -> DuckRowModel {
         func avatar(_ d: RosterDuck) -> DuckRowAvatar {
-            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams, title: d.title, wearsName: d.wearsName)
+            DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams, title: d.title, wearsName: d.wearsName,
+                          failed: d.needsYouReason == "failed", failureText: d.failure)
         }
         var ducks = roster.onDuty.map(avatar)
         switch place {

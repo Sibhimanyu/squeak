@@ -257,6 +257,11 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE room_posts ADD COLUMN summary TEXT;
   ALTER TABLE room_posts ADD COLUMN full_body TEXT;
   `,
+  // A failed chat the person has opened or dismissed stops counting under Needs you (fleet/needs-you.ts). Cleared when the
+  // chat leaves the error state, so the next failure counts again.
+  `
+  ALTER TABLE sessions ADD COLUMN error_seen_at TEXT;
+  `,
 ];
 
 /** Posts a pond's room keeps; the oldest go when a new one lands past this. */
@@ -451,6 +456,7 @@ function session(r: Row): SessionRow {
     prunedThrough: r.pruned_through as number,
     archivedAt: (r.archived_at as string | null) ?? null,
     titleAuto: r.title_auto === 1,
+    ...(r.status === "error" && r.error_seen_at ? { errorSeenAt: r.error_seen_at as string } : {}),
     ...(r.branch ? { branch: r.branch as string } : {}),
     ...(r.duck_id ? { duckId: r.duck_id as string } : {}),
   };
@@ -1027,9 +1033,33 @@ export class NativeStore {
     const at = nowIso();
     this.db
       .prepare(
-        "UPDATE sessions SET status=?, updated_at=?, last_turn_ended_at=COALESCE(?, last_turn_ended_at) WHERE id=?",
+        // The failure stays seen only while the chat stays failed: any other status, or a fresh error after one, counts anew.
+        "UPDATE sessions SET error_seen_at=CASE WHEN ?='error' AND status='error' THEN error_seen_at END, status=?, updated_at=?, last_turn_ended_at=COALESCE(?, last_turn_ended_at) WHERE id=?",
       )
-      .run(status, at, endedTurn ? at : null, id);
+      .run(status, status, at, endedTurn ? at : null, id);
+  }
+  /** The person opened or dismissed this chat's failure. False when the chat is not failed (nothing to dismiss). */
+  acknowledgeError(id: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE sessions SET error_seen_at=? WHERE id=? AND status='error' AND error_seen_at IS NULL")
+        .run(nowIso(), id).changes > 0
+    );
+  }
+  /** The words of the chat's latest failure row (`system/error`), for the Duck badge and the Needs-you list. */
+  latestErrorText(id: string): string | null {
+    const r = this.db
+      .prepare(
+        "SELECT payload FROM messages WHERE session_id=? AND kind='system/error' AND hidden=0 ORDER BY seq DESC LIMIT 1",
+      )
+      .get(id) as Row | undefined;
+    if (!r) return null;
+    try {
+      const text = (JSON.parse(r.payload as string) as { text?: unknown }).text;
+      return typeof text === "string" && text.trim() ? text.trim() : null;
+    } catch {
+      return null;
+    }
   }
   setAgentSessionId(id: string, agentSessionId: string): void {
     this.db.prepare("UPDATE sessions SET agent_session_id=? WHERE id=?").run(agentSessionId, id);

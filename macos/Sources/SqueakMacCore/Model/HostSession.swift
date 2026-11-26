@@ -89,6 +89,10 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var lastTurnEndedAt: Date? = nil
     /// The duck this chat belongs to (a daemon with `ducksOwnBranch`); nil from an older one.
     public var duckId: String? = nil
+    /// A failed chat: when the person opened or dismissed the failure (the host's `errorSeenAt`); nil until then.
+    public var errorSeenAt: Date? = nil
+    /// A failed chat: the failure's own words (the host's `needsYou.text`); nil when it sent none.
+    public var failureText: String? = nil
 
     public var id: SessionKey { key }
 

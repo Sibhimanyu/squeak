@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { pondCounts, type PondCounts } from "../fleet/pond-counts.js";
+import { needsYouReason, type NeedsYouReason } from "../fleet/needs-you.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -156,6 +157,12 @@ export interface DuckView {
   streamLabels: string[];
   /** Working when the turn runs or any Duckling still works; needsYou when it waits on the person. */
   activity: DuckActivity;
+  /** The Duck needs the person, by the one rule (`fleet/needs-you.ts`): waiting, or a failure not yet seen. Any duty. */
+  needsYou: boolean;
+  /** Why it needs the person; absent when it does not. */
+  needsYouReason?: NeedsYouReason;
+  /** The words of the failure (`needsYouReason` "failed"), so a badge can say why without opening the chat. */
+  failure?: string;
   /** How many Ducklings run for it now. */
   ducklingsRunning: number;
   /** The one status line every surface shows: "Working · 1 duckling on <task>", "Needs you", "Idle · 4m", "off duty 3d ago". */
@@ -1156,7 +1163,14 @@ export class Room extends EventEmitter {
       ? [{ workspaceId: place.workspaceId, branch: place.branch, ...(placed?.title ? { title: placed.title } : {}) }]
       : own;
     const helpers = s ? (this.options.helpers?.(s.id) ?? null) : null;
-    const activity = this.activityOf(s, helpers);
+    const reason = s
+      ? needsYouReason(
+          { state: toFleetState(s.status, s.lastTurnEndedAt), errorSeenAt: s.errorSeenAt, updatedAt: s.updatedAt },
+          this.now(),
+        )
+      : null;
+    const activity = this.activityOf(s, helpers, reason);
+    const failure = reason === "failed" && s ? (this.store.latestErrorText(s.id) ?? undefined) : undefined;
     const name = duck.name ?? (s ? agentName(s) : (duck.lastName ?? "Duck"));
     const chatTitle = s?.title?.trim() || undefined;
     const lastActiveAt = Number.isFinite(at) ? at : created;
@@ -1175,6 +1189,9 @@ export class Room extends EventEmitter {
       ...(streams.length ? { streams } : {}),
       streamLabels: streams.length ? streams.map((x) => x.branch || x.title?.trim() || "Stream") : ["Pond"],
       activity,
+      needsYou: reason !== null,
+      ...(reason ? { needsYouReason: reason } : {}),
+      ...(failure ? { failure } : {}),
       ducklingsRunning,
       statusLine: statusLineOf(activity, duck.duty, ducklingsRunning, helpers?.task, lastActiveAt, this.now()),
       heading: duck.duty === "off" ? (chatTitle ?? name) : name,
@@ -1193,10 +1210,11 @@ export class Room extends EventEmitter {
   }
 
   /** The working rule, once: the turn runs or its Ducklings still work; else waiting on the person, an error, or idle. */
-  private activityOf(s: SessionRow | null, helpers: DuckHelpers | null): DuckActivity {
+  private activityOf(s: SessionRow | null, helpers: DuckHelpers | null, reason: NeedsYouReason | null): DuckActivity {
     const state = s ? threadState(s.status, s.lastTurnEndedAt) : "idle";
     if (state === "waiting") return "needsYou";
-    if (state === "error") return "error";
+    // A failure the person has seen (or an old one) is not "Error" any more: the Duck reads as idle, the chat keeps its row.
+    if (state === "error") return reason === "failed" ? "error" : "idle";
     if (state === "working" || helpers?.keepWorking) return "working";
     return "idle";
   }
@@ -1223,7 +1241,7 @@ export class Room extends EventEmitter {
       this.listDucks(projectId).map((d) => ({
         duty: d.duty,
         working: d.activity === "working",
-        needsYou: d.activity === "needsYou",
+        needsYou: d.needsYou,
       })),
     );
   }

@@ -123,7 +123,7 @@ public enum DashboardBoard {
         if chat.isLoopingNow { return 0 }
         switch chat.state {
         case .blocked where chat.alive != false: return 0
-        case .error where SessionGrouping.isRecent(chat, now: now): return 1
+        case .error where NeedsYou.failureCounts(chat, now: now): return 1
         case .working where chat.alive != false: return 2
         case .finished where SessionGrouping.runsDucklings(chat): return 2
         case .finished: return 3

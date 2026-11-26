@@ -20,7 +20,7 @@ public enum SessionGrouping {
         case .working where s.alive != false: return .working
         case .finished where runsDucklings(s): return .working
         case .finished where isRecent(s, now: now): return .done
-        case .error where isRecent(s, now: now): return .error
+        case .error where NeedsYou.failureCounts(s, now: now): return .error
         default: return .idle
         }
     }

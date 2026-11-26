@@ -73,6 +73,14 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var duckId: String? = nil
     /// "Repeating a failing step: <label> ×N" for that row.
     public var loopSentence: String? = nil
+    /// The host's one rule names this Duck's failure (`needsYouReason` "failed"): the row says why and offers Dismiss.
+    public var failed = false
+    /// The failure's own words, when the host sent them.
+    public var failureText: String? = nil
+    /// Under Needs you by the one rule: waiting, or a failure the person has not seen. Any duty.
+    /// The host's roster flag (`needsYou`) where it sent one: the tiles and the list read the same rows it counted.
+    public var hostNeedsYou: Bool? = nil
+    public var needsYou: Bool { hostNeedsYou ?? (state == .needsYou || state == .failed || failed) }
     public var hostingLabel: String {
         if local != nil { return "This Mac" }
         if let nest, !nest.isEmpty { return nest }
@@ -173,6 +181,9 @@ public struct PondHomeLayout: Sendable, Equatable {
             row.statusLine = d.presenceLine
             row.heading = d.heading
             row.streamLabels = d.streamLabels
+            row.hostNeedsYou = d.needsYou
+            row.failed = d.needsYouReason == "failed"
+            row.failureText = d.failure
             row.duckId = d.id
             if !d.onDuty { row.offDuty = PondOffDutyNote(line: d.presenceLine, summary: d.lastSummary) }
             return row
@@ -328,7 +339,7 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
         switch self {
         case .all: true
         case .onDuty: row.onDuty && !row.isFlock
-        case .needsYou: row.onDuty && !row.isFlock && row.state == .needsYou
+        case .needsYou: !row.isFlock && row.needsYou
         case .working: row.onDuty && !row.isFlock && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
         case .offDuty: !row.onDuty && !row.isFlock
         case .shared: row.shared

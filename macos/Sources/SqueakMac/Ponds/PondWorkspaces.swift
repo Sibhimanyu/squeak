@@ -129,6 +129,18 @@ private struct PondChatRowView: View {
                 }
                 .padding(.horizontal, 16).padding(.bottom, 10)
             }
+            // A failure the person has not seen says why (the host's words) and can be let go without opening the chat.
+            if row.failed, let key = row.local, let s = model.session(key) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(verbatim: row.failureText.map { "Failed: \($0)" } ?? "Failed").font(Typo.meta).foregroundStyle(Theme.negative)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("Dismiss") { model.dismissFailure(s) }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .help("Stop counting this failure under Needs you. Sending the chat a message does the same.")
+                }
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
         }
     }
 
@@ -191,7 +203,7 @@ private struct PondChatRowView: View {
         }
         .buttonStyle(PondThreadRowStyle())
         .squeakContextMenu {
-            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s); DuckMenuItems(session: s) }
+            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s); DismissFailureItem(session: s); DuckMenuItems(session: s) }
             // Someone else's thread: archiving hides it from your view only, never from the person who started it.
             if row.local == nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
                 Button("Archive") { PondsModel.shared.hideShared(threadId: thread, pondId: pond.id, pondName: pond.name, title: row.title, agent: row.agent) }

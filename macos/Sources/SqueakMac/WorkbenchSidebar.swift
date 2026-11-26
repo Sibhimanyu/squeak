@@ -385,6 +385,8 @@ struct WorkbenchSidebar: View {
                 inFocus: model.focus.pond == key,
                 needs: PondsModel.shared.badge(pondRecord),
                 rollup: pondRollup(workspaces),
+                needsItems: model.needsYouItems(workspaces.flatMap(\.chats)),
+                onNeeds: { model.openNeedsYou(pond: key, items: model.needsYouItems(workspaces.flatMap(\.chats))) },
                 onDisclose: { toggleFold(key) },
                 folded: projectFolded,
                 badge: PondsModel.shared.chrome(key: key).badge,
@@ -644,6 +646,10 @@ private struct FoldRow: View {
     var needs = 0
     /// A pond row's status rollup (working / needs you / error), drawn in the count's slot; nil = the count as before.
     var rollup: StatusRollup?
+    /// The chats the one rule names (waiting or a failure not yet seen): the mark's tooltip says which, and a click opens the one
+    /// chat, or the pond's Needs-you list when there are several.
+    var needsItems: [NeedsYouItem] = []
+    var onNeeds: (() -> Void)?
     var onDisclose: (() -> Void)?
     var folded = false
     /// A small quiet label after a pond's name ("Remote": ducks on someone else's Mac).
@@ -675,19 +681,31 @@ private struct FoldRow: View {
         }
     }
 
+    /// The pond's waiting or failed mark as a control: hover says which chats and why; a click goes to them (one chat opens, several
+    /// open the pond's Needs-you list). With nothing to open (a count from another Mac) it is only the mark.
+    @ViewBuilder private func markButton<M: View>(_ mark: M, fallback: String) -> some View {
+        let help = needsItems.isEmpty ? fallback : PondNeedsYou.help(needsItems)
+        if onNeeds != nil, !needsItems.isEmpty {
+            Button { onNeeds?() } label: { mark.frame(width: 24, height: 24, alignment: .trailing).contentShape(Rectangle()) }
+                .buttonStyle(.plain).pointerHand().help(help).accessibilityLabel(help)
+                .accessibilityHint(PondNeedsYou.target(needsItems) == .list ? "Opens the pond's Needs you list" : "Opens the chat")
+        } else {
+            mark.frame(width: 24, alignment: .trailing).help(help).accessibilityLabel(help)
+        }
+    }
+
     @ViewBuilder private var pondMark: some View {
         let own = rollup ?? StatusRollup(state: needs > 0 ? .waiting : .idle, needsYou: needs)
         // An open pond shows its chats, and the working one moves: the pond itself does not repeat it.
         let r = StatusRollup(state: own.state.asRollup(childrenVisible: !folded), working: own.working, needsYou: own.needsYou)
         switch PondRowMark.of(r, count: count) {
         case .needsYou(let n):
-            StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16)
-                .frame(width: 24, alignment: .trailing).help("\(needs > 0 ? needs : n) waiting on you")
+            markButton(StatusMark(kind: .waiting(count: nil), color: Theme.warning, size: 16), fallback: "\(needs > 0 ? needs : n) waiting on you")
         case .working:
             // 15 pt tall compact mark centred in a 24 pt slot: its visible pixels (about 23 pt) stay inside the slot, clear of the name.
             WorkingGlyph(slot: 24, alignment: .center, grid: .compact).padding(.leading, 6)
         case .error:
-            StatusMark(kind: .failed, color: Theme.negative, size: 13).frame(width: 24, alignment: .trailing)
+            markButton(StatusMark(kind: .failed, color: Theme.negative, size: 13), fallback: "A chat failed")
         case .count(let n):
             // New layout: the one number on a Pond row is the yellow "For you" badge; a grey count would mean something else.
             if !newLayout { Text("\(n)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle) }
@@ -887,6 +905,7 @@ struct WorkbenchChatRow: View {
         .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
             RenameThreadItem(session: session)
+            DismissFailureItem(session: session)
             DuckMenuItems(session: session)
         }
         .accessibilityElement(children: .combine)

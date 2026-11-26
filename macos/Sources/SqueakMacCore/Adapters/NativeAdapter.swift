@@ -176,6 +176,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         h.helpersWorking = s.helpersWorking
         h.retryable = s.retryable && state == .error ? true : nil
         h.streamMissing = s.streamMissing
+        h.errorSeenAt = s.errorSeenAt
+        h.failureText = s.failureText
         return h
     }
 

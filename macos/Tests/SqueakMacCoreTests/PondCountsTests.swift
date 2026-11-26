@@ -18,6 +18,7 @@ struct PondCountsTests {
         func duck(_ id: String, _ activity: PondDuckActivity, off: Bool = false) -> PondDuck {
             var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), duty: off ? .off : .on, currentSessionId: id)
             d.activity = activity
+            d.needsYou = activity == .needsYou  // the host sends its one rule with the activity
             return d
         }
         let ducks = [duck("a", .working), duck("b", .needsYou), duck("c", .idle), duck("d", .idle, off: true), duck("e", .working, off: true)]

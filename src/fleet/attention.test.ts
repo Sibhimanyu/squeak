@@ -42,6 +42,11 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
 }
 
 describe("classifyAttentions", () => {
+  it("an errored chat the person already opened or dismissed asks for nothing", () => {
+    expect(classifyAttentions(session({ state: "error" }))).toEqual(["errored"]);
+    expect(classifyAttentions(session({ state: "error", errorSeenAt: "2026-11-26T10:00:00Z" }))).toEqual([]);
+  });
+
   it("maps blocked and finished states onto attention kinds", () => {
     const cases: [FleetState, string[]][] = [
       ["awaiting_approval", ["blocked_approval"]],

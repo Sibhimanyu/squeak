@@ -22,6 +22,12 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
     public var statusLine: String?
     /// The host's heading: the name on duty, the chat title off duty.
     public var hostHeading: String?
+    /// The host says this Duck needs the person by the one rule (`needs-you.ts`): waiting, or a failure not yet seen. Any duty.
+    public var needsYou = false
+    /// Why (`approval`, `question`, `looping`, `stalled`, `failed`); nil when it does not.
+    public var needsYouReason: String?
+    /// The failure's own words when `needsYouReason` is `failed`, so a badge says why without opening the chat.
+    public var failure: String?
     /// The Stream chips as the host writes them: each Stream's branch, or "Pond" when it is in none.
     public var streamLabels: [String] = []
     public var state: RoomThreadState
@@ -51,7 +57,7 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         self.currentSessionId = currentSessionId; self.state = state; self.lastActiveAt = lastActiveAt; self.createdAt = createdAt
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, streams, state, activity, ducklingsRunning, statusLine, heading, streamLabels, lastActiveAt, createdAt, title, chatTitle, lastSummary }
+    private enum CodingKeys: String, CodingKey { case id, name, role, colourSeed, duty, currentSessionId, streams, state, activity, ducklingsRunning, statusLine, heading, streamLabels, lastActiveAt, createdAt, title, chatTitle, lastSummary, needsYou, needsYouReason, failure }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -67,6 +73,10 @@ public struct PondDuck: Sendable, Equatable, Decodable, Identifiable {
         state = (try? c.decode(String.self, forKey: .state)).flatMap(RoomThreadState.init(rawValue:)) ?? .idle
         activity = (try? c.decode(String.self, forKey: .activity)).flatMap(PondDuckActivity.init(rawValue:)) ?? Self.activity(of: state)
         ducklingsRunning = (try? c.decode(Int.self, forKey: .ducklingsRunning)) ?? 0
+        // An older host does not say: only a chat waiting on the person counts, as it always did.
+        needsYou = (try? c.decode(Bool.self, forKey: .needsYou)) ?? (activity == .needsYou)
+        needsYouReason = (try? c.decode(String.self, forKey: .needsYouReason)).flatMap { $0.isEmpty ? nil : $0 }
+        failure = (try? c.decode(String.self, forKey: .failure)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         statusLine = (try? c.decode(String.self, forKey: .statusLine)).flatMap { $0.isEmpty ? nil : $0 }
         hostHeading = (try? c.decode(String.self, forKey: .heading)).flatMap { $0.isEmpty ? nil : $0 }
         let labels = (try? c.decode([String].self, forKey: .streamLabels)) ?? []
@@ -118,6 +128,10 @@ public struct RosterDuck: Sendable, Equatable, Identifiable {
     public var streamLabels: [String] = []
     public var lastActiveAt: Int64?
     public var activity: PondDuckActivity = .idle
+    /// The host's one "needs you" rule (see `PondDuck.needsYou`), whatever the duty.
+    public var needsYou = false
+    public var needsYouReason: String?
+    public var failure: String?
     public var onDuty: Bool { presence != .off }
     /// The row's heading: the host's; else an on-duty Duck's name or an Off-duty Duck's chat title (it wears no name).
     public var heading: String { hostHeading ?? (onDuty ? name : RoomRoster.offDutyHeading(title: chatTitle)) }
@@ -155,7 +169,8 @@ public enum RoomRoster {
             sessionId: d.currentSessionId, streams: d.streams,
             title: thread?.title ?? d.title, wearsName: d.wearsName && presence != .off,
             chatTitle: d.chatTitle ?? thread?.title, lastSummary: d.lastSummary, ducklingsRunning: d.ducklingsRunning,
-            statusLine: d.statusLine, hostHeading: d.hostHeading, streamLabels: d.streamLabels, lastActiveAt: d.lastActiveAt, activity: d.activity)
+            statusLine: d.statusLine, hostHeading: d.hostHeading, streamLabels: d.streamLabels, lastActiveAt: d.lastActiveAt, activity: d.activity,
+            needsYou: d.needsYou, needsYouReason: d.needsYouReason, failure: d.failure)
     }
 
     /// An Off-duty Duck's heading: its chat title, else "Untitled chat".

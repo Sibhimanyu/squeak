@@ -239,6 +239,30 @@ describe("SessionHost", () => {
     expect(runners[0]!.sent).toEqual(["go", "retry"]);
   });
 
+  it("a failed chat says it needs you and why; dismissing it, or sending anything, lets go (and a second failure counts again)", async () => {
+    const { host, runners, store, events } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onExit(new Error("The model is overloaded"));
+    await until(() => store.getSession(s.id)?.status === "error");
+    const row = () => host.list().find((x) => x.id === s.id)!;
+    expect(row().needsYou).toEqual({
+      reason: "failed",
+      text: expect.stringContaining("overloaded") as unknown as string,
+    });
+
+    expect(host.dismissError(s.id)).toEqual({ dismissed: true });
+    expect(row().needsYou).toBeUndefined();
+    expect(events.some((e) => e.type === "status" && e.sessionId === s.id && e.status === "error")).toBe(true);
+    // Nothing left to dismiss: not an error, two surfaces may race.
+    expect(host.dismissError(s.id)).toEqual({ dismissed: false });
+
+    await host.send(s.id, "again");
+    expect(row().needsYou).toBeUndefined();
+    runners[0]!.hooks.onExit(new Error("boom again"));
+    await until(() => store.getSession(s.id)?.status === "error");
+    expect(row().needsYou).toMatchObject({ reason: "failed" });
+  });
+
   it("a runner that dies mid-turn fails the turn", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });

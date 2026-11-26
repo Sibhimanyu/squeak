@@ -120,6 +120,10 @@ export interface SessionRow {
   prunedThrough: number;
   /** When the person archived the chat; null when it is in the list. An archived chat has no running agent. */
   archivedAt: string | null;
+  /** While the chat is failed: when the person opened or dismissed that failure; absent until then. */
+  errorSeenAt?: string;
+  /** Added by the host: this chat needs the person, and why (`fleet/needs-you.ts`, the one rule); absent when it does not. */
+  needsYou?: { reason: "approval" | "question" | "looping" | "stalled" | "failed"; text?: string };
   /** True when the title was made by Squeak, not typed by the person. */
   titleAuto?: boolean;
   /** The git branch this chat works on (denormalised from its workspace); absent in Main or a plain folder. */

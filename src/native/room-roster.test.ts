@@ -71,6 +71,52 @@ describe("the Pond roster", () => {
     expect(counts).toEqual({ onDuty: 1, working: 0, needsYou: 0, offDuty: 6, total: list.length });
   });
 
+  it("counts a failed Duck under Needs you whatever its duty (the owner's greenroom Zoom chat), says why, and lets go once dismissed", () => {
+    const r = rig();
+    r.duck("Pickle", "Fix Bugs Using Ducklings");
+    const zoom = r.duck(null, "Zoom SDK Video Subscription Instability", { off: true });
+    r.store.setStatus(zoom.s.id, "error", true);
+    r.store.appendMessage(zoom.s.id, "system", "system/error", {
+      text: "Squeak couldn't load this chat's earlier conversation.",
+    });
+    const before = r.room
+      .listDucks(r.project.id)
+      .find((d) => d.chatTitle === "Zoom SDK Video Subscription Instability")!;
+    expect(before).toMatchObject({ needsYou: true, needsYouReason: "failed", activity: "error", duty: "off" });
+    expect(before.failure).toBe("Squeak couldn't load this chat's earlier conversation.");
+    expect(r.room.duckCounts(r.project.id)).toMatchObject({ onDuty: 1, needsYou: 1, offDuty: 1 });
+
+    expect(r.store.acknowledgeError(zoom.s.id)).toBe(true);
+    const after = r.room
+      .listDucks(r.project.id)
+      .find((d) => d.chatTitle === "Zoom SDK Video Subscription Instability")!;
+    expect(after.needsYou).toBe(false);
+    expect(after.activity).toBe("idle");
+    expect(after.failure).toBeUndefined();
+    expect(r.room.duckCounts(r.project.id).needsYou).toBe(0);
+  });
+
+  it("a waiting Duck and a failed one both count; an old untouched failure does not", () => {
+    const r = rig();
+    const waiting = r.duck("Moss", "Needs an answer");
+    r.store.setStatus(waiting.s.id, "awaiting_answer");
+    const failed = r.duck("Pip", "Broke");
+    r.store.setStatus(failed.s.id, "error", true);
+    const stale = r.duck("Dhol", "Broke last week");
+    r.store.setStatus(stale.s.id, "error", true);
+    r.store.db
+      .prepare("UPDATE sessions SET updated_at=? WHERE id=?")
+      .run(new Date(Date.now() - 30 * 3_600_000).toISOString(), stale.s.id);
+    const list = r.room.listDucks(r.project.id);
+    expect(
+      list
+        .filter((d) => d.needsYou)
+        .map((d) => d.name)
+        .sort(),
+    ).toEqual(["Moss", "Pip"]);
+    expect(r.room.duckCounts(r.project.id).needsYou).toBe(2);
+  });
+
   it("names Streams, or Pond; never a folder branch", () => {
     const r = rig();
     const dhol = r.duck("Dhol", "Branch Setup");

@@ -110,6 +110,8 @@ final class AppModel {
     var directoryRevision = 0
     /// Chats just started whose tab opens as soon as the list carries them (`openWhenListed`), each with its 15 s timeout.
     @ObservationIgnored var awaitingList: [String: Task<Void, Never>] = [:]
+    /// Failed chats whose "seen" went to the host this run (once each), so a chat left open is not told again every settle.
+    @ObservationIgnored var failuresReported: Set<String> = []
     /// The long-lived loops the app owns (`startLoops`), not any view: the live-steps one restarts when the first read lands.
     @ObservationIgnored var loopTasks: [Task<Void, Never>] = []
     @ObservationIgnored var liveStepsTask: Task<Void, Never>?
@@ -909,6 +911,9 @@ final class AppModel {
         let now = screen
         let s = now.visibleChat.flatMap { SessionKey(stringValue: $0) }.flatMap { session($0) }
         guard readTracker.settle(now, available: s != nil) != nil, let s else { return }
+        // Looking at a failed chat is seeing its failure: the host stops counting it under Needs you (the same moment the
+        // finished chat reads). Dismiss is the way to let go of one you do not open.
+        if NeedsYou.failureCounts(s) { dismissFailure(s, userAction: false) }
         let before = seenLog
         seenLog.markOpened(s)
         if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
