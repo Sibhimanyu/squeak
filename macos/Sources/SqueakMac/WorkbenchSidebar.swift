@@ -23,9 +23,9 @@ struct WorkbenchSidebar: View {
     @AppStorage("sidebarShowHiddenPonds") private var showHiddenPonds = false
     /// Ducks mode: the ponds whose ducks are grouped by branch (JSON list of pond keys; `DuckGroupPrefs`).
     @AppStorage("sidebarDucksByBranch") private var groupedPonds = "[]"
-    /// All ponds, only mine, or only those shared with me (`PondSharing.Scope` raw value).
+    /// All, Shared (out or with me) or Not shared (`PondSharing.Scope` raw value).
     @AppStorage("sidebarPondScope") private var pondScope = PondSharing.Scope.all.rawValue
-    private var scope: PondSharing.Scope { PondSharing.Scope(rawValue: pondScope) ?? .all }
+    private var scope: PondSharing.Scope { PondSharing.Scope.restore(pondScope) }
     /// The pond whose Labels popover is open (its project id).
     @State private var labelsFor: String?
     /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
@@ -78,7 +78,7 @@ struct WorkbenchSidebar: View {
                     if let name = PondsModel.shared.homeProject, let delta = note.object as? Int { stepPond(name, by: delta) }
                 }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
-            if scope != .all { PondFilterChip(label: scope.title) { pondScope = PondSharing.Scope.all.rawValue } }
+            PondScopePicker(scope: Binding(get: { scope }, set: { pondScope = $0.rawValue }))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if model.pondsLoading {
@@ -144,7 +144,7 @@ struct WorkbenchSidebar: View {
         let keys = PondOrder.apply(keys: ponds.map(\.id), state: order.state)
         let byId = Dictionary(ponds.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return keys.compactMap { byId[$0] }.map { d in
-            PondFilter.Entry(id: d.id, name: d.name, hidden: d.hidden, labels: d.labels, shared: PondSharing.isSharedWithMe(PondsModel.shared.pond(key: d.id)))
+            PondFilter.Entry(id: d.id, name: d.name, hidden: d.hidden, labels: d.labels, shared: PondSharing.isShared(PondsModel.shared.pond(key: d.id)))
         }
     }
 

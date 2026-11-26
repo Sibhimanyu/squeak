@@ -88,7 +88,7 @@ private struct LeavePondDialog: ViewModifier {
             }
             Button("Cancel", role: .cancel) { key = nil }
         } message: {
-            Text(verbatim: PondActionWords.leaveMessage(name))
+            Text(verbatim: PondActionWords.leaveMessage(name, owner: key.flatMap { PondsModel.shared.pond(key: $0)?.ownerName }))
         }
     }
 }

@@ -289,7 +289,7 @@ struct PondActionsSection: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Leave this pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text(verbatim: PondActionWords.leaveMessage(pond.name)).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: PondActionWords.leaveMessage(pond.name, owner: pond.ownerName)).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     Button(ponds.isBusy("leave:\(pond.id)") ? "Leaving\u{2026}" : "Leave pond\u{2026}") { confirm = .leave }
                         .buttonStyle(DestructiveButtonStyle()).disabled(!canWrite || ponds.isBusy("leave:\(pond.id)"))
                 }
@@ -305,7 +305,7 @@ struct PondActionsSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             switch confirm {
-            case .leave: Text(verbatim: PondActionWords.leaveMessage(pond.name))
+            case .leave: Text(verbatim: PondActionWords.leaveMessage(pond.name, owner: pond.ownerName))
             case .delete: Text(verbatim: PondActionWords.deleteMessage(pond.name, others: others))
             case .rotate: Text(verbatim: PondActionWords.rotateExplain)
             case nil: EmptyView()

@@ -6,13 +6,19 @@ import Foundation
 public enum PondSharing {
     /// The sidebar filter's ownership choice (kept as its raw value across launches).
     public enum Scope: String, Sendable, CaseIterable, Equatable {
-        case all, mine, shared
+        case all, shared, notShared
         public var title: String {
             switch self {
-            case .all: "All ponds"
-            case .mine: "Mine"
-            case .shared: "Shared with me"
+            case .all: "All"
+            case .shared: "Shared"
+            case .notShared: "Not shared"
             }
+        }
+
+        /// The saved choice back to a scope; the earlier "mine" is Not shared, anything unknown is All.
+        public static func restore(_ raw: String?) -> Scope {
+            if raw == "mine" { return .notShared }
+            return raw.flatMap(Scope.init(rawValue:)) ?? .all
         }
     }
 
@@ -20,7 +26,7 @@ public enum PondSharing {
     public struct Badge: Sendable, Equatable {
         /// The sharer's initials ("AP"); nil when no name is known, and the badge is a people symbol.
         public var initials: String?
-        /// Tooltip and VoiceOver: "Shared with you by Aarav", else "Shared with you".
+        /// Tooltip and VoiceOver: "Aarav\u{2019}s Pond \u{00B7} you\u{2019}re a Member".
         public var label: String
     }
 
@@ -30,6 +36,15 @@ public enum PondSharing {
         guard let pond, !pond.local else { return false }
         return pond.state == .active && pond.role != .owner
     }
+
+    /// Shared out: an active Pond this person owns that other people have joined (more than the Owner alone).
+    public static func isSharedOut(_ pond: PondSummary?) -> Bool {
+        guard let pond, !pond.local else { return false }
+        return pond.state == .active && pond.role == .owner && pond.memberCount > 1
+    }
+
+    /// The Pond list's "Shared": shared out or shared with me. A local or plain-project Pond is Not shared.
+    public static func isShared(_ pond: PondSummary?) -> Bool { isSharedWithMe(pond) || isSharedOut(pond) }
 
     /// The sharer's name as shown: trimmed, nil when empty.
     public static func sharerName(_ pond: PondSummary) -> String? {
@@ -48,16 +63,16 @@ public enum PondSharing {
     /// The badge for a pond, nil for one the person owns.
     public static func badge(for pond: PondSummary?) -> Badge? {
         guard let pond, isSharedWithMe(pond) else { return nil }
-        guard let name = sharerName(pond) else { return Badge(initials: nil, label: "Shared with you") }
-        return Badge(initials: initials(name), label: "Shared with you by \(name)")
+        guard let name = sharerName(pond) else { return Badge(initials: nil, label: "Shared with you \u{00B7} you\u{2019}re a \(pond.role.word)") }
+        return Badge(initials: initials(name), label: "\(name)\u{2019}s Pond \u{00B7} you\u{2019}re a \(pond.role.word)")
     }
 
     /// Whether a pond passes the ownership scope.
     public static func matches(_ scope: Scope, shared: Bool) -> Bool {
         switch scope {
         case .all: true
-        case .mine: !shared
         case .shared: shared
+        case .notShared: !shared
         }
     }
 }

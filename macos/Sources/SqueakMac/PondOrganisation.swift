@@ -125,10 +125,7 @@ struct PondsHeader: View {
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             SqueakMenu {
-                Button { label = ""; scope = PondSharing.Scope.all.rawValue } label: { Text(verbatim: label.isEmpty && scope == PondSharing.Scope.all.rawValue ? "✓ All ponds" : "All ponds") }
-                ForEach([PondSharing.Scope.mine, .shared], id: \.self) { s in
-                    Button { scope = s.rawValue } label: { Text(verbatim: "\(scope == s.rawValue ? "✓ " : "")\(s.title)") }
-                }
+                Button { label = "" } label: { Text(verbatim: label.isEmpty ? "✓ All labels" : "All labels") }
                 ForEach(labels, id: \.label) { l in
                     Button { label = l.label } label: {
                         Text(verbatim: "\(label.lowercased() == l.label.lowercased() ? "✓ " : "")\(l.label) (\(l.count))")
@@ -141,13 +138,36 @@ struct PondsHeader: View {
                 Divider()
                 Toggle("Show hidden", isOn: $showHidden)
             } label: {
-                Image(systemName: "line.3.horizontal.decrease").font(.system(size: 12, weight: .medium)).foregroundStyle(label.isEmpty && scope == PondSharing.Scope.all.rawValue ? Theme.subtle : Theme.ink).frame(width: 24, height: 22).contentShape(Rectangle())
+                Image(systemName: "line.3.horizontal.decrease").font(.system(size: 12, weight: .medium)).foregroundStyle(label.isEmpty ? Theme.subtle : Theme.ink).frame(width: 24, height: 22).contentShape(Rectangle())
             }
             .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
             .help("Filter ponds").accessibilityLabel("Filter ponds")
         }
         .padding(.horizontal, Space.l).padding(.top, 14).padding(.bottom, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// All · Shared · Not shared, under the Ponds header (the mock's segmented row). One choice, kept per Mac.
+struct PondScopePicker: View {
+    @Binding var scope: PondSharing.Scope
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(PondSharing.Scope.allCases, id: \.self) { s in
+                Button { scope = s } label: {
+                    Text(verbatim: s.title).font(Typo.meta).foregroundStyle(scope == s ? Theme.ink : Theme.muted)
+                        .frame(maxWidth: .infinity).frame(height: 24)
+                        .background(scope == s ? Theme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
+                .accessibilityAddTraits(scope == s ? .isSelected : [])
+            }
+        }
+        .padding(2).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, Space.l).padding(.bottom, 6)
+        .help("Show all Ponds, shared ones, or ones only you use")
     }
 }
 

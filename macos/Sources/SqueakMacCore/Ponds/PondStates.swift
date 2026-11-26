@@ -269,7 +269,11 @@ public enum PondMembers {
 
 public enum PondActionWords {
     public static let rotateExplain = "Everyone in the pond keeps access. Anyone removed before this can\u{2019}t read new messages. Use it if a key or device may have leaked."
-    public static func leaveMessage(_ pond: String) -> String { "You will lose access to \(pond) and its ducks. The owner can invite you again." }
+    /// The one confirm for Leave (spec: People and remote). `owner` is the Owner's name; "the owner" when none is known.
+    public static func leaveMessage(_ pond: String, owner: String? = nil) -> String {
+        let n = owner?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return "Your messages stay in the Room under your name. To come back you need a new invite from \(n.isEmpty ? "the owner" : n)."
+    }
     public static func deleteMessage(_ pond: String, others: Int) -> String {
         let who = others <= 0 ? "No one else" : (others == 1 ? "1 other person" : "\(others) other people")
         return "\(who) will lose access to \(pond) and everything shared in it. Your folder and files on this Mac stay. This can\u{2019}t be undone."
