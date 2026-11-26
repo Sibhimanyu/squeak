@@ -71,3 +71,5 @@ available, enabled}]` / strict `{id, enabled}`), `/state.addons` (enabled ids). 
   add-on is one esbuild bundle (`scripts/addons.sh build`, `macos/scripts/embed-daemon.sh` puts `conductor` in the app's
   daemon); core must stay buildable and runnable with `addons/` deleted.
   `notify` finishes mode `conductor` is now `replyable` (the old spelling is still read from files and old phones).
+
+- The relay as one AppSail server, the dual-run with the function, cutover and rollback: `docs/cloud-cutover.md`.

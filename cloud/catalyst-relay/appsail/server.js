@@ -1,10 +1,14 @@
-// AppSail entry for the relay. The behaviour is the SAME handler the Catalyst function runs (functions/squeak_relay):
-// this file only turns a Node http server into the (req, res) call the function receives, and answers /health.
-// In production `handle` is the staged function entry (index.js, unchanged: it wires @zcatalyst/* from the request's x-zc-*
-// headers, which AppSail's gateway sends too); tests pass `createRelay(fakes)` instead. No relay rule lives here.
+// AppSail entry for the relay: THE relay server (#118). Every relay route is answered here, in this process, by the same
+// handler the Catalyst function still runs during the dual-run (functions/squeak_relay/handler.js, the shared core).
+// This file is transport only: it hosts the handler, answers /health, and adds CORS for the web app's account routes
+// (the one thing a browser on another origin needs). No relay rule lives here.
+// In production `handle` is the staged function entry (index.js: it wires @zcatalyst/* from the request's x-zc-* headers,
+// which AppSail's gateway sends too); tests pass `createRelay(fakes)` instead.
 const http = require("node:http");
 
 /**
+ * TEMPORARY bridge, off unless `accountUrl` is set (SQUEAK_ACCOUNT_URL): the function stays the only place that can mint
+ * live-update tokens until `squeak-live` (#121) replaces them. Delete this with the function (docs/cloud-cutover.md).
  * Live-update tokens. A Custom Logic Data Streams channel issues token pairs only to its own access-control function
  * (squeak_relay), so AppSail cannot mint them itself (verified live: 500). These two routes are passed through to the
  * function with the caller's own credential header, unchanged; every other route stays here. Only a (re)connect pays it.
@@ -58,12 +62,30 @@ function createServer({
   noCatalystUsers = false,
   accountUrl,
   fetchImpl = fetch,
+  webOrigins = DEFAULT_WEB_ORIGINS,
 }) {
+  const allowedOrigin = originMatcher(webOrigins);
   return http.createServer((req, res) => {
     if (req.method === "GET" && (req.url === "/health" || req.url === "/_health")) {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end('{"status":"ok"}');
       return;
+    }
+    // CORS: only for the web app's origins, only on its account routes. Control and device routes never get a header.
+    const origin = req.headers.origin;
+    if (typeof origin === "string" && isAccountCorsRoute(routeOf(req)) && allowedOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "x-squeak-account, content-type",
+          "Access-Control-Max-Age": "600",
+          "Cache-Control": "no-store",
+        });
+        res.end();
+        return;
+      }
     }
     if (accountUrl && TOKEN_ROUTES.has(routeOf(req))) {
       forwardToken(req, res, accountUrl, fetchImpl).catch((e) => {
@@ -93,6 +115,38 @@ function createServer({
 }
 
 const PREFIX = /^\/server\/squeak_relay/;
+
+/** The web app's home on Catalyst Slate. Preview origins are added by the owner (SQUEAK_WEB_PREVIEW_ORIGINS), never guessed. */
+const DEFAULT_WEB_ORIGINS = ["https://squeak.onslate.in"];
+/** Exact origins; a `*` stands for one run of letters, digits and dashes inside a host label (never a dot, never the scheme). */
+function originMatcher(patterns) {
+  const res = patterns.map(
+    (p) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[a-z0-9-]+")}$`),
+  );
+  return (origin) => res.some((r) => r.test(origin));
+}
+/**
+ * The routes the web app calls from another origin with its account token (x-squeak-account), plus the public invite
+ * preview. Everything else (/doc /list /ping /token /pond-* /ponds/short, key-proved device traffic, the cookie routes)
+ * is the daemon's or a device's and has no CORS.
+ */
+const ACCOUNT_CORS_ROUTES = new Set([
+  "/me",
+  "/invites/preview",
+  "/account/macs",
+  "/account/device-request",
+  "/account/ponds",
+  "/account/pond-leaves",
+  "/account/pond-devices",
+  "/account/avatar",
+  "/ponds/short/redeem",
+]);
+function isAccountCorsRoute(route) {
+  if (ACCOUNT_CORS_ROUTES.has(route)) return true;
+  return (
+    route.startsWith("/account/macs/") && route !== "/account/macs/cliq-token" && route !== "/account/macs/hist-token"
+  );
+}
 /**
  * Routes that need a signed-in Catalyst user (the browser's session cookie). They are served by the function only, where
  * Catalyst can say who the user is; on AppSail the cookie is meaningless and no x-zc-* header is ever trusted for identity.
@@ -133,7 +187,21 @@ function main() {
   // The staged function entry sits beside this file (appsail/build.sh copies it); same module the function deploys.
   const handle = require("./index.js");
   const port = Number(process.env.X_ZOHO_CATALYST_LISTEN_PORT) || 9000;
-  const server = createServer({ handle, noCatalystUsers: true, accountUrl: process.env.SQUEAK_ACCOUNT_URL });
+  const origins = [
+    ...DEFAULT_WEB_ORIGINS,
+    ...String(process.env.SQUEAK_WEB_PREVIEW_ORIGINS || "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.startsWith("https://")),
+  ];
+  const server = createServer({
+    handle,
+    // Dual-run: SQUEAK_NO_CATALYST_USER=1 keeps the sign-in routes on the function. At cutover it is unset and this server
+    // answers them itself; SQUEAK_ACCOUNT_URL is then only the live-token bridge (see the comment above forwardToken).
+    noCatalystUsers: process.env.SQUEAK_NO_CATALYST_USER === "1",
+    accountUrl: process.env.SQUEAK_ACCOUNT_URL,
+    webOrigins: origins,
+  });
   // SSE-free relay: requests are short; keep sockets from lingering past the platform's 30 s request limit.
   server.requestTimeout = 30_000;
   server.keepAliveTimeout = 65_000;

@@ -45,9 +45,9 @@ sentence and Try again. An emailed `/join#<code>` link opens the invite route; u
 Relay contract this depends on (the fake relay implements it):
 
 - `GET /me` with `x-squeak-account`: 200 `{userId|id, email, name?}`, 401 signed out (exists today).
-- `GET /invites/preview?code=` no auth: 200 `{inviter, pond, email, expiresAt}` else 404 (**new, belongs to #118**; until it
+- `GET /invites/preview?code=` no auth: 200 `{pond, inviter, members, state, expiresAt}` (first names, no address) else 404 (built in #118, `docs/cloud-cutover.md`; until it
   exists the invite page falls back to the plain sign-in).
-- Handoff `provider=` hint (**new**; the current relay ignores unknown parameters, so all three buttons reach the hosted page).
+- Handoff `provider=` hint (built in #118; whether hosted login honours it is unverified, otherwise all three buttons reach the hosted page).
 - CORS: the relay must allow the Slate origin (and preview origins) on `/me` and `/invites/preview`, with the
   `x-squeak-account` header.
 

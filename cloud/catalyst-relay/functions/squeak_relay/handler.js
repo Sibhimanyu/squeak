@@ -79,7 +79,6 @@ const { createCleanStart } = require("./clean-start");
 
 const VERSION = require("./package.json").version;
 const PREFIX = /^\/server\/squeak_relay/;
-const PATH_BASE = "/server/squeak_relay";
 
 const digest = (s) => crypto.createHash("sha256").update(String(s)).digest();
 /** Constant-time equality of two secrets (both hashed first, so lengths do not leak). */
@@ -157,6 +156,7 @@ const ZOHO_APP_PATH = "/app/index.html";
 /** The only places a sign-in handoff may return to (exact origin, no wildcard): the web app's Slate home. */
 const HANDOFF_ORIGINS = ["https://squeak.onslate.in"];
 /** Home, or the invite page (an emailed link opens /join#<code>; the code stays in the fragment, which the handoff never sees). */
+const HANDOFF_PROVIDERS = ["zoho", "google", "email"];
 const HANDOFF_PATHS = ["/", "/index.html", "/join"];
 const handoffReturn = (value) => {
   try {
@@ -184,6 +184,9 @@ const SHORT_BODY_MAX = 4096;
 /** What a short code's details may hold: the invite's fields except the pond key (`k`, `kv`), which never goes to the relay. */
 const SHORT_DETAIL_KEYS = ["v", "p", "o", "n", "s", "e", "r", "on", "l", "jt"];
 /** Invite email (docs/cloud-layer.md): limits and the fixed sentences a failure may carry. */
+const INVITE_PREVIEW_PK = "invite-preview";
+const INVITE_PREVIEW_PER_MIN = 60;
+const INVITE_PREVIEW_MEMBERS = 10;
 const INVITE_MAIL_PK = "invite-mail";
 const INVITE_MAIL_MAX = 10;
 const INVITE_MAIL_PER_MAC_DAY = 20;
@@ -1242,11 +1245,38 @@ function createRelay(deps) {
     return out(200, { details: row.details });
   }
 
+  /**
+   * GET /invites/preview?code=<inviteId> (no sign-in; the web's /join page shows it above the buttons). Only what the invitee
+   * may see before signing in: the Pond's name, the inviter's and the members' first names, the state. No address, no ids,
+   * no keys. Every miss is the same 404; guesses are counted for all callers together (a code is an unguessable id, this
+   * only stops a flood).
+   */
+  async function handleInvitePreview(res, url, method) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "GET") return out(405, {});
+    const code = url.searchParams.get("code");
+    if (!deps.people || typeof code !== "string" || !/^[A-Za-z0-9_.:-]{1,64}$/.test(code))
+      return out(404, { error: "code" });
+    if (!(await spend(INVITE_PREVIEW_PK, "all", 60_000, INVITE_PREVIEW_PER_MIN))) return out(429, { error: "busy" });
+    const invite = await deps.people.getInvite(code);
+    if (!invite) return out(404, { error: "code" });
+    const first = (a) => (a && typeof a.name === "string" ? a.name.trim().split(/\s+/)[0] || "" : "");
+    const pond = await deps.people.getPond(invite.pondId);
+    if (!pond) return out(404, { error: "code" });
+    const inviter = first(await deps.people.getAccount(invite.invitedBy)) || "Someone";
+    const members =
+      invite.state === "pending"
+        ? (await deps.people.membersOf(invite.pondId)).map(first).filter(Boolean).slice(0, INVITE_PREVIEW_MEMBERS)
+        : [];
+    return out(200, { pond: pond.name, inviter, members, state: invite.state, expiresAt: invite.expiresAt });
+  }
+
   return async function handle(req, res) {
     try {
       const url = new URL(req.url || "/", "http://relay");
       const route = url.pathname.replace(PREFIX, "") || "/";
       const method = req.method || "GET";
+      if (route === "/invites/preview") return await handleInvitePreview(res, url, method);
       if (route === "/me") {
         if (method !== "GET") return send(res, 405, {});
         const user = await accountUser(req, true);
@@ -1268,10 +1298,15 @@ function createRelay(deps) {
         if (!user) {
           // One hosted-login round trip: a second signed-out arrival (the session was not recognised) stops here, never loops.
           if (url.searchParams.get("n") === "1") return send(res, 401, { error: "signin" }, NO_STORE);
-          const again = `${PATH_BASE}/account/handoff?return=${encodeURIComponent(back)}&n=1`;
+          // The sign-in button the person pressed (zoho, google or email) rides along as a hint; anything else is dropped.
+          const hint = HANDOFF_PROVIDERS.includes(url.searchParams.get("provider"))
+            ? `&provider=${url.searchParams.get("provider")}`
+            : "";
+          // Back to this same route on whichever origin served it (the function's prefixed path, or AppSail's bare one).
+          const again = `${url.pathname}?return=${encodeURIComponent(back)}${hint}&n=1`;
           return send(res, 302, undefined, {
             ...NO_STORE,
-            Location: `/__catalyst/auth/login?redirect_url=${encodeURIComponent(again)}`,
+            Location: `/__catalyst/auth/login?redirect_url=${encodeURIComponent(again)}${hint}`,
             "Referrer-Policy": "no-referrer",
           });
         }
