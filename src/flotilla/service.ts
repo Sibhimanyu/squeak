@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
-import type { CloudStore, WatchSource } from "../cloud/store.js";
+import { BlobRefused, type CloudStore, type WatchSource } from "../cloud/store.js";
+import { newBlobId, openBlob, sealBlob } from "./blobs.js";
 import { logger } from "../utils/logger.js";
 import { flag } from "../squeak/flags.js";
 import type { ChannelDoc } from "../cloud/store.js";
@@ -732,6 +733,9 @@ export class FlotillaService extends EventEmitter {
    */
   private static relayError(error: unknown): FlotillaError {
     if (error instanceof FlotillaError) return error;
+    // A refused picture or file already carries its own plain sentence (too big, the Pond is full, not in the cloud yet).
+    if (error instanceof BlobRefused)
+      return new FlotillaError(error.message, error.status === 413 ? 413 : 503, { blob: "refused" });
     const message = error instanceof Error ? error.message : "";
     if (/\b(401|403)\b/.test(message)) return new FlotillaError(ACCESS_ENDED, 403, { access: "ended" });
     if (/\b404\b/.test(message)) return new FlotillaError("That pond isn't there any more.", 404, { access: "gone" });
@@ -762,6 +766,12 @@ export class FlotillaService extends EventEmitter {
       watch: (path, onChange, options) => store.watch(path, onChange, options),
       ...(typeof raw === "function" ? { getRaw: (path: string) => raw.call(store, path) } : {}),
       ...(typeof rawList === "function" ? { listRaw: (c: string) => rawList.call(store, c) } : {}),
+      ...(store.putBlob
+        ? { putBlob: (...a: Parameters<NonNullable<CloudStore["putBlob"]>>) => run(() => store.putBlob!(...a)) }
+        : {}),
+      ...(store.getBlob
+        ? { getBlob: (...a: Parameters<NonNullable<CloudStore["getBlob"]>>) => run(() => store.getBlob!(...a)) }
+        : {}),
     } as CloudStore;
   }
 
@@ -3858,6 +3868,27 @@ export class FlotillaService extends EventEmitter {
           .catch(() => null)) as { removed?: unknown; before?: unknown; at?: unknown } | null | undefined;
         if (!raw || typeof raw.removed !== "number" || raw.removed < 1) return null;
         return { removed: raw.removed, before: Number(raw.before) || 0, at: Number(raw.at) || 0 };
+      },
+      putBlob: async (bytes, ref) => {
+        const store = this.storeOf(pond);
+        const key = pond.keys[String(pond.current)];
+        if (!key) throw new FlotillaError("This Mac has no key for that pond yet.", 403);
+        if (!store.putBlob) throw new FlotillaError("Pictures and files aren't available in the cloud yet.", 503);
+        const id = newBlobId();
+        await store.putBlob(pond.id, id, sealBlob(key, pond.current, pond.id, id, bytes), ref);
+        return id;
+      },
+      getBlob: async (id) => {
+        const store = this.storeOf(pond);
+        if (!store.getBlob) return null;
+        const sealed = await store.getBlob(pond.id, id);
+        if (!sealed) return null;
+        try {
+          return openBlob(pond.keys, pond.id, id, sealed);
+        } catch {
+          // Sealed with a key this Mac never held, or altered on the way: the same as not there.
+          return null;
+        }
       },
       ingested: () => pond.ingestedSeq ?? 0,
       setIngested: (seq: number) => {

@@ -526,7 +526,7 @@ Mac writes its posts and Tasks; every Member writes their own posts as signed do
 
 - **Kinds.** `room`/<post id> = `{ v:1, seq, id, author:{kind person|agent, id?, name}, kind, level:"room", text, at }`, written only by the
   Owner's Mac (a Member's document of that kind is ignored; `seq` inside is the Owner's own and only a fallback: on read the cloud's number
-  replaces it). A Duck's author has no id; a person's is their member id. Only `level: room` posts go: no `agents` level, no attachments yet.
+  replaces it). A Duck's author has no id; a person's is their member id. Only `level: room` posts go: no `agents` level. A post's pictures and files travel as sealed blobs it names by id (docs/cloud-layer.md, "Pictures and files").
   `rtasks`/<task id with `:` made `-`> = a Task as Members see it (a suggestion nobody took up is never published). `rposts`/<time-ordered
   id> = a **Member's own signed document**: a message `{ v:1, id, text, at, replyTo? }`, or one ask that waits for the Owner's Mac:
   `task:{messageId}` ("Make task"), `leave:true`, `removeDevice:<id>`, `start:{requestId,text,agent,model,title?}` (a Duck). `roomnote`/`trim`

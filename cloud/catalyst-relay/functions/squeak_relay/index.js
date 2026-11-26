@@ -9,7 +9,9 @@ const { createRelay } = require("./handler");
 const { createChannelsCache } = require("./channels-cache");
 const { Datastore } = require("@zcatalyst/datastore");
 const { ZCQL } = require("@zcatalyst/zcql");
+const { Stratus } = require("@zcatalyst/stratus");
 const { createPeople } = require("./people");
+const { createStratusBucket } = require("./blob-stratus");
 const { createLiveNotices, withRemovalNotice, LIVE_CHANNEL } = require("./live-notice");
 const { createDataStoreTables } = require("./people-datastore");
 const peopleSchema = require("./people-schema.json");
@@ -240,6 +242,16 @@ const peopleFor = (app) => {
   );
 };
 
+/**
+ * The Stratus bucket for pictures and files (blobs.js): wired only when SQUEAK_BLOB_BUCKET names one, so a relay deployed before the
+ * owner made the bucket answers every /blob call with 503 and nothing else changes. UNMEASURED live: `new Stratus(app).bucket(name)`
+ * per the @zcatalyst typings.
+ */
+const blobBucketFor = (app) => {
+  const name = process.env.SQUEAK_BLOB_BUCKET;
+  return name ? createStratusBucket(new Stratus(app).bucket(name)) : undefined;
+};
+
 /** An env value that was really provided: the committed placeholder counts as unset. */
 const set = (v) => (v && v !== "REPLACED_AT_DEPLOY" ? v : undefined);
 
@@ -252,6 +264,7 @@ module.exports = async (req, res) => {
     streams: streamsFor(app),
     mail: mailerFor(app),
     people: peopleFor(app),
+    blobBucket: blobBucketFor(app),
     // The clean-start route (clean-start.js) exists only on a relay started for it: the development environment.
     cleanStart: process.env.SQUEAK_CLEAN_START === "on",
     // AppSail: no Catalyst user, ever (signing in is the function's job); the account-token routes still verify their own signature.

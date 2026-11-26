@@ -14,7 +14,7 @@ import type { ChannelDoc } from "./store.js";
 import { FeedMirror, type FeedPage } from "./change-feed.js";
 import { LiveClient, type LiveState } from "./live-notices.js";
 import { onNetworkChange } from "../remote/network-change.js";
-import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
+import { BlobRefused, type CloudStore, type CloudWatchOptions, type WatchSource } from "./store.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -222,6 +222,43 @@ export class CatalystStore implements CloudStore {
   async delete(path: string): Promise<void> {
     const response = await this.call(`/doc?path=${encodeURIComponent(path)}`, { method: "DELETE" }, 10_000);
     await ensureOk(response, "delete");
+  }
+
+  /** Keeps one sealed blob (relay `PUT /blob`, blobs.js). The bytes are already sealed; the relay never sees plaintext. */
+  async putBlob(
+    pondId: string,
+    id: string,
+    sealed: Buffer,
+    ref: { kind: "room" | "rposts"; doc: string },
+  ): Promise<void> {
+    const query = `pond=${encodeURIComponent(pondId)}&id=${encodeURIComponent(id)}&kind=${ref.kind}&doc=${encodeURIComponent(ref.doc)}`;
+    const response = await this.call(
+      `/blob?${query}`,
+      { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: new Uint8Array(sealed) },
+      60_000,
+    );
+    if (response.ok) return;
+    const body = (await response.json().catch(() => ({}))) as { message?: unknown };
+    throw new BlobRefused(
+      response.status,
+      typeof body.message === "string" && body.message
+        ? body.message
+        : response.status === 503
+          ? "Pictures and files aren't available in the cloud yet."
+          : "The cloud wouldn't keep that picture or file.",
+    );
+  }
+
+  /** The sealed bytes of one blob (relay `GET /blob`), or null once the cloud has paged it out. */
+  async getBlob(pondId: string, id: string): Promise<Buffer | null> {
+    const response = await this.call(
+      `/blob?pond=${encodeURIComponent(pondId)}&id=${encodeURIComponent(id)}`,
+      { method: "GET" },
+      60_000,
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new BlobRefused(response.status, "Couldn't load that picture or file from the cloud.");
+    return Buffer.from(await response.arrayBuffer());
   }
 
   /** The relay's `/ping`, for setup and tests: its answer or null. */

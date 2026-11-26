@@ -46,6 +46,10 @@
 //                         Pond from the cloud (clean-start.js); Mac channels, accounts and devices stay
 //   GET    /changes?pond=&since=<seq|head>&limit=  -> 200 {changes:[{seq,kind,id,doc|null}], next, more} (feed.js; key, Mac key, pond
 //                         token or an account token whose account is a member; 404 when the store keeps no feed)
+//   PUT|GET|DELETE /blob?pond=&id=[&kind=room|rposts&doc=<post id>] -> a sealed picture or file in Stratus (blobs.js): PUT stores the
+//                         request body as sent (204; 413 {error:"blob-too-large"|"blob-quota", message} past 6 MB a blob / 200 MB a
+//                         Pond), GET returns the bytes (members only: a Pond's Mac, a member's account or token; 404 when paged out),
+//                         DELETE the Pond's Mac or the key; 503 until SQUEAK_BLOB_BUCKET names a bucket
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
@@ -75,6 +79,7 @@ const scoped = require("./scoped");
 const { createFeed, FEED_KINDS } = require("./feed");
 const { createLiveNotices } = require("./live-notice");
 const { createRoomCloud } = require("./room-cloud");
+const { createBlobs, BLOB_ID } = require("./blobs");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 const { createCleanStart } = require("./clean-start");
@@ -214,6 +219,22 @@ const readBody = (req, max) =>
     req.on("end", () => resolve(raw));
     req.on("error", reject);
   });
+/** The request body as bytes (a sealed blob), refusing anything over `max`: unlike readBody, nothing is decoded as text. */
+const readBytes = (req, max) =>
+  new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > max) {
+        reject(tooLarge());
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
 const readJson = async (req, max) => {
   const raw = await readBody(req, max);
   try {
@@ -347,9 +368,18 @@ function createRelay(deps) {
   const feed = createFeed(deps.store);
   const live = createLiveNotices(deps.streams, log);
   /** The Room kept whole and sealed, paged out oldest first past a byte cap per Pond (room-cloud.js). */
+  /** Pictures and files as sealed blobs in a Stratus bucket (blobs.js); off, and every /blob call a 503, until the bucket is wired. */
+  const blobs = createBlobs({
+    store: deps.store,
+    bucket: deps.blobBucket,
+    now: deps.now,
+    ...(deps.blobCapBytes ? { capBytes: deps.blobCapBytes } : {}),
+    ...(deps.blobMaxBytes ? { maxBytes: deps.blobMaxBytes } : {}),
+  });
   const roomCloud = createRoomCloud({
     store: deps.store,
     feed,
+    blobs,
     ...(deps.roomCapBytes ? { capBytes: deps.roomCapBytes } : {}),
   });
   /**
@@ -466,6 +496,89 @@ function createRelay(deps) {
       return send(res, 200, { items: rows.map((r) => ({ id: r.doc, doc: JSON.parse(r.json) })) });
     }
     return send(res, 404, {});
+  }
+
+  /**
+   * /blob?pond=<id>&id=<blob id>: a sealed picture or file of a Pond (blobs.js). PUT (&kind=room|rposts&doc=<post id>) keeps the
+   * request body as is, 204; GET returns the bytes (404 when paged out); DELETE (the Pond's Mac or the operator) 204. The
+   * relay never sees plaintext: the body is sealed by the sender and only its shape is checked.
+   *   read:  a Mac of the Pond, an account that is a member (people.isMember), a pond token of the Pond (not revoked), the key
+   *   write: a Mac of the Pond or a member's Mac, a guest or member token (a Member's own post, kind rposts), the key
+   */
+  async function handleBlob(req, res, url, method, mac) {
+    if (!blobs.enabled) return send(res, 503, { error: "blobs-off" }, NO_STORE);
+    if (method !== "GET" && method !== "PUT" && method !== "DELETE") return send(res, 405, {}, NO_STORE);
+    const pond = url.searchParams.get("pond");
+    const id = url.searchParams.get("id");
+    if (!scoped.POND.test(pond || "") || !BLOB_ID.test(id || "")) return send(res, 400, { error: "blob" }, NO_STORE);
+    const hasKey = req.headers["x-squeak-relay"] !== undefined;
+    const token = req.headers["x-squeak-pond-token"];
+    let by = "operator";
+    let kinds = ["room", "rposts"];
+    let canWrite = true;
+    let canDelete = true;
+    if (mac) {
+      if (!(await tenants.channelAllowed(mac, pond))) {
+        // A Member's own Mac signed in as a member: reads, and adds to its own posts.
+        if (!deps.people || !(await deps.people.isMember(pond, mac.userId))) return send(res, 403, {}, NO_STORE);
+        kinds = ["rposts"];
+        canDelete = false;
+      }
+      by = mac.macId;
+    } else if (!hasKey && token !== undefined) {
+      const who = scoped.verify(deps.key, Array.isArray(token) ? "" : token, Date.now());
+      if (!who) return send(res, 401);
+      const revoked = await deps.store.get(`revoked/${who.pondId}`, who.memberId);
+      if (revoked !== null && revoked !== undefined) return send(res, 401);
+      if (who.pondId !== pond) return send(res, 403, {}, NO_STORE);
+      // A join token (an invite's) writes the join request only.
+      if (!scoped.SCOPES[who.scope].write.has("rposts")) return send(res, 403, {}, NO_STORE);
+      by = who.memberId;
+      kinds = ["rposts"];
+      canDelete = false;
+    } else if (!hasKey && req.headers["x-squeak-account"] !== undefined) {
+      const user = await accountUser(req, true);
+      if (!user) return send(res, 401, undefined, NO_STORE);
+      if (!deps.people || !(await deps.people.isMember(pond, user.userId))) return send(res, 403, {}, NO_STORE);
+      by = user.userId;
+      canWrite = false;
+      canDelete = false;
+    } else if (!sameKey(req.headers["x-squeak-relay"], deps.key)) {
+      return send(res, 401);
+    }
+    if (method === "GET") {
+      const bytes = await blobs.get(pond, id);
+      if (!bytes) return send(res, 404, {}, NO_STORE);
+      res.writeHead(200, { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" });
+      res.end(bytes);
+      return;
+    }
+    if (method === "DELETE") {
+      if (!canDelete) return send(res, 403, {}, NO_STORE);
+      await blobs.delete(pond, id);
+      return send(res, 204, undefined, NO_STORE);
+    }
+    if (!canWrite) return send(res, 403, {}, NO_STORE);
+    const kind = url.searchParams.get("kind") || "";
+    const doc = url.searchParams.get("doc") || "";
+    if (!kinds.includes(kind) || !DOC.test(doc)) return send(res, 400, { error: "blob" }, NO_STORE);
+    let bytes;
+    try {
+      bytes = await readBytes(req, blobs.maxBytes);
+    } catch (e) {
+      if (e && e.status === 413)
+        return send(res, 413, { error: "blob-too-large", message: blobs.sentence("blob-too-large") }, NO_STORE);
+      throw e;
+    }
+    const done = await blobs.put(pond, id, bytes, { kind, doc, by });
+    if (!done.ok)
+      return send(
+        res,
+        done.status,
+        { error: done.error, ...(done.message ? { message: done.message } : {}) },
+        NO_STORE,
+      );
+    return send(res, 204, undefined, NO_STORE);
   }
 
   const gone = (pk, doc) => deps.store.del(pk, doc).catch(() => undefined);
@@ -1402,6 +1515,7 @@ function createRelay(deps) {
         await publishNotice(parsed.pk, parsed.doc);
         return send(res, 200, { ok: true });
       }
+      if (route === "/blob") return await handleBlob(req, res, url, method, mac);
       // A signed-in account reads its Pond's changes if the people tables say it is a member (people.js isMember); a Pond
       // that is not theirs, a removed member and a Relay without the tables all read as 403, never as an empty feed.
       if (
@@ -1431,7 +1545,7 @@ function createRelay(deps) {
         const body = await readJson(req, 64 * 1024);
         if (body.confirm !== "wipe-cloud-ponds") return send(res, 400, { error: "confirm" });
         const list = (v) => (Array.isArray(v) ? v.slice(0, 5000) : []);
-        const done = await createCleanStart({ store: deps.store, people: deps.people }).run({
+        const done = await createCleanStart({ store: deps.store, people: deps.people, blobs }).run({
           pondIds: list(body.pondIds),
           userIds: list(body.userIds),
         });
@@ -1617,6 +1731,9 @@ function createRelay(deps) {
         if (method === "DELETE") {
           await stamp(parsed, null);
           await deps.store.del(parsed.pk, parsed.doc);
+          // A removed post takes its pictures and files with it.
+          if (blobs.enabled && roomCloud.isRoomKind(parsed.kind))
+            await blobs.dropFor(parsed.channel, parsed.kind, parsed.doc).catch(() => undefined);
           await publishNotice(parsed.pk, parsed.doc);
           return send(res, 204);
         }

@@ -9,6 +9,8 @@ import {
   ROOM_DETAIL_MAX,
   ROOM_MAX_TEXT,
 } from "../native/room.js";
+import { AttachmentError, checkAttachments } from "../native/room-attachments.js";
+import { blobView, readBlobRefs, type BlobRef } from "./blobs.js";
 import { TaskError, type RoomTask, type RoomTasks, type TaskOrigin, type TaskState } from "../native/room-tasks.js";
 import type { NativeStore, RoomPostKind } from "../native/store.js";
 import { randomId } from "./crypto.js";
@@ -64,6 +66,10 @@ export interface RoomPort {
   list(kind: string): Promise<RoomSignedDoc[]>;
   caps(): Promise<Caps>;
   owner(): Promise<{ name: string; online: boolean }>;
+  /** Seals picture or file bytes under the current Pond key and keeps them in the cloud for the post document `ref`; the blob id. */
+  putBlob(bytes: Buffer, ref: { kind: "room" | "rposts"; doc: string }): Promise<string>;
+  /** One blob opened (null when the cloud no longer holds it or this Mac cannot open it). */
+  getBlob(id: string): Promise<Buffer | null>;
   /** The relay's note that it paged the oldest posts out of the cloud's Room (25 MB cap), or null. */
   note(): Promise<{ removed: number; before: number; at: number } | null>;
   /** The Owner's Mac: the highest cloud seq of a queued ask it has applied, and a way to move it on. */
@@ -96,6 +102,8 @@ export interface RoomDoc {
   canvases?: RoomCanvasDoc[];
   /** The `plan` card a person's comment is on. */
   replyTo?: string;
+  /** Pictures and files of a person's message: sealed blobs in the cloud, named by id (docs/cloud-layer.md); never the bytes. */
+  blobs?: BlobRef[];
   at: number;
 }
 
@@ -107,6 +115,8 @@ export interface RoomInboxDoc {
   at: number;
   /** A comment on this `plan` card (a Room post id); the Owner's Mac delivers it to that Duck like the Owner's own comment. */
   replyTo?: string;
+  /** The Member's pictures and files, sealed blobs in the cloud (`text` may then be empty). */
+  blobs?: BlobRef[];
   /** Present for "Make task": the Room message to make a Task from (`text` is then empty). */
   task?: { messageId: string };
   /** A Member's other asks, which wait in the same queue (`text` is empty): leaving, ending a device, a Duck. */
@@ -147,6 +157,7 @@ export function readRoomDoc(v: unknown): RoomDoc | null {
     typeof v.detail === "string" && v.detail.trim() && v.detail.length <= ROOM_DETAIL_MAX * 2 ? v.detail : "";
   const replyTo = typeof v.replyTo === "string" && DOC_ID.test(v.replyTo) && v.replyTo.length <= 80 ? v.replyTo : "";
   const canvases = readCanvasDocs(v.canvases);
+  const blobs = readBlobRefs(v.blobs);
   return {
     v: 1,
     seq: v.seq,
@@ -158,6 +169,7 @@ export function readRoomDoc(v: unknown): RoomDoc | null {
     ...(detail ? { detail } : {}),
     ...(canvases.length > 0 ? { canvases } : {}),
     ...(replyTo ? { replyTo } : {}),
+    ...(blobs.length > 0 ? { blobs } : {}),
     at: v.at,
   };
 }
@@ -185,7 +197,15 @@ export function readInboxDoc(v: unknown): RoomInboxDoc | null {
     return { v: 1, id: v.id, text: "", at: v.at, task: { messageId: v.task.messageId } };
   }
   const replyTo = typeof v.replyTo === "string" && DOC_ID.test(v.replyTo) && v.replyTo.length <= 80 ? v.replyTo : "";
-  return { v: 1, id: v.id, text: v.text, at: v.at, ...(replyTo ? { replyTo } : {}) };
+  const blobs = readBlobRefs(v.blobs);
+  return {
+    v: 1,
+    id: v.id,
+    text: v.text,
+    at: v.at,
+    ...(replyTo ? { replyTo } : {}),
+    ...(blobs.length > 0 ? { blobs } : {}),
+  };
 }
 
 /** A Task's id is `task:<uuid>` on the Owner's Mac; the document id is the same with every character a path cannot hold made a dash. */
@@ -234,11 +254,14 @@ export function roomDocOf(
     canvases?: string | null;
   },
   ownerId?: string,
+  /** `attached`: the post has pictures or files (a post of only a picture has no text); `blobs`: their cloud references, once uploaded. */
+  opts: { attached?: boolean; blobs?: BlobRef[] } = {},
 ): RoomDoc | null {
   // A line Squeak says about the Pond (someone joined, left, was removed) travels as a message from Squeak.
   const line = row.authorKind === "squeak" && row.id.startsWith("ln-");
   if (row.level !== "room" || (row.authorKind !== "person" && row.authorKind !== "agent" && !line)) return null;
-  if (!DOC_ID.test(row.id) || !row.text) return null;
+  const blobs = opts.blobs ?? [];
+  if (!DOC_ID.test(row.id) || (!row.text && !opts.attached && blobs.length === 0)) return null;
   const canvases = canvasDocsOf(row.canvases);
   return {
     v: 1,
@@ -259,6 +282,7 @@ export function roomDocOf(
     ...(row.detail ? { detail: row.detail.slice(0, ROOM_DETAIL_MAX * 2) } : {}),
     ...(canvases.length > 0 ? { canvases } : {}),
     ...(row.replyTo && DOC_ID.test(row.replyTo) ? { replyTo: row.replyTo } : {}),
+    ...(blobs.length > 0 ? { blobs } : {}),
     at: row.at,
   };
 }
@@ -292,7 +316,8 @@ export function taskDocOf(t: RoomTask): RoomTaskDoc | null {
 
 /** What a Member's Mac draws: the same shape as the Owner's Room page, plus who is away. */
 export interface MemberRoomPage {
-  posts: Array<RoomDoc & { toSessionId?: undefined }>;
+  /** `attachments`: a post's pictures and files in the Owner's own Room shape, each fetched from the cloud when viewed. */
+  posts: Array<RoomDoc & { toSessionId?: undefined; attachments?: Array<BlobRef & { url: string }> }>;
   latestSeq: number;
   threads: [];
   turns: [];
@@ -515,6 +540,7 @@ export class RoomSync extends EventEmitter {
           }
         } else {
           const postId = `m-${doc.id}`;
+          const files = await this.fetchFiles(port, doc.blobs);
           try {
             this.o.jobs.withMemberPost(postId, origin, () =>
               this.o.room.post({
@@ -524,6 +550,7 @@ export class RoomSync extends EventEmitter {
                 kind: "message",
                 level: "room",
                 text: doc.text,
+                ...(files.length > 0 ? { attachments: files } : {}),
                 ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
                 // The Member's own time, never later than now.
                 at: Math.min(doc.at, now),
@@ -554,13 +581,17 @@ export class RoomSync extends EventEmitter {
     const known = this.published.get(pondId) ?? new Set<string>();
     const first = !this.published.has(pondId);
     const rows = this.o.store.roomPosts(projectId, { since: 0, limit: 1_000_000 }).filter((r) => !isSqueakLine(r));
+    const attached = this.o.room.attachments.forPosts(
+      projectId,
+      rows.map((r) => r.id),
+    );
     let floor = 0;
     if (first) {
       for (const d of await port.list("rposts")) if (d.seq !== undefined) this.inbox(pondId).add(`m-${d.id}`);
       // First time since this Mac started: learn what the cloud already holds, so a restart rewrites nothing it need not.
       const want = new Map<string, string>();
       for (const row of rows) {
-        const doc = roomDocOf(row, port.ownerId);
+        const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id) });
         if (doc) want.set(doc.id, JSON.stringify(doc));
       }
       const held = await port.list("room");
@@ -569,7 +600,10 @@ export class RoomSync extends EventEmitter {
         // A document written before detail, canvases or replyTo travelled is not what the Room holds now: it is written again.
         if (
           !want.has(d.id) ||
-          (read && JSON.stringify({ ...read, seq: 0 }) === JSON.stringify({ ...JSON.parse(want.get(d.id)!), seq: 0 }))
+          // The blob references are not compared: each upload makes new ids, and the pictures are not sent again on a restart.
+          (read &&
+            JSON.stringify({ ...read, seq: 0, blobs: undefined }) ===
+              JSON.stringify({ ...JSON.parse(want.get(d.id)!), seq: 0, blobs: undefined }))
         )
           known.add(d.id);
       }
@@ -584,11 +618,28 @@ export class RoomSync extends EventEmitter {
     const keep = new Set<string>();
     const inboxIds = this.inbox(pondId);
     for (const row of rows) {
-      const doc = roomDocOf(row, port.ownerId);
+      const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id) });
       // A Member's post the cloud numbered is in the cloud already, as their own signed document: not written twice.
       if (!doc || inboxIds.has(doc.id)) continue;
       keep.add(doc.id);
       if (known.has(doc.id) || doc.at < floor) continue;
+      const views = attached.get(row.id);
+      if (views && views.length > 0) {
+        // Pictures first, so the post never names a blob that is not there. One the cloud refuses (too big, the Pond is
+        // full, no bucket yet) stays on this Mac; a post of only that picture has nothing to say and is not sent.
+        const refs: BlobRef[] = [];
+        for (const v of views) {
+          const found = this.o.room.attachments.read(projectId, v.id);
+          if (!found) continue;
+          const ref = await this.upload(port, "room", doc.id, found.bytes, v);
+          if (ref) refs.push(ref);
+        }
+        if (refs.length > 0) doc.blobs = refs;
+        else if (!doc.text) {
+          known.add(doc.id);
+          continue;
+        }
+      }
       await port.put("room", doc.id, doc);
       known.add(doc.id);
     }
@@ -649,7 +700,8 @@ export class RoomSync extends EventEmitter {
     for (const d of inboxDocs) {
       const doc = readInboxDoc(d.value);
       // A Member's message is a post as it stands; their other asks (a Task, leaving, a Duck) are not Room lines.
-      if (!doc || doc.id !== d.id || doc.task || doc.act || !doc.text || d.device === port.ownerId) continue;
+      if (!doc || doc.id !== d.id || doc.task || doc.act || (!doc.text && !doc.blobs) || d.device === port.ownerId)
+        continue;
       const id = `m-${doc.id}`;
       if (have.has(id)) continue; // an older Owner's Mac also published it: that copy is the one
       entries.push({
@@ -662,6 +714,7 @@ export class RoomSync extends EventEmitter {
           level: "room",
           text: doc.text,
           ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
+          ...(doc.blobs ? { blobs: doc.blobs } : {}),
           at: doc.at,
         },
         seq: d.seq,
@@ -682,6 +735,7 @@ export class RoomSync extends EventEmitter {
     let posts: RoomDoc[];
     if (opts.since !== undefined) posts = all.filter((p) => p.seq > opts.since!).slice(0, limit);
     else posts = all.filter((p) => p.seq < (opts.before ?? Number.MAX_SAFE_INTEGER)).slice(-limit);
+    const shown = posts.map((p) => (p.blobs ? { ...p, attachments: p.blobs.map((b) => blobView(pondId, b)) } : p));
     const tasks: RoomTaskDoc[] = [];
     for (const d of taskDocs) {
       const doc = readRoomTaskDoc(d.value);
@@ -689,7 +743,7 @@ export class RoomSync extends EventEmitter {
     }
     tasks.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     return {
-      posts,
+      posts: shown,
       latestSeq,
       threads: [],
       turns: [],
@@ -708,15 +762,20 @@ export class RoomSync extends EventEmitter {
     pondId: string,
     text: unknown,
     replyTo?: unknown,
+    /** Pictures and files as the Mac sends them (`{name, data}` base64, as the Owner's Room takes): sealed here, kept in the cloud as blobs. */
+    attachments?: unknown,
   ): Promise<{ id: string; offline: boolean; line?: string }> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: post from the pond.", 400);
     if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
     let clean: string;
+    let checked: ReturnType<typeof checkAttachments>;
     try {
-      clean = Room.cleanText(text, "message");
+      checked = checkAttachments(attachments);
+      // A picture or file alone is a message: the text may be empty then.
+      clean = checked.length > 0 && typeof text === "string" && !text.trim() ? "" : Room.cleanText(text, "message");
     } catch (error) {
-      if (error instanceof RoomError) throw new FlotillaError(error.message, 400);
+      if (error instanceof RoomError || error instanceof AttachmentError) throw new FlotillaError(error.message, 400);
       throw error;
     }
     if (replyTo !== undefined && (typeof replyTo !== "string" || !DOC_ID.test(replyTo) || replyTo.length > 80)) {
@@ -724,10 +783,93 @@ export class RoomSync extends EventEmitter {
     }
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
-    const doc: RoomInboxDoc = { v: 1, id, text: clean, at, ...(replyTo ? { replyTo } : {}) };
+    const blobs: BlobRef[] = [];
+    for (const c of checked) {
+      // A refusal (too big, the Pond is full) is said plainly and nothing is posted: the Member decides what to send instead.
+      const ref = await this.upload(port, "rposts", id, c.bytes, c, true);
+      if (ref) blobs.push(ref);
+    }
+    const doc: RoomInboxDoc = {
+      v: 1,
+      id,
+      text: clean,
+      at,
+      ...(replyTo ? { replyTo } : {}),
+      ...(blobs.length > 0 ? { blobs } : {}),
+    };
     await port.put("rposts", id, doc);
     const owner = await port.owner().catch(() => null);
     return owner && !owner.online ? { id, offline: true, line: ownerOfflineLine(owner.name) } : { id, offline: false };
+  }
+
+  /**
+   * Seals one picture or file and keeps it in the cloud for the post document `docId`; its reference for the post. A refusal of the
+   * cloud (too big, the Pond is full, no bucket yet) is `null` and logged, or, with `loud`, the plain sentence as an error.
+   */
+  private async upload(
+    port: RoomPort,
+    kind: "room" | "rposts",
+    docId: string,
+    bytes: Buffer,
+    meta: {
+      kind: "image" | "file";
+      name: string;
+      mime: string;
+      width?: number | undefined;
+      height?: number | undefined;
+    },
+    loud = false,
+  ): Promise<BlobRef | null> {
+    try {
+      const id = await port.putBlob(bytes, { kind, doc: docId });
+      return {
+        id,
+        kind: meta.kind,
+        name: meta.name,
+        mime: meta.mime,
+        size: bytes.length,
+        ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}),
+      };
+    } catch (error) {
+      if (!(error instanceof FlotillaError) || error.extra.blob !== "refused") throw error;
+      if (loud) throw error;
+      logger.warn("a picture stays on this Mac", { pond: port.pondId, error: error.message });
+      return null;
+    }
+  }
+
+  /** A post's blobs as the Room takes attachments (`{name, data}`): the ones the cloud still holds and this Mac can open. */
+  private async fetchFiles(
+    port: RoomPort,
+    blobs: BlobRef[] | undefined,
+  ): Promise<Array<{ name: string; data: string }>> {
+    const out: Array<{ name: string; data: string }> = [];
+    for (const b of blobs ?? []) {
+      const bytes = await port.getBlob(b.id).catch(() => null);
+      if (bytes) out.push({ name: b.name, data: bytes.toString("base64") });
+    }
+    return out;
+  }
+
+  /**
+   * One picture or file of a post, fetched from the cloud when someone views it (a Member's Mac; the Owner's own Room holds them
+   * on disk). Found by its id among the posts' references, so a blob that no post names is never handed out. Null when the cloud
+   * paged it out.
+   */
+  async blob(pondId: string, blobId: string): Promise<{ ref: BlobRef; bytes: Buffer } | null> {
+    const port = this.o.service.roomPort(pondId);
+    let ref: BlobRef | undefined;
+    for (const kind of ["room", "rposts"]) {
+      for (const d of await port.list(kind)) {
+        const doc = kind === "room" ? readRoomDoc(d.value) : readInboxDoc(d.value);
+        ref = doc?.blobs?.find((b) => b.id === blobId);
+        if (ref) break;
+      }
+      if (ref) break;
+    }
+    if (!ref) return null;
+    const bytes = await port.getBlob(blobId);
+    return bytes ? { ref, bytes } : null;
   }
 
   /**

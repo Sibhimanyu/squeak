@@ -128,6 +128,58 @@ Code: `functions/squeak_relay/room-cloud.js`, `src/flotilla/room-sync.ts`; the d
   What the iPhone still uses, unchanged: `state`, `pairing`, `commands`, `results`, `live`, `media`, `voice*`, `hist`, `cliq`, `devreqs`,
   `devresults`; its pond view still decodes `ripples` (the Mac serves the Owner's recent lines, empty for a Member) and `presence` (empty).
 
+### Pictures and files (issue #123)
+
+Code: `functions/squeak_relay/blobs.js` (the store), `blob-stratus.js` and `blob-memory.js` (the two buckets), the `/blob` route in
+`handler.js`; the daemon side in `src/flotilla/blobs.ts` (seal and open), `CatalystStore.putBlob/getBlob` and `src/flotilla/room-sync.ts`.
+
+- **A post names a blob by id.** A Room post document (`room`, or a Member's `rposts`) carries `blobs: [{id, kind: image|file, name, mime,
+size, width?, height?}]` inside its sealed box; the bytes are never in a NoSQL document. A post of only a picture has empty `text`.
+- **Sealed on the device.** The sending Mac seals the bytes under the Pond key at the current key version: `<version>.` then nonce (12),
+  AES-256-GCM ciphertext and tag (16), with `blobs/<pond>/<blob id>` as the additional authenticated data (the cloud cannot hand one blob out
+  as another). The relay checks only the shape (a version head and room for a box) and refuses anything else with 400 `blob-unsealed`, so a
+  client that forgets to seal fails loudly. A rotation leaves old blobs alone; a Member holding the old key still opens them.
+- **Routes.** `PUT /blob?pond=&id=&kind=room|rposts&doc=<post id>` (body: the sealed bytes, 204), `GET /blob?pond=&id=` (the bytes, 404 once
+  paged out), `DELETE /blob?pond=&id=` (the Pond's Mac or the key, 204). A blob id is 16 to 64 base64url characters chosen by the sender and
+  is written once (409 on a second write). Who: read by a Mac of the Pond, an account that `people.isMember`, a pond token of that Pond that is
+  not revoked (a removed member's token is 401 and their account is 403 at once); write by a Mac of the Pond, a member's Mac signed in as a
+  member, or a guest or member token (kind `rposts` only: a Member adds to their own post and can never delete); an account token reads only.
+  Without `SQUEAK_BLOB_BUCKET` every call is 503 `blobs-off`.
+- **Limits, separate from the 25 MB Room cap** (which counts NoSQL bytes): one sealed blob is at most **6 MB** (a 5 MB file plus the box; the Mac's
+  own limits are 2 MB a picture, 5 MB a file, four of each, 16 MB a post); one Pond keeps at most **200 MB** of blobs. Past either the relay
+  answers 413 `{error: "blob-too-large" | "blob-quota", message}` with a plain sentence the Mac shows as it is. A full Pond first frees orphans
+  (a blob whose post document does not exist and that is over an hour old: an upload whose post never arrived). `deps.blobMaxBytes` and
+  `deps.blobCapBytes` override the limits in tests.
+- **Bookkeeping.** One small NoSQL row per blob, `blobs/<pond>` / `<blob id>` = `{v, size, at, kind, doc, by}` (relay-owned, no `/doc` path
+  reaches it): which document names it, and its size for the Pond's usage (a sum of the rows).
+- **Cleanup.** When a Room post leaves the cloud its blobs go with it: the 25 MB page-out (`room-cloud.js` `trim`) drops the blobs of every post it
+  removes, `DELETE /doc` of a `room` or `rposts` document drops its blobs, and clean start removes every blob of the Pond. A removed Member's
+  blobs stay with their posts (the Room keeps them). Dropping a blob that is not there is not an error.
+- **Daemon.** The Owner's Mac uploads the pictures of a post (from its local attachments) before writing the `room` document and does not send
+  them again after a restart. A refusal (too big, full, no bucket yet) leaves that picture on the Mac and the post goes without it (a post of
+  only that picture is not sent). A Member's Mac seals and uploads before writing its `rposts` document; there a refusal is an error with the
+  plain sentence and nothing is posted. The Owner's Mac, applying a Member's post, fetches its blobs into its own Room attachments. A Member's
+  page carries each post's `blobs` and `attachments` (the Owner's Room shape; `url` is `/native/ponds/<id>/room/blobs/<blob id>`), and that route
+  fetches and opens the blob when it is viewed. `POST /native/ponds/<id>/room` takes `attachments: [{name, data}]` like the Owner's Room.
+- **Not done here.** Drawing a Member's attachments in the Mac and the web (the daemon serves them), any web upload, and an iPhone change
+  (the iPhone's `media` kind is untouched).
+- **Unmeasured live.** The `@zcatalyst/stratus` calls (`new Stratus(app).bucket(name)`, `putObject` refusing an existing key, `getObject`'s
+  stream), a 6 MB request body through AppSail and the function, and what a hosted account's daily byte limit says about uploads (blob bytes are
+  not charged to it).
+
+**Owner steps for the Stratus bucket (nothing is created by code; Development environment first).**
+
+1. In the Catalyst console, **Cloud Scale > Stratus > Create bucket**. Bucket names are globally unique: use `squeak-blobs-<project id prefix>`.
+   Keep it **private** (no public read, no object URLs: only the relay reads it). Leave versioning off (a blob is written once and deleted whole).
+   Encryption at rest on if offered. Do not add a lifecycle rule: the relay deletes what a post's page-out or removal frees.
+2. Set `SQUEAK_BLOB_BUCKET=<the bucket name>` in the relay function's environment variables (and the AppSail relay's, if it runs there), in
+   Development first. Unset, `/blob` answers 503 and nothing else changes.
+3. Make sure the function and the AppSail app's role may use Stratus in that project (the console's Stratus page lists the access it needs), then
+   deploy the relay (`deploy-hosted.sh`); its `package.json` now depends on `@zcatalyst/stratus`.
+4. Check: from a Mac signed in on that environment, post a picture in a shared Pond's Room; the bucket shows one object `<pondId>/<blobId>`
+   whose bytes are not an image (they begin `1.`), and a Member's Mac opens it. Delete the post and the object goes.
+5. Rollback: unset `SQUEAK_BLOB_BUCKET` (Macs keep their pictures; new posts go without them); delete the bucket to free it.
+
 ### Clean start
 
 The release clears all cloud Pond data; every Pond and Duck stays on the Owner's Mac and shared Ponds become local again.

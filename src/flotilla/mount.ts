@@ -536,10 +536,29 @@ export class FlotillaRoutes {
     }
     if (parts.length === 3 && method === "POST") {
       const body = await ctx.body();
-      exact(body, ["text", "replyTo"]);
+      exact(body, ["text", "replyTo", "attachments"]);
       if (typeof body.text !== "string") throw new FlotillaError("text must be text");
       // 202: it is in the cloud; it is in the Room when the Owner's Mac has applied it.
-      ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text, body.replyTo)) });
+      ctx.json(202, { queued: true, ...(await sync.post(pondId, body.text, body.replyTo, body.attachments)) });
+      return true;
+    }
+    if (parts.length === 5 && parts[3] === "blobs" && method === "GET") {
+      // A picture or file of a post, opened here from the cloud (sealed on the sender's device; the cloud never saw it).
+      const found = await sync.blob(pondId, decodeURIComponent(parts[4]!));
+      if (!found) throw new FlotillaError("That picture or file is no longer in the cloud.", 404);
+      // Never let a stored file be taken for a page: pictures render, everything else downloads.
+      ctx.res
+        .writeHead(200, {
+          "content-type": found.ref.mime,
+          "content-length": found.bytes.length,
+          "cache-control": "private, max-age=3600",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; sandbox",
+          ...(found.ref.kind === "file"
+            ? { "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(found.ref.name)}` }
+            : {}),
+        })
+        .end(found.bytes);
       return true;
     }
     if (parts.length === 4 && parts[3] === "tasks" && method === "POST") {

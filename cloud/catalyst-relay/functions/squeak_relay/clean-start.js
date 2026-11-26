@@ -12,7 +12,7 @@ const MAC_OWNERS = "mac-owners";
 const ACCT_PONDS_PK = "acctponds";
 const USER = /^[A-Za-z0-9_.:-]{1,64}$/;
 
-function createCleanStart({ store, people }) {
+function createCleanStart({ store, people, blobs = null }) {
   const feed = createFeed(store);
   async function wipePartition(pk) {
     const rows = await store.list(pk);
@@ -46,6 +46,7 @@ function createCleanStart({ store, people }) {
       documents += await feed.wipe(id);
       await store.del("channel-owners", id);
       await store.del("roombytes", id);
+      if (blobs && blobs.enabled) documents += await blobs.wipe(id);
     }
     return { ponds: wiped, documents, indexes, people: people ? await people.cleanStart() : null };
   }

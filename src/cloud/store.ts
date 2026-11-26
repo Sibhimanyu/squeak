@@ -33,4 +33,21 @@ export interface CloudStore {
   delete(path: string): Promise<void>;
   /** A wake-up when anything at or under `path` may have changed; never carries data. Returns the unwatch. */
   watch(path: string, onChange: (source?: WatchSource) => void, options?: CloudWatchOptions): () => void;
+  /**
+   * Sealed pictures and files (docs/cloud-layer.md, "Pictures and files"): only a store with a blob bucket behind it has these (the
+   * Catalyst relay); the Realtime Database has none. `ref` names the post document the blob belongs to, so the cloud can drop the
+   * blob when that post goes. `getBlob` is null when the cloud no longer holds it. Both throw `BlobRefused` with a sentence to show.
+   */
+  putBlob?(pondId: string, id: string, sealed: Buffer, ref: { kind: "room" | "rposts"; doc: string }): Promise<void>;
+  getBlob?(pondId: string, id: string): Promise<Buffer | null>;
+}
+
+/** The cloud would not keep or hand over a blob; `message` is a plain sentence a person can read. */
+export class BlobRefused extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }

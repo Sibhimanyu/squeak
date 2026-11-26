@@ -19,8 +19,8 @@ const COUNTER_PK = "roombytes";
 const NOTE_KIND = "roomnote";
 const NOTE_DOC = "trim";
 
-/** `createRoomCloud({ store, feed, capBytes? })`: `wrote()` after a Room document is stored; `note()` reads the page-out note. */
-function createRoomCloud({ store, feed, capBytes = CAP_BYTES }) {
+/** `createRoomCloud({ store, feed, capBytes?, blobs? })`: `wrote()` after a Room document is stored; `note()` reads the page-out note. */
+function createRoomCloud({ store, feed, capBytes = CAP_BYTES, blobs = null }) {
   const kindPk = (channel, kind) => `channels/${channel}/${kind}`;
   const seqOf = (json) => {
     try {
@@ -67,6 +67,8 @@ function createRoomCloud({ store, feed, capBytes = CAP_BYTES }) {
       // A tombstone in the feed first (so every mirror drops the post), then the row.
       await feed.append(channel, { kind: r.kind, id: r.doc, doc: null });
       await store.del(kindPk(channel, r.kind), r.doc);
+      // Its pictures and files go with it (blobs.js): the page-out frees Stratus as well as NoSQL.
+      if (blobs && blobs.enabled) await blobs.dropFor(channel, r.kind, r.doc).catch(() => undefined);
       left -= r.bytes;
       removed += 1;
       before = Math.max(before, r.seq);
