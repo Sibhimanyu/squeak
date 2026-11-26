@@ -107,6 +107,11 @@ describe("invitations by email (routes)", () => {
     expect(sent[0]!.to).toBe("asha@example.com");
     expect(sent[0]!.text).toContain(`https://squeak.onslate.in/invite?code=${made.invite.inviteId}`);
     expect(sent[0]!.text).not.toContain("/join#");
+    // Only the To line has the address; the body shows it masked, with the new subject and an Open invitation button.
+    expect(sent[0]!.subject).toMatch(/ invited you to greenroom on Squeak$/);
+    for (const body of [sent[0]!.text, sent[0]!.html]) expect(body).not.toContain("asha@example.com");
+    expect(sent[0]!.html).toContain("Open invitation");
+    expect(sent[0]!.text).toContain("a***@e***.com");
   });
 
   it("only the Owner invites, lists and acts: everyone else is refused", async () => {

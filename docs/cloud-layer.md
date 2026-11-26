@@ -355,7 +355,7 @@ The Room lines for a join and a decline (none for withdraw) are written by the O
 ### The email
 
 One email per address, subject `<inviter> invited you to <pond> on Squeak`, plain words, no tracking, the button goes to
-`https://squeak.onslate.in/invite?code=<inviteId>` (the invite page is ticket 3i). Catalyst Mail sends one body per message
+`https://squeak.onslate.in/invite?code=<inviteId>` (the invite page: `webapp/src/views/InvitePage.tsx`; the body shows the address masked, never in full). Catalyst Mail sends one body per message
 (`@zcatalyst/mail` 1.0.0, `sendMail({ from_email, to_email, subject, content, html_mode })`), so the email is HTML with the
 bare link also in the text; `mail.js` also builds the plain-text version. Limits in `invite-mail`: 20 emails per account per
 day. A failure to send is `mailed: false`, with the provider's words in the function's log only. The sender is

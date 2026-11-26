@@ -37,47 +37,16 @@ const buttons = () => [...root.querySelectorAll("button")].map((b) => b.textCont
 
 describe("SignIn view", () => {
   it("shows the lockup, one line and three equal provider buttons, nothing else", () => {
-    mount(<SignIn state={{ status: "signed-out" }} invite={null} onSignIn={() => {}} onRetry={() => {}} />);
+    mount(<SignIn state={{ status: "signed-out" }} onSignIn={() => {}} onRetry={() => {}} />);
     expect(buttons()).toEqual(["Continue with Zoho", "Continue with Google", "Continue with email"]);
     expect(root.querySelector("img.lockup")?.getAttribute("src")).toBe("brand/squeak-lockup-stacked-ink.svg");
     expect(root.querySelector("source")?.getAttribute("media")).toBe("(prefers-color-scheme: dark)");
     expect(root.querySelector(".blurb")?.textContent).toContain("calm place");
-    expect(root.querySelector(".invite-card")).toBeNull();
-  });
-
-  it("names the inviter above the same buttons for an invite link", () => {
-    mount(<SignIn state={{ status: "signed-out" }} invite={INVITE} onSignIn={() => {}} onRetry={() => {}} />);
-    const card = root.querySelector(".invite-card")!;
-    expect(card.querySelector("h2")?.textContent).toBe("Sibhi invited you to greenroom");
-    expect(card.textContent).toContain("Sign in with a***@f***.dev and greenroom will be waiting.");
-    expect(card.textContent).not.toContain("asha@fernlabs.dev");
-    expect(card.textContent).toContain("The invitation expires 3 Dec.");
-    expect(
-      card.compareDocumentPosition(root.querySelector(".buttons")!) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(buttons()).toHaveLength(3);
-  });
-
-  it("a withdrawn invitation is one sentence plus who is in it, with no address or expiry", () => {
-    const withdrawn = { ...INVITE, state: "withdrawn" as const };
-    mount(<SignIn state={{ status: "signed-out" }} invite={withdrawn} onSignIn={() => {}} onRetry={() => {}} />);
-    const card = root.querySelector(".invite-card")!;
-    expect(card.textContent).toContain("Sibhi withdrew this invitation.");
-    expect(card.textContent).toContain("In greenroom: Sibhi, Mo.");
-    expect(card.textContent).not.toContain("a***");
-    expect(card.textContent).not.toContain("expires");
   });
 
   it("a failure is one sentence and Try again, with no provider buttons", () => {
     const retry = vi.fn();
-    mount(
-      <SignIn
-        state={{ status: "failed", message: UNREACHABLE_MESSAGE }}
-        invite={null}
-        onSignIn={() => {}}
-        onRetry={retry}
-      />,
-    );
+    mount(<SignIn state={{ status: "failed", message: UNREACHABLE_MESSAGE }} onSignIn={() => {}} onRetry={retry} />);
     expect(root.querySelector('[role="alert"] p')?.textContent).toBe(UNREACHABLE_MESSAGE);
     expect(buttons()).toEqual(["Try again"]);
     act(() => root.querySelector("button")!.click());
@@ -86,7 +55,7 @@ describe("SignIn view", () => {
 
   it("reports the chosen provider", () => {
     const pick = vi.fn();
-    mount(<SignIn state={{ status: "signed-out" }} invite={null} onSignIn={pick} onRetry={() => {}} />);
+    mount(<SignIn state={{ status: "signed-out" }} onSignIn={pick} onRetry={() => {}} />);
     act(() => root.querySelectorAll("button")[1]!.click());
     expect(pick).toHaveBeenCalledWith("google");
   });
@@ -108,22 +77,10 @@ describe("App with a fake relay", () => {
     return { visited, storage, fake };
   };
 
-  it("signed out on an invite link: previews it, and Continue saves the way back", async () => {
-    window.location.hash = "#/join/K7P4QD";
-    const { visited, storage } = boot({});
-    await flush();
-    expect(root.querySelector(".invite-card h2")?.textContent).toBe("Sibhi invited you to greenroom");
-    act(() => root.querySelectorAll("button")[0]!.click());
-    expect(storage.getItem("squeak-return-to")).toBe("/join/K7P4QD");
-    expect(visited[0]).toContain("/account/handoff?");
-    expect(visited[0]).toContain("provider=zoho");
-  });
-
-  it("an unknown invite code still shows the plain sign-in", async () => {
-    window.location.hash = "#/join/NOPE";
+  it("an unknown route code still shows the plain sign-in on the Pond list", async () => {
+    window.location.hash = "#/ponds";
     boot({});
     await flush();
-    expect(root.querySelector(".invite-card")).toBeNull();
     expect(buttons()).toHaveLength(3);
   });
 

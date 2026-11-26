@@ -1415,11 +1415,19 @@ function createRelay(deps) {
   /** Sends the invitation email for a pending invite through the mail path; false (with the reason logged) when it did not go. */
   async function mailInvite(user, pond, invite) {
     if (!deps.mail || !deps.mail.send) return false;
+    // First names only, from the accounts (the same ones the invite page shows); never the inviter's email address.
+    const first = (a) => (a && typeof a.name === "string" ? a.name.trim().split(/\s+/)[0] || "" : "");
+    const members = (await deps.people.membersOf(invite.pondId).catch(() => []))
+      .map(first)
+      .filter(Boolean)
+      .slice(0, INVITE_PREVIEW_MEMBERS);
     const m = mailing.buildInviteMail({
-      inviterName: user.name || user.email || "Someone",
+      inviterName: first(user) || "Someone",
       pondName: pond.name,
       email: invite.email,
       url: inviteUrl(invite.inviteId),
+      members,
+      expiresAt: invite.expiresAt,
     });
     try {
       await deps.mail.send({ to: invite.email, subject: m.subject, text: m.text, html: m.html });

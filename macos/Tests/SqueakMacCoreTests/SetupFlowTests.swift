@@ -64,7 +64,9 @@ final class SetupFlowTests: XCTestCase {
     }
 
     func testFreshStartsAtWelcomeThenService() {
-        XCTAssertEqual(SetupFlow(facts(service: .notInstalled)).startStage, .welcome)
+        // A signed-out first launch signs in first (invited-first, see InvitedFirstTests); signed in, it opens at Welcome.
+        XCTAssertEqual(SetupFlow(facts(service: .notInstalled)).startStage, .account)
+        XCTAssertEqual(SetupFlow(facts(service: .notInstalled, signedIn: true)).startStage, .welcome)
         let started = SetupFlow(facts(service: .notInstalled), progress: SetupProgress(started: true))
         XCTAssertEqual(started.startStage, .service)
     }

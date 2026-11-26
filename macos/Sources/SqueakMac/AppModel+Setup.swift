@@ -159,7 +159,9 @@ extension AppModel {
             hasActiveSession: sessions.contains { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true },
             signedIn: account.email != nil,
             phonePaired: !(channels.remote?.activeDevices.isEmpty ?? true),
-            connectBusy: daemon.busy || setup.hooksBusy)
+            connectBusy: daemon.busy || setup.hooksBusy,
+            pendingInvitations: PondsModel.shared.pendingInvitationCount,
+            ownPonds: PondsModel.shared.ownPondCount, joinedPonds: PondsModel.shared.joinedPondCount)
     }
 
     var setupFlow: SetupFlow { SetupFlow(setupFlowFacts, progress: setup.progress) }

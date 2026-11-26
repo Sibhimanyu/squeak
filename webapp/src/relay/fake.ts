@@ -33,6 +33,8 @@ export interface FakeRelayState {
   devices: Record<string, { publicKey: string; name: string; kind: string }[]>;
   /** Answers to Join and Decline: set "fail" to make the cloud refuse. */
   respond?: "ok" | "fail";
+  /** Make Join and Decline refuse the way the relay does (another address: 403 {error:"email"}; a settled invite: 409 {error:"state", state}). */
+  refusal?: { status: 403 | 409; body: unknown };
   requests: {
     url: string;
     method: string;
@@ -151,6 +153,7 @@ export const createFakeRelay = (state: Partial<FakeRelayState> = {}): { fetch: F
       const invitation = overview.invitations.find((i) => i.inviteId === answer[1]);
       if (!invitation) return json(404, { error: "invite" });
       if (full.respond === "fail") return json(503, { error: "cloud" });
+      if (full.refusal) return json(full.refusal.status, full.refusal.body);
       overview.invitations = overview.invitations.filter((i) => i !== invitation);
       if (answer[2] === "decline") return new Response(null, { status: 204 });
       const pondId = `joined-${invitation.inviteId}`;

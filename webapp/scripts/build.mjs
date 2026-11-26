@@ -36,7 +36,9 @@ if (serve) {
 } else {
   await build(options);
 }
-const css = await Promise.all(["styles.css", "ponds.css"].map((f) => readFile(path.join(root, "src", f), "utf8")));
+const css = await Promise.all(
+  ["styles.css", "ponds.css", "invite.css"].map((f) => readFile(path.join(root, "src", f), "utf8")),
+);
 await writeFile(path.join(out, "app.css"), css.join("\n"));
 await cp(path.join(root, "index.html"), path.join(out, "index.html"));
 // Slate's static hosting ignores redirect rules, so the emailed invite link (/join#<code>) needs a real page at /join.
@@ -46,10 +48,25 @@ const entry = (await readFile(path.join(root, "index.html"), "utf8")).replace(
   '<head>\n    <base href="/" />',
 );
 await writeFile(path.join(out, "join", "index.html"), entry);
-for (const name of ["squeak-lockup-stacked-ink", "squeak-lockup-stacked-paper", "squeak-duck-full-color"]) {
+// The invite page: the emailed button opens /invite?code=<id>, a real page for the same reason.
+await mkdir(path.join(out, "invite"), { recursive: true });
+await writeFile(path.join(out, "invite", "index.html"), entry);
+await cp(path.join(root, "assets"), path.join(out, "assets"), { recursive: true });
+for (const name of [
+  "squeak-lockup-stacked-ink",
+  "squeak-lockup-horizontal-ink",
+  "squeak-lockup-horizontal-paper",
+  "squeak-lockup-stacked-paper",
+  "squeak-duck-full-color",
+]) {
   await cp(path.join(root, "..", "brand/logo/svg", `${name}.svg`), path.join(out, "brand", `${name}.svg`));
 }
 await cp(path.join(root, "..", "brand/logo/png/duckThread.png"), path.join(out, "brand", "duckThread.png"));
+// The invite email shows the duck from this address (mail clients block SVG, so a PNG).
+await cp(
+  path.join(root, "..", "brand/logo/png/squeak-duck-full-color-96.png"),
+  path.join(out, "brand", "squeak-duck-full-color-96.png"),
+);
 console.log(`built ${out} (${env})`);
 
 if (serve) {
@@ -58,6 +75,7 @@ if (serve) {
     ".js": "text/javascript",
     ".css": "text/css",
     ".svg": "image/svg+xml",
+    ".png": "image/png",
     ".map": "application/json",
   };
   createServer(async (req, res) => {

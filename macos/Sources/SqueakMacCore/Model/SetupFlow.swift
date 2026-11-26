@@ -100,12 +100,31 @@ public struct SetupFlowFacts: Sendable, Equatable {
     public var phonePaired: Bool
     /// An action (service repair, hooks install) is running right now.
     public var connectBusy: Bool
+    /// Invitations waiting for this account (Join / Decline), read from the cloud once signed in.
+    public var pendingInvitations: Int
+    /// Ponds this person made themselves (not shared with them).
+    public var ownPonds: Int
+    /// Ponds of other people this account is a Member or Viewer of.
+    public var joinedPonds: Int
 
     public init(setup: SetupFacts = SetupFacts(), detection: AgentDetection = AgentDetection(), hasActiveSession: Bool = false,
-                signedIn: Bool = false, phonePaired: Bool = false, connectBusy: Bool = false) {
+                signedIn: Bool = false, phonePaired: Bool = false, connectBusy: Bool = false,
+                pendingInvitations: Int = 0, ownPonds: Int = 0, joinedPonds: Int = 0) {
         self.setup = setup; self.detection = detection; self.hasActiveSession = hasActiveSession
         self.signedIn = signedIn; self.phonePaired = phonePaired; self.connectBusy = connectBusy
+        self.pendingInvitations = pendingInvitations; self.ownPonds = ownPonds; self.joinedPonds = joinedPonds
     }
+}
+
+/// Where a person's first launch starts (docs/spec.md "Invited without Squeak"): someone who came from an invitation has no use
+/// for the background service, agents or hooks yet, so they sign in, see their Invitations and are in the Pond.
+public enum SetupEntry: Sendable, Equatable {
+    /// First launch, signed out: sign in before anything else.
+    case signIn
+    /// Signed in with an invitation waiting (or a Pond they joined) and no Pond of their own: the Invitations first, no other setup.
+    case invitations
+    /// The ordinary first run.
+    case setup
 }
 
 /// First run's order, detection, states, resume and what counts as done. It runs nothing: each screen calls
@@ -221,6 +240,7 @@ public struct SetupFlow: Sendable, Equatable {
     /// a working Squeak, or who finished once, goes straight to Done.
     public var startStage: SetupStage {
         if progress.finished || isReturning { return .done }
+        if entry == .signIn { return .account }
         return stages.first { $0 != .done && state($0) == .todo } ?? .done
     }
 
@@ -249,7 +269,25 @@ public struct SetupFlow: Sendable, Equatable {
     public func canDismiss(_ s: SetupStage) -> Bool { !(s.isRequired && !canContinue(s)) }
 
     /// What the Settings sidebar's "Finish setting up" card (`SetupCard`) offers: neither done nor skipped-and-left.
-    public var openStages: [SetupStage] { SetupStage.listed.filter { state($0) != .done } }
+    public var openStages: [SetupStage] { setupWaits ? [] : SetupStage.listed.filter { state($0) != .done } }
+
+    // MARK: Invited first
+
+    /// A first launch only: anyone who pressed Get started, finished, or already runs Squeak keeps the ordinary flow, so an
+    /// update or a later invitation never moves setup under them.
+    private var isFirstLaunch: Bool { !(progress.started || progress.finished || isReturning) }
+
+    /// Signed out: sign in first. Signed in with an invitation waiting, or in a Pond someone shared, and no Pond of their own:
+    /// the Invitations come before any other setup, which waits until they make a Pond of their own. Otherwise the ordinary flow.
+    public var entry: SetupEntry {
+        guard isFirstLaunch else { return .setup }
+        guard facts.signedIn else { return .signIn }
+        let invited = facts.pendingInvitations > 0 || facts.joinedPonds > 0
+        return invited && facts.ownPonds == 0 ? .invitations : .setup
+    }
+
+    /// The rest of setup (service, agents, hooks, phone, the "Finish setting up" card) is not offered yet.
+    public var setupWaits: Bool { entry == .invitations }
 
     // MARK: Persistence helpers
 

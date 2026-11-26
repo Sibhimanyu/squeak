@@ -45,6 +45,8 @@ export interface PondScreenProps {
   /** The Pond has been looked at up to its newest change. */
   onSeen: () => void;
   now?: number;
+  /** The one-time "Get Squeak for Mac" card after joining on the web; null when there is none to show. */
+  macCard?: { href: string; onDismiss: () => void } | null;
 }
 
 export function PondScreen(props: PondScreenProps) {
@@ -81,6 +83,14 @@ export function PondScreen(props: PondScreenProps) {
             <Avatar key={m.id} name={m.name} small />
           ))}
         </div>
+      ) : null}
+      {props.macCard ? (
+        <aside class="mac-card" data-card="mac">
+          <a href={props.macCard.href}>Get Squeak for Mac to run Ducks of your own</a>
+          <button type="button" aria-label="Dismiss" onClick={props.macCard.onDismiss}>
+            Dismiss
+          </button>
+        </aside>
       ) : null}
       <nav class="tabs" role="tablist" aria-label="Pond">
         <a role="tab" aria-selected={route.tab === "room"} href={href({ ...route, tab: "room" })}>

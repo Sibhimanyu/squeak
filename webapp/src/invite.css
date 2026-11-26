@@ -1,0 +1,272 @@
+/* The invite page: warm neutrals, the Pond's own colour as the only colour added (a soft wash behind the top, the Pond name and
+   section labels). The same tokens as the rest of the web app, light and dark. */
+.invite {
+  --wash: hsl(var(--h) var(--tint-sat) var(--tint-bg));
+  --pond: hsl(var(--h) 55% var(--tint-fg));
+  min-height: 100dvh;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+.invite.plain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px 24px;
+}
+.lockup-h {
+  display: block;
+  height: 30px;
+  width: auto;
+}
+.invite .top,
+.invite .hero,
+.invite .story,
+.invite .closing,
+.invite .foot,
+.invite .story-lede,
+.invite .member-line {
+  width: min(1040px, 100% - 48px);
+  margin-inline: auto;
+}
+.invite .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 0;
+}
+.invite .for,
+.invite .foot {
+  color: var(--muted);
+  font-size: 14px;
+}
+.invite .hero {
+  padding: 24px 0 56px;
+}
+.invite .hero-text {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+.invite .pond-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.invite .avatar.tile.big {
+  margin: 0;
+  width: 56px;
+  height: 56px;
+  font-size: 24px;
+  border-radius: 16px;
+}
+.invite .kicker {
+  color: var(--pond);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.invite h1 {
+  font-size: clamp(36px, 7vw, 60px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+.invite h1.settled {
+  font-size: clamp(28px, 5vw, 40px);
+}
+.invite .pond-name {
+  color: var(--pond);
+}
+.invite .lede {
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1.5;
+}
+.invite .members,
+.invite .member-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+}
+.invite .flock {
+  display: flex;
+  flex: none;
+}
+.invite .flock .avatar + .avatar {
+  margin-left: -10px;
+}
+.invite .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+.invite .actions .button {
+  width: auto;
+  min-width: 180px;
+  text-decoration: none;
+  color: var(--ink);
+}
+.invite .button.solid {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+.invite .providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, 100%);
+}
+.invite .fine {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.invite .fine strong {
+  color: var(--ink);
+}
+.invite .link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.invite .problem {
+  color: var(--negative);
+  font-size: 15px;
+}
+.invite .ask {
+  font-size: 19px;
+  font-weight: 600;
+}
+.invite .story-lede {
+  text-align: center;
+  color: var(--muted);
+  font-size: 20px;
+  max-width: 560px;
+  text-wrap: balance;
+}
+.invite .story {
+  display: flex;
+  flex-direction: column;
+  gap: 72px;
+  padding: 56px 0;
+}
+.invite .part {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: center;
+}
+.invite .part h2 {
+  font-size: clamp(26px, 4vw, 36px);
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  margin: 8px 0 12px;
+  text-wrap: balance;
+}
+.invite .part p:not(.kicker) {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.55;
+}
+.invite .shot {
+  display: block;
+  justify-self: center;
+  width: 100%;
+  border-radius: 20px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
+  border: 1px solid var(--line);
+}
+.invite .shot.phone {
+  max-width: 260px;
+}
+.invite .shot.wide {
+  max-width: 640px;
+}
+@media (min-width: 820px) {
+  .invite .part {
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+  }
+  .invite .part.flip .words {
+    order: 2;
+  }
+}
+.invite .member-line {
+  padding: 24px 28px;
+  background: var(--wash);
+  border-radius: 20px;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.5;
+  max-width: 760px;
+}
+.invite .closing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 0 40px;
+  text-align: center;
+}
+.invite .closing h2 {
+  font-size: 32px;
+  letter-spacing: -0.015em;
+}
+.invite .closing .actions {
+  justify-content: center;
+}
+.invite .foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.invite[data-state="withdrawn"] .hero,
+.invite[data-state="expired"] .hero,
+.invite[data-state="declined"] .hero,
+.invite[data-state="joined"] .hero {
+  background: none;
+}
+.invite:not(.plain) {
+  background:
+    linear-gradient(180deg, var(--wash) 0, var(--bg) 640px) no-repeat,
+    var(--bg);
+}
+
+/* The "Get Squeak for Mac" card, once, in a Pond after joining on the web. */
+.mac-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 14px 16px;
+  background: var(--selected);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.mac-card a {
+  font-weight: 600;
+}
+.mac-card button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}

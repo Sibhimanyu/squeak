@@ -19,7 +19,12 @@ export type OverviewResult =
   | { status: "unreachable" };
 
 /** Join answers the Pond to open; Decline answers nothing. Both only after the cloud confirms. */
-export type RespondResult = { status: "ok"; pondId: string | null } | { status: "unauthorized" } | { status: "failed" };
+export type RespondResult =
+  | { status: "ok"; pondId: string | null }
+  | { status: "unauthorized" }
+  /** The cloud said no on purpose: another address (`email`), a full Pond (`full`) or an invite already settled (`withdrawn`, `expired`, `joined`, `declined`). */
+  | { status: "refused"; why: string }
+  | { status: "failed" };
 
 /** A sealed document as the relay stores it (`ChannelDoc` in src/cloud/store.ts). The relay never sees what is inside `box`. */
 export interface SealedDoc {
@@ -185,6 +190,11 @@ export function createRelay(base: string, fetchFn: FetchLike = (url, init) => fe
           credentials: "omit",
         });
         if (res.status === 401) return { status: "unauthorized" };
+        if (res.status === 403 || res.status === 409) {
+          const refusal = (await res.json().catch(() => null)) as { error?: unknown; state?: unknown } | null;
+          const why = refusal?.error === "state" ? refusal.state : refusal?.error;
+          return typeof why === "string" ? { status: "refused", why } : { status: "failed" };
+        }
         if (res.status !== 200 && res.status !== 204) return { status: "failed" };
         const body = res.status === 200 ? ((await res.json().catch(() => null)) as { pondId?: unknown } | null) : null;
         return { status: "ok", pondId: typeof body?.pondId === "string" ? body.pondId : null };

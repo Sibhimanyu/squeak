@@ -1,11 +1,8 @@
-import type { InvitePreview } from "../../../src/shared/shapes.js";
 import type { AuthState } from "../auth/auth.js";
 import type { Provider } from "../auth/session.js";
 
 export interface SignInProps {
   state: AuthState;
-  /** Set when the link was an invitation: shown above the buttons. */
-  invite: InvitePreview | null;
   onSignIn: (provider: Provider) => void;
   onRetry: () => void;
 }
@@ -32,61 +29,7 @@ const MailIcon = () => (
   </svg>
 );
 
-/** A Pond or person's colour: one hue from its name, drawn by the stylesheet for both themes. */
-export const hueOf = (name: string): number => {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-};
-
-export const expiryText = (epochMs: number): string =>
-  new Date(epochMs).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-
-const WHY: Record<Exclude<InvitePreview["state"], "pending">, (i: InvitePreview) => string> = {
-  withdrawn: (i) => `${i.inviter} withdrew this invitation.`,
-  declined: () => "This invitation was declined.",
-  joined: () => "This invitation was already used.",
-  expired: () => "This invitation has expired.",
-};
-
-function InviteCard({ invite }: { invite: InvitePreview }) {
-  return (
-    <section class="invite-card" aria-label="Invitation">
-      <div class="avatars" aria-hidden="true">
-        <span class="avatar person" style={{ "--h": hueOf(invite.inviter) }}>
-          {invite.inviter.charAt(0).toUpperCase()}
-        </span>
-        <span class="avatar tile" style={{ "--h": hueOf(invite.pond) }}>
-          {invite.pond.charAt(0).toUpperCase()}
-        </span>
-      </div>
-      <h2>
-        {invite.inviter} invited you to {invite.pond}
-      </h2>
-      {invite.state === "pending" ? (
-        <p>
-          {invite.masked
-            ? `Sign in with ${invite.masked} and ${invite.pond} will be waiting.`
-            : `${invite.pond} will be waiting.`}
-          <br />
-          The invitation expires {expiryText(invite.expiresAt)}.
-        </p>
-      ) : (
-        <p>
-          {WHY[invite.state](invite)}
-          {invite.members.length > 0 ? (
-            <>
-              <br />
-              In {invite.pond}: {invite.members.join(", ")}.
-            </>
-          ) : null}
-        </p>
-      )}
-    </section>
-  );
-}
-
-export function SignIn({ state, invite, onSignIn, onRetry }: SignInProps) {
+export function SignIn({ state, onSignIn, onRetry }: SignInProps) {
   return (
     <main class="signin">
       <picture>
@@ -106,14 +49,10 @@ export function SignIn({ state, invite, onSignIn, onRetry }: SignInProps) {
         </p>
       ) : (
         <>
-          {invite ? (
-            <InviteCard invite={invite} />
-          ) : (
-            <p class="blurb">
-              Squeak is a calm place to follow your Ponds: the people and coding agents working with you, and what needs
-              you.
-            </p>
-          )}
+          <p class="blurb">
+            Squeak is a calm place to follow your Ponds: the people and coding agents working with you, and what needs
+            you.
+          </p>
           <div class="buttons">
             {PROVIDERS.map((p) => (
               <button type="button" class="button" key={p.id} onClick={() => onSignIn(p.id)}>

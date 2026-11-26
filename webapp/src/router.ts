@@ -6,7 +6,7 @@ export type Route =
   | { name: "ponds" }
   | { name: "pond"; pondId: string; tab: "room" | "ducks" }
   | { name: "duck"; pondId: string; duckId: string }
-  | { name: "join"; code: string };
+  | { name: "invite"; code: string };
 
 const ID = /^[A-Za-z0-9_~.-]{1,100}$/;
 
@@ -14,7 +14,7 @@ const ID = /^[A-Za-z0-9_~.-]{1,100}$/;
 export function parsePath(path: string): Route {
   const parts = path.split("/").filter(Boolean);
   const [a, b, c, d] = parts;
-  if (a === "join" && b && ID.test(b) && parts.length === 2) return { name: "join", code: b };
+  if ((a === "invite" || a === "join") && b && ID.test(b) && parts.length === 2) return { name: "invite", code: b };
   if (a === "ponds" && b && ID.test(b)) {
     if (parts.length === 2 || (parts.length === 3 && c === "room")) return { name: "pond", pondId: b, tab: "room" };
     if (parts.length === 3 && c === "ducks") return { name: "pond", pondId: b, tab: "ducks" };
@@ -31,8 +31,8 @@ export function routePath(route: Route): string {
       return `/ponds/${route.pondId}/${route.tab}`;
     case "duck":
       return `/ponds/${route.pondId}/ducks/${route.duckId}`;
-    case "join":
-      return `/join/${route.code}`;
+    case "invite":
+      return `/invite/${route.code}`;
   }
 }
 

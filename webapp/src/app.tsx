@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import type { InvitePreview } from "../../src/shared/shapes.js";
 import type { Auth, AuthState } from "./auth/auth.js";
 import type { KeyValueStore, Provider } from "./auth/session.js";
 import { defaultVault, type KeyVault } from "./device/vault.js";
 import { createDevice } from "./pond/device.js";
 import type { FetchLike, Relay } from "./relay/client.js";
 import { routePath, type Route, type Router } from "./router.js";
+import { isMac, MAC_DOWNLOAD_URL } from "./platform.js";
 import { createPondsStore, type PondsState, type PondsStore } from "./state/ponds-store.js";
 import { DuckScreen } from "./views/Duck.js";
 import { PondScreen } from "./views/Pond.js";
 import { PondsScreen } from "./views/Ponds.js";
-import { JoinScreen } from "./views/Screens.js";
+import { InvitePage, type InviteLoad } from "./views/InvitePage.js";
 import { SignIn } from "./views/SignIn.js";
 
 function useSubscribed<T>(read: () => T, subscribe: (listener: (value: T) => void) => () => void): T {
@@ -44,30 +44,39 @@ export interface AppProps {
   vault?: KeyVault;
   /** Where "seen up to" is kept per Pond (localStorage). */
   seen?: KeyValueStore;
+  /** Whether this device is a Mac (Squeak for Mac is offered only there); the page's own navigator by default. */
+  mac?: boolean;
 }
+
+/** After joining on the web: the one-time "Get Squeak for Mac" card in the Pond ("show" until dismissed, then "done"). */
+export const MAC_CARD_KEY = "squeak-mac-card";
 
 const defaultSeen = (): KeyValueStore => window.localStorage;
 
-export function App({ auth, relay, router, liveBase = null, liveFetch, vault, seen }: AppProps) {
+export function App({ auth, relay, router, liveBase = null, liveFetch, vault, seen, mac }: AppProps) {
   const state: AuthState = useSubscribed(auth.state, auth.subscribe);
   const route: Route = useSubscribed(router.current, router.subscribe);
-  const [invite, setInvite] = useState<InvitePreview | null>(null);
+  const onMac = mac ?? isMac(navigator);
+  const [invite, setInvite] = useState<InviteLoad>({ status: "loading" });
 
   useEffect(() => {
     void auth.start();
   }, [auth]);
 
-  // An invite link says who invited you before you sign in; unknown or unreachable falls back to the plain page.
-  const code = route.name === "join" ? route.code : null;
+  // An invite link is read from the relay's record before anyone signs in; an unknown code or an unreachable relay says so.
+  const code = route.name === "invite" ? route.code : null;
+  const settled = state.status === "signed-out" || state.status === "signed-in";
   useEffect(() => {
-    setInvite(null);
-    if (!code || state.status !== "signed-out") return;
+    setInvite({ status: "loading" });
+    if (!code || !settled) return;
     let live = true;
-    void relay.invitePreview(code).then((preview) => live && setInvite(preview));
+    void relay
+      .invitePreview(code)
+      .then((p) => live && setInvite(p ? { status: "ok", invite: p } : { status: "missing" }));
     return () => {
       live = false;
     };
-  }, [code, state.status, relay]);
+  }, [code, settled, relay]);
 
   // One Ponds store per signed-in session: one read on open, then live notices (or the 30 s poll) say when to read again.
   const token = state.status === "signed-in" ? state.token : null;
@@ -89,14 +98,46 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
     [relay, token, userId, liveBase, liveFetch, auth, vault, seen],
   );
   const ponds = useStore(store);
+  const seenStore = seen ?? defaultSeen();
+  const [macCard, setMacCard] = useState(() => onMac && seenStore.getItem(MAC_CARD_KEY) === "show");
   useEffect(() => {
     store?.start();
     return () => store?.stop();
   }, [store]);
 
+  const signIn = (provider: Provider): void => auth.signIn(provider, routePath(route));
+  if (route.name === "invite" && state.status !== "failed") {
+    return (
+      <InvitePage
+        load={state.status === "checking" ? { status: "loading" } : invite}
+        signedInAs={state.status === "signed-in" ? state.account.email : null}
+        isMac={onMac}
+        onSignIn={signIn}
+        onAnswer={async (answer) => {
+          if (state.status !== "signed-in") return { status: "failed" };
+          const result = await relay.respond(state.token, route.code, answer);
+          if (result.status === "unauthorized") auth.signOut();
+          return result;
+        }}
+        onJoined={(pondId) => {
+          if (onMac) {
+            try {
+              seenStore.setItem(MAC_CARD_KEY, "show");
+            } catch {
+              // storage refused: the card is skipped
+            }
+            setMacCard(true);
+          }
+          void (store ? store.refresh() : Promise.resolve()).then(() =>
+            router.go(pondId ? { name: "pond", pondId, tab: "room" } : { name: "ponds" }),
+          );
+        }}
+        onSwitchAccount={() => auth.signOut()}
+      />
+    );
+  }
   if (state.status !== "signed-in" || !store || !ponds) {
-    const signIn = (provider: Provider): void => auth.signIn(provider, routePath(route));
-    return <SignIn state={state} invite={invite} onSignIn={signIn} onRetry={() => void auth.start()} />;
+    return <SignIn state={state} onSignIn={signIn} onRetry={() => void auth.start()} />;
   }
 
   // Narrow: one screen at a time (Ponds, Pond, Duck). Wide: the list on the left, the open Pond or Duck on the right.
@@ -124,6 +165,21 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             session={store.session(route.pondId)}
             connection={ponds.connection}
             onSeen={() => store.markSeen(route.pondId)}
+            macCard={
+              macCard
+                ? {
+                    href: MAC_DOWNLOAD_URL,
+                    onDismiss: () => {
+                      try {
+                        seenStore.setItem(MAC_CARD_KEY, "done");
+                      } catch {
+                        // storage refused: it may show again
+                      }
+                      setMacCard(false);
+                    },
+                  }
+                : null
+            }
           />
         ) : null}
         {route.name === "duck" ? (
@@ -134,7 +190,6 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             session={store.session(route.pondId)}
           />
         ) : null}
-        {route.name === "join" ? <JoinScreen route={route} /> : null}
       </div>
     </div>
   );

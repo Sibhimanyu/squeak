@@ -110,6 +110,12 @@ final class PondsModel {
             if directory != nil { AppModel.shared.flushPendingTabs() }
         }
     }
+    /// Invitations waiting for this account, as the Invitations block reads them from the cloud. First launch looks here to
+    /// decide whether the person was invited (`SetupFlow.entry`); it stays 0 until that block fills it.
+    var pendingInvitationCount = 0
+    /// Ponds this person made on this Mac, and Ponds other people shared with them (first launch reads both).
+    var ownPondCount: Int { directory?.ponds.filter { !$0.isJoined }.count ?? 0 }
+    var joinedPondCount: Int { directory?.ponds.filter(\.isJoined).count ?? 0 }
     /// Stashed own-Mac threads: the daemon's word (docs/ponds.md); every pond list is read through it.
     var ownThreads: Bool { PondOwnThreads.enabled(directory?.pondOwnThreads) }
     /// An Invite that waits for the sign-in it started.

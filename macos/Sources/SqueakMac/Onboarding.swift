@@ -15,6 +15,8 @@ final class OnboardingController {
     func showIfNeeded() {
         let model = AppModel.shared
         guard !model.onboardingDone, !model.setup.progress.finished, !model.captureMode else { return }
+        // Someone invited and not yet on their own: the Invitations come first, so no setup window.
+        guard !model.setupFlow.setupWaits else { return }
         show()
     }
 

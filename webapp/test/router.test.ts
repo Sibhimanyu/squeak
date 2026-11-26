@@ -33,8 +33,9 @@ describe("router skeleton: Ponds, Pond (Room | Ducks), Duck", () => {
     expect(parsePath("/ponds/p1/room")).toEqual({ name: "pond", pondId: "p1", tab: "room" });
     expect(parsePath("/ponds/p1/ducks")).toEqual({ name: "pond", pondId: "p1", tab: "ducks" });
     expect(parsePath("/ponds/p1/ducks/d9")).toEqual({ name: "duck", pondId: "p1", duckId: "d9" });
-    expect(parsePath("/join/K7P4QD")).toEqual({ name: "join", code: "K7P4QD" });
-    for (const odd of ["", "/", "/nope", "/ponds/p1/ducks/d9/x", "/ponds/p 1", "/join"]) {
+    expect(parsePath("/invite/K7P4QD")).toEqual({ name: "invite", code: "K7P4QD" });
+    expect(parsePath("/join/K7P4QD")).toEqual({ name: "invite", code: "K7P4QD" });
+    for (const odd of ["", "/", "/nope", "/ponds/p1/ducks/d9/x", "/ponds/p 1", "/join", "/invite"]) {
       expect(parsePath(odd)).toEqual({ name: "ponds" });
     }
   });
@@ -45,7 +46,7 @@ describe("router skeleton: Ponds, Pond (Room | Ducks), Duck", () => {
       { name: "pond", pondId: "p1", tab: "room" },
       { name: "pond", pondId: "p1", tab: "ducks" },
       { name: "duck", pondId: "p1", duckId: "d9" },
-      { name: "join", code: "AB-12" },
+      { name: "invite", code: "AB-12" },
     ];
     for (const r of routes) expect(parsePath(routePath(r))).toEqual(r);
   });
@@ -84,10 +85,25 @@ describe("router skeleton: Ponds, Pond (Room | Ducks), Duck", () => {
 });
 
 describe("prepareAddress", () => {
-  it("opens an emailed invite link (/join#code) as the join route", () => {
+  it("opens the emailed invite link (/invite?code=id) as the invite route and drops the query", () => {
+    const win = fakeWindow("", "/invite");
+    win.location.search = "?code=K7P4QD";
+    expect(prepareAddress(win, memoryStore())).toEqual({ name: "invite", code: "K7P4QD" });
+    expect(win.history.log).toEqual(["replace /#/invite/K7P4QD"]);
+  });
+
+  it("an invite link without a usable code opens the Pond list", () => {
+    const none = fakeWindow("", "/invite");
+    expect(prepareAddress(none, memoryStore())).toEqual({ name: "ponds" });
+    const odd = fakeWindow("", "/invite");
+    odd.location.search = "?code=a/b";
+    expect(prepareAddress(odd, memoryStore())).toEqual({ name: "ponds" });
+  });
+
+  it("still opens the older /join#code link as the invite route", () => {
     const win = fakeWindow("#K7P4QD", "/join");
-    expect(prepareAddress(win, memoryStore())).toEqual({ name: "join", code: "K7P4QD" });
-    expect(win.history.log).toEqual(["replace /#/join/K7P4QD"]);
+    expect(prepareAddress(win, memoryStore())).toEqual({ name: "invite", code: "K7P4QD" });
+    expect(win.history.log).toEqual(["replace /#/invite/K7P4QD"]);
   });
 
   it("refuses a join code that is not a plain id", () => {
