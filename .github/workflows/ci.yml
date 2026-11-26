@@ -22,8 +22,12 @@ jobs:
   mac:
     # Squeak for Mac's package tests. macos/scripts/test.sh fails when either runner (XCTest, Swift Testing) is red or
     # reports nothing, and prints one line: xctest=N/failed swift-testing=N/failed-runs.
-    runs-on: macos-15
+    # The package needs a recent Swift (built locally with 6.4): the newest runner, and its newest Xcode.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - run: swift --version
+      - run: |
+          xcode=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          swift --version
       - run: macos/scripts/test.sh

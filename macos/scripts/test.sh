@@ -35,6 +35,8 @@ bad=0
 [ "$st_failed" != "0" ] && bad=1
 if [ "$bad" -ne 0 ]; then
   grep -E 'error: -\[|✘ Test .* (failed|recorded an issue)|Fatal error|Unexpectedly found nil|crashed' "$log" | head -40
+  # No test ran (a build error, a crash before the first summary): show where it stopped.
+  [ -z "$xc" ] && [ -z "$st" ] && { grep -E 'error:' "$log" | head -20; tail -15 "$log"; }
   printf 'macos tests: RED (swift test exit %s)\n' "$code" >&2
   exit 1
 fi
