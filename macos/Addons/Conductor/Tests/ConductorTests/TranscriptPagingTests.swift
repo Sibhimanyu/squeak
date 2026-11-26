@@ -88,9 +88,11 @@ actor PagedAdapter: HostAdapter {
 
     init(session: HostSession, count: Int, start: Date = Date(timeIntervalSince1970: 1_800_000_000)) {
         self.session = session
-        history = (0..<count).map { i in
-            ChatMessage(id: "m\(i)", role: i % 2 == 0 ? .user : .assistant, text: "message \(i)",
-                        at: start.addingTimeInterval(Double(i)), turnId: "t\(i / 2)", cursor: String(i + 1))
+        // Typed step by step: the one-expression form timed out the type checker on older Swift (CI's runner).
+        history = (0..<count).map { (i: Int) -> ChatMessage in
+            let role: MessageRole = i % 2 == 0 ? .user : .assistant
+            let at: Date = start.addingTimeInterval(Double(i))
+            return ChatMessage(id: "m\(i)", role: role, text: "message \(i)", at: at, turnId: "t\(i / 2)", cursor: String(i + 1))
         }
     }
 
