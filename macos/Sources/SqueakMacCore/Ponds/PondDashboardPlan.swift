@@ -10,7 +10,28 @@ public enum PondConnection: Sendable, Equatable {
     case reconnecting
     case ownerOffline
 
-    /// From the one freshness value the page already holds. The Owner's own Mac is never "offline" to the Owner.
+    /// The daemon's word for it (`live`, `reconnecting`, `owner-offline`); nil for a word this app does not know.
+    public init?(daemon raw: String) {
+        switch raw {
+        case "live": self = .live
+        case "reconnecting": self = .reconnecting
+        case "owner-offline": self = .ownerOffline
+        default: return nil
+        }
+    }
+
+    /// What the page draws. The daemon's connection is the word whenever it sent one (it alone knows the live stream and the
+    /// Owner's presence); only this app's own trouble reaching the daemon overrides it, and an older daemon falls back to the
+    /// freshness reading below.
+    public static func resolve(_ daemon: PondConnectionInfo?, freshness: PondFreshness, role: PondRole) -> PondConnection {
+        switch freshness {
+        case .couldntRead, .stale: return .reconnecting
+        default: break
+        }
+        return daemon?.state ?? of(freshness, role: role)
+    }
+
+    /// From the one freshness value the page already holds (an older daemon sent no connection). The Owner's own Mac is never "offline" to the Owner.
     public static func of(_ freshness: PondFreshness, role: PondRole) -> PondConnection {
         switch freshness {
         case .live, .reading, .refreshing: .live
@@ -36,6 +57,8 @@ public struct PondDashboardHeader: Sendable, Equatable {
         /// People in the Pond, the Owner included.
         public var people: Int
         public var connection: PondConnection
+        /// The daemon's own sentence for the connection (the Owner's name is in it); nil: this app words it.
+        public var connectionLine: String?
         /// The chrome's word on starting a Duck here.
         public var start: PondChrome.Start
         /// This Mac cannot start a Duck of its own here right now (the host says why); the button stays and says it.
@@ -45,11 +68,11 @@ public struct PondDashboardHeader: Sendable, Equatable {
 
         public init(
             role: PondRole, hasPond: Bool = true, isLocal: Bool = false, plainFolder: Bool = false, isRemote: Bool = false,
-            ownerName: String? = nil, people: Int = 1, connection: PondConnection = .live, start: PondChrome.Start = .own,
+            ownerName: String? = nil, people: Int = 1, connection: PondConnection = .live, connectionLine: String? = nil, start: PondChrome.Start = .own,
             startBlockedReason: String? = nil, canWrite: Bool = true
         ) {
             self.role = role; self.hasPond = hasPond; self.isLocal = isLocal; self.plainFolder = plainFolder; self.isRemote = isRemote
-            self.ownerName = ownerName; self.people = people; self.connection = connection; self.start = start
+            self.ownerName = ownerName; self.people = people; self.connection = connection; self.connectionLine = connectionLine; self.start = start
             self.startBlockedReason = startBlockedReason; self.canWrite = canWrite
         }
     }
@@ -76,16 +99,16 @@ public struct PondDashboardHeader: Sendable, Equatable {
 
     public static func make(_ f: Facts) -> PondDashboardHeader {
         let owner = ownerWord(f.ownerName)
-        let connection: String = switch f.connection {
+        let words: String = switch f.connection {
         case .live: "Live"
         case .reconnecting: "Reconnecting\u{2026}"
         case .ownerOffline: "\(owner)\u{2019}s Mac offline"
         }
+        let connection = f.connectionLine.flatMap { $0.isEmpty ? nil : $0 } ?? words
 
         let line: String
         if f.role == .owner && !f.isRemote {
             if f.isLocal { line = "Only on this Mac" }
-            else if f.connection == .live { line = "Shared with \(people(f.people)) \u{00B7} Live" }
             else { line = "Shared with \(people(f.people)) \u{00B7} \(connection)" }
         } else {
             line = "\(owner)\u{2019}s Pond \u{00B7} \(f.role.word) \u{00B7} \(connection)"

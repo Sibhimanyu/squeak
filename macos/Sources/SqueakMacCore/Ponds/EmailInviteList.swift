@@ -114,7 +114,7 @@ public enum EmailInviteText {
     public static let placeholder = "name@company.com, another@company.com"
     public static let note = "No codes to read out. Only the person with that address can join with the link."
     public static let send = "Send invites"
-    public static func sending(_ n: Int) -> String { "Sending\u{2026}" }
+    public static func sending(_ n: Int) -> String { PondActionWords.pending(.invite, who: nil) }
     public static let copyLink = "Copy invite link"
     public static let linkNote = "A link anyone can open still needs your approval."
     public static func tooMany() -> String { "At most \(EmailAddress.maxPerSend) people at a time." }

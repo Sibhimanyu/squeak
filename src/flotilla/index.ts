@@ -216,10 +216,14 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     },
     names: async (ids) => (catalystRelay ? catalystRelay.names(ids) : { names: {} }),
   };
-  const service = new FlotillaService({
+  // The one live stream of this Mac (squeak-live) tells the service its connection state; absent, the old path runs.
+  const connectionChanged = (): void => service.connectionChanged();
+  const store = where ? createCloudStore(where, { onLiveState: connectionChanged }) : null;
+  const service: FlotillaService = new FlotillaService({
     account,
     // No cloud set up: the service still works, with local ponds only, and makes no network call.
-    store: where ? createCloudStore(where) : null,
+    store,
+    liveState: () => (store instanceof CatalystStore ? store.liveState() : null),
     supportDir: deps.supportDir,
     nest: computerName(),
     ...(where ? { location: where } : {}),

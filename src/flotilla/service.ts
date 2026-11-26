@@ -30,6 +30,7 @@ import { can, capsOf, type Action, type Actor, type Context, type Caps } from ".
 import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import { joinWords } from "./join-words.js";
 import { normalizeShortCode } from "./short-code.js";
+import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
 import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
@@ -363,6 +364,11 @@ export interface FlotillaOptions {
   /** Catalyst only: how an owner's Mac asks the relay for pond-scoped tokens. Absent with Firebase. */
   relay?: PondRelay | null;
   now?: () => number;
+  /**
+   * The device's live stream to the cloud (`LiveClient.state`, docs/cloud-layer.md "Live notices"): "live", "reconnecting", or
+   * null when `squeak-live` is not configured (the old notice path; the state then follows what the cloud answered).
+   */
+  liveState?: () => "live" | "reconnecting" | null;
   /** A stream notice waits this long for company before it starts a read (default 1 s); 0 in tests. */
   wakeDebounceMs?: number;
   /** At least this long between two reads of one pond that a notice started (default 3 s). */
@@ -433,6 +439,11 @@ export interface PondSummary {
   /** Unix ms of the last good read this came from; present only with `offline`. */
   asOf?: number;
   offlineLine?: string;
+  /**
+   * The one connection state every surface draws (connection.ts): Live, Reconnecting… or the Owner's Mac offline. Absent
+   * for a Pond that is only on this Mac or not active, and from an older host.
+   */
+  connection?: Connection;
 }
 
 export interface MemberView {
@@ -535,6 +546,7 @@ export interface PondView {
   /** Unix ms of the last good read; present only with `offline`. */
   asOf?: number;
   offlineLine?: string;
+  connection?: Connection;
 }
 
 /** What the last good read of a pond left on disk: metadata only, never a thread's events or a message body. */
@@ -546,6 +558,9 @@ interface PondSnapshot {
 
 export const OFFLINE_WRITE = "The pond can't be reached right now, so it is read-only until the connection returns.";
 /** What a read says when the relay did not answer: never `fetch failed` or a status code. */
+/** A leave the cloud did not confirm stays a Member's: the Mac shows this and Try again (issue #130). */
+export const LEAVE_NOT_CONFIRMED =
+  "Squeak couldn't confirm leaving with the cloud. You're still in the Pond. Try again.";
 export const CLOUD_DOWN = "Can't reach Squeak's cloud. Try again in a moment.";
 const ACCESS_ENDED = "You no longer have access to this pond.";
 const WAITING_FOR_KEY = "Waiting for the pond owner's Mac to send you the new pond key.";
@@ -655,6 +670,8 @@ export class FlotillaService extends EventEmitter {
   private readonly lastRunAt = new Map<string, number>();
   private readonly backoffs = new Map<string, { ms: number; until: number }>();
   private readonly summaryCache = new Map<string, { at: number; row: PondSummary }>();
+  /** Whether the Owner's Mac was online at the last presence read of each Pond (connection.ts); not stored. */
+  private readonly ownerSeen = new Map<string, boolean>();
   private readonly lastPresence = new Map<string, { viewing?: string; typing?: string; at: number }>();
   private readonly pendingWake = new Map<string, number>();
   /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"). */
@@ -1487,7 +1504,35 @@ export class FlotillaService extends EventEmitter {
     );
     // A pond that is gone (forgotten, left) is gone from the cache too.
     for (const id of Object.keys(this.snapshotFile.data.ponds)) if (!live.has(id)) this.forgetSnapshot(id);
-    return out;
+    return out.map((row) => this.withConnection(row));
+  }
+
+  /** The one connection state of a row (connection.ts): from the live stream, the last read and the Owner's presence. */
+  private withConnection(row: PondSummary): PondSummary {
+    const rest = { ...row };
+    delete rest.connection;
+    if (row.status !== "active" || row.local) return rest;
+    const connection = connectionOf({
+      stream: this.options.liveState?.() ?? null,
+      reachable: row.offline !== true,
+      owner: row.role === "owner",
+      ...(this.ownerSeen.has(row.id) ? { ownerOnline: this.ownerSeen.get(row.id)! } : {}),
+      ...(row.ownerName ? { ownerName: row.ownerName } : {}),
+    });
+    return { ...rest, connection };
+  }
+
+  /** The whole Mac in one word, for the list's header (the Ponds that have a connection of their own). */
+  overallConnection(rows: PondSummary[]): Connection {
+    return overallConnection(
+      rows.map((r) => ({ owner: r.role === "owner", ...(r.connection ? { connection: r.connection } : {}) })),
+    );
+  }
+
+  /** The live stream changed state: every row's word is stale, so the next list and view say the new one. */
+  connectionChanged(): void {
+    this.summaryCache.clear();
+    for (const id of this.pondIds()) this.emit("connection", id);
   }
 
   /** Runs a refresh in the background at most every 15 s per pond: what a list or view wants answered, not waited on. */
@@ -2792,6 +2837,16 @@ export class FlotillaService extends EventEmitter {
       return;
     }
     const pond = this.activePond(pondId);
+    // Done only when the cloud confirms (issue #130): the account-level leave first, so another device of this account does
+    // not take the pond back. A relay without the route (404, 405: an older one) leaves it to the owner's removal.
+    try {
+      await this.options.relay?.leaveAccountPond?.(pondId);
+    } catch (error) {
+      const missing = error instanceof RelayRefused && (error.status === 404 || error.status === 405);
+      if (!missing && !(error instanceof Error && error.message === "404")) {
+        throw new FlotillaError(LEAVE_NOT_CONFIRMED, 503);
+      }
+    }
     await this.ripple(pondId, "left the pond", undefined, "left");
     await this.storeOf(pond)
       .delete(this.docPath(pond.id, "presence", this.selfId(pond)))
@@ -2800,9 +2855,6 @@ export class FlotillaService extends EventEmitter {
     // Kept on disk: a restart inside the day must not ask to be added back.
     this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
     this.pondsFile.save();
-    // Every other device of this account drops the pond on its next account sync, without the owner's Mac. A relay
-    // that does not know the route (older) refuses or fails: the owner's removal still does it, later.
-    await this.options.relay?.leaveAccountPond?.(pondId).catch(() => undefined);
     this.emit("changed", pondId);
   }
 
@@ -3449,11 +3501,13 @@ export class FlotillaService extends EventEmitter {
     // One that does not finish within the budget answers with the last good read, and carries on to refresh it.
     const work = this.readView(pond, options);
     work.catch(() => undefined);
-    return this.within(work, this.budgetMs, () => {
+    const view = await this.within(work, this.budgetMs, () => {
       const stale = this.staleView(pond);
       if (!stale) throw new FlotillaError(CLOUD_DOWN, 503);
       return stale;
     });
+    const row = this.withConnection(view.pond);
+    return { ...view, pond: row, ...(row.connection ? { connection: row.connection } : {}) };
   }
 
   /** A pond that is not (or not yet) the person's to read: its state and the sentence for it, and nothing else. */
@@ -3610,6 +3664,7 @@ export class FlotillaService extends EventEmitter {
     }
     const online = new Set(presence.filter((p) => p.online).map((p) => p.memberId));
     online.add(me.id);
+    this.ownerSeen.set(pond.id, pond.role === "owner" || online.has(memberIdOf(pond.ownerKey)));
     const ripples: Ripple[] = [];
     for (const { id, doc } of rippleRows) {
       const read = this.readSigned(pond, "ripples", id, doc, memberKey);
@@ -3951,6 +4006,7 @@ export class FlotillaService extends EventEmitter {
           if (p.online && (p.at !== undefined ? this.now() < p.until : this.now() - at < ONLINE_MS))
             online.add(p.memberId);
         }
+        this.ownerSeen.set(pond.id, online.has(ownerId));
         return { name: ownerName, online: online.has(ownerId) };
       },
     };

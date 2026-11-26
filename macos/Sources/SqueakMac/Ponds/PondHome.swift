@@ -307,7 +307,14 @@ struct PondFlockSection: View {
                 if let email = PersonName.emailLine(m) {
                     Text(verbatim: email).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 }
-                Text(verbatim: (removingNow ? "Removing\u{2026}" : changing ? "Changing role\u{2026}" : (detail == nil ? "You \u{00B7} This Mac" : tail))
+                if let failed = pond.flatMap({ ponds.actions.failure("remove:\($0.id):\(m.id)") }) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Text(verbatim: failed).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                        Button(PondActionWords.tryAgain) { if let p = pond { Task { await ponds.retry(action: "remove:\(p.id):\(m.id)", pond: p.id) } } }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+                Text(verbatim: (removingNow ? (pond.flatMap { ponds.actions.line("remove:\($0.id):\(m.id)") } ?? "Removing\u{2026}") : changing ? "Changing role\u{2026}" : (detail == nil ? "You \u{00B7} This Mac" : tail))
                     + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))
                     .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(dashboard ? 3 : 1)
                     .fixedSize(horizontal: false, vertical: true)

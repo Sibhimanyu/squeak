@@ -3,6 +3,7 @@
  * (docs/cloud-layer.md, "Configuration"). Absent: Firebase from `SQUEAK_REMOTE_DATABASE_URL`, as before.
  */
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -173,6 +174,24 @@ export interface CloudStoreDeps {
   envDatabaseUrl?: string | null;
   /** A hosted store's key was refused (revoked): the daemon goes back to needing sign-in. */
   onUnauthorized?: () => void;
+  /** `squeak-live`'s base URL (default `SQUEAK_LIVE_URL`); a hosted Mac only. Absent: the old notice path. */
+  liveUrl?: string | null;
+  /** Hears the live stream's state: "live" or "reconnecting". */
+  onLiveState?: (state: "live" | "reconnecting") => void;
+}
+
+/** The live service's base URL, checked: https, or plain http on this machine (a test double). Null when not usable. */
+export function liveServiceUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const url = new URL(value);
+    const local = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    if (url.username || url.password || url.search || url.hash) return null;
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return null;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
 }
 
 /** The store for a location (or for a whole config: its active one). */
@@ -180,8 +199,20 @@ export function createCloudStore(from: CloudLocation | CloudConfig, deps: CloudS
   const location: CloudLocation | null = "provider" in from ? from : activeLocation(from, deps.envDatabaseUrl ?? null);
   if (!location) throw new Error("The cloud store is not set up.");
   if (location.provider === "firebase") return new RtdbRest(location.databaseUrl, deps.fetch);
+  const liveUrl = location.hosted ? liveServiceUrl(deps.liveUrl ?? process.env.SQUEAK_LIVE_URL) : null;
   return new CatalystStore({
     baseUrl: location.relayUrl,
+    ...(liveUrl
+      ? {
+          live: {
+            url: liveUrl,
+            // Stable per Mac, and not the key itself.
+            deviceId: createHash("sha256").update(`squeak-live-device:${location.relayKey}`).digest("hex").slice(0, 32),
+            ...(deps.fetch ? { fetch: deps.fetch } : {}),
+            ...(deps.onLiveState ? { onState: deps.onLiveState } : {}),
+          },
+        }
+      : {}),
     ...(location.hosted ? { macKey: location.relayKey } : { relayKey: location.relayKey }),
     ...(deps.onUnauthorized && location.hosted ? { onUnauthorized: deps.onUnauthorized } : {}),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),

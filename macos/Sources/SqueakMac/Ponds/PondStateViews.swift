@@ -268,6 +268,14 @@ struct PondActionsSection: View {
                 }
             }
             if let line = ponds.result[pond.id] { Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted) }
+            ForEach(["leave:\(pond.id)", "delete:\(pond.id)"], id: \.self) { key in
+                if let failed = ponds.actions.failure(key) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Button(PondActionWords.tryAgain) { Task { await ponds.retry(action: key, pond: pond.id) } }.buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+            }
             if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             if !canWrite, let why = ponds.freshness(pond).writesDisabledReason { Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted) }
             Divider().overlay(Theme.line)

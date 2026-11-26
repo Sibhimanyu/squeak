@@ -147,7 +147,7 @@ struct RoomHeader: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(verbatim: RoomDucks.subtitle(people: people, ducks: ducks.count, connection: pond?.connection)).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             // New layout: the Duck row above the page carries the Ducks, so the header does not repeat them.

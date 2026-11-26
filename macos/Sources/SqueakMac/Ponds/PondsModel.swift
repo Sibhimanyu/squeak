@@ -94,6 +94,9 @@ final class PondsModel {
     private(set) var busy: Set<String> = []
     /// The last result line of those, quiet, by pond id.
     private(set) var result: [String: String] = [:]
+    /// Remove, leave and delete as the cloud has answered them (`PondActionTracker`): pending in place, a failure that stays
+    /// with Try again, and a done line only after the host confirmed.
+    private(set) var actions = PondActionTracker()
     /// Messages sent into other people's threads that the starter's Mac has not shown yet, by thread id.
     var outbox: [String: [PondOutgoing]] = [:]
     /// Whether the host has a cloud store an invite could publish to (an older host does not say: assumed).
@@ -517,14 +520,36 @@ final class PondsModel {
     }
 
     /// One owner action at a time per key; its result is a quiet line, its failure the host's sentence.
-    private func act(_ key: String, pond: String, success: String?, _ work: @escaping () async throws -> Void) async -> Bool {
+    private func act(_ key: String, pond: String, success: String?, kind: PondActionKind? = nil, who: String? = nil,
+                     _ work: @escaping () async throws -> Void) async -> Bool {
         guard !busy.contains(key) else { return false }
         busy.insert(key); result[pond] = nil
+        if let kind { actions.begin(key, kind, who: who) }
         defer { busy.remove(key) }
-        guard await attempt(work) else { return false }
+        guard await attempt(work) else {
+            if kind != nil { actions.fail(key, reason: note); note = nil }
+            return false
+        }
+        if kind != nil { actions.confirm(key); clearAction(key) }
         if let success { result[pond] = success; scheduleClear(pond) }
         await refresh(pond: pond, byPerson: true)
         return true
+    }
+
+    private func clearAction(_ key: String) {
+        Task { try? await Task.sleep(for: .seconds(5)); actions.clear(key) }
+    }
+
+    /// Try again on a failed remove, leave or delete: the same press, pending in place again.
+    func retry(action key: String, pond: String) async {
+        guard actions.offersTryAgain(key) else { return }
+        let parts = key.split(separator: ":").map(String.init)
+        switch parts.first {
+        case "remove": if parts.count == 3 { await removeMember(pond: parts[1], member: parts[2]) }
+        case "leave": _ = await leave(pond: pond)
+        case "delete": _ = await deletePond(pond: pond)
+        default: break
+        }
     }
 
     private var syncedAccount = false
@@ -533,7 +558,7 @@ final class PondsModel {
 
     func removeMember(pond: String, member: String) async {
         let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
-        _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.") { try await self.client!.removeMember(pond: pond, member: member) }
+        _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.", kind: .remove, who: name) { try await self.client!.removeMember(pond: pond, member: member) }
     }
 
     /// Owner: a Member's waiting Duck is approved (it starts) or declined (the Room says so).
@@ -563,7 +588,7 @@ final class PondsModel {
 
     /// A member leaves; the pond goes from the list.
     func leave(pond: String) async -> Bool {
-        let ok = await act("leave:\(pond)", pond: pond, success: nil) { try await self.client!.leave(pond: pond) }
+        let ok = await act("leave:\(pond)", pond: pond, success: nil, kind: .leave) { try await self.client!.leave(pond: pond) }
         if ok { route = nil }
         return ok
     }
@@ -600,7 +625,7 @@ final class PondsModel {
     }
 
     func deletePond(pond: String) async -> Bool {
-        let ok = await act("delete:\(pond)", pond: pond, success: nil) { try await self.client!.deletePond(pond: pond) }
+        let ok = await act("delete:\(pond)", pond: pond, success: nil, kind: .delete) { try await self.client!.deletePond(pond: pond) }
         if ok { await dropGone(id: pond) }
         return ok
     }

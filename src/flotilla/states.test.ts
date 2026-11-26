@@ -42,7 +42,15 @@ class World {
     };
     return self;
   }
-  mac(name: string, options: { owner?: boolean; budgetMs?: number; nest?: string | null } = {}) {
+  mac(
+    name: string,
+    options: {
+      owner?: boolean;
+      budgetMs?: number;
+      nest?: string | null;
+      live?: () => "live" | "reconnecting" | null;
+    } = {},
+  ) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pond-states-"));
     this.dirs.push(dir);
     const store = this.storeFor(name);
@@ -55,6 +63,7 @@ class World {
       storeFor: () => verifying(store),
       now: () => this.clock.t,
       ...(options.budgetMs ? { budgetMs: options.budgetMs } : {}),
+      ...(options.live ? { liveState: options.live } : {}),
     });
     return { dir, service, store };
   }
@@ -575,5 +584,63 @@ describe("the routes", () => {
     expect(await call("POST", ["ponds", pondId, "delete"], {})).toMatchObject({ status: 400 });
     expect(await call("POST", ["ponds", pondId, "delete"], { pondId })).toMatchObject({ status: 200 });
     expect(await call("GET", ["ponds"])).toMatchObject({ status: 200, body: { ponds: [] } });
+  });
+});
+
+describe("one connection state (#130)", () => {
+  it("a Member sees Live, then Reconnecting while the stream is down, then the Owner's Mac offline once it is back", async () => {
+    const w = world();
+    let stream: "live" | "reconnecting" | null = "live";
+    const A = w.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
+    const B = w.mac("Aarav", { live: () => stream });
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await A.service.setPresence(pond.id, { online: true });
+    expect((await B.service.view(pond.id)).pond.connection).toEqual({ state: "live", line: "Live" });
+    expect((await B.service.list())[0]!.connection?.state).toBe("live");
+
+    stream = "reconnecting";
+    B.service.connectionChanged();
+    const view = await B.service.view(pond.id);
+    expect(view.connection).toEqual({ state: "reconnecting", line: "Reconnecting\u2026" });
+    const rows = await B.service.list();
+    expect(rows[0]!.connection?.state).toBe("reconnecting");
+    expect(B.service.overallConnection(rows).state).toBe("reconnecting");
+
+    // The Owner's Mac stops (its presence lapses): after the stream is back, the word is the Owner's Mac offline.
+    stream = "live";
+    w.clock.t += 10 * 60_000;
+    B.service.connectionChanged();
+    const away = await B.service.view(pond.id);
+    expect(away.pond.connection).toEqual({ state: "owner-offline", line: "Sibhi\u2019s Mac offline" });
+    expect(B.service.overallConnection(await B.service.list()).state).toBe("owner-offline");
+  });
+
+  it("the Owner is never offline to themselves, and a local Pond has no connection", async () => {
+    const w = world();
+    const A = w.mac("Sibhi", { owner: true });
+    const local = A.service.ensureLocalPond({ name: "Solo", projectId: "proj-solo" });
+    const shared = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
+    const rows = await A.service.list();
+    expect(rows.find((r) => r.id === local.id)?.connection).toBeUndefined();
+    expect((await A.service.view(shared.id)).connection?.state).toBe("live");
+  });
+
+  it("an unreadable cloud is Reconnecting even with no live service configured", async () => {
+    const w = world();
+    const A = w.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
+    const B = w.mac("Aarav");
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await B.service.view(pond.id);
+    w.failing.set(B.store, "relay down");
+    const rows = await B.service.list();
+    expect(rows[0]).toMatchObject({ offline: true, connection: { state: "reconnecting" } });
   });
 });

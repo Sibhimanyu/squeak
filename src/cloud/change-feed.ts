@@ -65,6 +65,11 @@ const MAX_PAGES = 200;
 export class FeedMirror {
   private readonly ponds = new Map<string, PondMirror>();
   private off = false;
+  /**
+   * Where each Pond's cursor is, for `LiveClient` (live-notices.ts): a notice at or below it is already read. Kept in step
+   * with the mirror's own cursors; the live client may also move it forward after waking the Pond's watchers.
+   */
+  readonly cursors = new Map<string, number>();
 
   constructor(private readonly options: FeedMirrorOptions) {}
 
@@ -97,6 +102,7 @@ export class FeedMirror {
       const head = await this.options.changes(pondId, "head");
       if (!head) return this.turnOff();
       pond.cursor = head.next;
+      this.cursors.set(pondId, pond.cursor);
     } else if (!(await this.sync(pond, pondId))) {
       return this.turnOff();
     }
@@ -123,6 +129,7 @@ export class FeedMirror {
         else docs.delete(change.id);
       }
       pond.cursor = Math.max(pond.cursor, result.next);
+      this.cursors.set(pondId, pond.cursor);
       if (!result.more) return true;
     }
     return true;
@@ -131,11 +138,13 @@ export class FeedMirror {
   private turnOff(): null {
     this.off = true;
     this.ponds.clear();
+    this.cursors.clear();
     return null;
   }
 
   /** Forgets one Pond (it was left or reset): its next list starts from the head again. */
   forget(pondId: string): void {
     this.ponds.delete(pondId);
+    this.cursors.delete(pondId);
   }
 }

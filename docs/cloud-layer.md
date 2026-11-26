@@ -157,8 +157,14 @@ Code: `cloud/catalyst-relay/live/` (own folder, shares only the relay's modules)
 - **Fallback.** While no stream is open `LiveClient.state` is `reconnecting` (the UI of #130 says "Reconnecting...") and the
   feed is polled every 30 s; new streams are tried with growing jittered delays, and the first hello after being down reads
   each Pond once. Live again: no poll. The old shared `squeak_notice` channel and `/token` are unchanged for the iPhone app.
-- **Not wired yet.** `LiveClient` is not yet started by the daemon's `CatalystStore`; it takes the feed cursors of the
-  `FeedMirror` (`cursors`) and the same `changes` read, so wiring is #130's.
+- **Wired (issue #130).** A hosted Mac's `CatalystStore` starts one `LiveClient` with its first watcher when `SQUEAK_LIVE_URL`
+  names `squeak-live` (https, or http on this machine). It takes `FeedMirror.cursors`; a notice reads `/changes` and wakes the
+  watchers of that Pond, which list through the mirror as before. With it set, the store's own Data Streams socket stays
+  closed; unset, the old notice path runs unchanged. The daemon computes one connection state per Pond and overall
+  (`src/flotilla/connection.ts`): `live`, `reconnecting` (stream down or cloud unreadable) or `owner-offline` (Owner's presence,
+  never shown to the Owner), on `PondSummary.connection` and `PondView.connection`, and `connection` beside `ponds` in
+  `GET /ponds`. The Mac draws it (Dashboard state line, Room header) and works out nothing. Leave is done only when the cloud
+  confirms the account-level leave (503 with a sentence otherwise); remove and delete already answer after their cloud writes.
 
 Owner steps (nothing here is deployed; Development environment first):
 

@@ -101,6 +101,9 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var offline: Bool
     public var asOf: Date?
     public var offlineLine: String?
+    /// The daemon's one connection word for this Pond (Live, Reconnecting\u{2026}, the Owner's Mac offline); nil from an older host
+    /// and for a Pond that is only on this Mac. The app draws it and works out nothing.
+    public var connection: PondConnectionInfo?
     public var state: PondStatus { PondStatus(raw: status, local: local) }
     public var isWaiting: Bool { state == .pending }
     public var isDeclined: Bool { state == .declined }
@@ -108,7 +111,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var isTerminal: Bool { state.isTerminal }
 
     enum CodingKeys: String, CodingKey {
-        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words
+        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection
         case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere
     }
 
@@ -134,10 +137,12 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         offline = c.lenient(Bool.self, .offline) ?? false
         asOf = PondTime.decode(c, CodingKeys.asOf)
         offlineLine = c.lenient(String.self, .offlineLine).flatMap { $0.isEmpty ? nil : $0 }
+        connection = c.lenient(PondConnectionInfo.self, .connection)
     }
 
     public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil,
-                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil) {
+                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil) {
+        self.connection = connection
         self.statusLine = statusLine; self.ownerName = ownerName; self.offline = offline; self.asOf = asOf; self.offlineLine = offlineLine; self.requestedAt = requestedAt
         self.status = status; self.requestedRole = requestedRole; self.words = []
         self.canStartHere = canStartHere
@@ -145,6 +150,26 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         self.projectId = projectId
         self.id = id; self.name = name; self.role = role; self.memberCount = memberCount
         self.threadCount = threadCount; self.needsYou = needsYou; self.gitRemote = gitRemote; self.tint = tint
+    }
+}
+
+/// The daemon's word on a Pond's connection: `live`, `reconnecting` or `owner-offline`, and the sentence for it. A state this
+/// app does not know decodes to nothing, so an older app never draws a word it cannot place.
+public struct PondConnectionInfo: Sendable, Equatable, Decodable {
+    public var state: PondConnection
+    public var line: String
+
+    public init(state: PondConnection, line: String) { self.state = state; self.line = line }
+
+    enum CodingKeys: String, CodingKey { case state, line }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let raw = c.lenient(String.self, .state), let state = PondConnection(daemon: raw) else {
+            throw DecodingError.dataCorruptedError(forKey: .state, in: c, debugDescription: "unknown connection state")
+        }
+        self.state = state
+        self.line = c.lenient(String.self, .line) ?? ""
     }
 }
 

@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
+import { RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
 import { named, verifying } from "./named-account.test-fixture.js";
 
@@ -249,6 +250,29 @@ describe("a left pond is not asked for again, across a restart", () => {
     await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
     await B.service.refresh(pond.id);
     await expect(B.service.leave(pond.id)).resolves.toBeUndefined();
+  });
+
+  it("a leave the cloud did not confirm leaves the Member in the Pond with one sentence, and works on the next try (#130)", async () => {
+    const c = cloud();
+    const A = c.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-G" });
+    let down = true;
+    const B = c.mac("Aarav", {
+      relay: {
+        leaveAccountPond: async () => {
+          if (down) throw new RelayRefused(503);
+        },
+      },
+    });
+    await B.service.join((await A.service.invite(pond.id, "member")).code);
+    const [req] = (await A.service.view(pond.id)).joins;
+    await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
+    await B.service.refresh(pond.id);
+    await expect(B.service.leave(pond.id)).rejects.toThrow(/couldn't confirm leaving/);
+    expect((await B.service.list()).map((p) => p.id)).toContain(pond.id);
+    down = false;
+    await B.service.leave(pond.id);
+    expect((await B.service.list()).map((p) => p.id)).not.toContain(pond.id);
   });
 
   it("is dropped once the owner's removal is seen (the pond is no longer listed)", async () => {

@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 
 import type { ChannelDoc } from "./store.js";
 import { FeedMirror, type FeedPage } from "./change-feed.js";
+import { LiveClient, type LiveState } from "./live-notices.js";
 import { onNetworkChange } from "../remote/network-change.js";
 import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 
@@ -44,6 +45,21 @@ export interface CatalystStoreOptions {
   pondToken?: string;
   /** A Mac joiner's attestation (`POST /account/join-attest`), sent as `x-squeak-join-attest` beside a pond token. */
   joinAttest?: string;
+  /**
+   * `squeak-live` (docs/cloud-layer.md, "Live notices"): one stream per Mac, a hosted Mac's own key only. Set, the live stream
+   * replaces this store's Data Streams WebSocket and its notices drive the feed reads; unset, the old notice path runs
+   * unchanged. `onState` hears "live" / "reconnecting" (the Mac's one connection state, issue #130).
+   */
+  live?: {
+    url: string;
+    deviceId: string;
+    fetch?: FetchLike;
+    onState?: (state: LiveState) => void;
+    pollMs?: number;
+    handoverMs?: number;
+    retryMinMs?: number;
+    retryMaxMs?: number;
+  };
   fetch?: FetchLike;
   /** Opens a WebSocket; the default is Node's global one. */
   socket?: (url: string) => StreamSocket;
@@ -76,6 +92,8 @@ export class CatalystStore implements CloudStore {
   private readonly fetchImpl: FetchLike;
   private readonly hub: StreamHub;
   private readonly feed: FeedMirror;
+  private liveClient: LiveClient | null = null;
+  private readonly liveOptions: CatalystStoreOptions["live"] | undefined;
 
   constructor(options: CatalystStoreOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "");
@@ -95,7 +113,11 @@ export class CatalystStore implements CloudStore {
       changes: (pondId, since) => this.changes(pondId, since),
       listPlain: (collection) => this.listPlain(collection),
     });
+    // Live notices are for the Mac's own key; a pond-scoped member store and the owner's key keep the old stream.
+    this.liveOptions = options.macKey ? options.live : undefined;
     this.hub = new StreamHub({
+      passive: this.liveOptions !== undefined,
+      liveHealthy: () => this.liveClient?.state === "live",
       token: () => this.token(),
       socket: options.socket ?? ((url) => new WebSocket(url) as unknown as StreamSocket),
       retryMinMs: options.retryMinMs ?? RETRY_MIN_MS,
@@ -224,6 +246,7 @@ export class CatalystStore implements CloudStore {
       if (!stopped) onChange(source);
     };
     const release = this.hub.add({ path, wake, options });
+    this.startLive();
     const first = setTimeout(() => wake("first"), 0);
     first.unref?.();
     const poll = setInterval(() => {
@@ -245,8 +268,45 @@ export class CatalystStore implements CloudStore {
     return this.hub.healthy();
   }
 
+  /** The live stream's state ("live" / "reconnecting"); null when `squeak-live` is not configured (the old notice path). */
+  liveState(): LiveState | null {
+    return this.liveOptions ? (this.liveClient?.state ?? "reconnecting") : null;
+  }
+
+  /**
+   * Starts the one live stream of this Mac (once; with the first watcher). A notice reads the change feed from the cursor
+   * `FeedMirror` already holds and wakes the watchers of that Pond, which list through the mirror as before.
+   */
+  private startLive(): void {
+    const live = this.liveOptions;
+    if (!live || this.liveClient) return;
+    const client = new LiveClient({
+      baseUrl: live.url,
+      headers: { [this.header.name]: this.header.value },
+      deviceId: live.deviceId,
+      ponds: () => this.hub.channels(),
+      changes: (pondId, since) => this.changes(pondId, since),
+      onChanges: (pondId) => this.hub.wakeChannel(pondId),
+      onRemoved: (pondId) => this.hub.wakeChannel(pondId),
+      onState: (state) => {
+        // Down: the 30 s feed poll wakes the watchers; live again: everything missed was read once at the hello.
+        live.onState?.(state);
+      },
+      cursors: this.feed.cursors,
+      ...(live.fetch ? { fetch: live.fetch } : {}),
+      ...(live.pollMs !== undefined ? { pollMs: live.pollMs } : {}),
+      ...(live.handoverMs !== undefined ? { handoverMs: live.handoverMs } : {}),
+      ...(live.retryMinMs !== undefined ? { retryMinMs: live.retryMinMs } : {}),
+      ...(live.retryMaxMs !== undefined ? { retryMaxMs: live.retryMaxMs } : {}),
+    });
+    this.liveClient = client;
+    client.start();
+  }
+
   /** Stops the subscriber (a store that is being replaced); watchers still registered get no more notices. */
   close(): void {
+    this.liveClient?.stop();
+    this.liveClient = null;
     this.hub.shutdown();
   }
 
@@ -295,6 +355,9 @@ interface Watcher {
 }
 
 interface HubOptions {
+  /** `squeak-live` carries the notices: this hub keeps watchers and wakes them, and opens no Data Streams socket. */
+  passive?: boolean;
+  liveHealthy?: () => boolean;
   token: () => Promise<{ url: string; key: string; wssId: string }>;
   socket: (url: string) => StreamSocket;
   retryMinMs: number;
@@ -357,7 +420,23 @@ class StreamHub {
   }
 
   healthy(): boolean {
+    if (this.options.passive) return this.running && (this.options.liveHealthy?.() ?? false);
     return this.running && this.ready && this.socket !== null;
+  }
+
+  /** The channel ids every watcher names: the Ponds this Mac watches. */
+  channels(): string[] {
+    const ids = new Set<string>();
+    for (const watcher of this.watchers) {
+      const id = channelOfPath(watcher.path);
+      if (id) ids.add(id);
+    }
+    return [...ids];
+  }
+
+  /** A change in this Pond was read from the feed: its watchers list again (through the mirror). */
+  wakeChannel(channel: string): void {
+    for (const watcher of [...this.watchers]) if (channelOfPath(watcher.path) === channel) watcher.wake("stream");
   }
 
   /** The one channel id every watcher's path names, else undefined. */
@@ -393,6 +472,7 @@ class StreamHub {
   private start(): void {
     this.running = true;
     this.retryMs = this.options.retryMinMs;
+    if (this.options.passive) return;
     // A new network leaves the socket dead without a word: drop it and reconnect now.
     this.unsubscribeNetwork = onNetworkChange(() => {
       if (!this.running) return;

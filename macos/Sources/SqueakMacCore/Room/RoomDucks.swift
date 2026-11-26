@@ -99,6 +99,14 @@ public enum RoomDucks {
         return "\(p) \u{00B7} \(d)"
     }
 
+    /// The Room header's line with the Pond's one connection word at the end, the daemon's own sentence ("Live", "Reconnecting\u{2026}",
+    /// "Sibhi\u{2019}s Mac offline"); unchanged for a Pond with no connection (only on this Mac, or an older host).
+    public static func subtitle(people: Int, ducks: Int, connection: PondConnectionInfo?) -> String {
+        let base = subtitle(people: people, ducks: ducks)
+        guard let line = connection?.line, !line.isEmpty else { return base }
+        return "\(base) \u{00B7} \(line)"
+    }
+
     /// The duck's name as the host takes it (1 to 32 characters): nil when it cannot be sent.
     public static func cleanName(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)

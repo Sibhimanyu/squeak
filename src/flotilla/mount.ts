@@ -114,14 +114,15 @@ export class FlotillaRoutes {
       }
       // The host decides whether "Start a thread" is offered: this Mac holds the pond's project, or the pond has a remote.
       const here = new Set((this.deps.projects?.() ?? []).map((p) => p.id));
-      const ponds = (await service.list()).map((p) => ({
+      const rows = await service.list();
+      const ponds = rows.map((p) => ({
         ...p,
         // With own-Mac threads stashed, a pond someone else owns starts only on the owner's Mac (docs/ponds.md).
         canStartHere:
           (p.role === "owner" || p.local === true || flag("pondOwnThreads")) &&
           Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
       }));
-      ctx.json(200, { ponds, cloud: service.hasCloud() });
+      ctx.json(200, { ponds, cloud: service.hasCloud(), connection: service.overallConnection(rows) });
       return true;
     }
     if (a === "sync-account" && parts.length === 2 && method === "POST") {
