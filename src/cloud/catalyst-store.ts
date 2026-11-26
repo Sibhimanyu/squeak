@@ -698,6 +698,7 @@ function toDoc(value: unknown): ChannelDoc | null {
   if (typeof fields.sig === "string") doc.sig = fields.sig;
   if (typeof fields.device === "string") doc.device = fields.device;
   if (typeof fields.at === "number") doc.at = fields.at;
+  if (typeof fields.seq === "number" && Number.isInteger(fields.seq) && fields.seq > 0) doc.seq = fields.seq;
   return doc;
 }
 

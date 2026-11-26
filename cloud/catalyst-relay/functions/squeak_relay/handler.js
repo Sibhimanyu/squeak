@@ -51,11 +51,6 @@
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
 //                      scope "guest" (default), "member" or "join" (an invite's: writes the join request only)
 //   POST   /pond-revoke {pondId, memberId}         (relay key) -> 204
-//   POST   /ponds/short {pondId, details} (the owner's Mac key, or the relay key) -> 200 {code:"K7P-4QD", expiresAt}: a short invite
-//                      code (6 characters, 10 min, once). The relay keeps only the join details the joiner needs to ask (never the
-//                      pond key), under a keyed hash of the code. POST /ponds/short/redeem {code} (a signed-in account: a Mac's own
-//                      key, an x-squeak-account token or the cookie) -> 200 {details} once, the record is deleted first; every miss is
-//                      the same 404 {error:"code"}; 10 tries a minute and 30 an hour per account, 5 wrong tries lock the account 10 min
 //   POST   /account/macs/provision {macId, name?} (cookie or x-squeak-account) -> 200 {macId, key, ...}: creates or rotates the
 //                      Mac's own key (shown once, only its hash kept; at most 10 Macs per account: 409 too-many-macs)
 //   POST   /account/macs/cliq-token {channel, token} (the Mac's own key) -> 200 {ok:true}: registers the Cliq ingest token of one of
@@ -79,6 +74,7 @@ const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = 
 const scoped = require("./scoped");
 const { createFeed, FEED_KINDS } = require("./feed");
 const { createLiveNotices } = require("./live-notice");
+const { createRoomCloud } = require("./room-cloud");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 const { createCleanStart } = require("./clean-start");
@@ -103,7 +99,7 @@ const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
 /** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
 /** The one history document that wakes readers (the index); pages are read by id from it, so they stay quiet. */
 const HIST_INDEX = "idx";
-const NO_KEY_PUT = new Set(["joinids", "devreqs"]);
+const NO_KEY_PUT = new Set(["joinids", "devreqs", "roomnote"]);
 const TICKET_TTL_MS = 10 * 60 * 1000;
 const JOIN_ATTEST_TTL_MS = 10 * 60 * 1000;
 const NAMES_MAX = 50;
@@ -176,21 +172,6 @@ const handoffReturn = (value) => {
     return null;
   }
 };
-/** Short invite codes (docs/ponds.md, "Short codes"): relay-owned pks, never reachable by /doc or /list. */
-const SHORT_PK = "shortcodes";
-const SHORT_RATE_PK = "short-rate";
-const SHORT_TRIES_PK = "short-tries";
-const SHORT_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // no 0 O 1 I L
-const SHORT_LENGTH = 6;
-const SHORT_TTL_MS = 10 * 60 * 1000;
-const SHORT_CREATES_PER_HOUR = 20;
-const SHORT_TRIES_PER_MIN = 10;
-const SHORT_TRIES_PER_HOUR = 30;
-const SHORT_WRONG_LIMIT = 5;
-const SHORT_LOCK_MS = 10 * 60 * 1000;
-const SHORT_BODY_MAX = 4096;
-/** What a short code's details may hold: the invite's fields except the pond key (`k`, `kv`), which never goes to the relay. */
-const SHORT_DETAIL_KEYS = ["v", "p", "o", "n", "s", "e", "r", "on", "l", "jt"];
 /** Invite email (docs/cloud-layer.md): limits and the fixed sentences a failure may carry. */
 const INVITE_PREVIEW_PK = "invite-preview";
 const INVITE_PREVIEW_PER_MIN = 60;
@@ -365,6 +346,12 @@ function createRelay(deps) {
 
   const feed = createFeed(deps.store);
   const live = createLiveNotices(deps.streams, log);
+  /** The Room kept whole and sealed, paged out oldest first past a byte cap per Pond (room-cloud.js). */
+  const roomCloud = createRoomCloud({
+    store: deps.store,
+    feed,
+    ...(deps.roomCapBytes ? { capBytes: deps.roomCapBytes } : {}),
+  });
   /**
    * Gives a content write the Pond's next seq (feed.js) and returns the document to store: the same one with `seq` added
    * (an older client ignores the field), or the document untouched when the kind is not Pond content or the store has no
@@ -430,10 +417,19 @@ function createRelay(deps) {
           if (verdict && verdict.status) return send(res, verdict.status, verdict.body);
           identity = verdict && verdict.user;
         }
+        // A Member's post is part of the Room for good: a token may add one, never overwrite or delete anyone's (the
+        // Owner's own key pages and removes).
+        if (parsed.kind === "rposts" && method === "DELETE") return send(res, 403, {});
         if (method === "PUT") {
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
-          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(await stamp(parsed, body.doc)));
+          if (parsed.kind === "rposts") {
+            const had = await deps.store.get(parsed.pk, parsed.doc);
+            if (had !== null && had !== undefined) return send(res, 409, { error: "exists" });
+          }
+          const stored = JSON.stringify(await stamp(parsed, body.doc));
+          await deps.store.put(parsed.pk, parsed.doc, stored);
+          if (roomCloud.isRoomKind(parsed.kind)) await roomCloud.wrote(parsed.channel, Buffer.byteLength(stored));
           if (parsed.kind === "joins") {
             // Always rewritten or cleared, so the email shown is that of whoever wrote the request now.
             const idPk = `channels/${parsed.channel}/joinids`;
@@ -926,40 +922,7 @@ function createRelay(deps) {
     return send(res, 204);
   }
 
-  // ---- short invite codes ----
   const clock = () => (deps.now ? deps.now() : Date.now());
-  /** The row id of a code: a keyed hash, so a copy of the table holds no codes. */
-  const shortId = (code) =>
-    crypto.createHmac("sha256", String(deps.key)).update(`squeak-short-code\n${code}`).digest("base64url");
-  const shortHash = (code) =>
-    crypto.createHmac("sha256", String(deps.key)).update(`squeak-short-check\n${code}`).digest();
-  /** "k7p-4qd", " K7P 4QD " -> "K7P4QD", or null when it is not six characters of the alphabet. */
-  const shortNormal = (value) => {
-    if (typeof value !== "string" || value.length > 32) return null;
-    const c = value.replace(/[\s-]/g, "").toUpperCase();
-    return c.length === SHORT_LENGTH && [...c].every((ch) => SHORT_ALPHABET.includes(ch)) ? c : null;
-  };
-  const shortShow = (c) => `${c.slice(0, 3)}-${c.slice(3)}`;
-  const shortMake = () => {
-    let c = "";
-    for (let i = 0; i < SHORT_LENGTH; i++) c += SHORT_ALPHABET[crypto.randomInt(SHORT_ALPHABET.length)];
-    return c;
-  };
-  /** The invite's details as the joiner needs them, or null: only known keys, right types, never a pond key. */
-  function shortDetails(d) {
-    if (!d || typeof d !== "object" || Array.isArray(d)) return null;
-    if (Object.keys(d).some((k) => !SHORT_DETAIL_KEYS.includes(k))) return null;
-    const str = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;
-    if (d.v !== 1 || !scoped.POND.test(String(d.p)) || !str(d.o, 200) || !str(d.s, 100) || typeof d.e !== "number")
-      return null;
-    if (d.n !== undefined && !str(d.n, 400)) return null;
-    if (d.on !== undefined && !str(d.on, 200)) return null;
-    if (d.r !== undefined && d.r !== "member" && d.r !== "viewer") return null;
-    if (d.jt !== undefined && !str(d.jt, 800)) return null;
-    if (d.l !== undefined && d.l !== null && (typeof d.l !== "object" || Array.isArray(d.l))) return null;
-    if (JSON.stringify(d).length > 2000) return null;
-    return d;
-  }
   /** Counts one more use in a window kept under (pk, id); false once `limit` uses are spent. */
   async function spend(pk, id, windowMs, limit, n = 1) {
     const now = clock();
@@ -1032,39 +995,6 @@ function createRelay(deps) {
     // Nothing went out: say so as a failure (quota or a sender that is not set up are the usual causes), no SDK words.
     if (sent.length === 0) return out(503, { error: "mail", reason: MAIL_FAILED, failed });
     return out(200, { sent, failed });
-  }
-
-  /** POST /ponds/short: an owner's Mac (or the operator) makes a short code for the join details it hands over. */
-  async function handleShortCreate(req, res, method, mac) {
-    const out = (status, body) => send(res, status, body, NO_STORE);
-    if (method !== "POST") return out(405, {});
-    const body = await readJson(req, SHORT_BODY_MAX);
-    if (typeof body.pondId !== "string" || !scoped.POND.test(body.pondId)) return out(400, { error: "ids" });
-    if (mac && !(await tenants.channelAllowed(mac, body.pondId))) return send(res, 403, {}, NO_STORE);
-    const details = shortDetails(body.details);
-    if (!details || details.p !== body.pondId) return out(400, { error: "details" });
-    const who = mac ? mac.userId : "operator";
-    if (!(await spend(SHORT_RATE_PK, `c-${who}`, HOUR_MS, SHORT_CREATES_PER_HOUR))) return out(429, { error: "busy" });
-    const now = clock();
-    // Lapsed codes are dropped as they are met: a table of codes that were never used must not grow without end.
-    for (const r of (await deps.store.list(SHORT_PK)).slice(0, 200)) {
-      const d = parseOr(r.json);
-      if (!d || typeof d.exp !== "number" || d.exp <= now) await gone(SHORT_PK, r.doc);
-    }
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const code = shortMake();
-      const id = shortId(code);
-      const taken = await deps.store.get(SHORT_PK, id);
-      if (taken !== null && taken !== undefined) continue;
-      const exp = now + SHORT_TTL_MS;
-      await deps.store.put(
-        SHORT_PK,
-        id,
-        JSON.stringify({ v: 1, h: shortHash(code).toString("base64url"), exp, pondId: body.pondId, details }),
-      );
-      return out(200, { code: shortShow(code), expiresAt: exp });
-    }
-    return out(503, { error: "busy" });
   }
 
   /**
@@ -1301,56 +1231,6 @@ function createRelay(deps) {
     return out(204);
   }
 
-  /** POST /ponds/short/redeem: a signed-in account trades a code for the details, once. */
-  async function handleShortRedeem(req, res, method, mac) {
-    const out = (status, body) => send(res, status, body, NO_STORE);
-    if (method !== "POST") return out(405, {});
-    if (req.headers["x-squeak-pond-token"] !== undefined) return out(401, undefined);
-    let userId;
-    if (mac) userId = mac.userId;
-    else if (req.headers["x-squeak-relay"] !== undefined)
-      return out(401, undefined); // the operator's key is no account
-    else {
-      const user = await accountUser(req, true);
-      if (!user) return out(401, { error: "signin" });
-      userId = user.userId;
-    }
-    if (!USER_ID.test(String(userId))) return out(401, { error: "signin" });
-    const body = await readJson(req, 1024);
-    const now = clock();
-    const lockId = `l-${userId}`;
-    const lock = parseOr(await deps.store.get(SHORT_TRIES_PK, lockId));
-    if (lock && typeof lock.until === "number" && lock.until > now) return out(429, { error: "locked" });
-    if (
-      !(await spend(SHORT_TRIES_PK, `m-${userId}`, 60_000, SHORT_TRIES_PER_MIN)) ||
-      !(await spend(SHORT_TRIES_PK, `h-${userId}`, HOUR_MS, SHORT_TRIES_PER_HOUR))
-    )
-      return out(429, { error: "busy" });
-    const miss = async () => {
-      // Five wrong tries by one account lock it out for ten minutes: a guess costs the guesser, never an owner's code.
-      const wrong = parseOr(await deps.store.get(SHORT_TRIES_PK, `w-${userId}`));
-      const fresh = !wrong || typeof wrong.since !== "number" || wrong.since + SHORT_LOCK_MS <= now;
-      const n = (fresh ? 0 : Number(wrong.n) || 0) + 1;
-      await deps.store.put(SHORT_TRIES_PK, `w-${userId}`, JSON.stringify({ since: fresh ? now : wrong.since, n }));
-      if (n >= SHORT_WRONG_LIMIT) {
-        await deps.store.put(SHORT_TRIES_PK, lockId, JSON.stringify({ until: now + SHORT_LOCK_MS }));
-        await gone(SHORT_TRIES_PK, `w-${userId}`);
-      }
-      return out(404, { error: "code" });
-    };
-    const code = shortNormal(body.code);
-    if (!code) return await miss();
-    const id = shortId(code);
-    const row = parseOr(await deps.store.get(SHORT_PK, id));
-    if (!row || typeof row.h !== "string" || typeof row.exp !== "number") return await miss();
-    if (!crypto.timingSafeEqual(Buffer.from(row.h, "base64url"), shortHash(code))) return await miss();
-    // Spent before it is handed over: a code that is read is a code that is gone, expired or not.
-    await deps.store.del(SHORT_PK, id);
-    if (row.exp <= now) return await miss();
-    await gone(SHORT_TRIES_PK, `w-${userId}`);
-    return out(200, { details: row.details });
-  }
-
   /**
    * GET /invites/preview?code=<inviteId> (no sign-in; the web's /join page shows it above the buttons). Only what the invitee
    * may see before signing in: the Pond's name, the inviter's and the members' first names, the state, the invited address masked. No full address, no ids,
@@ -1448,7 +1328,6 @@ function createRelay(deps) {
         await stampSeen(mac.macId);
       }
       const forbidden = () => send(res, 403, {});
-      if (route === "/ponds/short/redeem") return await handleShortRedeem(req, res, method, mac);
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
       if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
@@ -1597,7 +1476,6 @@ function createRelay(deps) {
         return send(res, 200, { names, ...(self ? { self } : {}) }, NO_STORE);
       }
 
-      if (route === "/ponds/short") return await handleShortCreate(req, res, method, mac);
       {
         const m = /^\/ponds\/([^/]+)\/invites\/email$/.exec(route);
         if (m) return await handleInviteEmail(req, res, method, mac, m[1]);
@@ -1729,7 +1607,9 @@ function createRelay(deps) {
           const stored = JSON.stringify(body.doc);
           if (mac && !(await tenants.chargeBytes(mac, Buffer.byteLength(stored))))
             return send(res, 429, { error: "quota" });
-          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(await stamp(parsed, body.doc)));
+          const kept = JSON.stringify(await stamp(parsed, body.doc));
+          await deps.store.put(parsed.pk, parsed.doc, kept);
+          if (roomCloud.isRoomKind(parsed.kind)) await roomCloud.wrote(parsed.channel, Buffer.byteLength(kept));
           await publishNotice(parsed.pk, parsed.doc);
           // A Cliq handler (Deluge) reads the answer's body to tell success from a bare 401, and a 204 has none.
           return parsed.kind === "cliq" ? send(res, 200, { ok: true }) : send(res, 204);

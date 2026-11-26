@@ -3,7 +3,7 @@
 // The token is stateless (an HMAC under RELAY_KEY) plus a revocation list in the store. Three scopes, three prefixes, and
 // the prefix is inside the MAC so one cannot be turned into another:
 //
-//   pt.<pondId>.<memberId>.<expiresAtSeconds>.<mac>   guest   (a web member): presence, tcmds, joins, holds, ripples
+//   pt.<pondId>.<memberId>.<expiresAtSeconds>.<mac>   guest   (a web or iPhone device of a member): tcmds, joins, holds, rposts
 //   pm.<pondId>.<memberId>.<expiresAtSeconds>.<mac>   member  (a Mac member): the guest kinds plus threads and tevents
 //   pj.<pondId>.<inviteId>.<expiresAtSeconds>.<mac>   join    (carried by an invite): writes the join request only
 //
@@ -12,8 +12,8 @@ const crypto = require("node:crypto");
 
 const POND = /^[A-Za-z0-9_-]{22,64}$/;
 const MEMBER = /^[A-Za-z0-9_-]{1,64}$/;
-/** What a guest's token may write: its own presence, commands, join request, holds and ripples. Room posts (rposts) are the inbox the owner Mac applies; never room, rtasks, members, keys, threads or tevents. */
-const GUEST_WRITE = new Set(["presence", "tcmds", "joins", "holds", "ripples", "rposts"]);
+/** What a guest's token may write: its commands, join request and holds. Room posts (rposts) are the inbox the owner Mac applies; never room, rtasks, members, keys, threads or tevents. */
+const GUEST_WRITE = new Set(["tcmds", "joins", "holds", "rposts"]);
 /** A Mac member also starts threads, so it writes its threads and their event batches. */
 const MEMBER_WRITE = new Set([...GUEST_WRITE, "threads", "tevents"]);
 /** An invite's token writes the join request and nothing else. */

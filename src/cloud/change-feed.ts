@@ -16,18 +16,13 @@ export const FEED_KINDS: ReadonlySet<string> = new Set([
   "joins",
   "threads",
   "tevents",
-  "presence",
   "holds",
   "tcmds",
-  "ripples",
   "keys",
-  "grants",
-  "tasks",
-  "claims",
-  "locks",
   "room",
   "rposts",
   "rtasks",
+  "roomnote",
 ]);
 
 export interface FeedChange {
@@ -125,7 +120,8 @@ export class FeedMirror {
       for (const change of result.changes) {
         const docs = pond.kinds.get(change.kind);
         if (!docs) continue;
-        if (change.doc) docs.set(change.id, change.doc);
+        // The stored document carries its seq; the feed's row (the document as written) does not, so it is put back here.
+        if (change.doc) docs.set(change.id, { ...change.doc, seq: change.seq });
         else docs.delete(change.id);
       }
       pond.cursor = Math.max(pond.cursor, result.next);

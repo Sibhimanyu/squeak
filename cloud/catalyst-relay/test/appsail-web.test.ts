@@ -63,7 +63,7 @@ describe("CORS: the Slate origin on account routes, nothing on control routes", 
 
   it("answers a preflight for account routes, naming x-squeak-account", async () => {
     const { base } = await boot();
-    for (const route of ["/me", "/invites/preview?code=x", "/account/macs", "/ponds/short/redeem"]) {
+    for (const route of ["/me", "/invites/preview?code=x", "/account/macs"]) {
       const r = await fetch(`${base}${route}`, {
         method: "OPTIONS",
         headers: {
@@ -117,7 +117,6 @@ describe("CORS: the Slate origin on account routes, nothing on control routes", 
       ["POST", "/pond-token"],
       ["POST", "/pond-revoke"],
       ["POST", "/pond-stream"],
-      ["POST", "/ponds/short"],
       ["POST", "/account/link"],
       ["POST", "/account/macs/cliq-token"],
       ["GET", "/account/handoff?return=https://squeak.onslate.in/"],

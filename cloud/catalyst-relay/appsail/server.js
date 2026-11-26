@@ -127,7 +127,7 @@ function originMatcher(patterns) {
 }
 /**
  * The routes the web app calls from another origin with its account token (x-squeak-account), plus the public invite
- * preview. Everything else (/doc /list /ping /token /pond-* /ponds/short, key-proved device traffic, the cookie routes)
+ * preview. Everything else (/doc /list /ping /token /pond-*, key-proved device traffic, the cookie routes)
  * is the daemon's or a device's and has no CORS.
  */
 const ACCOUNT_CORS_ROUTES = new Set([
@@ -139,7 +139,6 @@ const ACCOUNT_CORS_ROUTES = new Set([
   "/account/pond-leaves",
   "/account/pond-devices",
   "/account/avatar",
-  "/ponds/short/redeem",
 ]);
 function isAccountCorsRoute(route) {
   if (ACCOUNT_CORS_ROUTES.has(route)) return true;
@@ -179,7 +178,6 @@ function needsCatalystUser(req) {
   if (route === "/account/macs/cliq-token" || route === "/account/macs/hist-token") return false;
   if (route.startsWith("/account/macs/")) return !token;
   if (route === "/account/avatar") return !token && !key;
-  if (route === "/ponds/short/redeem") return !token && !key;
   return false;
 }
 

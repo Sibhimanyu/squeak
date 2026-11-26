@@ -2,7 +2,6 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { JOIN_WORDS, joinWords, joinWordsInput } from "./join-words.js";
-import { normalizeShortCode } from "./short-code.js";
 
 const fixture = JSON.parse(
   fs.readFileSync(
@@ -36,14 +35,5 @@ describe("join words (docs/ponds.md, Matching words)", () => {
       joinWords("ownerKey", "joinerKey", "pond2"),
     ];
     for (const d of different) expect(d).not.toEqual(base);
-  });
-
-  it("reads codes the way a person types them", () => {
-    for (const c of fixture.codes) expect(normalizeShortCode(c.input), c.input).toBe(c.normal);
-    expect(normalizeShortCode("k7p4qd")).toBe("K7P-4QD");
-    expect(normalizeShortCode("K7P 4QD")).toBe("K7P-4QD");
-    for (const bad of ["K7P-4Q0", "K7P-4QO", "K7P-4Q1", "K7P-4QI", "K7P-4QL", "K7P", "K7P-4QDD", "squeak-pond:eyJ2"]) {
-      expect(normalizeShortCode(bad), bad).toBeNull();
-    }
   });
 });

@@ -27,14 +27,11 @@ import {
   verifyText,
 } from "./crypto.js";
 import { can, capsOf, type Action, type Actor, type Context, type Caps } from "./permissions.js";
-import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import { joinWords } from "./join-words.js";
-import { normalizeShortCode } from "./short-code.js";
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
 import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
-import type { LockDoc, TaskView } from "./tasks.js";
 import {
   ARTIFACT_CHUNK_BYTES,
   ARTIFACT_FETCH_PER_HOUR,
@@ -180,9 +177,6 @@ interface LocalInvite {
    */
   code?: string;
   link?: string;
-  /** A short code (docs/ponds.md, "Short codes"): shown while it lives (10 min), then dropped. */
-  short?: string;
-  shortExpiresAt?: number;
 }
 
 export interface LongInvite {
@@ -191,14 +185,6 @@ export interface LongInvite {
   link?: string;
   id: string;
 }
-/** A short invite: `short` lives until `expiresAt` (10 min); `inviteExpiresAt` is how long the owner has to answer. */
-export interface ShortInvite {
-  short: string;
-  expiresAt: number;
-  id: string;
-  inviteExpiresAt: number;
-}
-
 /** What an owner sees of an invite. `code` and `link` are present only while it is pending. */
 export interface InviteView {
   id: string;
@@ -209,9 +195,6 @@ export interface InviteView {
   usedBy?: string;
   link?: string;
   code?: string;
-  /** `K7P-4QD` while the short code is unspent and unexpired, with when it lapses. */
-  short?: string;
-  shortExpiresAt?: number;
 }
 
 /** A pond-scoped relay token a member holds (docs/ponds.md, "Scoped tokens"). */
@@ -237,7 +220,7 @@ interface LocalPond {
   ownerName?: string;
   /** A joiner: when the invite lapses (from the code) and when the request went out. */
   inviteExpiresAt?: number;
-  /** A joiner by short code holds no pond key until the owner approves: the three words the owner sees too. */
+  /** A joiner holds no pond key until the owner approves: the three words the owner sees too. */
   words?: string[];
   requestedAt?: number;
   /** When a terminal status was reached. */
@@ -536,10 +519,6 @@ export interface PondView {
   starts?: PendingStartView[];
   presence: PresenceDoc[];
   holds: Hold[];
-  /** Tasks with their live claim folded in, most recently changed first. Only with `?coordination=1`: nothing draws them. */
-  tasks?: TaskView[];
-  /** Standing scope locks. */
-  locks?: LockDoc[];
   joins: JoinView[];
   /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
   invites?: InviteView[];
@@ -595,8 +574,6 @@ const INVITE_TTL_MS = 24 * 60 * 60_000;
 export const EMAIL_INVITE_LINK_BASE = "https://squeak.onslate.in/join";
 /** An invite by email lives a week: the person may read it tomorrow. Its join token is bound to their address. */
 const EMAIL_INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
-/** A short code lives 10 minutes (the relay's `SHORT_TTL_MS`); the invite behind it (and its join token) lets the owner answer for an hour. */
-const SHORT_INVITE_LIFE_MS = 60 * 60_000;
 /** A finished invite is kept this long past its expiry, so the owner can see what became of it. */
 const INVITE_KEEP_MS = 30 * 24 * 60 * 60_000;
 const RIPPLE_KEEP = 100;
@@ -677,8 +654,6 @@ export class FlotillaService extends EventEmitter {
   private readonly ownerSeen = new Map<string, boolean>();
   private readonly lastPresence = new Map<string, { viewing?: string; typing?: string; at: number }>();
   private readonly pendingWake = new Map<string, number>();
-  /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"). */
-  readonly coordination = new PondCoordination((pondId) => this.coordinationPort(pondId));
 
   constructor(private readonly options: FlotillaOptions) {
     super();
@@ -1652,32 +1627,22 @@ export class FlotillaService extends EventEmitter {
     pondId: string,
     role: Role | undefined,
     email: string | undefined,
-    options: { short: true },
-  ): Promise<ShortInvite>;
-  invite(
-    pondId: string,
-    role: Role | undefined,
-    email: string | undefined,
     options: { keyless: true; life?: number; linkBase?: string },
   ): Promise<LongInvite>;
   async invite(
     pondId: string,
     role: Role = "member",
     email?: string,
-    options: { short?: boolean; keyless?: boolean; life?: number; linkBase?: string } = {},
-  ): Promise<LongInvite | ShortInvite> {
+    options: { keyless?: boolean; life?: number; linkBase?: string } = {},
+  ): Promise<LongInvite> {
     const pond = this.activePond(pondId);
     this.allow(pond, "invite", {}, "Only an owner can invite.");
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
     // The first invite publishes a local pond (quietly), then makes the invite.
     await this.prepareFirstInvite(pond);
     const location = this.inviteLocation(pond);
-    const short = options.short === true;
-    if (short && !this.options.relay?.shortCreate) {
-      throw new FlotillaError("Short codes need Squeak's cloud. Sign in to Squeak, or share a link instead.", 503);
-    }
     const keyless = options.keyless === true;
-    const life = short ? SHORT_INVITE_LIFE_MS : (options.life ?? INVITE_TTL_MS);
+    const life = options.life ?? INVITE_TTL_MS;
     let joinToken: string | undefined;
     let tokenId: string | undefined;
     if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
@@ -1693,12 +1658,11 @@ export class FlotillaService extends EventEmitter {
     const expiresAt = this.now() + life;
     const id = randomId(8);
     this.sweepInvites(pond);
-    // A short code's details never hold the pond key (`k`, `kv`): it reaches the member only when the owner approves.
     const body = {
       v: 1,
       p: pond.id,
       // A keyless (emailed) invite carries no pond key: it reaches the member sealed to their key once they are let in.
-      ...(short ? {} : keyless ? { k: "", kv: 0 } : { k: pond.keys[String(pond.current)], kv: pond.current }),
+      ...(keyless ? { k: "", kv: 0 } : { k: pond.keys[String(pond.current)], kv: pond.current }),
       o: pond.ownerKey,
       n: pond.name,
       s: secret,
@@ -1710,36 +1674,6 @@ export class FlotillaService extends EventEmitter {
       l: location,
       ...(joinToken ? { jt: joinToken } : {}),
     };
-    if (short) {
-      let made: { code: string; expiresAt: number };
-      try {
-        made = await this.options.relay!.shortCreate!(pond.id, body);
-      } catch {
-        // A join token whose short code failed must not stay live: if revoke fails too, say so.
-        if (tokenId) {
-          await this.options.relay?.revoke(pond.id, tokenId).catch((error) =>
-            logger.warn("could not revoke a join token after its short code failed", {
-              pond: pond.id,
-              error: String(error),
-            }),
-          );
-        }
-        throw new FlotillaError("The relay would not make a short code; try again.", 503);
-      }
-      pond.invites.push({
-        id,
-        secret,
-        role,
-        expiresAt,
-        state: "pending",
-        createdAt: this.now(),
-        short: made.code,
-        shortExpiresAt: made.expiresAt,
-        ...(tokenId ? { tokenId } : {}),
-      });
-      this.save();
-      return { short: made.code, expiresAt: made.expiresAt, id, inviteExpiresAt: expiresAt };
-    }
     const code = INVITE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
     // The link form keeps the secret in the fragment, which a browser never sends to any server.
     const base = (options.linkBase ?? this.options.inviteLinkBase)?.replace(/[#?].*$/, "").replace(/\/+$/, "");
@@ -1877,47 +1811,17 @@ export class FlotillaService extends EventEmitter {
     }
   }
 
-  /** The relay's answer to a short code, in the sentences a person reads. */
-  private async redeemShort(code: string): Promise<Record<string, unknown>> {
-    const relay = this.options.relay;
-    if (!this.options.account || !relay?.shortRedeem) {
-      throw new FlotillaError("Joining with a short code needs Squeak's cloud. Sign in to Squeak first.", 401);
-    }
-    try {
-      return await relay.shortRedeem(code);
-    } catch (error) {
-      if (error instanceof RelayRefused) {
-        if (error.status === 404)
-          throw new FlotillaError("That code isn't valid, or it has expired. Ask for a new one.", 404);
-        if (error.status === 429) throw new FlotillaError("Too many tries. Wait a few minutes and try again.", 429);
-        if (error.status === 401 || error.status === 403) throw new FlotillaError(SIGN_IN_TO_JOIN, 401);
-      }
-      throw new FlotillaError("Squeak's cloud can't be reached, so the code wasn't checked. Try again.", 503);
-    }
-  }
-
   /** Writes a join request. Nothing is granted until an owner approves it on their Mac. */
   async join(code: string): Promise<{ pondId: string; status: "pending" }> {
     let body: Record<string, unknown>;
-    // A short code (K7P-4QD, any case, dash optional) is traded at the relay for the join details; they never hold the
-    // pond key, which arrives sealed to this Mac's key once the owner approves.
-    const shortCode = normalizeShortCode(code);
-    if (shortCode) {
-      body = { ...(await this.redeemShort(shortCode)) };
-      delete body.k;
-      delete body.kv;
-    } else {
-      try {
-        const raw = code.trim();
-        const bare = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : raw.replace(INVITE_PREFIX, "");
-        body = JSON.parse(Buffer.from(bare, "base64url").toString("utf8")) as Record<string, unknown>;
-      } catch {
-        throw new FlotillaError("That invite code is not valid.");
-      }
+    try {
+      const raw = code.trim();
+      const bare = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : raw.replace(INVITE_PREFIX, "");
+      body = JSON.parse(Buffer.from(bare, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new FlotillaError("That invite code is not valid.");
     }
-    const { p, o, n, s, e } = body;
-    const k = shortCode ? "" : body.k;
-    const kv = shortCode ? 0 : body.kv;
+    const { p, o, n, s, e, k, kv } = body;
     // An emailed invite is keyless too (`k: ""`): the pond key arrives sealed to this Mac's key once it is let in.
     const keyless = k === "";
     if (
@@ -3582,12 +3486,12 @@ export class FlotillaService extends EventEmitter {
     };
   }
 
-  async view(pondId: string, options: { coordination?: boolean } = {}): Promise<PondView> {
+  async view(pondId: string): Promise<PondView> {
     const pond = this.pond(pondId);
     if (pond.status !== "active") return this.idleView(pond);
-    if (pond.local) return this.liveView(pond, options);
+    if (pond.local) return this.liveView(pond);
     // One that does not finish within the budget answers with the last good read, and carries on to refresh it.
-    const work = this.readView(pond, options);
+    const work = this.readView(pond);
     work.catch(() => undefined);
     const view = await this.within(work, this.budgetMs, () => {
       const stale = this.staleView(pond);
@@ -3632,9 +3536,9 @@ export class FlotillaService extends EventEmitter {
     };
   }
 
-  private async readView(pond: LocalPond, options: { coordination?: boolean }): Promise<PondView> {
+  private async readView(pond: LocalPond): Promise<PondView> {
     try {
-      const view = await this.liveView(pond, options);
+      const view = await this.liveView(pond);
       this.remember(pond.id, {
         counts: { members: view.members.length, threads: view.threads.length, needsYou: view.pond.needsYou },
         view: this.metadataOnly(view),
@@ -3644,7 +3548,7 @@ export class FlotillaService extends EventEmitter {
       if (FlotillaService.isAccessEnded(error)) {
         const verdict = await this.onAccessEnded(pond);
         if (verdict === "removed") return this.idleView(pond);
-        if (verdict === "ok") return this.liveView(pond, options);
+        if (verdict === "ok") return this.liveView(pond);
         if (verdict === "waiting") {
           const stale = this.staleView(pond);
           if (stale) return stale;
@@ -3675,7 +3579,7 @@ export class FlotillaService extends EventEmitter {
     };
   }
 
-  private async liveView(pond: LocalPond, options: { coordination?: boolean } = {}): Promise<PondView> {
+  private async liveView(pond: LocalPond): Promise<PondView> {
     const me = this.meIn(pond);
     if (pond.local) {
       // Same page as a published pond: a flock of just you, no threads or Ripples in the cloud yet.
@@ -3700,7 +3604,6 @@ export class FlotillaService extends EventEmitter {
         ripples: [],
         presence: [],
         holds: [],
-        ...(options.coordination ? { tasks: [], locks: [] } : {}),
         joins: [],
         me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
       };
@@ -3723,18 +3626,12 @@ export class FlotillaService extends EventEmitter {
     const memberKey = (d: string): string[] => keysOfMember(members.get(d));
     const store = this.storeOf(pond);
     // Everything here is independent of everything else: one round trip's time, not ten.
-    const [presenceRows, holds, rippleRows, threadsRead, joinRows, coordination] = await Promise.all([
+    const [presenceRows, holds, rippleRows, threadsRead, joinRows] = await Promise.all([
       store.list(`channels/${pond.id}/presence`),
       this.holdsOf(pond, members),
       store.list(`channels/${pond.id}/ripples`),
       this.threadsOf(pond, members),
       pond.role === "owner" ? this.pendingJoins(pond, members) : Promise.resolve([]),
-      options.coordination
-        ? Promise.all([
-            this.coordination.tasks(pond.id).catch((): TaskView[] => []),
-            this.coordination.locks(pond.id).catch((): LockDoc[] => []),
-          ])
-        : Promise.resolve(null),
     ]);
     const now = this.now();
     const presence: PresenceDoc[] = [];
@@ -3790,7 +3687,6 @@ export class FlotillaService extends EventEmitter {
         .map((r) => this.rippleView(pond, r, members)),
       presence,
       holds: holds.map((h) => ({ ...h, heldBy: h.by, heldByName: h.byName })),
-      ...(coordination ? { tasks: coordination[0], locks: coordination[1] } : {}),
       joins: joinRows.map(
         ({ requestId, name, nest, role, client, verifiedEmail, verifiedName, requestedAt, stale, words }) => {
           const decision = stale ? { state: "failed" as const, line: stale } : this.decisionFor(pond.id, requestId);
@@ -3852,9 +3748,6 @@ export class FlotillaService extends EventEmitter {
           ...(i.usedBy ? { usedBy: i.usedBy } : {}),
           ...(state === "pending" && i.link ? { link: i.link } : {}),
           ...(state === "pending" && i.code ? { code: i.code } : {}),
-          ...(state === "pending" && i.short && (i.shortExpiresAt ?? 0) > this.now()
-            ? { short: i.short, shortExpiresAt: i.shortExpiresAt! }
-            : {}),
         };
       })
       .sort((a, b) => (b.createdAt ?? b.expiresAt) - (a.createdAt ?? a.expiresAt));
@@ -4000,35 +3893,6 @@ export class FlotillaService extends EventEmitter {
   async heldBy(pondId: string, requestId: string): Promise<Hold | null> {
     const pond = this.activePond(pondId);
     return (await this.holdsOf(pond, await this.members(pond))).find((h) => h.requestId === requestId) ?? null;
-  }
-
-  /**
-   * The narrow handle `coordination.ts` builds tasks, claims and scope locks on: sealed, signed documents of a kind
-   * it names, read back only when a current member of the pond signed them. Nothing else of the service leaks.
-   */
-  coordinationPort(pondId: string): CoordinationPort {
-    const pond = this.activePond(pondId);
-    const me = this.meIn(pond);
-    const store = this.storeOf(pond);
-    return {
-      me: { id: me.id, name: me.name },
-      role: pond.role,
-      ownerId: memberIdOf(pond.ownerKey),
-      now: this.now,
-      put: (kind, docId, value) => this.put(pond, kind, docId, value),
-      remove: (kind, docId) => store.delete(this.docPath(pond.id, kind, docId)),
-      list: async (kind) => {
-        const members = await this.members(pond);
-        const out: SignedDoc[] = [];
-        for (const { id, doc } of await store.list(`channels/${pond.id}/${kind}`)) {
-          const read = this.readSigned(pond, kind, id, doc, (d) => keysOfMember(members.get(d)));
-          const member = read ? members.get(read.device) : undefined;
-          if (read && member) out.push({ id, value: read.value, device: read.device, role: member.role });
-        }
-        return out;
-      },
-      ripple: async (text, kind) => void (await this.ripple(pondId, text, undefined, kind).catch(() => undefined)),
-    };
   }
 
   /**

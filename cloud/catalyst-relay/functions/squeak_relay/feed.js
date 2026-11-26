@@ -31,18 +31,13 @@ const FEED_KINDS = new Set([
   "joins",
   "threads",
   "tevents",
-  "presence",
   "holds",
   "tcmds",
-  "ripples",
   "keys",
-  "grants",
-  "tasks",
-  "claims",
-  "locks",
   "room",
   "rposts",
   "rtasks",
+  "roomnote",
 ]);
 
 function createFeed(store) {

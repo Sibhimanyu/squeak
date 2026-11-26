@@ -26,13 +26,6 @@ export interface PondRelay {
    */
   attest?(): Promise<IssuedToken>;
   /**
-   * A short invite code (`POST /ponds/short`, docs/ponds.md, "Short codes"): the relay keeps the join details under it for
-   * ten minutes and hands them over once. The details never hold the pond key.
-   */
-  shortCreate?(pondId: string, details: Record<string, unknown>): Promise<{ code: string; expiresAt: number }>;
-  /** Trades a short code for its details (`POST /ponds/short/redeem`, a signed-in Mac). Throws `RelayRefused` with the status. */
-  shortRedeem?(code: string): Promise<Record<string, unknown>>;
-  /**
    * `POST /ponds/<id>/invites/email`: the relay sends each address its invitation through Catalyst Mail (the join token
    * behind each link is already bound to that address). Throws `RelayRefused` with the status (429 limit, 503 mail).
    */
@@ -187,31 +180,6 @@ export class HttpPondRelay implements PondRelay {
     return { token: body.token, expiresAt: body.expiresAt };
   }
 
-  async shortCreate(pondId: string, details: Record<string, unknown>): Promise<{ code: string; expiresAt: number }> {
-    const body = (await (await this.post("/ponds/short", { pondId, details })).json().catch(() => null)) as Record<
-      string,
-      unknown
-    > | null;
-    if (!body || typeof body.code !== "string" || typeof body.expiresAt !== "number") {
-      throw new Error("catalyst ponds/short: unexpected answer");
-    }
-    return { code: body.code, expiresAt: body.expiresAt };
-  }
-
-  async shortRedeem(code: string): Promise<Record<string, unknown>> {
-    const response = await this.fetchImpl(`${this.url}/ponds/short/redeem`, {
-      method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
-      body: JSON.stringify({ code }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new RelayRefused(response.status);
-    const body = (await response.json().catch(() => null)) as { details?: unknown } | null;
-    if (!body || typeof body.details !== "object" || !body.details || Array.isArray(body.details)) {
-      throw new Error("catalyst ponds/short/redeem: unexpected answer");
-    }
-    return body.details as Record<string, unknown>;
-  }
 
   async inviteEmail(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }> {
     const response = await this.fetchImpl(`${this.url}/ponds/${encodeURIComponent(pondId)}/invites/email`, {

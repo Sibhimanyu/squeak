@@ -3,7 +3,6 @@ import type http from "node:http";
 
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { FlotillaBridge } from "./bridge.js";
-import type { Failure } from "./coordination.js";
 import { FlotillaError, isRole, type Role } from "./types.js";
 import type { FlotillaService } from "./service.js";
 import type { RoomSync } from "./room-sync.js";
@@ -66,12 +65,6 @@ const textList = (v: unknown, field: string): string[] => {
   }
   return v as string[];
 };
-
-/** A refused coordination call as the route's error: its status, sentence and who holds it. */
-function ok<T extends object>(outcome: ({ ok: true } & T) | Failure): { ok: true } & T {
-  if (outcome.ok) return outcome;
-  throw new FlotillaError(outcome.reason, outcome.status, outcome.heldBy ? { heldBy: outcome.heldBy } : {});
-}
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
@@ -195,8 +188,7 @@ export class FlotillaRoutes {
     if (!a) return false;
     const pondId = a;
     if (parts.length === 2 && method === "GET") {
-      // Tasks and locks cost two more relay reads and nothing draws them: only on request.
-      ctx.json(200, await service.view(pondId, { coordination: ctx.url.searchParams.get("coordination") === "1" }));
+      ctx.json(200, await service.view(pondId));
       return true;
     }
     if (b === "members" && c && parts.length === 4 && method === "DELETE") {
@@ -290,17 +282,8 @@ export class FlotillaRoutes {
       const inviteBody = await ctx.body();
       const role = str(inviteBody.role) ?? "member";
       if (!isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      // `{ short: true }`: a six-character code (K7P-4QD, 10 minutes, once) instead of the long code.
-      if (inviteBody.short !== undefined && typeof inviteBody.short !== "boolean") {
-        throw new FlotillaError("short is true or false");
-      }
       const email = str(inviteBody.email) ?? undefined;
-      ctx.json(
-        200,
-        inviteBody.short === true
-          ? await service.invite(pondId, role as Role, email, { short: true })
-          : await service.invite(pondId, role as Role, email),
-      );
+      ctx.json(200, await service.invite(pondId, role as Role, email));
       return true;
     }
     if (b === "invites" && c === "email" && parts.length === 4 && method === "POST") {
@@ -514,9 +497,6 @@ export class FlotillaRoutes {
     if (b === "room" && this.deps.roomSync) {
       if (await this.room(ctx, pondId, this.deps.roomSync)) return true;
     }
-    if (b === "tasks" || b === "locks") {
-      if (await this.coordinate(ctx, pondId)) return true;
-    }
     if (b === "presence" && parts.length === 3 && method === "POST") {
       const body = await ctx.body();
       exact(body, ["viewing", "typing"]);
@@ -646,105 +626,6 @@ export class FlotillaRoutes {
     }
   }
 
-  /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"); bodies are strict. */
-  private async coordinate(ctx: RouteContext, pondId: string): Promise<boolean> {
-    const co = this.deps.service.coordination;
-    const { method, parts } = ctx;
-    const [, , b, c, d] = parts;
-    const optionalStrings = (
-      body: Record<string, unknown>,
-    ): { title?: string; description?: string; scope?: string[] } => {
-      for (const k of ["title", "description"]) {
-        if (body[k] !== undefined && typeof body[k] !== "string") throw new FlotillaError(`${k} must be a string`);
-      }
-      return {
-        ...(typeof body.title === "string" ? { title: body.title } : {}),
-        ...(typeof body.description === "string" ? { description: body.description } : {}),
-        ...(body.scope !== undefined ? { scope: textList(body.scope, "scope") } : {}),
-      };
-    };
-    if (b === "tasks") {
-      if (parts.length === 3 && method === "GET") {
-        ctx.json(200, { tasks: await co.tasks(pondId), locks: await co.locks(pondId) });
-        return true;
-      }
-      if (parts.length === 3 && method === "POST") {
-        const body = await ctx.body();
-        exact(body, ["title", "description", "scope"]);
-        const input = optionalStrings(body);
-        if (!input.title?.trim()) throw new FlotillaError("title is required");
-        const out = ok(await co.createTask(pondId, { ...input, title: input.title }));
-        ctx.json(201, { task: out.task });
-        return true;
-      }
-      if (c && parts.length === 4 && method === "POST") {
-        const body = await ctx.body();
-        exact(body, ["title", "description", "scope"]);
-        ok(await co.editTask(pondId, c, optionalStrings(body)));
-        ctx.json(200, { ok: true });
-        return true;
-      }
-      if (c && d && parts.length === 5 && method === "POST") {
-        const body = await ctx.body();
-        if (d === "claim") {
-          exact(body, []);
-          ctx.json(200, ok(await co.claim(pondId, c)));
-          return true;
-        }
-        if (d === "release") {
-          exact(body, []);
-          ok(await co.release(pondId, c));
-          ctx.json(200, { ok: true });
-          return true;
-        }
-        if (d === "start") {
-          exact(body, ["threadKey"]);
-          const threadKey = str(body.threadKey);
-          if (!threadKey) throw new FlotillaError("threadKey is required");
-          ok(await co.hatch(pondId, c, threadKey));
-          ctx.json(200, { ok: true });
-          return true;
-        }
-        if (d === "done" || d === "drop") {
-          exact(body, []);
-          ok(await co.closeTask(pondId, c, d === "done" ? "done" : "dropped"));
-          ctx.json(200, { ok: true });
-          return true;
-        }
-      }
-      return false;
-    }
-    if (parts.length === 3 && method === "GET") {
-      ctx.json(200, { locks: await co.locks(pondId) });
-      return true;
-    }
-    if (parts.length === 3 && method === "POST") {
-      const body = await ctx.body();
-      exact(body, ["paths", "taskId", "threadKey"]);
-      const taskId = str(body.taskId);
-      const threadKey = str(body.threadKey);
-      const out = ok(
-        await co.takeLock(pondId, {
-          paths: textList(body.paths, "paths"),
-          ...(taskId ? { taskId } : {}),
-          ...(threadKey ? { threadKey } : {}),
-        }),
-      );
-      ctx.json(201, { lock: out.lock });
-      return true;
-    }
-    if (c && d === "heartbeat" && parts.length === 5 && method === "POST") {
-      exact(await ctx.body(), []);
-      ctx.json(200, ok(await co.heartbeat(pondId, c)));
-      return true;
-    }
-    if (c && parts.length === 4 && method === "DELETE") {
-      ok(await co.releaseLock(pondId, c));
-      ctx.json(200, { ok: true });
-      return true;
-    }
-    return false;
-  }
 
   /** SSE: `event: changed` with `{ pondId }` and nothing else; the app re-reads through the routes. */
   private stream(ctx: RouteContext): void {

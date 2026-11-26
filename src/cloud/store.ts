@@ -9,6 +9,8 @@ export interface ChannelDoc {
   sig?: string;
   device?: string;
   at?: number;
+  /** The Pond's change-feed sequence number the relay stamped on a content write (docs/cloud-layer.md); never sent by a writer. */
+  seq?: number;
 }
 
 /** Why a watch woke: a notice from the stream, the safety poll, a (re)connect, or the first call. */

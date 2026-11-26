@@ -123,8 +123,8 @@ describe("the sequence number", () => {
   it("is per Pond: two Ponds each count from 1, and concurrent writers to both do not mix", async () => {
     const { deps } = world();
     await Promise.all([
-      ...Array.from({ length: 6 }, (_, i) => put(deps, "tasks", `a${i}`, "x", POND)),
-      ...Array.from({ length: 6 }, (_, i) => put(deps, "tasks", `b${i}`, "x", OTHER)),
+      ...Array.from({ length: 6 }, (_, i) => put(deps, "rtasks", `a${i}`, "x", POND)),
+      ...Array.from({ length: 6 }, (_, i) => put(deps, "rtasks", `b${i}`, "x", OTHER)),
     ]);
     for (const pond of [POND, OTHER]) {
       const r = await changes(deps, `pond=${pond}&since=0`);
@@ -169,15 +169,15 @@ describe("GET /changes", () => {
   it("returns exactly the later documents, in order, with deletes as tombstones", async () => {
     const { deps } = world();
     await put(deps, "room", "a", "1");
-    await put(deps, "tasks", "t", "2");
+    await put(deps, "rtasks", "t", "2");
     await put(deps, "room", "a", "3"); // the same document again: a new change
-    await call(deps, "DELETE", `/doc?path=channels/${POND}/tasks/t`, op);
+    await call(deps, "DELETE", `/doc?path=channels/${POND}/rtasks/t`, op);
     const r = await changes(deps, `pond=${POND}&since=1`);
     expect(r.json).toEqual({
       changes: [
-        { seq: 2, kind: "tasks", id: "t", doc: SEALED("2") },
+        { seq: 2, kind: "rtasks", id: "t", doc: SEALED("2") },
         { seq: 3, kind: "room", id: "a", doc: SEALED("3") },
-        { seq: 4, kind: "tasks", id: "t", doc: null },
+        { seq: 4, kind: "rtasks", id: "t", doc: null },
       ],
       next: 4,
       more: false,

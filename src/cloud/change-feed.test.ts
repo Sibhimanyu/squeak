@@ -113,8 +113,8 @@ describe("a device reads a Pond through the change feed", () => {
     requests.length = 0;
     const now = await theirs.list(`channels/${POND}/room`);
     expect(now).toEqual([
-      { id: "a", doc: { box: "a2" } },
-      { id: "c", doc: { box: "c1" } },
+      { id: "a", doc: { box: "a2", seq: expect.any(Number) } },
+      { id: "c", doc: { box: "c1", seq: expect.any(Number) } },
     ]);
     expect(requests).toEqual(["/changes"]);
   });
@@ -124,13 +124,13 @@ describe("a device reads a Pond through the change feed", () => {
     const mine = open(fetchImpl);
     const theirs = open(fetchImpl);
     await mine.set(room("a"), { box: "a1" });
-    await mine.set(`channels/${POND}/tasks/t1`, { box: "t1" });
+    await mine.set(`channels/${POND}/rtasks/t1`, { box: "t1" });
     await theirs.list(`channels/${POND}/room`);
     requests.length = 0;
-    expect((await theirs.list(`channels/${POND}/tasks`)).map((d) => d.id)).toEqual(["t1"]);
+    expect((await theirs.list(`channels/${POND}/rtasks`)).map((d) => d.id)).toEqual(["t1"]);
     expect(requests.filter((r) => r === "/list")).toHaveLength(1);
     requests.length = 0;
-    await theirs.list(`channels/${POND}/tasks`);
+    await theirs.list(`channels/${POND}/rtasks`);
     await theirs.list(`channels/${POND}/room`);
     expect(requests).toEqual(["/changes", "/changes"]);
   });

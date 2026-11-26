@@ -286,7 +286,7 @@ describe("the relay is slow or gone", () => {
     w.delayMs = 0;
   });
 
-  it("a pond view reads its independent lists together and skips tasks and locks unless asked", async () => {
+  it("a pond view reads its independent lists together and reads each list once", async () => {
     const w = world();
     const { A, pondId } = await flock(w, [{ name: "Aarav", role: "member" }]);
     const seen: string[] = [];
@@ -296,9 +296,6 @@ describe("the relay is slow or gone", () => {
       return real(c);
     };
     const view = await A.service.view(pondId);
-    expect(view.tasks).toBeUndefined();
-    expect(seen).not.toContain("tasks");
-    expect(seen).not.toContain("locks");
     expect(seen.filter((k) => k === "members")).toHaveLength(1);
   });
 });

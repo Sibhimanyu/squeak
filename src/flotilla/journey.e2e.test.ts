@@ -182,24 +182,12 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
   });
 });
 
-describe("the account-based invite: a short code, no link, a signed-in member", () => {
-  it("joins with six characters, is approved on the owner's Mac, then messages a thread", async () => {
-    const table = new Map<string, Record<string, unknown>>();
+describe("the account-based invite: a signed-in member", () => {
+  it("joins with the invite, is approved on the owner's Mac, then messages a thread", async () => {
     const relay = {
       url: "https://relay.example/server/squeak_relay",
       issue: async () => ({ token: "t", expiresAt: 0 }),
       revoke: async () => undefined,
-      shortCreate: async (_p: string, details: Record<string, unknown>) => {
-        const code = `K7P-${table.size + 2}QD`;
-        table.set(code, details);
-        return { code, expiresAt: Date.now() + 10 * 60_000 };
-      },
-      shortRedeem: async (code: string) => {
-        const details = table.get(code);
-        if (!details) throw new Error("code");
-        table.delete(code);
-        return details;
-      },
     };
     const account = named("Bea Lee", "bea@example.com");
     const location = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
@@ -215,9 +203,8 @@ describe("the account-based invite: a short code, no link, a signed-in member", 
       projectId: "p2",
       gitRemote: "git@github.com:acme/docs.git",
     });
-    const made = await A.service.invite(pond.id, "member", undefined, { short: true });
-    expect(made.short).toMatch(/^[2-9A-HJKMNP-Z]{3}-[2-9A-HJKMNP-Z]{3}$/);
-    expect(await C.service.join(made.short)).toEqual({ pondId: pond.id, status: "pending" });
+    const made = await A.service.invite(pond.id, "member");
+    expect(await C.service.join(made.code)).toEqual({ pondId: pond.id, status: "pending" });
     const [join] = (await A.service.view(pond.id)).joins;
     expect(join).toBeDefined();
     await A.service.decideJoin(pond.id, join!.requestId, { approve: true });

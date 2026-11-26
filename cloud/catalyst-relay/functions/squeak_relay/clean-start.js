@@ -45,6 +45,7 @@ function createCleanStart({ store, people }) {
       documents += await wipePartition(`revoked/${id}`);
       documents += await feed.wipe(id);
       await store.del("channel-owners", id);
+      await store.del("roombytes", id);
     }
     return { ponds: wiped, documents, indexes, people: people ? await people.cleanStart() : null };
   }

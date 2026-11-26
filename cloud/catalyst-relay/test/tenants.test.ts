@@ -352,8 +352,8 @@ describe("phones (pairing credentials) stay working and confined", () => {
     const { f, a } = await twoMacs();
     const token = (await call(f.deps, "POST", "/pond-token", mk(a), { pondId: POND, memberId: "m1" })).json.token;
     const guest = (m: string, u: string, body?: unknown) => call(f.deps, m, u, { "x-squeak-pond-token": token }, body);
-    expect((await guest("PUT", `/doc?path=channels/${POND}/presence/p1`, { doc })).status).toBe(204);
-    expect((await guest("GET", `/doc?path=channels/${POND}/presence/p1`)).status).toBe(200);
+    expect((await guest("PUT", `/doc?path=channels/${POND}/holds/p1`, { doc })).status).toBe(204);
+    expect((await guest("GET", `/doc?path=channels/${POND}/holds/p1`)).status).toBe(200);
     expect((await guest("GET", `/doc?path=channels/${MAC_B}/state/d1`)).status).toBe(403);
     expect((await guest("PUT", `/doc?path=channels/${POND}/state/p1`, { doc })).status).toBe(403);
   });
