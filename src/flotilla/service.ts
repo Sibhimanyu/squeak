@@ -5,7 +5,6 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 
-import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
 import { BlobRefused, type CloudStore, type WatchSource } from "../cloud/store.js";
 import { newBlobId, openBlob, sealBlob } from "./blobs.js";
 import { logger } from "../utils/logger.js";

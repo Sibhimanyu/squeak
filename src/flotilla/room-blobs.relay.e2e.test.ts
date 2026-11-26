@@ -242,7 +242,7 @@ const user = (name: string): TestUser => ({
   name,
 });
 
-async function admit(owner: Mac, pondId: string, who: Mac, _email: string) {
+async function admit(owner: Mac, pondId: string, who: Mac) {
   await admitMember(owner.service, who.service, pondId, "member");
   await who.service.refresh(pondId);
 }
@@ -282,8 +282,8 @@ describe("pictures and files in the cloud, over the real relay", () => {
     host = ownerHost(A.service);
     pondId = (await A.service.createPond({ name: "Site", projectId: host.project.id })).id;
     for (const m of [A, B, C]) m.tellOwner(A.service.me.id);
-    await admit(A, pondId, B, "aarav@example.com");
-    await admit(A, pondId, C, "chris@example.com");
+    await admit(A, pondId, B);
+    await admit(A, pondId, C);
     bSync = memberSync(B);
     cSync = memberSync(C);
     await host.sync.idle();
