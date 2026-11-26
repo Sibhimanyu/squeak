@@ -2,47 +2,9 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// Two one-time helps for a first Pond, the same in the old and the new layout: the "Next steps" card on the Dashboard and
-// the quiet "Put this on GitHub?" line in the Room. What shows is decided in SqueakMacCore (`PondPolish.swift`); each is
-// gone for good once dismissed, and the choice is kept per Pond.
-
-/// The Dashboard's card: Start a duck, Invite someone, Put it on GitHub (folder ponds only).
-struct PondNextStepsCard: View {
-    let key: String
-    let steps: PondNextSteps.Steps
-    let startDuck: () -> Void
-    let invite: () -> Void
-    let dismiss: () -> Void
-    @State private var askGitHub = false
-    @State private var gitHubBusy = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(PondNextSteps.title).font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                Button(action: dismiss) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).frame(width: 24, height: 24).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).foregroundStyle(Theme.muted).pointerHand()
-                    .help("Dismiss. This will not come back.").accessibilityLabel(PondNextSteps.dismiss)
-            }
-            HStack(spacing: 10) {
-                if steps.startDuck { Button(PondNextSteps.startDuck, action: startDuck).buttonStyle(SecondaryButtonStyle()) }
-                if steps.invite { Button(PondNextSteps.invite, action: invite).buttonStyle(SecondaryButtonStyle()) }
-                if steps.gitHub {
-                    Button(PondNextSteps.gitHub) { askGitHub = true }
-                        .buttonStyle(SecondaryButtonStyle()).disabled(gitHubBusy).help(FirstPondJourney.gitPondHelp)
-                    if gitHubBusy { ProgressView().controlSize(.small) }
-                }
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-        .accessibilityElement(children: .contain).accessibilityLabel(PondNextSteps.title)
-        .gitPondFlow(key: key, ask: $askGitHub, busy: $gitHubBusy)
-    }
-}
-
+// The one-time help for a first Pond: the quiet "Put this on GitHub?" line in the Room. What shows is decided in
+// SqueakMacCore (`PondPolish.swift`); it is gone for good once dismissed, and the choice is kept per Pond. (The Dashboard's
+// "Next steps" card is gone: its three steps are the header's buttons.)
 /// "Put this on GitHub?": one quiet line above the Room's composer after the first duck finished, in a folder pond.
 struct GitHubLineView: View {
     let key: String

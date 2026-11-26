@@ -37,6 +37,10 @@ public enum FirstPondJourney {
 
     public static let inviteItem = "Invite someone\u{2026}"
     public static let gitPondItem = "Make it a Git Pond\u{2026}"
+    /// The Dashboard's button and the Room menu's item for the same step (the Pond's folder to a private or public repository).
+    public static let putOnGitHub = "Put on GitHub"
+    public static let putOnGitHubItem = "Put on GitHub\u{2026}"
+    public static let puttingOnGitHub = "Putting on GitHub\u{2026}"
     public static let gitPondHelp = "Put this folder on GitHub and give the pond streams"
 
     public struct MenuOffer: Equatable, Sendable {

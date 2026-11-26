@@ -8,6 +8,8 @@ private struct GitPondFlow: ViewModifier {
     let key: String
     @Binding var ask: Bool
     @Binding var busy: Bool
+    /// When given, a failure is kept here (the page says it in place with Try again) instead of in an alert.
+    var failure: Binding<String?>?
     var done: () -> Void
     @Environment(AppModel.self) private var model
     @State private var outcome: (title: String, message: String)?
@@ -16,7 +18,7 @@ private struct GitPondFlow: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .confirmationDialog("Make \(ponds.name(key: key)) a Git Pond?", isPresented: $ask, titleVisibility: .visible) {
+            .confirmationDialog("Put \(ponds.name(key: key)) on GitHub?", isPresented: $ask, titleVisibility: .visible) {
                 if let native = ponds.native(key: key) {
                     Button("Private repository on GitHub") { make(native, isPublic: false) }
                     Button("Public repository on GitHub") { make(native, isPublic: true) }
@@ -37,25 +39,30 @@ private struct GitPondFlow: ViewModifier {
 
     private func make(_ p: NativeProject, isPublic: Bool) {
         busy = true
+        failure?.wrappedValue = nil
         Task {
             defer { busy = false }
+            func fail(_ sentence: String) {
+                if let failure { failure.wrappedValue = sentence } else { outcome = (FirstPondJourney.gitPondFailedTitle, sentence) }
+            }
             do {
                 let made = try await model.nativeHost.makeGitPond(projectId: p.id, isPublic: isPublic)
                 outcome = (FirstPondJourney.gitPondDoneTitle, FolderPond.gitPondResult(url: made.url, note: made.note))
                 await model.refreshNativeProjects()
                 done()
             } catch let e as NativeHostError {
-                outcome = (FirstPondJourney.gitPondFailedTitle, e.reason)
+                fail(e.reason)
             } catch {
-                outcome = (FirstPondJourney.gitPondFailedTitle, "Squeak couldn\u{2019}t make this pond a Git Pond.")
+                fail("Squeak couldn\u{2019}t put this Pond on GitHub.")
             }
         }
     }
 }
 
 extension View {
-    /// Setting `ask` to true opens the confirm; `busy` is true while it runs; `done` runs after it worked.
-    func gitPondFlow(key: String, ask: Binding<Bool>, busy: Binding<Bool>, done: @escaping () -> Void = {}) -> some View {
-        modifier(GitPondFlow(key: key, ask: ask, busy: busy, done: done))
+    /// Setting `ask` to true opens the confirm; `busy` is true while it runs; `done` runs after it worked. With `failure`, a
+    /// failed run leaves its sentence there for the caller to show in place; without it an alert says it.
+    func gitPondFlow(key: String, ask: Binding<Bool>, busy: Binding<Bool>, failure: Binding<String?>? = nil, done: @escaping () -> Void = {}) -> some View {
+        modifier(GitPondFlow(key: key, ask: ask, busy: busy, failure: failure, done: done))
     }
 }

@@ -2,44 +2,70 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// The pond header's ⋯ menu (Dashboard and Room). "Pond settings…" opens Settings on Ponds › this pond.
+// The Pond's ⋯ menu: on the Dashboard it sits in the page header and holds what the three buttons do not (Pond settings,
+// Notebook, Rename, Leave or Delete); in the Room's bar the same menu also keeps Invite and Put on GitHub. What it holds
+// for a role is decided in `PondDashboardHeader.menu` (SqueakMacCore).
 
 struct PondHeaderMenu: View {
     let key: String
+    /// The Room's bar keeps Invite and Put on GitHub here (the Dashboard has them as buttons).
+    var withActions = false
     @Environment(AppModel.self) private var model
     @State private var leaving: String?
     @State private var confirmGitPond = false
     @State private var gitPondBusy = false
+    @State private var renaming = false
+    @State private var newName = ""
+    @State private var deleting = false
 
     private var ponds: PondsModel { .shared }
 
     var body: some View {
         let pond = ponds.pond(key: key)
-        let native = ponds.native(key: key)
-        let role = ponds.detail(key: key)?.myRole ?? pond?.role ?? .owner
-        let offer = FirstPondJourney.menuOffer(
-            canInvite: role.canInvite, hasPond: pond != nil, plainFolder: native?.isPlainFolder == true, isRemote: ponds.chrome(key: key).isRemote)
+        let plan = ponds.dashboardHeader(key: key)
+        let name = ponds.name(key: key)
         Menu {
-            // The next steps of a first pond, findable from the pond itself.
-            if offer.invite, let pond {
-                Button(FirstPondJourney.inviteItem) { ponds.startInvite(pondId: pond.id, account: model.account) }
-                    .disabled(!ponds.freshness(pond).canWrite)
+            if withActions {
+                if plan.showsInvite, let pond {
+                    Button(FirstPondJourney.inviteItem) { ponds.startInvite(pondId: pond.id, account: model.account) }
+                        .disabled(!ponds.freshness(pond).canWrite)
+                }
+                if plan.showsPutOnGitHub {
+                    Button(FirstPondJourney.putOnGitHubItem) { confirmGitPond = true }
+                        .disabled(gitPondBusy).help(FirstPondJourney.gitPondHelp)
+                }
+                if plan.showsInvite || plan.showsPutOnGitHub { Divider() }
             }
-            if offer.gitPond {
-                Button(FirstPondJourney.gitPondItem) { confirmGitPond = true }
-                .disabled(gitPondBusy).help(FirstPondJourney.gitPondHelp)
+            ForEach(plan.menu, id: \.self) { item in
+                switch item {
+                case .settings: Button("Pond settings\u{2026}") { model.openSettings(.pond(key)) }
+                case .notebook: Button("Notebook") { model.openPondItem(.notebook) }
+                case .rename: Button("Rename\u{2026}") { newName = name; renaming = true }.disabled(!ponds.freshness(pond).canWrite)
+                case .leave: Button("Leave \(name)\u{2026}") { leaving = key }
+                case .delete: Button("Delete \(name)\u{2026}", role: .destructive) { deleting = true }.disabled(!ponds.freshness(pond).canWrite)
+                }
             }
-            if offer.invite || offer.gitPond { Divider() }
-            Button("Pond settings\u{2026}") { model.openSettings(.pond(key)) }
-            // A pond someone else owns can be left; the person's own pond never shows it.
-            if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond\u{2026}") { leaving = key } }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .help("More for this pond").accessibilityLabel("More for this pond")
+        .help("More for this Pond").accessibilityLabel("More for this Pond")
         .leavePondDialog($leaving)
         .gitPondFlow(key: key, ask: $confirmGitPond, busy: $gitPondBusy)
+        .alert("Rename \(name)", isPresented: $renaming) {
+            TextField("Name", text: $newName)
+            Button("Rename") {
+                let n = newName.trimmingCharacters(in: .whitespaces)
+                if let pond, !n.isEmpty, n != name { Task { _ = await ponds.rename(pond: pond.id, name: n) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete \(name) for everyone?", isPresented: $deleting, titleVisibility: .visible) {
+            Button("Delete for everyone", role: .destructive) { if let pond { Task { _ = await ponds.deletePond(pond: pond.id) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(verbatim: PondActionWords.deleteMessage(name, others: max(0, (ponds.detail(key: key)?.members.count ?? pond?.memberCount ?? 1) - 1)))
+        }
     }
 }
 

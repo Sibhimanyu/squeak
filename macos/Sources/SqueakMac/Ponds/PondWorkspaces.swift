@@ -111,7 +111,7 @@ private struct PondWorkspaceCardView: View {
     }
 }
 
-private struct PondChatRowView: View {
+struct PondChatRowView: View {
     let row: PondChatRow
     let members: [FlockMember]
     let open: (PondChatRow) -> Void

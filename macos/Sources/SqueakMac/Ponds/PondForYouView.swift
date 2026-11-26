@@ -38,36 +38,3 @@ extension AppModel {
         return (d.onDuty + d.offDuty).first { $0.sessionId == sid || (s.duckId != nil && $0.id == s.duckId) }?.name
     }
 }
-
-struct PondForYouCard: View {
-    let key: String
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let list = model.forYou(pond: key)
-        if !list.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("For you").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 0)
-                    Text("\(list.count)").font(.system(size: 12, weight: .bold)).monospacedDigit()
-                        .foregroundStyle(Color(nsColor: NSColor(hex: Tokens.duckOutline)))
-                        .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18).background(Theme.duck, in: Capsule())
-                }
-                ForEach(list.items) { item in
-                    HStack(spacing: 10) {
-                        if item.reason == .waiting { Lucide(.triangleAlert, size: 13, color: Theme.warning) }
-                        Text(verbatim: item.line).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
-                        Spacer(minLength: 8)
-                        Button("Open") { _ = model.openFromPond(.duck(item.sessionId), pond: key, page: .dashboard) }
-                            .buttonStyle(PondPrimaryButtonStyle()).accessibilityLabel("Open \(item.name)")
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.duck.opacity(0.5)))
-        }
-    }
-}

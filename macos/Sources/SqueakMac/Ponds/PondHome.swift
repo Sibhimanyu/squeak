@@ -76,8 +76,12 @@ struct PondRouteView: View {
                 if sidebarHidden { Color.clear.frame(width: clearance ?? sidebarClearance) }
                 Spacer(minLength: 0)
                 if case .home(let project) = route {
-                    if PondsModel.shared.native(key: project) != nil || roomProject(project) != nil { HStack(spacing: Space.m) { RoomModeSwitch(key: project); PondHeaderMenu(key: project) }.padding(.trailing, Space.xl) }
-                    else if PondsModel.shared.chrome(key: project).showsLeave { PondHeaderMenu(key: project).padding(.trailing, Space.xl) }
+                    // The Dashboard carries its own ⋯ in its header; only the Room switch (and a waiting Pond's Leave) sit here.
+                    if let waiting = PondsModel.shared.pond(key: project), PondStates.isGreyedRow(waiting) {
+                        if PondsModel.shared.chrome(key: project).showsLeave { PondHeaderMenu(key: project, withActions: false).padding(.trailing, Space.xl) }
+                    } else if PondsModel.shared.native(key: project) != nil || roomProject(project) != nil {
+                        RoomModeSwitch(key: project).padding(.trailing, Space.xl)
+                    }
                 }
             }
             .frame(height: Metrics.header).background(WindowDragArea()) }
@@ -96,459 +100,6 @@ struct PondRouteView: View {
             case .thread(let project, let pondId, let threadId):
                 PondThreadView(key: project, pondId: pondId, threadId: threadId).id(threadId).screen("Duck")
             }
-        }
-    }
-}
-
-struct PondHomeView: View {
-    /// The pond's directory key; `project` reads its name.
-    let key: String
-    private var project: String { ponds.name(key: key) }
-    @Environment(AppModel.self) private var model
-    @State private var query = ""
-    @State private var scope: PondDashboardScope = .all
-    @State private var archivedOpen = false
-    /// Bumped when the next-steps card is dismissed, so the body reads the stored choice again.
-    @State private var dismissTick = 0
-
-    private var ponds: PondsModel { .shared }
-    private var pond: PondSummary? { ponds.pond(key: key) }
-    private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
-    private var native: NativeProject? { ponds.native(key: key) }
-    private var roster: RoomRosterModel? { native.map { RoomRosterStore.shared.model(for: $0.id) } }
-    private var localSessions: [HostSession] { model.pondProject(key).workspaces.flatMap(\.chats) }
-    private var person: String { PondsModel.shared.myName.isEmpty ? "You" : PondsModel.shared.myName }
-    private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
-
-    private var layout: PondHomeLayout {
-        // Ducks mode: the host's roster is the one list of the Pond's Ducks; this Mac's chats only say what a click opens.
-        if model.ducksMode, let roster {
-            return PondHomeLayout.buildRoster(
-                ducks: roster.list, sessions: localSessions, detail: detail, me: person, hostIdFor: { model.hostId($0) },
-                hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads)
-        }
-        return PondHomeLayout.build(
-            project: model.pondProject(key), detail: detail, me: person,
-            emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
-            main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
-            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [], offDutyNotes: roster?.offDutyNotes ?? [:])
-    }
-
-    /// The one-time "Next steps" card (`PondNextSteps`): gone for good once dismissed.
-    @ViewBuilder private func nextSteps(_ layout: PondHomeLayout) -> some View {
-        let _ = dismissTick
-        let steps = PondNextSteps.steps(
-            dismissed: PondOnce().done(.nextSteps, pond: key), canStartDuck: chrome.start != .hidden, hasDucks: !layout.isEmpty,
-            canInvite: role.canInvite && pond != nil, memberCount: pond?.memberCount ?? 1,
-            plainFolder: native?.isPlainFolder == true, isRemote: chrome.isRemote)
-        if let steps {
-            PondNextStepsCard(
-                key: key, steps: steps, startDuck: { startThread() },
-                invite: { if let pond { ponds.startInvite(pondId: pond.id, account: model.account) } },
-                dismiss: { PondOnce().markDone(.nextSteps, pond: key); dismissTick += 1 })
-        }
-    }
-
-    var body: some View {
-        let layout = layout
-        let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    header
-                    PondForYouCard(key: key)
-                    nextSteps(layout)
-                    overview(layout, compact: geometry.size.width < 650)
-                    if !joins.isEmpty { joinsGroup(joins) }
-                    presence
-                    // The people, invites and pond controls live in the inspector beside this page (`PondInspector`).
-                    threads(layout).frame(maxWidth: .infinity, alignment: .leading)
-                    if let native, !chrome.isRemote { CanvasesSection(pondKey: key, projectId: native.id) }
-                    if chrome.isRemote { RemoteCanvasesSection(pondKey: key) }
-                    ripples
-                }
-                .padding(geometry.size.width < 600 ? 20 : 32)
-                .frame(maxWidth: PondInspectorSections.dashboardContentWidth, alignment: .leading).frame(maxWidth: .infinity)
-                .background(ScrollMemory(id: "pond:\(key):dashboard"))
-            }
-            .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
-        }
-        .background(Theme.bg)
-        .onAppear { ponds.note = nil; if let asked = PondScopeRequest.shared.take(pond: key) { scope = asked } }
-        // A pond's mark clicked while this page is already open.
-        .onChange(of: PondScopeRequest.shared.pending[key]) { _, asked in
-            if asked != nil, let asked = PondScopeRequest.shared.take(pond: key) { scope = asked }
-        }
-        .pondHeartbeat(pond: pond?.id)
-        .task(id: native?.id) { roster?.keepFresh(host: model.nativeHost) }
-    }
-
-    // MARK: Identity and overview
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // The Pond's icon and name are in the top bar; the card keeps its label and its actions.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 20) {
-                    overviewLabel
-                    Spacer(minLength: 16)
-                    actions
-                }
-                VStack(alignment: .leading, spacing: 20) {
-                    overviewLabel
-                    actions
-                }
-            }
-            statusRow
-        }
-        .padding(24)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 2).fill(PondColour.pondAccent(pond?.id))
-                .frame(width: 44, height: 4).padding(.leading, 24)
-        }
-    }
-
-    /// The one status row of the dashboard: a fixed height whatever it says, so nothing below it ever moves. The access
-    /// line (with the info mark when this Mac can only share threads into the pond), the latest note or result, and a
-    /// small slot for refreshing / can't-reach that only fades.
-    private var statusRow: some View {
-        let status = ponds.headerStatus(pond, access: accessDescription)
-        let message: (text: String, icon: String)? = ponds.note.map { ($0, "info.circle") }
-            ?? pond.flatMap { ponds.result[$0.id] }.map { ($0, "checkmark.circle") }
-        return HStack(spacing: 8) {
-            Image(systemName: pond?.local ?? true ? "desktopcomputer" : "person.2").accessibilityHidden(true)
-            Text(verbatim: status.accessLine).lineLimit(1).truncationMode(.tail)
-            if let info = status.info {
-                Image(systemName: "info.circle").help(info).accessibilityLabel(info)
-            }
-            Spacer(minLength: 8)
-            if let message {
-                Label(message.text, systemImage: message.icon).labelStyle(.titleAndIcon).lineLimit(1).truncationMode(.tail)
-                    .help(message.text).transition(.opacity)
-            }
-            statusSlot(status.indicator)
-        }
-        .font(Typo.footnote).foregroundStyle(Theme.muted)
-        .frame(height: 20)
-        .animation(Motion.quick, value: message?.text)
-    }
-
-    /// A fixed 24 x 20 slot: its contents fade, its size never changes.
-    private func statusSlot(_ indicator: PondHeaderIndicator) -> some View {
-        ZStack {
-            switch indicator {
-            case .none: Color.clear
-            case .refreshing: WorkingGlyph(slot: 20).transition(.opacity).accessibilityLabel("Refreshing")
-            case .problem(let help):
-                Lucide(.triangleAlert, size: 13, color: Theme.warning).help(help).accessibilityLabel(help)
-            case .retry(let help):
-                Button { if let id = pond?.id { ponds.retry(id) } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless).help(help + " Try again").accessibilityLabel("Try again")
-            }
-        }
-        .frame(width: 24, height: 20)
-        .animation(Motion.quick, value: indicator)
-    }
-
-    private var overviewLabel: some View {
-        Text("Pond overview").font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize().accessibilityAddTraits(.isHeader)
-    }
-
-    private var actions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { inviteAction; startAction; settingsAction }
-            VStack(alignment: .leading, spacing: 10) {
-                startAction
-                HStack(spacing: 8) { inviteAction; settingsAction }
-            }
-        }
-    }
-
-    @ViewBuilder private var inviteAction: some View {
-        if role.canInvite, let p = pond {
-            Button { ponds.startInvite(pondId: p.id, account: model.account) } label: { Text("Invite").lineLimit(1).fixedSize() }
-                .buttonStyle(SecondaryButtonStyle()).disabled(!ponds.freshness(p).canWrite)
-                .help(ponds.freshness(p).writesDisabledReason ?? "Invite someone to this pond")
-        }
-    }
-
-    private var chrome: PondChrome { PondsModel.shared.chrome(key: key) }
-
-    @ViewBuilder private var startAction: some View {
-        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }).map({ $0 != .none }) == true {
-            let why: String? = pond.flatMap { p in
-                if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local, !PondStartThread.runsOnOwnerMac(p) { return w } else { return nil }
-            }
-            switch chrome.start {
-            case .hidden: EmptyView()
-            case .own, .askOwner:
-                let label: String = { if case .askOwner(let l) = chrome.start { return l } else { return "Start a duck" } }()
-                Button { startThread() } label: { Label(label, systemImage: "plus").lineLimit(1).fixedSize() }
-                    .buttonStyle(PondPrimaryButtonStyle())
-                    .disabled(why != nil).help(why ?? (chrome.isRemote ? label : "Start a duck in this pond"))
-            }
-        }
-    }
-
-    /// Pond settings is in the header's ⋯ menu whenever that menu is there; the gear only stands in for it when it is not.
-    @ViewBuilder private var settingsAction: some View {
-        if !hasHeaderMenu { settingsButton }
-    }
-
-    /// The same test the page's header applies to show its ⋯ menu (a room, or a pond that can be left).
-    private var hasHeaderMenu: Bool {
-        if PondsModel.shared.native(key: key) != nil || PondsModel.shared.chrome(key: key).showsLeave { return true }
-        guard let p = pond, !PondStates.isGreyedRow(p) else { return false }
-        return p.role != .owner && !p.id.isEmpty
-    }
-
-    private var settingsButton: some View {
-        Button { model.openSettings(.pond(key)) } label: {
-            Lucide(.settings, size: 16, color: Theme.muted).frame(width: 32, height: 32).contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless).help(PondWords.settings).accessibilityLabel(PondWords.settings)
-    }
-
-    private var accessDescription: String {
-        if pond?.local ?? true { return PondStates.headerLine(pond) ?? PondWords.onlyThisMac }
-        if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) { return why }
-        guard let pond else { return "" }
-        // The host's own sentence for the role and the people, else what is plainly true.
-        var parts = ["\(role.word) \u{00B7} \(pond.memberCount) \(pond.memberCount == 1 ? "person" : "people")"]
-        if let owner = pond.ownerName, role != .owner { parts.append("owned by \(owner)") }
-        if role == .viewer { parts.append(PondThreadStatus.viewerLine) }
-        return parts.joined(separator: " \u{00B7} ")
-    }
-
-    /// Who is here, the Tasks waiting and the Notebook: what the Room's side panel shows, here because the Dashboard has no
-    /// side panel. The Ducks working are the Working tile above and the list below, so they are not repeated.
-    @ViewBuilder private var presence: some View {
-        if let native, !chrome.isRemote {
-            let panel = PondPresence.panel(key: key, projectId: native.id)
-            VStack(alignment: .leading, spacing: 12) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
-                        presenceCard { PondPeopleSection(panel: panel) }
-                        presenceCard { PondTasksSection(panel: panel) }
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        presenceCard { PondPeopleSection(panel: panel) }
-                        presenceCard { PondTasksSection(panel: panel) }
-                    }
-                }
-                PondNotebookRow(key: key)
-            }
-        }
-    }
-
-    private func presenceCard<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        content().padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
-        let counts = roster?.counts ?? PondCounts.none
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: compact ? 2 : 4), spacing: 12) {
-            ForEach(PondDashboardScope.tiles, id: \.self) { item in
-                let count = counts.count(item) + (item == .needsYou && role.canApproveJoins ? (detail?.joins.count ?? 0) : 0)
-                Button { scope = scope == item ? .all : item } label: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 6) {
-                            if item == .needsYou {
-                                Lucide(.triangleAlert, size: 13, color: count > 0 ? Theme.warning : Theme.muted)
-                            } else if item == .working && count > 0 {
-                                WorkingGlyph(slot: 20, alignment: .leading, grid: .compact)
-                            }
-                            Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                        }
-                        .frame(height: 16)  // the working glyph or the alert icon never makes one tile taller
-                        Text(verbatim: "\(count)")
-                            .font(.system(size: 28, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(item == .needsYou && count > 0 ? Theme.warning : Theme.ink)
-                        // Every tile reserves the secondary line ("21 in all" on Off duty) so the four are one height.
-                        let line = PondCounts.secondary(item, counts)
-                        Text(verbatim: line ?? " ").font(Typo.meta).foregroundStyle(Theme.muted)
-                            .opacity(line == nil ? 0 : 1).accessibilityHidden(line == nil)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                    .background(scope == item ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("\(item.title), \(count) ducks")
-                .accessibilityAddTraits(scope == item ? .isSelected : [])
-                .help("Show \(item.title.lowercased())")
-            }
-        }
-    }
-
-    private func threads(_ layout: PondHomeLayout) -> some View {
-        let filtered = layout.filtered(query: query, scope: scope)
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(model.ducksMode ? "Ducks" : "Streams & ducks").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Spacer()
-                if let native, !chrome.isRemote, !model.ducksMode {
-                    Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New stream", systemImage: "plus") }
-                        .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
-                }
-            }
-            Text(model.ducksMode ? "Ducks work across the whole Pond and choose which Streams to join." : "Each stream is a separate working folder. Its ducks work with the same files.")
-                .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField(model.ducksMode ? "Find a duck or person" : "Find a stream, duck or person", text: $query).textFieldStyle(.plain)
-                    .font(Typo.body).accessibilityLabel(model.ducksMode ? "Find a duck or person" : "Find a stream, duck or person")
-                if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
-                }
-                Menu {
-                    Toggle("Shared", isOn: Binding(get: { scope == .shared }, set: { scope = $0 ? .shared : .all }))
-                } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .foregroundStyle(scope == .shared ? Theme.ink : Theme.muted).help("Filter").accessibilityLabel("Filter ducks")
-            }
-            .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-            if scope != .all || !query.isEmpty {
-                HStack {
-                    Text("\(filtered.dutyCount) of \(layout.dutyCount) ducks · \(scope.title)")
-                        .font(Typo.meta).foregroundStyle(Theme.muted)
-                    Spacer()
-                    Button("Reset") { scope = .all; query = "" }.buttonStyle(.borderless).font(Typo.meta)
-                }
-            }
-            if filtered.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Image(systemName: layout.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass")
-                        .font(.system(size: 24)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Text(layout.isEmpty ? "Room for your next idea" : "No matching ducks")
-                        .font(Typo.heading).foregroundStyle(Theme.ink)
-                    Text(layout.isEmpty ? FirstPondJourney.emptyPondDetail(plainFolder: native?.isPlainFolder == true) : "Try another name or reset the filters to see everything in this pond.")
-                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    // No buttons here: "Start a duck" is the overview card's action and "Reset" is on the filter line above.
-                }
-                .padding(24).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            } else {
-                PondWorkspacesView(layout: filtered, members: detail?.members ?? [], showsHeading: false, open: open)
-            }
-            archivedThreads
-        }
-    }
-
-    /// "Archived threads (n)": this pond's archived chats, newest archived first, folded until asked for. Opening one
-    /// shows it read-only with Unarchive where the composer was.
-    @ViewBuilder private var archivedThreads: some View {
-        let archived = model.archivedThreads(in: key)
-        if let title = ThreadArchive.entryTitle(count: archived.count) {
-            VStack(alignment: .leading, spacing: 8) {
-                Button { withAnimation(Motion.standard) { archivedOpen.toggle() } } label: {
-                    HStack(spacing: 8) {
-                        Lucide(archivedOpen ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
-                        Text(verbatim: title.replacingOccurrences(of: "Archived", with: "Archived ducks")).font(Typo.label).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).pointerHand()
-                if archivedOpen {
-                    VStack(spacing: 0) {
-                        ForEach(archived) { s in
-                            RowOrButton(editing: model.isRenaming(s), action: { model.openFromPond(s.key, pond: key, page: .dashboard) }) {
-                                HStack(spacing: 8) {
-                                    ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.sidebarRow)
-                                    if model.isRenaming(s) { InlineTitleEditor(session: s, font: Typo.body) }
-                                    else { Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
-                                    Spacer(minLength: 0)
-                                    if let at = s.archivedAt { Text(verbatim: PickerRows.age(at)).font(Typo.meta).foregroundStyle(Theme.subtle) }
-                                }
-                                .padding(.horizontal, 12).frame(height: 36).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain).pointerHand()
-                            .squeakContextMenu { RenameThreadItem(session: s) }
-                        }
-                    }
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-                }
-            }
-        }
-    }
-
-    private func startThread() { Self.startThread(key: key, model: model) }
-
-    /// Also the room's "New thread".
-    static func startThread(key: String, model: AppModel) {
-        let ponds = PondsModel.shared
-        let pond = ponds.pond(key: key), native = ponds.native(key: key)
-        // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
-        // A pond in a plain folder starts its thread in the folder through the same route (it has no streams).
-        if let pond, !pond.local || native?.isPlainFolder == true {
-            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces, projectKind: native?.kind,
-                                           hasMain: native.flatMap { MainPlace(project: $0) } != nil) {
-            case .open(let page, let context): NewChatController.shared.open(page, pondThread: context)
-            case .refuse(let why): ponds.note = why
-            }
-            return
-        }
-        // The New duck page opens over the Pond it was started from, so Esc and Cancel return there. Leaving the Pond
-        // first (closePondPage) made the open chat or the Dashboard the place to return to.
-        if let native {
-            if MainPlace(project: native) != nil {
-                // A git pond starts in Main, its own folder; the "In:" control above the message picks a stream instead.
-                model.openNewMainThread(projectId: native.id)
-            } else if let ws = model.git.workspaces.first(where: { $0.projectId == native.id && $0.state != "archived" }) {
-                NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.id, workspaceId: ws.id))
-            } else {
-                model.nativeMakeWorkspace(projectId: native.id)
-            }
-        } else {
-            NewChatController.shared.show()
-        }
-    }
-
-    // MARK: Threads
-
-    private func joinsGroup(_ joins: [JoinRequest]) -> some View {
-        PondSection("Waiting to join") {
-            VStack(spacing: Space.s) { ForEach(joins) { j in joinCard(j) } }
-        }
-    }
-
-    private func joinCard(_ j: JoinRequest) -> some View {
-        Group { if let pond { JoinRequestCard(pond: pond, join: j) } }
-    }
-
-    private func open(_ r: PondChatRow) {
-        if let tab = r.local {
-            model.openFromPond(tab, pond: key, page: .dashboard)
-        } else if let p = pond, let id = r.pondThread {
-            AppModel.shared.openPond(.thread(project: key, pondId: p.id, threadId: id))
-        }
-    }
-
-    // MARK: Ripples
-
-    @ViewBuilder private var ripples: some View {
-        let feed = PondRippleFeed.build(detail?.ripples ?? [], me: detail?.meMember?.id ?? detail?.me?.id)
-        PondSection("Ripples") {
-            VStack(alignment: .leading, spacing: Space.s) {
-                if feed.isEmpty {
-                    Text("A quiet pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text("Shared ducks, new members and pond activity will appear here.")
-                        .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(feed) { r in
-                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                        Text(verbatim: r.sentence).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        Text(verbatim: RelativeAge.short(r.at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
-                    }
-                }
-            }
-            .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         }
     }
 }
@@ -805,6 +356,8 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
     var switchProgress: Double?
     let pick: (PondPage) -> Void
     var hasTabs = true
+    /// The Pond's name lives in the Dashboard header (DESIGN.md 8.12); the bar shows it only where a caller asks.
+    var showsName = true
     @ViewBuilder let tile: () -> Tile
     @ViewBuilder let tabs: () -> Tabs
     @ViewBuilder let trailing: () -> Trailing
@@ -813,15 +366,17 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
         HStack(spacing: 0) {
             if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
             // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
-            HStack(spacing: CGFloat(PondBarMetrics.logoGap)) {
-                tile()
-                Text(verbatim: name).font(.system(size: 15, weight: .semibold)).tracking(-0.1).foregroundStyle(Theme.ink)
-                    .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
+            if showsName {
+                HStack(spacing: CGFloat(PondBarMetrics.logoGap)) {
+                    tile()
+                    Text(verbatim: name).font(.system(size: 15, weight: .semibold)).tracking(-0.1).foregroundStyle(Theme.ink)
+                        .lineLimit(1).fixedSize().accessibilityAddTraits(.isHeader)
+                }
+                .help(subtitle)
+                .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
             }
-            .help(subtitle)
-            .accessibilityElement(children: .combine).accessibilityLabel("\(name), \(subtitle)")
             PondPageSwitch(selection: switchSelection, strip: strip, progress: switchProgress, pick: pick)
-                .padding(.leading, CGFloat(PondBarMetrics.sectionGap))
+                .padding(.leading, showsName ? CGFloat(PondBarMetrics.sectionGap) : 0)
             if hasTabs { tabs().padding(.leading, CGFloat(PondBarMetrics.sectionGap)) }
             if !hasTabs { Spacer(minLength: 0) }
             trailing().padding(.leading, CGFloat(PondBarMetrics.trailingGap))
@@ -862,6 +417,8 @@ struct PondSharedHeader: View {
             // Flow: from inside a Duck, the switch goes to that page of the Pond.
             pick: { page in model.applyCentre(pond: key) { $0.switchTo(page) } },
             hasTabs: !(strip?.isEmpty ?? true),
+            // The name and tile live in the Dashboard's header: the bar keeps the switch (and the tabs).
+            showsName: false,
             tile: {
                 PondTile(name: name, pondId: PondsModel.shared.pond(key: key)?.id,
                          projectId: PondsModel.shared.native(key: key)?.id, size: 32)
@@ -871,7 +428,8 @@ struct PondSharedHeader: View {
                     PondWorkspaceTabStrip(workspace: workspace, strip: strip, embedded: true).id(workspace.project.id)
                 }
             },
-            trailing: { if centre.showsPondMenu { PondHeaderMenu(key: key) } })
+            // The Dashboard's ⋯ is in its header; the Room and items keep it here.
+            trailing: { if centre.showsPondMenu, centre.switchSelection != .dashboard { PondHeaderMenu(key: key, withActions: true) } })
         .background(WindowDragArea())
         // The bar owns the Pond's roster feed. It used to start only from views that mount once the strip has tabs (the strip
         // itself, the Dashboard, the Room): a chat opened first after a launch (restored, sidebar, deep link) had an empty

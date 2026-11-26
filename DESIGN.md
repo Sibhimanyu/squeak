@@ -218,7 +218,7 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 - The violet `error` token is retired (the duck's own `needs_you` pulse stays); failures are red (`negative`) and are not pushed. Red marks failure and the destructive, never "waiting": a screen with nothing failed has none.
 - **Working is ocean blue; unread is the duck's yellow (owner decision, 2026-11-12, replacing finished-is-blue of 2026-11-09 and green working).** Water means work: the stream dot-grid glyph and every working mark draw from `working`, a blue (`#4C8DFF` / `#1D4ED8`) well apart from `info` sky, `success` green, `warning` amber and `negative` red. A yellow dot is something new for you: unread is `done`, the duck's own yellow (`duck-text` on light). This amends the rule that the duck's yellow marks unread only: **yellow marks unread and nothing else** (the primary button and the selected-pond accent stay brand, not state). The stream glyph moves (§8.1, "Stream glyph"; the old three-line waves icon is retired, 2026-11-15): working is a soft brightness wave through its dots, needs-you and error are steady. **No coloured dots for chat state (owner, 2026-11-16):** unread is the title's semibold weight, waiting is the `triangle-alert` glyph, working the tide, failed `circle-x`; a list has no coloured dot at all.
 - A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text. Cards: 3pt `warning` edge for an approval or a plan, `subtle` for a question; a failed chat has no card.
-- Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
+- Order is never state: lists are newest first by last activity, and a chat does not move because its state changes. One exception (owner, 2026-11-26): the Pond Dashboard's Ducks list puts the Ducks that are working first, then the rest most recent first, with Off duty folded at the end (section 8.12).
 - Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` (yellow) count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
 - **Priority** where a row stands for several chats (a folded project or stream): waiting, failed, finished-unread, working.
 - **Unread** is the person's own record on this Mac: a chat is unread from a finished turn until it is opened, keyed by the turn's end, so a new finish makes it unread again. An offline Squeak is not a row mark; it stays on the duck and the footer ("Squeak is not running").
@@ -612,7 +612,7 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - A row waiting on you, or finished and unread, has its title in `ink` semibold; every other title is regular `muted`; the selected row is `ink`.
 - Mac rows are one line, 28pt; the chat's step lives in the live row inside the chat. The menu-bar panel's rows keep `repo · agent` and one line of the agent's words, with the same marks. **Phone** rows have one more line in muted footnote type: the ask for a chat waiting on you (the tool heading or the question), the failure reason for a failed one, and otherwise the agent's last words, one line. No state word, no agent name.
 - **Conductor marker:** a chat Conductor holds carries a plain SF Symbol, `point.3.connected.trianglepath.dotted`, 14pt in the muted colour, after the title, tooltip and accessibility label "Conductor chat" (never Conductor's own icon). Native chats carry none.
-- **Every list is newest first by last activity** (a chat never moves because of its state). Folded rows (project, stream) show the highest-priority mark inside instead of their age; expanded ones show their age. Ties are stable by title. The menu-bar panel is one such list, with no strip or section for what waits: a chat waiting on you opens as its answer card in its place. The Telegram radar keeps its section headings (Needs you, Working, Done, Error, Idle) with their glyphs; Telegram has no tooltip, so words are its only second signal.
+- **Every list is newest first by last activity** (a chat never moves because of its state; the one exception is the Pond Dashboard's Ducks list, which puts working Ducks first, section 8.12). Folded rows (project, stream) show the highest-priority mark inside instead of their age; expanded ones show their age. Ties are stable by title. The menu-bar panel is one such list, with no strip or section for what waits: a chat waiting on you opens as its answer card in its place. The Telegram radar keeps its section headings (Needs you, Working, Done, Error, Idle) with their glyphs; Telegram has no tooltip, so words are its only second signal.
 - A row is a button: it opens the session's detail (app) or offers its actions (phone). Hover: `surface-raised`.
 - **Search** (the dock): chips **Waiting**, **Unread**, **Working**, **Failed**, **Claude**, **Codex** and up to five projects; the line is read as filters (the four state words, `claude`, `codex`, `today`, `yesterday`, `this week`, `project:` / `in:`) and free words; legacy synonyms are accepted but not offered. **Waiting** opens the decision cards page, titled "Waiting for you", whose cards carry no state header either (§8.10).
 - The chat header on the phone is title, then `pond · stream · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
@@ -1274,10 +1274,11 @@ produces sits beside its chat. The new layout is the default for everyone who ha
 `MacLayoutPreference.shared.isNew` and nowhere else. Approved mock: Option A, plus Option B's icon rail.
 
 - **One bar, oval tabs.** The top bar is one view hosted above every page (`WorkbenchCentre`), so it never moves or rebuilds
-  between the Dashboard, the Room, an item and a Duck. It reads, left to right: the Pond's icon and name (the "1 person ·
-  2 ducks on duty" subtitle is their tooltip), the Dashboard | Room switch (neither side selected inside a Duck or an
-  item; picking one goes to that page), then the tabs filling the rest, fading at hidden edges with a "⋯" list on overflow.
-  The two-finger swipe still works. The Dashboard's Pond overview card does not repeat the icon and name.
+  between the Dashboard, the Room, an item and a Duck. It holds, left to right: the Dashboard | Room switch (neither side
+  selected inside a Duck or an item; picking one goes to that page), then the tabs filling the rest, fading at hidden edges
+  with a "⋯" list on overflow; back and forward belong to the window's own unified toolbar. The Pond's icon and name are not in
+  the bar (2026-11-26): the Dashboard's header carries them. The Room and items keep the Pond's ⋯ at the bar's end; the
+  Dashboard's ⋯ is in its header. The two-finger swipe still works.
   Every tab is a low oval (38pt, width capped at 220, one line per row, never wrapping; text may shorten and the full text
   is the tooltip). The selected tab is raised: `surface-raised` fill and a `lineStrong` border, no shadow (§5). Others sit
   on `surface` with a `line` border.
@@ -1302,9 +1303,8 @@ produces sits beside its chat. The new layout is the default for everyone who ha
 - **Item tabs.** Files, diffs, review-all, artifacts and the Notebook open in the centre. A click either selects the
   existing tab or opens one (first among the items, or right after the current item tab). A Duck showing a file adds its tab in the
   background. Order is saved by project id. ⌘W closes the selected item, ⌘1–9 select strip tabs and ⌃Tab cycles them.
-- **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: "Here now",
-  Tasks and the Notebook live on the Dashboard under the overview tiles (the Ducks working are the Working tile and the
-  list). Instead the Dashboard, the Room and every Duck carry the same slim icon rail (`RailTool`): Changes, Files, Artifacts,
+- **Room = home, no side panel.** The Room has no right panel and no inspector toggle, and neither has the Dashboard: the people and
+  Tasks are in the Dashboard's header and Needs you. Instead the Dashboard, the Room and every Duck carry the same slim icon rail (`RailTool`): Changes, Files, Artifacts,
   Tasks (when its list ships, #88; the rail already has room for six), Notebook and Terminal. Changes, Files and Artifacts
   open a one-shot popover list anchored to the icon: no pin; picking a row opens a tab and closes the list; Esc or a click
   away closes it too. Changes: on the Dashboard and in the Room every Duck's changed files grouped by Duck and branch (the
@@ -1323,10 +1323,24 @@ produces sits beside its chat. The new layout is the default for everyone who ha
   `cancelOperation:` swallows it); Ctrl-Cmd-F and the green button still do. Esc is not bound to stopping a turn or
   clearing the composer, and a draft is kept per Duck, so nothing is lost on the way. The classic layout keeps its behaviour
   except that Esc does not leave full screen.
-- **For you.** The first card on the Dashboard, hidden at zero: one line per item ("Pip - finished, not opened yet" or
-  "needs you") with an Open button. The sidebar's yellow Pond badge is the same list's count (`PondForYou` makes both);
-  the grey count beside a Pond name is not shown in the new layout. Duck rows everywhere are labelled by the Duck's name,
-  the chat title only as secondary text, and the Room's header counts on-duty Ducks only.
+- **For you (Dashboard card retired 2026-11-26).** The Dashboard no longer has a For-you card; what waits on the person is its
+  Needs you block (below). The sidebar's yellow Pond badge is still `PondForYou`'s count, and Duck rows everywhere are labelled by
+  the Duck's name, the chat title only as secondary text; the Room's header counts on-duty Ducks only. The grey count beside a
+  Pond name is not shown in the new layout.
+- **The Dashboard (2026-11-26; mocks in `docs/mocks/2026-11-26/pond-dashboard/`).** One page, the same for every role, drawn for the
+  role (`PondDashboardHeader`, SqueakMacCore). *Header:* the Pond's tile and name, one state line ("Only on this Mac", "Shared
+  with 3 people · Live", "Sibhi's Pond · Member · Live", "Owner's Mac offline"), small avatars (you first, a pending invite an
+  outlined avatar; a click opens the people), and the buttons the role may press: **Start a duck** (primary; a Member's asks the
+  Owner; a Viewer's is drawn closed, a lock and no fill, with the one line "You can view this Pond. Ask Sibhi to make you a
+  Member." under the header), **Invite** and, for a folder Pond the Owner holds, **Put on GitHub** (gone once it is a Git Pond);
+  then ⋯: Pond settings, Notebook, Rename, Leave or Delete. *Body*, each block only when it has something: **Needs you** (a Duck's
+  question, approval or failure, a Member's Task waiting for approval, people asking to join; an amber triangle and a 3pt
+  `warning` edge only on what needs a decision), **Ducks** (the one list: working first with the animated glyph, the rest most
+  recent first, idle shows no icon, waiting shows the triangle; Off duty folded at the end), **Latest in the Room** (the last three
+  lines, with Open the Room). A new Pond has only the empty Ducks block: the brand duck and one sentence, no buttons (the header
+  has them). There are no count tiles, Next-steps card, For-you card, People or Tasks cards, Notebook row, Canvases or Ripples:
+  their contents live in Needs you, the avatars, the Room, the rail and ⋯. An action that has not finished says so where it was
+  asked ("Putting on GitHub…") and a failure stays there with a sentence and Try again.
 - **The Room is flat rows (Slack or Cliq style; owner-approved 2026-11-25, mock-up direction B).** No bubbles, no box around
   text. A row is a 36pt avatar column, a 12pt gap and the text column. The first row of a group has the avatar, the name in
   bold 14.5pt `ink` (a Duck's agent as a small `subtle` tag after it) and the time in `subtle` 12pt; the other rows of the
