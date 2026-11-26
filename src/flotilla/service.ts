@@ -101,7 +101,7 @@ function canonicalPoint(key: string): string | null {
   return raw.toString("base64");
 }
 
-/** What each command a member can send is, for `can`. There is no approve or stop to map. */
+/** What each command a member can send is, for `can`. There is no approve to map; `stop` is the Owner's alone (`can` refuses everyone else). */
 const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
   message: "message",
   steer: "message",
@@ -110,7 +110,11 @@ const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
   start: "start-thread",
   artifacts: "view-pond",
   artifact: "view-pond",
+  stop: "stop",
 };
+
+/** Said when anyone but the Owner asks a Mac to stop a Duck. */
+const ONLY_OWNER_STOPS = "Only the Owner can stop a duck.";
 
 /** Said when a member's Mac is asked for code in a remote pond (changes, diffs). */
 export const REMOTE_NO_CODE = "This is a remote pond: you talk to their agents, and code stays on their Mac.";
@@ -2431,12 +2435,23 @@ export class FlotillaService extends EventEmitter {
   private async indexAccounts(pond: LocalPond, add: string[], remove: string[]): Promise<void> {
     const relay = this.options.relay;
     if (!relay?.indexAccounts || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    const own = pond.role === "owner" ? await this.ownAccountId() : null;
+    const roles: Record<string, "owner" | "member" | "viewer"> = {};
+    if (add.length > 0) {
+      for (const m of (await this.members(pond)).values()) {
+        if (m.accountId && add.includes(m.accountId)) roles[m.accountId] = m.role;
+      }
+      if (own && add.includes(own)) roles[own] = "owner";
+    }
     for (let i = 0; i < Math.max(add.length, remove.length, 1); i += 50) {
+      const chunk = add.slice(i, i + 50);
       await relay.indexAccounts(pond.id, {
         ownerKey: pond.ownerKey,
         name: pond.name,
         ownerName: this.accountLabel(),
-        add: add.slice(i, i + 50),
+        ...(own ? { ownerUserId: own } : {}),
+        roles: Object.fromEntries(chunk.flatMap((id) => (roles[id] ? [[id, roles[id]!]] : []))),
+        add: chunk,
         remove: remove.slice(i, i + 50),
       });
     }
@@ -2452,8 +2467,25 @@ export class FlotillaService extends EventEmitter {
     const ids = [
       ...new Set([...members.values()].filter((m) => m.role !== "owner" && m.accountId).map((m) => m.accountId!)),
     ];
+    // The Owner's own account is listed too, so their other devices (the browser) can ask to be added.
+    const own = pond.role === "owner" ? await this.ownAccountId() : null;
+    if (own && !ids.includes(own)) ids.push(own);
     if (ids.length > 0) await this.indexAccounts(pond, ids, []);
   }
+
+  /** This Mac's own account id, as the relay attests it (`names().self`); cached for ten minutes. Null when signed out. */
+  private async ownAccountId(): Promise<string | null> {
+    const at = this.now();
+    if (this.ownAccountCache && at - this.ownAccountCache.at < 10 * 60_000) return this.ownAccountCache.id;
+    try {
+      const id = (await this.options.account?.names([]))?.self?.userId ?? null;
+      this.ownAccountCache = { id, at };
+      return id;
+    } catch {
+      return this.ownAccountCache?.id ?? null;
+    }
+  }
+  private ownAccountCache: { id: string | null; at: number } | null = null;
 
   /**
    * An owner's Mac adds a device the relay says belongs to a member's account. The relay wrote the request (no client
@@ -2472,6 +2504,11 @@ export class FlotillaService extends EventEmitter {
     const members = await this.members(pond);
     const byAccount = new Map<string, MemberDoc>();
     for (const m of members.values()) if (m.accountId && m.role !== "owner") byAccount.set(m.accountId, m);
+    // The Owner's own devices (their browser, another Mac) are adopted too, by the same rule: the relay says which account
+    // asked, and that account is this Mac's own (relay-attested). The signing key stays on this one Mac.
+    const ownerMember = pond.role === "owner" ? members.get(this.identity.id) : undefined;
+    const ownAccount = ownerMember ? await this.ownAccountId() : null;
+    if (ownerMember && ownAccount) byAccount.set(ownAccount, ownerMember);
     const now = this.now();
     const recent = (this.deviceAdds.get(pond.id) ?? []).filter((t) => now - t < 60_000);
     this.deviceAdds.set(pond.id, recent);
@@ -2544,7 +2581,8 @@ export class FlotillaService extends EventEmitter {
   private async dropAccountDevice(pond: LocalPond, members: Map<string, MemberDoc>, deviceId: string): Promise<void> {
     const member = memberOfDevice(members, deviceId);
     const device = member ? devicesOf(member).find((d) => d.id === deviceId) : undefined;
-    if (member && device) {
+    // The Owner's own signing Mac is never dropped by a note about it: the Pond lives there. Only a device they added.
+    if (member && device && !(member.role === "owner" && device.id === member.id)) {
       await this.revokeToken(pond, device.id, "Squeak couldn't end that device's access. Try again.");
       await this.sendRemoval(pond, member, device).catch(() => undefined);
       const left: MemberDoc =
@@ -2824,6 +2862,8 @@ export class FlotillaService extends EventEmitter {
     if (found.role === role) return;
     const changed: MemberDoc = { ...found, role };
     await this.writeMember(pond, changed);
+    // The account index carries each account's role (the web's overview draws it): say the new one.
+    if (found.accountId) await this.indexAccounts(pond, [found.accountId], []).catch(() => undefined);
     await this.ripple(pondId, `made ${found.name} ${role === "viewer" ? "a viewer" : "a member"}`).catch(
       () => undefined,
     );
@@ -2976,7 +3016,10 @@ export class FlotillaService extends EventEmitter {
     pond.keys[String(pond.current)] = randomKey();
     this.save();
     for (const member of remaining.values()) {
-      if (member.id !== this.identity.id) await this.sendKeyTo(pond, member);
+      // The Owner's other devices (their browser, another Mac) get the new key too; this Mac already holds it.
+      for (const device of devicesOf(member)) {
+        if (device.id !== this.identity.id) await this.sendKeyToDevice(pond, member, device);
+      }
       await this.writeMember(pond, member);
     }
     const me = this.identity;
@@ -4655,8 +4698,23 @@ export class FlotillaService extends EventEmitter {
       if (member && devicesOf(member).some((d) => d.id === act.removeDevice))
         await this.removeDevice(pondId, from.id, act.removeDevice).catch(() => undefined);
     } else if (act.start) {
-      if (from.role !== "member" || !this.takeStartSlot(pondId, from.id)) return;
       const r = act.start;
+      // The Owner's own device (their browser) asks for a Duck: no approval, it starts at once, as it would on this Mac.
+      if (from.role === "owner" && from.id === this.identity.id) {
+        if (!this.takeStartSlot(pondId, from.id)) return;
+        await this.ownerStarter?.(pondId, {
+          requestId: r.requestId,
+          memberId: from.id,
+          name: from.name,
+          text: r.text,
+          agent: r.agent,
+          model: r.model,
+          ...(r.title ? { title: r.title } : {}),
+          at: this.now(),
+        }).catch(() => undefined);
+        return;
+      }
+      if (from.role !== "member" || !this.takeStartSlot(pondId, from.id)) return;
       await this.holdStart(pondId, from, {
         id: r.requestId,
         kind: "start",
@@ -4671,6 +4729,12 @@ export class FlotillaService extends EventEmitter {
         requestId: r.requestId,
       }).catch(() => undefined);
     }
+  }
+
+  /** Set by the bridge: starts the Owner's own Duck at once (no approval). Without it this Mac drops the Owner's own start. */
+  private ownerStarter: ((pondId: string, request: PendingStart) => Promise<void>) | null = null;
+  setOwnerStarter(starter: ((pondId: string, request: PendingStart) => Promise<void>) | null): void {
+    this.ownerStarter = starter;
   }
 
   /** A Member's Mac learns the Owner answered (declined) these start requests: they stop saying "Waiting". */
@@ -4924,12 +4988,12 @@ export class FlotillaService extends EventEmitter {
     if (!cmd || cmd.id !== id) return "not a command this Mac runs";
     const thread = podLevel ? null : (pond.threads[cmd.threadId] ?? null);
     if (!podLevel && !thread) return "not-mine";
-    // The only things a member can ask of a starter are COMMAND_ACTION's: approving and stopping are not among them.
+    // The only things a member can ask of a starter are COMMAND_ACTION's: approving is not among them, and stopping is the Owner's.
     if (thread?.private) return "that thread is private";
     const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
       thread: { starter: this.selfId(pond), private: false },
     });
-    if (!verdict.ok) return VIEWERS_READ;
+    if (!verdict.ok) return cmd.kind === "stop" ? ONLY_OWNER_STOPS : VIEWERS_READ;
     // Code (changed files, patches) leaves this Mac only for a member at the "git" level: the owner's own flag is on, the
     // pond has a Git remote and the member has a machine of their own. Anyone else is remote, whatever their client claims.
     if (

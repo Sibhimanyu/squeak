@@ -100,5 +100,16 @@ names (AAD = its path), and checks its signature (Owner's key for `room`/`rtasks
 
 Format knowledge sits in `pond/room-format.ts` (Room), `pond/duck-format.ts` (Ducks, commands) and `pond/people-format.ts`.
 
-Mac-side follow-ups this needs (not done here): `adoptDeviceRequests` refuses the Owner's own account, so an Owner's browser cannot get
-keys yet; `stop` is not a command kind, so Owner Stop is ignored; the Owner's own `start` runs only from the Owner's Mac.
+Mac-side follow-ups, done: the Owner's Mac adopts the Owner's own devices (browser, another Mac) into Ponds it owns, by the same
+rule (the relay says which account asked; it must be this Mac's own account, `names().self`), sealed with every key version, and
+rotation reaches them; the Owner's account is in the Pond's account index so the browser can ask. The signing key stays on the one
+Mac, and a removal note never drops the Owner's own Mac. `stop` is a `tcmds` command kind (Owner only, any non-private Duck; a
+Member or Viewer gets "Only the Owner can stop a duck."), wired to the session host's interrupt. The Owner's own `start`, as a `tcmds`
+command or an `rposts` `start` ask from their device, runs at once with no approval; a Member's still waits in the queue.
+
+The relay routes are built (`cloud/catalyst-relay/test/overview.test.ts`): `GET /account/overview` as above (rows from the account
+index, which the Owner's Mac now fills with `ownerUserId` and each account's `roles`; people tables where present; feed head and its
+time; members and ducks counted by document id), and `POST /account/invitations/<inviteId>/join|decline`, minimal: the invitation
+must be pending and addressed to the caller's signed-in email; join records the membership and settles it, decline only settles it.
+The rest of the invitation lifecycle (and the Owner's Mac learning that someone joined this way) is #126's. All three have CORS for
+the Slate origin.

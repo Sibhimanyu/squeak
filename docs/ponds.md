@@ -269,8 +269,8 @@ own key; the member is the account those keys belong to.
   `{ reqId, token, expiresAt }`: a join-scope pond token for that device id (24 h), with which the device reads what the owner
   writes back. `deviceId = base64url(sha256(publicKey)[0..12])`, so a retry replaces itself.
 - **Owner's Mac.** On each refresh `adoptDeviceRequests` lists the pond's `devreqs`; for each it checks the request is well
-  formed (both keys on-curve P-256, the id is the key's, at most 24 h old), that a **member of this pond has that `accountId`** and is
-  not the owner, that the member has fewer than 8 devices, and that at most 5 devices were added to this pond in the last minute (the
+  formed (both keys on-curve P-256, the id is the key's, at most 24 h old), that a **member of this pond has that `accountId`** (or the account is the Owner's own, as the relay attests this Mac's account:
+  the Owner's browser and other Macs are adopted as devices of the Owner, never a second signing key), that the member has fewer than 8 devices, and that at most 5 devices were added to this pond in the last minute (the
   rest stay on the relay). It then writes `keys/<deviceId>` (the pond key and a device token) **before** the member document lists the
   device, deletes the request. No Ripple and no event: a device is never shown in a pond (#129). A request for
   a device already listed only sends its key again.

@@ -86,6 +86,21 @@ function createFeed(store) {
     return { changes: page, next: page.length ? page[page.length - 1].seq : since, more: rows.length > take };
   }
 
+  /** The newest change's seq and when it was written (epoch ms): metadata only, never the document. { seq: 0, at: 0 } when empty or no feed. */
+  async function newest(pondId) {
+    if (!enabled) return { seq: 0, at: 0 };
+    const seq = await head(pondId);
+    if (seq === 0) return { seq: 0, at: 0 };
+    let at = 0;
+    try {
+      const row = await store.get(pk(pondId), pad(seq));
+      at = row ? Number(JSON.parse(row).at) || 0 : 0;
+    } catch {
+      at = 0;
+    }
+    return { seq, at };
+  }
+
   /** Clean start: the log and its hint. */
   async function wipe(pondId) {
     let n = 0;
@@ -97,7 +112,7 @@ function createFeed(store) {
     return n;
   }
 
-  return { enabled, append, changes, head, wipe };
+  return { enabled, append, changes, head, newest, wipe };
 }
 
 module.exports = { createFeed, FEED_KINDS, FEED_PK, HEAD_PK };

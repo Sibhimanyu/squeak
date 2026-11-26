@@ -181,7 +181,8 @@ describe("names come only from sign-in", () => {
     const counted: AccountPort = {
       ...ownerAccount.port,
       names: (ids) => {
-        calls += 1;
+        // An empty list is only asking who this account is (its own id); the test counts name refreshes.
+        if (ids.length > 0) calls += 1;
         return ownerAccount.port.names(ids);
       },
     };

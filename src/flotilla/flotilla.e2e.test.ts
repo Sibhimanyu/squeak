@@ -260,13 +260,17 @@ describe("two Macs over one store", () => {
     expect(A.host.sent).toHaveLength(1);
   });
 
-  it("there is no approve or stop on the wire", async () => {
-    for (const kind of ["approve", "stop", "interrupt", "deny"]) {
+  it("there is no approve on the wire, and a member's stop is refused (stop is the Owner's alone)", async () => {
+    for (const kind of ["approve", "interrupt", "deny"]) {
       await rawCommand(B, pondId, { kind, threadId, requestId: "q1" });
       expect(await A.bridge.runCommands(pondId)).toEqual([
         expect.objectContaining({ ok: false, reason: "not a command this Mac runs" }),
       ]);
     }
+    await rawCommand(B, pondId, { kind: "stop", threadId });
+    expect(await A.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: "Only the Owner can stop a duck." }),
+    ]);
     expect(A.host.responded).toHaveLength(0);
     A.host.requests.push({
       id: "tool1",

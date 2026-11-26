@@ -245,7 +245,7 @@ export const DUCK_HISTORY_MS = 30 * 24 * 3_600_000;
 export const KEEP_EVENTS = 5000;
 
 /** The only things a member can ask of a thread's starter. Approving and stopping are not among them. */
-export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start", "artifacts", "artifact"] as const;
+export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start", "artifacts", "artifact", "stop"] as const;
 export type CommandKind = (typeof COMMAND_KINDS)[number];
 
 export interface CommandDoc {

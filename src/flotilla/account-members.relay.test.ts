@@ -378,9 +378,9 @@ describe("members are accounts: a second device of the same account joins withou
     await A.bridge.runCommands(pondId);
   });
 
-  it("a member's own devices are listed on the relay's index and the owner never lists itself", async () => {
+  it("the owner's account is listed for its own Pond only (so its other devices can ask), never as a member's", async () => {
     const mineAfter = (await (await asAccount(await accountToken(SIBHI), "/account/ponds")).json()) as any;
-    expect(mineAfter.ponds).toEqual([]);
+    expect(mineAfter.ponds).toEqual([{ pondId, ownerKey: A.service.me.publicKey, name: "Site", ownerName: "Sibhi" }]);
   });
 
   it("removing one device rotates the pond key; the other device keeps working and the removed one is refused for good", async () => {
@@ -770,6 +770,79 @@ describe("your devices: one account-wide list; removing a device removes it from
       }),
     ).rejects.toMatchObject({ status: 403 });
     await expect(web.service.removeAccountDevice(laptopId)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("the Owner's own devices (their browser, another Mac) are adopted into their Ponds", () => {
+  const OWEN: TestUser = { userId: "u-owen", email: "owen@example.com", name: "Owen" };
+  let A: Mac;
+  let web: Mac;
+  let pondId = "";
+
+  beforeAll(async () => {
+    A = await mac(OWEN);
+    web = await mac(OWEN, { nest: null });
+    pondId = (await A.service.createPond({ name: "Mine", projectId: "owen-1" })).id;
+    await A.service.refresh(pondId);
+  });
+
+  it("the Owner's account is listed for their own Pond, with the Owner Mac's key", async () => {
+    const res = await asAccount(await accountToken(OWEN), "/account/ponds");
+    const body = (await res.json()) as { ponds: Array<{ pondId: string; ownerKey: string }> };
+    expect(body.ponds.find((p) => p.pondId === pondId)).toMatchObject({ ownerKey: A.service.me.publicKey });
+  });
+
+  it("the web's overview says mine and owner for the Owner, from what the Owner's Mac indexed", async () => {
+    const res = await asAccount(await accountToken(OWEN), "/account/overview");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ponds: Array<Record<string, unknown>> };
+    expect(body.ponds.find((p) => p.pondId === pondId)).toMatchObject({
+      name: "Mine",
+      ownerName: "Owen",
+      ownerKey: A.service.me.publicKey,
+      mine: true,
+      role: "owner",
+      shared: false,
+    });
+  });
+
+  it("the Owner's browser is let in with every key version; the signing key stays on the one Mac", async () => {
+    await A.service.rotateKey(pondId);
+    expect(pondOf(A, pondId).current).toBe(2);
+    expect(await web.service.syncAccountPonds()).toBe(1);
+    await A.service.refresh(pondId);
+    await web.service.refresh(pondId);
+    expect((await web.service.list()).find((p) => p.id === pondId)?.status).toBe("active");
+    expect(Object.keys(pondOf(web, pondId).keys).sort()).toEqual(["1", "2"]);
+    const owner = (await membersOf(A, pondId)).get(A.service.me.id);
+    expect(owner.role).toBe("owner");
+    expect(owner.primaryRetired).toBeUndefined();
+    expect(devicesOf(owner).map((d) => d.id)).toEqual([A.service.me.id, web.service.me.id]);
+    // a later rotation reaches the browser too
+    await A.service.rotateKey(pondId);
+    await web.service.refresh(pondId);
+    expect(pondOf(web, pondId).current).toBe(3);
+  });
+
+  it("another account's device is still refused, and the Owner's own Mac is never dropped by a note about it", async () => {
+    const eve = await mac(EVE);
+    await expect(
+      eve.relay.requestDevice({
+        pondId,
+        publicKey: eve.service.me.publicKey,
+        boxKey: eve.service.me.publicKey,
+        client: "web",
+        nest: null,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    // the Owner ends the browser from Settings: it is dropped and the key rotates; the Owner's Mac stays the Owner
+    const before = pondOf(A, pondId).current as number;
+    await A.service.removeAccountDevice(web.service.me.id);
+    await A.service.refresh(pondId);
+    const owner = (await membersOf(A, pondId)).get(A.service.me.id);
+    expect(devicesOf(owner).map((d) => d.id)).toEqual([A.service.me.id]);
+    expect(pondOf(A, pondId).current).toBe(before + 1);
+    await expect(A.service.removeAccountDevice(A.service.me.id)).rejects.toMatchObject({ status: 409 });
   });
 });
 

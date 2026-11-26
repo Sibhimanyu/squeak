@@ -166,6 +166,7 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
     openRequests: (id) => store.openRequests(id),
     send: (id, text, options) => host.send(id, text, options),
     respond: (requestId, resolution) => void host.respond(requestId, resolution),
+    stop: (id) => host.interrupt(id),
     note: (id, text, by) => host.post(id, "system/pond-sender", { text, by }),
     setGuestTurn: (id, on) => host.setGuestTurn(id, on),
     async diff(id, file) {

@@ -296,6 +296,12 @@ exists and is relay-owned: no pond token reads or writes it, and the relay key n
   `<pondId>` = `{ v:1, ownerKey, name?, at }`. 204; 400 `ids` | `key`; 403 not the channel's Mac.
 - `GET /account/ponds` (a Mac's own key, or `x-squeak-account`; 401 for the operator's key, a pond token or nobody): `{ ponds:
 [{ pondId, ownerKey, name? }] }` for the caller's own account only (at most 100), `no-store`.
+- `GET /account/overview` (`x-squeak-account`): `{ ponds: [{ pondId, name, ownerName, ownerKey, mine, role, shared, lastActivityAt,
+seqHead, counts: { members, ducks } }], invitations: [{ inviteId, pondName, inviterName, at }] }`, metadata only (ADR 0005), `no-store`,
+  newest activity first, at most 100 Ponds. From the account's `acctponds` rows (which may carry `ownerUserId` and `role`, written by the
+  Owner's Mac), `people.pondsOf`, the feed's newest row (`seq` and `at`), and document ids counted under `members` and `threads`.
+  `POST /account/invitations/<inviteId>/join` (200 `{ pondId }`) and `/decline` (204): the invite must be pending and addressed to the
+  caller's email (403 otherwise; 404 unknown; 409 settled). Join writes the people-table membership; the full lifecycle is #126's.
 - `GET /account/devices?deviceId=<this>` (account token or the Mac's own key) answers `{ devices: [{ deviceId, name, kind:
 "mac"|"web"|"iphone", createdAt, lastSeenAt, thisDevice }] }` from `people_devices`; `POST /account/devices { publicKey, name,
 kind }` registers or refreshes one (20 per account; `pond-devices` registers too); `DELETE /account/devices/<deviceId>` (204,

@@ -151,6 +151,21 @@ describe("GET /native/projects/:id/changes", () => {
     expect(after.ducks[0].files).toMatchObject([{ path: "late.txt", added: 1 }]);
   });
 
+  it("sees a change even when the index file keeps its old mtime (a coarse clock, or two writes in one tick)", async () => {
+    const r = rig();
+    const pip = r.duckOnStream("Pip", "sq/pip");
+    const url = `/native/projects/${r.project.id}/changes`;
+    const indexPath = r.git(pip.wt, "rev-parse", "--path-format=absolute", "--git-path", "index").trim();
+    const stamp = `${indexPath}.stamp`;
+    execFileSync("cp", ["-p", indexPath, stamp]); // keeps the mtime to the nanosecond
+    expect(((await (await r.get(url)).json()) as any).ducks[0].files).toEqual([]);
+    fs.writeFileSync(path.join(pip.wt, "late.txt"), "z\n");
+    r.git(pip.wt, "add", "late.txt");
+    execFileSync("touch", ["-r", stamp, indexPath]); // the write left no timestamp trace: the mtime the first read keyed on
+    const after: any = await (await r.get(url)).json();
+    expect(after.ducks[0].files).toMatchObject([{ path: "late.txt", added: 1 }]);
+  });
+
   it("answers the held list at once with ?cached=1, and the next plain read is current", async () => {
     const r = rig();
     const pip = r.duckOnStream("Pip", "sq/pip");

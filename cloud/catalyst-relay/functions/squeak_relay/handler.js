@@ -24,6 +24,10 @@
 //                         ownerKey, name?}]} for the caller's own account only; POST /account/pond-devices {pondId, publicKey, boxKey?,
 //                         client, nest?} (same callers, 10 a minute per account) writes the relay-owned channels/<pond>/devreqs/<deviceId>
 //                         and answers a join-scope token (docs/ponds.md, "Members are accounts")
+//   GET    /account/overview (account token) -> {ponds:[{pondId, name, ownerName, ownerKey, mine, role, shared, lastActivityAt, seqHead,
+//                         counts:{members, ducks}}], invitations:[{inviteId, pondName, inviterName, at}]}: metadata only, for the web's
+//                         Ponds screen; POST /account/invitations/<inviteId>/join (-> {pondId}) | /decline (204), account token, the
+//                         invited address only (minimal; the full lifecycle is #126)
 //   GET    /account/devices?deviceId=<this device> (account token or Mac key) -> {devices:[{deviceId, name, kind: mac|web|iphone,
 //                         createdAt, lastSeenAt, thisDevice}]}: the account's devices, never a Pond's; POST /account/devices {publicKey,
 //                         name, kind} registers or refreshes one -> {deviceId}; DELETE /account/devices/<deviceId> -> 204: removes it
@@ -1131,8 +1135,12 @@ function createRelay(deps) {
       return out(400, { error: "key" });
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
     const ownerName = typeof body.ownerName === "string" ? body.ownerName.trim().slice(0, 100) : "";
+    // Which account owns the Pond, and each listed account's role: what the web's overview draws ("mine", the role chip).
+    const ownerUserId = typeof body.ownerUserId === "string" && USER_ID.test(body.ownerUserId) ? body.ownerUserId : "";
+    const roles = body.roles && typeof body.roles === "object" && !Array.isArray(body.roles) ? body.roles : {};
     const at = Date.now();
     for (const userId of new Set(add)) {
+      const role = roles[userId];
       await deps.store.put(
         `${ACCT_PONDS_PK}/${userId}`,
         pondId,
@@ -1141,12 +1149,121 @@ function createRelay(deps) {
           ownerKey: body.ownerKey,
           ...(name ? { name } : {}),
           ...(ownerName ? { ownerName } : {}),
+          ...(ownerUserId ? { ownerUserId } : {}),
+          ...(role === "owner" || role === "member" || role === "viewer" ? { role } : {}),
           at,
         }),
       );
     }
     for (const userId of new Set(remove)) await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
     return out(204);
+  }
+
+  /**
+   * GET /account/overview (account token): what the web's Ponds screen draws, metadata only (ADR 0005, docs/web-app-v2.md).
+   * Per Pond: { pondId, name, ownerName, ownerKey, mine, role, shared, lastActivityAt, seqHead, counts: {members, ducks} } from the
+   * account's index rows, the people tables and the change feed's newest row (its seq and time, never a document), newest
+   * activity first; plus the pending invitations for this account's email. A Pond the account has left is not listed. The
+   * cloud never reads a Pond's content here: ducks and members are counted by document id.
+   */
+  async function handleOverview(req, res, method) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "GET") return out(405, {});
+    const user = await accountUser(req, true);
+    if (!user || !USER_ID.test(String(user.userId))) return out(401, { error: "signin" });
+    const rows = await deps.store.list(`${ACCT_PONDS_PK}/${user.userId}`);
+    const known = deps.people ? await deps.people.pondsOf(user.userId).catch(() => []) : [];
+    const roleIn = new Map(known.map((p) => [p.pondId, p]));
+    const ponds = [];
+    for (const r of rows) {
+      const v = parseOr(r.json);
+      if (!v || typeof v.ownerKey !== "string" || !scoped.POND.test(r.doc) || v.left === true) continue;
+      if (ponds.length >= ACCT_PONDS_MAX) break;
+      const pondId = r.doc;
+      const inPeople = roleIn.get(pondId);
+      const mine =
+        (inPeople && inPeople.role === "owner") || (typeof v.ownerUserId === "string" && v.ownerUserId === user.userId);
+      const role = mine ? "owner" : inPeople ? inPeople.role : v.role === "viewer" ? "viewer" : "member";
+      let members;
+      if (inPeople) members = (await deps.people.membersOf(pondId).catch(() => [])).length;
+      else members = (await deps.store.list(`channels/${pondId}/members`).catch(() => [])).length;
+      const ducks = (await deps.store.list(`channels/${pondId}/threads`).catch(() => [])).length;
+      const head = await feed.newest(pondId).catch(() => ({ seq: 0, at: 0 }));
+      let ownerName = typeof v.ownerName === "string" ? v.ownerName : "";
+      if (!ownerName && inPeople && deps.people) {
+        const owner = await deps.people.getAccount(inPeople.ownerUserId).catch(() => null);
+        ownerName = (owner && owner.name) || "";
+      }
+      ponds.push({
+        pondId,
+        name: (typeof v.name === "string" && v.name) || (inPeople && inPeople.name) || "A pond",
+        ownerName: ownerName || "Someone",
+        ownerKey: v.ownerKey,
+        mine,
+        role,
+        shared: members > 1,
+        lastActivityAt: head.at || (typeof v.at === "number" ? v.at : 0),
+        seqHead: head.seq,
+        counts: { members, ducks },
+      });
+    }
+    ponds.sort((a, b) => b.lastActivityAt - a.lastActivityAt || (a.pondId < b.pondId ? -1 : 1));
+    const invitations = [];
+    if (deps.people && user.email) {
+      for (const inv of await deps.people.pendingInvitesFor(user.email).catch(() => [])) {
+        const pond = await deps.people.getPond(inv.pondId).catch(() => null);
+        if (!pond) continue;
+        const inviter = await deps.people.getAccount(inv.invitedBy).catch(() => null);
+        invitations.push({
+          inviteId: inv.inviteId,
+          pondName: pond.name,
+          inviterName: (inviter && inviter.name) || "Someone",
+          at: inv.createdAt,
+        });
+      }
+    }
+    invitations.sort((a, b) => b.at - a.at);
+    return out(200, { ponds, invitations: invitations.slice(0, 50) });
+  }
+
+  /**
+   * POST /account/invitations/<inviteId>/join (200 {pondId}) and /decline (204), account token. Minimal: the invitation must
+   * be pending and addressed to the caller's signed-in email (403 otherwise, 404 unknown, 409 already settled). Join records
+   * the membership in the people tables and settles the invite; decline only settles it. The full lifecycle (emailing,
+   * withdrawing, the Owner's Mac learning of it) is #126's; this is only the two verbs the web's Ponds screen calls.
+   */
+  async function handleInvitation(req, res, method, inviteId, verb) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (method !== "POST") return out(405, {});
+    const user = await accountUser(req, true);
+    if (!user || !USER_ID.test(String(user.userId))) return out(401, { error: "signin" });
+    if (!deps.people) return out(404, { error: "invite" });
+    const invite = await deps.people.getInvite(inviteId).catch(() => null);
+    if (!invite) return out(404, { error: "invite" });
+    const email = String(user.email || "")
+      .trim()
+      .toLowerCase();
+    if (!email || email !== String(invite.email).trim().toLowerCase()) return out(403, { error: "email" });
+    if (invite.state !== "pending") return out(409, { error: "state", state: invite.state });
+    try {
+      if (verb === "join") {
+        await deps.people.upsertAccount({ userId: user.userId, email, name: user.name || "" }).catch(() => undefined);
+        try {
+          await deps.people.addMember({ pondId: invite.pondId, userId: user.userId, role: invite.role });
+        } catch (e) {
+          if (!(e && e.code === "already-member")) throw e;
+        }
+        await deps.people.settleInvite(inviteId, "joined");
+        return out(200, { pondId: invite.pondId });
+      }
+      await deps.people.settleInvite(inviteId, "declined");
+      return out(204);
+    } catch (e) {
+      if (e && e.code === "pond-full") return out(409, { error: "full" });
+      if (e && e.code === "not-pending") return out(409, { error: "state" });
+      if (e && (e.code === "no-invite" || e.code === "no-pond")) return out(404, { error: "invite" });
+      throw e;
+    }
   }
 
   /** The signed-in account behind a request: a Mac's own key, or an account token (never the operator's key, a pond token or a cookie-less call). */
@@ -1441,6 +1558,11 @@ function createRelay(deps) {
         await stampSeen(mac.macId);
       }
       const forbidden = () => send(res, 403, {});
+      if (route === "/account/overview") return await handleOverview(req, res, method);
+      {
+        const inv = /^\/account\/invitations\/([A-Za-z0-9_-]{1,100})\/(join|decline)$/.exec(route);
+        if (inv) return await handleInvitation(req, res, method, inv[1], inv[2]);
+      }
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
       if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);

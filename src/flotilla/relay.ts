@@ -73,6 +73,10 @@ export interface AccountIndexChange {
   name?: string;
   /** The owner's name, so a new device can say "waiting for <Owner>'s Mac" before it holds the key. */
   ownerName?: string;
+  /** The Owner's account id, so the web's overview can say "mine" without reading the Pond. */
+  ownerUserId?: string;
+  /** The role of each listed account (`add`), for the web's overview. */
+  roles?: Record<string, "owner" | "member" | "viewer">;
   add: string[];
   remove: string[];
 }

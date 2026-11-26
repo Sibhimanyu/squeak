@@ -42,6 +42,10 @@ class FakeHost extends EventEmitter implements HostPort {
     return { queued: false };
   }
   respond(): void {}
+  stopped: string[] = [];
+  async stop(id: string) {
+    this.stopped.push(id);
+  }
   note(_id: string, text: string) {
     this.notes.push(text);
   }
@@ -188,6 +192,37 @@ describe("a member reads the changes of someone else's thread", () => {
     const { requestId } = await V.service.requestDiff(pondId, threadId, "src/a.ts");
     expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "diff" })]);
     expect((await V.service.diffResult(pondId, threadId, requestId))!.patch?.text).toContain("+b");
+  });
+
+  it("the Owner stops a Duck on a Member's Mac; a Member or Viewer cannot, on the wire or by hand", async () => {
+    B.host.sessions.set("b1", session("b1", { title: "Aarav's" }));
+    B.host.sessions.set("b2", session("b2", { title: "Aarav's secret" }));
+    const own = (await B.bridge.share(pondId, "b1")).id;
+    const secret = (await B.bridge.share(pondId, "b2", { private: true })).id;
+    await A.service.refresh(pondId);
+    await A.service.sendCommandTo(pondId, own, { kind: "stop" });
+    expect(await B.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "stop" })]);
+    expect(B.host.stopped).toEqual(["b1"]);
+    // a private Duck does not exist to the Owner either
+    await rawCommand(A, pondId, { kind: "stop", threadId: secret });
+    expect(await B.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: "that thread is private" }),
+    ]);
+    // a Member's stop on the Owner's own Duck, and a Viewer's, are refused with the fixed sentence
+    await expect(V.service.sendCommandTo(pondId, threadId, { kind: "stop" })).rejects.toThrow();
+    for (const who of [B, V]) {
+      await rawCommand(who, pondId, { kind: "stop", threadId });
+      expect(await A.bridge.runCommands(pondId)).toEqual([
+        expect.objectContaining({ ok: false, reason: "Only the Owner can stop a duck." }),
+      ]);
+    }
+    expect(A.host.stopped).toEqual([]);
+    // and a Member cannot stop another Member's Duck by hand
+    await rawCommand(V, pondId, { kind: "stop", threadId: own });
+    expect(await B.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: "Only the Owner can stop a duck." }),
+    ]);
+    expect(B.host.stopped).toEqual(["b1"]);
   });
 
   it("a private thread is refused to a member's request and a hand-signed one", async () => {
@@ -385,5 +420,44 @@ describe("a member starts a thread on the owner's Mac", () => {
       { at: clock.now },
     );
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: true });
+  });
+
+  it("the Owner's own device starts a Duck at once: no approval, in the owner's own mode; a Member's still waits", async () => {
+    const before = started.length;
+    const me = { id: A.service.me.id, name: "Sibhi", role: "owner" as const };
+    // the queued ask a browser writes (rposts), applied by the Owner's Mac
+    await A.service.applyMemberAct(pondId, me, {
+      start: { requestId: "own-1", text: "Fix the build", agent: "claude", model: "claude-opus", title: "Build" },
+    });
+    expect(started).toHaveLength(before + 1);
+    expect(started.at(-1)!.spec).toMatchObject({ main: true, text: "Fix the build", permissionMode: "default" });
+    expect(((await A.service.view(pondId)).starts ?? []).map((s) => s.requestId)).not.toContain("own-1");
+    expect(A.host.notes).not.toContain("Sibhi started this thread.");
+    // the signed command form (tcmds) does the same
+    await rawCommand(
+      A,
+      pondId,
+      { kind: "start", threadId: "", text: "And lint", agent: "codex", model: "gpt-x" },
+      { at: clock.now },
+    );
+    expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "start" })]);
+    expect(started).toHaveLength(before + 2);
+    expect(started.at(-1)!.spec).toMatchObject({ agent: "codex", text: "And lint" });
+    // a Member's identical ask is held, never run
+    await A.service.applyMemberAct(
+      pondId,
+      { id: B.service.me.id, name: "Aarav", role: "member" },
+      { start: { requestId: "m-1", text: "Mine", agent: "claude", model: "m" } },
+    );
+    expect(started).toHaveLength(before + 2);
+    expect(((await A.service.view(pondId)).starts ?? []).map((s) => s.requestId)).toContain("m-1");
+    // a Viewer's is dropped
+    await A.service.applyMemberAct(
+      pondId,
+      { id: V.service.me.id, name: "Vera", role: "viewer" },
+      { start: { requestId: "v-1", text: "No", agent: "claude", model: "m" } },
+    );
+    expect(((await A.service.view(pondId)).starts ?? []).map((s) => s.requestId)).not.toContain("v-1");
+    expect(started).toHaveLength(before + 2);
   });
 });

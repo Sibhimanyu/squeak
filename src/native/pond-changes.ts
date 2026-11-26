@@ -232,13 +232,16 @@ export class PondChangesReader {
       ]);
       const [head, indexPath] = heads.trim().split("\n");
       base = mergeBase;
-      let mtime = 0;
+      // The mtime alone can repeat (a coarse clock, or a write inside the same tick as the last one), which served a stale
+      // list. Git rewrites the index through a lock file and a rename, so its inode and size move with every write.
+      let stamp = "0";
       try {
-        mtime = fs.statSync(path.resolve(dir, indexPath ?? "")).mtimeMs;
+        const st = fs.statSync(path.resolve(dir, indexPath ?? ""));
+        stamp = `${st.mtimeMs}:${st.ino}:${st.size}`;
       } catch {
         // no index yet
       }
-      key = `${head}|${base ?? ""}|${mtime}`;
+      key = `${head}|${base ?? ""}|${stamp}`;
     } catch {
       return null; // not a repository, or no commits
     }

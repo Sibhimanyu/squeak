@@ -136,12 +136,14 @@ const ACCOUNT_CORS_ROUTES = new Set([
   "/account/macs",
   "/account/device-request",
   "/account/ponds",
+  "/account/overview",
   "/account/pond-leaves",
   "/account/pond-devices",
   "/account/avatar",
 ]);
 function isAccountCorsRoute(route) {
   if (ACCOUNT_CORS_ROUTES.has(route)) return true;
+  if (/^\/account\/invitations\/[A-Za-z0-9_-]{1,100}\/(join|decline)$/.test(route)) return true;
   return (
     route.startsWith("/account/macs/") && route !== "/account/macs/cliq-token" && route !== "/account/macs/hist-token"
   );

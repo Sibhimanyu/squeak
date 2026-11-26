@@ -21,6 +21,7 @@ import {
   type SharedArtifact,
   MAX_PATHS,
   MAX_TEXT,
+  type CommandDoc,
   type DiffResult,
   type ChangedFiles,
   type PondThread,
@@ -43,6 +44,8 @@ export interface HostPort {
     options: { mode: "queue" | "steer"; author?: { id: string; name: string } },
   ): Promise<{ queued: boolean }>;
   respond(requestId: string, resolution: Resolution): void;
+  /** Ends the chat's running turn (the Stop button). Without it this Mac refuses a `stop` command. */
+  stop?(id: string): Promise<void>;
   /** A Squeak note in the chat, so the starter's own transcript says who sent what. */
   note(id: string, text: string, by: string): void;
   /** While a member's work runs, nothing is auto-allowed by the chat's rules. */
@@ -154,6 +157,7 @@ export class FlotillaBridge {
     const visibility = (pondId: string, threadId: string, isPrivate: boolean): void => {
       if (!isPrivate) void this.backfill(pondId, threadId).catch(() => undefined);
     };
+    this.service.setOwnerStarter((pondId, request) => this.startFor(pondId, request, true));
     this.service.on("pass", pass);
     this.service.on("republish", republish);
     this.service.on("visibility", visibility);
@@ -161,6 +165,7 @@ export class FlotillaBridge {
       () => this.service.off("pass", pass),
       () => this.service.off("republish", republish),
       () => this.service.off("visibility", visibility),
+      () => this.service.setOwnerStarter(null),
     );
     for (const { pondId, threadId } of this.service.ownThreads()) this.track(pondId, threadId);
   }
@@ -453,7 +458,11 @@ export class FlotillaBridge {
   private async execute(pondId: string, v: VerifiedCommand): Promise<void> {
     const { cmd, from } = v;
     // A Member's Duck spends the Owner's tokens: it is recorded as waiting and runs only when the Owner approves it.
-    if (cmd.kind === "start") return this.service.holdStart(pondId, from, cmd);
+    if (cmd.kind === "start") {
+      // The Owner's own device asks: it runs now. Only a Member's waits for the Owner's approval.
+      if (from.role === "owner") return this.startOwn(pondId, from, cmd);
+      return this.service.holdStart(pondId, from, cmd);
+    }
     if (cmd.kind === "artifacts" || cmd.kind === "artifact") return this.artifactsFor(pondId, v);
     const thread = v.thread;
     if (!thread) throw new FlotillaError("no such thread");
@@ -484,7 +493,33 @@ export class FlotillaBridge {
     }
     if (cmd.kind === "diff") {
       await this.answerDiff(pondId, cmd.threadId, thread.sessionId, cmd.id, from.id, cmd.path);
+      return;
     }
+    if (cmd.kind === "stop") {
+      // Verified as the Owner's already (service.verifyCommand): any non-private Duck, never a Member's say-so.
+      if (!this.host.stop) throw new FlotillaError("this Mac cannot stop a duck");
+      await this.host.stop(thread.sessionId);
+    }
+  }
+
+  /** The Owner's own `start` command (from their browser): a verified Owner, so it starts at once, no approval. */
+  private async startOwn(pondId: string, from: { id: string; name: string }, cmd: CommandDoc): Promise<void> {
+    const agent = cmd.agent === "codex" ? "codex" : cmd.agent === "claude" ? "claude" : null;
+    if (!cmd.text?.trim() || !agent || !cmd.model) throw new FlotillaError("choose Claude or Codex and a model");
+    await this.startFor(
+      pondId,
+      {
+        requestId: cmd.requestId ?? cmd.id,
+        memberId: from.id,
+        name: from.name,
+        text: cmd.text,
+        agent,
+        model: cmd.model,
+        ...(cmd.title ? { title: cmd.title } : {}),
+        at: this.now(),
+      },
+      true,
+    );
   }
 
   /**
@@ -642,7 +677,7 @@ export class FlotillaBridge {
    * member as its requester and first participant. Published like any thread, so everyone sees it; the member's Mac
    * opens it by `requestId`.
    */
-  private async startFor(pondId: string, request: PendingStart): Promise<void> {
+  private async startFor(pondId: string, request: PendingStart, own = false): Promise<void> {
     const from = { id: request.memberId, name: request.name };
     const cmd = { text: request.text, model: request.model, title: request.title, requestId: request.requestId };
     const text = cmd.text.trim();
@@ -663,17 +698,21 @@ export class FlotillaBridge {
       main: true,
     });
     if (!started) throw new FlotillaError("this pond's folder is not on this Mac");
-    // The first message is theirs: match it to the host's user row, and say who sent it in the owner's transcript.
-    const waiting = this.sent.get(started.sessionId) ?? [];
-    waiting.push({ text, by: from.id, byName: from.name });
-    this.sent.set(started.sessionId, waiting.slice(-20));
-    this.host.note(started.sessionId, `${from.name} started this thread.`, from.id);
-    this.host.setGuestTurn(started.sessionId, true);
+    // The first message is theirs: match it to the host's user row, and say who sent it in the owner's transcript. The
+    // Owner's own Duck is just theirs: no note, and not a guest's turn (the chat's own rules apply).
+    if (!own) {
+      const waiting = this.sent.get(started.sessionId) ?? [];
+      waiting.push({ text, by: from.id, byName: from.name });
+      this.sent.set(started.sessionId, waiting.slice(-20));
+      this.host.note(started.sessionId, `${from.name} started this thread.`, from.id);
+      this.host.setGuestTurn(started.sessionId, true);
+    }
     const thread = await this.share(pondId, started.sessionId, {
       mode: "shared",
       ...(cmd.title ? { title: cmd.title } : {}),
       requester: { memberId: from.id, requestId: cmd.requestId, name: from.name },
     });
+    if (own) return;
     await this.service
       .noteParticipant(pondId, thread.id, { id: from.id, name: from.name }, this.now(), "working")
       .catch(() => undefined);
