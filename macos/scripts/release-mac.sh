@@ -222,5 +222,17 @@ else
   echo "WARNING: the site page was not published (the app is live): run 'cd $REL/website && npm run build && EXPECT_VERSION=$VERSION $REL/macos/scripts/publish-site.sh $REL/website/dist/index.html'" >&2
 fi
 
+step "Prune old builds"
+# Keep the newest archives the next release's delta patches start from (appcast-deltas.py MAX_DELTAS, plus this one);
+# older DMGs, ZIPs, checksums and patch files only fill the disk (18 GB of them filled it on 2026-11-25).
+keep=$(python3 -I -c "import re,sys; print(int(re.search(r'^MAX_DELTAS\s*=\s*(\d+)', open(sys.argv[1]).read(), re.M)[1]) + 1)" "$REL/macos/scripts/appcast-deltas.py")
+old_versions=$(ls "$BUILD" | sed -nE 's/^Squeak-([0-9]+\.[0-9]+\.[0-9]+)\.zip$/\1/p' | sort -t. -k1,1n -k2,2n -k3,3n | head -n "-$keep")
+for v in $old_versions; do rm -f "$BUILD/Squeak-$v.zip" "$BUILD/Squeak-$v.dmg" "$BUILD/Squeak-$v".*.sha256; done
+current_tag=$(echo "$VERSION" | awk -F. '{printf "%d%02d%02d", $1, $2, $3}')
+find "$BUILD" -maxdepth 1 -name 'Squeak*-*.delta' ! -name "Squeak${current_tag}-*.delta" -delete
+find "$BUILD" -maxdepth 1 -name 'deltas-*' -type d -mmin +60 -exec rm -rf {} +
+find "$BUILD" -maxdepth 1 -name 'release-*.log' -mtime +14 -delete
+echo "kept the last $keep release archives"
+
 step "Done"
 echo "Squeak $VERSION is live: https://sibhimanyu.github.io/squeak/appcast.xml  (built from $COMMIT in $((SECONDS - START)) s)"

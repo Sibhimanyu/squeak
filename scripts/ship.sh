@@ -225,18 +225,23 @@ host_sessions() {
   curl -fsS --max-time 3 -H "x-squeak-token: $token" "http://127.0.0.1:$HOST_PORT/native/sessions" 2>/dev/null
 }
 
-# Prints how many chats are working or waiting on the person; host down = 0.
-host_busy_count() {
+# Prints one line per chat that is working or waiting on the person ("title · status, why"); host down = nothing.
+host_busy_list() {
   local body
-  body="$(host_sessions)" || { echo 0; return 0; }
+  body="$(host_sessions)" || return 0
   printf '%s' "$body" | node -e "
     let t=''; process.stdin.on('data', d => t += d).on('end', () => {
       try {
         const list = JSON.parse(t).sessions || [];
-        const busy = list.filter(s => s.busy === true || ['working','cancelling','stopping'].includes(s.status) || /^(needs_|awaiting_)/.test(String(s.status)));
-        console.log(busy.length);
-      } catch { console.log(0); }
-    });" 2>/dev/null || echo 0
+        for (const s of list) {
+          const waiting = /^(needs_|awaiting_)/.test(String(s.status));
+          const working = ['working','cancelling','stopping'].includes(s.status);
+          if (!(s.busy === true || working || waiting)) continue;
+          const why = working || waiting ? s.status : 'busy (' + s.status + ', background work)';
+          console.log('  ' + String(s.title || s.id).slice(0, 60) + ' · ' + why);
+        }
+      } catch {}
+    });" 2>/dev/null || true
 }
 
 host_healthy() {
@@ -262,9 +267,11 @@ restart_host_if_needed() {
     printf '%s\n' "$head_now" > "$HOST_STAMP"
     return 0
   fi
-  busy="$(host_busy_count)"
-  if [ "$FORCE_HOST" -ne 1 ] && [ "${busy:-0}" -gt 0 ]; then
-    say "host not restarted: $busy chats running; rerun with --restart-host when they finish"
+  busy="$(host_busy_list)"
+  if [ "$FORCE_HOST" -ne 1 ] && [ -n "$busy" ]; then
+    say "host not restarted: $(printf '%s\n' "$busy" | wc -l | tr -d ' ') chats running:"
+    say "$busy"
+    say "rerun with --restart-host when they finish (it stops them)"
     return 0
   fi
   say "restarting the session host..."

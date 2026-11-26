@@ -15,6 +15,11 @@ BUILD_ONLY=0
 [ "${1:-}" = "--build-only" ] && BUILD_ONLY=1
 
 cd "$HERE"
+# A full disk kills builds half-way (exit 137, truncated .build): warn first.
+free_gb=$(df -g "$HERE" | awk 'NR==2 {print $4}')
+if [ "${free_gb:-99}" -lt 10 ]; then
+  echo "run-dev: only ${free_gb} GB free; builds may fail. Old release builds: ~/.squeak-release/macos/build" >&2
+fi
 CFG="${SQUEAK_DEV_CONFIG:-debug}"   # SQUEAK_DEV_CONFIG=release: optimised, as the shipped app
 swift build -c "$CFG" --product SqueakMac
 BINDIR="$(swift build -c "$CFG" --show-bin-path)"

@@ -52,6 +52,7 @@ Read only what your task touches. Index: `docs/agents/README.md`.
 - Ponds `docs/ponds.md`, voice `docs/voice.md`, Cliq `docs/cliq.md`, flags `docs/flags.md`, RasanAI
   `docs/rasanai-plugin.md`
 - Big files and how to split them: `docs/agents/cleanup.md`
+- Reviewing a diff: `CODING_STANDARDS.md`; after merging agent branches: `scripts/clean-merged.sh`
 
 ## Upstream
 
