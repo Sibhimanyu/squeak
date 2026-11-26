@@ -2,25 +2,79 @@
 
 Research for issue #117 (part of #101), before building the cloud foundation of ADR 0005
 (`docs/adr/0005-people-data-in-tables-content-sealed-targeted-notices.md`; spec: `docs/spec.md`, "Cloud: what is stored
-where, and how changes travel"). Nothing was deployed, created or called on Catalyst. Evidence is the Catalyst skill docs,
-the public Catalyst docs pages named below, the current relay code, and a local prototype
-(`cloud/spikes/appsail-sse/`). **Every Catalyst-side behaviour that is not in a doc is marked "unmeasured" and is in the
-live test plan at the end, which needs the owner's approval.** The acceptance item "measured numbers" is therefore only
-half met: the numbers below are documented limits plus local measurements; the live ones wait for approval.
+where, and how changes travel"). Evidence: the Catalyst skill docs, the public Catalyst docs, the current relay code, a
+local prototype (`cloud/spikes/appsail-sse/`) and, on 2026-11-26, a live test in the Development environment (steps 1 to
+6 of the plan at the end ran; steps 7 and 8 are waiting on the owner; see "Live results"). Sections 1 to 5 below are the
+desk research written before the live test; where the live test measured something it is marked **Live**.
 
-## Decision (provisional until the live test)
+## Decision (after the live test)
 
-1. **Live connections: SSE from a separate AppSail service (`squeak-live`), not the existing relay app.** WebSocket only
-   if the live test shows the front door passes `Upgrade` and SSE does not work.
-2. **People tables: Catalyst Data Store**, with the limits below designed around (composite keys, slot rows for the
-   10-person cap, no emoji in names, caches).
-3. **The one thing that can flip (1): the documented cap of 100 concurrent requests per AppSail instance** (below). If an
-   open stream counts against it and Zoho will not raise it, a service holds about 500 devices in production and 100 in
-   development, and the fallback (sharded Data Streams, last section) becomes the plan.
-4. The platform's documented 30 s request limit may also end every stream at 30 s. The design below tolerates that
-   (reconnect before the cut, no gap), so it is a cost, not a blocker.
+1. **Live connections: SSE from a separate AppSail service (`squeak-live`).** WebSocket is ruled out: the front door
+   strips `Upgrade` (Live, step 6).
+2. **People tables: Catalyst Data Store**, limits designed around (composite keys, slot rows for the 10-person cap, no emoji
+   in names, caches). Still unmeasured live (step 7 needs a console-made table); the choice does not depend on it.
+3. **The documented 100 concurrent requests per instance is real and open streams count against it** (Live, step 3/4): one
+   AppSail app holds at most 500 open streams (5 instances x 100), also in Development; beyond that every request,
+   streams and ordinary calls alike, gets HTTP 429 `Concurrency limit reached for the feature APP_COMPUTE`. So `squeak-live`
+   serves about 500 devices until Zoho raises the limit (ask now: draft below). The sharded Data Streams fallback (section
+   5) becomes the plan only if Zoho refuses and we pass about 400 devices.
+4. **The platform ends every stream at about 45 s, cleanly** (Live, step 1), and **never tells the app when a client goes
+   away** (Live, step 3). So the hub must rotate streams itself: send `event: bye` and close at 40 s, the client opens its
+   replacement at about 35 s, heartbeat every 15 s. `lastSeen`, "last connection closed" and membership removal must not
+   depend on a socket `close` event; use the 40 s rotation and an explicit client "alive" call.
 
-## 1. Can AppSail hold long-lived SSE or WebSocket connections?
+## Live results (2026-11-26, Development, `squeak-spike-sse`, Node 22, 256 MB, from the owner's Mac, direct to the front door)
+
+Note: the Mac's sandbox proxy cut streams at the same 45 s; every number below was taken with the proxy bypassed.
+
+- **Step 1, survival**: first byte immediate (response headers and `: open` about 1 s after connect, including TLS). Heartbeat 15
+  s: stream stayed open to **45.3 to 45.8 s** (4 runs), then closed by the platform with a normal end (curl exit 0, no
+  reset), no `bye` from the app. Nothing reached 60 s or 5 min. Response is not buffered.
+- **Step 2, heartbeat**: 5 s heartbeat: still cut at about 46 s (9 heartbeats), so the cut is a **maximum age**, not idle.
+  60 s heartbeat (silence after `hello`): cut at **35 to 38 s** (3 runs), so there is also an idle cut near 35 s. Heartbeat 15 s is
+  right; it is not what sets the lifetime.
+- **Step 3, 100-request cap**: 120 streams opened without error, `/stats` p50 123 ms (idle baseline 122), no 429 at 120 or 200.
+  Streams do count: they are spread over more instances (Development did not stay at 1 instance): with the pond's state on
+  one instance, 100 of 191 streams landed on it and 91 elsewhere. At 600 attempted streams: **500 open, the rest 429**, and
+  while saturated 65 of 84 ordinary `/stats` calls were 429 too; first byte p95 6.5 s during scale-out (instance start).
+  Whether the limit is per service or per project was not tested (it would have touched the live relay): ask Zoho.
+- **Disconnect is invisible to the app**: after clients went away, `conns` stayed at 5 for 100+ s and at 518 for 5+ min (the app kept
+  writing heartbeats). With the hub's own max age (30 s) they reached 0 within 35 s.
+- **Step 4, 200 streams over 100 to 180 s**: all opened (p50 first byte 117 ms, p95 234 ms), about 3 instances, RSS 56 to 62 MB
+  per instance, 4,933 platform cuts re-opened without an error. Instance count is read from per-instance `conns`; the console was not opened.
+- **Step 5, redeploy with 20 streams**: `catalyst deploy appsail` returned in 4 s; all 20 streams ended cleanly (normal end, no reset)
+  18 s after it returned; with 0 to 3 s of random delay all 20 were back within 3 s.
+- **Step 6, WebSocket**: the `Upgrade` header is stripped by the front door: the request reaches the app as a plain `GET`
+  (404 from the app's own handler, identical to a normal request). No WebSocket route is possible on AppSail.
+- **Step 7, Data Store**: not run. The CLI and SDK cannot create a table; the owner must make `spike_people` in the console.
+- **Step 8, Data Streams User Roles from AppSail**: not run, waiting for the console-made channel `spike_live` and app user `spike-live-1`.
+- **Step 9**: email drafted below, not sent.
+
+Cost of the test: about 0.5 GB-hours of AppSail, no Data Store use.
+
+### Cleanup: the owner must delete the test service
+
+The CLI (1.29.1) has no command to delete an AppSail service (`functions:delete --remote` is interactive-only and lists the live
+`squeak_relay`, so it was not used). **`squeak-spike-sse` is still deployed in Development**; delete it in the console
+(Serverless, AppSail, `squeak-spike-sse`, id `53069000116008223`). It holds no secrets (`x-key: spike` only) and scales to zero.
+No Data Store table, channel or app user was created. The temporary deploy directory was removed; the relay, its function and
+tables were not touched.
+
+### Draft email to Zoho support (step 9, not sent)
+
+To: support@zohocatalyst.com. Subject: Raise AppSail concurrent request limit; streaming response limits (project 53069000000381140)
+
+> Hello, we run a notification service on Catalyst AppSail (project 53069000000381140, development, India DC) that holds
+> one long-lived Server-Sent Events response per user device. In a test we found: (1) every open stream counts toward the
+> 100 concurrent requests per instance, so an app tops out at 500 open streams and then returns 429 "Concurrency limit
+> reached for the feature APP_COMPUTE" for all requests; (2) the front door ends every response at about 45 s (about 35 s
+> with no bytes) and does not tell the app when the client disconnected; (3) the `Upgrade` header is stripped, so WebSocket
+> does not work. Please tell us: can the concurrent-request limit per instance and the 5-instance maximum be raised for
+> this project (target 5,000 concurrent streams in production), is the limit per AppSail service or per project, can the
+> maximum response age and idle timeout be raised or disabled for text/event-stream responses, and is there a supported way
+> to learn that a client has disconnected. Thank you.
+
+## 1. Can AppSail hold long-lived SSE or WebSocket connections? (desk research; **Live** results above override it)
 
 Documented (Catalyst docs, AppSail "Platform Management",
 <https://docs.catalyst.zoho.com/en/serverless/help/appsail/key-concepts/platform-management>; skill
@@ -204,34 +258,12 @@ Facts that shape it (skill `catalyst-datastreams`):
 7. Prototype memory figures are without TLS and the real front door; multiply by about 1.5 for TLS-terminating proxies if
    the front door passes connections through unterminated (unknown).
 
-## Live test plan (awaiting the owner's approval; nothing below has been run)
+## Live test plan (approved and run 2026-11-26; results above)
 
-All in the **Development** environment of the existing project (`53069000000381140` in `deploy-appsail.sh`), no production
-data, no writes to the live relay, no change to the existing `squeak-relay` app.
+Steps 1 to 6 ran as written against `squeak-spike-sse`, deploying the spike server through a small wrapper (adds a `/id`
+probe and a `/ws` echo, plus the `ws` package). Steps 7 and 8 need console work by the owner:
 
-Resources it would create (all throwaway, all deleted afterwards by name):
-
-- AppSail service `squeak-spike-sse` (Node 22, 256 MB), deploying `cloud/spikes/appsail-sse/server.js` unchanged. It
-  has no secrets, `x-key: spike` as the only credential, and is deleted after the test.
-- Data Store table `spike_people` with columns `k` (varchar 255, IsUnique), `acct` (varchar 64), `n` (bigint); deleted after.
-- Data Streams channel `spike_live` (User Roles) made by the owner in the console, and one app user `spike-live-1`
-  (the agent cannot create channels); deleted after.
-
-Steps and what each answers:
-
-1. Deploy `squeak-spike-sse`; `curl -N` its `/events` for 5 minutes with heartbeat 15 s: does the stream survive 30 s,
-   60 s, 5 min; is the first byte immediate (buffering); what status or reset closes it if cut.
-2. Same with `HB_MS=60000` and `HB_MS=5000`: the heartbeat that matters.
-3. Open 120 streams from the Mac (`load.js` pointed at the deployed URL), then 120 ordinary `/stats` calls: does an open
-   stream count toward the 100-request cap (queueing, 429, or a second instance).
-4. Raise to 200 streams over several minutes; read the instance count and memory in the console: scale-out behaviour (dev
-   is expected to stay at 1).
-5. Redeploy the service while 20 streams are open: how they end, how fast clients reconnect.
-6. WebSocket: a tiny `ws` echo on a second path; does `Upgrade` pass and for how long.
-7. Data Store: 200 inserts into `spike_people` (single, concurrent), duplicate `k` (error shape), 10 slot-row races for the
-   cap, 300-row SELECT, a name with an emoji, a SELECT and INSERT latency set (p50 and p95 over 100 calls).
-8. Data Streams: from `squeak-spike-sse`, mint a token for `spike-live-1` on `spike_live` (does AppSail work for User Roles),
-   subscribe two instances' worth of sockets, publish, confirm both receive.
-9. Ask Zoho support (support@zohocatalyst.com) to raise the concurrent-request limit and state the streaming timeout.
-
-Cost: a few cents of Data Store and under 1 GB-hour of AppSail, inside the free tier.
+- Step 7: make a Data Store table `spike_people` in Development with columns `k` (varchar 255, unique), `acct` (varchar 64),
+  `n` (bigint); then ask for the run (200 inserts, duplicate `k`, 10 slot races, 300-row SELECT, emoji name, p50/p95 over 100 calls).
+- Step 8: make a Data Streams channel `spike_live` (User Roles) and an app user `spike-live-1`; then ask for the run.
+- Delete `squeak-spike-sse` (see Cleanup above) and, afterwards, the table, channel and app user.
