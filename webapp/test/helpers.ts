@@ -5,6 +5,7 @@ export const CONFIG: AppConfig = {
   env: "test",
   appOrigin: "https://app.example.test",
   relayBase: "https://relay.example.test/server/squeak_relay",
+  liveBase: "https://live.example.test",
 };
 
 export const memoryStore = (initial: Record<string, string> = {}): KeyValueStore & { data: Map<string, string> } => {

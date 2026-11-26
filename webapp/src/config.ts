@@ -7,6 +7,8 @@ export interface AppConfig {
   appOrigin: string;
   /** The relay's base URL (no trailing slash): account routes live under it. */
   relayBase: string;
+  /** The `squeak-live` service (https, no trailing slash). Absent: no live stream, the lists are read every 30 s. */
+  liveBase: string | null;
 }
 
 declare const __SQUEAK_CONFIG__: AppConfig | undefined;
@@ -22,6 +24,7 @@ export function parseConfig(value: unknown): AppConfig {
     env: String(v["env"] ?? "development"),
     appOrigin: new URL(https(v["appOrigin"])).origin,
     relayBase: https(v["relayBase"]),
+    liveBase: v["liveBase"] ? https(v["liveBase"]) : null,
   };
 }
 

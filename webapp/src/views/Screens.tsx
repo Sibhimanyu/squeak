@@ -1,23 +1,10 @@
-// Empty placeholder screens for the router skeleton: Ponds, a Pond (Room | Ducks) and a Duck. No data yet (#136 onward).
+// Placeholder screens for the router skeleton: a Pond (Room | Ducks), a Duck and an invite link. No data yet (#137 onward).
+// The Ponds list is in Ponds.tsx.
 
 import type { Route } from "../router.js";
 import { parentRoute, routePath } from "../router.js";
 
 const href = (route: Route): string => `#${routePath(route)}`;
-
-export function PondsScreen({ account, onSignOut }: { account: string; onSignOut: () => void }) {
-  return (
-    <section class="screen" data-screen="ponds">
-      <header class="bar">
-        <h1>Ponds</h1>
-        <button type="button" class="avatar-button" onClick={onSignOut} aria-label={`Sign out ${account}`}>
-          {account.charAt(0).toUpperCase()}
-        </button>
-      </header>
-      <p class="empty">No Ponds yet.</p>
-    </section>
-  );
-}
 
 function BackBar({ route, title }: { route: Route; title: string }) {
   const parent = parentRoute(route);

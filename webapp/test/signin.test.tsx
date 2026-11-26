@@ -94,7 +94,12 @@ describe("SignIn view", () => {
 
 describe("App with a fake relay", () => {
   const boot = (stored: Record<string, string>, relayState = {}) => {
-    const fake = createFakeRelay({ accounts: { [TOKEN]: ASHA }, invites: { K7P4QD: INVITE }, ...relayState });
+    const fake = createFakeRelay({
+      accounts: { [TOKEN]: ASHA },
+      invites: { K7P4QD: INVITE },
+      overviews: { [TOKEN]: { ponds: [], invitations: [], needsYou: [] } },
+      ...relayState,
+    });
     const relay = createRelay(CONFIG.relayBase, fake.fetch);
     const visited: string[] = [];
     const storage = memoryStore(stored);

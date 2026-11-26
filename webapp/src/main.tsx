@@ -14,4 +14,4 @@ const relay = createRelay(config.relayBase);
 const auth = createAuth({ config, relay, storage, navigate: (url) => window.location.assign(url) });
 const router = createRouter(window);
 
-render(<App auth={auth} relay={relay} router={router} />, document.getElementById("app")!);
+render(<App auth={auth} relay={relay} router={router} liveBase={config.liveBase} />, document.getElementById("app")!);

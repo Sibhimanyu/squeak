@@ -65,3 +65,21 @@ Relay contract this depends on (the fake relay implements it):
 6. Old `web/`, the guest page and `/app/index.html` stay until #138.
 
 `/join` needs a real page because Slate ignores redirect rules; the build writes `join/index.html` with `<base href="/">`.
+
+## Ponds screen (#136)
+
+`views/Ponds.tsx` draws Invitations (Join, Decline), Needs you (questions only) and the Pond list under All · Shared · Not shared, newest
+first; narrow is one screen, from 860 px the list is the left column (400 px) with the open Pond on the right. `state/ponds-store.ts`
+reads the overview once on open and again on a live notice or the 30 s poll; `relay/live.ts` is the web's `squeak-live` client (SSE read
+with fetch because EventSource cannot send `x-squeak-account`; 35 s handover, 30 s poll fallback, "Live" / "Reconnecting…" from what the
+stream knows; no `liveBase` in the config means polling and no connection line). Join and Decline change the screen only after the cloud
+confirms.
+
+Relay routes this assumes, not built yet (the fake relay implements them; shapes in `src/shared/shapes.ts`):
+
+- `GET /account/overview` with `x-squeak-account`: `{ ponds: PondSummary[], invitations: Invitation[], needsYou: NeedsYouItem[] }`.
+  Pond content documents on `GET /changes` are sealed with Pond keys the web does not hold yet, so the list's summary line, unread, working
+  and waiting marks have to come from the relay as plain fields; the feed read of "reopen" is this one call.
+- `POST /account/invitations/<inviteId>/join` (200 `{ pondId }`) and `/decline` (204), same header. The invitation lifecycle is #126.
+- `liveBase` in `webapp/config/<env>.json`: the `squeak-live` URL (https), with CORS for the Slate origin and the `x-squeak-account` and
+  `x-squeak-device` headers.

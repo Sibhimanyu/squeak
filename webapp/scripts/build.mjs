@@ -36,7 +36,8 @@ if (serve) {
 } else {
   await build(options);
 }
-await cp(path.join(root, "src/styles.css"), path.join(out, "app.css"));
+const css = await Promise.all(["styles.css", "ponds.css"].map((f) => readFile(path.join(root, "src", f), "utf8")));
+await writeFile(path.join(out, "app.css"), css.join("\n"));
 await cp(path.join(root, "index.html"), path.join(out, "index.html"));
 // Slate's static hosting ignores redirect rules, so the emailed invite link (/join#<code>) needs a real page at /join.
 await mkdir(path.join(out, "join"), { recursive: true });
@@ -48,6 +49,7 @@ await writeFile(path.join(out, "join", "index.html"), entry);
 for (const name of ["squeak-lockup-stacked-ink", "squeak-lockup-stacked-paper", "squeak-duck-full-color"]) {
   await cp(path.join(root, "..", "brand/logo/svg", `${name}.svg`), path.join(out, "brand", `${name}.svg`));
 }
+await cp(path.join(root, "..", "brand/logo/png/duckThread.png"), path.join(out, "brand", "duckThread.png"));
 console.log(`built ${out} (${env})`);
 
 if (serve) {

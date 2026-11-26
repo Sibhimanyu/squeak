@@ -1,0 +1,248 @@
+/* Ponds screen (#136), appended to styles.css by the build. Pond tiles and people take one hue (--h, never the duck's band)
+   from their id or name. */
+:root {
+  --waiting: #9a5b00;
+  --primary-bg: #292622;
+  --primary-fg: #f8f7f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --waiting: #e3a53b;
+    --primary-bg: #ece7e2;
+    --primary-fg: #13100c;
+  }
+}
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 16px 16px 24px;
+  flex: 1;
+}
+.content h2 {
+  font-size: 17px;
+  font-weight: 650;
+  margin-bottom: 10px;
+}
+.count {
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.invitation {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.list-card {
+  overflow: hidden;
+}
+.list-card > li + li {
+  border-top: 1px solid var(--line);
+}
+.row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.text strong {
+  font-size: 17px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub {
+  color: var(--muted);
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.pair button,
+.segmented button {
+  min-height: 46px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.primary {
+  border: 0;
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+.outline {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.failure-line {
+  color: var(--negative);
+  font-size: 15px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  text-decoration: none;
+  min-height: 64px;
+}
+.item:hover {
+  background: var(--selected);
+}
+.item.pond.selected {
+  background: color-mix(in srgb, var(--selected) 70%, hsl(150 40% 60%));
+}
+.item.pond strong {
+  font-weight: 600;
+}
+.item.unread strong {
+  font-weight: 800;
+}
+.waiting {
+  color: var(--waiting);
+  flex: none;
+}
+.age {
+  color: var(--muted);
+  font-size: 14px;
+  flex: none;
+}
+.tile-wrap {
+  position: relative;
+  flex: none;
+  display: block;
+}
+.tile-wrap .avatar.tile {
+  margin: 0;
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  border-radius: 14px;
+}
+.tile-wrap .avatar.small {
+  position: absolute;
+  right: -8px;
+  bottom: -6px;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.duck {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  background: hsl(var(--h) 60% 48%);
+  -webkit-mask: url("brand/duckThread.png") center / contain no-repeat;
+  mask: url("brand/duckThread.png") center / contain no-repeat;
+}
+.tide {
+  flex: none;
+  width: 56px;
+  height: 18px;
+  background-image: radial-gradient(circle, hsl(225 70% 60%) 40%, transparent 45%);
+  background-size: 7px 6px;
+  animation: tide 1.6s ease-in-out infinite alternate;
+}
+@keyframes tide {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  background: var(--selected);
+  border-radius: 14px;
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  min-height: 40px;
+}
+.segmented button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.connection {
+  color: var(--muted);
+  font-size: 14px;
+}
+.connection[data-connection="reconnecting"] {
+  color: var(--waiting);
+}
+.account {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+.account .avatar {
+  width: 36px;
+  height: 36px;
+  box-shadow: none;
+}
+.link {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+@media (min-width: 860px) {
+  .shell {
+    grid-template-columns: 400px 1fr;
+  }
+  .account {
+    display: flex;
+  }
+  .avatar-button {
+    display: none;
+  }
+  .list .screen {
+    position: sticky;
+    top: 0;
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+}
