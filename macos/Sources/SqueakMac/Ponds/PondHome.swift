@@ -288,18 +288,13 @@ struct PondFlockSection: View {
             }
             if m.role != .owner {
                 Divider()
-                ForEach(PondPresets.presets(ownThreads: ponds.ownThreads), id: \.key) { preset in
-                    Button((PondPresets.current(m) == preset.key ? "\u{2713} " : "") + preset.title) {
-                        if let p = pond { Task { await ponds.setPreset(pond: p.id, member: m.id, preset: preset.key) } }
+                if PondRoles.offersStartTasks(m, viewerIsOwner: true) {
+                    Button((m.canStartTasks ? "\u{2713} " : "") + PondRoles.startTasksTitle) {
+                        if let p = pond { Task { await ponds.setCanStartTasks(pond: p.id, member: m.id, on: !m.canStartTasks) } }
                     }
+                    .help(PondRoles.startTasksNote)
+                    Divider()
                 }
-                ForEach(PondPresets.switches(ownThreads: ponds.ownThreads), id: \.key) { sw in
-                    let on = PondPresets.value(m, sw.key)
-                    Button((on ? "\u{2713} " : "") + sw.title) {
-                        if let p = pond { Task { await ponds.setCap(pond: p.id, member: m.id, cap: sw.key, on: !on) } }
-                    }
-                }
-                Divider()
             }
             Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
     }

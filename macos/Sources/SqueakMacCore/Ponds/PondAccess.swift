@@ -39,32 +39,19 @@ public struct ThreadAccess: Sendable, Equatable {
     public var starterName: String
     /// False when the chat runs without asking (`permissionMode`): other members cannot message it. Nil from an older host.
     public var asks: Bool?
-    /// Why the owner's or the starter's switches keep this person from writing here (calm, one line); nil when nothing does.
-    public var restriction: String?
 
-    public init(role: PondRole, starter: String, me: String?, starterName: String, asks: Bool? = nil,
-                caps: PondCaps? = nil, locked: Bool = false, allow: [String] = [], deny: [String] = []) {
+    public init(role: PondRole, starter: String, me: String?, starterName: String, asks: Bool? = nil) {
         self.role = role
-        let mine = me != nil && starter == me
-        if mine { restriction = nil }
-        else if let me, deny.contains(me) { restriction = "\(starterName.isEmpty ? "The starter" : starterName) doesn\u{2019}t let you message this duck." }
-        else if caps?.message == false { restriction = "The owner has turned off messaging for you in this pond." }
-        else if locked, me == nil || !allow.contains(me!) { restriction = "This duck is read-only: its starter locked it." }
-        else { restriction = nil }
-        self.answerRestriction = mine ? nil : (caps?.answer == false ? "The owner has turned off answering questions for you in this pond." : restriction)
         self.isMine = me != nil && starter == me
         self.starterName = starterName.trimmingCharacters(in: .whitespaces)
         self.asks = asks
     }
-
-    public var answerRestriction: String?
 
     private var starter: String { starterName.isEmpty ? "the starter" : starterName }
 
     /// A viewer watches; a member (or owner) messages. Someone else's thread that runs without asking takes only its starter.
     public func composer(working: Bool) -> Composer {
         if !role.canMessage { return .watchOnly(line: Self.watchLine) }
-        if let restriction { return .watchOnly(line: restriction) }
         if asks == false, !isMine {
             return .closed(reason: "Only \(starter) can message this duck while it runs without asking.")
         }
@@ -79,11 +66,9 @@ public struct ThreadAccess: Sendable, Equatable {
             case .open: ok = true
             case .watchOnly, .closed: ok = false
             }
-            if action == .answer, role.canMessage {
-                if let why = answerRestriction { return Gate(enabled: false, tooltip: why, visible: true) }
-                if restriction != nil, !isMine, asks != false { return Gate(enabled: true, tooltip: nil, visible: true) }
-            }
-            return Gate(enabled: ok, tooltip: ok ? nil : (restriction ?? (role.canMessage ? "Only \(starter) can message this duck while it runs without asking." : Self.watchLine)), visible: true)
+            // Answering a question stays open to a Member even when the thread runs without asking.
+            if action == .answer, role.canMessage { return Gate(enabled: true, tooltip: nil, visible: true) }
+            return Gate(enabled: ok, tooltip: ok ? nil : (role.canMessage ? "Only \(starter) can message this duck while it runs without asking." : Self.watchLine), visible: true)
         case .viewChanges:
             return Gate(enabled: true, tooltip: nil, visible: true)
         case .approve:

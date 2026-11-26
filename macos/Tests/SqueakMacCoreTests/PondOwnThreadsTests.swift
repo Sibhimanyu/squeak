@@ -35,11 +35,4 @@ struct PondOwnThreadsTests {
         #expect(PondOwnThreads.poweredBy(nest: "Aarav-mac", ownThreads: false) == nil)
         #expect(PondOwnThreads.poweredBy(nest: "Aarav-mac", ownThreads: true) == "Powered by Aarav-mac \u{00B7} Flotilla")
     }
-
-    @Test("off: the People wording no longer says members run agents on their own Mac")
-    func presetWords() {
-        let off = PondPresets.presets(ownThreads: false).map(\.title) + PondPresets.switches(ownThreads: false).map(\.title)
-        #expect(!off.contains { $0.localizedCaseInsensitiveContains("own agent") || $0.localizedCaseInsensitiveContains("their own ducks") })
-        #expect(off.contains("Collaborator: can start ducks on the owner\u{2019}s Mac"))
-    }
 }

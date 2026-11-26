@@ -38,7 +38,7 @@ public struct PondChrome: Sendable, Equatable {
 
     public var access: PondMembership
     public var ownerName: String?
-    /// The member's `start` cap (default on): may they ask the owner's Mac to start a duck.
+    /// The member's Can start Tasks: may they ask the owner's Mac to start a duck. Off, the host refuses it (a Duck that waits for approval is not built yet), so no button.
     public var canStart: Bool
     /// May they message at all, and why not (the pond view's `access { canMessage, reason }`).
     public var canMessage: Bool

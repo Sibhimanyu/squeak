@@ -221,8 +221,8 @@ final class PondsModel {
     func chrome(key: String) -> PondChrome {
         let pond = pond(key: key)
         let me = detail(key: key)?.me
-        let messaging = (pond?.role.canMessage ?? true) && me?.caps?.message != false
-        let why: String? = messaging ? nil : (pond?.role.canMessage == false ? ThreadAccess.watchLine : "The owner has turned off messaging for you in this pond.")
+        let messaging = pond?.role.canMessage ?? true
+        let why: String? = messaging ? nil : ThreadAccess.watchLine
         return PondChrome(access: membership(of: key), ownerName: pond.flatMap(PondSharing.sharerName), canStart: me?.caps?.start ?? true,
                           canMessage: messaging, reason: why)
     }
@@ -536,17 +536,9 @@ final class PondsModel {
         _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.") { try await self.client!.removeMember(pond: pond, member: member) }
     }
 
-    func setPreset(pond: String, member: String, preset: String) async {
+    func setCanStartTasks(pond: String, member: String, on: Bool) async {
         let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
-        _ = await act("role:\(pond):\(member)", pond: pond, success: "\(name) is now a \(preset).") { try await self.client!.setMemberCaps(pond: pond, member: member, preset: preset) }
-    }
-
-    func setCap(pond: String, member: String, cap: String, on: Bool) async {
-        _ = await act("role:\(pond):\(member)", pond: pond, success: on ? "Allowed." : "Restricted.") { try await self.client!.setMemberCaps(pond: pond, member: member, caps: [cap: on]) }
-    }
-
-    func setThreadAccess(pond: String, thread: String, locked: Bool? = nil, allow: [String]? = nil, deny: [String]? = nil) async {
-        if await attempt({ try await client!.setThreadAccess(pond: pond, thread: thread, locked: locked, allow: allow, deny: deny) }) { await refresh(pond: pond, byPerson: true) }
+        _ = await act("role:\(pond):\(member)", pond: pond, success: on ? "\(name) can start Tasks." : "\(name)\u{2019}s Tasks wait for you.") { try await self.client!.setCanStartTasks(pond: pond, member: member, on: on) }
     }
 
     func setRole(pond: String, member: String, role: PondRole) async {

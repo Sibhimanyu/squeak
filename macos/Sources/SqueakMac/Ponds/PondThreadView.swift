@@ -45,7 +45,7 @@ struct PondThreadView: View {
     }
     private var state: PondThreadState { ThreadTimeline.latestState(events) ?? PondThreadState(raw: thread?.state ?? "") }
     private var working: Bool { state == .working }
-    private var access: ThreadAccess { ThreadAccess(role: role, starter: thread?.starter ?? "", me: me, starterName: starterName, asks: thread?.asks, caps: detail?.me?.caps, locked: thread?.locked ?? false, allow: thread?.allow ?? [], deny: thread?.deny ?? []) }
+    private var access: ThreadAccess { ThreadAccess(role: role, starter: thread?.starter ?? "", me: me, starterName: starterName, asks: thread?.asks) }
     private var starterMember: FlockMember? { members.first { $0.id == thread?.starter } }
     private var laid: [GroupChat.Entry] {
         GroupChat.lay(rows, starter: thread?.starter ?? "", me: me, nameOf: { name($0) }, pendingMine: !(ponds.outbox[threadId] ?? []).isEmpty)
@@ -246,27 +246,6 @@ struct PondThreadView: View {
                 Button { } label: { Lucide(.square, size: 14, color: Theme.subtle).frame(width: 28, height: 28).contentShape(Rectangle()) }
                     .buttonStyle(.plain).disabled(!stop.enabled).help(stop.tooltip ?? "Stop")
                     .accessibilityLabel("Stop").accessibilityHint(stop.tooltip ?? "")
-            }
-            if access.isMine {
-                SqueakMenu {
-                    Toggle("Lock (read-only for everyone else)", isOn: Binding(get: { thread?.locked ?? false }, set: { v in Task { await ponds.setThreadAccess(pond: pondId, thread: threadId, locked: v) } }))
-                    ForEach(members.filter { !$0.you }) { m in
-                        let denied = thread?.deny.contains(m.id) ?? false
-                        let allowed = thread?.allow.contains(m.id) ?? false
-                        Menu(m.name) {
-                            Button(allowed ? "\u{2713} Always let \(m.name) message" : "Always let \(m.name) message") {
-                                let next = allowed ? (thread?.allow ?? []).filter { $0 != m.id } : (thread?.allow ?? []) + [m.id]
-                                Task { await ponds.setThreadAccess(pond: pondId, thread: threadId, allow: next) }
-                            }
-                            Button(denied ? "\u{2713} Keep \(m.name) from messaging" : "Keep \(m.name) from messaging") {
-                                let next = denied ? (thread?.deny ?? []).filter { $0 != m.id } : (thread?.deny ?? []) + [m.id]
-                                Task { await ponds.setThreadAccess(pond: pondId, thread: threadId, deny: next) }
-                            }
-                        }
-                    }
-                } label: { Lucide(.users, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle()) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Who can message this duck")
-                    .accessibilityLabel("Who can message this duck")
             }
             let priv = access.gate(.togglePrivate)
             if priv.visible {

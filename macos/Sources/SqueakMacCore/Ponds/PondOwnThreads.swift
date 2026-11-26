@@ -26,6 +26,6 @@ public enum PondOwnThreads {
 
     /// "Powered by <their Mac> \u{00B7} Flotilla" only with the mode on; nil hides the mark.
     public static func poweredBy(nest: String?, ownThreads: Bool) -> String? {
-        ownThreads ? PondPresets.poweredBy(nest: nest) : nil
+        ownThreads ? PondPoweredBy.line(nest: nest) : nil
     }
 }
