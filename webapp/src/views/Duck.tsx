@@ -9,6 +9,7 @@ import { conversationOf, firstName, letter } from "../pond/derive.js";
 import type { PondSession, SendResult } from "../pond/session.js";
 import type { Route } from "../router.js";
 import { Avatar } from "./marks.js";
+import { deletedText } from "./Pond.js";
 import { BackBar, Composer, FAILED_SEND, OpenOnMac, useSession, useStickToBottom } from "./parts.js";
 
 type DuckRoute = Extract<Route, { name: "duck" }>;
@@ -22,6 +23,8 @@ interface PendingReply {
 export interface DuckScreenProps {
   route: DuckRoute;
   pond: PondSummary | undefined;
+  /** The Owner deleted this Pond: its name, for "<name> was deleted." */
+  deletedName?: string | undefined;
   session: PondSession | null;
   now?: number;
 }
@@ -41,7 +44,7 @@ export function DuckScreen(props: DuckScreenProps) {
     return (
       <section class="screen" data-screen="duck">
         <BackBar route={route} title="Duck" />
-        <p class="empty">This Duck is not in your list.</p>
+        <p class="empty">{props.deletedName ? deletedText(props.deletedName) : "This Duck is not in your list."}</p>
       </section>
     );
   }

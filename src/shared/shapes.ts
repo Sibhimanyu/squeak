@@ -82,6 +82,8 @@ export interface PondSummary {
   /** The newest `seq` in the Pond's change feed: unread is this beyond what this browser last opened. */
   seqHead: number;
   counts: { members: number; ducks: number };
+  /** The Owner deleted the Pond (the relay keeps the row a week): the list drops it and an open one says "<name> was deleted." */
+  deleted?: true;
 }
 
 /** An invitation waiting on this account: Join or Decline. */
@@ -130,6 +132,7 @@ function parsePondSummary(value: unknown): PondSummary | null {
     lastActivityAt,
     seqHead,
     counts: { members: count(counts["members"]) ?? 0, ducks: count(counts["ducks"]) ?? 0 },
+    ...(value["deleted"] === true ? { deleted: true as const } : {}),
   };
 }
 

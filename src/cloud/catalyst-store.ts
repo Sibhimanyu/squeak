@@ -110,6 +110,7 @@ export class CatalystStore implements CloudStore {
     this.feed = new FeedMirror({
       changes: (pondId, since) => this.changes(pondId, since),
       listPlain: (collection) => this.listPlain(collection),
+      getRaw: (path) => this.getRaw(path),
     });
     // Live notices are for the Mac's own key; a pond-scoped member store and the owner's key keep the old stream.
     this.liveOptions = options.macKey ? options.live : undefined;
@@ -184,6 +185,17 @@ export class CatalystStore implements CloudStore {
     return (await this.feed.list(collection)) ?? (await this.listPlain(collection));
   }
 
+  /**
+   * Several of a Pond's collections, and relay-owned plain documents by path, from one feed read (see `FeedMirror.listMany`).
+   * Null when the caller should read them one by one.
+   */
+  async readMany(
+    collections: string[],
+    rawPaths: string[] = [],
+  ): Promise<{ lists: Array<Array<{ id: string; doc: ChannelDoc }>>; raws: unknown[] } | null> {
+    return this.feed.listMany(collections, rawPaths);
+  }
+
   /** One `GET /changes` (relay feed.js): a page, or null when this relay or this caller has no feed (404, 400, 401, 403). */
   private async changes(pondId: string, since: number | "head"): Promise<FeedPage | null> {
     const response = await this.call(
@@ -198,7 +210,13 @@ export class CatalystStore implements CloudStore {
     const changes = body.changes.flatMap((c) => {
       if (!c || typeof c.seq !== "number" || typeof c.kind !== "string" || typeof c.id !== "string") return [];
       const doc = c.doc === null ? null : toDoc(c.doc);
-      return c.doc !== null && !doc ? [] : [{ seq: c.seq, kind: c.kind, id: c.id, doc }];
+      // A relay-owned plain document (the page-out note) has no box: it travels as `raw`, never as a sealed document.
+      if (c.doc !== null && !doc) {
+        return c.kind === "roomnote" && typeof c.doc === "object"
+          ? [{ seq: c.seq, kind: c.kind, id: c.id, doc: null, raw: c.doc }]
+          : [];
+      }
+      return [{ seq: c.seq, kind: c.kind, id: c.id, doc }];
     });
     return { changes, next: body.next, more: body.more === true };
   }

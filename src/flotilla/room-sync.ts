@@ -73,6 +73,16 @@ export interface RoomPort {
   putBlob(bytes: Buffer, ref: { kind: "room" | "rposts"; doc: string }): Promise<string>;
   /** One blob opened (null when the cloud no longer holds it or this Mac cannot open it). */
   getBlob(id: string): Promise<Buffer | null>;
+  /**
+   * What a whole page reads, from one read of the cloud's feed: the given kinds, the capabilities, the Owner and the note. Null
+   * when this store cannot (the page then reads them one by one). Never older than the call.
+   */
+  readPage?(kinds: string[]): Promise<{
+    lists: RoomSignedDoc[][];
+    caps: Caps;
+    owner: { name: string; online: boolean };
+    note: { removed: number; before: number; at: number } | null;
+  } | null>;
   /** The relay's note that it paged the oldest posts out of the cloud's Room (25 MB cap), or null. */
   note(): Promise<{ removed: number; before: number; at: number } | null>;
   /** The Owner's Mac: the highest cloud seq of a queued ask it has applied, and a way to move it on. */
@@ -717,15 +727,30 @@ export class RoomSync extends EventEmitter {
   async page(pondId: string, opts: { since?: number; before?: number; limit?: number } = {}): Promise<MemberRoomPage> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: read it from the pond.", 400);
-    const caps = await port.caps();
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
-    const [roomDocs, taskDocs, inboxDocs, owner, note] = await Promise.all([
-      port.list("room"),
-      port.list("rtasks"),
-      port.list("rposts"),
-      port.owner().catch(() => null),
-      port.note().catch(() => null),
-    ]);
+    // The members, the three kinds and the note are read once for the whole page, not once per kind.
+    const once = await port.readPage?.(["room", "rtasks", "rposts"]).catch(() => null);
+    let caps: Caps;
+    let roomDocs: RoomSignedDoc[];
+    let taskDocs: RoomSignedDoc[];
+    let inboxDocs: RoomSignedDoc[];
+    let owner: { name: string; online: boolean } | null;
+    let note: { removed: number; before: number; at: number } | null;
+    if (once) {
+      caps = once.caps;
+      [roomDocs, taskDocs, inboxDocs] = once.lists as [RoomSignedDoc[], RoomSignedDoc[], RoomSignedDoc[]];
+      owner = once.owner;
+      note = once.note;
+    } else {
+      caps = await port.caps();
+      [roomDocs, taskDocs, inboxDocs, owner, note] = await Promise.all([
+        port.list("room"),
+        port.list("rtasks"),
+        port.list("rposts"),
+        port.owner().catch(() => null),
+        port.note().catch(() => null),
+      ]);
+    }
     const entries: Array<{ post: RoomDoc; seq: number | undefined }> = [];
     const have = new Set<string>();
     const declined: string[] = [];

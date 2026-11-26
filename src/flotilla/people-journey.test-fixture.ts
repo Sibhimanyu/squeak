@@ -243,12 +243,15 @@ export function peopleJourney(world: JourneyWorld, step: Step): void {
     const mark = world.requests.length;
     await storeOf(web).list(room);
     assert.deepEqual(routesOf(world.since(mark, "web")), ["GET /changes"], "reopening a seen Pond reads the feed once");
-    // The whole Room page reads several kinds and the members behind each (a known cost over the budget, see
-    // docs/agents/people-journey.md): only feed reads and the one note document, never a plain list.
+    // The whole Room page of a Pond already seen is the same one feed read: the members, the three kinds and the page-out
+    // note come from it together (never a list, never a document).
     const page = world.requests.length;
     await webRoom.page(pondId);
-    for (const r of routesOf(world.since(page, "web")))
-      assert.ok(["GET /changes", "GET /doc"].includes(r), `a Room page asked ${r}`);
+    assert.deepEqual(
+      routesOf(world.since(page, "web")),
+      ["GET /changes"],
+      "a Room page of a seen Pond is one feed read",
+    );
   });
 
   step("the Owner's Mac is away: a Member posts and another Member sees it at once, in the cloud's order", async () => {

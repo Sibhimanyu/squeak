@@ -20,6 +20,8 @@ export interface PondsState {
   /** What the browser worked out from each Pond's own documents, by Pond id. */
   derived: Record<string, PondDerived>;
   needsYou: NeedsYouItem[];
+  /** Ponds the Owner deleted, by Pond id: the name to say "<name> was deleted." with. They are not in the list and hold no data here. */
+  deleted: Record<string, string>;
   connection: Connection;
   /** Invitations being answered, and the sentence for one that failed. */
   busy: string[];
@@ -68,6 +70,7 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
     overview: EMPTY,
     derived: {},
     needsYou: [],
+    deleted: {},
     connection: deps.liveBase ? "reconnecting" : "polling",
     busy: [],
     errors: {},
@@ -88,6 +91,20 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
       deps.seen.setItem(`${SEEN}${pondId}`, String(seq));
     } catch {
       // storage refused: the Pond stays unread until the next visit
+    }
+  };
+
+  /** Forgets a deleted Pond here: its open session (keys, token, opened documents) and its "seen up to". */
+  const wipe = (pondId: string): void => {
+    const held = sessions.get(pondId);
+    if (held) {
+      held.session.stop();
+      sessions.delete(pondId);
+    }
+    try {
+      deps.seen.removeItem(`${SEEN}${pondId}`);
+    } catch {
+      // storage refused: the mark is harmless
     }
   };
 
@@ -154,11 +171,15 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
       deps.onSignedOut?.();
     } else if (result.status === "ok") {
       const o = result.overview;
+      // A Pond the Owner deleted leaves the list and everything this browser kept of it is wiped.
+      const deleted = { ...state.deleted };
+      for (const p of o.ponds) if (p.deleted) deleted[p.pondId] = p.name;
+      for (const id of Object.keys(deleted)) wipe(id);
       // Newest first, always (docs/spec.md: every list is newest first).
-      const ponds = [...o.ponds].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+      const ponds = o.ponds.filter((p) => !p.deleted).sort((a, b) => b.lastActivityAt - a.lastActivityAt);
       const invitations = [...o.invitations].sort((a, b) => b.at - a.at);
       syncSessions(ponds);
-      set({ status: "ready", overview: { ponds, invitations } });
+      set({ status: "ready", overview: { ponds, invitations }, deleted });
       derive();
       // Each Pond's own feed is read on the same cue; one that cannot be read leaves the list as it was.
       void Promise.all([...sessions.values()].map((h) => h.session.refresh()));

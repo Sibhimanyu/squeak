@@ -29,8 +29,10 @@ export interface FeedChange {
   seq: number;
   kind: string;
   id: string;
-  /** Null is a delete. */
+  /** Null is a delete (or a relay-owned plain document: then `raw` carries it). */
   doc: ChannelDoc | null;
+  /** A relay-owned plain-JSON document (the Room's page-out note): not sealed, so it has no `doc`. */
+  raw?: unknown;
 }
 
 export interface FeedPage {
@@ -44,15 +46,24 @@ export interface FeedMirrorOptions {
   changes(pondId: string, since: number | "head"): Promise<FeedPage | null>;
   /** The plain list of one collection (`channels/<pond>/<kind>`). */
   listPlain(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
+  /** One relay-owned plain document (`channels/<pond>/<kind>/<id>`), or null. */
+  getRaw?(path: string): Promise<unknown | null>;
 }
+
+type Docs = Array<{ id: string; doc: ChannelDoc }>;
 
 interface PondMirror {
   cursor: number;
   kinds: Map<string, Map<string, ChannelDoc>>;
+  /** Relay-owned plain documents asked for by path (`<kind>/<id>`); null when absent. */
+  raws: Map<string, unknown>;
   /** Syncs run one at a time per Pond, so two lists never apply the same page twice or out of order. */
   chain: Promise<unknown>;
 }
 
+const sorted = (docs: Map<string, ChannelDoc>): Docs =>
+  [...docs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, doc]) => ({ id, doc: { ...doc } }));
+const RAW_PATH = /^channels\/([^/]+)\/([^/]+)\/([^/]+)$/;
 const COLLECTION = /^channels\/([^/]+)\/([^/]+)$/;
 /** A page that never ends is a relay fault: stop after this many pages in one sync and answer from what is held. */
 const MAX_PAGES = 200;
@@ -76,13 +87,82 @@ export class FeedMirror {
     const kind = m[2]!;
     let pond = this.ponds.get(pondId);
     if (!pond) {
-      pond = { cursor: -1, kinds: new Map(), chain: Promise.resolve() };
+      pond = { cursor: -1, kinds: new Map(), raws: new Map(), chain: Promise.resolve() };
       this.ponds.set(pondId, pond);
     }
     const mirror = pond;
     const run = mirror.chain.then(() => this.read(mirror, pondId, collection, kind));
     mirror.chain = run.catch(() => undefined);
     return run;
+  }
+
+  /**
+   * Several collections of one Pond (and relay-owned plain documents by path) from one feed read: what a whole page needs, so
+   * the page costs one `GET /changes` and not one per kind. Always synced first, so nothing is older than the call. Null when
+   * the caller should read them one by one (not the feed's kinds, several Ponds, or the feed is off).
+   */
+  async listMany(collections: string[], rawPaths: string[] = []): Promise<{ lists: Docs[]; raws: unknown[] } | null> {
+    if (this.off || collections.length === 0) return null;
+    const parsed = collections.map((c) => COLLECTION.exec(c));
+    const pondId = parsed[0]?.[1];
+    if (!pondId || parsed.some((m) => !m || m[1] !== pondId || !FEED_KINDS.has(m[2]!))) return null;
+    const rawKeys = rawPaths.map((p) => RAW_PATH.exec(p));
+    if (
+      rawKeys.some((m) => !m || m[1] !== pondId || !FEED_KINDS.has(m[2]!)) ||
+      (rawPaths.length && !this.options.getRaw)
+    )
+      return null;
+    let pond = this.ponds.get(pondId);
+    if (!pond) {
+      pond = { cursor: -1, kinds: new Map(), raws: new Map(), chain: Promise.resolve() };
+      this.ponds.set(pondId, pond);
+    }
+    const mirror = pond;
+    const run = mirror.chain.then(() =>
+      this.readSeveral(
+        mirror,
+        pondId,
+        parsed.map((m, i) => ({ collection: collections[i]!, kind: m![2]! })),
+        rawPaths.map((path, i) => ({ path, key: `${rawKeys[i]![2]}/${rawKeys[i]![3]}` })),
+      ),
+    );
+    mirror.chain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async readSeveral(
+    pond: PondMirror,
+    pondId: string,
+    wanted: Array<{ collection: string; kind: string }>,
+    raws: Array<{ path: string; key: string }>,
+  ): Promise<{ lists: Docs[]; raws: unknown[] } | null> {
+    if (this.off) return null;
+    if (pond.cursor < 0) {
+      const head = await this.options.changes(pondId, "head");
+      if (!head) return this.turnOff();
+      pond.cursor = head.next;
+      this.cursors.set(pondId, pond.cursor);
+    } else if (!(await this.sync(pond, pondId))) {
+      return this.turnOff();
+    }
+    // Anything first asked for now is seeded from the cloud once, then the cursor replays whatever the seed also saw.
+    let seeded = false;
+    for (const { collection, kind } of wanted) {
+      if (pond.kinds.has(kind)) continue;
+      const rows = await this.options.listPlain(collection);
+      pond.kinds.set(kind, new Map(rows.map(({ id, doc }) => [id, doc])));
+      seeded = true;
+    }
+    for (const { path, key } of raws) {
+      if (pond.raws.has(key)) continue;
+      pond.raws.set(key, (await this.options.getRaw!(path)) ?? null);
+      seeded = true;
+    }
+    if (seeded && !(await this.sync(pond, pondId))) return this.turnOff();
+    return {
+      lists: wanted.map(({ kind }) => sorted(pond.kinds.get(kind)!)),
+      raws: raws.map(({ key }) => pond.raws.get(key) ?? null),
+    };
   }
 
   private async read(
@@ -109,7 +189,7 @@ export class FeedMirror {
       pond.kinds.set(kind, docs);
       if (!(await this.sync(pond, pondId))) return this.turnOff();
     }
-    return [...docs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, doc]) => ({ id, doc: { ...doc } }));
+    return sorted(docs);
   }
 
   /** Applies every change after the cursor to the kinds held; false when the feed answered nothing usable. */
@@ -118,6 +198,8 @@ export class FeedMirror {
       const result = await this.options.changes(pondId, pond.cursor);
       if (!result) return false;
       for (const change of result.changes) {
+        const rawKey = `${change.kind}/${change.id}`;
+        if (pond.raws.has(rawKey)) pond.raws.set(rawKey, change.doc === null ? (change.raw ?? null) : null);
         const docs = pond.kinds.get(change.kind);
         if (!docs) continue;
         // The stored document carries its seq; the feed's row (the document as written) does not, so it is put back here.

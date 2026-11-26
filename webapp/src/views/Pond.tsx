@@ -21,6 +21,7 @@ type PondRoute = Extract<Route, { name: "pond" }>;
 export const connectingText = (owner: string): string => `Connecting: waiting for ${firstName(owner)}'s Mac`;
 export const offlineText = (owner: string): string =>
   `${firstName(owner)}'s Mac is offline. Messages you send now wait and arrive in order when it is back.`;
+export const deletedText = (name: string): string => `${name} was deleted.`;
 export const OFFLINE_LINE = "Owner's Mac offline";
 const ROLE_LABEL: Record<PondRole, string> = { owner: "Owner", member: "Member", viewer: "Viewer" };
 
@@ -41,6 +42,8 @@ interface PendingDuck {
 export interface PondScreenProps {
   route: PondRoute;
   pond: PondSummary | undefined;
+  /** The Owner deleted this Pond: its name, for "<name> was deleted." */
+  deletedName?: string | undefined;
   session: PondSession | null;
   connection: Connection;
   /** The Pond has been looked at up to its newest change. */
@@ -65,7 +68,9 @@ export function PondScreen(props: PondScreenProps) {
     return (
       <section class="screen" data-screen="pond">
         <BackBar route={route} title="Pond" />
-        <p class="empty">This Pond is not in your list.</p>
+        <p class="empty" data-state={props.deletedName ? "deleted" : undefined}>
+          {props.deletedName ? deletedText(props.deletedName) : "This Pond is not in your list."}
+        </p>
       </section>
     );
   }

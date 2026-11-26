@@ -188,6 +188,7 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             key={route.pondId}
             route={route.name === "people" ? { name: "pond", pondId: route.pondId, tab: "room" } : route}
             pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
+            deletedName={ponds.deleted[route.pondId]}
             session={store.session(route.pondId)}
             connection={ponds.connection}
             onSeen={() => store.markSeen(route.pondId)}
@@ -213,6 +214,7 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             key={`${route.pondId}/${route.duckId}`}
             route={route}
             pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
+            deletedName={ponds.deleted[route.pondId]}
             session={store.session(route.pondId)}
           />
         ) : null}

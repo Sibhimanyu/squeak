@@ -254,6 +254,12 @@ export function createSession(deps: SessionDeps): PondSession {
     stop() {
       stopped = true;
       listeners.clear();
+      // What this Pond held in this browser goes with it: the keys, the Pond token, the opened documents.
+      keys = null;
+      joinToken = null;
+      grantBox = "";
+      feed = null;
+      state = { ...state, data: null };
     },
   };
 }

@@ -143,3 +143,7 @@ confirm; "Removing a device removes it from every Pond."); the "Open on your Mac
 Connection states: the Pond header says one of Live, Reconnecting… or Owner's Mac offline (the Mac being away outranks Live, the stream being
 down outranks both because presence comes from it) and the offline banner says messages wait and arrive in order; a Pond that cannot be read is
 one sentence with Try again.
+
+A Pond the Owner deleted arrives in the overview as `deleted: true` (the relay keeps the row a week). `state/ponds-store.ts` drops it
+from the list, stops its session (keys, Pond token and opened documents live only there; the IndexedDB vault holds the account's one
+device key, nothing per Pond) and removes its `squeak-seen-<id>` mark; an open Pond or Duck of it reads "<Pond> was deleted." (`state.deleted`).

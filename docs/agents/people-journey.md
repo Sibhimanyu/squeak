@@ -35,9 +35,10 @@ back with the full history and no mark; they leave; the Owner deletes the Pond a
 Cost budgets asserted: an idle device makes no requests; reading a Pond already seen is one feed read; a Room post is one write,
 one live notice, and one small feed read per watching device.
 
-Known gap: a whole Room page (`RoomSync.page`) reads three kinds plus the members behind each, so about eight feed reads and one
-note document, not one. The journey only asserts it never falls back to a plain list. Closing it means reading the members once
-per page.
+A whole Room page (`RoomSync.page`) is one feed read for a Pond already seen: `CatalystStore.readMany` takes the members, the three
+kinds and the relay's page-out note (stamped into the feed as a plain `raw` row) from one `GET /changes`, applied to what the mirror
+holds. It is read at call time, never from a window, so poll-only use never sees stale data. A store without `readMany` (or a
+feed that is off) reads kind by kind as before. The journey asserts exactly `["GET /changes"]`.
 
 ## The daily smoke
 

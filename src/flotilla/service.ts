@@ -539,6 +539,12 @@ export const OWN_THREADS_OFF =
 const PENDING_STARTS_PER_MEMBER = 10;
 const PENDING_START_LIFE_MS = 24 * 60 * 60_000;
 
+/** A store's one-feed-read of several collections and plain documents (`CatalystStore.readMany`). */
+type ReadMany = (
+  collections: string[],
+  rawPaths: string[],
+) => Promise<{ lists: Array<Array<{ id: string; doc: ChannelDoc }>>; raws: unknown[] } | null>;
+
 export class FlotillaService extends EventEmitter {
   private readonly now: () => number;
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
@@ -672,6 +678,7 @@ export class FlotillaService extends EventEmitter {
     const raw = (store as CloudStore & { getRaw?: (path: string) => Promise<unknown | null> }).getRaw;
     const rawList = (store as CloudStore & { listRaw?: (c: string) => Promise<Array<{ id: string; doc: unknown }>> })
       .listRaw;
+    const many = (store as unknown as { readMany?: ReadMany }).readMany;
     return {
       get: (path) => run(() => store.get(path)),
       set: (path, doc, options) => run(() => store.set(path, doc, options)),
@@ -680,6 +687,9 @@ export class FlotillaService extends EventEmitter {
       watch: (path, onChange, options) => store.watch(path, onChange, options),
       ...(typeof raw === "function" ? { getRaw: (path: string) => raw.call(store, path) } : {}),
       ...(typeof rawList === "function" ? { listRaw: (c: string) => rawList.call(store, c) } : {}),
+      ...(typeof many === "function"
+        ? { readMany: (c: string[], r: string[]) => run(() => many.call(store, c, r)) }
+        : {}),
       ...(store.putBlob
         ? { putBlob: (...a: Parameters<NonNullable<CloudStore["putBlob"]>>) => run(() => store.putBlob!(...a)) }
         : {}),
@@ -3435,6 +3445,35 @@ export class FlotillaService extends EventEmitter {
     if (pond.local) throw new FlotillaError("This pond is not shared yet.", 409);
     const store = this.storeOf(pond);
     const ownerId = memberIdOf(pond.ownerKey);
+    /** The documents of a kind that a known member signed, as the Room reads them. */
+    const signedRows = (
+      kind: string,
+      rows: Array<{ id: string; doc: ChannelDoc }>,
+      members: Map<string, MemberDoc>,
+    ): RoomSignedDoc[] => {
+      const out: RoomSignedDoc[] = [];
+      for (const { id, doc } of rows) {
+        const read = this.readSigned(pond, kind, id, doc, (d) => keysOfMember(members.get(d)));
+        const member = read ? members.get(read.device) : undefined;
+        if (!read || !member) continue;
+        out.push({
+          id,
+          value: read.value,
+          device: read.device,
+          role: member.role,
+          name: this.shownName(pond, member),
+          caps: capsOf(member.role),
+          ...(doc.seq !== undefined ? { seq: doc.seq } : {}),
+          ...(doc.at !== undefined ? { at: doc.at } : {}),
+        });
+      }
+      return out;
+    };
+    const noteOf = (raw: unknown): { removed: number; before: number; at: number } | null => {
+      const n = raw as { removed?: unknown; before?: unknown; at?: unknown } | null | undefined;
+      if (!n || typeof n.removed !== "number" || n.removed < 1) return null;
+      return { removed: n.removed, before: Number(n.before) || 0, at: Number(n.at) || 0 };
+    };
     return {
       pondId: pond.id,
       projectId: pond.projectId ?? null,
@@ -3452,31 +3491,40 @@ export class FlotillaService extends EventEmitter {
       remove: (kind, docId) => store.delete(this.docPath(pond.id, kind, docId)),
       list: async (kind) => {
         const members = await this.members(pond);
-        const out: RoomSignedDoc[] = [];
-        for (const { id, doc } of await store.list(`channels/${pond.id}/${kind}`)) {
-          const read = this.readSigned(pond, kind, id, doc, (d) => keysOfMember(members.get(d)));
-          const member = read ? members.get(read.device) : undefined;
-          if (!read || !member) continue;
-          out.push({
-            id,
-            value: read.value,
-            device: read.device,
-            role: member.role,
-            name: this.shownName(pond, member),
-            caps: capsOf(member.role),
-            ...(doc.seq !== undefined ? { seq: doc.seq } : {}),
-            ...(doc.at !== undefined ? { at: doc.at } : {}),
-          });
-        }
-        return out;
+        return signedRows(kind, await store.list(`channels/${pond.id}/${kind}`), members);
       },
       note: async () => {
         // The relay's own plain note that it paged the oldest posts out (cloud: room-cloud.js); nothing else is read this way.
         const raw = (await (store as unknown as { getRaw?: (p: string) => Promise<unknown> })
           .getRaw?.(this.docPath(pond.id, "roomnote", "trim"))
-          .catch(() => null)) as { removed?: unknown; before?: unknown; at?: unknown } | null | undefined;
-        if (!raw || typeof raw.removed !== "number" || raw.removed < 1) return null;
-        return { removed: raw.removed, before: Number(raw.before) || 0, at: Number(raw.at) || 0 };
+          .catch(() => null)) as unknown;
+        return noteOf(raw);
+      },
+      readPage: async (kinds) => {
+        // One feed read for the members, every kind the page needs and the page-out note (a store without it reads one by one).
+        const many = (store as unknown as { readMany?: ReadMany }).readMany;
+        const read = await many
+          ?.call(
+            store,
+            [`channels/${pond.id}/members`, ...kinds.map((k) => `channels/${pond.id}/${k}`)],
+            [this.docPath(pond.id, "roomnote", "trim")],
+          )
+          .catch(() => null);
+        if (!read) return null;
+        const members = new Map<string, MemberDoc>();
+        const ownerOnly = (device: string): string | null =>
+          device === memberIdOf(pond.ownerKey) ? pond.ownerKey : null;
+        for (const { id, doc } of read.lists[0]!) {
+          const signed = this.readSigned(pond, "members", id, doc, ownerOnly);
+          const member = signed ? readMember(signed.value) : null;
+          if (member && member.id === id && memberIdOf(member.publicKey) === id) members.set(id, member);
+        }
+        return {
+          lists: kinds.map((kind, i) => signedRows(kind, read.lists[i + 1]!, members)),
+          caps: this.capsIn(pond, members, this.selfId(pond)),
+          owner: await this.ownerStanding(pond, members),
+          note: noteOf(read.raws[0]),
+        };
       },
       putBlob: async (bytes, ref) => {
         const store = this.storeOf(pond);
@@ -3508,19 +3556,25 @@ export class FlotillaService extends EventEmitter {
       },
       noteAnswered: (ids) => this.noteAnswered(pondId, ids),
       caps: async () => this.capsIn(pond, await this.members(pond), this.selfId(pond)),
-      owner: async () => {
-        const members = await this.members(pond);
-        const owner = members.get(ownerId);
-        const ownerName = owner ? owner.name : this.ownerLabel(pond);
-        if (pond.role === "owner") return { name: ownerName, online: true };
-        // Without a live-connection source there is nothing to say the Owner's Mac is away: say nothing.
-        const live = this.options.presenceOf ? await this.options.presenceOf(pond.id).catch(() => null) : null;
-        if (!live) return { name: ownerName, online: true };
-        const up = live.some((l) => l.memberId === ownerId && l.online);
-        this.ownerSeen.set(pond.id, up);
-        return { name: ownerName, online: up };
-      },
+      owner: async () => this.ownerStanding(pond, await this.members(pond)),
     };
+  }
+
+  /** The Owner's name and whether their Mac is up, from the members already read. */
+  private async ownerStanding(
+    pond: LocalPond,
+    members: Map<string, MemberDoc>,
+  ): Promise<{ name: string; online: boolean }> {
+    const ownerId = memberIdOf(pond.ownerKey);
+    const owner = members.get(ownerId);
+    const ownerName = owner ? owner.name : this.ownerLabel(pond);
+    if (pond.role === "owner") return { name: ownerName, online: true };
+    // Without a live-connection source there is nothing to say the Owner's Mac is away: say nothing.
+    const live = this.options.presenceOf ? await this.options.presenceOf(pond.id).catch(() => null) : null;
+    if (!live) return { name: ownerName, online: true };
+    const up = live.some((l) => l.memberId === ownerId && l.online);
+    this.ownerSeen.set(pond.id, up);
+    return { name: ownerName, online: up };
   }
 
   // threads (the starter's side)

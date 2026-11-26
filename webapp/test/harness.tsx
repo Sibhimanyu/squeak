@@ -42,6 +42,8 @@ export interface Booted {
   root: HTMLElement;
   fake: ReturnType<typeof createFakeRelay>;
   vault: KeyVault;
+  /** Where this browser keeps "seen up to" per Pond. */
+  seen: ReturnType<typeof memoryStore>;
   unmount(): void;
   text(selector: string): string | undefined;
 }
@@ -98,6 +100,7 @@ export function bootApp(
   const auth = createAuth({ config: CONFIG, relay, storage: memoryStore(storedToken()), navigate: () => {} });
   const router = createRouter(window);
   const vault = o.vault ?? createMemoryVault();
+  const seen = memoryStore(o.seen);
   const root = document.createElement("div");
   document.body.append(root);
   const liveFetch = (async (url: string) => {
@@ -115,7 +118,7 @@ export function bootApp(
         liveBase={o.presence || o.liveFetch ? "https://live.example.test" : null}
         {...(o.liveFetch ? { liveFetch: o.liveFetch } : o.presence ? { liveFetch } : {})}
         vault={vault}
-        seen={memoryStore(o.seen)}
+        seen={seen}
       />,
       root,
     ),
@@ -124,6 +127,7 @@ export function bootApp(
     root,
     fake,
     vault,
+    seen,
     unmount() {
       render(null, root);
       root.remove();
