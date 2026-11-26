@@ -8,6 +8,7 @@ Read only the file for the area you are touching. `AGENTS.md` at the root is the
 - `terminal-reply.md` — answering a `claude`/`codex` in Terminal: every proof step before a key is pressed
 - `fleet.md` — `src/fleet/`: observers, merge, active rule, push rules, stalls, git and diff, sorting
 - `phone-channel.md` — `src/remote/` and the iPhone channel: keys, Realtime Database, history, the direct path
+- `codex-runner.md` — Codex in the session host: reading its protocol, and where it differs from Claude (approvals, late items)
 - `mac-app.md` — `macos/`: the timeline feed, activity, control routes, capture flags
 - `usage-and-cost.md` — pricing, cost reader, Codex quota, Claude rate limits and the usage endpoint
 - `runtime.md` — proxy, native modules, launch agents, bot polling, sleep and pmset

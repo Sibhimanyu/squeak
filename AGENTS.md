@@ -31,7 +31,7 @@ npm install
 npm run ci      # typecheck + lint (src/ and web/) + format:check + test
 npm run build   # safe in a worktree, never in the live checkout
 (cd ios/SqueakCore && swift test)
-(cd macos && swift test)
+macos/scripts/test.sh        # both runners (XCTest, Swift Testing); red when either fails or reports nothing
 ```
 
 ## Where to look
@@ -45,6 +45,7 @@ Read only what your task touches. Index: `docs/agents/README.md`.
 - Replying into Terminal: `docs/agents/terminal-reply.md`
 - `src/remote/`, iPhone channel: `docs/agents/phone-channel.md`, then `docs/remote-channel.md`
 - `macos/`: `docs/agents/mac-app.md`, then `macos/README.md`
+- Codex chats (approvals, turns, the app-server protocol): `docs/agents/codex-runner.md`
 - Cost, quota, rate limits: `docs/agents/usage-and-cost.md`
 - Proxy, launchd, sleep, native modules: `docs/agents/runtime.md`
 - Telegram, lint, ask-format, voices: `docs/agents/misc.md`

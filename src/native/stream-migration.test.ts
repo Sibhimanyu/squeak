@@ -206,7 +206,9 @@ describe("repairHousekeepingNotes", () => {
   it("hides the move notes and restores last activity to before them, once", async () => {
     const store = new NativeStore(":memory:");
     const s = make(store);
-    const real = store.appendMessage(s.id, "agent", "assistant", { text: "done" });
+    store.appendMessage(s.id, "agent", "assistant", { text: "done" });
+    // The turn ends a moment after its last message (1 ms apart on a loaded CI runner): last activity is the turn's end.
+    await new Promise((r) => setTimeout(r, 3));
     store.setStatus(s.id, "idle", true);
     const before = store.getSession(s.id)!.updatedAt;
     await new Promise((r) => setTimeout(r, 5));
@@ -220,13 +222,13 @@ describe("repairHousekeepingNotes", () => {
     const tAt = store.getSession(t.id)!.updatedAt;
 
     expect(store.repairHousekeepingNotes()).toBe(1);
-    expect(store.getSession(s.id)!.updatedAt).toBe(real.createdAt);
+    expect(store.getSession(s.id)!.updatedAt).toBe(before);
     expect(store.messagesAfter(s.id).map((m) => m.kind)).toEqual(["assistant"]);
     expect(store.getSession(t.id)!.updatedAt).toBe(tAt);
     expect(store.messagesAfter(t.id).map((m) => m.kind)).toEqual(["user/text"]);
     // idempotent
     expect(store.repairHousekeepingNotes()).toBe(0);
-    expect(store.getSession(s.id)!.updatedAt).toBe(real.createdAt);
+    expect(store.getSession(s.id)!.updatedAt).toBe(before);
   });
 
   it("a quiet note leaves last activity alone and stays visible", () => {

@@ -1,8 +1,8 @@
 name: CI
 
 on:
+  # Every branch: a break shows on push, not when ship.sh runs CI on the live checkout.
   push:
-    branches: [master]
   pull_request:
 
 jobs:
@@ -18,3 +18,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ci
+
+  mac:
+    # Squeak for Mac's package tests. macos/scripts/test.sh fails when either runner (XCTest, Swift Testing) is red or
+    # reports nothing, and prints one line: xctest=N/failed swift-testing=N/failed-runs.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: swift --version
+      - run: macos/scripts/test.sh
