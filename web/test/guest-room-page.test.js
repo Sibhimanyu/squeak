@@ -245,11 +245,11 @@ describe("the Room in the guest page, end to end over the fake relay", () => {
     expect(text(root)).toContain("You");
   });
 
-  it("closes the composer with the reason once the owner turns messaging off", async () => {
+  it("closes the composer with the reason once the owner makes the Member a viewer", async () => {
     const me = (await owner.view(pondId)).members.find((m) => m.name === "Webby");
-    await owner.setMemberCaps(pondId, me.id, { caps: { message: false } });
+    await owner.changeRole(pondId, me.id, "viewer");
     notice();
-    await says("The owner has turned off messaging for you in this pond.");
+    await says("Viewers can read but not send.");
     const composer = all(root).find((n) => n.attrs?.class === "g-composer");
     expect(composer.hidden).toBe(true);
   });

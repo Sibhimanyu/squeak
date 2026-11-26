@@ -234,7 +234,7 @@ describe("the Room reaches Members", () => {
     expect(await store.list(`channels/${pondId}/rposts`)).toEqual([]);
   });
 
-  it("a viewer, or a Member the Owner muted, cannot post; a post already waiting from one is dropped", async () => {
+  it("a viewer, or a Member the Owner made a viewer, cannot post; a post already waiting from one is dropped", async () => {
     await expect(vSync.post(pondId, "hello")).rejects.toThrow(/viewer can only watch/);
     // Written straight into the inbox by a client that skipped the check: the Owner's Mac drops it.
     const id = `${clock.now.toString(36).padStart(9, "0")}-${randomId(6)}`;
@@ -244,27 +244,18 @@ describe("the Room reaches Members", () => {
     expect(host.store.roomPosts(host.project.id, { limit: 200 }).some((r) => r.text === "let me in")).toBe(false);
     expect(await new RtdbRest(url).list(`channels/${pondId}/rposts`)).toEqual([]);
 
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: false } });
+    await A.service.changeRole(pondId, B.service.me.id, "viewer");
     await B.service.refresh(pondId);
-    await expect(bSync.post(pondId, "muted")).rejects.toThrow(/turned off messaging/);
+    await expect(bSync.post(pondId, "muted")).rejects.toThrow(/viewer can only watch/);
     const late = `${clock.now.toString(36).padStart(9, "0")}-${randomId(6)}`;
     await rawInbox(B, pondId, late, "sneaked in");
     await A.service.pass(pondId);
     await host.sync.idle();
     expect(host.store.roomPosts(host.project.id, { limit: 200 }).some((r) => r.text === "sneaked in")).toBe(false);
     expect((await bSync.page(pondId)).canPost).toBe(false);
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: true } });
+    await A.service.changeRole(pondId, B.service.me.id, "member");
     await B.service.refresh(pondId);
     expect((await bSync.page(pondId)).canPost).toBe(true);
-  });
-
-  it("a Member the Owner hid the pond from reads nothing", async () => {
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { see: false } });
-    await B.service.refresh(pondId);
-    await expect(bSync.page(pondId)).rejects.toThrow(/hidden/);
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { see: true } });
-    await B.service.refresh(pondId);
-    expect((await bSync.page(pondId)).posts.length).toBeGreaterThan(0);
   });
 
   it("only the Owner's own Room documents count: a Member's `room` document is ignored", async () => {
@@ -492,7 +483,7 @@ describe("Members see the whole Room: detail, plan cards, canvas cards, comments
     expect(posts.at(-1)).toMatchObject({ text: "Please keep the old logo.", replyTo: planId });
   });
 
-  it("a comment from a viewer or a muted Member is dropped, and one on a card that is not a plan is too", async () => {
+  it("a comment from a viewer or a demoted Member is dropped, and one on a card that is not a plan is too", async () => {
     delivered.length = 0;
     const rpost = async (who: Mac, id: string, doc: unknown) => rawDoc(who, pondId, "rposts", id, doc);
     const at = clock.now;
@@ -503,13 +494,13 @@ describe("Members see the whole Room: detail, plan cards, canvas cards, comments
     expect(delivered).toEqual([]);
     expect(host.store.roomPostById("m-000000001-viewer")).toBeNull();
     expect(host.store.roomPostById("m-000000002-notplan")).toBeNull();
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: false } });
+    await A.service.changeRole(pondId, B.service.me.id, "viewer");
     await B.service.refresh(pondId);
     await rpost(B, "000000003-muted", { v: 1, id: "000000003-muted", text: "hm", at, replyTo: planId });
     await apply();
     expect(delivered).toEqual([]);
     expect(host.store.roomPostById("m-000000003-muted")).toBeNull();
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
+    await A.service.changeRole(pondId, B.service.me.id, "member");
     await B.service.refresh(pondId);
   });
 
@@ -622,12 +613,12 @@ describe("a Member's Tasks need the Owner's approval", () => {
     await A.service.setPresence(pondId, {});
   });
 
-  it("a Member has no start permission by default; the Collaborator preset turns it on", async () => {
+  it("a Member has no start permission by default; the Owner turns Can start Tasks on", async () => {
     const view = async () => (await A.service.view(pondId)).members.find((m) => m.id === B.service.me.id)!;
     expect((await view()).caps?.start).toBe(false);
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     expect((await view()).caps?.start).toBe(true);
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
     expect((await view()).caps?.start).toBe(false);
     await B.service.refresh(pondId);
   });
@@ -668,14 +659,14 @@ describe("a Member's Tasks need the Owner's approval", () => {
   });
 
   it("with the start permission the Task is the Owner's kind: nothing waits", async () => {
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { start: true } });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     await B.service.refresh(pondId);
     const said = await bSync.post(pondId, "make it a task: tidy the header spacing");
     await apply();
     const made = host.jobs.list(host.project.id).find((t) => t.messageId === `m-${said.id}`)!;
     expect(made.approval).toBeUndefined();
     expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)?.needsApproval).toBeUndefined();
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { start: false } });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
     await B.service.refresh(pondId);
   });
 

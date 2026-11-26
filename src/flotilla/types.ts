@@ -3,7 +3,6 @@
  * applies to a document it opened. A document that fails its check is dropped, never repaired.
  */
 
-import { readCapsPatch, type CapsPatch } from "./permissions.js";
 import { memberIdOf as memberIdOfKey } from "./crypto.js";
 import { readTimelineEvent, type TimelineEvent } from "../native/timeline.js";
 
@@ -39,8 +38,12 @@ export interface MemberDoc {
   email?: string;
   /** A seam for Catalyst sign-in; unused today. */
   accountId?: string;
-  /** What the owner lets this member do beyond their role's default (`effectiveCaps`); signed with the document. */
-  caps?: CapsPatch;
+  /**
+   * The Member's one switch, "Can start Tasks" (off when absent): their Tasks and Ducks go ahead without the Owner's
+   * approval. Signed with the document. Older documents carried `caps`; it is ignored (a Collaborator is a Member with
+   * this off, a Viewer stays a Viewer).
+   */
+  canStartTasks?: true;
   /**
    * The member's other devices (docs/ponds.md, "Members are accounts"): added by the owner's Mac for a device signed in to
    * the same account as `accountId`. `publicKey` above is device number one. Absent on every older document.
@@ -107,10 +110,6 @@ export interface JoinRequestDoc {
 }
 
 export interface PondThread {
-  /** The starter's overrides for everyone else (`threadWriteDecision`): locked, and who is let in or kept out. */
-  locked?: boolean;
-  allow?: string[];
-  deny?: string[];
   id: string;
   title: string;
   /** The starter's member id. */
@@ -459,7 +458,7 @@ export function readMember(v: unknown): MemberDoc | null {
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
     ...(s(v.email, 200) ? { email: v.email as string } : {}),
-    ...(readCapsPatch(v.caps) ? { caps: readCapsPatch(v.caps)! } : {}),
+    ...(v.canStartTasks === true && v.role === "member" ? { canStartTasks: true as const } : {}),
     ...(Array.isArray(v.devices) && v.devices.length > 0 ? { devices: readDevices(v.devices) } : {}),
     ...(v.primaryRetired === true && Array.isArray(v.devices) && v.devices.length > 0
       ? { primaryRetired: true as const }
@@ -569,9 +568,6 @@ export function readThread(v: unknown): PondThread | null {
     ...(s(v.branch, 250) ? { branch: v.branch } : {}),
     ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
     ...(v.waitingFor === "approval" || v.waitingFor === "question" ? { waitingFor: v.waitingFor } : {}),
-    ...(v.locked === true ? { locked: true } : {}),
-    ...(Array.isArray(v.allow) ? { allow: v.allow.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
-    ...(Array.isArray(v.deny) ? { deny: v.deny.filter((x): x is string => s(x, 64)).slice(0, 50) } : {}),
     ...(rec(v.requester) && s(v.requester.memberId, 64) && s(v.requester.requestId, 80)
       ? { requester: { memberId: v.requester.memberId, requestId: v.requester.requestId } }
       : {}),

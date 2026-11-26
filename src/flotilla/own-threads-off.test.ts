@@ -53,7 +53,7 @@ async function pond() {
   await B.service.join((await A.service.invite(created.id, "member")).link!);
   const [join] = (await A.service.view(created.id)).joins;
   await A.service.decideJoin(created.id, join!.requestId, { approve: true });
-  await A.service.setMemberCaps(created.id, B.service.me.id, { preset: "collaborator" });
+  await A.service.setCanStartTasks(created.id, B.service.me.id, true);
   await B.service.refresh(created.id);
   return { A, B, pondId: created.id };
 }

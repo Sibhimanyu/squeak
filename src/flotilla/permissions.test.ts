@@ -6,16 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { sealAt, signedText, signText } from "./crypto.js";
-import {
-  can,
-  defaultGrant,
-  readGrant,
-  THREAD_ACTIONS,
-  type Action,
-  type Actor,
-  type Context,
-  type MachineGrant,
-} from "./permissions.js";
+import { can, capsOf, THREAD_ACTIONS, type Action, type Actor, type Context } from "./permissions.js";
 import { FlotillaService } from "./service.js";
 import type { Role } from "./types.js";
 import { named, verifying } from "./named-account.test-fixture.js";
@@ -96,72 +87,27 @@ describe("thread authority: role x action x starter x private", () => {
   });
 });
 
-describe("machine grants", () => {
-  const grant = (over: Partial<MachineGrant> = {}): MachineGrant => ({
-    ...defaultGrant("M"),
-    allowAgents: true,
-    maxAgents: 2,
-    providers: ["claude"],
-    ...over,
+describe("roles", () => {
+  it("a Member's one switch, Can start Tasks, is off unless the Owner turned it on; a Viewer never has it", () => {
+    expect(capsOf("member")).toEqual({ see: true, diffs: true, message: true, answer: true, start: false });
+    expect(capsOf("member", true).start).toBe(true);
+    expect(capsOf("viewer", true)).toEqual({ see: true, diffs: true, message: false, answer: false, start: false });
+    expect(capsOf("owner").start).toBe(true);
   });
-  const nest = (g?: MachineGrant, extra: Record<string, unknown> = {}): Context => ({
-    nest: { owner: "M", ...(g ? { grant: g } : {}), ...extra },
-  });
-
-  it("by default only the Nest's owner runs agents there", () => {
-    expect(defaultGrant("M")).toMatchObject({ allowAgents: false, maxAgents: 0, providers: [], shell: "deny" });
-    expect(ok(member, "run-agent", nest())).toBe(true);
-    expect(ok(member, "run-shell", nest())).toBe(true);
-    for (const a of [owner, other]) {
-      expect(ok(a, "run-agent", nest())).toBe(false);
-      expect(ok(a, "run-shell", nest())).toBe(false);
-      expect(ok(a, "start-thread", nest())).toBe(false);
+  it("a Viewer cannot post, message, answer or start anything", () => {
+    for (const a of ["start-thread", "message", "answer-question"] as const) {
+      expect(ok(viewer, a, thread("O")), a).toBe(false);
     }
-    expect(can(other, "run-agent", nest())).toEqual({ ok: false, reason: "That machine's owner has not shared it." });
   });
-  it("a grant lets others run its providers, up to its limit", () => {
-    expect(ok(other, "run-agent", nest(grant(), { provider: "claude" }))).toBe(true);
-    expect(ok(other, "run-agent", nest(grant(), { provider: "codex" }))).toBe(false);
-    expect(ok(other, "run-agent", nest(grant(), { provider: "claude", runningForOthers: 1 }))).toBe(true);
-    expect(ok(other, "run-agent", nest(grant(), { provider: "claude", runningForOthers: 2 }))).toBe(false);
-    expect(ok(other, "run-agent", nest(grant({ allowAgents: false }), { provider: "claude" }))).toBe(false);
-  });
-  it("the owner's own machine ignores its own limits", () => {
-    expect(ok(member, "run-agent", nest(grant({ maxAgents: 0 }), { provider: "codex", runningForOthers: 9 }))).toBe(
-      true,
-    );
-  });
-  it("shell follows the policy, and `ask` is not `allow`", () => {
-    expect(ok(other, "run-shell", nest(grant({ shell: "allow" })))).toBe(true);
-    expect(ok(other, "run-shell", nest(grant({ shell: "ask" })))).toBe(false);
-    expect(ok(other, "run-shell", nest(grant({ shell: "deny" })))).toBe(false);
-    expect(ok(other, "run-shell", nest(grant({ allowAgents: false, shell: "allow" })))).toBe(false);
-  });
-  it("viewers never run anything, granted or not", () => {
-    expect(ok(viewer, "run-agent", nest(grant({ shell: "allow" }), { provider: "claude" }))).toBe(false);
-    expect(ok(viewer, "run-shell", nest(grant({ shell: "allow" })))).toBe(false);
-  });
-  it("stopping what runs on a machine: its owner or the thread's starter", () => {
-    const ctx: Context = { nest: { owner: "M" }, thread: { starter: "N", private: false } };
-    expect(ok(member, "stop-remote", ctx)).toBe(true);
-    expect(ok(other, "stop-remote", ctx)).toBe(true);
-    expect(ok(owner, "stop-remote", ctx)).toBe(false);
-    expect(ok(viewer, "stop-remote", ctx)).toBe(false);
-  });
-  it("readGrant drops anything out of shape", () => {
-    expect(readGrant(grant())).toEqual(grant());
-    expect(readGrant({ ...grant(), maxAgents: -1 })).toBeNull();
-    expect(readGrant({ ...grant(), maxAgents: 1.5 })).toBeNull();
-    expect(readGrant({ ...grant(), maxAgents: 999 })).toBeNull();
-    expect(readGrant({ ...grant(), shell: "yes" })).toBeNull();
-    expect(readGrant({ ...grant(), allowAgents: "true" })).toBeNull();
-    expect(readGrant({ ...grant(), providers: ["Bad Name"] })).toBeNull();
-    expect(readGrant(null)).toBeNull();
-    expect(readGrant({ ...grant(), providers: ["claude", "claude"] })!.providers).toEqual(["claude"]);
+  it("a Member messages and answers on a Duck that is not Private, and never reaches a Private one", () => {
+    expect(ok(member, "message", thread("O"))).toBe(true);
+    expect(ok(member, "answer-question", thread("O"))).toBe(true);
+    expect(ok(member, "message", thread("O", true))).toBe(false);
+    expect(ok(viewer, "view-thread", thread("O", true))).toBe(false);
   });
 });
 
-describe("grants and holds over a store", () => {
+describe("holds over a store", () => {
   let rtdb: FakeRtdb;
   let url: string;
   const dirs: string[] = [];
@@ -191,45 +137,6 @@ describe("grants and holds over a store", () => {
       await A.service.decideJoin(pondId, j.requestId, { approve: true });
     await B.service.refresh(pondId);
   }
-
-  it("a Nest's owner writes its grant; default otherwise; nobody writes another's", async () => {
-    const A = mac("Sibhi");
-    const B = mac("Aarav");
-    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
-    await joinAs(A, B, pond.id, "member");
-
-    expect(await B.service.machineGrant(pond.id, A.service.me.id)).toMatchObject({
-      allowAgents: false,
-      owner: A.service.me.id,
-    });
-    const written = await A.service.setMachineGrant(pond.id, {
-      allowAgents: true,
-      maxAgents: 2,
-      providers: ["claude"],
-      shell: "ask",
-    });
-    expect(await B.service.machineGrant(pond.id, A.service.me.id)).toEqual(written);
-
-    await B.service.setMachineGrant(pond.id, { allowAgents: true, maxAgents: 5, providers: ["codex"], shell: "allow" });
-    expect(await A.service.machineGrant(pond.id, A.service.me.id)).toEqual(written);
-    expect((await A.service.machineGrant(pond.id, B.service.me.id)).providers).toEqual(["codex"]);
-    await expect(
-      A.service.setMachineGrant(pond.id, { allowAgents: true, maxAgents: 500, providers: [], shell: "allow" }),
-    ).rejects.toThrow(/not a machine grant/);
-
-    // A grant document under A's id signed by B is not A's: it is ignored, A's own stays.
-    const stolen = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id];
-    const identity = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "identity.json"), "utf8")).identity;
-    const docPath = `channels/${pond.id}/grants/${A.service.me.id}`;
-    const box = `${stolen.current}.${sealAt(stolen.keys[String(stolen.current)], docPath, { ...written, maxAgents: 20 })}`;
-    await new RtdbRest(url).set(docPath, {
-      box,
-      sig: signText(identity.privateKey, signedText(docPath, box)),
-      device: B.service.me.id,
-      at: Date.now(),
-    });
-    expect(await A.service.machineGrant(pond.id, A.service.me.id)).toMatchObject({ allowAgents: false });
-  });
 
   it("regression: a viewer cannot hold a question against the people who can answer it", async () => {
     const A = mac("Sibhi2");

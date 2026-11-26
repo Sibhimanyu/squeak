@@ -253,7 +253,7 @@ describe("the multiplayer journey over the real relay", () => {
     const [join] = (await A.service.view(pondId)).joins;
     expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
     await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     await B.service.refresh(pondId);
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
@@ -306,14 +306,15 @@ describe("the multiplayer journey over the real relay", () => {
   });
 
   it("6. the owner restricts the member live: refused at the starter's Mac even if their client sends it", async () => {
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: false } });
+    await A.service.changeRole(pondId, B.service.me.id, "viewer");
     expect(await B.bridge.message(pondId, shared, "still here")).toMatchObject({ ok: false, state: "refused" });
     await rawCommand(B, pondId, { kind: "message", threadId: shared, text: "forged" });
     expect(await A.bridge.runCommands(pondId)).toEqual([
-      expect.objectContaining({ ok: false, reason: "The owner has turned off messaging for you in this pond." }),
+      expect.objectContaining({ ok: false, reason: "Viewers can read but not send." }),
     ]);
     expect(A.host.sent.map((s) => s.text)).not.toContain("forged");
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: true } });
+    await A.service.changeRole(pondId, B.service.me.id, "member");
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     expect((await B.bridge.message(pondId, shared, "back")).ok).toBe(true);
     await A.bridge.runCommands(pondId);
   });

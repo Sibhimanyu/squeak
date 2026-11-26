@@ -127,13 +127,8 @@ export function answeringLine(holds, requestId, meId) {
 }
 
 /** Whether the guest can message this thread, or the one sentence that says why not. */
-export function composerBlock(role, thread, me = null) {
+export function composerBlock(role, thread) {
   if (role === "viewer") return "Viewers can read but not send.";
-  if (me && thread && thread.starter !== me.id) {
-    if (thread.deny?.includes(me.id)) return `${thread.starterName} doesn't let you message this duck.`;
-    if (me.caps?.message === false) return "The owner has turned off messaging for you in this pond.";
-    if (thread.locked && !thread.allow?.includes(me.id)) return "This duck is read-only: its starter locked it.";
-  }
   if (thread?.permissionMode === "bypassPermissions") {
     return `Only ${thread.starterName} can message this duck while it runs without asking.`;
   }

@@ -1,15 +1,17 @@
 import type { Role } from "./types.js";
 
 /**
- * Three permission layers (docs/ponds.md, "Permissions"), answered by one pure function, `can`. It reads nothing
- * but its arguments, so every surface that decides (the service, the starter's Mac, a later scheduler) asks the
- * same question and a test can name every cell of the matrix.
+ * Two permission layers (docs/ponds.md, "Who can do what"), answered by one pure function, `can`. It reads nothing
+ * but its arguments, so every surface that decides (the service, the starter's Mac) asks the same question and a
+ * test can name every cell of the matrix.
  *
- *  1. Pond role: owner, member, viewer. What a person may do in the pond.
- *  2. Machine grant: what the owner of a Nest lets other members run on it. Default: nothing, only its owner.
- *  3. Agent authority: who may message, answer, approve or stop a thread. Approving and stopping stay with the
+ *  1. Pond role: Owner, Member, Viewer. A Viewer only reads; a Member also posts, messages, answers and asks for
+ *     Tasks and Ducks (which wait for the Owner unless the Owner turned on that Member's "Can start Tasks"); only the
+ *     Owner invites, removes, changes roles and approves what a Member asked for.
+ *  2. Agent authority: who may message, answer, approve or stop a thread. Approving and stopping stay with the
  *     thread's starter, whatever the role; nobody else's role (the pond owner's included) reaches them.
  *
+ * A Duck marked Private is its starter's alone: to everyone else it does not exist.
  * A refusal is a fixed sentence, never the content of what was refused.
  */
 
@@ -35,66 +37,19 @@ export const THREAD_ACTIONS = [
   "push-git",
   "stop",
 ] as const;
-export const NEST_ACTIONS = ["run-agent", "run-shell", "stop-remote"] as const;
 
 export type PondAction = (typeof POND_ACTIONS)[number];
 export type ThreadAction = (typeof THREAD_ACTIONS)[number];
-export type NestAction = (typeof NEST_ACTIONS)[number];
-export type Action = PondAction | ThreadAction | NestAction;
-
-/** What the owner of a Nest lets other members do on it. */
-export type ShellPolicy = "deny" | "ask" | "allow";
-export const SHELL_POLICIES: readonly ShellPolicy[] = ["deny", "ask", "allow"];
-
-export interface MachineGrant {
-  /** The member who owns the Nest and wrote this. */
-  owner: string;
-  /** May other members run agents here at all. */
-  allowAgents: boolean;
-  /** Agents other members may have running here at once. */
-  maxAgents: number;
-  /** Providers (`claude`, `codex`) others may run; empty means none. */
-  providers: string[];
-  /** Whether others' agents may run shell commands: never, only with the owner's say, or freely. */
-  shell: ShellPolicy;
-  updatedAt: number;
-}
-
-export const MAX_GRANT_AGENTS = 20;
-
-/** Nothing for anyone but the Nest's owner. */
-export const defaultGrant = (owner: string): MachineGrant => ({
-  owner,
-  allowAgents: false,
-  maxAgents: 0,
-  providers: [],
-  shell: "deny",
-  updatedAt: 0,
-});
+export type Action = PondAction | ThreadAction;
 
 export interface ThreadFacts {
   starter: string;
   private: boolean;
 }
 
-export interface NestFacts {
-  /** The member who owns the machine. */
-  owner: string;
-  /** Their grant; absent means the default. */
-  grant?: MachineGrant;
-  /** Agents from other members running there now. */
-  runningForOthers?: number;
-  /** For `run-agent`: the provider asked for. */
-  provider?: string;
-}
-
 export interface Context {
-  /** The pond owner's member id. */
-  ownerId?: string;
   /** For thread actions. */
   thread?: ThreadFacts;
-  /** For nest actions and `start-thread` on a machine. */
-  nest?: NestFacts;
 }
 
 export type Decision = { ok: true } | { ok: false; reason: string };
@@ -103,7 +58,7 @@ const no = (reason: string): Decision => ({ ok: false, reason });
 
 const WATCH = "viewers only watch";
 
-function pondLevel(actor: Actor, action: PondAction, ctx: Context): Decision {
+function pondLevel(actor: Actor, action: PondAction): Decision {
   switch (action) {
     case "view-pond":
       return yes;
@@ -112,8 +67,7 @@ function pondLevel(actor: Actor, action: PondAction, ctx: Context): Decision {
     case "remove-member":
       return actor.role === "owner" ? yes : no("Only an owner can do that.");
     case "start-thread":
-      if (actor.role === "viewer") return no(WATCH);
-      return ctx.nest ? nestLevel(actor, "run-agent", ctx) : yes;
+      return actor.role === "viewer" ? no(WATCH) : yes;
   }
 }
 
@@ -136,30 +90,10 @@ function threadLevel(actor: Actor, action: ThreadAction, ctx: Context): Decision
       return actor.role === "viewer" ? no(WATCH) : yes;
     default:
       // Approving, pushing and stopping: the starter, whose machine and account the agent runs on. Not the pond's
-      // owner, not a member with a grant; the commands a member can send do not include them either.
+      // owner, not another member; the commands a member can send do not include them either.
       if (actor.kind === "agent") return no("An agent cannot approve its own work.");
       return starter && actor.role !== "viewer" ? yes : no("Only the thread's starter can do that.");
   }
-}
-
-function nestLevel(actor: Actor, action: NestAction, ctx: Context): Decision {
-  const nest = ctx.nest;
-  if (!nest) return no("no such machine");
-  if (actor.role === "viewer") return no(WATCH);
-  const mine = nest.owner === actor.memberId;
-  if (action === "stop-remote") {
-    // The machine's owner can always pull the plug on what runs on it; a thread's starter can stop their own.
-    if (mine || ctx.thread?.starter === actor.memberId) return yes;
-    return no("Only the machine's owner or the thread's starter can stop it.");
-  }
-  if (mine) return yes;
-  const grant = nest.grant ?? defaultGrant(nest.owner);
-  if (!grant.allowAgents) return no("That machine's owner has not shared it.");
-  if (action === "run-shell") return grant.shell === "allow" ? yes : no("That machine does not allow shell commands.");
-  if (nest.provider !== undefined && !grant.providers.includes(nest.provider))
-    return no("That machine does not run that agent.");
-  if ((nest.runningForOthers ?? 0) >= grant.maxAgents) return no("That machine is running as many as it allows.");
-  return yes;
 }
 
 /**
@@ -170,100 +104,28 @@ export function can(actor: Actor, action: Action, ctx: Context = {}): Decision {
   if (actor.kind === "system" || actor.kind === "runtime") {
     return action === "view-pond" || action === "view-thread" ? yes : no(`${actor.kind} actors only look`);
   }
-  if ((POND_ACTIONS as readonly string[]).includes(action)) return pondLevel(actor, action as PondAction, ctx);
-  if ((THREAD_ACTIONS as readonly string[]).includes(action)) return threadLevel(actor, action as ThreadAction, ctx);
-  return nestLevel(actor, action as NestAction, ctx);
+  if ((POND_ACTIONS as readonly string[]).includes(action)) return pondLevel(actor, action as PondAction);
+  return threadLevel(actor, action as ThreadAction, ctx);
 }
-
-const rec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** A grant document, or null: wrong shapes, out-of-range numbers and unknown providers are all dropped, not repaired. */
-export function readGrant(v: unknown): MachineGrant | null {
-  if (!rec(v) || typeof v.owner !== "string" || v.owner.length > 64) return null;
-  if (typeof v.allowAgents !== "boolean") return null;
-  if (!Number.isInteger(v.maxAgents) || (v.maxAgents as number) < 0 || (v.maxAgents as number) > MAX_GRANT_AGENTS)
-    return null;
-  if (!Array.isArray(v.providers) || v.providers.length > 8) return null;
-  if (!v.providers.every((p) => typeof p === "string" && /^[a-z0-9_-]{1,40}$/.test(p))) return null;
-  if (!SHELL_POLICIES.includes(v.shell as ShellPolicy)) return null;
-  if (typeof v.updatedAt !== "number" || !Number.isFinite(v.updatedAt)) return null;
-  return {
-    owner: v.owner,
-    allowAgents: v.allowAgents,
-    maxAgents: v.maxAgents as number,
-    providers: [...new Set(v.providers as string[])],
-    shell: v.shell as ShellPolicy,
-    updatedAt: v.updatedAt,
-  };
-}
-
-// MARK: Per-member capabilities (owner-set, live) and per-thread overrides (starter-set)
 
 /**
- * What the owner lets one member do in the pond, on top of their role. Stored in the member's own document (signed by
- * the owner), so a change reaches every Mac with the next member read and is enforced where the thread runs: the
- * starter's Mac checks it for every command, whatever the sender's client says. Absent keys take the role's default.
+ * What a role may do, in the shape older clients read (`caps` on the pond view, and the Room's port). Derived, never
+ * stored: a Viewer reads, a Member also messages and answers, and `start` (a Task that goes ahead without the Owner's
+ * approval) is the Member's one switch, "Can start Tasks", off unless the Owner turned it on.
  */
-export const CAPS = ["see", "diffs", "message", "answer", "start"] as const;
-export type Cap = (typeof CAPS)[number];
-export type Caps = Record<Cap, boolean>;
-export type CapsPatch = Partial<Caps> & { muted?: boolean };
-
-/**
- * Role defaults: a member sees, reads diffs, messages and answers but does not start (a Member's Task waits for the
- * Owner's approval until the Owner turns `start` on, or picks the Collaborator preset); a viewer only reads. Approving
- * and stopping are never grantable.
- */
-export const ROLE_CAPS: Record<Role, Caps> = {
-  owner: { see: true, diffs: true, message: true, answer: true, start: true },
-  member: { see: true, diffs: true, message: true, answer: true, start: false },
-  viewer: { see: true, diffs: true, message: false, answer: false, start: false },
-};
-
-/** Presets the Mac's People page offers: Viewer reads, Member talks in shared threads, Collaborator also brings an agent. */
-export const CAP_PRESETS = {
-  viewer: { role: "viewer", caps: {} },
-  member: { role: "member", caps: { start: false } },
-  collaborator: { role: "member", caps: { start: true } },
-} as const satisfies Record<string, { role: Role; caps: CapsPatch }>;
-
-/** The caps a member really has: role defaults, then the owner's patch; muted and viewers never write. */
-export function effectiveCaps(role: Role, patch?: CapsPatch): Caps {
-  const out = { ...ROLE_CAPS[role] };
-  if (role === "owner") return out;
-  if (role === "member" && patch) {
-    for (const k of CAPS) if (typeof patch[k] === "boolean") out[k] = patch[k] as boolean;
-    if (patch.muted === true) {
-      out.message = false;
-      out.answer = false;
-      out.start = false;
-    }
-  }
-  if (!out.see) return { see: false, diffs: false, message: false, answer: false, start: false };
-  return out;
+export interface Caps {
+  see: boolean;
+  diffs: boolean;
+  message: boolean;
+  answer: boolean;
+  start: boolean;
 }
 
-export function readCapsPatch(v: unknown): CapsPatch | undefined {
-  if (!rec(v)) return undefined;
-  const out: CapsPatch = {};
-  for (const k of [...CAPS, "muted"] as const) if (typeof v[k] === "boolean") out[k] = v[k] as boolean;
-  return Object.keys(out).length ? out : undefined;
+export function capsOf(role: Role, canStartTasks = false): Caps {
+  if (role === "owner") return { see: true, diffs: true, message: true, answer: true, start: true };
+  if (role === "viewer") return { see: true, diffs: true, message: false, answer: false, start: false };
+  return { see: true, diffs: true, message: true, answer: true, start: canStartTasks };
 }
 
-/** A thread starter's own switches for others: locked (read-only for everyone else), and named members let in or kept out. */
-export interface ThreadAccess {
-  locked?: boolean;
-  allow?: string[];
-  deny?: string[];
-}
-
-export const LOCKED = "This thread is read-only: its starter locked it.";
-export const DENIED = "Its starter doesn't let you message this thread.";
-
-/** May `who` write (message or answer) in a thread, under its starter's overrides? The starter always may. */
-export function threadWriteDecision(who: string, starter: string, access: ThreadAccess | undefined): Decision {
-  if (who === starter || !access) return yes;
-  if (access.deny?.includes(who)) return no(DENIED);
-  if (access.locked && !access.allow?.includes(who)) return no(LOCKED);
-  return yes;
-}
+/** Said when a Member asks for a Duck or Task that waits for the Owner (no "Can start Tasks"). */
+export const NEEDS_OWNER = "That waits for the Owner's approval.";

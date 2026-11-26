@@ -510,7 +510,7 @@ export function createThreadScreen(handlers) {
       .filter(Boolean)
       .join(" · ");
     markSlot.replaceChildren(...[markNode(m.state)].filter(Boolean));
-    const blocked = composerBlock(m.role, m.thread, m.me);
+    const blocked = composerBlock(m.role, m.thread);
     block.hidden = !blocked;
     block.textContent = blocked ?? "";
     composer.hidden = Boolean(blocked);

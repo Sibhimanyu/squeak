@@ -73,15 +73,9 @@ describe("what the guest screens say", () => {
     expect(composerBlock("member", { permissionMode: "default" })).toBeNull();
   });
 
-  it("respects the owner's switches and a thread's lock, and marks a member's own thread", () => {
-    const me = { id: "m", caps: { message: false } };
-    expect(composerBlock("member", { starter: "s" }, me)).toMatch(/turned off messaging/);
-    expect(composerBlock("member", { starter: "s", locked: true }, { id: "m", caps: {} })).toMatch(/locked/);
-    expect(composerBlock("member", { starter: "s", locked: true, allow: ["m"] }, { id: "m", caps: {} })).toBeNull();
-    expect(composerBlock("member", { starter: "s", deny: ["m"], starterName: "Aarav" }, { id: "m", caps: {} })).toMatch(
-      /Aarav doesn't let you/,
-    );
-    expect(composerBlock("member", { starter: "m", locked: true }, me)).toBeNull();
+  it("a viewer reads only; a member's composer is open; a member's own thread is marked", () => {
+    expect(composerBlock("viewer", { starter: "s" }, { id: "m" })).toMatch(/Viewers can read/);
+    expect(composerBlock("member", { starter: "s" }, { id: "m" })).toBeNull();
     expect(poweredBy({ mode: "own", nest: "Aarav-mac" })).toBeNull(); // stashed: hidden by default
     expect(poweredBy({ mode: "own", nest: "Aarav-mac" }, true)).toBe("Powered by Aarav-mac · Flotilla");
     expect(poweredBy({ mode: "shared", nest: "x" })).toBeNull();

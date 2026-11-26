@@ -22,27 +22,16 @@ export function readMeta(v) {
   return { id: v.id, name: v.name, owner: v.owner, ownerKey: v.ownerKey, created: v.created };
 }
 
-const CAP_KEYS = ["see", "diffs", "message", "answer", "start", "muted"];
-
-/** The owner's switches in a member document: booleans only, anything else dropped. */
-export function readCapsPatch(v) {
-  if (!rec(v)) return undefined;
-  const out = {};
-  for (const k of CAP_KEYS) if (typeof v[k] === "boolean") out[k] = v[k];
-  return Object.keys(out).length ? out : undefined;
-}
-
-/** What a member may do now: the role's defaults, then the owner's switches (src/flotilla/permissions.ts `effectiveCaps`). */
-export function effectiveCaps(role, patch) {
+/**
+ * What a role may do, in the shape the pages read (src/flotilla/permissions.ts `capsOf`): a Viewer reads; a Member also
+ * messages and answers, and `start` (a Task that goes ahead without the Owner's approval) is their one switch,
+ * "Can start Tasks", off unless the Owner turned it on.
+ */
+export function capsOf(role, canStartTasks = false) {
   const base = { see: true, diffs: true, message: true, answer: true, start: true };
   if (role === "owner") return base;
   if (role === "viewer") return { ...base, message: false, answer: false, start: false };
-  const out = { ...base };
-  for (const k of ["see", "diffs", "message", "answer", "start"])
-    if (typeof patch?.[k] === "boolean") out[k] = patch[k];
-  if (patch?.muted === true) Object.assign(out, { message: false, answer: false, start: false });
-  if (!out.see) return { see: false, diffs: false, message: false, answer: false, start: false };
-  return out;
+  return { ...base, start: canStartTasks === true };
 }
 
 export const MAX_DEVICES_PER_MEMBER = 8;
@@ -115,7 +104,7 @@ export function readMember(v) {
     nest: v.nest,
     client: v.client,
     addedAt: v.addedAt,
-    caps: readCapsPatch(v.caps),
+    ...(v.canStartTasks === true && v.role === "member" ? { canStartTasks: true } : {}),
     ...(withDevices ? { devices: readDevices(v.devices) } : {}),
     ...(withDevices && v.primaryRetired === true ? { primaryRetired: true } : {}),
   };
@@ -151,9 +140,6 @@ export function readThread(v) {
     mode: v.mode,
     updatedAt: v.updatedAt,
     permissionMode: typeof v.permissionMode === "string" ? v.permissionMode : undefined,
-    locked: v.locked === true ? true : undefined,
-    allow: Array.isArray(v.allow) ? v.allow.filter((x) => s(x, 64)).slice(0, 50) : undefined,
-    deny: Array.isArray(v.deny) ? v.deny.filter((x) => s(x, 64)).slice(0, 50) : undefined,
     waitingFor: v.waitingFor === "approval" || v.waitingFor === "question" ? v.waitingFor : undefined,
   };
 }

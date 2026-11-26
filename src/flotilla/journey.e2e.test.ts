@@ -82,7 +82,7 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
     const [join] = (await A.service.view(pondId)).joins;
     expect(join).toMatchObject({ name: "Aarav", nest: "Aarav-mac" });
     await A.service.decideJoin(pondId, join!.requestId, { approve: true });
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     await B.service.refresh(pondId);
     const view = await B.service.view(pondId);
     expect(view.me.role).toBe("member");
@@ -147,45 +147,34 @@ describe("the multiplayer journey: shared thread, then a member's own thread", (
   });
 
   it("6. the owner restricts the member live: refused at the starter's Mac even if their client sends it", async () => {
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: false } });
+    await A.service.changeRole(pondId, B.service.me.id, "viewer");
     // Their client is stopped early, calmly...
     expect(await B.bridge.message(pondId, shared, "still here")).toMatchObject({ ok: false, state: "refused" });
     // ...and a forged command is refused by the starter's host.
     await rawCommand(B, pondId, { kind: "message", threadId: shared, text: "forged" });
     expect(await A.bridge.runCommands(pondId)).toEqual([
-      expect.objectContaining({ ok: false, reason: "The owner has turned off messaging for you in this pond." }),
+      expect.objectContaining({ ok: false, reason: "Viewers can read but not send." }),
     ]);
     expect(A.host.sent.map((s) => s.text)).not.toContain("forged");
     const ripples = (await A.service.view(pondId)).ripples.map((r) => r.text);
-    expect(ripples.some((r) => /restricted Aarav from messaging/.test(r))).toBe(true);
+    expect(ripples.some((r) => /made Aarav a viewer/.test(r))).toBe(true);
+    await B.service.refresh(pondId);
     const mine = await B.service.view(pondId);
-    expect(mine.me.caps).toMatchObject({ message: false, answer: true, start: true });
-    await A.service.setMemberCaps(pondId, B.service.me.id, { caps: { message: true } });
+    expect(mine.me).toMatchObject({ role: "viewer", caps: { message: false, answer: false, start: false } });
+    await A.service.changeRole(pondId, B.service.me.id, "member");
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
     expect((await B.bridge.message(pondId, shared, "back")).ok).toBe(true);
     await A.bridge.runCommands(pondId);
   });
 
-  it("7. losing 'start' hides the member's own threads from the pond; they keep running on their Mac", async () => {
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "member" });
-    expect((await A.service.threads(pondId)).some((t) => t.id === own)).toBe(false);
-    expect(B.service.localThread(pondId, own)).not.toBeNull();
-    await expect(B.service.assertCanStart(pondId)).rejects.toThrow(/starting your own threads/);
-    await A.service.setMemberCaps(pondId, B.service.me.id, { preset: "collaborator" });
+  it("7. Can start Tasks is the Member's one switch: off, a start is refused calmly; on, it is allowed", async () => {
+    await A.service.setCanStartTasks(pondId, B.service.me.id, false);
+    await expect(B.service.assertCanStart(pondId)).rejects.toThrow(/waits for the Owner/);
+    // The Member's own thread is still shown: nothing but the Owner's approval is gated.
     expect((await A.service.threads(pondId)).some((t) => t.id === own)).toBe(true);
-  });
-
-  it("8. a starter locks a thread and lets one member in; deny wins", async () => {
-    await B.service.setThreadAccess(pondId, own, { locked: true });
-    expect(await A.bridge.message(pondId, own, "locked out")).toMatchObject({ ok: false, state: "refused" });
-    await B.service.setThreadAccess(pondId, own, { allow: [A.service.me.id] });
-    expect((await A.bridge.message(pondId, own, "let in")).ok).toBe(true);
-    await B.bridge.runCommands(pondId);
-    expect(B.host.sent.map((s) => s.text)).toContain("let in");
-    await B.service.setThreadAccess(pondId, own, { deny: [A.service.me.id] });
-    expect((await A.bridge.message(pondId, own, "denied")).ok).toBe(false);
-    await rawCommand(A, pondId, { kind: "message", threadId: own, text: "forged2" });
-    expect((await B.bridge.runCommands(pondId))[0]).toMatchObject({ ok: false });
-    expect(B.host.sent.map((s) => s.text)).not.toContain("forged2");
+    await A.service.setCanStartTasks(pondId, B.service.me.id, true);
+    await expect(B.service.assertCanStart(pondId)).resolves.toBeUndefined();
+    expect((await B.service.view(pondId)).members.find((m) => m.you)).toMatchObject({ canStartTasks: true });
   });
 
   it("9. the member leaves; the owner's Mac removes them and nothing new reads", async () => {

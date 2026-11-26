@@ -1,40 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { CAP_PRESETS, effectiveCaps, readCapsPatch, threadWriteDecision } from "./permissions.js";
+import { capsOf } from "./permissions.js";
+import { readMember } from "./types.js";
 
-describe("per-member capabilities", () => {
-  it("role defaults, presets and muted", () => {
-    // A Member does not start by default (their Tasks wait for the Owner); the Collaborator preset does.
-    expect(effectiveCaps("member")).toMatchObject({ message: true, answer: true, start: false });
-    expect(effectiveCaps("member", CAP_PRESETS.collaborator.caps)).toMatchObject({ start: true });
-    expect(effectiveCaps("viewer")).toEqual({ see: true, diffs: true, message: false, answer: false, start: false });
-    expect(effectiveCaps("viewer", { message: true })).toMatchObject({ message: false });
-    const m = CAP_PRESETS.member;
-    expect(effectiveCaps(m.role, m.caps)).toMatchObject({ message: true, start: false });
-    expect(effectiveCaps("member", { muted: true })).toMatchObject({
-      message: false,
-      answer: false,
-      start: false,
-      see: true,
-    });
-    expect(effectiveCaps("member", { see: false })).toEqual({
-      see: false,
-      diffs: false,
-      message: false,
-      answer: false,
-      start: false,
-    });
-    expect(effectiveCaps("owner", { message: false }).message).toBe(true);
+const doc = (over: Record<string, unknown>) => ({
+  id: "m1",
+  name: "Aarav",
+  publicKey: "k",
+  role: "member",
+  nest: null,
+  addedAt: 1,
+  ...over,
+});
+
+describe("roles and the Member's one switch", () => {
+  it("reads canStartTasks only for a Member, and only as true", () => {
+    expect(readMember(doc({ canStartTasks: true }))?.canStartTasks).toBe(true);
+    expect(readMember(doc({ canStartTasks: "yes" }))?.canStartTasks).toBeUndefined();
+    expect(readMember(doc({ role: "viewer", canStartTasks: true }))?.canStartTasks).toBeUndefined();
   });
-  it("reads only booleans", () => {
-    expect(readCapsPatch({ message: "no", start: false, x: true })).toEqual({ start: false });
-    expect(readCapsPatch(null)).toBeUndefined();
-  });
-  it("thread overrides: starter always, deny beats allow, lock needs allow", () => {
-    expect(threadWriteDecision("s", "s", { locked: true, deny: ["s"] }).ok).toBe(true);
-    expect(threadWriteDecision("a", "s", { locked: true }).ok).toBe(false);
-    expect(threadWriteDecision("a", "s", { locked: true, allow: ["a"] }).ok).toBe(true);
-    expect(threadWriteDecision("a", "s", { locked: true, allow: ["a"], deny: ["a"] }).ok).toBe(false);
-    expect(threadWriteDecision("a", "s", undefined).ok).toBe(true);
+  it("migration: an old document's caps and presets are ignored (Collaborator becomes a Member with the switch off)", () => {
+    const collaborator = readMember(doc({ caps: { start: true, message: false, muted: true } }))!;
+    expect(collaborator.role).toBe("member");
+    expect(collaborator.canStartTasks).toBeUndefined();
+    expect("caps" in collaborator).toBe(false);
+    expect(capsOf(collaborator.role, collaborator.canStartTasks === true).message).toBe(true);
+    const viewer = readMember(doc({ role: "viewer", caps: { message: true } }))!;
+    expect(viewer.role).toBe("viewer");
+    expect(capsOf(viewer.role).message).toBe(false);
   });
 });

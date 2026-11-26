@@ -365,10 +365,10 @@ describe("members are accounts: a second device of the same account joins withou
   });
 
   it("the owner's permissions are the member's, so they hold on every device", async () => {
-    await A.service.setMemberCaps(pondId, memberId, { caps: { message: false } });
+    await A.service.changeRole(pondId, memberId, "viewer");
     expect(await laptop.bridge.message(pondId, thread, "x")).toMatchObject({ ok: false, state: "refused" });
     expect(await web.bridge.message(pondId, thread, "y")).toMatchObject({ ok: false, state: "refused" });
-    await A.service.setMemberCaps(pondId, memberId, { caps: { message: true } });
+    await A.service.changeRole(pondId, memberId, "member");
     expect((await laptop.bridge.message(pondId, thread, "back")).ok).toBe(true);
     await A.bridge.runCommands(pondId);
   });

@@ -24,7 +24,7 @@ import {
   verifyText,
 } from "./guest-crypto.js";
 import {
-  effectiveCaps,
+  capsOf,
   HOLD_MS,
   keysOfMember,
   MAX_COMMAND_LIFE_MS,
@@ -61,8 +61,6 @@ export class GuestError extends Error {
 
 /** What a person is told when a thread cannot be messaged (the Mac's sentences, word for word). */
 export const VIEWERS_READ = "Viewers can read but not send.";
-export const ROOM_NO_MESSAGE = "The owner has turned off messaging for you in this pond.";
-export const ROOM_HIDDEN = "The owner has hidden this pond's threads from you.";
 export const noMessageWithoutAsking = (starter) =>
   `Only ${starter} can message this duck while it runs without asking.`;
 
@@ -446,13 +444,6 @@ export class GuestPond {
       const read = await this.readSigned("threads", id, doc, memberKey);
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read.device || thread.private) continue;
-      // A member the owner took "start" from has no threads in the pond; one hidden from threads sees none.
-      const starter = members.get(thread.starter);
-      if (starter && starter.role !== "owner" && !effectiveCaps(starter.role, starter.caps).start) continue;
-      if (
-        !effectiveCaps(members.get(this.record.memberId)?.role ?? "viewer", members.get(this.record.memberId)?.caps).see
-      )
-        continue;
       out.push(thread);
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt || a.title.localeCompare(b.title));
@@ -510,7 +501,7 @@ export class GuestPond {
         id: r.memberId,
         name: r.displayName,
         role: members.get(r.memberId).role,
-        caps: effectiveCaps(members.get(r.memberId).role, members.get(r.memberId).caps),
+        caps: capsOf(members.get(r.memberId).role, members.get(r.memberId).canStartTasks),
       },
       members: [...members.values()].map((m) => ({
         id: m.id,
@@ -589,8 +580,6 @@ export class GuestPond {
     const members = await this.members();
     const me = members.get(r.memberId);
     if (!me) throw new GuestError("Can't read the pond right now. I'll try again.", 503);
-    const caps = effectiveCaps(me.role, me.caps);
-    if (!caps.see) throw new GuestError(ROOM_HIDDEN, 403);
     const owner = members.get(r.ownerId);
     const ownerKeys = owner ? keysOfMember(owner) : [r.ownerKey];
     const fromOwner = (d) => (d === r.ownerId ? ownerKeys : null);
@@ -615,8 +604,8 @@ export class GuestPond {
       latestSeq: posts.length ? posts[posts.length - 1].seq : 0,
       ownerName: owner?.name ?? r.ownerName ?? "The owner",
       ownerOnline: await this.ownerOnline(members),
-      canPost: caps.message && me.role !== "viewer",
-      blockedLine: me.role === "viewer" ? VIEWERS_READ : caps.message ? null : ROOM_NO_MESSAGE,
+      canPost: me.role !== "viewer",
+      blockedLine: me.role === "viewer" ? VIEWERS_READ : null,
       me: { id: r.memberId, name: r.displayName },
     };
   }
@@ -647,7 +636,6 @@ export class GuestPond {
     const me = members.get(r.memberId);
     if (!me) throw new GuestError("Can't read the pond right now. I'll try again.", 503);
     if (me.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
-    if (!effectiveCaps(me.role, me.caps).message) throw new GuestError(ROOM_NO_MESSAGE, 403);
     const clean = typeof text === "string" ? text.trim() : "";
     if (!clean) throw new GuestError("A post can't be empty.", 400);
     if ([...clean].length > ROOM_MAX_TEXT) throw new GuestError(`Keep a post under ${ROOM_MAX_TEXT} characters.`, 400);

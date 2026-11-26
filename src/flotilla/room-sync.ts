@@ -533,7 +533,6 @@ export class RoomSync extends EventEmitter {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: read it from the pond.", 400);
     const caps = await port.caps();
-    if (!caps.see) throw new FlotillaError("The owner has hidden this pond's threads from you.", 403);
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
     const [roomDocs, taskDocs, owner] = await Promise.all([
       port.list("room"),
@@ -580,9 +579,6 @@ export class RoomSync extends EventEmitter {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: post from the pond.", 400);
     if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
-    if (!(await port.caps()).message) {
-      throw new FlotillaError("The owner has turned off messaging for you in this pond.", 403);
-    }
     let clean: string;
     try {
       clean = Room.cleanText(text, "message");
@@ -609,9 +605,6 @@ export class RoomSync extends EventEmitter {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: make the task from the pond.", 400);
     if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
-    if (!(await port.caps()).message) {
-      throw new FlotillaError("The owner has turned off messaging for you in this pond.", 403);
-    }
     if (typeof messageId !== "string" || !messageId || messageId.length > 80) {
       throw new FlotillaError("messageId must be a Room message id");
     }

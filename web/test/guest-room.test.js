@@ -8,7 +8,7 @@ import { RoomTasks } from "../../src/native/room-tasks.js";
 import { NativeStore } from "../../src/native/store.js";
 import { RoomSync } from "../../src/flotilla/room-sync.js";
 import { KeyStore } from "../js/key-store.js";
-import { GuestPond, ROOM_NO_MESSAGE, VIEWERS_READ } from "../js/guest-pond.js";
+import { GuestPond, VIEWERS_READ } from "../js/guest-pond.js";
 import { readInvite } from "../js/guest-invite.js";
 import { account, cleanup, fakeRelay, mac } from "./guest-helpers.js";
 import { fakeIndexedDB } from "./helpers.js";
@@ -136,14 +136,14 @@ describe("the Room in a browser", () => {
     expect(rows).toEqual([]);
   });
 
-  it("refuses before writing when the Owner turned messaging off, and for a viewer; reading still works", async () => {
+  it("refuses before writing for a viewer, also one the Owner just demoted; reading still works", async () => {
     const w = await world();
     const me = (await w.owner.view(w.pondId)).members.find((m) => !m.you);
-    await w.owner.setMemberCaps(w.pondId, me.id, { caps: { message: false } });
-    await expect(w.guest.postToRoom("hello")).rejects.toMatchObject({ status: 403, message: ROOM_NO_MESSAGE });
+    await w.owner.changeRole(w.pondId, me.id, "viewer");
+    await expect(w.guest.postToRoom("hello")).rejects.toMatchObject({ status: 403, message: VIEWERS_READ });
     const page = await w.guest.room();
     expect(page.canPost).toBe(false);
-    expect(page.blockedLine).toBe(ROOM_NO_MESSAGE);
+    expect(page.blockedLine).toBe(VIEWERS_READ);
 
     const v = await world("viewer");
     await expect(v.guest.postToRoom("hello")).rejects.toMatchObject({ status: 403, message: VIEWERS_READ });
@@ -156,12 +156,5 @@ describe("the Room in a browser", () => {
     await expect(w.guest.postToRoom("x".repeat(501))).rejects.toMatchObject({ status: 400 });
     w.guest.now = () => Date.now() + 5 * 60_000;
     expect((await w.guest.room()).ownerOnline).toBe(false);
-  });
-
-  it("hides the Room from a guest whose pond view the Owner turned off", async () => {
-    const w = await world();
-    const me = (await w.owner.view(w.pondId)).members.find((m) => !m.you);
-    await w.owner.setMemberCaps(w.pondId, me.id, { caps: { see: false } });
-    await expect(w.guest.room()).rejects.toMatchObject({ status: 403 });
   });
 });
