@@ -89,6 +89,8 @@ export function bootApp(
     seen?: Record<string, string>;
     /** Who the live service says is online; with this set the app has a live service (no stream ever says hello). */
     presence?: () => { userId: string; online: boolean }[];
+    /** A live service of the test's own (its stream and /presence); overrides the default one. */
+    liveFetch?: typeof fetch;
   } = {},
 ): Booted {
   window.location.hash = o.hash ?? "#/ponds";
@@ -110,8 +112,8 @@ export function bootApp(
         auth={auth}
         relay={relay}
         router={router}
-        liveBase={o.presence ? "https://live.example.test" : null}
-        {...(o.presence ? { liveFetch } : {})}
+        liveBase={o.presence || o.liveFetch ? "https://live.example.test" : null}
+        {...(o.liveFetch ? { liveFetch: o.liveFetch } : o.presence ? { liveFetch } : {})}
         vault={vault}
         seen={memoryStore(o.seen)}
       />,

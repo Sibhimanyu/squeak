@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import type { PondSummary } from "../../src/shared/shapes.js";
 import type { Auth, AuthState } from "./auth/auth.js";
 import type { KeyValueStore, Provider } from "./auth/session.js";
-import { defaultVault, type KeyVault } from "./device/vault.js";
+import { defaultVault, loadIdentity, type KeyVault } from "./device/vault.js";
 import { createDevice } from "./pond/device.js";
 import type { FetchLike, Relay } from "./relay/client.js";
 import { routePath, type Route, type Router } from "./router.js";
@@ -9,8 +10,10 @@ import { isMac, MAC_DOWNLOAD_URL } from "./platform.js";
 import { createPondsStore, type PondsState, type PondsStore } from "./state/ponds-store.js";
 import { DuckScreen } from "./views/Duck.js";
 import { PondScreen } from "./views/Pond.js";
+import { PeopleSheet } from "./views/People.js";
 import { PondsScreen } from "./views/Ponds.js";
 import { InvitePage, type InviteLoad } from "./views/InvitePage.js";
+import { SettingsScreen } from "./views/Settings.js";
 import { SignIn } from "./views/SignIn.js";
 
 function useSubscribed<T>(read: () => T, subscribe: (listener: (value: T) => void) => () => void): T {
@@ -53,11 +56,18 @@ export const MAC_CARD_KEY = "squeak-mac-card";
 
 const defaultSeen = (): KeyValueStore => window.localStorage;
 
+function PeopleHost(props: Omit<Parameters<typeof PeopleSheet>[0], "pond"> & { pond: PondSummary | undefined }) {
+  const { pond, ...rest } = props;
+  return pond ? <PeopleSheet {...rest} pond={pond} version={pond.counts.members} /> : null;
+}
+
 export function App({ auth, relay, router, liveBase = null, liveFetch, vault, seen, mac }: AppProps) {
   const state: AuthState = useSubscribed(auth.state, auth.subscribe);
   const route: Route = useSubscribed(router.current, router.subscribe);
   const onMac = mac ?? isMac(navigator);
   const [invite, setInvite] = useState<InviteLoad>({ status: "loading" });
+  // One vault for the life of the app: the device key is loaded through it from every place that needs it.
+  const keyVault = useMemo(() => vault ?? defaultVault(), [vault]);
 
   useEffect(() => {
     void auth.start();
@@ -89,17 +99,32 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             token,
             liveBase,
             // This browser is a device of the account: its key is made once and kept, and the Owner's Mac seals Pond keys to it.
-            device: createDevice({ relay, token, userId, vault: vault ?? defaultVault() }),
+            device: createDevice({ relay, token, userId, vault: keyVault }),
             seen: seen ?? defaultSeen(),
             ...(liveFetch ? { fetch: liveFetch } : {}),
             onSignedOut: () => auth.signOut(),
           })
         : null,
-    [relay, token, userId, liveBase, liveFetch, auth, vault, seen],
+    [relay, token, userId, liveBase, liveFetch, auth, keyVault, seen],
   );
   const ponds = useStore(store);
   const seenStore = seen ?? defaultSeen();
   const [macCard, setMacCard] = useState(() => onMac && seenStore.getItem(MAC_CARD_KEY) === "show");
+  // This browser's own device id, for Settings > Your devices ("This device").
+  const [selfDeviceId, setSelfDeviceId] = useState<string | null>(null);
+  useEffect(() => {
+    setSelfDeviceId(null);
+    if (!userId) return;
+    let live = true;
+    void loadIdentity(keyVault, userId).then(
+      (id) => live && setSelfDeviceId(id.deviceId),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+    // the vault is stable for the life of the app
+  }, [userId]);
   useEffect(() => {
     store?.start();
     return () => store?.stop();
@@ -147,8 +172,9 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
         <PondsScreen
           account={state.account}
           state={ponds}
-          selectedPondId={route.name === "pond" || route.name === "duck" ? route.pondId : null}
-          onSignOut={() => auth.signOut()}
+          selectedPondId={
+            route.name === "pond" || route.name === "duck" || route.name === "people" ? route.pondId : null
+          }
           onRetry={() => void store.refresh()}
           onJoin={(id) =>
             void store.join(id).then((pondId) => pondId && router.go({ name: "pond", pondId, tab: "room" }))
@@ -157,10 +183,10 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
         />
       </div>
       <div class="detail">
-        {route.name === "pond" ? (
+        {route.name === "pond" || route.name === "people" ? (
           <PondScreen
             key={route.pondId}
-            route={route}
+            route={route.name === "people" ? { name: "pond", pondId: route.pondId, tab: "room" } : route}
             pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
             session={store.session(route.pondId)}
             connection={ponds.connection}
@@ -188,6 +214,31 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             route={route}
             pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
             session={store.session(route.pondId)}
+          />
+        ) : null}
+        {route.name === "people" ? (
+          <PeopleHost
+            key={route.pondId}
+            pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
+            relay={relay}
+            token={state.token}
+            selfUserId={state.account.userId}
+            onClose={() => router.go({ name: "pond", pondId: route.pondId, tab: "room" })}
+            onGone={() => {
+              void store.refresh();
+              router.go({ name: "ponds" }, { replace: true });
+            }}
+            onSignedOut={() => auth.signOut()}
+          />
+        ) : null}
+        {route.name === "settings" ? (
+          <SettingsScreen
+            account={state.account}
+            relay={relay}
+            token={state.token}
+            selfDeviceId={selfDeviceId}
+            onSignOut={() => auth.signOut()}
+            onSignedOut={() => auth.signOut()}
           />
         ) : null}
       </div>

@@ -6,7 +6,10 @@ export type Route =
   | { name: "ponds" }
   | { name: "pond"; pondId: string; tab: "room" | "ducks" }
   | { name: "duck"; pondId: string; duckId: string }
-  | { name: "invite"; code: string };
+  | { name: "invite"; code: string }
+  /** The People sheet: the Pond's Room with the sheet open over it. */
+  | { name: "people"; pondId: string }
+  | { name: "settings" };
 
 const ID = /^[A-Za-z0-9_~.-]{1,100}$/;
 
@@ -15,7 +18,9 @@ export function parsePath(path: string): Route {
   const parts = path.split("/").filter(Boolean);
   const [a, b, c, d] = parts;
   if ((a === "invite" || a === "join") && b && ID.test(b) && parts.length === 2) return { name: "invite", code: b };
+  if (a === "settings" && parts.length === 1) return { name: "settings" };
   if (a === "ponds" && b && ID.test(b)) {
+    if (parts.length === 3 && c === "people") return { name: "people", pondId: b };
     if (parts.length === 2 || (parts.length === 3 && c === "room")) return { name: "pond", pondId: b, tab: "room" };
     if (parts.length === 3 && c === "ducks") return { name: "pond", pondId: b, tab: "ducks" };
     if (parts.length === 4 && c === "ducks" && d && ID.test(d)) return { name: "duck", pondId: b, duckId: d };
@@ -33,13 +38,18 @@ export function routePath(route: Route): string {
       return `/ponds/${route.pondId}/ducks/${route.duckId}`;
     case "invite":
       return `/invite/${route.code}`;
+    case "people":
+      return `/ponds/${route.pondId}/people`;
+    case "settings":
+      return "/settings";
   }
 }
 
 /** Where Back goes: Duck to its Pond's Ducks tab, Pond to the list; the list and an invite have no parent. */
 export function parentRoute(route: Route): Route | null {
   if (route.name === "duck") return { name: "pond", pondId: route.pondId, tab: "ducks" };
-  if (route.name === "pond") return { name: "ponds" };
+  if (route.name === "pond" || route.name === "settings") return { name: "ponds" };
+  if (route.name === "people") return { name: "pond", pondId: route.pondId, tab: "room" };
   return null;
 }
 

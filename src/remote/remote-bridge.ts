@@ -5019,7 +5019,7 @@ export class RemoteBridge {
   } {
     const account = this.config?.account;
     const location = this.deps.location?.() ?? null;
-    // The page a native app sends the browser to (web/js/app-signin.js): the Catalyst app's own /app/index.html.
+    // The page a native app sends the browser to (the web app): the Catalyst app's own /app/index.html.
     const signInUrl =
       location?.provider === "catalyst" ? { signInUrl: `${new URL(location.relayUrl).origin}/app/index.html` } : {};
     const avatarAt = account ? this.avatarAt() : null;

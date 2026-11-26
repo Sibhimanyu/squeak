@@ -315,7 +315,9 @@ describe("Room tab", () => {
     presence = [{ userId: "u-sibhi", online: false }];
     await open("member", "#/ponds/p-green/room", (s) => post(s.mac, 1, "a1", "still readable"));
     await until(() => q('[data-state="offline"]'), "the offline banner");
-    expect(app!.text('[data-state="offline"]')).toBe("Sibhi's Mac is offline. Your messages wait and arrive in order.");
+    expect(app!.text('[data-state="offline"]')).toBe(
+      "Sibhi's Mac is offline. Messages you send now wait and arrive in order when it is back.",
+    );
     expect(texts('[data-feed="room"] .bubble p')).toEqual(["still readable"]);
     expect(q("textarea")).not.toBeNull();
   });

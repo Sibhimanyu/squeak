@@ -1,7 +1,7 @@
 # Squeak web app (v2, `webapp/`)
 
-The rebuild described in `docs/spec.md` ("Web app"). It lives beside the old `web/` (deleted in #138); nothing here
-touches it. Scaffold only: sign-in and an empty router skeleton. Pond screens arrive in later issues.
+The rebuild described in `docs/spec.md` ("Web app"). The old `web/` and its guest page were deleted in #138; nothing here
+touches it.
 
 ## Layout
 
@@ -62,7 +62,7 @@ Relay contract this depends on (the fake relay implements it):
 4. Add the Slate origin and each preview origin to the relay's CORS allow-list and to `HANDOFF_ORIGINS`
    (`cloud/catalyst-relay/functions/squeak_relay/handler.js`); the daemon's control routes keep no CORS.
 5. Enable preview deploys per branch; open the preview, check sign-in, an invite link `/join#<code>`, light and dark.
-6. Old `web/`, the guest page and `/app/index.html` stay until #138.
+6. The old `web/` and the guest page are gone (#138); `/app/index.html` becomes a redirect in #133.
 
 `/join` needs a real page because Slate ignores redirect rules; the build writes `join/index.html` with `<base href="/">`.
 
@@ -113,3 +113,33 @@ time; members and ducks counted by document id), and `POST /account/invitations/
 must be pending and addressed to the caller's signed-in email; join records the membership and settles it, decline only settles it.
 The rest of the invitation lifecycle (and the Owner's Mac learning that someone joined this way) is #126's. All three have CORS for
 the Slate origin.
+
+## People, Settings and connection states (#138)
+
+`views/People.tsx` is the People sheet (route `#/ponds/<id>/people`, opened from the avatars in the Pond header, Done goes back). It reads
+`GET /ponds/<id>/people` (relay: any member; members with name, email, role, `lastSeenAt`, and the Owner also gets the invites). A person
+shows with their email under the name (the email stands in for a missing name), "online" (seen in the last 5 minutes) or "last seen 2 h
+ago", and the role. The Owner has the invite box (email and Member or Viewer), a role picker and Remove (inline confirm) on each person,
+invites below with their states ("Invited · 3 days ago" with Resend and Withdraw; "Declined · 2 h ago", "Expired", "Withdrawn" with Invite
+again; Joined moves up into Members), and a typed-name Delete of the Pond. A Member or Viewer sees "Only <Owner> can invite, remove or change
+roles." and Leave with the specced confirm. Every change calls the relay and the list is read again from the cloud only when it says yes; a
+refusal keeps the screen as it was with one sentence.
+
+Relay routes added for this (`cloud/catalyst-relay/test/people-routes.test.ts`), all with the account token and CORS for the web origin:
+
+- `GET /ponds/<id>/people`, `POST /ponds/<id>/members/<userId>/role {role}`, `DELETE /ponds/<id>/members/<userId>`,
+  `DELETE /ponds/<id> {name}` (the typed name must match). Owner only except the read. `POST /account/pond-leaves` (already there) now also
+  takes the leaving account out of the people table and ends its devices' tokens in that Pond.
+- Each takes effect in the cloud at once (people table, the account index row, the devices' tokens) and leaves a relay-owned note in the
+  Pond's `devreqs` queue: `{v:1, reqId: "pn-<act>-<userId>", userId, act: "remove" | "leave" | "role" | "delete", role?}`. The Owner's Mac
+  finishes what needs its keys (`FlotillaService.applyPeopleNote`): rotate the key and say it in the Room (remove, leave), sign the member
+  document (role), delete the sealed documents (delete). A note waits there while that Mac is away.
+- Also CORS now: `/account/devices[/<id>]` and the invite routes `/ponds/<id>/invites...`.
+
+`views/Settings.tsx` (`#/settings`, from the avatar on the Ponds screen): the account's name and email from sign-in with the note that
+Squeak does not change them; Your devices (`GET /account/devices?deviceId=` with this browser's id, `DELETE /account/devices/<id>` after a
+confirm; "Removing a device removes it from every Pond."); the "Open on your Mac" line; Sign out. Devices appear only here.
+
+Connection states: the Pond header says one of Live, Reconnecting… or Owner's Mac offline (the Mac being away outranks Live, the stream being
+down outranks both because presence comes from it) and the offline banner says messages wait and arrive in order; a Pond that cannot be read is
+one sentence with Try again.

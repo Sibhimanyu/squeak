@@ -1181,7 +1181,123 @@ function createRelay(deps) {
     if (!row || typeof row.ownerKey !== "string") return out(403, { error: "pond" });
     if (row.left !== true)
       await deps.store.put(pk, body.pondId, JSON.stringify({ ...row, left: true, leftAt: Date.now() }));
+    // The cloud's own record of who is in the Pond, and a note the Owner's Mac applies (key rotation, the Room line).
+    if (deps.people) {
+      const m = await deps.people.membershipOf(body.pondId, user.userId).catch(() => null);
+      if (m && m.role !== "owner" && m.leftAt === 0 && m.slot >= 0) {
+        await deps.people.removeMember({ pondId: body.pondId, userId: user.userId, reason: "left" });
+        await revokeAccountIn(body.pondId, user.userId);
+        await peopleNote(body.pondId, user.userId, "leave");
+      }
+    }
     return out(204);
+  }
+
+  /** Ends every device of an account in one Pond at once (tokens refused); the Owner's Mac rotates the key from the note. */
+  async function revokeAccountIn(pondId, userId) {
+    if (!deps.people) return;
+    const at = Date.now();
+    for (const d of await deps.people.devicesOf(userId).catch(() => []))
+      if (scoped.MEMBER.test(d.deviceId)) await deps.store.put(`revoked/${pondId}`, d.deviceId, JSON.stringify({ at }));
+  }
+
+  /**
+   * A relay-owned note for the Owner's Mac in the Pond's `devreqs` queue (no client token can write that kind): a change that
+   * takes effect in the cloud at once but needs the Mac's keys to finish (rotating the key, signing a member document, deleting
+   * the sealed documents). { v:1, reqId, userId, act: "remove" | "leave" | "role" | "delete", role?, at }.
+   */
+  async function peopleNote(pondId, userId, act, role) {
+    const pk = `channels/${pondId}/devreqs`;
+    const reqId = `pn-${act}-${userId}`.slice(0, 64);
+    await deps.store.put(
+      pk,
+      reqId,
+      JSON.stringify({ v: 1, reqId, userId, act, ...(role ? { role } : {}), at: Date.now() }),
+    );
+    await publishNotice(pk, reqId).catch(() => undefined);
+  }
+
+  /** The account's index row for a Pond says its role now (what the overview draws). */
+  async function indexRole(pondId, userId, role) {
+    const pk = `${ACCT_PONDS_PK}/${userId}`;
+    const row = parseOr(await deps.store.get(pk, pondId));
+    if (row) await deps.store.put(pk, pondId, JSON.stringify({ ...row, role }));
+  }
+
+  /**
+   * The People sheet's data and the Owner's changes (account token; a Mac's own key stands for its account).
+   *   GET    /ponds/<id>/people              any member: { owner, name, cap, members:[{userId,name,email,role,lastSeenAt}], invites } (invites: Owner only)
+   *   POST   /ponds/<id>/members/<userId>/role {role}   Owner: member or viewer
+   *   DELETE /ponds/<id>/members/<userId>    Owner: remove someone (never themselves)
+   *   DELETE /ponds/<id> {name}              Owner: delete the Pond; the typed name must match
+   * Each takes effect in the cloud at once and leaves a note in the Pond's queue for the Owner's Mac to finish.
+   */
+  async function handlePondPeople(req, res, method, mac, pondId, userId, action) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
+    if (userId !== null && !USER_ID.test(userId)) return out(400, { error: "ids" });
+    if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
+    const user = await peopleUser(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    const pond = await deps.people.getPond(pondId);
+    if (!pond) return out(404, { error: "no-pond" });
+    const mine = await deps.people.membershipOf(pondId, user.userId);
+    if (!mine || mine.leftAt !== 0 || mine.slot < 0) return out(403, {});
+    const isOwner = pond.ownerUserId === user.userId;
+    try {
+      if (action === "people") {
+        if (method !== "GET") return out(405, {});
+        const members = [];
+        for (const m of await deps.people.membersOf(pondId)) {
+          const seen = (await deps.people.devicesOf(m.userId).catch(() => [])).reduce(
+            (t, d) => Math.max(t, d.lastSeenAt),
+            0,
+          );
+          members.push({ userId: m.userId, name: m.name, email: m.email, role: m.role, lastSeenAt: seen });
+        }
+        const invites = isOwner ? await Promise.all((await deps.people.listInvites(pondId)).map(inviteOut)) : [];
+        return out(200, { owner: pond.ownerUserId, name: pond.name, cap: 10, members, invites });
+      }
+      if (!isOwner) return out(403, {});
+      if (userId === null) {
+        if (method !== "DELETE") return out(405, {});
+        const body = await readJson(req, 1024);
+        if (typeof body.name !== "string" || body.name.trim() !== pond.name)
+          return out(400, { error: "name", message: "Type the Pond's name to delete it." });
+        for (const m of await deps.people.membersOf(pondId)) {
+          if (m.role !== "owner") await revokeAccountIn(pondId, m.userId);
+          await gone(`${ACCT_PONDS_PK}/${m.userId}`, pondId);
+        }
+        await deps.people.deletePond(pondId);
+        await peopleNote(pondId, user.userId, "delete");
+        return out(204);
+      }
+      if (userId === user.userId)
+        return out(409, { error: "owner", message: "The Owner cannot change their own place." });
+      const target = await deps.people.membershipOf(pondId, userId);
+      if (!target || target.leftAt !== 0 || target.slot < 0) return out(404, { error: "not-member" });
+      if (method === "DELETE" && action === null) {
+        await deps.people.removeMember({ pondId, userId, reason: "removed" });
+        await revokeAccountIn(pondId, userId);
+        await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
+        await peopleNote(pondId, userId, "remove");
+        await invitesChanged(pondId);
+        return out(204);
+      }
+      if (method === "POST" && action === "role") {
+        const body = await readJson(req, 1024);
+        if (body.role !== "member" && body.role !== "viewer") return out(400, { error: "body" });
+        await deps.people.setRole({ pondId, userId, role: body.role });
+        await indexRole(pondId, userId, body.role);
+        await peopleNote(pondId, userId, "role", body.role);
+        await invitesChanged(pondId);
+        return out(204);
+      }
+      return out(405, {});
+    } catch (e) {
+      const r = asRefusal(e);
+      return out(r.status, r.body);
+    }
   }
 
   /**
@@ -1682,6 +1798,24 @@ function createRelay(deps) {
       {
         const m = /^\/ponds\/([^/]+)\/invites(?:\/([^/]+)\/(resend|withdraw|again))?$/.exec(route);
         if (m) return await handlePondInvites(req, res, method, mac, [m[1], "invites", m[2], m[3]]);
+      }
+      {
+        const m = /^\/ponds\/([^/]+)(?:\/(people)|\/members\/([^/]+)\/role|\/members\/([^/]+))?$/.exec(route);
+        if (
+          m &&
+          deps.people &&
+          !(m[4] === "accounts" || m[3] === "accounts") &&
+          (m[2] || m[3] || m[4] || method === "DELETE")
+        )
+          return await handlePondPeople(
+            req,
+            res,
+            method,
+            mac,
+            m[1],
+            m[3] || m[4] || null,
+            m[2] ? "people" : m[3] ? "role" : null,
+          );
       }
       if (route === "/account/devices" || route.startsWith("/account/devices/"))
         return await handleAccountDevices(req, res, url, route, method, mac);

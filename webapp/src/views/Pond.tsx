@@ -20,7 +20,8 @@ type PondRoute = Extract<Route, { name: "pond" }>;
 
 export const connectingText = (owner: string): string => `Connecting: waiting for ${firstName(owner)}'s Mac`;
 export const offlineText = (owner: string): string =>
-  `${firstName(owner)}'s Mac is offline. Your messages wait and arrive in order.`;
+  `${firstName(owner)}'s Mac is offline. Messages you send now wait and arrive in order when it is back.`;
+export const OFFLINE_LINE = "Owner's Mac offline";
 const ROLE_LABEL: Record<PondRole, string> = { owner: "Owner", member: "Member", viewer: "Viewer" };
 
 interface PendingPost {
@@ -70,7 +71,9 @@ export function PondScreen(props: PondScreenProps) {
   }
   const now = props.now ?? Date.now();
   const owner = pond.ownerName;
-  const line = connectionLine(props.connection);
+  // One connection state at a time, honest: the Owner's Mac being away outranks Live; Reconnecting… is the live stream's own.
+  const line =
+    state?.ownerOffline && props.connection !== "reconnecting" ? OFFLINE_LINE : connectionLine(props.connection);
   const sub = `${pond.mine ? "Your Pond" : `${firstName(owner)}'s Pond`} · ${ROLE_LABEL[pond.role]}${line ? ` · ${line}` : ""}`;
   const data = state?.data ?? null;
 
@@ -78,11 +81,11 @@ export function PondScreen(props: PondScreenProps) {
     <section class="screen" data-screen="pond" data-role={pond.role}>
       <BackBar route={route} title={pond.name} sub={sub} />
       {data && data.members.length > 0 ? (
-        <div class="flock" aria-label="People in this Pond">
+        <a class="flock" href={href({ name: "people", pondId: pond.pondId })} aria-label="People in this Pond">
           {data.members.map((m) => (
             <Avatar key={m.id} name={m.name} small />
           ))}
-        </div>
+        </a>
       ) : null}
       {props.macCard ? (
         <aside class="mac-card" data-card="mac">
@@ -100,7 +103,7 @@ export function PondScreen(props: PondScreenProps) {
           Ducks
         </a>
       </nav>
-      <Status state={state} owner={owner} />
+      <Status state={state} owner={owner} onRetry={() => void session?.refresh()} />
       {state?.access === "ready" && data && session ? (
         route.tab === "room" ? (
           <RoomTab
@@ -122,7 +125,7 @@ export function PondScreen(props: PondScreenProps) {
 }
 
 /** What stands in for the content until there is some: connecting, removed, or unreachable. */
-function Status({ state, owner }: { state: SessionState | null; owner: string }) {
+function Status({ state, owner, onRetry }: { state: SessionState | null; owner: string; onRetry: () => void }) {
   if (!state || !state.loaded) return <p class="empty">Loading…</p>;
   if (state.access === "connecting") {
     return (
@@ -141,7 +144,10 @@ function Status({ state, owner }: { state: SessionState | null; owner: string })
   if (state.access === "failed") {
     return (
       <p class="banner" role="alert" data-state="failed">
-        Squeak can't be reached right now.
+        Squeak can't be reached right now.{" "}
+        <button type="button" class="link" onClick={onRetry}>
+          Try again
+        </button>
       </p>
     );
   }

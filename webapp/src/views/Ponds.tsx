@@ -114,7 +114,6 @@ export interface PondsScreenProps {
   state: PondsState;
   /** The open Pond, to mark its row (wide). */
   selectedPondId: string | null;
-  onSignOut: () => void;
   onRetry: () => void;
   onJoin: (inviteId: string) => void;
   onDecline: (inviteId: string) => void;
@@ -139,14 +138,9 @@ export function PondsScreen(props: PondsScreenProps) {
             {line}
           </span>
         ) : null}
-        <button
-          type="button"
-          class="avatar-button"
-          onClick={props.onSignOut}
-          aria-label={`Sign out ${props.account.name}`}
-        >
+        <a class="avatar-button" href={`#${routePath({ name: "settings" })}`} aria-label="Settings">
           {initial(props.account.name)}
-        </button>
+        </a>
       </header>
       {state.status === "loading" ? <p class="empty">Loading…</p> : null}
       {state.status === "failed" ? (
@@ -238,9 +232,9 @@ export function PondsScreen(props: PondsScreenProps) {
           <strong>{props.account.name}</strong>
           <span class="sub">{props.account.email}</span>
         </span>
-        <button type="button" class="link" onClick={props.onSignOut}>
-          Sign out
-        </button>
+        <a class="link" href={`#${routePath({ name: "settings" })}`}>
+          Settings
+        </a>
       </footer>
     </section>
   );

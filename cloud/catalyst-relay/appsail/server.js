@@ -140,9 +140,19 @@ const ACCOUNT_CORS_ROUTES = new Set([
   "/account/pond-leaves",
   "/account/pond-devices",
   "/account/avatar",
+  "/account/devices",
 ]);
 function isAccountCorsRoute(route) {
   if (ACCOUNT_CORS_ROUTES.has(route)) return true;
+  if (/^\/account\/devices\/[A-Za-z0-9_-]{1,100}$/.test(route)) return true;
+  // The People sheet: the Pond's people, invites and the Owner's changes (the daemon's /ponds/<id>/members/accounts is not here).
+  if (
+    /^\/ponds\/[A-Za-z0-9_-]{1,100}(\/people|\/invites(\/[A-Za-z0-9_.:-]+\/(resend|withdraw|again))?|\/members\/[A-Za-z0-9_.:-]+(\/role)?)?$/.test(
+      route,
+    ) &&
+    !route.endsWith("/members/accounts")
+  )
+    return true;
   if (/^\/account\/invitations\/[A-Za-z0-9_-]{1,100}\/(join|decline)$/.test(route)) return true;
   return (
     route.startsWith("/account/macs/") && route !== "/account/macs/cliq-token" && route !== "/account/macs/hist-token"

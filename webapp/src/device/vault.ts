@@ -72,7 +72,22 @@ export const defaultVault = (): KeyVault =>
   typeof indexedDB === "undefined" ? createMemoryVault() : createIdbVault(indexedDB);
 
 /** This browser's key for the account: made once, kept. A vault that cannot be read or written falls back to a key for this tab. */
-export async function loadIdentity(vault: KeyVault, userId: string): Promise<DeviceIdentity> {
+export function loadIdentity(vault: KeyVault, userId: string): Promise<DeviceIdentity> {
+  // One load at a time per vault and account: two first loads racing would each make a key and the second would replace the first.
+  let byUser = loading.get(vault);
+  if (!byUser) loading.set(vault, (byUser = new Map()));
+  let pending = byUser.get(userId);
+  if (!pending) {
+    pending = makeIdentity(vault, userId);
+    byUser.set(userId, pending);
+    // A failure is not kept: the next call tries again.
+    pending.catch(() => byUser.delete(userId));
+  }
+  return pending;
+}
+const loading = new WeakMap<KeyVault, Map<string, Promise<DeviceIdentity>>>();
+
+async function makeIdentity(vault: KeyVault, userId: string): Promise<DeviceIdentity> {
   let keys: DeviceKeys | null;
   try {
     keys = await vault.load(userId);

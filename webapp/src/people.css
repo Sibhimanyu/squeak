@@ -1,0 +1,165 @@
+/* People sheet and Settings (#138). Red (--negative) marks the destructive and failures only. */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.32);
+}
+.sheet {
+  width: 100%;
+  max-width: 560px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: 24px 24px 0 0;
+  padding: 8px 16px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.grab {
+  align-self: center;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.sheet-head h2 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+}
+.sheet h3 {
+  font-size: 17px;
+  font-weight: 650;
+  margin: 6px 0 0;
+}
+.done {
+  text-decoration: none;
+  padding: 8px 4px;
+}
+.invite-form {
+  display: flex;
+  gap: 8px;
+}
+.invite-form input {
+  flex: 1;
+  min-width: 0;
+}
+input,
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+select {
+  background: var(--selected);
+  border-color: transparent;
+}
+.person-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.person-row .text {
+  flex: 1;
+  min-width: 0;
+}
+.person-row .email,
+.person-row .presence {
+  display: block;
+}
+.you {
+  color: var(--muted);
+  font-weight: 400;
+}
+.role {
+  color: var(--ink);
+  font-size: 15px;
+  align-self: center;
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.danger-link {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  font: inherit;
+  color: var(--negative);
+  cursor: pointer;
+}
+.danger-text {
+  color: var(--negative);
+}
+.danger {
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--negative);
+  color: #fff;
+  cursor: pointer;
+}
+.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.confirm {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 4px;
+}
+.confirm p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.confirm input {
+  flex: 1;
+  min-width: 0;
+}
+.buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.avatar.dashed {
+  background: transparent;
+  border: 1.5px dashed var(--line-strong);
+  color: var(--muted);
+}
+.wide {
+  width: 100%;
+}
+.account-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sign-out {
+  margin-top: auto;
+}
+.device-row .outline {
+  align-self: center;
+}

@@ -3,11 +3,8 @@
     "src/fleet/send-default.ts": [
       "src/fleet/send-default.test.ts",
       "src/remote/remote-bridge.test.ts",
-      "src/remote/phone-interop.test.ts",
-      "web/test/e2e.test.js",
-      "web/test/chat-e2e.test.js"
+      "src/remote/phone-interop.test.ts"
     ],
-    "src/remote/**": ["web/test/e2e.test.js", "web/test/chat-e2e.test.js"],
     "src/native/host.ts": ["src/native/host.test.ts", "src/native/server.test.ts"],
     "src/native/codex-runner.ts": ["src/native/codex-runner.test.ts", "src/native/host.test.ts"]
   },

@@ -1,5 +1,5 @@
 // Writes the cloud copy of history exactly as the Mac makes it (src/remote/history-cloud.ts), for the phone's Swift test
-// (ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/history-cloud.json) and the web's. Run from the repo root:
+// (ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/history-cloud.json). Run from the repo root:
 //   npx tsx scripts/make-history-cloud-fixture.ts
 import fs from "node:fs";
 import { HistoryCloudSync, histPageDoc, HIST_INDEX_DOC, type HistStore } from "../src/remote/history-cloud.js";
@@ -40,7 +40,4 @@ const index = open<{ chats: Array<{ pages: Array<{ f: string }> }> }>(key, docs[
 const pages = Object.fromEntries(index.chats[0]!.pages.map((p) => [p.f, docs[histPageDoc(chatKey, p.f)]!]));
 const out = new URL("../ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/history-cloud.json", import.meta.url);
 fs.writeFileSync(out, JSON.stringify({ key, chatKey, indexBox: docs[HIST_INDEX_DOC], pages }, null, 2) + "\n");
-const web = new URL("../web/test/fixtures/history-cloud.json", import.meta.url);
-fs.mkdirSync(new URL(".", web), { recursive: true });
-fs.copyFileSync(out, web);
 console.log("wrote", out.pathname, Object.keys(pages).length, "pages");

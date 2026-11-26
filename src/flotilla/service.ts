@@ -64,6 +64,8 @@ import {
   readCommand,
   readHold,
   readDeviceGone,
+  readPeopleNote,
+  type PeopleNote,
   readDeviceRequest,
   readMember,
   readMeta,
@@ -1913,6 +1915,12 @@ export class FlotillaService extends EventEmitter {
     const recent = (this.deviceAdds.get(pond.id) ?? []).filter((t) => now - t < 60_000);
     this.deviceAdds.set(pond.id, recent);
     for (const row of rows) {
+      const note = readPeopleNote(row.doc);
+      if (note && note.reqId === row.id) {
+        await this.applyPeopleNote(pond, members, note);
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
       const gone = readDeviceGone(row.doc);
       if (gone && gone.deviceId === row.id) {
         await this.dropAccountDevice(pond, members, gone.deviceId);
@@ -2009,6 +2017,31 @@ export class FlotillaService extends EventEmitter {
       await this.dropDeviceRequest(pond, row.id);
       this.emit("changed", pond.id);
     }
+  }
+
+  /**
+   * A Pond's People were changed from the web (Owner: remove, role, delete; Member: leave). The relay already ended the cloud
+   * side (membership, index row, tokens); this Mac finishes what needs its keys: the member document, the key rotation, the
+   * Room line, and for a delete the sealed documents. The note's account says which member, by `accountId`.
+   */
+  private async applyPeopleNote(pond: LocalPond, members: Map<string, MemberDoc>, note: PeopleNote): Promise<void> {
+    if (note.act === "delete") {
+      await this.deletePond(pond.id).catch((error) =>
+        logger.warn("could not delete a pond the web ended", { pond: pond.id, error: String(error) }),
+      );
+      return;
+    }
+    const target = [...members.values()].find((m) => m.accountId === note.userId && m.role !== "owner");
+    if (!target) return;
+    if (note.act === "role") {
+      await this.changeRole(pond.id, target.id, note.role!).catch(() => undefined);
+      return;
+    }
+    const say =
+      note.act === "leave"
+        ? (gone: MemberDoc) => `${gone.name} left the pond`
+        : (gone: MemberDoc) => `removed ${gone.name}`;
+    await this.removeAndRotate(pond.id, target.id, say).catch(() => undefined);
   }
 
   /**

@@ -35,6 +35,11 @@ describe("router skeleton: Ponds, Pond (Room | Ducks), Duck", () => {
     expect(parsePath("/ponds/p1/ducks/d9")).toEqual({ name: "duck", pondId: "p1", duckId: "d9" });
     expect(parsePath("/invite/K7P4QD")).toEqual({ name: "invite", code: "K7P4QD" });
     expect(parsePath("/join/K7P4QD")).toEqual({ name: "invite", code: "K7P4QD" });
+    expect(parsePath("/settings")).toEqual({ name: "settings" });
+    expect(parsePath("/ponds/p1/people")).toEqual({ name: "people", pondId: "p1" });
+    expect(routePath({ name: "people", pondId: "p1" })).toBe("/ponds/p1/people");
+    expect(parentRoute({ name: "people", pondId: "p1" })).toEqual({ name: "pond", pondId: "p1", tab: "room" });
+    expect(parentRoute({ name: "settings" })).toEqual({ name: "ponds" });
     for (const odd of ["", "/", "/nope", "/ponds/p1/ducks/d9/x", "/ponds/p 1", "/join", "/invite"]) {
       expect(parsePath(odd)).toEqual({ name: "ponds" });
     }

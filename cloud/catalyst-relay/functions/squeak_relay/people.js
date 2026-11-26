@@ -329,6 +329,27 @@ function createPeople(deps) {
     await freeSlot(input.pondId, m.slot);
   }
 
+  /** The Owner changes a member's role (member or viewer); the Owner's own never changes. */
+  async function setRole(input) {
+    need(INVITE_ROLES.has(input.role), "role");
+    const m = await membershipOf(input.pondId, input.userId);
+    if (!isIn(m)) throw new PeopleError("not-member", "Not in this Pond.");
+    if (m.role === "owner") throw new PeopleError("owner", "The Owner's role cannot change.");
+    await tables.update(T.members, "memberKey", memberKey(input.pondId, input.userId), { role: input.role });
+  }
+
+  /** Ends the Pond for everyone: pending invites withdrawn, every membership and slot cleared, the Pond row gone. */
+  async function deletePond(pondId) {
+    for (const row of await tables.select(T.invites, "pondId", String(pondId))) {
+      if (row.state === "pending") await settleInvite(row.inviteId, "withdrawn").catch(() => undefined);
+    }
+    for (const row of await tables.select(T.members, "pondId", String(pondId))) {
+      await tables.delete(T.members, "memberKey", row.memberKey);
+      await freeSlot(pondId, Number(row.slot));
+    }
+    await tables.delete(T.ponds, "pondId", String(pondId));
+  }
+
   async function membersOf(pondId) {
     const rows = (await tables.select(T.members, "pondId", String(pondId))).map(membership).filter(isIn);
     const out = [];
@@ -587,6 +608,8 @@ function createPeople(deps) {
     accountIds,
     addMember,
     removeMember,
+    setRole,
+    deletePond,
     isMember,
     membershipOf,
     membersOf,

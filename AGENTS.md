@@ -28,7 +28,7 @@ anything under `src/`.
 
 ```bash
 npm install
-npm run ci      # typecheck + lint (src/ and web/) + format:check + test
+npm run ci      # typecheck + lint (src/ and webapp/) + format:check + test + webapp build
 npm run build   # safe in a worktree, never in the live checkout
 (cd ios/SqueakCore && swift test)
 macos/scripts/test.sh        # both runners (XCTest, Swift Testing); red when either fails or reports nothing

@@ -3,8 +3,8 @@
 // Like the real relay it stores only sealed documents: a Pond's change feed, the device requests and the writes made with a
 // Pond token. The "Owner's Mac" that answers a device request lives in the test (`test/owner-mac.ts`), not here.
 
-import type { AccountInfo, InvitePreview, PondsOverview } from "../../../src/shared/shapes.js";
-import { ACCOUNT_HEADER, type FeedChange, type FetchLike } from "./client.js";
+import type { AccountInfo, InvitePreview, PondRole, PondsOverview } from "../../../src/shared/shapes.js";
+import { ACCOUNT_HEADER, type AccountDevice, type FeedChange, type FetchLike, type PondPeople } from "./client.js";
 
 export interface FakePond {
   /** Account tokens that are members (what `people.isMember` says). */
@@ -31,6 +31,16 @@ export interface FakeRelayState {
   ponds: Record<string, FakePond>;
   /** Devices registered with `POST /account/devices`, by account token. */
   devices: Record<string, { publicKey: string; name: string; kind: string }[]>;
+  /** Each Pond's people as `GET /ponds/<id>/people` answers (the Owner's call also sees `invites`). */
+  people: Record<string, PondPeople>;
+  /** The account's devices by token, as `GET /account/devices` lists them. */
+  accountDevices: Record<string, Omit<AccountDevice, "thisDevice">[]>;
+  /** "fail": every change by the Owner, a leave or a device removal is refused (the cloud did not confirm). */
+  act?: "ok" | "fail";
+  /** What the relay left for the Owner's Mac (the notes in the Pond's queue), and the invites resent or made again. */
+  notes: { pondId: string; userId: string; act: string }[];
+  resent: string[];
+  again: string[];
   /** Answers to Join and Decline: set "fail" to make the cloud refuse. */
   respond?: "ok" | "fail";
   /** Make Join and Decline refuse the way the relay does (another address: 403 {error:"email"}; a settled invite: 409 {error:"state", state}). */
@@ -60,6 +70,11 @@ export const createFakeRelay = (state: Partial<FakeRelayState> = {}): { fetch: F
     overviews: {},
     ponds: {},
     devices: {},
+    people: {},
+    accountDevices: {},
+    notes: [],
+    resent: [],
+    again: [],
     requests: [],
     ...state,
   };
@@ -170,6 +185,101 @@ export const createFakeRelay = (state: Partial<FakeRelayState> = {}): { fetch: F
         counts: { members: 2, ducks: 0 },
       });
       return json(200, { pondId });
+    }
+    const who = full.accounts[token];
+    const pondRoute =
+      /\/ponds\/([^/]+)(?:\/(people)|\/invites(?:\/([^/]+)\/(resend|withdraw|again))?|\/members\/([^/]+)(?:\/(role))?)?$/.exec(
+        u.pathname,
+      );
+    if (pondRoute && !u.pathname.includes("/account/")) {
+      if (!who) return json(401, { error: "signin" });
+      const people = full.people[pondRoute[1]!];
+      const method = init?.method ?? "GET";
+      const body =
+        typeof init?.body === "string" && init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      if (!people || !people.members.some((m) => m.userId === who.userId)) return json(403, {});
+      const owner = people.owner === who.userId;
+      if (pondRoute[2] === "people") return json(200, { ...people, invites: owner ? people.invites : [] });
+      if (!owner) return json(403, {});
+      if (full.act === "fail") return json(503, { error: "cloud" });
+      const inviteId = pondRoute[3] ? decodeURIComponent(pondRoute[3]) : undefined;
+      if (u.pathname.endsWith("/invites") && method === "POST") {
+        const now = Date.now();
+        const results = (body["emails"] as string[]).map((email) => {
+          if (!email.includes("@")) return { email, ok: false, message: `${email || "That"} is not an email address.` };
+          if (people.members.some((m) => m.email === email))
+            return { email, ok: false, message: `${email} is already in this Pond.` };
+          people.invites.unshift({
+            inviteId: `i${people.invites.length + 1}-${email}`,
+            email,
+            role: body["role"] as "member" | "viewer",
+            state: "pending",
+            createdAt: now,
+            settledAt: 0,
+            expiresAt: now + 7 * 86_400_000,
+          });
+          return { email, ok: true };
+        });
+        return json(200, { results });
+      }
+      if (inviteId) {
+        const invite = people.invites.find((i) => i.inviteId === inviteId);
+        if (!invite) return json(404, { error: "no-invite" });
+        const verb = pondRoute[4]!;
+        if (verb === "resend") {
+          if (invite.state !== "pending") return json(409, { message: "That invite is already settled." });
+          full.resent.push(inviteId);
+        } else if (verb === "withdraw") {
+          invite.state = "withdrawn";
+          invite.settledAt = Date.now();
+        } else {
+          invite.state = "pending";
+          invite.createdAt = Date.now();
+          invite.settledAt = 0;
+          full.again.push(inviteId);
+        }
+        return json(200, { invite });
+      }
+      if (pondRoute[5]) {
+        const target = people.members.find((m) => m.userId === pondRoute[5]);
+        if (!target || target.role === "owner") return json(404, { error: "not-member" });
+        if (method === "DELETE") people.members = people.members.filter((m) => m !== target);
+        else target.role = body["role"] as PondRole;
+        full.notes.push({ pondId: pondRoute[1]!, userId: target.userId, act: method === "DELETE" ? "remove" : "role" });
+        return new Response(null, { status: 204 });
+      }
+      if (method === "DELETE") {
+        if (body["name"] !== people.name) return json(400, { message: "Type the Pond's name to delete it." });
+        delete full.people[pondRoute[1]!];
+        full.notes.push({ pondId: pondRoute[1]!, userId: who.userId, act: "delete" });
+        return new Response(null, { status: 204 });
+      }
+    }
+    if (u.pathname.endsWith("/account/pond-leaves") && init?.method === "POST") {
+      if (!who) return json(401, { error: "signin" });
+      if (full.act === "fail") return json(503, { error: "cloud" });
+      const pondId = (JSON.parse(String(init.body)) as { pondId: string }).pondId;
+      const people = full.people[pondId];
+      if (people) people.members = people.members.filter((m) => m.userId !== who.userId);
+      const overview = full.overviews[token];
+      if (overview) overview.ponds = overview.ponds.filter((p) => p.pondId !== pondId);
+      full.notes.push({ pondId, userId: who.userId, act: "leave" });
+      return new Response(null, { status: 204 });
+    }
+    if (u.pathname.endsWith("/account/devices") && (init?.method ?? "GET") === "GET") {
+      if (!who) return json(401, { error: "signin" });
+      const self = u.searchParams.get("deviceId");
+      const devices = (full.accountDevices[token] ?? []).map((d) => ({ ...d, thisDevice: self === d.deviceId }));
+      return json(200, { devices });
+    }
+    const deviceRoute = /\/account\/devices\/([^/]+)$/.exec(u.pathname);
+    if (deviceRoute && init?.method === "DELETE") {
+      if (!who) return json(401, { error: "signin" });
+      if (full.act === "fail") return json(503, { error: "cloud" });
+      const mine = full.accountDevices[token] ?? [];
+      if (!mine.some((d) => d.deviceId === deviceRoute[1])) return json(404, { error: "device" });
+      full.accountDevices[token] = mine.filter((d) => d.deviceId !== deviceRoute[1]);
+      return new Response(null, { status: 204 });
     }
     if (u.pathname.endsWith("/invites/preview")) {
       const invite = full.invites[u.searchParams.get("code") ?? ""];

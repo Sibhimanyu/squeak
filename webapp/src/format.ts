@@ -22,6 +22,17 @@ const startOfDay = (t: number): number => {
   return d.getTime();
 };
 
+/** "just now", "5 min ago", "2 h ago", "yesterday", "3 days ago": how long ago, in words (People and devices). */
+export function ago(now: number, at: number): string {
+  const mins = Math.max(0, Math.floor((now - at) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
 /** "2 min ago" for an invitation (`ago`); the short form for a row: "4 min", "1 h", "Yesterday", "Mon", "3 Dec". */
 export function age(now: number, at: number, ago = false): string {
   const mins = Math.max(0, Math.floor((now - at) / 60_000));

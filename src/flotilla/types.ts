@@ -493,6 +493,26 @@ export function readDeviceGone(v: unknown): { deviceId: string; userId: string }
   return { deviceId: v.reqId, userId: v.userId };
 }
 
+/** The relay's note that the Owner (or a leaving Member) changed a Pond's People from the web (relay-owned, in `devreqs`). */
+export interface PeopleNote {
+  reqId: string;
+  userId: string;
+  act: "remove" | "leave" | "role" | "delete";
+  role?: "member" | "viewer";
+}
+
+export function readPeopleNote(v: unknown): PeopleNote | null {
+  if (!rec(v) || v.v !== 1 || !s(v.reqId, 64) || !s(v.userId, 64)) return null;
+  if (v.act !== "remove" && v.act !== "leave" && v.act !== "role" && v.act !== "delete") return null;
+  if (v.act === "role" && v.role !== "member" && v.role !== "viewer") return null;
+  return {
+    reqId: v.reqId,
+    userId: v.userId,
+    act: v.act,
+    ...(v.act === "role" ? { role: v.role as "member" | "viewer" } : {}),
+  };
+}
+
 export function readDeviceRequest(v: unknown): DeviceRequestDoc | null {
   if (!rec(v) || v.v !== 1 || !s(v.reqId, 64) || !s(v.userId, 64) || !s(v.publicKey, 200) || !s(v.boxKey, 200))
     return null;

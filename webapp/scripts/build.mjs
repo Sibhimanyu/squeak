@@ -37,7 +37,7 @@ if (serve) {
   await build(options);
 }
 const css = await Promise.all(
-  ["styles.css", "ponds.css", "invite.css"].map((f) => readFile(path.join(root, "src", f), "utf8")),
+  ["styles.css", "ponds.css", "invite.css", "people.css"].map((f) => readFile(path.join(root, "src", f), "utf8")),
 );
 await writeFile(path.join(out, "app.css"), css.join("\n"));
 await cp(path.join(root, "index.html"), path.join(out, "index.html"));

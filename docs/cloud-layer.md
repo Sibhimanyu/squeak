@@ -36,7 +36,7 @@ the in-memory double most tests use) stays, for what is still live:
 - The voice add-on's rendezvous database (`RENDEZVOUS_DATABASE`, `src/voice/claim-protocol.ts`) and the Home Assistant
   gateway's own store, which older add-ons still open.
 - The Cliq inbox in the Realtime Database, read next to the Catalyst `cliq` kind until the handlers are pasted again.
-- The web app (`web/js/rtdb.js`) for a browser paired before Catalyst, and `firebase/` Hosting for `/app`.
+- `firebase/` Hosting for `/app` (the old web app that read it was deleted in #138).
 
 Remove each when its owner is gone; the remaining ticket steps (older Mac apps refused, `/app` redirect) come first.
 

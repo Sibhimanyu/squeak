@@ -748,6 +748,25 @@ describe("your devices: one account-wide list; removing a device removes it from
     ).rejects.toMatchObject({ status: 403 });
     await expect(web.service.removeAccountDevice(laptopId)).rejects.toMatchObject({ status: 404 });
   });
+
+  it("People changed from the web reach the Owner's Mac as notes: a role, then a removal that rotates the key", async () => {
+    const note = (act: string, extra: object = {}) =>
+      rows.set(
+        `channels/${pond1}/devreqs|pn-${act}-${DANA.userId}`,
+        JSON.stringify({ v: 1, reqId: `pn-${act}-${DANA.userId}`, userId: DANA.userId, act, at: Date.now(), ...extra }),
+      );
+    note("role", { role: "viewer" });
+    await owner1.service.refresh(pond1);
+    const roleOf = async () =>
+      [...(await membersOf(owner1, pond1)).values()].find((m) => m.accountId === DANA.userId)?.role;
+    expect(await roleOf()).toBe("viewer");
+    expect(rows.has(`channels/${pond1}/devreqs|pn-role-${DANA.userId}`)).toBe(false);
+    const before = pondOf(owner1, pond1).current as number;
+    note("remove");
+    await owner1.service.refresh(pond1);
+    expect(await roleOf()).toBeUndefined();
+    expect(pondOf(owner1, pond1).current).toBe(before + 1);
+  });
 });
 
 describe("the Owner's own devices (their browser, another Mac) are adopted into their Ponds", () => {

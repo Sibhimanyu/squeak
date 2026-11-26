@@ -8,6 +8,7 @@ import {
   parsePondsOverview,
   type AccountInfo,
   type InvitePreview,
+  type PondRole,
   type PondsOverview,
 } from "../../../src/shared/shapes.js";
 
@@ -60,7 +61,75 @@ export type AccessResult =
 
 export type WriteResult = "ok" | "unauthorized" | "failed";
 
+/** The People sheet's data: `GET /ponds/<id>/people`. Invites come only for the Owner. */
+export interface PondPerson {
+  userId: string;
+  name: string;
+  email: string;
+  role: PondRole;
+  /** Epoch ms of the person's newest device activity; 0 when never. */
+  lastSeenAt: number;
+}
+export type InviteState = "pending" | "joined" | "declined" | "expired" | "withdrawn";
+export interface PondInvite {
+  inviteId: string;
+  email: string;
+  role: "member" | "viewer";
+  state: InviteState;
+  createdAt: number;
+  /** When it reached its state (the time shown: "Declined · 2 h ago"); `createdAt` while pending. */
+  settledAt: number;
+  expiresAt: number;
+}
+export interface PondPeople {
+  owner: string;
+  name: string;
+  cap: number;
+  members: PondPerson[];
+  invites: PondInvite[];
+}
+export type PeopleResult =
+  | { status: "ok"; people: PondPeople }
+  | { status: "unauthorized" }
+  | { status: "forbidden" }
+  | { status: "unreachable" };
+
+/** One change by the Owner (or a leave): done only when the cloud says so; `message` is the relay's own plain sentence, if it gave one. */
+export type ActResult = { status: "ok" } | { status: "unauthorized" } | { status: "failed"; message?: string };
+export type InviteAction = "resend" | "withdraw" | "again";
+
+/** One of the account's devices (`GET /account/devices`), shown in Settings and never in a Pond. */
+export interface AccountDevice {
+  deviceId: string;
+  name: string;
+  kind: "mac" | "web" | "iphone";
+  createdAt: number;
+  lastSeenAt: number;
+  thisDevice: boolean;
+}
+export type DevicesResult =
+  | { status: "ok"; devices: AccountDevice[] }
+  | { status: "unauthorized" }
+  | { status: "unreachable" };
+
 export interface Relay {
+  /** The Pond's people and (Owner) invites: `GET /ponds/<id>/people`. */
+  people(token: string, pondId: string): Promise<PeopleResult>;
+  /** Owner: one invite per address with the role. A per-address failure comes back as its own sentence. */
+  invite(token: string, pondId: string, emails: string[], role: "member" | "viewer"): Promise<ActResult>;
+  /** Owner: `POST /ponds/<id>/invites/<inviteId>/resend|withdraw|again`. */
+  inviteAction(token: string, pondId: string, inviteId: string, action: InviteAction): Promise<ActResult>;
+  /** Owner: `POST /ponds/<id>/members/<userId>/role`. */
+  setRole(token: string, pondId: string, userId: string, role: "member" | "viewer"): Promise<ActResult>;
+  /** Owner: `DELETE /ponds/<id>/members/<userId>`. */
+  removeMember(token: string, pondId: string, userId: string): Promise<ActResult>;
+  /** Member or Viewer: `POST /account/pond-leaves`. */
+  leave(token: string, pondId: string): Promise<ActResult>;
+  /** Owner: `DELETE /ponds/<id>` with the typed name. */
+  deletePond(token: string, pondId: string, name: string): Promise<ActResult>;
+  /** `GET /account/devices?deviceId=` (this device marked) and `DELETE /account/devices/<id>`. */
+  devices(token: string, selfId: string | null): Promise<DevicesResult>;
+  removeDevice(token: string, deviceId: string): Promise<ActResult>;
   /** The Pond list and Invitations, metadata only: `GET /account/overview` (assumed route, see docs/web-app-v2.md). */
   overview(token: string): Promise<OverviewResult>;
   /** Register this browser as a device of the account: `POST /account/devices {publicKey, name, kind: "web"}`. */
@@ -85,7 +154,123 @@ export const ACCOUNT_HEADER = "x-squeak-account";
 
 export function createRelay(base: string, fetchFn: FetchLike = (url, init) => fetch(url, init)): Relay {
   const root = base.replace(/\/+$/, "");
+  const act = async (url: string, init: RequestInit): Promise<ActResult> => {
+    try {
+      const res = await fetchFn(url, { ...init, credentials: "omit" });
+      if (res.status === 401) return { status: "unauthorized" };
+      if (res.ok) {
+        // 200 from the invite routes can carry per-address failures: the first one's own sentence is the answer.
+        const body =
+          res.status === 200 ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null;
+        const results = Array.isArray(body?.["results"]) ? (body["results"] as Record<string, unknown>[]) : [];
+        const bad = results.find((r) => r["ok"] === false);
+        return bad
+          ? { status: "failed", ...(typeof bad["message"] === "string" ? { message: bad["message"] } : {}) }
+          : { status: "ok" };
+      }
+      const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+      return { status: "failed", ...(typeof body?.message === "string" ? { message: body.message } : {}) };
+    } catch {
+      return { status: "failed" };
+    }
+  };
+  const send = (token: string, url: string, body: unknown, method = "POST"): Promise<ActResult> =>
+    act(url, {
+      method,
+      headers: { [ACCOUNT_HEADER]: token, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const pondUrl = (pondId: string): string => `${root}/ponds/${encodeURIComponent(pondId)}`;
   return {
+    async people(token, pondId) {
+      try {
+        const res = await fetchFn(`${pondUrl(pondId)}/people`, {
+          headers: { [ACCOUNT_HEADER]: token },
+          credentials: "omit",
+        });
+        if (res.status === 401) return { status: "unauthorized" };
+        if (res.status === 403 || res.status === 404) return { status: "forbidden" };
+        if (res.status !== 200) return { status: "unreachable" };
+        const b = (await res.json()) as Record<string, unknown>;
+        if (!Array.isArray(b["members"])) return { status: "unreachable" };
+        const members: PondPerson[] = [];
+        for (const m of b["members"] as Record<string, unknown>[]) {
+          const role = m?.["role"];
+          if (typeof m?.["userId"] !== "string" || (role !== "owner" && role !== "member" && role !== "viewer"))
+            continue;
+          members.push({
+            userId: m["userId"],
+            name: typeof m["name"] === "string" ? m["name"] : "",
+            email: typeof m["email"] === "string" ? m["email"] : "",
+            role,
+            lastSeenAt: num(m["lastSeenAt"]),
+          });
+        }
+        const invites: PondInvite[] = [];
+        for (const i of (Array.isArray(b["invites"]) ? b["invites"] : []) as Record<string, unknown>[]) {
+          const state = i?.["state"];
+          if (typeof i?.["inviteId"] !== "string" || typeof i["email"] !== "string") continue;
+          if (!["pending", "joined", "declined", "expired", "withdrawn"].includes(String(state))) continue;
+          invites.push({
+            inviteId: i["inviteId"],
+            email: i["email"],
+            role: i["role"] === "viewer" ? "viewer" : "member",
+            state: state as InviteState,
+            createdAt: num(i["createdAt"]),
+            settledAt: num(i["settledAt"]) || num(i["createdAt"]),
+            expiresAt: num(i["expiresAt"]),
+          });
+        }
+        const owner = typeof b["owner"] === "string" ? b["owner"] : "";
+        const name = typeof b["name"] === "string" ? b["name"] : "";
+        return { status: "ok", people: { owner, name, cap: num(b["cap"]) || 10, members, invites } };
+      } catch {
+        return { status: "unreachable" };
+      }
+    },
+    invite: (token, pondId, emails, role) => send(token, `${pondUrl(pondId)}/invites`, { emails, role }),
+    inviteAction: (token, pondId, inviteId, action) =>
+      send(token, `${pondUrl(pondId)}/invites/${encodeURIComponent(inviteId)}/${action}`, {}),
+    setRole: (token, pondId, userId, role) =>
+      send(token, `${pondUrl(pondId)}/members/${encodeURIComponent(userId)}/role`, { role }),
+    removeMember: (token, pondId, userId) =>
+      send(token, `${pondUrl(pondId)}/members/${encodeURIComponent(userId)}`, {}, "DELETE"),
+    leave: (token, pondId) => send(token, `${root}/account/pond-leaves`, { pondId }),
+    deletePond: (token, pondId, name) => send(token, pondUrl(pondId), { name }, "DELETE"),
+    async devices(token, selfId) {
+      try {
+        const query = selfId ? `?deviceId=${encodeURIComponent(selfId)}` : "";
+        const res = await fetchFn(`${root}/account/devices${query}`, {
+          headers: { [ACCOUNT_HEADER]: token },
+          credentials: "omit",
+        });
+        if (res.status === 401) return { status: "unauthorized" };
+        if (res.status !== 200) return { status: "unreachable" };
+        const b = (await res.json()) as { devices?: unknown };
+        if (!Array.isArray(b.devices)) return { status: "unreachable" };
+        const devices: AccountDevice[] = [];
+        for (const d of b.devices as Record<string, unknown>[]) {
+          if (typeof d?.["deviceId"] !== "string" || typeof d["name"] !== "string") continue;
+          devices.push({
+            deviceId: d["deviceId"],
+            name: d["name"],
+            kind: d["kind"] === "mac" || d["kind"] === "iphone" ? d["kind"] : "web",
+            createdAt: num(d["createdAt"]),
+            lastSeenAt: num(d["lastSeenAt"]),
+            thisDevice: d["thisDevice"] === true,
+          });
+        }
+        return { status: "ok", devices };
+      } catch {
+        return { status: "unreachable" };
+      }
+    },
+    removeDevice: (token, deviceId) =>
+      act(`${root}/account/devices/${encodeURIComponent(deviceId)}`, {
+        method: "DELETE",
+        headers: { [ACCOUNT_HEADER]: token },
+      }),
     async overview(token) {
       try {
         const res = await fetchFn(`${root}/account/overview`, {

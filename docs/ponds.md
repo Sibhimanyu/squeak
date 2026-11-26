@@ -56,7 +56,7 @@ Other readers see who is answering.
   header's Private toggle, composer disabled with the reason for a Viewer, rows of own threads carry the powered-by mark.
 - **Phone and web**: the phone's pond-threads doc (`pondthreads`) carries optional `flock` and `access` (`canMessage`,
   `reason`), read by the Mac from the pond itself (`NativePhone.pondFlock`); older fields such as `locked` may still
-  appear and are ignored. The web guest page derives what a role may do the same way (`capsOf`), disables the composer for a
+  appear and are ignored. The web app derives what a role may do the same way, disables the composer for a
   Viewer with the reason and shows the powered-by mark. Approvals and Stop are never grantable.
 - **Journey test** also covers a signed-in member (named from the account) messaging a thread. The way in is an email invitation held by the relay, so a test that needs a second Member writes one with `admitMember` (`src/flotilla/admit-member.test-fixture.ts`): the member document, the sealed key and token, the account index and the "joined" Ripple, as the Owner's Mac does.
 
@@ -177,8 +177,8 @@ assumes a Mac.
      of the pond id), which the relay also notifies on every write in that pond; it never gets the store-wide `/token`.
      The flotilla service issues and stores these tokens, and a member's store is opened with the pond token (`storeFor` in
      `src/flotilla/index.ts`). The SDK call that creates a pond's stream channel is not wired (the relay answers 503 until the
-     channel exists). The web UI is `web/join.html`
-     (docs/web-app.md, "Web guests"); it uses `/pond-stream` with a 60 s safety poll, so it works without that channel.
+     channel exists). The web UI is the new `webapp/` (the old `web/join.html` guest page was deleted in #138)
+     (docs/web-app-v2.md); it reads the change feed, so it works without that channel.
 
 ## Tasks, claims and scope locks (removed)
 
