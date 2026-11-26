@@ -33,7 +33,7 @@ struct TurnBlockView: View {
     @State private var ownExpand = TurnExpansion()
     private var expandBinding: Binding<TurnExpansion> { shared ?? $ownExpand }
     private var expand: TurnExpansion { expandBinding.wrappedValue }
-    private var prefs = WorkbenchPrefs.shared
+    private let prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
         (block.folded + block.shown).contains {
