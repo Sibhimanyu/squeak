@@ -41,7 +41,8 @@ const clock = { now: Date.now() };
 const ownerAway = { v: false };
 const BULK_POSTS = 205;
 /** What people and Ducks said: the Room's own lines about the Pond (someone joined) are Squeak's. */
-const said = <T extends { author: { name: string } }>(posts: T[]): T[] => posts.filter((p) => p.author.name !== "Squeak");
+const said = <T extends { author: { name: string } }>(posts: T[]): T[] =>
+  posts.filter((p) => p.author.name !== "Squeak");
 
 interface Mac {
   dir: string;
@@ -210,7 +211,11 @@ describe("the Room reaches Members", () => {
     const waiting = await bSync.page(pondId);
     expect(waiting.ownerOffline?.line).toBe(ownerOfflineLine("Sibhi"));
     // Members read the waiting posts now, with the Owner's Mac away.
-    expect(said(waiting.posts).slice(-3).map((p) => p.text)).toEqual(["two (earlier clock)", "one", "three"]);
+    expect(
+      said(waiting.posts)
+        .slice(-3)
+        .map((p) => p.text),
+    ).toEqual(["two (earlier clock)", "one", "three"]);
     // The Owner's Mac returns: it applies them in the order they were written.
     ownerAway.v = false;
     await A.service.pass(pondId);
@@ -222,7 +227,11 @@ describe("the Room reaches Members", () => {
     expect(mine.slice(-3)).toEqual(["two (earlier clock)", "one", "three"]);
     const after = await bSync.page(pondId);
     expect(after.ownerOffline).toBeUndefined();
-    expect(said(after.posts).slice(-3).map((p) => p.text)).toEqual(["two (earlier clock)", "one", "three"]);
+    expect(
+      said(after.posts)
+        .slice(-3)
+        .map((p) => p.text),
+    ).toEqual(["two (earlier clock)", "one", "three"]);
     expect(after.posts.slice(-3).every((p, i, all) => i === 0 || p.seq > all[i - 1]!.seq)).toBe(true);
   });
 
@@ -466,7 +475,9 @@ describe("Members see the whole Room: detail, plan cards, canvas cards, comments
         detail: "Spec: links.\nPlan: 1. fix hrefs",
       });
       expect(said(page.posts)[1]!.detail).toBe("Which footer layout?");
-      expect(said(page.posts)[2]!.canvases).toEqual([{ id: "abc123", title: "Footer deck", kind: "deck", artboards: 3 }]);
+      expect(said(page.posts)[2]!.canvases).toEqual([
+        { id: "abc123", title: "Footer deck", kind: "deck", artboards: 3 },
+      ]);
     }
     expect(JSON.stringify((await bSync.page(pondId)).posts)).not.toContain("/Users/owner");
     // Plain posts stay as thin as before.

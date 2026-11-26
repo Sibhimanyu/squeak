@@ -239,7 +239,10 @@ export type ThreadEvent = ThreadEventBody & { seq: number; at: number };
 export const MAX_PATHS = 200;
 export const MAX_DIFF_BYTES = 64 * 1024;
 export const MAX_TEXT = 20_000;
-export const KEEP_EVENTS = 1200;
+/** A Duck's messages and short step lines stay in the cloud this long (a Member can see what it did in the last 30 days). */
+export const DUCK_HISTORY_MS = 30 * 24 * 3_600_000;
+/** A safety ceiling on events kept per thread; the 30 days above is the rule. */
+export const KEEP_EVENTS = 5000;
 
 /** The only things a member can ask of a thread's starter. Approving and stopping are not among them. */
 export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start", "artifacts", "artifact"] as const;

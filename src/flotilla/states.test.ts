@@ -299,7 +299,7 @@ describe("the relay is slow or gone", () => {
       seen.push(c.split("/").slice(2).join("/"));
       return real(c);
     };
-    const view = await A.service.view(pondId);
+    await A.service.view(pondId);
     expect(seen.filter((k) => k === "members")).toHaveLength(1);
   });
 });
@@ -534,8 +534,8 @@ describe("names and authors", () => {
     });
     const first = A.service.allocSeq(pondId, t.id, 2);
     await A.service.publishEvents(pondId, t.id, [
-      { type: "user", by: A.service.me.id, byName: "Sibhi", text: "mine", seq: first, at: 1 },
-      { type: "user", by: others[0]!.service.me.id, byName: "Aarav", text: "theirs", seq: first + 1, at: 2 },
+      { type: "user", by: A.service.me.id, byName: "Sibhi", text: "mine", seq: first, at: w.clock.t },
+      { type: "user", by: others[0]!.service.me.id, byName: "Aarav", text: "theirs", seq: first + 1, at: w.clock.t },
     ]);
     const { events } = await others[0]!.service.readEvents(pondId, t.id, 0);
     expect(events[0]).not.toHaveProperty("author");

@@ -50,14 +50,13 @@ import {
   readDiffResult,
   type DiffResult,
   HOLD_MS,
+  DUCK_HISTORY_MS,
   KEEP_EVENTS,
-  ONLINE_MS,
   MAX_PARTICIPANTS,
   sortParticipants,
   MAX_COMMAND_LIFE_MS,
   MAX_SKEW_MS,
   POND_ID,
-  PRESENCE_MS,
   readCommand,
   readHold,
   readJoinRequest,
@@ -70,8 +69,6 @@ import {
   memberOfDevice,
   MAX_DEVICES_PER_MEMBER,
   type MemberDevice,
-  readPresence,
-  readRipple,
   readMemberAct,
   type MemberAct,
   readThread,
@@ -144,6 +141,8 @@ export interface LocalThread {
   seq: number;
   /** [first, last] seq of each batch in the cloud, oldest first. */
   batches: Array<[number, number]>;
+  /** When each batch's last event happened (ms), aligned with `batches`; older records have none. */
+  batchAt?: number[];
 }
 
 export const VIEWERS_READ = "Viewers can read but not send.";
@@ -3583,8 +3582,6 @@ export class FlotillaService extends EventEmitter {
         // Still pending; the next view or a retry of the removal tries again.
       }
     }
-    const memberKey = (d: string): string[] => keysOfMember(members.get(d));
-    const store = this.storeOf(pond);
     // Everything here is independent of everything else: one round trip's time, not ten.
     const [holds, threadsRead, joinRows, live] = await Promise.all([
       this.holdsOf(pond, members),
@@ -4086,7 +4083,11 @@ export class FlotillaService extends EventEmitter {
     return first;
   }
 
-  /** One batch of events, one document; then the thread keeps only its newest 500. */
+  /**
+   * One batch of events, one document; then the thread keeps the last 30 days of them (and never more than `KEEP_EVENTS`). What is
+   * published is only what a person reads: messages and short step labels. A tool's output, a diff or a file is never in an event;
+   * a Member opening one asks the Owner's Mac (`diff` and `artifact` commands) and is told when that Mac is away.
+   */
   async publishEvents(pondId: string, threadId: string, events: ThreadEvent[]): Promise<void> {
     if (events.length === 0) return;
     const pond = this.activePond(pondId);
@@ -4097,9 +4098,22 @@ export class FlotillaService extends EventEmitter {
     const last = events[events.length - 1]!.seq;
     await this.put(pond, "tevents", `${threadId}-${first}`, { events });
     local.batches.push([first, last]);
+    const times = [...(local.batchAt ?? []), events[events.length - 1]!.at];
+    while (times.length < local.batches.length) times.unshift(0); // older records: unknown, kept until counted out
+    local.batchAt = times;
     let total = local.batches.reduce((n, [a, b]) => n + (b - a + 1), 0);
+    const cutoff = this.now() - DUCK_HISTORY_MS;
+    // Whatever is older than 30 days goes (wherever it sits in the list), then the oldest while over the safety ceiling.
+    for (let i = local.batches.length - 1; i >= 0; i--) {
+      if (!(local.batchAt[i]! > 0 && local.batchAt[i]! < cutoff)) continue;
+      const [a, b] = local.batches.splice(i, 1)[0]!;
+      local.batchAt.splice(i, 1);
+      total -= b - a + 1;
+      await this.storeOf(pond).delete(this.docPath(pond.id, "tevents", `${threadId}-${a}`));
+    }
     while (local.batches.length > 1 && total - (local.batches[0]![1] - local.batches[0]![0] + 1) >= KEEP_EVENTS) {
       const [a, b] = local.batches.shift()!;
+      local.batchAt.shift();
       total -= b - a + 1;
       await this.storeOf(pond).delete(this.docPath(pond.id, "tevents", `${threadId}-${a}`));
     }

@@ -59,13 +59,6 @@ function exact(body: Record<string, unknown>, allowed: string[]): void {
   }
 }
 
-const textList = (v: unknown, field: string): string[] => {
-  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
-    throw new FlotillaError(`${field} must be a list of strings`);
-  }
-  return v as string[];
-};
-
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
 /**

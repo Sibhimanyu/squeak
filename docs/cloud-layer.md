@@ -79,8 +79,8 @@ Who is in a Pond lives in server-readable Catalyst Data Store tables; what peopl
 
 ## Sequence numbers and the change feed
 
-Every content write in a Pond (kinds in `feed.js` `FEED_KINDS`: pond, members, joins, threads, tevents, presence, holds,
-tcmds, ripples, keys, grants, tasks, claims, locks, room, rposts, rtasks) gets the Pond's next `seq`; a device asks what
+Every content write in a Pond (kinds in `feed.js` `FEED_KINDS`: pond, members, joins, threads, tevents, holds,
+tcmds, keys, room, rposts, rtasks, roomnote) gets the Pond's next `seq`; a device asks what
 changed since a seq and gets only those documents. Code: `functions/squeak_relay/feed.js`, the daemon side in
 `src/cloud/change-feed.ts`.
 
@@ -99,7 +99,7 @@ changed since a seq and gets only those documents. Code: `functions/squeak_relay
   token of that Pond, or an `x-squeak-account` token whose account `people.isMember(pondId, userId)` (a non-member, a
   removed member, or a relay without the people tables is 403). 404 when the store has no `claim`/`range` (feed off).
 - **Old clients.** The stored document also gets `seq` (an extra field older clients ignore); `/doc` and `/list` are unchanged
-  and the iPhone app keeps using them.
+  and the iPhone app keeps using them. The daemon's `ChannelDoc.seq` carries it to the Room (`FeedMirror` puts the change's seq back on each document).
 - **Daemon.** `CatalystStore.list` of a content kind goes through `FeedMirror`: first open of a Pond = `since=head`, one list
   of that kind, one catch-up read; afterwards every list of that Pond is one `/changes` read applied to a mirror held per
   Pond (cursor) and kind. A relay without the feed, or a token it refuses, turns the mirror off and lists plainly.
@@ -108,6 +108,25 @@ changed since a seq and gets only those documents. Code: `functions/squeak_relay
   document written by two writers at once can hold the earlier seq's content; the feed, in seq order, is the truth.
   `claim` and `range` on NoSQL (`index.js`) are **unmeasured against a live project**: insert refusing an existing key, and
   query results ascending by sort key with a `start_key`. Add them to the live test plan.
+
+## The Room in the cloud (issue #122)
+
+Code: `functions/squeak_relay/room-cloud.js`, `src/flotilla/room-sync.ts`; the design is in `docs/ponds.md`, "The Room reaches Members".
+
+- **Kept whole, sealed.** `room` (the Owner's posts) and `rposts` (every Member's own signed documents) are stamped like any content.
+  A Member's token may add an `rposts` document and never overwrite (409) or delete (403) one. Everything a Member writes is readable by
+  every other Member at once; the Owner's Mac ingests it when it is online.
+- **25 MB per Pond.** A counter row `roombytes/<pond>` (relay-owned, outside `channels/`) is raised by every Room write; it only ever
+  overcounts. When it passes the cap the relay measures exactly (`room` + `rposts`), and a Room that is really over loses its oldest by seq
+  until it is under 90% of the cap: each removal is a feed tombstone, then `channels/<pond>/roomnote/trim` = `{v, removed, before, at}` is
+  written (plain JSON, relay only, stamped into the feed, readable by every Member, refused to every writer). `deps.roomCapBytes`
+  overrides the cap in tests. Clean start deletes the counter and the note. Unmeasured live: the NoSQL cost of the measuring read.
+- **Key versions.** Boxes are tagged `<version>.<sealed>`; the relay never reads them. A rotation leaves old documents alone.
+- **Kinds removed.** `ripples`, `presence`, `grants`, `claims`, `tasks`, `locks` are no longer kinds (`kinds.json`, `FEED_KINDS`, the RTDB
+  rules, the guest token's write set), and `/ponds/short` and `/ponds/short/redeem` are gone. A write to a removed kind is a 400 (403 for a
+  token). `guest` remains the name of the token a web or iPhone member device holds (writes: `tcmds`, `joins`, `holds`, `rposts`).
+  What the iPhone still uses, unchanged: `state`, `pairing`, `commands`, `results`, `live`, `media`, `voice*`, `hist`, `cliq`, `devreqs`,
+  `devresults`; its pond view still decodes `ripples` (the Mac serves the Owner's recent lines, empty for a Member) and `presence` (empty).
 
 ### Clean start
 

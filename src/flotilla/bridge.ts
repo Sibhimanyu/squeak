@@ -12,6 +12,7 @@ import type {
 import { Normalizer } from "./normalize.js";
 import {
   FlotillaError,
+  DUCK_HISTORY_MS,
   KEEP_EVENTS,
   ARTIFACT_ID,
   MAX_ARTIFACT_BYTES,
@@ -218,7 +219,12 @@ export class FlotillaBridge {
     const local = this.service.localThread(pondId, threadId);
     const t = this.find(pondId, threadId);
     if (!local || !t || local.private) return;
-    const rows = this.host.messagesAfter(local.sessionId, 0, 2000).slice(-KEEP_EVENTS);
+    // Only the last 30 days of the Duck's words go to the cloud.
+    const since = this.now() - DUCK_HISTORY_MS;
+    const rows = this.host
+      .messagesAfter(local.sessionId, 0, 2000)
+      .filter((row) => (Date.parse(row.createdAt) || this.now()) >= since)
+      .slice(-KEEP_EVENTS);
     const normalizer = new Normalizer();
     t.normalizer = normalizer;
     for (const row of rows) {

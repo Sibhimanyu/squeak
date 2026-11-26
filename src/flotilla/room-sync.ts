@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 
 import { logger } from "../utils/logger.js";
 import {
-  isPondLine,
   isSqueakLine,
   Room,
   RoomError,
@@ -554,9 +553,7 @@ export class RoomSync extends EventEmitter {
     const projectId = port.projectId;
     const known = this.published.get(pondId) ?? new Set<string>();
     const first = !this.published.has(pondId);
-    const rows = this.o.store
-      .roomPosts(projectId, { since: 0, limit: 1_000_000 })
-      .filter((r) => !isSqueakLine(r));
+    const rows = this.o.store.roomPosts(projectId, { since: 0, limit: 1_000_000 }).filter((r) => !isSqueakLine(r));
     let floor = 0;
     if (first) {
       for (const d of await port.list("rposts")) if (d.seq !== undefined) this.inbox(pondId).add(`m-${d.id}`);

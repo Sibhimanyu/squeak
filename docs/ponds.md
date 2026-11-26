@@ -154,28 +154,7 @@ The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fi
   declined your request to join." and writes a Ripple; a revoke ends the relay join token, drops requests waiting on it and writes a Ripple.
   Invites saved before states have none and read as pending until they expire.
   Approval also writes the member's `keys` document, so a key rotated since the invite still reaches them.
-- **Short codes** (owner-approved 2026-11-13). A second way in beside the long code: six characters from an alphabet with no
-  0, O, 1, I or L, shown `K7P-4QD` (typed in any case, dash or space optional: `normalizeShortCode`), valid 10 minutes, once.
-  `POST /ponds/<id>/invites` with `{ short: true }` answers `{ short, expiresAt, id, inviteExpiresAt }` (no `code`); the invite
-  behind it and its join token live an hour, so the owner can answer after the code has been used. The Mac makes the invite
-  exactly as for a long code, then `POST /ponds/short` (relay 1.3.0, the owner's own Mac key, or the operator's) leaves the join
-  details under the code: `{ v, p pondId, o ownerKey, n name, s secret, e expiry, r role, on ownerName, l location, jt join
-token }` and **never the pond key** (`k`, `kv`; the relay refuses details that carry anything else). The row is keyed by an
-  HMAC of the code (the table holds no readable code), holds the details and a deadline, and `POST /ponds/short/redeem {code}`
-  (a signed-in account: a Mac's own key, the web app's `x-squeak-account` token or the cookie; never the operator's key) returns
-  them **once**: the row is deleted before the answer, and unknown, used, expired and malformed codes are one `404
-{error:"code"}`. Limits: 20 codes an hour per owner account; per account 10 tries a minute and 30 an hour (a right try
-  counts), and **5 wrong tries lock that account for 10 minutes** (`429 locked`): a guess costs the guesser, never an owner's
-  code. A code cannot be tied to the guesses made against it (a wrong guess matches no row), so the limit is per account.
-  The relay sees the secret and the join token, as it always could; with them it can forge a request, which is why the
-  words below exist. A join request needs a pond key to be sealed with, and this joiner has none: it is sealed to the owner's
-  public key (box tag `s.`, `sealToMember`, only for `joins`) and the owner's `openDoc` opens it with their own key. The pond
-  key reaches the member as for a rotation: approval writes `keys/<member>` (sealed to the member's key, signed by the owner)
-  _before_ the member document, and the joiner's refresh finds the member list unreadable, calls `syncKeys` and adopts it. Until
-  then a short-code joiner's pond has `keys: {}` and `current: 0`. The Firebase store has no relay, so short codes need a Mac
-  with the Squeak relay (`options.relay.shortCreate`); otherwise 503 "Short codes need Squeak's cloud...". Joining accepts a long
-  code, a link or a short code (`join(code)`: a short one is traded at the relay first: 404 "That code isn't valid, or it has
-  expired...", 429 "Too many tries...", 401 the sign-in sentence).
+- **Short codes are gone (2026-11-26, #122).** The relay's `/ponds/short` routes, the Mac's `{ short: true }` invite and joining by a six-character code were removed with the other obsolete kinds (see "The Room reaches Members" below); an invite is an emailed link.
 - **Matching words** (`src/flotilla/join-words.ts`, Swift `JoinWords`, web `join-words.js`, fixture
   `macos/Tests/SqueakMacCoreTests/Fixtures/ponds/join-words.json`). Three words from a committed list of 256 plain words:
   SHA-256 over `"squeak-pond-words-v1\n" + ownerKey + "\n" + joinerKey + "\n" + pondId` (UTF-8, the keys as the base64 strings
@@ -240,46 +219,9 @@ assumes a Mac.
    Approved browser members receive a pond-scoped guest token (`pt`) sealed to their key. Email-bound invites also
    require the signed-in email to match. Account sign-in and relay tokens do not replace the Owner's signed membership.
 
-## Tasks, claims and scope locks
+## Tasks, claims and scope locks (removed)
 
-Backend only, no screen yet (`src/flotilla/tasks.ts`, `scope.ts`, `coordination.ts`). Three more kinds, sealed with the pond key and
-signed by their writer like every other pond document, so a document that does not open, or whose signature is not a current
-member's, is dropped: `tasks`/<task id>, `claims`/<task id>\_<member id>, `locks`/<lock id> (the relay's `kinds.json` and the RTDB
-rules list them; a web guest's scoped token does not write them yet).
-
-- **Task** `{ id, title (200), description? (4000), createdBy, createdAt, updatedAt, status, scope? }`. The id begins with its creator's
-  member id, so only the creator or the owner can write it. `status` is `open | claimed | hatched | done | dropped`; the document
-  stores open, done or dropped, and what the pond shows folds in the live claim (`claimed`, `hatched` once a thread started).
-- **Claim**: one claimant per task, 2 h, renewed by claiming again (a renewal keeps its first `at`). It ends when it expires, on
-  release, on `start` (the claim becomes `hatched` and names the `threadKey`), and on done or drop. A race is settled the same way on
-  every Mac: the earliest signed `at` wins, ties by member id; the loser deletes its own claim and is told who holds it. This is
-  advisory, as holds are: a Mac with a wrong clock can jump the queue (a claim dated more than 2 min ahead is ignored).
-- **Scope lock**: repo-relative paths or globs (`*`, `?`, `**`; a plain path also covers what is under it; case ignored; up to 20),
-  held by a member for a thread or a claim, 10 min, kept alive by `heartbeat`. A lock overlapping another member's standing lock
-  is refused with a fixed sentence naming the holder (`Aarav holds renderer/**.`, 409 `heldBy`); a member's own locks never block them.
-  Overlapping locks that both landed are resolved the same way as claims. The owner can break any lock.
-- **Roles** (kept local to `coordination.ts`): a viewer only watches; a member creates, claims and locks, edits and closes their own
-  tasks (a claimant can mark theirs done); the owner closes any task and breaks any lock.
-- **Ripples**: `added the task`, `claimed`, `released`, `started a thread on`, `finished`/`dropped`, `locked`, `released`, `broke X's lock`.
-
-Routes, token-gated beside the pond routes (bodies are strict: an unknown key is a 400; a refusal is its sentence with 403 for a
-role, 404 for nothing there, 409 with `heldBy` when someone else holds it):
-
-- `GET /ponds/<id>/tasks` → `{ tasks, locks }`
-- `POST /ponds/<id>/tasks` with `{ title, description?, scope? }` → 201 `{ task }`
-- `POST /ponds/<id>/tasks/<tid>` with `{ title?, description?, scope? }` → `{ ok }` (creator or owner)
-- `POST /ponds/<id>/tasks/<tid>/claim` with `{}` → `{ ok, until }`
-- `POST /ponds/<id>/tasks/<tid>/release` with `{}` → `{ ok }`
-- `POST /ponds/<id>/tasks/<tid>/start` with `{ threadKey }` → `{ ok }` (claimant)
-- `POST /ponds/<id>/tasks/<tid>/done` or `/drop` with `{}` → `{ ok }`
-- `GET /ponds/<id>/locks` → `{ locks }`
-- `POST /ponds/<id>/locks` with `{ paths, taskId?, threadKey? }` → 201 `{ lock }` or 409
-- `POST /ponds/<id>/locks/<lid>/heartbeat` with `{}` → `{ ok, until }`
-- `DELETE /ponds/<id>/locks/<lid>` → `{ ok }`
-
-`GET /ponds/<id>` also carries `tasks: TaskView[]` (newest change first; `claimedBy { id, name, until }`, `threadKey`) and
-`locks: LockDoc[]`, both optional for older readers. A local pond has none (no cloud). Not here: nothing enforces a lock on file
-writes yet, and tasks do not start threads by themselves.
+Removed 2026-11-26 (#122): the `tasks`, `claims` and `locks` kinds, `coordination.ts`, `tasks.ts`, `scope.ts` and their routes (`/ponds/<id>/tasks`, `/locks`). The Room's own Tasks (`rtasks`, below) are the only Tasks. The same change removed the `ripples` and `presence` kinds and the `grants` kind: what happened in a Pond is a Room line from the Owner's Mac, and who is online comes from live connections (cloud-layer.md, "Live notices").
 
 ## Members are accounts (2026-11-17)
 
@@ -578,60 +520,41 @@ sentence), filled in place.
 
 ### The Room reaches Members (`src/flotilla/room-sync.ts`)
 
-A shared (published) pond carries its Room to its Members through the same sealed channel as threads. The Flotilla `tasks`
-documents (claims and locks stay) are not used for this: the Room's Tasks are `rtasks`.
+The cloud keeps the **whole Room**, sealed (docs/spec.md, "Cloud"; ADR 0005; docs/cloud-layer.md, "The Room in the cloud"). The Owner's
+Mac writes its posts and Tasks; every Member writes their own posts as signed documents. The relay numbers every write with the Pond's
+`seq`, and that number is the one order everyone draws.
 
-- **Kinds.** `room`/<post id> = `{ v:1, seq, id, author:{kind person|agent, id?, name}, kind, level:"room", text, at }`, written
-  only by the Owner's Mac (a Member's document of that kind is ignored); `seq` is the Owner's own, so every Mac orders alike. A
-  Duck's author has no id (its chat's id never leaves the Owner's Mac); a person's is their member id (the Owner's own posts
-  carry the Owner's member id, not `owner`). Only `level: room` posts by people and Ducks go: no `agents` level, no Squeak
-  lines, no attachments yet. The newest 200 are kept in the cloud (`ROOM_CLOUD_POSTS`); older ones stay on the Mac.
-  `rtasks`/<task id with `:` made `-`> = `{ v:1, id, messageId, title, text, state, parentTaskId?, result?, createdAt, updatedAt }`
-  (no discussion, place or Duck chat; a suggestion nobody took up is never published). `rposts`/<time-ordered id> =
-  `{ v:1, id, text, at }`, written and signed by the Member.
-- **Detail, canvas cards, plan cards, comments.** A `room` document may also carry `detail` (a status line's or plan card's
-  expandable body), `canvases` (`[{ id (wire id), title, kind, artboards }]`, at most 6, on a `done` line; the canvas folder never
-  leaves the Owner's Mac, and a Member views a canvas, never edits it) and `replyTo` (the plan card a person's comment is on); its
-  `kind` may be `plan`. All optional, so older documents still decode, and a wrong one drops only itself. A Member comments on a
-  plan card with `POST /native/ponds/<id>/room { text, replyTo }`: the `rposts` document carries `replyTo`, and the Owner's Mac
-  applies it under the same rules as any Member message, as a reply the card's Duck is told about at its next turn. A document
-  published before these fields is written again by the first publish after the Owner's Mac starts.
-- **Publishing.** On a Room post or Task change the Owner's Mac writes what is new (a burst waits 400 ms; posts never change, so
-  a post already in the cloud is not written again; the first publish after a start learns what the cloud holds). A key
-  rotation (a Member removed) rewrites everything under the new key (`service` event `rotated`).
-- **Member posts, offline or not.** A Member's `POST /native/ponds/<id>/room { text }` writes an `rposts` document and answers
-  202 `{ queued, id, offline, line? }`. The Owner's Mac, on every pond pass, applies waiting documents oldest first (by the
-  Member's own time, ties by id), each through the Room's own post path as post `m-<doc id>` (so a replay can never post twice),
-  then deletes them. Dropped quietly, whatever the document says: not a member, a viewer, `message` switched off by the Owner,
-  older than a week (`ROOM_INBOX_LIFE_MS`), over 60 an hour per Member, empty or over 500 characters. A post "Make it a task"
-  made this way is an ordinary Room message to the Owner's Task rules, plus the approval gate below.
-- **Make task from a Member** (`POST /native/ponds/<id>/room/tasks { messageId }`, 202 `{ queued, id, offline, line? }`). An `rposts` document
-  `{ v:1, id, text:"", at, task:{ messageId } }`, applied by the Owner's Mac in the same pass and under the same rules as a message
-  (not a viewer, `message` on, the hourly limit, under a week old), through `RoomTasks.fromMessage(..., origin)`. A viewer
-  Member gets the usual 403 sentence; a task the Owner's rules refuse (already a Task, no such message) is dropped quietly.
-- **Needs the Owner's approval (`start` permission).** The Owner's Mac reads the Member's current `start` when it applies their
-  post or Make task (the signed member document, so a change is live). With `start` on, the Task is the Owner's kind: routed, and
-  started at once when it has a destination and the pond does not ask before starting. With `start` off (the default for a
-  Member) the Task is `waiting` with `approval: { by, name }`: never in the start line, never offered to a Duck (`open_jobs`) and
-  a Duck's `claim_job` is refused, until the Owner acts. The Owner's Room shows "<name> asked for this task" with **Approve** and
-  **Drop** (`POST .../tasks/<id> { action: "approve" }`, which clears the reason and then starts it like any Owner's Task; Go,
-  New and Allow approve too). Members read the reason in the published Task as `needsApproval: { name }` and see "Waiting for
-  the Owner's approval"; it has no buttons for them. Taking a Member's message up as the Owner's own Make task is approval by
-  itself. A Member's "make it a task" words follow the same gate (their post id is `m-<doc id>`).
-- **Permissions.** A viewer: `POST` is a 403 with
-  the usual sentence, `canPost` is false on the page, and the Mac shows the reason instead of the composer.
-- **Offline.** `ownerOffline.line` is "<Owner's first name>'s Mac is offline; Ducks will pick this up when it's back" while the
-  Owner's presence is not live (`PRESENCE_TTL_MS`, the same presence the thread lines use). Members still read what was
-  published and post; their posts wait and apply in order when the Owner's Mac returns.
-- **Member routes** (`FlotillaRoutes`, strict bodies): `GET /ponds/<id>/room?since&before&limit` answers the Owner's Room page
-  shape (`posts` with `v`, `latestSeq`, `threads: []`, `turns: []`, `tasks`) plus `ownerOffline? { line }` and `canPost`;
-  `POST` as above; `GET .../room/stream` (server-sent events `hello { latestSeq }`, `owner { offline, line? }`, `post`, `task`;
-  a ping and a re-read every 25 s, because the Owner's Mac going quiet is not a notice). An owner's own pond answers 400: it
-  reads its Room from `/projects/<id>/room`.
-- **Mac.** `RoomClient(member: true)` and `PondRoomModel(member: true)` draw it with the same views (Make task is offered, queued as above and remembered locally until the Task comes back; Drop and
-  Approve are not offered; the Owner's words are not "mine"; a Member's own words are theirs by member id). A message sent while the Owner's
-  Mac is away stays a pending row until its post arrives. Fixtures: `npx tsx scripts/make-room-member-fixtures.ts`
-  (`Fixtures/ponds/room-member-*`); Swift decodes exactly those. The web reads and posts it too (docs/web-app.md, "The Room on the web"); the iPhone does too ("The Room on iPhone", below).
+- **Kinds.** `room`/<post id> = `{ v:1, seq, id, author:{kind person|agent, id?, name}, kind, level:"room", text, at }`, written only by the
+  Owner's Mac (a Member's document of that kind is ignored; `seq` inside is the Owner's own and only a fallback: on read the cloud's number
+  replaces it). A Duck's author has no id; a person's is their member id. Only `level: room` posts go: no `agents` level, no attachments yet.
+  `rtasks`/<task id with `:` made `-`> = a Task as Members see it (a suggestion nobody took up is never published). `rposts`/<time-ordered
+  id> = a **Member's own signed document**: a message `{ v:1, id, text, at, replyTo? }`, or one ask that waits for the Owner's Mac:
+  `task:{messageId}` ("Make task"), `leave:true`, `removeDevice:<id>`, `start:{requestId,text,agent,model,title?}` (a Duck). `roomnote`/`trim`
+  is the relay's own plain note that it paged the oldest out. Pond lines (someone joined, left, was removed, renamed, a Duck declined) are
+  Room posts by Squeak with ids `ln-<id>` (`ln-dec-<requestId>` for a declined Duck, which tells that Member's Mac to stop saying
+  "Waiting"); they travel as a message from "Squeak".
+- **Members read at once.** A Member's post is readable by every Member the moment it is written, from their `rposts` document, with the
+  Owner's Mac away; the Member's Room is the Owner's `room` documents and every `rposts` message, ordered by the cloud's `seq` (a store that
+  does not number falls back to time, then the Owner's own order). A Member's message is not published a second time by the Owner's Mac.
+- **The Owner's Mac ingests when it is online** (that is when Ducks hear it): on every pond pass it applies the Members' waiting posts and
+  Tasks (`RoomSync.drain`) and, in the service, their leaves, device removals and Duck requests (`applyQueuedActs`), each oldest first by
+  seq, through the Room's own post path as post `m-<doc id>` (a replay can never post twice). It remembers how far (`ingestedSeq`,
+  `actsSeq` in `flotilla/ponds.json`); a numbered document stays in the cloud as the Room's record. Rules are the same as before: not a
+  member, a viewer, `message` off, over 60 an hour per Member (counted by the Member's own times, so a backlog is not cut short), empty or
+  over 500 characters are skipped quietly. A Duck request or leave waits as long as it takes (it is not a 5-minute command).
+- **25 MB cap per Pond** (`room-cloud.js`): past it the relay pages out the oldest `room`/`rposts` by seq, leaves tombstones in the feed
+  and the note; a Member's page carries `earlier: { line }`, and the Owner's Mac does not send a post older than the oldest the cloud still
+  holds. The 200-post cap is gone, so a joiner or rejoiner reads everything the cloud still has.
+- **Key rotation rewrites nothing.** Each document keeps its key version (its box tag); the Owner's Mac seals **every** version to each
+  member and device (`keys` grant `versions`), so a new Member opens old and new. New writes use the new key.
+- **A Member's token** may add an `rposts` document but never overwrite or delete one (409 / 403); the Owner's own key pages and removes.
+- **Offline line.** While the Owner's Mac is not running (from the live connections, `options.presenceOf`) a Member's post answers 202
+  `{ queued, id, offline: true, line }` and the Room shows the line; Ducks pick the post up when it is back.
+- **Detail, canvas cards, plan cards, comments** are as before (`detail`, `canvases`, `replyTo` on a `room` document; a comment on a plan
+  card is an `rposts` message with `replyTo`).
+- **Ducks a Member can see** (not Private): their messages and short step lines for the last 30 days (`DUCK_HISTORY_MS`, thread
+  events in `tevents`); tool output, diffs and files are never in an event. Opening one asks the Owner's Mac (`diff` and `artifact`
+  commands) or shows "Available when <Owner>'s Mac is online". A Private Duck is never uploaded.
 
 ### The Room on iPhone (`src/remote/pond-room.ts`)
 
