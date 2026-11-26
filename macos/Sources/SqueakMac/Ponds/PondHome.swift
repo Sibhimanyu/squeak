@@ -117,7 +117,7 @@ struct PondHomeView: View {
     private var native: NativeProject? { ponds.native(key: key) }
     private var roster: RoomRosterModel? { native.map { RoomRosterStore.shared.model(for: $0.id) } }
     private var localSessions: [HostSession] { model.pondProject(key).workspaces.flatMap(\.chats) }
-    private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
+    private var person: String { PondsModel.shared.myName.isEmpty ? "You" : PondsModel.shared.myName }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
 
     private var layout: PondHomeLayout {
@@ -686,7 +686,7 @@ struct PondFlockSection: View {
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
-    private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
+    private var person: String { PondsModel.shared.myName.isEmpty ? "You" : PondsModel.shared.myName }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
@@ -762,10 +762,13 @@ struct PondFlockSection: View {
             FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: presence) && !offline, size: 32)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink)
-                        .lineLimit(dashboard ? 2 : 1).help(m.name)
+                    Text(verbatim: m.you ? "\(PersonName.shown(m)) (you)" : PersonName.shown(m)).font(Typo.label).foregroundStyle(Theme.ink)
+                        .lineLimit(dashboard ? 2 : 1).help(PersonName.emailLine(m) ?? PersonName.shown(m))
                     Text(verbatim: PondMembers.chip(m)).font(Typo.meta).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 6).frame(height: 18).background(Theme.selected, in: Capsule())
+                }
+                if let email = PersonName.emailLine(m) {
+                    Text(verbatim: email).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 }
                 Text(verbatim: (removingNow ? "Removing\u{2026}" : changing ? "Changing role\u{2026}" : (detail == nil ? "You \u{00B7} This Mac" : tail))
                     + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))

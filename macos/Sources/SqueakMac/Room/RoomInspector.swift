@@ -22,7 +22,7 @@ struct RoomInspector: View {
     private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { ponds.detail(key: key) }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
-    private var me: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
+    private var me: String { PondsModel.shared.myName.isEmpty ? "You" : PondsModel.shared.myName }
 
     var body: some View {
         let needs = PondInspectorSections.needsYou(room.feed.threads)

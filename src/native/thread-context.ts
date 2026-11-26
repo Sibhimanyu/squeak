@@ -1,4 +1,3 @@
-
 import { ASK_FORMAT_EXAMPLE_CHOICE, ASK_FORMAT_TEXT, NO_RETRY_LOOP_RULE } from "../fleet/ask-format.js";
 import type { AgentKind, MessageAuthor } from "./types.js";
 

@@ -32,7 +32,7 @@ enum PondPresence {
         let threads = room.feed.threads
         let ducks = RoomRosterStore.shared.model(for: projectId).list
         return RoomPondPanel.build(
-            members: PondsModel.shared.detail(key: key)?.members ?? [], youName: NSFullUserName(),
+            members: PondsModel.shared.detail(key: key)?.members ?? [], youName: PondsModel.shared.myName,
             roster: RoomRoster.roster(ducks, threads: threads), tasks: room.feed.jobs)
     }
 }

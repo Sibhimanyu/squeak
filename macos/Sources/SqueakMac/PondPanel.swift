@@ -42,7 +42,7 @@ struct PondPanel: View {
     var body: some View {
         if let key {
             let detail = PondsModel.shared.detail(key: key)
-            let glance = PondGlance.build(detail: detail, local: localThreads.map(fact), youName: NSFullUserName())
+            let glance = PondGlance.build(detail: detail, local: localThreads.map(fact), youName: PondsModel.shared.myName)
             VStack(spacing: 0) {
                 if compact { header(key: key) }
                 ScrollView {

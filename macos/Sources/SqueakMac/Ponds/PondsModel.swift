@@ -209,6 +209,9 @@ final class PondsModel {
 
     func detail(key: String) -> PondDetail? { pond(key: key).flatMap { details[$0.id] } }
 
+    /// This person's name: the Squeak account's (the daemon's "you" in any pond), never the Mac's user name. Empty until a pond says it.
+    var myName: String { PersonName.mine(in: Array(details.values)) }
+
     /// How this person belongs to a pond: the directory's `access`, else own / joined (`PondDirectory.Pond.membership`).
     func membership(of key: String) -> PondMembership {
         (directory?.pond(id: key) ?? directory?.pond(pondId: key))?.membership ?? .owner

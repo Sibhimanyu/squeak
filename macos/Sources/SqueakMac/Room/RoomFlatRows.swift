@@ -240,8 +240,14 @@ struct RoomGroupView: View {
     private var own: Bool { RoomRowPlan.isOwn(group.author) }
     private var displayName: String {
         guard own else { return group.author.name }
-        let n = NSFullUserName().trimmingCharacters(in: .whitespaces)
+        let n = PondsModel.shared.myName.trimmingCharacters(in: .whitespaces)
         return n.isEmpty ? group.author.name : n
+    }
+    /// The account's email, on hover of a name: for you, the "you" member's; for another person, the one member of that name.
+    private var nameEmail: String? {
+        let members = PondsModel.shared.homeProject.flatMap { PondsModel.shared.detail(key: $0) }?.members ?? []
+        if own { return members.first(where: \.you).flatMap(PersonName.emailLine) }
+        return PersonName.email(forName: displayName, in: members)
     }
 
     var body: some View {
@@ -322,6 +328,8 @@ struct RoomGroupView: View {
         let label = Text(verbatim: displayName).font(.system(size: CGFloat(RoomRowPlan.nameSize), weight: .bold)).foregroundStyle(Theme.ink)
         if a.kind == .duck, let t = groupTarget {
             DuckHitName(target: t, name: a.name, hovering: hoverDuck, set: { hoverDuck = $0 }) { label }
+        } else if let email = nameEmail {
+            label.help(email)
         } else {
             label
         }

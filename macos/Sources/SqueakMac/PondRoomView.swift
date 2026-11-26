@@ -348,7 +348,7 @@ struct PondRoomView: View {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             let selfId = member ? key.flatMap { PondsModel.shared.detail(key: $0)?.me?.id } : nil
-            let built = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: NSFullUserName(), filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
+            let built = RoomFold.fold(RoomMessages.build(feed: room.feed, owner: PondsModel.shared.myName, filesFor: { model.changesStore(for: $0).changes?.files.count }, memberView: member, selfId: selfId, canMakeMemberTask: room.canPost))
             let items = RoomUnread.insert(into: built, seenAt: room.visitSeenAt, through: room.visitThrough)
             let working = RoomMessages.working(feed: room.feed)
             VStack(spacing: 0) {

@@ -23,7 +23,7 @@ struct RoomComposer: View {
     @State private var fieldHandle = ComposerFieldHandle()
 
     private var people: [String] {
-        let me = NSFullUserName()
+        let me = PondsModel.shared.myName
         let names = PondsModel.shared.homeProject.flatMap { PondsModel.shared.detail(key: $0) }?.members.filter { !$0.you }.map(\.name) ?? []
         return names.filter { $0 != me }
     }

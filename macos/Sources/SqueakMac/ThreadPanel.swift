@@ -36,7 +36,7 @@ struct ThreadPanel: View {
         let thread = pondThread(s, detail)
         let changes = model.changesStore(for: s.key.hostSessionId).changes
         let glance = ThreadGlance.build(
-            agentName: SessionText.agentName(s.agent), model: modelName(s), state: s.state, you: NSFullUserName(),
+            agentName: SessionText.agentName(s.agent), model: modelName(s), state: s.state, you: PondsModel.shared.myName,
             thread: thread, members: detail?.members ?? [], presence: detail?.presence ?? [], meId: detail?.meMember?.id,
             helpers: model.ducklings(for: s)?.items ?? [],
             queued: native(s) && model.native.key == s.key ? model.native.pending.stackCards.map(\.text) : [],

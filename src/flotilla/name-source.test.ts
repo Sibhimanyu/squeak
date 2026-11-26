@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { CloudStore } from "../cloud/store.js";
-import type { ChannelDoc } from "../remote/firestore-rest.js";
+import type { ChannelDoc, CloudStore } from "../cloud/store.js";
 import { named, verifying } from "./named-account.test-fixture.js";
 import { FlotillaService, SIGNED_OUT_MEMBER, type AccountPort } from "./service.js";
 

@@ -187,8 +187,10 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     public var nestName: String?
     public var client: String?
     public var lastSeenAt: Date?
+    /// The account's email, drawn under the name and on hover; nil from an older host or a member with none on file.
+    public var email: String? = nil
 
-    enum CodingKeys: String, CodingKey { case id, name, role, nest, online, you, nestName, client, lastSeenAt, caps, muted }
+    enum CodingKeys: String, CodingKey { case id, name, email, role, nest, online, you, nestName, client, lastSeenAt, caps, muted }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -196,6 +198,7 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
         caps = c.lenient(PondCaps.self, .caps)
         muted = c.lenient(Bool.self, .muted) ?? false
         name = c.lenient(String.self, .name) ?? ""
+        email = c.lenient(String.self, .email).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         role = PondRole(raw: c.lenient(String.self, .role))
         nest = c.lenient(String.self, .nest)
         online = c.lenient(Bool.self, .online) ?? false
@@ -206,7 +209,8 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     }
 
     public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, online: Bool = false, you: Bool = false,
-                nestName: String? = nil, client: String? = nil, lastSeenAt: Date? = nil) {
+                nestName: String? = nil, client: String? = nil, lastSeenAt: Date? = nil, email: String? = nil) {
+        self.email = email
         self.id = id; self.name = name; self.role = role; self.nest = nest; self.online = online; self.you = you
         self.nestName = nestName; self.client = client; self.lastSeenAt = lastSeenAt
     }

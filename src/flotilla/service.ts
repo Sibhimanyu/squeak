@@ -1348,7 +1348,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** The name this Mac goes by in one pond: what was typed at joining, else its own. */
-  private nameIn(_pond: LocalPond): string {
+  private nameIn(): string {
     return this.accountLabel();
   }
 
@@ -3169,8 +3169,7 @@ export class FlotillaService extends EventEmitter {
     const own = this.accountLabel();
     const ownEmail = this.accountEmail();
     if (mine && (mine.name !== own || (ownEmail && mine.email !== ownEmail))) {
-      const { email: _old, ...rest } = mine;
-      await this.writeMember(pond, { ...rest, name: own, ...this.emailField() });
+      await this.writeMember(pond, { ...mine, name: own, ...this.emailField() });
     }
     const withAccount = [...members.values()].filter((m) => m.accountId && m.id !== me.id);
     for (let i = 0; i < withAccount.length; i += 50) {
@@ -3746,7 +3745,7 @@ export class FlotillaService extends EventEmitter {
       ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
       me: {
         id: me.id,
-        name: this.nameIn(pond),
+        name: this.nameIn(),
         role: pond.role,
         nest: me.nest,
         caps: this.capsIn(pond, members, me.id),
@@ -3914,11 +3913,11 @@ export class FlotillaService extends EventEmitter {
     if (!this.capsIn(pond, members, me.id).answer) throw new FlotillaError(CAP_REFUSAL.answer, 403);
     const existing = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
     if (existing && existing.by !== me.id) return { ok: false, heldBy: existing.byName };
-    const mine: Hold = { requestId, by: me.id, byName: this.nameIn(pond), until: this.now() + HOLD_MS };
+    const mine: Hold = { requestId, by: me.id, byName: this.nameIn(), until: this.now() + HOLD_MS };
     await this.put(pond, "holds", requestId, mine);
     const back = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
     if (back && back.by !== me.id) return { ok: false, heldBy: back.byName };
-    return { ok: true, heldBy: this.nameIn(pond) };
+    return { ok: true, heldBy: this.nameIn() };
   }
 
   async releaseHold(pondId: string, requestId: string): Promise<void> {
@@ -3986,7 +3985,7 @@ export class FlotillaService extends EventEmitter {
       pondId: pond.id,
       projectId: pond.projectId ?? null,
       role: pond.role,
-      me: { id: this.selfId(pond), name: this.nameIn(pond) },
+      me: { id: this.selfId(pond), name: this.nameIn() },
       ownerId,
       now: this.now,
       put: (kind, docId, value) => this.put(pond, kind, docId, value),
@@ -4071,9 +4070,7 @@ export class FlotillaService extends EventEmitter {
       ...(input.requester
         ? { requester: { memberId: input.requester.memberId, requestId: input.requester.requestId } }
         : {}),
-      participants: [
-        { memberId: this.selfId(pond), name: this.nameIn(pond), lastAt: new Date(this.now()).toISOString() },
-      ],
+      participants: [{ memberId: this.selfId(pond), name: this.nameIn(), lastAt: new Date(this.now()).toISOString() }],
       seq: 0,
       batches: [],
     };
@@ -4108,7 +4105,7 @@ export class FlotillaService extends EventEmitter {
       id: threadId,
       title: local.title,
       starter: me.id,
-      starterName: this.nameIn(pond),
+      starterName: this.nameIn(),
       nest: me.nest ?? "",
       agent: local.agent,
       model: local.model,

@@ -275,8 +275,8 @@ struct WorkbenchSidebar: View {
     }
 
     private static var macName: String {
-        let first = NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
-        return first.isEmpty ? "This Mac" : "\(first)'s Mac"
+        let first = PondsModel.shared.myName.split(separator: " ").first.map(String.init) ?? ""
+        return first.isEmpty || first.contains("@") ? "This Mac" : "\(first)'s Mac"
     }
 
     /// Create: a page in the centre (start work, add a project, join a pond), selected like the Dashboard.
