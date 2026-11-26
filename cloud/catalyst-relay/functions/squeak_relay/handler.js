@@ -1108,31 +1108,27 @@ function createRelay(deps) {
     const user = await accountUser(req, true);
     if (!user || !USER_ID.test(String(user.userId))) return out(401, { error: "signin" });
     if (!deps.people) return out(404, { error: "invite" });
-    const invite = await deps.people.getInvite(inviteId).catch(() => null);
-    if (!invite) return out(404, { error: "invite" });
     const email = String(user.email || "")
       .trim()
       .toLowerCase();
-    if (!email || email !== String(invite.email).trim().toLowerCase()) return out(403, { error: "email" });
-    if (invite.state !== "pending") return out(409, { error: "state", state: invite.state });
+    const who = { userId: user.userId, email };
+    if (email)
+      await deps.people.upsertAccount({ userId: user.userId, email, name: user.name || "" }).catch(() => undefined);
     try {
-      if (verb === "join") {
-        await deps.people.upsertAccount({ userId: user.userId, email, name: user.name || "" }).catch(() => undefined);
-        try {
-          await deps.people.addMember({ pondId: invite.pondId, userId: user.userId, role: invite.role });
-        } catch (e) {
-          if (!(e && e.code === "already-member")) throw e;
-        }
-        await deps.people.settleInvite(inviteId, "joined");
-        return out(200, { pondId: invite.pondId });
-      }
-      await deps.people.settleInvite(inviteId, "declined");
-      return out(204);
+      const done =
+        verb === "join"
+          ? await deps.people.acceptInvite(inviteId, who)
+          : await deps.people.declineInvite(inviteId, who);
+      // The Owner's Mac is woken and says the join or the decline in the Room.
+      await invitesChanged(done.pondId);
+      return verb === "join" ? out(200, { pondId: done.pondId }) : out(204);
     } catch (e) {
-      if (e && e.code === "pond-full") return out(409, { error: "full" });
-      if (e && e.code === "not-pending") return out(409, { error: "state" });
-      if (e && (e.code === "no-invite" || e.code === "no-pond")) return out(404, { error: "invite" });
-      throw e;
+      if (!(e && e.name === "PeopleError")) throw e;
+      if (e.code === "wrong-address") return out(403, { error: "email" });
+      if (e.code === "no-invite" || e.code === "no-pond") return out(404, { error: "invite" });
+      if (e.code === "pond-full") return out(409, { error: "full" });
+      const state = String(e.code).startsWith("was-") ? String(e.code).slice(4) : undefined;
+      return out(409, { error: "state", ...(state ? { state } : {}) });
     }
   }
 

@@ -422,3 +422,25 @@ describe("invitations from the Owner's Mac (its own key)", () => {
     );
   });
 });
+
+describe("the web's Ponds-screen verbs use the same lifecycle", () => {
+  it("/account/invitations join and decline settle the one record, wake the Owner's Mac, and keep the address check", async () => {
+    const { deps, published, people } = world();
+    const [a, b] = (await invite(deps, "sibhi", ["asha@example.com", "bea@example.com"])).json.results;
+    published.length = 0;
+    const join = await call(deps, "POST", `/account/invitations/${a.invite.inviteId}/join`, as("asha"), {});
+    expect([join.status, join.json]).toEqual([200, { pondId: POND }]);
+    expect(published.length).toBeGreaterThan(0);
+    expect(await people.membershipOf(POND, "asha")).toMatchObject({ role: "member" });
+    published.length = 0;
+    const eve = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/decline`, as("eve"), {});
+    expect(eve.status).toBe(403);
+    expect(published).toEqual([]);
+    expect((await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/decline`, as("bea"), {})).status).toBe(
+      204,
+    );
+    expect(published.length).toBeGreaterThan(0);
+    const again = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/join`, as("bea"), {});
+    expect([again.status, again.json]).toEqual([409, { error: "state", state: "declined" }]);
+  });
+});
