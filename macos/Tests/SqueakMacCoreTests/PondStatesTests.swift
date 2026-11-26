@@ -99,6 +99,18 @@ import Testing
         #expect(PondThreadStatus.visibility(isPrivate: true) == "Private")
     }
 
+    @Test func aDeletedPondSaysSoAndARemovalStillSaysRemoved() throws {
+        let deleted = try pond(#"{"id":"a","name":"greenroom","status":"removed","deleted":true,"statusLine":"greenroom was deleted."}"#)
+        #expect(deleted.deleted)
+        #expect(PondStates.card(for: deleted)?.title == "greenroom was deleted")
+        #expect(PondStates.card(for: deleted)?.line == "greenroom was deleted.")
+        let active = try pond(#"{"id":"a","name":"greenroom","status":"active"}"#)
+        #expect(PondNotes.joiner(old: [active], new: [deleted]).map(\.title) == ["greenroom was deleted"])
+        let removed = try pond(#"{"id":"a","name":"greenroom","status":"removed"}"#)
+        #expect(!removed.deleted)
+        #expect(PondStates.card(for: removed)?.title == "You were removed")
+    }
+
     @Test func joinerNotificationsFollowTransitions() throws {
         func p(_ s: String) throws -> PondSummary { try pond(#"{"id":"a","name":"greenroom","status":"\#(s)","ownerName":"Sibhi"}"#) }
         let pending = try [p("pending")]

@@ -123,14 +123,22 @@ function mac(name: string, nest: string | null = name + "-mac") {
 }
 
 /** A signed command built by hand, as a hostile or buggy member would. */
-async function rawCommand(who: Mac, pondId: string, body: Record<string, unknown>, opts: { tamper?: boolean } = {}) {
+async function rawCommand(
+  who: Mac,
+  pondId: string,
+  body: Record<string, unknown>,
+  opts: { tamper?: boolean; oldKey?: string } = {},
+) {
   const identity = JSON.parse(fs.readFileSync(path.join(who.dir, "flotilla", "identity.json"), "utf8")).identity;
   const pond = JSON.parse(fs.readFileSync(path.join(who.dir, "flotilla", "ponds.json"), "utf8")).ponds[pondId];
   const id = randomId(12);
   const docPath = `channels/${pondId}/tcmds/${id}`;
   const now = Date.now();
   const cmd = { id, issuedAt: now, expiresAt: now + 60_000, nonce: randomId(12), ...body };
-  const box = `${pond.current}.${sealAt(pond.keys[String(pond.current)], docPath, cmd)}`;
+  // A removed device wipes its copy of the keys (#128); a hostile one that copied the old key first passes it as `oldKey`.
+  const box = opts.oldKey
+    ? `1.${sealAt(opts.oldKey, docPath, cmd)}`
+    : `${pond.current}.${sealAt(pond.keys[String(pond.current)], docPath, cmd)}`;
   const doc = { box, sig: signText(identity.privateKey, signedText(docPath, box)), device: who.service.me.id, at: now };
   if (opts.tamper) doc.box = box.slice(0, -4) + (box.endsWith("AAAA") ? "BBBB" : "AAAA");
   await new RtdbRest(url).set(docPath, doc);
@@ -359,7 +367,7 @@ describe("two Macs over one store", () => {
     expect((await V.service.threads(pondId)).map((t) => t.title)).toContain("After removal");
     // Their keys document is now a note sealed to their key: it says "removed" and carries no key.
     expect(rtdb.tree.get(`channels/${pondId}/keys/${B.service.me.id}`)).toMatchObject({ device: A.service.me.id });
-    await rawCommand(B, pondId, { kind: "message", threadId: t2.id, text: "still here?" });
+    await rawCommand(B, pondId, { kind: "message", threadId: t2.id, text: "still here?" }, { oldKey });
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: false });
   });
 

@@ -94,6 +94,7 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     summaryWriters,
     ownerName: () => flotilla?.service?.identity.name ?? null,
+    standing: (projectId, authorId) => flotilla?.service?.authorStanding(projectId, authorId),
     attachmentsDir: path.join(supportDir, "room-attachments"),
     members: (id) => server?.pondMembers(id) ?? 0,
     helpers: (id) => host.helpersOf(id),

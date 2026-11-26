@@ -36,6 +36,7 @@ import {
 } from "./invites-port.js";
 import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
+import type { Standing } from "./standing.js";
 import {
   ARTIFACT_CHUNK_BYTES,
   ARTIFACT_FETCH_PER_HOUR,
@@ -184,8 +185,15 @@ interface LocalPond {
   requestedAt?: number;
   /** When a terminal status was reached. */
   endedAt?: number;
+  /** A member's device: the Pond ended because the Owner deleted it (not because this person was removed). */
+  deleted?: true;
   /** The Owner's Mac: what happened lately in the pond, newest first (the Room says the same as lines). */
   recent?: Ripple[];
+  /**
+   * The Owner's Mac: people who left or were removed, by member id: their name then, every id their posts carry (the member's
+   * and each device's), and whether their account is gone. Their posts stay and read "<name> (left)" until they come back.
+   */
+  departed?: Record<string, { name: string; at: number; ids: string[]; former?: boolean }>;
   /** The Owner's Mac: the highest cloud seq of a Member's queued ask (`rposts`) it has applied; the queue is read from there. */
   ingestedSeq?: number;
   /** The Owner's Mac: the same for the asks the service applies itself (leave, end a device, a Duck). */
@@ -323,6 +331,8 @@ export interface FlotillaOptions {
   updateRequired?: () => boolean;
   /** A stream notice waits this long for company before it starts a read (default 1 s); 0 in tests. */
   wakeDebounceMs?: number;
+  /** Deleting a Pond tells each Member first, then waits this long for them to read it before their access ends (default 2 s; 0 in tests). */
+  deleteGraceMs?: number;
   /** At least this long between two reads of one pond that a notice started (default 3 s). */
   wakeMinIntervalMs?: number;
   /** 0..1, for the back-off's jitter (default Math.random). */
@@ -376,6 +386,8 @@ export interface PondSummary {
   status: PondStatus;
   /** One plain sentence for the current state, made here so no surface words it (docs/ponds.md, "States"). */
   statusLine: string;
+  /** The Owner deleted this Pond (status `removed`): "<name> was deleted." */
+  deleted?: true;
   ownerName?: string;
   /** True until the first invite publishes it: only this Mac can see it. */
   local?: boolean;
@@ -1199,6 +1211,25 @@ export class FlotillaService extends EventEmitter {
 
   private async writeMember(pond: LocalPond, member: MemberDoc): Promise<void> {
     await this.put(pond, "members", member.id, member);
+    // Someone who left and is written again is the same person back: their posts lose "(left)".
+    if (pond.departed?.[member.id]) {
+      delete pond.departed[member.id];
+      if (Object.keys(pond.departed).length === 0) delete pond.departed;
+      this.save();
+      this.emit("departed", pond.id);
+    }
+  }
+
+  /**
+   * How one author of a Pond's Room stands, for the Owner's Mac (a project's pond): "left" or "former" for a person who is out,
+   * nothing for everyone else. Synchronous: it is read for every post served.
+   */
+  authorStanding(projectId: string, authorId: string): Standing | undefined {
+    const pondId = this.sharedPondOfProject(projectId);
+    const departed = pondId ? this.pondsFile.data.ponds[pondId]?.departed : undefined;
+    if (!departed) return undefined;
+    for (const d of Object.values(departed)) if (d.ids.includes(authorId)) return d.former ? "former" : "left";
+    return undefined;
   }
 
   /** The name this Mac goes by in one pond: what was typed at joining, else its own. */
@@ -1224,7 +1255,7 @@ export class FlotillaService extends EventEmitter {
       case "revoked":
         return `${owner} withdrew this invite.`;
       case "removed":
-        return `You were removed from ${pond.name}.`;
+        return pond.deleted ? `${pond.name} was deleted.` : `You were removed from ${pond.name}.`;
       case "active":
         break;
     }
@@ -1261,6 +1292,7 @@ export class FlotillaService extends EventEmitter {
       tint: TINTS[hash % TINTS.length]!,
       status,
       statusLine: this.statusLineOf(pond, members),
+      ...(pond.deleted ? { deleted: true as const } : {}),
       ...(pond.ownerName ? { ownerName: pond.ownerName } : {}),
       ...(pond.status === "pending" && pond.deviceJoin ? { connecting: true as const } : {}),
       ...(pond.local ? { local: true } : {}),
@@ -1432,16 +1464,19 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** Records a terminal status once: the row stays, the watch stops, what was remembered goes. */
-  private markEnded(pond: LocalPond, status: "removed" | "denied" | "revoked" | "expired"): "removed" {
+  private markEnded(pond: LocalPond, status: "removed" | "denied" | "revoked" | "expired", deleted = false): "removed" {
     if (pond.status === status) return "removed";
     pond.status = status;
+    if (deleted) pond.deleted = true;
     pond.endedAt = this.now();
     delete pond.token;
     delete pond.joinToken;
     this.watches.get(pond.id)?.();
     this.watches.delete(pond.id);
+    // This device's copy of the Pond goes the next time it learns of the end (issue #128): the row stays to say why.
+    pond.keys = {};
     this.save();
-    this.forgetSnapshot(pond.id);
+    this.wipeLocalCopy(pond.id);
     this.emit("changed", pond.id);
     this.emit("ended", pond.id, status);
     return "removed";
@@ -1731,10 +1766,10 @@ export class FlotillaService extends EventEmitter {
     });
   }
 
-  private async sendRemoval(pond: LocalPond, member: MemberDoc, only?: MemberDevice): Promise<void> {
+  private async sendRemoval(pond: LocalPond, member: MemberDoc, only?: MemberDevice, deleted = false): Promise<void> {
     for (const device of only ? [only] : devicesOf(member)) {
       const docPath = this.docPath(pond.id, "keys", device.id);
-      const box = sealToMember(device.boxKey, { removed: true });
+      const box = sealToMember(device.boxKey, deleted ? { removed: true, deleted: true } : { removed: true });
       const id = this.identity;
       await this.storeOf(pond).set(docPath, {
         box,
@@ -1921,6 +1956,9 @@ export class FlotillaService extends EventEmitter {
       const note = readPeopleNote(row.doc);
       if (note && note.reqId === row.id) {
         await this.applyPeopleNote(pond, members, note);
+        for (const [id, m] of [...members])
+          if (m.accountId === note.userId && m.role !== "owner" && note.act !== "role") members.delete(id);
+        if (note.act !== "role") byAccount.delete(note.userId);
         await this.dropDeviceRequest(pond, row.id);
         continue;
       }
@@ -2040,11 +2078,10 @@ export class FlotillaService extends EventEmitter {
       await this.changeRole(pond.id, target.id, note.role!).catch(() => undefined);
       return;
     }
-    const say =
-      note.act === "leave"
-        ? (gone: MemberDoc) => `${gone.name} left the pond`
-        : (gone: MemberDoc) => `removed ${gone.name}`;
-    await this.removeAndRotate(pond.id, target.id, say).catch(() => undefined);
+    // Final at once in the relay already; this Mac drops the Member, rotates the key, says it in the Room and remembers them.
+    await this.applyAccountGone(pond.id, note.userId, note.act === "leave" ? "left" : "removed").catch((error) =>
+      logger.warn("could not finish a removal the web ended", { pond: pond.id, error: String(error) }),
+    );
   }
 
   /**
@@ -2173,8 +2210,14 @@ export class FlotillaService extends EventEmitter {
         return 0;
       }
       const me = this.identity;
-      this.pruneLeft(new Set(list.filter((e) => !e.left).map((e) => e.pondId)));
+      this.pruneLeft(new Set(list.filter((e) => !e.left && !e.deleted).map((e) => e.pondId)));
       for (const entry of list) {
+        if (entry.deleted) {
+          // The Owner deleted the pond and this device missed the Owner's note: it still reads "<Pond> was deleted".
+          const mine = this.pondsFile.data.ponds[entry.pondId];
+          if (mine && mine.role !== "owner" && !TERMINAL.includes(mine.status)) this.markEnded(mine, "removed", true);
+          continue;
+        }
         if (entry.left) {
           // This account left the pond on another device: drop it here and never ask for it again.
           const mine = this.pondsFile.data.ponds[entry.pondId];
@@ -2243,14 +2286,45 @@ export class FlotillaService extends EventEmitter {
       .catch(() => undefined);
   }
 
+  /**
+   * The cloud already cut an account off (it left, or the Owner removed it from the web: issue #128). The Owner's Mac drops
+   * that account's Member document, ends its tokens, says it in the Room and rotates the key. Nothing is rewritten: every
+   * remaining Member holds every key version. A person already dropped, or never listed here, is a no-op.
+   */
+  async applyAccountGone(pondId: string, accountId: string, reason: "left" | "removed" | "deleted"): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner" || pond.local) return;
+    const member = [...(await this.members(pond)).values()].find(
+      (m) => m.accountId === accountId && m.role !== "owner",
+    );
+    if (!member) return;
+    await this.removeAndRotate(
+      pondId,
+      member.id,
+      reason === "removed" ? (gone) => `removed ${gone.name}` : () => "left",
+      reason !== "removed",
+      reason === "deleted",
+    ).catch((error) => {
+      if (!(error instanceof FlotillaError && error.status === 404)) throw error;
+    });
+  }
+
   /** One removal per member at a time: a second press while the first runs joins it instead of rotating the key twice. */
   private readonly removing = new Map<string, Promise<void>>();
 
-  private removeAndRotate(pondId: string, memberId: string, say: (gone: MemberDoc) => string): Promise<void> {
+  private removeAndRotate(
+    pondId: string,
+    memberId: string,
+    say: (gone: MemberDoc) => string,
+    leaver = false,
+    former = false,
+  ): Promise<void> {
     const key = `${pondId}/${memberId}`;
     const running = this.removing.get(key);
     if (running) return running;
-    const run = this.removeAndRotateOnce(pondId, memberId, say).finally(() => this.removing.delete(key));
+    const run = this.removeAndRotateOnce(pondId, memberId, say, leaver, former).finally(() =>
+      this.removing.delete(key),
+    );
     this.removing.set(key, run);
     return run;
   }
@@ -2260,7 +2334,13 @@ export class FlotillaService extends EventEmitter {
     return this.removing.has(`${pondId}/${memberId}`);
   }
 
-  private async removeAndRotateOnce(pondId: string, memberId: string, say: (gone: MemberDoc) => string): Promise<void> {
+  private async removeAndRotateOnce(
+    pondId: string,
+    memberId: string,
+    say: (gone: MemberDoc) => string,
+    leaver: boolean,
+    former: boolean,
+  ): Promise<void> {
     const pond = this.activePond(pondId);
     this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner cannot remove themselves.");
@@ -2289,12 +2369,24 @@ export class FlotillaService extends EventEmitter {
     // Whatever they still held (a question being answered) goes with them: a hold by a key that is no member reads as nothing.
     await this.dropHoldsOf(pond, memberId).catch(() => undefined);
     members.delete(memberId);
+    // Their posts stay, marked "(left)" (or "Former member"): remembered here, and the Room is written again with the mark.
+    (pond.departed ??= {})[gone.id] = {
+      name: gone.name,
+      at: this.now(),
+      ids: [gone.id, ...devicesOf(gone).map((d) => d.id)],
+      ...(former ? { former: true } : {}),
+    };
     pond.rotationPending = true;
     this.save();
+    this.emit("departed", pond.id);
     // Said as soon as they are out: the rotation below is many relay calls, and a failure there must not leave the
     // removal unrecorded.
     const sentence = say(gone);
-    if (sentence) await this.ripple(pondId, sentence, undefined, "left").catch(() => undefined);
+    // A person who left is the one saying it ("Asha left"); a removal is the Owner's ("Sibhi removed Asha").
+    if (sentence)
+      await this.ripple(pondId, sentence, leaver ? { id: gone.id, name: gone.name } : undefined, "left").catch(
+        () => undefined,
+      );
     await this.rotate(pond, members);
     delete pond.rotationPending;
     this.save();
@@ -2415,6 +2507,16 @@ export class FlotillaService extends EventEmitter {
       return;
     }
     const members = await this.members(pond);
+    // Each Member's device is told "deleted" first, so it reads "<Pond> was deleted." and not "You were removed".
+    let told = 0;
+    for (const member of members.values()) {
+      if (member.id === this.identity.id) continue;
+      await this.sendRemoval(pond, member, undefined, true)
+        .then(() => told++)
+        .catch(() => undefined);
+    }
+    const grace = this.options.deleteGraceMs ?? 2_000;
+    if (told > 0 && grace > 0) await new Promise((r) => setTimeout(r, grace));
     for (const member of members.values()) {
       if (member.id !== this.identity.id) {
         await this.revokeToken(pond, member.id, "Squeak couldn't end a member's access. Try again.");
@@ -2687,11 +2789,12 @@ export class FlotillaService extends EventEmitter {
         key: string;
         versions?: unknown;
         removed?: unknown;
+        deleted?: unknown;
         token?: { value?: unknown; expiresAt?: unknown };
       }>(me.privateKey, doc.box);
       if (grant.removed === true) {
         // A person asking to join again still has the old note: it ends nothing until the owner approves.
-        if (allowRemoval) this.markEnded(pond, "removed");
+        if (allowRemoval) this.markEnded(pond, "removed", grant.deleted === true);
         return;
       }
       const held: Array<[string, string]> = [];
@@ -3291,6 +3394,11 @@ export class FlotillaService extends EventEmitter {
    * The pond a project of this Mac was published as (this Mac its owner), else null: only a shared pond carries its Room to
    * Members. A local pond never leaves the Mac.
    */
+  projectOfPond(pondId: string): string | null {
+    const p = this.pondsFile.data.ponds[pondId];
+    return p && p.role === "owner" && !p.local ? (p.projectId ?? null) : null;
+  }
+
   sharedPondOfProject(projectId: string): string | null {
     const found = Object.values(this.pondsFile.data.ponds).find(
       (p) => p.projectId === projectId && p.role === "owner" && p.status === "active" && !p.local,
@@ -3315,6 +3423,12 @@ export class FlotillaService extends EventEmitter {
       me: { id: this.selfId(pond), name: this.nameIn() },
       ownerId,
       now: this.now,
+      standing: (authorId) => {
+        const departed = pond.departed;
+        if (!departed) return undefined;
+        for (const d of Object.values(departed)) if (d.ids.includes(authorId)) return d.former ? "former" : "left";
+        return undefined;
+      },
       put: (kind, docId, value) => this.put(pond, kind, docId, value),
       remove: (kind, docId) => store.delete(this.docPath(pond.id, kind, docId)),
       list: async (kind) => {
@@ -4125,7 +4239,7 @@ export class FlotillaService extends EventEmitter {
     if (pond.role !== "owner") return;
     if (act.leave) {
       if (from.id === this.identity.id) return;
-      await this.removeAndRotate(pondId, from.id, (gone) => `${gone.name} left the pond`).catch(() => undefined);
+      await this.removeAndRotate(pondId, from.id, () => "left", true).catch(() => undefined);
     } else if (act.removeDevice) {
       const member = (await this.members(pond)).get(from.id);
       if (member && devicesOf(member).some((d) => d.id === act.removeDevice))
@@ -4485,6 +4599,7 @@ export class FlotillaService extends EventEmitter {
         "inviteExpiresAt",
         "requestedAt",
         "endedAt",
+        "deleted",
         "recent",
         "ingestedSeq",
         "actsSeq",
@@ -4502,6 +4617,18 @@ export class FlotillaService extends EventEmitter {
     return done;
   }
 
+  /**
+   * Deletes what this device keeps of a Pond it is out of: the snapshot, downloaded files, and what the Room sync holds in
+   * memory (listeners of "wiped"). Never touches the Pond's row: that stays to say "You were removed" until it is dismissed.
+   */
+  wipeLocalCopy(pondId: string): void {
+    this.forgetSnapshot(pondId);
+    this.summaryCache.delete(pondId);
+    for (const key of [...this.downloads.keys()]) if (key.startsWith(`${pondId}:`)) this.downloads.delete(key);
+    fs.rmSync(path.join(this.options.supportDir, "artifact-cache", pondId), { recursive: true, force: true });
+    this.emit("wiped", pondId);
+  }
+
   /** Forget a member's pending work and local ponds, for tests and for leaving. */
   forgetPond(pondId: string): void {
     this.watches.get(pondId)?.();
@@ -4511,9 +4638,7 @@ export class FlotillaService extends EventEmitter {
     this.lastPresence.delete(pondId);
     this.echoes.delete(pondId);
     this.backoffs.delete(pondId);
-    this.summaryCache.delete(pondId);
-    this.forgetSnapshot(pondId);
-    fs.rmSync(path.join(this.options.supportDir, "artifact-cache", pondId), { recursive: true, force: true });
+    this.wipeLocalCopy(pondId);
   }
 }
 

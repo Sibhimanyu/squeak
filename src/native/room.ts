@@ -305,6 +305,8 @@ export interface RoomOptions {
   store: NativeStore;
   /** The pond member name for the owner, when there is one (else the macOS full name, else "owner"). */
   ownerName?: () => string | null;
+  /** How a person's post stands: "left" / "former" for someone who is out of the Pond (docs/spec.md); absent for everyone else. */
+  standing?: (projectId: string, authorId: string) => "left" | "former" | undefined;
   now?: () => number;
   /** Where attachments' bytes are kept (the support dir's `room-attachments`); a temp folder when absent (tests). */
   attachmentsDir?: string;
@@ -735,6 +737,19 @@ export class Room extends EventEmitter {
     });
   }
 
+  /** A person who left reads "<name> (left)"; once their account is gone, "Former member". */
+  private shownAuthor<A extends { kind: string; id?: string; name: string }>(
+    projectId: string,
+    r: RoomPostRow,
+    author: A,
+  ): A {
+    const name = this.senderName(r);
+    const standing =
+      r.authorKind === "person" && r.authorId ? this.options.standing?.(projectId, r.authorId) : undefined;
+    if (!standing) return { ...author, name };
+    return { ...author, name: standing === "former" ? "Former member" : `${name} (left)` };
+  }
+
   /** The wire form of posts, with their attachments and the receiving Duck's name. */
   toPosts(projectId: string, rows: RoomPostRow[]): RoomPost[] {
     const atts = this.attachments.forPosts(
@@ -747,7 +762,7 @@ export class Room extends EventEmitter {
       const post = toRoomPost(r);
       return {
         ...post,
-        author: { ...post.author, name: this.senderName(r) },
+        author: this.shownAuthor(projectId, r, post.author),
         ...(toName ? { toName } : {}),
         ...(a?.length ? { attachments: a } : {}),
         ...this.turnOfPost(r),

@@ -78,6 +78,8 @@ export interface AccountPond {
   ownerName?: string;
   /** This account left the pond (on any device): other devices drop it and never ask to be added. */
   left?: true;
+  /** The Owner deleted the pond (the relay keeps this for a week so a device that missed the note still says so). */
+  deleted?: true;
 }
 
 export interface DeviceRequestBody {
@@ -189,6 +191,7 @@ export class HttpPondRelay implements PondRelay {
         name?: unknown;
         ownerName?: unknown;
         left?: unknown;
+        deleted?: unknown;
       } | null;
       return r && typeof r.pondId === "string" && typeof r.ownerKey === "string"
         ? [
@@ -198,6 +201,7 @@ export class HttpPondRelay implements PondRelay {
               ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
               ...(typeof r.ownerName === "string" && r.ownerName ? { ownerName: r.ownerName } : {}),
               ...(r.left === true ? { left: true as const } : {}),
+              ...(r.deleted === true ? { deleted: true as const } : {}),
             },
           ]
         : [];

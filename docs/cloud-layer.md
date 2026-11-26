@@ -345,7 +345,7 @@ Owner routes (an account token, or the Owner's Mac's own key; the caller's accou
 invite makes the Pond exist in the cloud with that account as Owner):
 
 - `POST /ponds/<id>/invites { emails: [1..10], role: "member" | "viewer", pondName }` answers `200 { results: [{ email, ok,
-  mailed, invite } | { email, ok: false, error, message }] }`. Each refusal is a plain sentence: "<email> is already in this
+mailed, invite } | { email, ok: false, error, message }] }`. Each refusal is a plain sentence: "<email> is already in this
   Pond.", "<email> already has a pending invitation.", "This Pond holds 10 people, counting invitations. Withdraw an
   invitation or remove someone first.", "<x> is not an email address." The email goes out through the mail path (below); a
   failed send leaves the invite pending (`mailed: false`) and Resend tries again.

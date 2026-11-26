@@ -23,6 +23,7 @@ Static HTML, light theme (DESIGN.md Mac light neutrals, warm), system font stack
 **settings.html (phone)** - Account: name and email read-only with a note that they come from Zoho; Your devices (this device has no Remove, others do, with "removing removes it from every Pond"); one line "Open on your Mac" for what the web leaves out; Sign out.
 
 ## Spec conflicts and calls I made
+
 - Ducks "working first" contradicts DESIGN 3.3 "order is never state, newest first". I followed the brief (Working group, then Earlier newest first). Decide which wins.
 - The Room feed is oldest to newest with the newest at the bottom (chat), while lists are newest first.
 - Spec says the web does approvals not at all; Needs you therefore holds only questions, never edit approvals.
@@ -31,6 +32,7 @@ Static HTML, light theme (DESIGN.md Mac light neutrals, warm), system font stack
 - Light theme only here; the Mac is dark primary.
 
 ## Open questions
+
 - Dark theme for the web (follow the system)?
 - Does the Pond list on phone show Needs you above Invitations, or Invitations first as drawn (an invitation is time-sensitive, a question is waiting on you)?
 - "Make task" as a chip above the composer: right place, or inside a composer menu?

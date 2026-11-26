@@ -45,6 +45,7 @@ public enum PondStates {
         case .revoked:
             return PondStateCard(title: "This invite was withdrawn", line: pond.statusLine ?? "\(owner ?? "The owner") withdrew this invite.", tone: .problem, button: "Remove", forgets: true)
         case .removed:
+            if pond.deleted { return PondStateCard(title: "\(pond.name) was deleted", line: pond.statusLine ?? "\(pond.name) was deleted.", tone: .problem, button: "Remove", forgets: true) }
             return PondStateCard(title: "You were removed", line: pond.statusLine ?? "You were removed from \(pond.name).", tone: .problem, button: "Remove", forgets: true)
         }
     }
@@ -335,7 +336,9 @@ public enum PondNotes {
             case (_, .declined) where was == .pending: return note(.declined, "\(owner ?? "The owner") declined your request", p.name)
             case (_, .expired) where was == .pending: return note(.expired, "This invite expired", "\(p.name): \(p.statusLine ?? "Ask for a new one.")")
             case (_, .revoked) where was == .pending: return note(.revoked, "This invite was withdrawn", "\(p.name): \(p.statusLine ?? "Ask for a new one.")")
-            case (.active, .removed), (.pending, .removed): return note(.removed, "You were removed from \(p.name)", p.statusLine ?? "The owner took you out of the pond.")
+            case (.active, .removed), (.pending, .removed):
+                if p.deleted { return note(.removed, "\(p.name) was deleted", p.statusLine ?? "The owner deleted the pond.") }
+                return note(.removed, "You were removed from \(p.name)", p.statusLine ?? "The owner took you out of the pond.")
             default: return nil
             }
         }

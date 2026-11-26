@@ -11,6 +11,7 @@ Static HTML plus headless-Chrome PNGs. Same family as `../web/`: warm light neut
 **email.html (600x900 @2x)** - Subject, To and From shown above the card. Card: Pond-tinted header with lockup, tile, avatars and the headline; one line on what Squeak is; one Open invitation button; "You don't need to install anything to join."; a soft note that Squeak for Mac is optional and the invite is also waiting in the app; footer with the masked address and expiry (3 December 2026).
 
 ## Spec conflicts and calls
+
 - Spec asks for "a Duck working on a Task" picture; no existing PNG shows that. I used the Duck asking a question (`duck.png`), which is the closest real shot. A new capture is needed if it must show a Task.
 - The Dashboard picture is the Owner's view (Invite button, Approve). A Member view (`member-view.png`) would match "what you can do" better and could replace it.
 - Phone page and 2000 px: content needs about 3000 px, so the render is taller than requested.
@@ -19,6 +20,7 @@ Static HTML plus headless-Chrome PNGs. Same family as `../web/`: warm light neut
 - Mac story bullet "Get Squeak for Mac" has no destination URL in the spec; it is shown without one.
 
 ## Open questions
+
 - Show the members' names in the hero, or only avatars (names come from the invite record)?
 - Should the email show the avatars at all, since mail clients may block images (they are inline discs here, but real email needs hosted images)?
 - Is a one-line Member sentence enough, or should the Viewer wording also be mocked (it depends on the invited role)?

@@ -191,8 +191,9 @@ describe("rotating the pond key", () => {
     await B.service.refresh(pond.id);
     expect((await B.service.view(pond.id)).pond.status).toBe("removed");
     const keys = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id].keys;
-    expect(Object.keys(keys)).toEqual(["1"]);
-    expect(oldKey).toBe(keys["1"]);
+    // The removed device deletes its copy of the keys (#128).
+    expect(keys).toEqual({});
+    expect(oldKey).toBeTruthy();
     await C.service.refresh(pond.id);
     const view = await C.service.view(pond.id);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Sibhi", "Vera"]);

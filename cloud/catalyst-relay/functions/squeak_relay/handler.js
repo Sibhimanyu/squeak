@@ -31,7 +31,8 @@
 //                         name, kind} registers or refreshes one -> {deviceId}; DELETE /account/devices/<deviceId> -> 204: removes it
 //                         from the account and from every Pond at once (its tokens are refused) and leaves a relay-owned removal
 //                         note in each Pond's devreqs for the Owner's Mac, which rotates the key when it is online
-//   POST   /account/pond-leaves {pondId} (same callers): marks the caller's own index entry left (idempotent, 403 if not listed);
+//   POST   /account/pond-leaves {pondId} (same callers): leaves the Pond, final at once: membership ended, every device's pond tokens
+//                         refused, live subscriptions closed, a relay-owned devreqs/acct-<userId> note for the Owner's Mac; marks the caller's own index entry left (idempotent, 403 if not listed or a member);
 //                         GET /account/ponds then returns it with left:true; the owner's remove or a fresh add clears it
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
 //   GET    /account/handoff?return=<pinned web origin> (cookie): the web app on another origin (squeak.onslate.in) signs in HERE
@@ -1028,7 +1029,15 @@ function createRelay(deps) {
         }),
       );
     }
-    for (const userId of new Set(remove)) await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
+    for (const userId of new Set(remove)) {
+      // Taking an account off the index is a removal: final at once (someone who left is no longer in: a no-op).
+      const before = parseOr(await deps.store.get(`${ACCT_PONDS_PK}/${userId}`, pondId));
+      if (deps.people && (!before || before.left !== true))
+        await ejectAccount(pondId, userId, "removed").catch((e) => {
+          if (!(e && e.name === "PeopleError")) throw e;
+        });
+      await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
+    }
     return out(204);
   }
 
@@ -1123,6 +1132,7 @@ function createRelay(deps) {
           ? await deps.people.acceptInvite(inviteId, who)
           : await deps.people.declineInvite(inviteId, who);
       // The Owner's Mac is woken and says the join or the decline in the Room.
+      if (verb === "join") await restoreAccount(done.pondId, user.userId);
       await invitesChanged(done.pondId);
       return verb === "join" ? out(200, { pondId: done.pondId }) : out(204);
     } catch (e) {
@@ -1144,6 +1154,8 @@ function createRelay(deps) {
     return user && USER_ID.test(String(user.userId)) ? user : null;
   }
 
+  const DELETED_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
   /** GET /account/ponds: the ponds the caller's own account is a member of. Only that account reads its own row. */
   async function handleAccountPonds(req, res, method, mac) {
     const out = (status, body) => send(res, status, body, NO_STORE);
@@ -1155,12 +1167,17 @@ function createRelay(deps) {
     for (const r of rows) {
       const v = parseOr(r.json);
       if (!v || typeof v.ownerKey !== "string" || !scoped.POND.test(r.doc)) continue;
+      if (v.deleted === true && !(Date.now() - Number(v.deletedAt || 0) < DELETED_KEEP_MS)) {
+        await gone(`${ACCT_PONDS_PK}/${user.userId}`, r.doc);
+        continue;
+      }
       ponds.push({
         pondId: r.doc,
         ownerKey: v.ownerKey,
         ...(typeof v.name === "string" && v.name ? { name: v.name } : {}),
         ...(typeof v.ownerName === "string" && v.ownerName ? { ownerName: v.ownerName } : {}),
         ...(v.left === true ? { left: true } : {}),
+        ...(v.deleted === true ? { deleted: true } : {}),
       });
       if (ponds.length >= ACCT_PONDS_MAX) break;
     }
@@ -1168,9 +1185,56 @@ function createRelay(deps) {
   }
 
   /**
-   * POST /account/pond-leaves { pondId }: the caller's account marks its own index entry for the pond as left (idempotent).
-   * The entry stays, flagged `left`, so every device of the account sees it; the owner's remove clears it, and a fresh add
-   * (the put in handlePondAccounts) rewrites the row without the marker. 403 when the account is not listed for the pond.
+   * An account leaves a Pond or is removed from it (issue #128, docs/spec.md "Removal is final at once"). At once, in the cloud:
+   * the membership row ends (so the feed, blobs and Mac reads refuse the account, and the live hub is told to close its
+   * subscriptions), and every device of the account that this Pond knows has its tokens refused (`revoked/`). The caller then
+   * writes the one `peopleNote` that tells the Owner's Mac to drop the Member and rotate the key when it is next online.
+   * Returns whether the account was a member in the people tables. The Owner is never ejected (a PeopleError "owner").
+   */
+  async function ejectAccount(pondId, userId, reason) {
+    let was = false;
+    if (deps.people) {
+      try {
+        await deps.people.removeMember({ pondId, userId, reason });
+        was = true;
+      } catch (e) {
+        if (!(e && e.name === "PeopleError" && e.code === "not-member")) throw e;
+      }
+    }
+    for (const id of await accountDeviceIds(pondId, userId)) {
+      await deps.store.put(`revoked/${pondId}`, id, JSON.stringify({ at: Date.now() }));
+    }
+    return was;
+  }
+
+  /** The devices of an account this Pond knows: the account's registered ones and those that asked to join this Pond. */
+  async function accountDeviceIds(pondId, userId) {
+    const ids = new Set();
+    if (deps.people) for (const d of await deps.people.devicesOf(userId).catch(() => [])) ids.add(d.deviceId);
+    for (const r of await deps.store.list(`channels/${pondId}/devreqs`)) {
+      const v = parseOr(r.json);
+      if (v && v.userId === userId && v.gone !== true && v.accountGone !== true) ids.add(r.doc);
+    }
+    return [...ids].filter((id) => scoped.MEMBER.test(id));
+  }
+
+  /** A new invitation was accepted: the same account's devices are let in again, and the removal note is withdrawn. */
+  async function restoreAccount(pondId, userId) {
+    for (const id of await accountDeviceIds(pondId, userId)) await gone(`revoked/${pondId}`, id);
+    const pk = `channels/${pondId}/devreqs`;
+    for (const act of ["remove", "leave"]) {
+      const id = `pn-${act}-${userId}`.slice(0, 64);
+      if ((await deps.store.get(pk, id)) !== null) {
+        await gone(pk, id);
+        await publishNotice(pk, id);
+      }
+    }
+  }
+
+  /**
+   * POST /account/pond-leaves { pondId }: the caller's account leaves the Pond, final at once (ejectAccount). Its own index entry
+   * stays, flagged `left`, so every device of the account sees it; the owner's remove clears it, and a fresh add (the put in
+   * handlePondAccounts) rewrites the row without the marker. 403 when the account is neither listed nor a member; idempotent.
    */
   async function handlePondLeave(req, res, method, mac) {
     const out = (status, body) => send(res, status, body, NO_STORE);
@@ -1181,18 +1245,19 @@ function createRelay(deps) {
     if (typeof body.pondId !== "string" || !scoped.POND.test(body.pondId)) return out(400, { error: "ids" });
     const pk = `${ACCT_PONDS_PK}/${user.userId}`;
     const row = parseOr(await deps.store.get(pk, body.pondId));
-    if (!row || typeof row.ownerKey !== "string") return out(403, { error: "pond" });
-    if (row.left !== true)
-      await deps.store.put(pk, body.pondId, JSON.stringify({ ...row, left: true, leftAt: Date.now() }));
-    // The cloud's own record of who is in the Pond, and a note the Owner's Mac applies (key rotation, the Room line).
-    if (deps.people) {
-      const m = await deps.people.membershipOf(body.pondId, user.userId).catch(() => null);
-      if (m && m.role !== "owner" && m.leftAt === 0 && m.slot >= 0) {
-        await deps.people.removeMember({ pondId: body.pondId, userId: user.userId, reason: "left" });
-        await revokeAccountIn(body.pondId, user.userId);
-        await peopleNote(body.pondId, user.userId, "leave");
-      }
+    const listed = !!row && typeof row.ownerKey === "string";
+    const member = deps.people ? await deps.people.isMember(body.pondId, user.userId).catch(() => false) : false;
+    if (!listed && !member) return out(403, { error: "pond" });
+    try {
+      if (member || row.left !== true) await ejectAccount(body.pondId, user.userId, "left");
+    } catch (e) {
+      if (e && e.name === "PeopleError" && e.code === "owner") return out(409, { error: "owner" });
+      throw e;
     }
+    if (listed && row.left !== true)
+      await deps.store.put(pk, body.pondId, JSON.stringify({ ...row, left: true, leftAt: Date.now() }));
+    // The note the Owner's Mac applies (key rotation, the Room line); it finds the Member by account, so it is idempotent.
+    await peopleNote(body.pondId, user.userId, "leave");
     return out(204);
   }
 
@@ -1268,8 +1333,19 @@ function createRelay(deps) {
         if (typeof body.name !== "string" || body.name.trim() !== pond.name)
           return out(400, { error: "name", message: "Type the Pond's name to delete it." });
         for (const m of await deps.people.membersOf(pondId)) {
-          if (m.role !== "owner") await revokeAccountIn(pondId, m.userId);
-          await gone(`${ACCT_PONDS_PK}/${m.userId}`, pondId);
+          if (m.role === "owner") {
+            await gone(`${ACCT_PONDS_PK}/${m.userId}`, pondId);
+            continue;
+          }
+          await revokeAccountIn(pondId, m.userId);
+          // The index row stays a week as "deleted", so a device that missed the Owner's note still reads "<Pond> was deleted".
+          const row = parseOr(await deps.store.get(`${ACCT_PONDS_PK}/${m.userId}`, pondId));
+          if (row)
+            await deps.store.put(
+              `${ACCT_PONDS_PK}/${m.userId}`,
+              pondId,
+              JSON.stringify({ ...row, deleted: true, deletedAt: Date.now() }),
+            );
         }
         await deps.people.deletePond(pondId);
         await peopleNote(pondId, user.userId, "delete");
@@ -1280,8 +1356,7 @@ function createRelay(deps) {
       const target = await deps.people.membershipOf(pondId, userId);
       if (!target || target.leftAt !== 0 || target.slot < 0) return out(404, { error: "not-member" });
       if (method === "DELETE" && action === null) {
-        await deps.people.removeMember({ pondId, userId, reason: "removed" });
-        await revokeAccountIn(pondId, userId);
+        await ejectAccount(pondId, userId, "removed");
         await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
         await peopleNote(pondId, userId, "remove");
         await invitesChanged(pondId);
@@ -1710,6 +1785,7 @@ function createRelay(deps) {
         parts[2] === "accept"
           ? await deps.people.acceptInvite(parts[1], user)
           : await deps.people.declineInvite(parts[1], user);
+      if (parts[2] === "accept") await restoreAccount(done.pondId, user.userId);
       await invitesChanged(done.pondId);
       return out(200, { invite: await inviteOut(done) });
     } catch (e) {

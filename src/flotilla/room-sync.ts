@@ -18,6 +18,7 @@ import type { Caps } from "./permissions.js";
 import { DOC_ID, FlotillaError, type Role } from "./types.js";
 import type { FlotillaService } from "./service.js";
 import { readMemberAct, type MemberAct, type Ripple } from "./types.js";
+import { readStanding, shownName, type Standing } from "./standing.js";
 
 /**
  * The Room reaches Members (docs/ponds.md, "The Room reaches Members"). The Owner's Mac holds the Room; for a shared pond it
@@ -61,6 +62,8 @@ export interface RoomPort {
   me: { id: string; name: string };
   ownerId: string;
   now: () => number;
+  /** The Owner's Mac: how a post's author stands now (left, or former once their account is gone); nothing for the rest. */
+  standing?: (authorId: string) => Standing | undefined;
   put(kind: string, docId: string, value: unknown): Promise<void>;
   remove(kind: string, docId: string): Promise<void>;
   list(kind: string): Promise<RoomSignedDoc[]>;
@@ -92,7 +95,8 @@ export interface RoomDoc {
   v: 1;
   seq: number;
   id: string;
-  author: { kind: "person" | "agent"; id?: string; name: string };
+  /** `standing`: the person is out of the Pond ("left", or "former" once their account is gone); the name is theirs as it was. */
+  author: { kind: "person" | "agent"; id?: string; name: string; standing?: Standing };
   kind: RoomPostKind;
   level: "room";
   text: string;
@@ -162,7 +166,12 @@ export function readRoomDoc(v: unknown): RoomDoc | null {
     v: 1,
     seq: v.seq,
     id: v.id,
-    author: { kind: a.kind, ...(typeof a.id === "string" ? { id: a.id } : {}), name: a.name },
+    author: {
+      kind: a.kind,
+      ...(typeof a.id === "string" ? { id: a.id } : {}),
+      name: a.name,
+      ...(readStanding(a.standing) ? { standing: readStanding(a.standing)! } : {}),
+    },
     kind: v.kind as RoomPostKind,
     level: "room",
     text: v.text,
@@ -255,7 +264,11 @@ export function roomDocOf(
   },
   ownerId?: string,
   /** `attached`: the post has pictures or files (a post of only a picture has no text); `blobs`: their cloud references, once uploaded. */
-  opts: { attached?: boolean; blobs?: BlobRef[] } = {},
+  opts: {
+    attached?: boolean;
+    blobs?: BlobRef[];
+    standing?: ((authorId: string) => Standing | undefined) | undefined;
+  } = {},
 ): RoomDoc | null {
   // A line Squeak says about the Pond (someone joined, left, was removed) travels as a message from Squeak.
   const line = row.authorKind === "squeak" && row.id.startsWith("ln-");
@@ -275,6 +288,10 @@ export function roomDocOf(
         ? { id: row.authorId === "owner" && ownerId ? ownerId : row.authorId }
         : {}),
       name: row.authorName.slice(0, 100),
+      // A person who left or was removed: their post stays, and every reader marks it.
+      ...(row.authorKind === "person" && row.authorId && opts.standing?.(row.authorId)
+        ? { standing: opts.standing(row.authorId)! }
+        : {}),
     },
     kind: row.kind,
     level: "room",
@@ -370,7 +387,24 @@ export class RoomSync extends EventEmitter {
     this.o.jobs.on("job", onTask);
     this.o.service.on("pass", onPass);
     this.o.service.on("line", onLine);
+    // Someone left, was removed or came back: their posts are written again with (or without) the mark. A Pond this device is
+    // out of keeps nothing in memory.
+    const onDeparted = (pondId: string): void => {
+      this.published.delete(pondId);
+      this.inboxPosts.delete(pondId);
+      const project = this.o.service.projectOfPond?.(pondId);
+      if (project) this.changed(project);
+    };
+    const onWiped = (pondId: string): void => {
+      this.published.delete(pondId);
+      this.inboxPosts.delete(pondId);
+      this.slots.delete(pondId);
+    };
+    this.o.service.on("departed", onDeparted);
+    this.o.service.on("wiped", onWiped);
     this.detach.push(
+      () => this.o.service.off("departed", onDeparted),
+      () => this.o.service.off("wiped", onWiped),
       () => this.o.service.off("line", onLine),
       () => this.o.room.off("post", onPost),
       () => this.o.jobs.off("job", onTask),
@@ -591,7 +625,7 @@ export class RoomSync extends EventEmitter {
       // First time since this Mac started: learn what the cloud already holds, so a restart rewrites nothing it need not.
       const want = new Map<string, string>();
       for (const row of rows) {
-        const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id) });
+        const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id), standing: port.standing });
         if (doc) want.set(doc.id, JSON.stringify(doc));
       }
       const held = await port.list("room");
@@ -618,7 +652,7 @@ export class RoomSync extends EventEmitter {
     const keep = new Set<string>();
     const inboxIds = this.inbox(pondId);
     for (const row of rows) {
-      const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id) });
+      const doc = roomDocOf(row, port.ownerId, { attached: attached.has(row.id), standing: port.standing });
       // A Member's post the cloud numbered is in the cloud already, as their own signed document: not written twice.
       if (!doc || inboxIds.has(doc.id)) continue;
       keep.add(doc.id);
@@ -735,7 +769,11 @@ export class RoomSync extends EventEmitter {
     let posts: RoomDoc[];
     if (opts.since !== undefined) posts = all.filter((p) => p.seq > opts.since!).slice(0, limit);
     else posts = all.filter((p) => p.seq < (opts.before ?? Number.MAX_SAFE_INTEGER)).slice(-limit);
-    const shown = posts.map((p) => (p.blobs ? { ...p, attachments: p.blobs.map((b) => blobView(pondId, b)) } : p));
+    // A person who left reads "<name> (left)" (or "Former member"): the mark was written with the post by the Owner's Mac.
+    const marked = posts.map((p) =>
+      p.author.standing ? { ...p, author: { ...p.author, name: shownName(p.author.name, p.author.standing) } } : p,
+    );
+    const shown = marked.map((p) => (p.blobs ? { ...p, attachments: p.blobs.map((b) => blobView(pondId, b)) } : p));
     const tasks: RoomTaskDoc[] = [];
     for (const d of taskDocs) {
       const doc = readRoomTaskDoc(d.value);

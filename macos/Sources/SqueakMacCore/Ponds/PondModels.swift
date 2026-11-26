@@ -94,6 +94,8 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     /// The host's one plain sentence for the current state ("Waiting for Sibhi to approve you as a member."); nil from an older host.
     public var statusLine: String?
     public var ownerName: String?
+    /// The Owner deleted this Pond (state `removed`): the card says "was deleted", not "You were removed".
+    public var deleted: Bool = false
     /// For a pending join: the three words the owner's approval screen shows too; empty from an older host.
     public var words: [String]
     /// The relay could not be reached and this is the last good read (`asOf`); `offlineLine` is the host's sentence for it.
@@ -112,7 +114,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var isTerminal: Bool { state.isTerminal }
 
     enum CodingKeys: String, CodingKey {
-        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection, connecting
+        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection, connecting, deleted
         case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere
     }
 
@@ -140,11 +142,12 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         offlineLine = c.lenient(String.self, .offlineLine).flatMap { $0.isEmpty ? nil : $0 }
         connection = c.lenient(PondConnectionInfo.self, .connection)
         connecting = c.lenient(Bool.self, .connecting) ?? false
+        deleted = c.lenient(Bool.self, .deleted) ?? false
     }
 
     public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil,
-                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil, connecting: Bool = false) {
-        self.connection = connection; self.connecting = connecting
+                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil, connecting: Bool = false, deleted: Bool = false) {
+        self.connection = connection; self.connecting = connecting; self.deleted = deleted
         self.statusLine = statusLine; self.ownerName = ownerName; self.offline = offline; self.asOf = asOf; self.offlineLine = offlineLine; self.requestedAt = requestedAt
         self.status = status; self.requestedRole = requestedRole; self.words = []
         self.canStartHere = canStartHere
