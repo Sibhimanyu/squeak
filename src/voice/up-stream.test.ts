@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { generateChannel } from "../remote/remote-crypto.js";
@@ -44,8 +44,10 @@ describe("UpStream: a recording goes up while it is made", () => {
     const stream = make("s1");
     // 7.5 s heard in half-second looks.
     for (let i = 0; i < 15; i++) stream.feed(pcmOf(0.5, i + 1));
-    await tick();
-    expect(await stored()).toEqual([upAudioId("s1", 0), upAudioId("s1", 1)]);
+    // Pieces go up in the background: wait for both (a fixed sleep lost the second on a loaded CI runner).
+    await vi.waitFor(async () => expect(await stored()).toEqual([upAudioId("s1", 0), upAudioId("s1", 1)]), {
+      timeout: 5000,
+    });
     const first = readUpPart(key, upAudioId("s1", 0), (await store.get(upPath(channel, upAudioId("s1", 0))))!)!;
     expect(first.opus.toString()).toBe(`opus:${3 * SECOND}:1`);
     const second = readUpPart(key, upAudioId("s1", 1), (await store.get(upPath(channel, upAudioId("s1", 1))))!)!;
