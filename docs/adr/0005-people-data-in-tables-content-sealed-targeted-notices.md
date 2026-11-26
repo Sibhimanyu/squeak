@@ -11,3 +11,5 @@ joining and new devices waited on a laptop. Signed member documents still say wh
 notice to every device on one shared Data Streams channel because traffic then grows with the square of the number of
 users and every device re-reads lists on noise. Data Streams cannot carry targeted notices itself: its channels are made
 by hand in the console and resuming after a drop repeats messages.
+
+Research spike on live connections and the people-table limits: [cloud-spike-2026-11](../cloud-spike-2026-11.md).
