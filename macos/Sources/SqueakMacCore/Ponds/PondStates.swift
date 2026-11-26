@@ -31,6 +31,8 @@ public enum PondStates {
         case .active: return nil
         case .local:
             return PondStateCard(title: onlyThisMac, line: pond.statusLine ?? "Only on this Mac. Invite someone to share it.", tone: .calm, button: nil, forgets: false)
+        case .pending where pond.connecting:
+            return PondStateCard(title: "Connecting", line: pond.statusLine ?? "Connecting: waiting for \(owner ?? "the Owner")\u{2019}s Mac", tone: .waiting, button: nil, forgets: false)
         case .pending:
             return PondStateCard(
                 title: "Waiting for approval", line: pond.statusLine ?? "Waiting for \(who) to approve you as a \(role).", tone: .waiting,

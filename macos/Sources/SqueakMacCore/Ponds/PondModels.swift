@@ -104,6 +104,8 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     /// The daemon's one connection word for this Pond (Live, Reconnecting\u{2026}, the Owner's Mac offline); nil from an older host
     /// and for a Pond that is only on this Mac. The app draws it and works out nothing.
     public var connection: PondConnectionInfo?
+    /// A new device of an account already in the Pond, waiting for the Owner\u{2019}s Mac to seal the key: "Connecting", with nothing to press.
+    public var connecting: Bool
     public var state: PondStatus { PondStatus(raw: status, local: local) }
     public var isWaiting: Bool { state == .pending }
     public var isDeclined: Bool { state == .declined }
@@ -111,7 +113,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var isTerminal: Bool { state.isTerminal }
 
     enum CodingKeys: String, CodingKey {
-        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection
+        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection, connecting
         case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere
     }
 
@@ -138,11 +140,12 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         asOf = PondTime.decode(c, CodingKeys.asOf)
         offlineLine = c.lenient(String.self, .offlineLine).flatMap { $0.isEmpty ? nil : $0 }
         connection = c.lenient(PondConnectionInfo.self, .connection)
+        connecting = c.lenient(Bool.self, .connecting) ?? false
     }
 
     public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil,
-                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil) {
-        self.connection = connection
+                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil, connecting: Bool = false) {
+        self.connection = connection; self.connecting = connecting
         self.statusLine = statusLine; self.ownerName = ownerName; self.offline = offline; self.asOf = asOf; self.offlineLine = offlineLine; self.requestedAt = requestedAt
         self.status = status; self.requestedRole = requestedRole; self.words = []
         self.canStartHere = canStartHere

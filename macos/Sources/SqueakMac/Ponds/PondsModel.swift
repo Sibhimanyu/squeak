@@ -167,6 +167,14 @@ final class PondsModel {
     @ObservationIgnored private var client: PondsClient?
     @ObservationIgnored private var running = false
 
+    // MARK: Your devices (Settings; the account's, never a Pond's)
+
+    private(set) var yourDevices: [AccountDevice] = []
+    /// nil until the first read; true when the last read failed (the list keeps what it had).
+    private(set) var yourDevicesFailed: Bool?
+    private(set) var removingDevice: String?
+    private(set) var deviceNote: String?
+
     // MARK: Lookup
 
     /// The native projects on this Mac, kept current by the sidebar, so a project finds its pond by id.
@@ -616,6 +624,25 @@ final class PondsModel {
 
     func removeMyDevice(pond: String, deviceKeyId: String) async {
         _ = await act("device:\(pond):\(deviceKeyId)", pond: pond, success: "Device removed.") { try await self.client!.removeMyDevice(pond: pond, deviceKeyId: deviceKeyId) }
+    }
+
+    /// Reads the account's devices from the host; the list keeps what it had when the cloud will not answer.
+    func loadDevices() async {
+        guard let client else { return }
+        do {
+            if let list = try await client.accountDevices() { yourDevices = list; yourDevicesFailed = false }
+            else { yourDevicesFailed = true }
+        } catch { yourDevicesFailed = true }
+    }
+
+    /// Removes a device everywhere. The row goes only after the cloud confirmed (the host answers after the relay did).
+    func removeDevice(_ id: String) async {
+        guard let client, removingDevice == nil else { return }
+        removingDevice = id; deviceNote = nil
+        defer { removingDevice = nil }
+        do { try await client.removeAccountDevice(id: id) }
+        catch { deviceNote = (error as? NativeHostError)?.reason ?? "Squeak couldn't remove that device. Try again."; return }
+        await loadDevices()
     }
 
     /// Fire and forget: ponds joined in a browser appear. Failures are silent.

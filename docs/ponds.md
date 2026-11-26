@@ -347,8 +347,15 @@ own key; the member is the account those keys belong to.
   `view()` hides that Ripple (and any older "added/removed a device" one), and the removal writes none.
   Leaving a pond is leaving as a person: every device goes.
 - **Surfaces.** `view().members[]` is one row per person and carries nothing about devices (no count, no `ownDevices`; older
-  clients treat both as optional). Neither the Mac's People list nor Pond settings mention devices; an account-wide "Your devices"
-  list is #129's later part. The web signs in, asks `GET /account/ponds` on load and requests each pond
+  clients treat both as optional). Neither the Mac's People list nor Pond settings mention devices. Devices live in Settings ›
+  Your devices (Mac), one list for the account: `GET /native/ponds/account-devices` (the account's devices, this one marked) and
+  `POST /native/ponds/account-devices/remove { deviceId }`. The relay removes the device from the account and writes
+  `revoked/<pond>/<deviceId>` for every Pond the account is in, so its tokens are refused at once, and a relay-owned removal
+  note `{v:1, reqId, userId, gone:true}` in each Pond's `devreqs`; each Owner's Mac reads it when online (`dropAccountDevice`):
+  seals the device a removal, drops it from its member and rotates the key (a rotation that failed is finished by the next
+  pass). A device registers itself under the account when it syncs (`POST /account/devices`) or asks to join a Pond. A new
+  device's Pond is `status: "pending"` with `connecting: true` and the sentence "Connecting: waiting for <Owner>’s Mac" until the
+  Owner's Mac seals the key; the Mac draws it with no button. The web signs in, asks `GET /account/ponds` on load and requests each pond
   it does not hold. The iPhone reads shared Pond and Room views through the Mac. See “The Room on iPhone” below.
 - **Migration.** Nothing is rewritten. Existing documents are one-device members. An owner's Mac adds the accounts of members that
   have an `accountId` to the relay index at its first pass after the update; a member who joined with no `accountId` stays one device

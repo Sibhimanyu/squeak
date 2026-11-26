@@ -6,6 +6,7 @@ import SwiftUI
 struct AccountSettings: View {
     @Environment(AppModel.self) private var app
     @State private var confirmSignOut = false
+    @State private var removing: AccountDeviceRow?
     private var m: AccountModel { app.account }
 
     var body: some View {
@@ -59,15 +60,62 @@ struct AccountSettings: View {
                 }
                 if let n = m.notice { Footnote(n) }
             }
+            if m.email != nil { yourDevices }
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
         .onDisappear { m.cancelPending(only: [.connect, .photo]) }
         .task { await m.refresh(); await app.cloud.refresh(); await app.cloud.pollWhileConnecting() }
+        .task { await PondsModel.shared.loadDevices() }
+        .confirmationDialog("Remove this device?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { row in
+            Button("Remove \(row.name)", role: .destructive) { Task { await PondsModel.shared.removeDevice(row.id) } }
+        } message: { row in
+            Text(YourDevices.removeMessage(name: row.name))
+        }
         .confirmationDialog("Sign out of your Squeak account?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await m.signOut() } }
         } message: {
             Text("Browsers and iPhones signed in to \(m.email ?? "this account") will no longer see this Mac. Devices already added keep working.")
+        }
+    }
+
+    /// Settings › Your devices: one list for the whole account. Nothing about a device is ever shown inside a Pond.
+    @ViewBuilder private var yourDevices: some View {
+        let ponds = PondsModel.shared
+        let rows = YourDevices.rows(ponds.yourDevices)
+        SettingsCard(title: YourDevices.title, subtitle: YourDevices.subtitle, symbol: "laptopcomputer.and.iphone") {
+            ForEach(rows) { row in
+                HStack(spacing: Space.m) {
+                    Image(systemName: row.symbol)
+                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 38, height: 38)
+                        .background(Theme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(verbatim: row.name).font(Typo.label).foregroundStyle(Theme.ink)
+                        Text(verbatim: row.line).font(Typo.meta).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    if row.canRemove {
+                        if ponds.removingDevice == row.id { ProgressView().controlSize(.small) }
+                        else {
+                            Button("Remove\u{2026}") { removing = row }
+                                .buttonStyle(DestructiveButtonStyle()).disabled(ponds.removingDevice != nil)
+                                .accessibilityLabel("Remove \(row.name)")
+                        }
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            }
+            if ponds.yourDevicesFailed == true {
+                HStack {
+                    Text(YourDevices.loadFailed).font(Typo.body).foregroundStyle(Theme.muted)
+                    Spacer()
+                    Button("Try again") { Task { await ponds.loadDevices() } }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
+            if let n = ponds.deviceNote { Footnote(n) }
+            Footnote(YourDevices.footnote)
         }
     }
 

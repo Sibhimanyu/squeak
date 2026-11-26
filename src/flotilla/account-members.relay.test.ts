@@ -23,6 +23,9 @@ const require = createRequire(import.meta.url);
 const fn = new URL("../../cloud/catalyst-relay/functions/squeak_relay/", import.meta.url).pathname;
 const { createRelay } = require(`${fn}handler.js`);
 const { createServer } = require("../../cloud/catalyst-relay/appsail/server.js");
+const { createPeople } = require(`${fn}people.js`);
+const { createMemoryTables } = require(`${fn}people-memory.js`);
+const peopleSchema = require(`${fn}people-schema.json`);
 
 const RELAY_KEY = "k".repeat(43);
 const BASE = "https://squeak-relay.development.catalystappsail.in";
@@ -108,6 +111,7 @@ beforeAll(async () => {
     store,
     streams: streams.deps,
     hosted: true,
+    people: createPeople({ tables: createMemoryTables(peopleSchema) }),
     sharedNotice: true,
     log: () => {},
     usageCache: new Map(),
@@ -213,6 +217,7 @@ async function mac(user: TestUser, options: DeviceOptions = {}) {
 
 const SIBHI: TestUser = { userId: "u-sibhi", email: "sibhi@example.com", name: "Sibhi" };
 const AARAV: TestUser = { userId: "u-aarav", email: "aarav@example.com", name: "Aarav" };
+const DANA: TestUser = { userId: "u-dana", email: "dana@example.com", name: "Dana" };
 const EVE: TestUser = { userId: "u-eve", email: "eve@example.com", name: "Eve" };
 
 const pondOf = (who: Mac, id: string): any => (who.service as any).pondsFile.data.ponds[id];
@@ -268,7 +273,7 @@ describe("members are accounts: a second device of the same account joins withou
     const mine = await asAccount(await accountToken(AARAV), "/account/ponds");
     expect(mine.status).toBe(200);
     const body = (await mine.json()) as { ponds: Array<{ pondId: string; ownerKey: string; name?: string }> };
-    expect(body.ponds).toEqual([{ pondId, ownerKey: A.service.me.publicKey, name: "Site" }]);
+    expect(body.ponds).toEqual([{ pondId, ownerKey: A.service.me.publicKey, name: "Site", ownerName: "Sibhi" }]);
     // another account sees none of it
     const eve = await asAccount(await accountToken(EVE), "/account/ponds");
     expect(((await eve.json()) as { ponds: unknown[] }).ponds).toEqual([]);
@@ -639,6 +644,132 @@ describe("members are accounts: older documents", () => {
       ],
     });
     expect(m?.devices ?? []).toEqual([]);
+  });
+});
+
+// Devices belong to the account (#129): one list in Settings, removing one cuts it off in every Pond and rotates the keys.
+describe("your devices: one account-wide list; removing a device removes it from every pond", () => {
+  let owner1: Mac;
+  let owner2: Mac;
+  let web: Mac;
+  let laptop: Mac;
+  let pond1 = "";
+  let pond2 = "";
+
+  const join = async (owner: Mac, id: string) => {
+    const made = await owner.service.invite(id, "member", DANA.email);
+    return made.link!;
+  };
+
+  beforeAll(async () => {
+    owner1 = await mac(SIBHI);
+    owner2 = await mac({ userId: "u-vera", email: "vera@example.com", name: "Vera" });
+    web = await mac(DANA, { nest: null });
+    pond1 = (
+      await owner1.service.createPond({ name: "One", projectId: "p1", gitRemote: "git@github.com:acme/one.git" })
+    ).id;
+    pond2 = (
+      await owner2.service.createPond({ name: "Two", projectId: "p2", gitRemote: "git@github.com:acme/two.git" })
+    ).id;
+    for (const [owner, id] of [
+      [owner1, pond1],
+      [owner2, pond2],
+    ] as const) {
+      await web.service.join(await join(owner, id));
+      const [req] = (await owner.service.view(id)).joins;
+      await owner.service.decideJoin(id, req!.requestId, { approve: true });
+      await web.service.refresh(id);
+    }
+    // what each device's periodic account sync does first: list itself under the account
+    await web.service.registerSelf();
+  });
+
+  it("a new device shows its ponds at once as Connecting until the owner's Mac seals the key", async () => {
+    laptop = await mac(DANA);
+    expect(await laptop.service.syncAccountPonds()).toBe(2);
+    const rows = await laptop.service.list();
+    for (const id of [pond1, pond2]) {
+      const row = rows.find((p) => p.id === id)!;
+      expect(row).toMatchObject({ status: "pending", connecting: true });
+    }
+    expect(rows.find((p) => p.id === pond1)!.statusLine).toBe("Connecting: waiting for Sibhi\u2019s Mac");
+    expect(rows.find((p) => p.id === pond2)!.statusLine).toBe("Connecting: waiting for Vera\u2019s Mac");
+    await owner1.service.refresh(pond1);
+    await owner2.service.refresh(pond2);
+    await laptop.service.refresh(pond1);
+    await laptop.service.refresh(pond2);
+    for (const id of [pond1, pond2]) {
+      const row = (await laptop.service.list()).find((p) => p.id === id)!;
+      expect(row.status).toBe("active");
+      expect(row).not.toHaveProperty("connecting");
+    }
+  });
+
+  it("lists the account's devices (this one marked), the same on every device, and nothing of it is in a pond", async () => {
+    const mine = await laptop.service.accountDevices();
+    expect(mine.map((d) => [d.kind, d.thisDevice]).sort()).toEqual([
+      ["mac", true],
+      ["web", false],
+    ]);
+    const fromWeb = await web.service.accountDevices();
+    expect(fromWeb.map((d) => d.deviceId).sort()).toEqual(mine.map((d) => d.deviceId).sort());
+    expect(fromWeb.find((d) => d.thisDevice)?.kind).toBe("web");
+    // another account's devices are never listed
+    const theirs = (await owner1.service.accountDevices()).map((d) => d.deviceId);
+    for (const d of mine) expect(theirs).not.toContain(d.deviceId);
+    expect((await owner1.service.accountDevices()).filter((d) => d.thisDevice)).toHaveLength(1);
+    for (const [svc, id] of [
+      [owner1.service, pond1],
+      [owner2.service, pond2],
+    ] as const) {
+      const view = await svc.view(id);
+      expect(view.ripples.map((r) => r.text).filter((t) => /device/i.test(t))).toEqual([]);
+      expect(JSON.stringify(view.members)).not.toMatch(/device/i);
+    }
+  });
+
+  it("removing a device cuts it off in every pond at once; each owner's Mac rotates the key when it next looks", async () => {
+    const laptopId = laptop.service.me.id;
+    const tokens = [pond1, pond2].map((id) => pondOf(laptop, id).token?.value as string);
+    const before = [pondOf(owner1, pond1).current, pondOf(owner2, pond2).current] as number[];
+    await expect(web.service.removeAccountDevice(web.service.me.id)).rejects.toMatchObject({ status: 409 });
+    await web.service.removeAccountDevice(laptopId);
+    // refused at once, before any owner's Mac is back
+    for (const [i, id] of [pond1, pond2].entries()) {
+      const res = await fetch(`${deviceUrl}/list?prefix=${encodeURIComponent(`channels/${id}/threads`)}`, {
+        headers: { "x-squeak-pond-token": tokens[i]! },
+      });
+      expect(res.status).toBe(401);
+    }
+    expect((await web.service.accountDevices()).map((d) => d.deviceId)).not.toContain(laptopId);
+    // the owners' Macs come online: the device is dropped and the key rotates; the person's other device keeps reading
+    await owner1.service.refresh(pond1);
+    await owner2.service.refresh(pond2);
+    expect(pondOf(owner1, pond1).current).toBe(before[0]! + 1);
+    expect(pondOf(owner2, pond2).current).toBe(before[1]! + 1);
+    const m1 = [...(await membersOf(owner1, pond1)).values()].find((m) => m.accountId === DANA.userId);
+    expect(devicesOf(m1).map((d) => d.id)).not.toContain(laptopId);
+    await web.service.refresh(pond1);
+    await web.service.refresh(pond2);
+    expect(pondOf(web, pond1).current).toBe(before[0]! + 1);
+    // nothing about it is in either pond
+    for (const [svc, id] of [
+      [owner1.service, pond1],
+      [owner2.service, pond2],
+    ] as const) {
+      expect((await svc.view(id)).ripples.map((r) => r.text).filter((t) => /device/i.test(t))).toEqual([]);
+    }
+    // it cannot come back, and a stranger cannot remove it again
+    await expect(
+      laptop.relay.requestDevice({
+        pondId: pond1,
+        publicKey: laptop.service.me.publicKey,
+        boxKey: laptop.service.me.publicKey,
+        client: "mac",
+        nest: "x",
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(web.service.removeAccountDevice(laptopId)).rejects.toMatchObject({ status: 404 });
   });
 });
 

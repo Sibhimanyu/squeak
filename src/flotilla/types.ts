@@ -496,6 +496,12 @@ export interface DeviceRequestDoc {
   at: number;
 }
 
+/** The relay's note that an account removed a device (relay-owned, plain JSON, in the Pond's `devreqs`). */
+export function readDeviceGone(v: unknown): { deviceId: string; userId: string } | null {
+  if (!rec(v) || v.v !== 1 || v.gone !== true || !s(v.reqId, 64) || !s(v.userId, 64)) return null;
+  return { deviceId: v.reqId, userId: v.userId };
+}
+
 export function readDeviceRequest(v: unknown): DeviceRequestDoc | null {
   if (!rec(v) || v.v !== 1 || !s(v.reqId, 64) || !s(v.userId, 64) || !s(v.publicKey, 200) || !s(v.boxKey, 200))
     return null;

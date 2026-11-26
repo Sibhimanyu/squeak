@@ -24,6 +24,11 @@
 //                         ownerKey, name?}]} for the caller's own account only; POST /account/pond-devices {pondId, publicKey, boxKey?,
 //                         client, nest?} (same callers, 10 a minute per account) writes the relay-owned channels/<pond>/devreqs/<deviceId>
 //                         and answers a join-scope token (docs/ponds.md, "Members are accounts")
+//   GET    /account/devices?deviceId=<this device> (account token or Mac key) -> {devices:[{deviceId, name, kind: mac|web|iphone,
+//                         createdAt, lastSeenAt, thisDevice}]}: the account's devices, never a Pond's; POST /account/devices {publicKey,
+//                         name, kind} registers or refreshes one -> {deviceId}; DELETE /account/devices/<deviceId> -> 204: removes it
+//                         from the account and from every Pond at once (its tokens are refused) and leaves a relay-owned removal
+//                         note in each Pond's devreqs for the Owner's Mac, which rotates the key when it is online
 //   POST   /account/pond-leaves {pondId} (same callers): marks the caller's own index entry left (idempotent, 403 if not listed);
 //                         GET /account/ponds then returns it with left:true; the owner's remove or a fresh add clears it
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
@@ -135,6 +140,8 @@ const PONDDEV_TOKEN_TTL_SEC = 24 * 60 * 60;
 const ACCT_INDEX_MAX = 50;
 const ACCT_PONDS_MAX = 100;
 const DEVICE_CLIENTS = new Set(["mac", "web", "ios"]);
+/** The most devices one account lists in Settings > Your devices. */
+const DEVICES_PER_ACCOUNT = 20;
 /** The profile photo: relay-owned partition keys (not channels/..., so parseDocPath/parseKindPath can never name them). */
 const AVATAR_PK = "avatars";
 const NAMES_PK = "names";
@@ -1080,12 +1087,19 @@ function createRelay(deps) {
     if (add.length > 0 && (typeof body.ownerKey !== "string" || !B64_ANY_200.test(body.ownerKey)))
       return out(400, { error: "key" });
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
+    const ownerName = typeof body.ownerName === "string" ? body.ownerName.trim().slice(0, 100) : "";
     const at = Date.now();
     for (const userId of new Set(add)) {
       await deps.store.put(
         `${ACCT_PONDS_PK}/${userId}`,
         pondId,
-        JSON.stringify({ v: 1, ownerKey: body.ownerKey, ...(name ? { name } : {}), at }),
+        JSON.stringify({
+          v: 1,
+          ownerKey: body.ownerKey,
+          ...(name ? { name } : {}),
+          ...(ownerName ? { ownerName } : {}),
+          at,
+        }),
       );
     }
     for (const userId of new Set(remove)) await gone(`${ACCT_PONDS_PK}/${userId}`, pondId);
@@ -1116,6 +1130,7 @@ function createRelay(deps) {
         pondId: r.doc,
         ownerKey: v.ownerKey,
         ...(typeof v.name === "string" && v.name ? { name: v.name } : {}),
+        ...(typeof v.ownerName === "string" && v.ownerName ? { ownerName: v.ownerName } : {}),
         ...(v.left === true ? { left: true } : {}),
       });
       if (ponds.length >= ACCT_PONDS_MAX) break;
@@ -1169,12 +1184,7 @@ function createRelay(deps) {
     const member = parseOr(await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, body.pondId));
     if (!member || member.left === true) return out(403, { error: "pond" });
     if (!(await spend(PONDDEV_RATE_PK, user.userId, 60 * 1000, PONDDEV_PER_MINUTE))) return out(429, { error: "rate" });
-    const deviceId = crypto
-      .createHash("sha256")
-      .update(Buffer.from(keys.publicKey, "base64"))
-      .digest()
-      .subarray(0, 12)
-      .toString("base64url");
+    const deviceId = deviceIdOf(keys.publicKey);
     const revoked = await deps.store.get(`revoked/${body.pondId}`, deviceId);
     if (revoked !== null && revoked !== undefined) return out(403, { error: "removed" });
     const rec = await namesOf(user.userId).catch(() => null);
@@ -1194,9 +1204,101 @@ function createRelay(deps) {
     };
     await deps.store.put(pk, deviceId, JSON.stringify(value));
     await publishNotice(pk, deviceId);
+    // The device is the account's, not the Pond's: it is listed in Settings > Your devices (best effort).
+    await registerDevice(user, keys.publicKey, value.nest || value.name || "Device", body.client).catch(
+      () => undefined,
+    );
     const issued = scoped.issue(deps.key, body.pondId, deviceId, now, PONDDEV_TOKEN_TTL_SEC, "join");
     if (!issued) return out(400, { error: "ids" });
     return out(200, { reqId: deviceId, token: issued.token, expiresAt: issued.expiresAt });
+  }
+
+  /** A device's id: what its key hashes to, the same id the Pond's member document and its tokens use. */
+  const deviceIdOf = (publicKey) =>
+    crypto.createHash("sha256").update(Buffer.from(publicKey, "base64")).digest().subarray(0, 12).toString("base64url");
+
+  /** Writes (or refreshes) one of the account's devices in the people tables; no-op where there are none. */
+  async function registerDevice(user, publicKey, name, kind) {
+    if (!deps.people) return null;
+    const deviceId = deviceIdOf(publicKey);
+    await deps.people.addDevice({ deviceId, userId: user.userId, name, kind, publicKey });
+    return deviceId;
+  }
+
+  /**
+   * Removes one device of the account everywhere (Settings > Your devices, docs/spec.md "Devices"): out of the account's
+   * list, its tokens refused in every Pond at once (`revoked/`), and a relay-owned note in each Pond's `devreqs` that the
+   * Owner's Mac reads when it is online to drop the device and rotate the key. Devices belong to the account: nothing is
+   * written that any Member could read.
+   */
+  async function removeAccountDevice(user, deviceId) {
+    await deps.people.removeDevice(deviceId);
+    const ponds = new Set();
+    for (const r of await deps.store.list(`${ACCT_PONDS_PK}/${user.userId}`))
+      if (scoped.POND.test(r.doc)) ponds.add(r.doc);
+    for (const p of await deps.people.pondsOf(user.userId))
+      if (p.role !== "owner" && scoped.POND.test(p.pondId)) ponds.add(p.pondId);
+    const at = Date.now();
+    for (const pondId of ponds) {
+      if (scoped.MEMBER.test(deviceId)) await deps.store.put(`revoked/${pondId}`, deviceId, JSON.stringify({ at }));
+      const pk = `channels/${pondId}/devreqs`;
+      await deps.store.put(
+        pk,
+        deviceId,
+        JSON.stringify({ v: 1, reqId: deviceId, userId: user.userId, gone: true, at }),
+      );
+      await publishNotice(pk, deviceId);
+    }
+  }
+
+  /**
+   * /account/devices (account token or the Mac's own key): GET the account's devices, POST one to register or refresh,
+   * DELETE /account/devices/<id> to remove it everywhere. Only the account's own devices are ever listed or removed.
+   */
+  async function handleAccountDevices(req, res, url, route, method, mac) {
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    const user = await accountOf(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    if (!deps.people) return out(503, { error: "unavailable" });
+    if (route === "/account/devices") {
+      if (method === "GET") {
+        const self = url.searchParams.get("deviceId");
+        const devices = (await deps.people.devicesOf(user.userId))
+          .sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.name.localeCompare(b.name))
+          .map((d) => ({
+            deviceId: d.deviceId,
+            name: d.name,
+            kind: d.kind === "ios" ? "iphone" : d.kind,
+            createdAt: d.createdAt,
+            lastSeenAt: d.lastSeenAt,
+            thisDevice: self !== null && self === d.deviceId,
+          }));
+        return out(200, { devices });
+      }
+      if (method !== "POST") return out(405, {});
+      const body = await readJson(req, 2048);
+      const kind = body.kind === "iphone" ? "ios" : body.kind;
+      if (typeof body.publicKey !== "string" || !B64_ANY_200.test(body.publicKey)) return out(400, { error: "key" });
+      if (typeof body.name !== "string" || !DEVICE_CLIENTS.has(kind)) return out(400, { error: "device" });
+      const mine = await deps.people.devicesOf(user.userId);
+      const deviceId = deviceIdOf(body.publicKey);
+      if (mine.length >= DEVICES_PER_ACCOUNT && !mine.some((d) => d.deviceId === deviceId))
+        return out(429, { error: "devices" });
+      try {
+        await registerDevice(user, body.publicKey, body.name.slice(0, 100) || "Device", kind);
+      } catch (e) {
+        if (e && e.code === "device-taken") return out(403, { error: "device" });
+        throw e;
+      }
+      return out(200, { deviceId });
+    }
+    // /account/devices/<deviceId>
+    if (method !== "DELETE") return out(405, {});
+    const id = route.slice("/account/devices/".length);
+    const found = (await deps.people.devicesOf(user.userId)).find((d) => d.deviceId === id);
+    if (!found) return out(404, { error: "device" });
+    await removeAccountDevice(user, id);
+    return out(204);
   }
 
   /** POST /ponds/short/redeem: a signed-in account trades a code for the details, once. */
@@ -1350,6 +1452,8 @@ function createRelay(deps) {
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
       if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
+      if (route === "/account/devices" || route.startsWith("/account/devices/"))
+        return await handleAccountDevices(req, res, url, route, method, mac);
       {
         const m = /^\/ponds\/([^/]+)\/members\/accounts$/.exec(route);
         if (m && (mac || (relayGiven !== undefined && sameKey(relayGiven, deps.key))))

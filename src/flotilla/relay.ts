@@ -56,12 +56,30 @@ export interface PondRelay {
    * index entry `left` and `accountPonds` then lists it with `left: true`. Absent or refused on an older relay.
    */
   leaveAccountPond?(pondId: string): Promise<void>;
+  /** The account's devices (`GET /account/devices`), `thisDevice` marking `selfId`. Throws `RelayRefused`. */
+  accountDevices?(selfId: string): Promise<AccountDevice[]>;
+  /** Lists this device under the account (`POST /account/devices`); idempotent. */
+  registerDevice?(device: { publicKey: string; name: string; kind: "mac" | "web" | "iphone" }): Promise<void>;
+  /** Removes one of the account's devices everywhere (`DELETE /account/devices/<id>`). Throws `RelayRefused` (404 not yours). */
+  removeAccountDevice?(deviceId: string): Promise<void>;
   requestDevice?(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }>;
+}
+
+/** One of the account's devices, as Settings > Your devices lists it (never part of any Pond). */
+export interface AccountDevice {
+  deviceId: string;
+  name: string;
+  kind: "mac" | "web" | "iphone";
+  createdAt: number;
+  lastSeenAt: number;
+  thisDevice: boolean;
 }
 
 export interface AccountIndexChange {
   ownerKey: string;
   name?: string;
+  /** The owner's name, so a new device can say "waiting for <Owner>'s Mac" before it holds the key. */
+  ownerName?: string;
   add: string[];
   remove: string[];
 }
@@ -70,6 +88,7 @@ export interface AccountPond {
   pondId: string;
   ownerKey: string;
   name?: string;
+  ownerName?: string;
   /** This account left the pond (on any device): other devices drop it and never ask to be added. */
   left?: true;
 }
@@ -247,13 +266,20 @@ export class HttpPondRelay implements PondRelay {
     const body = (await response.json().catch(() => null)) as { ponds?: unknown } | null;
     if (!body || !Array.isArray(body.ponds)) throw new Error("catalyst account/ponds: unexpected answer");
     return body.ponds.flatMap((row: unknown) => {
-      const r = row as { pondId?: unknown; ownerKey?: unknown; name?: unknown; left?: unknown } | null;
+      const r = row as {
+        pondId?: unknown;
+        ownerKey?: unknown;
+        name?: unknown;
+        ownerName?: unknown;
+        left?: unknown;
+      } | null;
       return r && typeof r.pondId === "string" && typeof r.ownerKey === "string"
         ? [
             {
               pondId: r.pondId,
               ownerKey: r.ownerKey,
               ...(typeof r.name === "string" && r.name ? { name: r.name } : {}),
+              ...(typeof r.ownerName === "string" && r.ownerName ? { ownerName: r.ownerName } : {}),
               ...(r.left === true ? { left: true as const } : {}),
             },
           ]
@@ -266,6 +292,45 @@ export class HttpPondRelay implements PondRelay {
       method: "POST",
       headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
       body: JSON.stringify({ pondId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+  }
+
+  async accountDevices(selfId: string): Promise<AccountDevice[]> {
+    const response = await this.fetchImpl(`${this.url}/account/devices?deviceId=${encodeURIComponent(selfId)}`, {
+      method: "GET",
+      headers: { [this.keyHeader]: this.relayKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as { devices?: unknown } | null;
+    if (!body || !Array.isArray(body.devices)) throw new Error("catalyst account/devices: unexpected answer");
+    return body.devices.flatMap((row: unknown) => {
+      const r = row as Record<string, unknown> | null;
+      if (!r || typeof r.deviceId !== "string" || typeof r.name !== "string") return [];
+      const kind = r.kind === "mac" || r.kind === "web" || r.kind === "iphone" ? r.kind : "mac";
+      return [
+        {
+          deviceId: r.deviceId,
+          name: r.name,
+          kind,
+          createdAt: typeof r.createdAt === "number" ? r.createdAt : 0,
+          lastSeenAt: typeof r.lastSeenAt === "number" ? r.lastSeenAt : 0,
+          thisDevice: r.thisDevice === true,
+        },
+      ];
+    });
+  }
+
+  async registerDevice(device: { publicKey: string; name: string; kind: "mac" | "web" | "iphone" }): Promise<void> {
+    await this.post("/account/devices", device);
+  }
+
+  async removeAccountDevice(deviceId: string): Promise<void> {
+    const response = await this.fetchImpl(`${this.url}/account/devices/${encodeURIComponent(deviceId)}`, {
+      method: "DELETE",
+      headers: { [this.keyHeader]: this.relayKey },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new RelayRefused(response.status);

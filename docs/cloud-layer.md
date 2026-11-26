@@ -225,6 +225,13 @@ exists and is relay-owned: no pond token reads or writes it, and the relay key n
   `<pondId>` = `{ v:1, ownerKey, name?, at }`. 204; 400 `ids` | `key`; 403 not the channel's Mac.
 - `GET /account/ponds` (a Mac's own key, or `x-squeak-account`; 401 for the operator's key, a pond token or nobody): `{ ponds:
 [{ pondId, ownerKey, name? }] }` for the caller's own account only (at most 100), `no-store`.
+- `GET /account/devices?deviceId=<this>` (account token or the Mac's own key) answers `{ devices: [{ deviceId, name, kind:
+"mac"|"web"|"iphone", createdAt, lastSeenAt, thisDevice }] }` from `people_devices`; `POST /account/devices { publicKey, name,
+kind }` registers or refreshes one (20 per account; `pond-devices` registers too); `DELETE /account/devices/<deviceId>` (204,
+  404 when not the caller's) removes it everywhere: deleted from the people tables, `revoked/<pond>/<deviceId>` for every Pond
+  of the account (the `acctponds` index and `people.pondsOf`, not owned ones), and a relay-owned removal note in each Pond's
+  `devreqs` for the Owner's Mac (docs/ponds.md, "Surfaces"). Devices are never written anywhere a Member can read. `acctponds`
+  rows may carry `ownerName` (from the Owner's Mac) so a new device can say "waiting for <Owner>’s Mac".
 - `POST /account/pond-devices` `{ pondId, publicKey, boxKey?, client: "mac"|"web"|"ios", nest? }` (same callers): 403 `pond` unless
   the caller's account is in the pond's index, 403 `removed` for a device whose id has a revocation record, 429 `rate` past 10 a
   minute per account (`ponddev-rate`). Writes `channels/<pondId>/devreqs/<deviceId>` (`deviceId` = base64url of the first 12 bytes

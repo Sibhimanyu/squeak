@@ -32,7 +32,7 @@ import { joinWords } from "./join-words.js";
 import { normalizeShortCode } from "./short-code.js";
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { MAX_EMAILS_PER_SEND, isEmail, normalizeEmail } from "./email.js";
-import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
+import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
 import type { LockDoc, TaskView } from "./tasks.js";
 import {
@@ -64,6 +64,7 @@ import {
   readCommand,
   readHold,
   readJoinRequest,
+  readDeviceGone,
   readDeviceRequest,
   readMember,
   readMeta,
@@ -429,6 +430,8 @@ export interface PondSummary {
   ownerName?: string;
   /** True until the first invite publishes it: only this Mac can see it. */
   local?: boolean;
+  /** A new device of an account already in the Pond, waiting for the Owner's Mac to seal the key: "Connecting", no button. */
+  connecting?: true;
   /** A join still waiting on an owner: what the invite offered, and when the request went out. */
   requestedRole?: Role;
   requestedAt?: number;
@@ -1372,6 +1375,8 @@ export class FlotillaService extends EventEmitter {
     const owner = this.ownerLabel(pond);
     switch (pond.status) {
       case "pending":
+        // Another device of an account that is already in: it is let in by the Owner's Mac itself, never by a click.
+        if (pond.deviceJoin) return `Connecting: waiting for ${pond.ownerName || "the Owner"}’s Mac`;
         return `Waiting for ${owner} to approve you as ${pond.requestedRole === "viewer" ? "a viewer" : "a member"}.`;
       case "denied":
         return `${owner} declined your request.`;
@@ -1418,6 +1423,7 @@ export class FlotillaService extends EventEmitter {
       status,
       statusLine: this.statusLineOf(pond, members),
       ...(pond.ownerName ? { ownerName: pond.ownerName } : {}),
+      ...(pond.status === "pending" && pond.deviceJoin ? { connecting: true as const } : {}),
       ...(pond.status === "pending" && pond.requestedRole ? { requestedRole: pond.requestedRole } : {}),
       ...(pond.status === "pending" && pond.requestedAt ? { requestedAt: pond.requestedAt } : {}),
       ...(pond.status === "pending" && pond.words ? { words: pond.words } : {}),
@@ -2508,6 +2514,7 @@ export class FlotillaService extends EventEmitter {
       await relay.indexAccounts(pond.id, {
         ownerKey: pond.ownerKey,
         name: pond.name,
+        ownerName: this.accountLabel(),
         add: add.slice(i, i + 50),
         remove: remove.slice(i, i + 50),
       });
@@ -2548,6 +2555,12 @@ export class FlotillaService extends EventEmitter {
     const recent = (this.deviceAdds.get(pond.id) ?? []).filter((t) => now - t < 60_000);
     this.deviceAdds.set(pond.id, recent);
     for (const row of rows) {
+      const gone = readDeviceGone(row.doc);
+      if (gone && gone.deviceId === row.id) {
+        await this.dropAccountDevice(pond, members, gone.deviceId);
+        await this.dropDeviceRequest(pond, row.id);
+        continue;
+      }
       const req = readDeviceRequest(row.doc);
       if (!req || req.reqId !== row.id) {
         await this.dropDeviceRequest(pond, row.id);
@@ -2602,6 +2615,79 @@ export class FlotillaService extends EventEmitter {
     }
   }
 
+  /**
+   * The account removed a device (Settings > Your devices): the relay already refuses its tokens and left a note here. The
+   * Owner's Mac drops the device from its member, seals it a removal and rotates the key, so it can read nothing new. A
+   * rotation that did not finish is finished by the next pass. Nothing is said in the Pond.
+   */
+  private async dropAccountDevice(pond: LocalPond, members: Map<string, MemberDoc>, deviceId: string): Promise<void> {
+    const member = memberOfDevice(members, deviceId);
+    const device = member ? devicesOf(member).find((d) => d.id === deviceId) : undefined;
+    if (member && device) {
+      await this.revokeToken(pond, device.id, "Squeak couldn't end that device's access. Try again.");
+      await this.sendRemoval(pond, member, device).catch(() => undefined);
+      const left: MemberDoc =
+        device.id === member.id
+          ? { ...member, primaryRetired: true }
+          : { ...member, devices: (member.devices ?? []).filter((d) => d.id !== device.id) };
+      if (left.devices?.length === 0) delete left.devices;
+      await this.writeMember(pond, left);
+      members.set(left.id, left);
+      pond.rotationPending = true;
+      this.save();
+    }
+    if (!pond.rotationPending) return;
+    await this.rotate(pond, members);
+    delete pond.rotationPending;
+    this.save();
+    this.emit("changed", pond.id);
+  }
+
+  // The account's devices (Settings > Your devices): one list for the whole account, never a Pond's
+
+  /** This device's kind as the relay lists it. */
+  private deviceKind(): "mac" | "web" {
+    return this.identity.nest === null ? "web" : "mac";
+  }
+
+  /** Lists this device under the account (idempotent, best effort). */
+  async registerSelf(): Promise<void> {
+    const relay = this.options.relay;
+    if (!relay?.registerDevice) return;
+    await relay
+      .registerDevice({
+        publicKey: this.identity.publicKey,
+        name: this.identity.nest || this.accountLabel(),
+        kind: this.deviceKind(),
+      })
+      .catch(() => undefined);
+  }
+
+  /** The account's devices, this one included and marked. Throws `FlotillaError` 503 when the cloud will not say. */
+  async accountDevices(): Promise<AccountDevice[]> {
+    const relay = this.options.relay;
+    if (!relay?.accountDevices) throw new FlotillaError("Your devices need the Squeak cloud.", 503);
+    await this.registerSelf();
+    try {
+      return await relay.accountDevices(this.identity.id);
+    } catch {
+      throw new FlotillaError("Squeak couldn't reach your devices. Try again.", 503);
+    }
+  }
+
+  /** Removes one of the account's devices from the account and every Pond (the relay cuts it off; Owners' Macs rotate). */
+  async removeAccountDevice(deviceId: string): Promise<void> {
+    const relay = this.options.relay;
+    if (!relay?.removeAccountDevice) throw new FlotillaError("Your devices need the Squeak cloud.", 503);
+    if (deviceId === this.identity.id) throw new FlotillaError("This is the device you are using.", 409);
+    try {
+      await relay.removeAccountDevice(deviceId);
+    } catch (error) {
+      if (error instanceof RelayRefused && error.status === 404) throw new FlotillaError("No such device.", 404);
+      throw new FlotillaError("Squeak couldn't remove that device. Try again.", 503);
+    }
+  }
+
   // Members are accounts: this Mac as a later device
 
   /** The account on this Mac changed (signed in): the next sync is not held back by the last one. */
@@ -2646,6 +2732,7 @@ export class FlotillaService extends EventEmitter {
     this.accountSyncAt = this.now();
     let asked = 0;
     try {
+      await this.registerSelf();
       let list;
       try {
         list = await relay.accountPonds();
@@ -2689,6 +2776,7 @@ export class FlotillaService extends EventEmitter {
         this.pondsFile.data.ponds[entry.pondId] = {
           id: entry.pondId,
           name: (entry.name ?? "A pond").slice(0, 200),
+          ...(entry.ownerName ? { ownerName: entry.ownerName.slice(0, 100) } : {}),
           status: "pending",
           role: "viewer",
           ownerKey: entry.ownerKey,

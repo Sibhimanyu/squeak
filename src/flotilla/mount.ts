@@ -132,6 +132,20 @@ export class FlotillaRoutes {
       ctx.json(200, { asked: await service.syncAccountPonds() });
       return true;
     }
+    if (a === "account-devices" && parts.length === 2 && method === "GET") {
+      // Settings > Your devices: the account's devices, one list for every Pond (nothing about devices is ever in a Pond).
+      ctx.json(200, { devices: await service.accountDevices() });
+      return true;
+    }
+    if (a === "account-devices" && b === "remove" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["deviceId"]);
+      const deviceId = str(body.deviceId);
+      if (!deviceId) throw new FlotillaError("the body is exactly { deviceId }");
+      await service.removeAccountDevice(deviceId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
     if (a === "local" && parts.length === 2 && method === "POST") {
       const body = await ctx.body();
       // A local pond is made for a project, never from a name: a folder or workspace name is not a pond.

@@ -100,6 +100,18 @@ public struct PondsClient: Sendable {
         catch where Self.isAbsent(error) { return nil }
     }
 
+    /// Settings › Your devices: the account's devices, this one marked. nil from an older host.
+    public func accountDevices() async throws -> [AccountDevice]? {
+        struct R: Decodable { var devices: [Failable<AccountDevice>] }
+        do { return try decode(R.self, try await host.call("GET", "/native/ponds/account-devices", timeout: 30)).devices.compactMap(\.value) }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
+    /// Removes one of the account's devices from the account and from every Pond.
+    public func removeAccountDevice(id: String) async throws {
+        _ = try await host.call("POST", "/native/ponds/account-devices/remove", body: .object(["deviceId": .string(id)]), timeout: 60)
+    }
+
     public func rename(pond: String, name: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/rename", body: .object(["name": .string(name)]), timeout: 30)
     }
