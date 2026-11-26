@@ -72,6 +72,8 @@ import {
   type MemberDevice,
   readPresence,
   readRipple,
+  readMemberAct,
+  type MemberAct,
   readThread,
   readThreadEvent,
   type CommandDoc,
@@ -225,8 +227,14 @@ interface LocalPond {
   requestedAt?: number;
   /** When a terminal status was reached. */
   endedAt?: number;
-  /** The newest Ripple time an owner has already acted on (a member leaving). */
-  reapedAt?: number;
+  /** The Owner's Mac: what happened lately in the pond, newest first (the Room says the same as lines). */
+  recent?: Ripple[];
+  /** The Owner's Mac: the highest cloud seq of a Member's queued ask (`rposts`) it has applied; the queue is read from there. */
+  ingestedSeq?: number;
+  /** The Owner's Mac: the same for the asks the service applies itself (leave, end a device, a Duck). */
+  actsSeq?: number;
+  /** A Member's Mac: start requests the Owner has answered (declined), by request id. */
+  answered?: string[];
   /** The owner's first invite has been made: Ducks shared before it were set Private then; later ones are visible. */
   invited?: true;
   role: Role;
@@ -318,7 +326,16 @@ interface Identity {
   publicKey: string;
 }
 
+/** Who is online in a pond, from the live connections (cloud-layer.md, "Live notices"); `lastSeenAt` is ms. */
+export interface LivePresence {
+  memberId: string;
+  online: boolean;
+  lastSeenAt?: number;
+}
+
 export interface FlotillaOptions {
+  /** Who is online in a pond now. Absent until the daemon wires the live client: then only this Mac shows as online. */
+  presenceOf?: (pondId: string) => Promise<LivePresence[]>;
   /** null when no cloud is set up: ponds are then local only and no network call is ever made. */
   store?: CloudStore | null;
   /** Key files live in `<supportDir>/flotilla/`, mode 0600. */
@@ -581,11 +598,6 @@ const RIPPLE_KEEP = 100;
 const TOKEN_TTL_SEC = 30 * 24 * 3600;
 const TOKEN_RENEW_MS = 3 * 24 * 3600_000;
 /** The host's own heartbeat: a running Mac is online in every pond it is in. A write only when this old (or changed). */
-const BEAT_MS = 120_000;
-/** A presence document the host writes now lasts this long, so a beat every 2 minutes keeps a member online. */
-export const PRESENCE_TTL_MS = 4 * 60_000;
-/** A changed presence (viewing, typing) is written at most this often. */
-const PRESENCE_CHANGE_MIN_MS = 5_000;
 /** Our own write's notice comes back within seconds; one that long after is someone else's. */
 const ECHO_WINDOW_MS = 5_000;
 const BACKOFF_FIRST_MS = 30_000;
@@ -636,14 +648,8 @@ export class FlotillaService extends EventEmitter {
   private readonly decisions = new Map<string, DecisionState>();
   private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
   private readonly budgetMs: number;
-  private beatTimer: NodeJS.Timeout | null = null;
   private statsTimer: NodeJS.Timeout | null = null;
   private stats: SyncStats = FlotillaService.emptyStats();
-  /** What this Mac last wrote as its presence in a pond, so an unchanged one is not written again. */
-  private readonly lastPresenceWrite = new Map<
-    string,
-    { viewing?: string; typing?: string; online: boolean; at: number }
-  >();
   /** When this Mac's own writes that echo (presence, thread events) were made, newest last. */
   private readonly echoes = new Map<string, number[]>();
   private readonly wakeTimers = new Map<string, { timer: NodeJS.Timeout; quiet: boolean }>();
@@ -1117,7 +1123,7 @@ export class FlotillaService extends EventEmitter {
         at: this.now(),
       });
       // The relay tells every watcher of the channel, this Mac included; that notice is not news.
-      if (kind === "presence" || kind === "tevents") this.expectEcho(pond.id);
+      if (kind === "tevents") this.expectEcho(pond.id);
     } catch (error) {
       if (FlotillaService.isOutage(error)) throw new FlotillaError(OFFLINE_WRITE, 503);
       throw error;
@@ -2297,9 +2303,11 @@ export class FlotillaService extends EventEmitter {
     const docPath = this.docPath(pond.id, "keys", device.id);
     const primary = device.id === member.id;
     const token = await this.tokenFor(pond, member, primary ? undefined : device);
+    // Every version the Pond has had, not only the newest: a new member or device reads the history that came before it.
     const box = sealToMember(device.boxKey, {
       version: pond.current,
       key: pond.keys[String(pond.current)],
+      versions: pond.keys,
       ...(token ? { token } : {}),
     });
     const id = this.identity;
@@ -2404,7 +2412,7 @@ export class FlotillaService extends EventEmitter {
     if (!me || !devicesOf(me).some((d) => d.id === deviceId)) throw new FlotillaError("No such device.", 404);
     if (devicesOf(me).length === 1)
       throw new FlotillaError("That is your only device here: leave the pond instead.", 409);
-    await this.ripple(pondId, `${DEVICE_REMOVE_PREFIX}${deviceId}`);
+    await this.queueForOwner(pondId, { removeDevice: deviceId });
     if (deviceId === this.identity.id) this.forgetPond(pondId);
   }
 
@@ -2755,7 +2763,6 @@ export class FlotillaService extends EventEmitter {
     // reads (Firebase has none) learns it from that; on Catalyst the revoked token says the same by refusing them.
     await this.sendRemoval(pond, gone).catch(() => undefined);
     await store.delete(this.docPath(pond.id, "members", memberId));
-    await store.delete(this.docPath(pond.id, "presence", memberId));
     // Their account no longer lists this pond, and no waiting device request of theirs may bring a device back.
     if (gone.accountId) await this.indexAccounts(pond, [], [gone.accountId]).catch(() => undefined);
     for (const d of devicesOf(gone)) await this.dropDeviceRequest(pond, d.id);
@@ -2839,10 +2846,14 @@ export class FlotillaService extends EventEmitter {
         throw new FlotillaError(LEAVE_NOT_CONFIRMED, 503);
       }
     }
-    await this.ripple(pondId, "left the pond", undefined, "left");
-    await this.storeOf(pond)
-      .delete(this.docPath(pond.id, "presence", this.selfId(pond)))
-      .catch(() => undefined);
+    // Told to the Owner's Mac through the cloud queue (it waits there if that Mac is away); the relay's refusal of this
+    // account's token is what ends access at once.
+    try {
+      await this.queueForOwner(pond.id, { leave: true });
+    } catch (error) {
+      // A token the Owner already ended is the leave done; any other failure leaves the person in, to try again.
+      if (!FlotillaService.isAccessEnded(error)) throw error;
+    }
     this.forgetPond(pondId);
     // Kept on disk: a restart inside the day must not ask to be added back.
     this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
@@ -2895,21 +2906,7 @@ export class FlotillaService extends EventEmitter {
         await store.delete(this.docPath(pond.id, "members", member.id));
       }
     }
-    const kinds = [
-      "keys",
-      "presence",
-      "holds",
-      "ripples",
-      "joins",
-      "joinids",
-      "threads",
-      "tevents",
-      "tcmds",
-      "grants",
-      "tasks",
-      "claims",
-      "locks",
-    ];
+    const kinds = ["keys", "holds", "joins", "joinids", "threads", "tevents", "tcmds", "room", "rposts", "rtasks"];
     await Promise.all(
       kinds.map(async (kind) => {
         for (const { id } of await store.list(`channels/${pond.id}/${kind}`).catch(() => [])) {
@@ -2982,8 +2979,8 @@ export class FlotillaService extends EventEmitter {
       created: this.now(),
       ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
     } satisfies PondMeta);
-    await this.republishThreads(pond);
-    // The Room's posts and Tasks move to the new key too (room-sync.ts rewrites them).
+    // Nothing already in the cloud is rewritten: each document keeps the key version in its box tag, every member holds
+    // every version (`sendKeyToDevice`), and only new writes use the new key.
     this.emit("rotated", pond.id);
   }
 
@@ -3105,15 +3102,14 @@ export class FlotillaService extends EventEmitter {
         this.save();
       }
     }
-    await this.republishThreads(pond);
     // This Mac's account may be a member of ponds it has not opened yet (it joined in a browser first).
     this.syncAccountPondsSoon();
     if (pond.role === "owner") {
+      await this.applyQueuedActs(pond).catch(() => undefined);
       await this.autoApproveEmailJoins(pond).catch(() => undefined);
       await this.adoptDeviceRequests(pond).catch(() => undefined);
       await this.reconcileAccountIndex(pond).catch(() => undefined);
       await this.renewTokens(pond).catch(() => undefined);
-      await this.reapLeavers(pond).catch(() => undefined);
       await this.refreshMemberNames(pond).catch(() => undefined);
     }
   }
@@ -3157,38 +3153,6 @@ export class FlotillaService extends EventEmitter {
     }
   }
 
-  /** A member who said "left the pond" is removed by the owner's Mac (their key and the pond key change). */
-  private async reapLeavers(pond: LocalPond): Promise<void> {
-    const members = await this.members(pond);
-    const since = pond.reapedAt ?? 0;
-    let newest = since;
-    const leavers = new Set<string>();
-    const dropDevices: Array<{ member: string; device: string }> = [];
-    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/ripples`)) {
-      const read = this.readSigned(pond, "ripples", id, doc, (d) => keysOfMember(members.get(d)));
-      const r = read ? readRipple(read.value) : null;
-      if (!r || r.actor !== read!.device || r.at <= since) continue;
-      newest = Math.max(newest, r.at);
-      if (r.text === "left the pond" && r.actor !== this.identity.id && members.has(r.actor)) leavers.add(r.actor);
-      // A member ending one of their own devices: only a device that is theirs, whoever else claims it.
-      if (r.text.startsWith(DEVICE_REMOVE_PREFIX) && r.actor !== this.identity.id) {
-        const deviceId = r.text.slice(DEVICE_REMOVE_PREFIX.length);
-        const owner = members.get(r.actor);
-        if (owner && devicesOf(owner).some((d) => d.id === deviceId))
-          dropDevices.push({ member: r.actor, device: deviceId });
-      }
-    }
-    for (const id of leavers) await this.removeAndRotate(pond.id, id, () => "").catch(() => undefined);
-    for (const d of dropDevices) {
-      if (leavers.has(d.member)) continue;
-      await this.removeDevice(pond.id, d.member, d.device).catch(() => undefined);
-    }
-    if (newest !== since) {
-      pond.reapedAt = newest;
-      this.save();
-    }
-  }
-
   private async meta(pond: LocalPond): Promise<PondMeta | null> {
     const doc = await this.storeOf(pond).get(this.docPath(pond.id, "pond", "meta"));
     if (!doc) return null;
@@ -3210,6 +3174,7 @@ export class FlotillaService extends EventEmitter {
       const grant = openFromMember<{
         version: number;
         key: string;
+        versions?: unknown;
         removed?: unknown;
         token?: { value?: unknown; expiresAt?: unknown };
       }>(me.privateKey, doc.box);
@@ -3218,11 +3183,21 @@ export class FlotillaService extends EventEmitter {
         if (allowRemoval) this.markEnded(pond, "removed");
         return;
       }
-      if (typeof grant.version === "number" && typeof grant.key === "string" && !pond.keys[String(grant.version)]) {
-        pond.keys[String(grant.version)] = grant.key;
-        pond.current = Math.max(pond.current, grant.version);
-        this.save();
+      const held: Array<[string, string]> = [];
+      if (typeof grant.version === "number" && typeof grant.key === "string")
+        held.push([String(grant.version), grant.key]);
+      if (grant.versions && typeof grant.versions === "object" && !Array.isArray(grant.versions)) {
+        for (const [v, k] of Object.entries(grant.versions as Record<string, unknown>))
+          if (/^\d{1,6}$/.test(v) && typeof k === "string" && k) held.push([v, k]);
       }
+      let learned = false;
+      for (const [v, k] of held) {
+        if (pond.keys[v]) continue;
+        pond.keys[v] = k;
+        pond.current = Math.max(pond.current, Number(v));
+        learned = true;
+      }
+      if (learned) this.save();
       const t = grant.token;
       if (t && typeof t.value === "string" && typeof t.expiresAt === "number" && pond.token?.value !== t.value) {
         pond.token = { value: t.value, expiresAt: t.expiresAt };
@@ -3241,15 +3216,6 @@ export class FlotillaService extends EventEmitter {
     stop();
     this.watches.delete(pond.id);
     this.watch(pond.id);
-  }
-
-  /** After a rotation, a starter's thread documents move to the new key. */
-  private async republishThreads(pond: LocalPond): Promise<void> {
-    for (const [threadId, local] of Object.entries(pond.threads)) {
-      if (local.private) continue;
-      const doc = await this.storeOf(pond).get(this.docPath(pond.id, "threads", threadId));
-      if (doc && !doc.box.startsWith(`${pond.current}.`)) this.emit("republish", pond.id, threadId);
-    }
   }
 
   // watching: a wake-up only, never data
@@ -3277,10 +3243,6 @@ export class FlotillaService extends EventEmitter {
     }
     // Ponds this Mac's account is a member of, joined elsewhere first (a browser), arrive here without an invite.
     this.syncAccountPondsSoon();
-    if (!this.beatTimer) {
-      this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
-      this.beatTimer.unref?.();
-    }
     if (!this.statsTimer) {
       this.statsTimer = setInterval(() => this.logStats(), STATS_MS);
       this.statsTimer.unref?.();
@@ -3295,8 +3257,6 @@ export class FlotillaService extends EventEmitter {
   }
 
   stop(): void {
-    if (this.beatTimer) clearInterval(this.beatTimer);
-    this.beatTimer = null;
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.statsTimer = null;
     for (const { timer } of this.wakeTimers.values()) clearTimeout(timer);
@@ -3626,36 +3586,25 @@ export class FlotillaService extends EventEmitter {
     const memberKey = (d: string): string[] => keysOfMember(members.get(d));
     const store = this.storeOf(pond);
     // Everything here is independent of everything else: one round trip's time, not ten.
-    const [presenceRows, holds, rippleRows, threadsRead, joinRows] = await Promise.all([
-      store.list(`channels/${pond.id}/presence`),
+    const [holds, threadsRead, joinRows, live] = await Promise.all([
       this.holdsOf(pond, members),
-      store.list(`channels/${pond.id}/ripples`),
       this.threadsOf(pond, members),
       pond.role === "owner" ? this.pendingJoins(pond, members) : Promise.resolve([]),
+      this.options.presenceOf ? this.options.presenceOf(pond.id).catch(() => []) : Promise.resolve([]),
     ]);
     const now = this.now();
+    // Who is online comes from the live connections (#121); this Mac is always online to itself.
     const presence: PresenceDoc[] = [];
     const beat = new Map<string, number>();
-    for (const { id, doc } of presenceRows) {
-      const read = this.readSigned(pond, "presence", id, doc, memberKey);
-      const p = read ? readPresence(read.value) : null;
-      if (p && p.memberId === read!.device && p.until > now) {
-        const at = p.at ?? p.until - PRESENCE_MS;
-        beat.set(p.memberId, at);
-        // `online` is the heartbeat's age, not what the writer claimed: a document with its own `at` lives until its
-        // `until`; an older writer's (45 s of beats) is judged by ONLINE_MS.
-        presence.push({ ...p, online: p.online && (p.at !== undefined ? now < p.until : now - at < ONLINE_MS) });
-      }
-    }
-    const online = new Set(presence.filter((p) => p.online).map((p) => p.memberId));
-    online.add(me.id);
+    const online = new Set<string>([me.id]);
+    for (const l of live) {
+      if (!members.has(l.memberId)) continue;
+      if (l.online) online.add(l.memberId);
+      if (l.lastSeenAt) beat.set(l.memberId, l.lastSeenAt);
     this.ownerSeen.set(pond.id, pond.role === "owner" || online.has(memberIdOf(pond.ownerKey)));
-    const ripples: Ripple[] = [];
-    for (const { id, doc } of rippleRows) {
-      const read = this.readSigned(pond, "ripples", id, doc, memberKey);
-      const r = read ? readRipple(read.value) : null;
-      if (r && r.id === id && r.actor === read!.device) ripples.push(r);
     }
+    // The Ripples feed is this Owner's Mac's own record of what happened (the Room carries the same lines).
+    const ripples: Ripple[] = [...(pond.recent ?? [])];
     ripples.sort((a, b) => b.at - a.at);
     const threads = threadsRead.map((t) => this.decorateThread(t, online, me.id));
     const needsYou = this.needsCount(pond, threads);
@@ -3755,59 +3704,25 @@ export class FlotillaService extends EventEmitter {
 
   // presence, ripples, holds
 
+  /**
+   * What this Mac's app is viewing or typing. Nothing is written to the cloud: a person is online while a device holds a
+   * live connection, and typing travels on it (cloud-layer.md, "Live notices"); this only remembers it for that.
+   */
   async setPresence(pondId: string, input: { viewing?: string; typing?: string; online?: boolean }): Promise<void> {
     const pond = this.activePond(pondId);
+    if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
     this.lastPresence.set(pondId, {
       ...(input.viewing ? { viewing: input.viewing } : {}),
       ...(input.typing ? { typing: input.typing } : {}),
       at: this.now(),
     });
-    const online = input.online ?? true;
-    // A write is a notice to every member's Mac: left out when nothing changed (until the next heartbeat is due),
-    // and a change is written at most every few seconds.
-    const prev = this.lastPresenceWrite.get(pondId);
-    if (prev) {
-      const age = this.now() - prev.at;
-      const same = prev.online === online && prev.viewing === input.viewing && prev.typing === input.typing;
-      if ((same && age < BEAT_MS - 5_000) || (!same && age < PRESENCE_CHANGE_MIN_MS)) {
-        this.stats.presenceSkipped += 1;
-        return;
-      }
-    }
-    const at = this.now();
-    const doc: PresenceDoc = {
-      memberId: this.selfId(pond),
-      online,
-      at,
-      until: at + PRESENCE_TTL_MS,
-      ...(input.viewing ? { viewing: input.viewing } : {}),
-      ...(input.typing ? { typing: input.typing } : {}),
-    };
-    await this.put(pond, "presence", this.selfId(pond), doc);
-    this.stats.presenceWrites += 1;
-    this.lastPresenceWrite.set(pondId, {
-      online,
-      at,
-      ...(input.viewing ? { viewing: input.viewing } : {}),
-      ...(input.typing ? { typing: input.typing } : {}),
-    });
   }
 
-  /** The host's own heartbeat: a running Mac is online in every pond it is in, with what its app last said it was viewing. */
-  private beat(): void {
-    for (const pond of Object.values(this.pondsFile.data.ponds)) {
-      if (pond.status !== "active" || pond.local) continue;
-      const known = this.snapshotFile.data.ponds[pond.id]?.counts.members ?? 0;
-      if (pond.role === "owner" && known <= 1) continue;
-      const last = this.lastPresence.get(pond.id);
-      const fresh = last && this.now() - last.at < BEAT_MS * 2 ? last : undefined;
-      void this.setPresence(pond.id, {
-        ...(fresh?.viewing ? { viewing: fresh.viewing } : {}),
-        ...(fresh?.typing ? { typing: fresh.typing } : {}),
-      }).catch(() => undefined);
-    }
-  }
-
+  /**
+   * Something happened in the pond (made, joined, left, removed, renamed...). The Owner's Mac keeps it in its recent list
+   * and says it in the Room as a line every Member reads (`line` event, room-sync.ts); nothing is written as its own
+   * document. A Member's Mac has no say in it: the Owner's Mac writes the line when it learns of the change.
+   */
   async ripple(
     pondId: string,
     text: string,
@@ -3818,6 +3733,7 @@ export class FlotillaService extends EventEmitter {
     const pond = this.activePond(pondId);
     const at = this.now();
     const id = `${at.toString(36).padStart(9, "0")}-${randomId(3)}`;
+    if (pond.role !== "owner") return id;
     const ripple: Ripple = {
       id,
       at,
@@ -3827,16 +3743,9 @@ export class FlotillaService extends EventEmitter {
       ...(kind ? { kind } : {}),
       ...(ref ? { ref: ref.slice(0, 80) } : {}),
     };
-    await this.put(pond, "ripples", id, ripple);
-    // Keep the feed short: forget the oldest beyond a hundred.
-    const all = await this.storeOf(pond).list(`channels/${pond.id}/ripples`);
-    if (all.length > RIPPLE_KEEP + 20) {
-      const old = all
-        .map((r) => r.id)
-        .sort()
-        .slice(0, all.length - RIPPLE_KEEP);
-      for (const gone of old) await this.storeOf(pond).delete(this.docPath(pond.id, "ripples", gone));
-    }
+    pond.recent = [ripple, ...(pond.recent ?? [])].slice(0, RIPPLE_KEEP);
+    this.save();
+    this.emit("line", pondId, ripple);
     return id;
   }
 
@@ -3939,27 +3848,40 @@ export class FlotillaService extends EventEmitter {
             role: member.role,
             name: this.shownName(pond, member),
             caps: capsOf(member.role),
+            ...(doc.seq !== undefined ? { seq: doc.seq } : {}),
+            ...(doc.at !== undefined ? { at: doc.at } : {}),
           });
         }
         return out;
       },
+      note: async () => {
+        // The relay's own plain note that it paged the oldest posts out (cloud: room-cloud.js); nothing else is read this way.
+        const raw = (await (store as unknown as { getRaw?: (p: string) => Promise<unknown> })
+          .getRaw?.(this.docPath(pond.id, "roomnote", "trim"))
+          .catch(() => null)) as { removed?: unknown; before?: unknown; at?: unknown } | null | undefined;
+        if (!raw || typeof raw.removed !== "number" || raw.removed < 1) return null;
+        return { removed: raw.removed, before: Number(raw.before) || 0, at: Number(raw.at) || 0 };
+      },
+      ingested: () => pond.ingestedSeq ?? 0,
+      setIngested: (seq: number) => {
+        if (seq > (pond.ingestedSeq ?? 0)) {
+          pond.ingestedSeq = seq;
+          this.save();
+        }
+      },
+      noteAnswered: (ids) => this.noteAnswered(pondId, ids),
       caps: async () => this.capsIn(pond, await this.members(pond), this.selfId(pond)),
       owner: async () => {
         const members = await this.members(pond);
         const owner = members.get(ownerId);
         const ownerName = owner ? owner.name : this.ownerLabel(pond);
         if (pond.role === "owner") return { name: ownerName, online: true };
-        const online = new Set<string>();
-        for (const { id, doc } of await store.list(`channels/${pond.id}/presence`)) {
-          const read = this.readSigned(pond, "presence", id, doc, (d) => keysOfMember(members.get(d)));
-          const p = read ? readPresence(read.value) : null;
-          if (!p || p.memberId !== read!.device || p.until <= this.now()) continue;
-          const at = p.at ?? p.until - PRESENCE_MS;
-          if (p.online && (p.at !== undefined ? this.now() < p.until : this.now() - at < ONLINE_MS))
-            online.add(p.memberId);
-        }
-        this.ownerSeen.set(pond.id, online.has(ownerId));
-        return { name: ownerName, online: online.has(ownerId) };
+        // Without a live-connection source there is nothing to say the Owner's Mac is away: say nothing.
+        const live = this.options.presenceOf ? await this.options.presenceOf(pond.id).catch(() => null) : null;
+        if (!live) return { name: ownerName, online: true };
+        const up = live.some((l) => l.memberId === ownerId && l.online);
+        this.ownerSeen.set(pond.id, up);
+        return { name: ownerName, online: up };
       },
     };
   }
@@ -4139,7 +4061,7 @@ export class FlotillaService extends EventEmitter {
     if (isPrivate) {
       // Its title is not left behind in the feed.
       if (local.rippleId) {
-        await store.delete(this.docPath(pond.id, "ripples", local.rippleId)).catch(() => undefined);
+        pond.recent = (pond.recent ?? []).filter((r) => r.id !== local.rippleId);
         delete local.rippleId;
       }
       await store.delete(this.docPath(pond.id, "threads", threadId));
@@ -4599,28 +4521,123 @@ export class FlotillaService extends EventEmitter {
     const text = input.text.trim();
     if (!text) throw new FlotillaError("empty message");
     const now = this.now();
-    const cmd: CommandDoc = {
-      id: randomId(12),
-      kind: "start",
-      threadId: "",
-      issuedAt: now,
-      expiresAt: now + 5 * 60_000,
-      nonce: randomId(12),
-      text,
-      agent: input.agent,
-      model: input.model,
-      ...(input.title ? { title: input.title.slice(0, 200) } : {}),
-      requestId: randomId(10),
-    };
-    await this.put(pond, "tcmds", cmd.id, cmd);
+    const requestId = randomId(10);
+    const title = input.title ? input.title.slice(0, 200) : undefined;
+    // Sealed, signed and ordered by the cloud: it waits there for the Owner's Mac as long as that Mac is away (a command
+    // expires in 5 minutes; this does not), and is applied in order when it is back (room-sync.ts).
+    await this.queueForOwner(pondId, {
+      start: { requestId, text, agent: input.agent, model: input.model, ...(title ? { title } : {}) },
+    });
+    const cmd = { requestId, title, text };
     // Remembered here so this Mac can say "Waiting for <Owner>" until the Duck appears or the Owner declines.
     pond.asked = [
       ...(pond.asked ?? []).filter((a) => now - a.at < PENDING_START_LIFE_MS),
-      { requestId: cmd.requestId!, title: (cmd.title ?? text).replace(/\s+/g, " ").slice(0, 80), at: now },
+      { requestId, title: (cmd.title ?? text).replace(/\s+/g, " ").slice(0, 80), at: now },
     ].slice(-PENDING_STARTS_PER_MEMBER);
     this.save();
     this.emit("changed", pondId);
-    return { requestId: cmd.requestId!, ownerName: owner.name };
+    return { requestId, ownerName: owner.name };
+  }
+
+  /**
+   * A Member's Mac asks the Owner's Mac for something that must wait if that Mac is away: a post, a Task, a Duck, leaving, ending
+   * a device. One sealed, signed `rposts` document in the Pond's own queue: the cloud gives it its place in the one order, and
+   * the Owner's Mac applies it, oldest first, when it is running (`applyMemberAct`, room-sync.ts).
+   */
+  async queueForOwner(pondId: string, act: Record<string, unknown>): Promise<string> {
+    const pond = this.activePond(pondId);
+    if (pond.role === "owner") throw new FlotillaError("That is your own Mac.", 400);
+    const at = this.now();
+    const id = `${at.toString(36).padStart(9, "0")}-${randomId(6)}`;
+    await this.put(pond, "rposts", id, { v: 1, id, text: "", at, ...act });
+    return id;
+  }
+
+  /**
+   * The Owner's Mac reads the Members' queued asks (`rposts` documents carrying a leave, a device removal or a Duck request) and
+   * applies each once, in the cloud's order (seq; the Member's own time on a store that does not number). A numbered document
+   * stays in the cloud, as the Room's record; the Mac remembers how far it has applied (`actsSeq`). An unnumbered one is
+   * deleted when applied.
+   */
+  async applyQueuedActsOf(pondId: string): Promise<void> {
+    const pond = this.pondsFile.data.ponds[pondId];
+    if (pond && pond.role === "owner" && pond.status === "active" && !pond.local) await this.applyQueuedActs(pond);
+  }
+
+  private async applyQueuedActs(pond: LocalPond): Promise<void> {
+    const members = await this.members(pond);
+    const cursor = pond.actsSeq ?? 0;
+    const waiting: Array<{ id: string; act: MemberAct; from: MemberDoc; seq: number | undefined; at: number }> = [];
+    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/rposts`)) {
+      const read = this.readSigned(pond, "rposts", id, doc, (d) => keysOfMember(members.get(d)));
+      const from = read ? members.get(read.device) : undefined;
+      const act = read ? readMemberAct(read.value) : null;
+      if (!read || !from || !act || (read.value as { id?: unknown }).id !== id) continue;
+      if (doc.seq !== undefined && doc.seq <= cursor) continue;
+      waiting.push({ id, act, from, seq: doc.seq, at: Number((read.value as { at?: unknown }).at) || 0 });
+    }
+    const numbered = waiting.every((w) => w.seq !== undefined);
+    waiting.sort((a, b) => (numbered ? a.seq! - b.seq! : a.at - b.at || (a.id < b.id ? -1 : 1)));
+    for (const w of waiting) {
+      await this.applyMemberAct(
+        pond.id,
+        { id: w.from.id, name: this.shownName(pond, w.from), role: w.from.role },
+        w.act,
+      );
+      if (w.seq !== undefined) {
+        pond.actsSeq = Math.max(pond.actsSeq ?? 0, w.seq);
+        this.save();
+      } else {
+        await this.storeOf(pond)
+          .delete(this.docPath(pond.id, "rposts", w.id))
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  /**
+   * The Owner's Mac applies one queued ask of a Member (leave, end one of their devices, a Duck), under the same rules as
+   * the command it replaced. Anything the rules refuse is dropped quietly.
+   */
+  async applyMemberAct(pondId: string, from: { id: string; name: string; role: Role }, act: MemberAct): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner") return;
+    if (act.leave) {
+      if (from.id === this.identity.id) return;
+      await this.removeAndRotate(pondId, from.id, (gone) => `${gone.name} left the pond`).catch(() => undefined);
+    } else if (act.removeDevice) {
+      const member = (await this.members(pond)).get(from.id);
+      if (member && devicesOf(member).some((d) => d.id === act.removeDevice))
+        await this.removeDevice(pondId, from.id, act.removeDevice).catch(() => undefined);
+    } else if (act.start) {
+      if (from.role !== "member" || !this.takeStartSlot(pondId, from.id)) return;
+      const r = act.start;
+      await this.holdStart(pondId, from, {
+        id: r.requestId,
+        kind: "start",
+        threadId: "",
+        issuedAt: this.now(),
+        expiresAt: this.now(),
+        nonce: "",
+        text: r.text,
+        agent: r.agent,
+        model: r.model,
+        ...(r.title ? { title: r.title } : {}),
+        requestId: r.requestId,
+      }).catch(() => undefined);
+    }
+  }
+
+  /** A Member's Mac learns the Owner answered (declined) these start requests: they stop saying "Waiting". */
+  noteAnswered(pondId: string, requestIds: string[]): void {
+    const pond = this.pondsFile.data.ponds[pondId];
+    if (!pond || pond.role === "owner" || requestIds.length === 0) return;
+    const have = new Set(pond.answered ?? []);
+    const fresh = requestIds.filter((id) => !have.has(id));
+    if (fresh.length === 0) return;
+    pond.answered = [...(pond.answered ?? []), ...fresh].slice(-200);
+    this.save();
+    this.emit("changed", pondId);
   }
 
   /**
@@ -4731,7 +4748,7 @@ export class FlotillaService extends EventEmitter {
         .sort((a, b) => a.at - b.at);
     }
     const answered = new Set<string>();
-    for (const r of ripples) if (r.ref) answered.add(r.ref);
+    for (const id of pond.answered ?? []) answered.add(id);
     for (const t of threads) if (t.requester?.requestId) answered.add(t.requester.requestId);
     return (pond.asked ?? [])
       .filter((a) => now - a.at < PENDING_START_LIFE_MS && !answered.has(a.requestId))
@@ -4947,7 +4964,10 @@ export class FlotillaService extends EventEmitter {
         "words",
         "requestedAt",
         "endedAt",
-        "reapedAt",
+        "recent",
+        "ingestedSeq",
+        "actsSeq",
+        "answered",
       ] as const)
         delete pond[key];
       this.summaryCache.delete(pond.id);
@@ -4968,7 +4988,6 @@ export class FlotillaService extends EventEmitter {
     delete this.pondsFile.data.ponds[pondId];
     this.save();
     this.lastPresence.delete(pondId);
-    this.lastPresenceWrite.delete(pondId);
     this.echoes.delete(pondId);
     this.backoffs.delete(pondId);
     this.summaryCache.delete(pondId);

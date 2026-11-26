@@ -11,13 +11,12 @@ import { NativeStore } from "../native/store.js";
 import type { SessionRow } from "../native/types.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaRoutes } from "./mount.js";
-import { FlotillaService, PRESENCE_TTL_MS } from "./service.js";
+import { FlotillaService, type LivePresence } from "./service.js";
 import {
   readInboxDoc,
   readRoomDoc,
   readRoomTaskDoc,
   RoomSync,
-  ROOM_CLOUD_POSTS,
   ROOM_INBOX_LIFE_MS,
   ownerOfflineLine,
   roomDocOf,
@@ -38,6 +37,11 @@ afterAll(async () => {
 });
 
 const clock = { now: Date.now() };
+/** The live connections' word on whether the Owner's Mac is running (cloud-layer.md, "Live notices"). */
+const ownerAway = { v: false };
+const BULK_POSTS = 205;
+/** What people and Ducks said: the Room's own lines about the Pond (someone joined) are Squeak's. */
+const said = <T extends { author: { name: string } }>(posts: T[]): T[] => posts.filter((p) => p.author.name !== "Squeak");
 
 interface Mac {
   dir: string;
@@ -46,7 +50,7 @@ interface Mac {
   at: { now: number };
 }
 
-function mac(name: string, at: { now: number } = clock): Mac {
+function mac(name: string, at: { now: number } = clock, presenceOf?: () => Promise<LivePresence[]>): Mac {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-room-"));
   dirs.push(dir);
   const service = new FlotillaService({
@@ -56,6 +60,7 @@ function mac(name: string, at: { now: number } = clock): Mac {
     nest: name + "-mac",
     inviteLinkBase: "https://x.test/join",
     now: () => at.now,
+    ...(presenceOf ? { presenceOf } : {}),
   });
   return { dir, service, at };
 }
@@ -118,7 +123,7 @@ describe("the Room reaches Members", () => {
   beforeAll(async () => {
     A = mac("Sibhi");
     bAt = { now: clock.now };
-    B = mac("Aarav", bAt);
+    B = mac("Aarav", bAt, async () => [{ memberId: A.service.me.id, online: !ownerAway.v }]);
     V = mac("Vera");
     host = ownerHost(A.service);
     pondId = (await A.service.createPond({ name: "Site", projectId: host.project.id })).id;
@@ -153,32 +158,34 @@ describe("the Room reaches Members", () => {
     });
     await host.sync.idle();
     const page = await bSync.page(pondId);
-    expect(page.posts.map((p) => p.text)).toEqual(["Shall we start with the footer?", "On it: footer first."]);
-    expect(page.posts.map((p) => p.seq)).toEqual([first.seq, duck.seq]);
-    expect(page.latestSeq).toBe(duck.seq);
+    expect(said(page.posts).map((p) => p.text)).toEqual(["Shall we start with the footer?", "On it: footer first."]);
+    // The order is the cloud's (this fake store has no numbers, so time then the Owner's own order); seqs only ever rise.
+    expect(page.posts.every((p, i, all) => i === 0 || p.seq > all[i - 1]!.seq)).toBe(true);
+    expect(page.latestSeq).toBe(page.posts.at(-1)!.seq);
+    expect(first.seq).toBeLessThan(duck.seq);
     // A Duck's chat id is the Owner's Mac's own and never leaves it.
     expect(JSON.stringify(page.posts)).not.toContain("sess-1");
-    expect(page.posts[0]!.author).toMatchObject({ kind: "person", name: "Sibhi", id: A.service.me.id });
+    expect(said(page.posts)[0]!.author).toMatchObject({ kind: "person", name: "Sibhi", id: A.service.me.id });
     // What the cloud holds is opaque.
     const raw = await new RtdbRest(url).list(`channels/${pondId}/room`);
-    expect(raw.length).toBe(2);
+    // Two posts and the Room's lines about the Pond (made, joined).
+    expect(raw.length).toBe(5);
     expect(JSON.stringify(raw)).not.toContain("footer");
     // A viewer watches the Room too.
-    expect((await vSync.page(pondId)).posts).toHaveLength(2);
+    expect(said((await vSync.page(pondId)).posts)).toHaveLength(2);
   });
 
   it("a Member posts while the Owner's Mac runs: it lands in the Room as theirs and comes back to everyone", async () => {
-    await A.service.setPresence(pondId, {});
     const sent = await bSync.post(pondId, "Footer is fine by me.");
     expect(sent.offline).toBe(false);
-    // Not in the Room until the Owner's Mac applies it.
-    expect((await bSync.page(pondId)).posts.map((p) => p.text)).not.toContain("Footer is fine by me.");
+    // Every Member reads it at once, from the Member's own signed document, before the Owner's Mac has applied it.
+    expect((await bSync.page(pondId)).posts.map((p) => p.text)).toContain("Footer is fine by me.");
     await A.service.pass(pondId);
     await host.sync.idle();
     const row = host.store.roomPostById(`m-${sent.id}`);
     expect(row).toMatchObject({ authorKind: "person", authorName: "Aarav", text: "Footer is fine by me." });
     const page = await bSync.page(pondId);
-    expect(page.posts.at(-1)).toMatchObject({
+    expect(said(page.posts).at(-1)).toMatchObject({
       text: "Footer is fine by me.",
       author: { name: "Aarav", kind: "person" },
     });
@@ -188,9 +195,9 @@ describe("the Room reaches Members", () => {
   });
 
   it("while the Owner's Mac is away: Members read, post, and see the offline line; the posts wait in order and apply when it returns", async () => {
-    clock.now += PRESENCE_TTL_MS + 60_000;
+    ownerAway.v = true;
+    clock.now += 60_000;
     bAt.now = clock.now;
-    const before = (await bSync.page(pondId)).latestSeq;
     const first = await bSync.post(pondId, "one");
     expect(first).toMatchObject({ offline: true });
     expect(first.line).toBe(ownerOfflineLine("Sibhi"));
@@ -201,11 +208,11 @@ describe("the Room reaches Members", () => {
     bAt.now = clock.now + 1_000;
     await bSync.post(pondId, "three");
     const waiting = await bSync.page(pondId);
-    expect(waiting.latestSeq).toBe(before);
     expect(waiting.ownerOffline?.line).toBe(ownerOfflineLine("Sibhi"));
-    expect(waiting.posts.map((p) => p.text)).not.toContain("one");
+    // Members read the waiting posts now, with the Owner's Mac away.
+    expect(said(waiting.posts).slice(-3).map((p) => p.text)).toEqual(["two (earlier clock)", "one", "three"]);
     // The Owner's Mac returns: it applies them in the order they were written.
-    await A.service.setPresence(pondId, {});
+    ownerAway.v = false;
     await A.service.pass(pondId);
     await host.sync.idle();
     const mine = host.store
@@ -215,12 +222,11 @@ describe("the Room reaches Members", () => {
     expect(mine.slice(-3)).toEqual(["two (earlier clock)", "one", "three"]);
     const after = await bSync.page(pondId);
     expect(after.ownerOffline).toBeUndefined();
-    expect(after.posts.slice(-3).map((p) => p.text)).toEqual(["two (earlier clock)", "one", "three"]);
+    expect(said(after.posts).slice(-3).map((p) => p.text)).toEqual(["two (earlier clock)", "one", "three"]);
     expect(after.posts.slice(-3).every((p, i, all) => i === 0 || p.seq > all[i - 1]!.seq)).toBe(true);
   });
 
   it("applies a waiting post once, however often the inbox is replayed", async () => {
-    await A.service.setPresence(pondId, {});
     const sent = await bSync.post(pondId, "only once");
     const store = new RtdbRest(url);
     const doc = (await store.list(`channels/${pondId}/rposts`)).find((d) => d.id === sent.id)!.doc;
@@ -303,16 +309,16 @@ describe("the Room reaches Members", () => {
     expect(tasks.find((t) => t.id === task.id)).toMatchObject({ state: "done", result: "Footer links fixed." });
   });
 
-  it("the cloud keeps only the newest posts", async () => {
-    for (let i = 0; i < ROOM_CLOUD_POSTS + 5; i++) host.room.personPost(host.project.id, `bulk ${i}`);
+  it("the cloud keeps the whole Room, not the newest 200: older pages walk back by seq", async () => {
+    for (let i = 0; i < BULK_POSTS; i++) host.room.personPost(host.project.id, `bulk ${i}`);
     await host.sync.idle();
     const raw = await new RtdbRest(url).list(`channels/${pondId}/room`);
-    expect(raw.length).toBe(ROOM_CLOUD_POSTS);
+    expect(raw.length).toBeGreaterThanOrEqual(BULK_POSTS);
     const page = await bSync.page(pondId, { limit: 200 });
-    expect(page.posts.at(-1)!.text).toBe(`bulk ${ROOM_CLOUD_POSTS + 4}`);
-    // Older pages walk back by seq.
-    const older = await bSync.page(pondId, { before: page.posts[0]!.seq, limit: 10 });
-    expect(older.posts.length).toBe(0);
+    expect(page.posts.at(-1)!.text).toBe(`bulk ${BULK_POSTS - 1}`);
+    const older = await bSync.page(pondId, { before: page.posts[0]!.seq, limit: 200 });
+    expect(older.posts.length).toBeGreaterThan(0);
+    expect(said(older.posts)[0]!.text).toBe("Shall we start with the footer?");
   });
 
   it("a post that waited longer than a week is dropped unread", async () => {
@@ -383,7 +389,7 @@ describe("the Room reaches Members", () => {
     await B.service.refresh(pondId);
     const after = await bSync.page(pondId);
     expect(after.posts.length).toBe(before);
-    expect(after.posts.at(-1)!.text).toBe(`bulk ${ROOM_CLOUD_POSTS + 4}`);
+    expect(after.posts.map((p) => p.text)).toContain(`bulk ${BULK_POSTS - 1}`);
   });
 });
 
@@ -454,13 +460,13 @@ describe("Members see the whole Room: detail, plan cards, canvas cards, comments
     await host.sync.idle();
     for (const sync of [bSync, vSync]) {
       const page = await sync.page(pondId);
-      expect(page.posts.map((p) => p.kind)).toEqual(["plan", "needs", "done"]);
-      expect(page.posts[0]).toMatchObject({
+      expect(said(page.posts).map((p) => p.kind)).toEqual(["plan", "needs", "done"]);
+      expect(said(page.posts)[0]).toMatchObject({
         text: "Plan: redo the footer",
         detail: "Spec: links.\nPlan: 1. fix hrefs",
       });
-      expect(page.posts[1]!.detail).toBe("Which footer layout?");
-      expect(page.posts[2]!.canvases).toEqual([{ id: "abc123", title: "Footer deck", kind: "deck", artboards: 3 }]);
+      expect(said(page.posts)[1]!.detail).toBe("Which footer layout?");
+      expect(said(page.posts)[2]!.canvases).toEqual([{ id: "abc123", title: "Footer deck", kind: "deck", artboards: 3 }]);
     }
     expect(JSON.stringify((await bSync.page(pondId)).posts)).not.toContain("/Users/owner");
     // Plain posts stay as thin as before.

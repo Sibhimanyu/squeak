@@ -626,7 +626,6 @@ export class FlotillaRoutes {
     }
   }
 
-
   /** SSE: `event: changed` with `{ pondId }` and nothing else; the app re-reads through the routes. */
   private stream(ctx: RouteContext): void {
     const { res, req } = ctx;

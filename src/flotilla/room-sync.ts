@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { logger } from "../utils/logger.js";
 import {
+  isPondLine,
   isSqueakLine,
   Room,
   RoomError,
@@ -15,6 +16,7 @@ import { randomId } from "./crypto.js";
 import type { Caps } from "./permissions.js";
 import { DOC_ID, FlotillaError, type Role } from "./types.js";
 import type { FlotillaService } from "./service.js";
+import { readMemberAct, type MemberAct, type Ripple } from "./types.js";
 
 /**
  * The Room reaches Members (docs/ponds.md, "The Room reaches Members"). The Owner's Mac holds the Room; for a shared pond it
@@ -23,12 +25,15 @@ import type { FlotillaService } from "./service.js";
  * Nothing here decides who may speak beyond the Owner's own switches; it is the same channel, keys and signatures as threads.
  */
 
-/** Posts kept in the cloud: the newest. The Mac's own store keeps the rest. */
-export const ROOM_CLOUD_POSTS = 200;
-/** A Member's post waits this long for the Owner's Mac; after that it is dropped unread. */
+/**
+ * A queued ask that the cloud did not number (a store with no change feed) waits this long for the Owner's Mac; after that it
+ * is dropped unread. One the cloud numbered waits as long as it takes: the order is the cloud's, and it is applied once.
+ */
 export const ROOM_INBOX_LIFE_MS = 7 * 24 * 3_600_000;
 /** What one Member may add to the Room per hour (applied by the Owner's Mac). */
 export const ROOM_MEMBER_POSTS_PER_HOUR = 60;
+/** What the Room says above its first post once the cloud has paged the oldest out (25 MB cap per Pond). */
+export const EARLIER_LINE = "Earlier messages are no longer kept in the cloud";
 /** What a Member sees while the Owner's Mac is not running. */
 export const ownerOfflineLine = (name: string): string =>
   `${name.trim().split(/\s+/)[0] || "Owner"}'s Mac is offline; Ducks will pick this up when it's back`;
@@ -41,6 +46,10 @@ export interface RoomSignedDoc {
   role: Role;
   name: string;
   caps: Caps;
+  /** The cloud's number for this document (the Pond's one order); absent on a store with no change feed. */
+  seq?: number;
+  /** When the writer sealed it. */
+  at?: number;
 }
 
 /** What `FlotillaService.roomPort` hands over: the only door the Room's documents use. */
@@ -56,6 +65,13 @@ export interface RoomPort {
   list(kind: string): Promise<RoomSignedDoc[]>;
   caps(): Promise<Caps>;
   owner(): Promise<{ name: string; online: boolean }>;
+  /** The relay's note that it paged the oldest posts out of the cloud's Room (25 MB cap), or null. */
+  note(): Promise<{ removed: number; before: number; at: number } | null>;
+  /** The Owner's Mac: the highest cloud seq of a queued ask it has applied, and a way to move it on. */
+  ingested(): number;
+  setIngested(seq: number): void;
+  /** A Member's Mac: start requests the Owner declined. */
+  noteAnswered(requestIds: string[]): void;
 }
 
 /** A canvas card as a Member sees it: no folder (that stays on the Owner's Mac), just what the card draws and the wire id. */
@@ -94,6 +110,8 @@ export interface RoomInboxDoc {
   replyTo?: string;
   /** Present for "Make task": the Room message to make a Task from (`text` is then empty). */
   task?: { messageId: string };
+  /** A Member's other asks, which wait in the same queue (`text` is empty): leaving, ending a device, a Duck. */
+  act?: MemberAct;
 }
 
 /** `rtasks`/<task id>: a Task as Members see it (no discussion, no place, no Duck's chat). Written by the Owner's Mac. */
@@ -161,6 +179,8 @@ export function readInboxDoc(v: unknown): RoomInboxDoc | null {
   if (!rec(v) || v.v !== 1 || !str(v.id, 80) || !DOC_ID.test(v.id) || !str(v.text, ROOM_MAX_TEXT * 4) || !num(v.at)) {
     return null;
   }
+  const act = readMemberAct(v);
+  if (act) return { v: 1, id: v.id, text: "", at: v.at, act };
   if (v.task !== undefined) {
     if (!rec(v.task) || !str(v.task.messageId, 80) || !v.task.messageId) return null;
     return { v: 1, id: v.id, text: "", at: v.at, task: { messageId: v.task.messageId } };
@@ -216,7 +236,9 @@ export function roomDocOf(
   },
   ownerId?: string,
 ): RoomDoc | null {
-  if (row.level !== "room" || (row.authorKind !== "person" && row.authorKind !== "agent")) return null;
+  // A line Squeak says about the Pond (someone joined, left, was removed) travels as a message from Squeak.
+  const line = row.authorKind === "squeak" && row.id.startsWith("ln-");
+  if (row.level !== "room" || (row.authorKind !== "person" && row.authorKind !== "agent" && !line)) return null;
   if (!DOC_ID.test(row.id) || !row.text) return null;
   const canvases = canvasDocsOf(row.canvases);
   return {
@@ -224,7 +246,7 @@ export function roomDocOf(
     seq: row.seq,
     id: row.id,
     author: {
-      kind: row.authorKind,
+      kind: line ? "agent" : (row.authorKind as "person" | "agent"),
       // A Duck's id is its chat's id on the Owner's Mac: it stays there. A person's is their member id.
       // The Owner's own posts are stored as "owner" (this Mac's room); everyone else knows them by their member id.
       ...(row.authorId && row.authorKind === "person"
@@ -280,6 +302,8 @@ export interface MemberRoomPage {
   ownerOffline?: { line: string };
   /** False when the Owner turned off messaging for this Member: the Room is read-only. */
   canPost: boolean;
+  /** Set when the cloud paged the oldest posts out (25 MB cap): the one sentence the Room shows above its first post. */
+  earlier?: { line: string };
 }
 
 export interface RoomSyncOptions {
@@ -298,6 +322,8 @@ export class RoomSync extends EventEmitter {
   private readonly debounceMs: number;
   /** Per pond: the post ids already in the cloud (posts never change) and when the cloud was last compared. */
   private readonly published = new Map<string, Set<string>>();
+  /** Per pond: Members' post ids (`m-<doc id>`) the cloud numbered. Those are already in the Room as the Member's own document. */
+  private readonly inboxPosts = new Map<string, Set<string>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly chains = new Map<string, Promise<void>>();
   private readonly slots = new Map<string, number[]>();
@@ -314,17 +340,14 @@ export class RoomSync extends EventEmitter {
     const onPost = (row: { projectId: string }): void => this.changed(row.projectId);
     const onTask = (f: { projectId: string }): void => this.changed(f.projectId);
     const onPass = (pondId: string): Promise<void> => this.pass(pondId);
-    // A new pond key (someone was removed): what is in the cloud is sealed with the old one, so all of it is written again.
-    const onRotated = (pondId: string): void => {
-      this.published.delete(pondId);
-      void this.enqueue(pondId, () => this.publish(pondId, true)).catch(() => undefined);
-    };
+    // What happened in the Pond (someone joined, left, was removed): said in the Room, where every Member reads it.
+    const onLine = (pondId: string, ripple: Ripple): void => this.line(pondId, ripple);
     this.o.room.on("post", onPost);
     this.o.jobs.on("job", onTask);
     this.o.service.on("pass", onPass);
-    this.o.service.on("rotated", onRotated);
+    this.o.service.on("line", onLine);
     this.detach.push(
-      () => this.o.service.off("rotated", onRotated),
+      () => this.o.service.off("line", onLine),
       () => this.o.room.off("post", onPost),
       () => this.o.jobs.off("job", onTask),
       () => this.o.service.off("pass", onPass),
@@ -397,111 +420,182 @@ export class RoomSync extends EventEmitter {
     return next;
   }
 
-  private takeSlot(pondId: string, memberId: string): boolean {
+  private inbox(pondId: string): Set<string> {
+    let set = this.inboxPosts.get(pondId);
+    if (!set) this.inboxPosts.set(pondId, (set = new Set()));
+    return set;
+  }
+
+  /** The Room says what happened in the Pond (the Owner's Mac only; a Member's Mac has no say in it). */
+  private line(pondId: string, ripple: Ripple): void {
+    let port: RoomPort;
+    try {
+      port = this.o.service.roomPort(pondId);
+    } catch {
+      return; // a local pond: no Members to tell
+    }
+    if (port.role !== "owner" || !port.projectId || !this.o.store.getProject(port.projectId)) return;
+    const who = ripple.onBehalf?.name ?? port.me.name;
+    const text = ripple.text.toLowerCase().startsWith(`${who.toLowerCase()} `) ? ripple.text : `${who} ${ripple.text}`;
+    try {
+      this.o.room.post({
+        projectId: port.projectId,
+        // A declined Duck request keeps the request's id in the line, so the Member's Mac can stop saying "Waiting".
+        id: ripple.ref ? `ln-dec-${ripple.ref}` : `ln-${ripple.id}`,
+        author: { kind: "squeak", name: "Squeak" },
+        kind: "message",
+        level: "room",
+        text: text.slice(0, ROOM_MAX_TEXT),
+        at: ripple.at,
+      });
+    } catch (error) {
+      if (!(error instanceof RoomError)) throw error;
+    }
+  }
+
+  /** Posts a Member added in the hour up to `at`, counting this one: the limit is by the Member's own clock, so a backlog applied late is not cut short. */
+  private takeSlot(pondId: string, memberId: string, at: number): boolean {
     const key = `${pondId}:${memberId}`;
-    const now = this.now();
-    const recent = (this.slots.get(key) ?? []).filter((at) => now - at < 3_600_000);
+    const recent = (this.slots.get(key) ?? []).filter((t) => at - t < 3_600_000 && t <= at);
     if (recent.length >= ROOM_MEMBER_POSTS_PER_HOUR) {
       this.slots.set(key, recent);
       return false;
     }
-    recent.push(now);
+    recent.push(at);
     this.slots.set(key, recent);
     return true;
   }
 
   /**
-   * Applies the Members' waiting posts, oldest first (by the time the Member wrote them, ties by id), each through the
-   * Room's own post path, then deletes them. A post that is refused (not a member, a viewer, messaging switched off, too old,
-   * empty) is dropped quietly; the same post id can never land twice.
+   * Applies the Members' queued asks, in the cloud's order (seq; the Member's own time on a store with no feed): a message goes
+   * through the Room's own post path as post `m-<doc id>` (so a replay can never post twice), "Make task" through the Task rules, a
+   * leave, a device removal or a Duck request through the service. Nothing is deleted: a numbered document stays (it is the
+   * Member's post in the cloud's Room) and the Owner's Mac remembers how far it has applied. A refused ask (not a member, a
+   * viewer, messaging switched off, over the hourly limit, empty) is skipped quietly.
    */
   async drain(pondId: string): Promise<number> {
     const port = this.o.service.roomPort(pondId);
     if (port.role !== "owner" || !port.projectId || !this.o.store.getProject(port.projectId)) return 0;
-    const waiting: Array<{ doc: RoomInboxDoc; from: RoomSignedDoc; docId: string }> = [];
+    const cursor = port.ingested();
+    const waiting: Array<{ doc: RoomInboxDoc; from: RoomSignedDoc; seq: number | undefined }> = [];
     for (const signed of await port.list("rposts")) {
       const doc = readInboxDoc(signed.value);
-      if (doc && doc.id === signed.id) waiting.push({ doc, from: signed, docId: signed.id });
-      else await port.remove("rposts", signed.id).catch(() => undefined);
+      // Leaving, ending a device and a Duck request are applied by the service itself (`applyQueuedActs`), on its own cursor.
+      if (doc?.act) continue;
+      if (!doc || doc.id !== signed.id) {
+        if (signed.seq === undefined) await port.remove("rposts", signed.id).catch(() => undefined);
+        continue;
+      }
+      if (signed.seq !== undefined) this.inbox(pondId).add(`m-${signed.id}`);
+      if (signed.seq !== undefined && signed.seq <= cursor) continue;
+      waiting.push({ doc, from: signed, seq: signed.seq });
     }
-    waiting.sort((a, b) => a.doc.at - b.doc.at || (a.docId < b.docId ? -1 : a.docId > b.docId ? 1 : 0));
+    const numbered = waiting.every((w) => w.seq !== undefined);
+    waiting.sort((a, b) =>
+      numbered ? a.seq! - b.seq! : a.doc.at - b.doc.at || (a.doc.id < b.doc.id ? -1 : a.doc.id > b.doc.id ? 1 : 0),
+    );
     let applied = 0;
-    for (const { doc, from } of waiting) {
+    for (const { doc, from, seq } of waiting) {
       const now = this.now();
-      const fine =
-        from.device !== port.ownerId &&
+      if (from.device === port.ownerId) {
+        // The Owner's own key never queues an ask.
+      } else if (
         from.role !== "viewer" &&
         from.caps.message &&
-        now - doc.at <= ROOM_INBOX_LIFE_MS &&
-        this.takeSlot(pondId, from.device);
-      const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.role === "owner" };
-      if (fine && doc.task) {
-        // "Make task": the Owner's Task rules, with the approval gate for a Member without the start permission.
-        try {
-          this.o.jobs.fromMessage(port.projectId, doc.task.messageId, undefined, origin);
-          applied += 1;
-        } catch (error) {
-          if (!(error instanceof TaskError)) throw error;
-        }
-      } else if (fine) {
-        const postId = `m-${doc.id}`;
-        try {
-          this.o.jobs.withMemberPost(postId, origin, () =>
-            this.o.room.post({
-              projectId: port.projectId!,
-              id: postId,
-              author: { kind: "person", id: from.device, name: from.name },
-              kind: "message",
-              level: "room",
-              text: doc.text,
-              ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
-              // The Member's own time, never later than now.
-              at: Math.min(doc.at, now),
-            }),
-          );
-          applied += 1;
-        } catch (error) {
-          if (!(error instanceof RoomError)) throw error;
+        (seq !== undefined || now - doc.at <= ROOM_INBOX_LIFE_MS) &&
+        this.takeSlot(pondId, from.device, doc.at)
+      ) {
+        const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.role === "owner" };
+        if (doc.task) {
+          // "Make task": the Owner's Task rules, with the approval gate for a Member without the start permission.
+          try {
+            this.o.jobs.fromMessage(port.projectId, doc.task.messageId, undefined, origin);
+            applied += 1;
+          } catch (error) {
+            if (!(error instanceof TaskError)) throw error;
+          }
+        } else {
+          const postId = `m-${doc.id}`;
+          try {
+            this.o.jobs.withMemberPost(postId, origin, () =>
+              this.o.room.post({
+                projectId: port.projectId!,
+                id: postId,
+                author: { kind: "person", id: from.device, name: from.name },
+                kind: "message",
+                level: "room",
+                text: doc.text,
+                ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
+                // The Member's own time, never later than now.
+                at: Math.min(doc.at, now),
+              }),
+            );
+            applied += 1;
+          } catch (error) {
+            if (!(error instanceof RoomError)) throw error;
+          }
         }
       }
-      await port.remove("rposts", doc.id).catch(() => undefined);
+      if (seq !== undefined) port.setIngested(seq);
+      else await port.remove("rposts", doc.id).catch(() => undefined);
     }
     if (applied > 0) await this.publish(pondId);
     return applied;
   }
 
-  /** Writes the Room's newest posts and its Tasks to the cloud; posts already there are not written again. */
-  async publish(pondId: string, all = false): Promise<void> {
+  /**
+   * Writes the whole Room and its Tasks to the cloud; a post already there is not written again. A Member's own posts are not
+   * written when the cloud numbered them: they are already there, as the Member's signed documents. The cloud pages out the oldest past its cap, and
+   * after it has, a post older than the oldest one it still holds is not sent again.
+   */
+  async publish(pondId: string): Promise<void> {
     const port = this.o.service.roomPort(pondId);
     if (port.role !== "owner" || !port.projectId || !this.o.store.getProject(port.projectId)) return;
     const projectId = port.projectId;
-    const known = all ? new Set<string>() : (this.published.get(pondId) ?? new Set<string>());
-    // First time since this Mac started: learn what the cloud already holds, so a restart rewrites nothing it need not.
-    const first = !all && !this.published.has(pondId);
-    const rows = this.o.store.roomPosts(projectId, { limit: ROOM_CLOUD_POSTS }).filter((r) => !isSqueakLine(r));
+    const known = this.published.get(pondId) ?? new Set<string>();
+    const first = !this.published.has(pondId);
+    const rows = this.o.store
+      .roomPosts(projectId, { since: 0, limit: 1_000_000 })
+      .filter((r) => !isSqueakLine(r));
+    let floor = 0;
     if (first) {
-      // A document written before detail, canvases or replyTo travelled is not what the Room holds now: it is written again.
+      for (const d of await port.list("rposts")) if (d.seq !== undefined) this.inbox(pondId).add(`m-${d.id}`);
+      // First time since this Mac started: learn what the cloud already holds, so a restart rewrites nothing it need not.
       const want = new Map<string, string>();
       for (const row of rows) {
         const doc = roomDocOf(row, port.ownerId);
         if (doc) want.set(doc.id, JSON.stringify(doc));
       }
-      for (const d of await port.list("room")) {
+      const held = await port.list("room");
+      for (const d of held) {
         const read = readRoomDoc(d.value);
-        if (!want.has(d.id) || (read && JSON.stringify(read) === want.get(d.id))) known.add(d.id);
+        // A document written before detail, canvases or replyTo travelled is not what the Room holds now: it is written again.
+        if (
+          !want.has(d.id) ||
+          (read && JSON.stringify({ ...read, seq: 0 }) === JSON.stringify({ ...JSON.parse(want.get(d.id)!), seq: 0 }))
+        )
+          known.add(d.id);
+      }
+      if (await port.note().catch(() => null)) {
+        const times = [
+          ...held.map((d) => readRoomDoc(d.value)?.at),
+          ...(await port.list("rposts")).map((d) => d.at),
+        ].filter((t): t is number => typeof t === "number");
+        if (times.length > 0) floor = Math.min(...times);
       }
     }
     const keep = new Set<string>();
+    const inboxIds = this.inbox(pondId);
     for (const row of rows) {
       const doc = roomDocOf(row, port.ownerId);
-      if (!doc) continue;
+      // A Member's post the cloud numbered is in the cloud already, as their own signed document: not written twice.
+      if (!doc || inboxIds.has(doc.id)) continue;
       keep.add(doc.id);
-      if (known.has(doc.id)) continue;
+      if (known.has(doc.id) || doc.at < floor) continue;
       await port.put("room", doc.id, doc);
       known.add(doc.id);
     }
-    // The cloud keeps only the newest: whatever left the window (or the Room) goes.
-    if (all) for (const d of await port.list("room")) if (!keep.has(d.id)) known.add(d.id);
+    // A post that left the Room (cleared) leaves the cloud too; the cloud's own paging is not ours to repeat.
     for (const id of [...known]) {
       if (keep.has(id)) continue;
       await port.remove("room", id).catch(() => undefined);
@@ -519,7 +613,7 @@ export class RoomSync extends EventEmitter {
       else current.set(d.id, "");
     }
     for (const [id, doc] of tasks) {
-      if (!all && current.get(id) === JSON.stringify(doc)) continue;
+      if (current.get(id) === JSON.stringify(doc)) continue;
       await port.put("rtasks", id, doc);
     }
     for (const id of current.keys()) if (!tasks.has(id)) await port.remove("rtasks", id).catch(() => undefined);
@@ -528,24 +622,65 @@ export class RoomSync extends EventEmitter {
 
   // ---- a Member's Mac ----
 
-  /** The Room as the Owner's Mac last published it, plus whether that Mac is running. Never the Owner's own pond. */
+  /**
+   * The Room as the cloud holds it: the Owner's posts and every Member's own posts, in the cloud's one order, whether or not the
+   * Owner's Mac is running (when it is away, Members still read each other at once). Never the Owner's own pond.
+   */
   async page(pondId: string, opts: { since?: number; before?: number; limit?: number } = {}): Promise<MemberRoomPage> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: read it from the pond.", 400);
     const caps = await port.caps();
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
-    const [roomDocs, taskDocs, owner] = await Promise.all([
+    const [roomDocs, taskDocs, inboxDocs, owner, note] = await Promise.all([
       port.list("room"),
       port.list("rtasks"),
+      port.list("rposts"),
       port.owner().catch(() => null),
+      port.note().catch(() => null),
     ]);
-    const all: RoomDoc[] = [];
+    const entries: Array<{ post: RoomDoc; seq: number | undefined }> = [];
+    const have = new Set<string>();
+    const declined: string[] = [];
     for (const d of roomDocs) {
       const doc = readRoomDoc(d.value);
       // Only the Owner's Mac writes the Room: a Member's own document here is ignored, whatever it says.
-      if (doc && doc.id === d.id && d.device === port.ownerId) all.push(doc);
+      if (!doc || doc.id !== d.id || d.device !== port.ownerId) continue;
+      have.add(doc.id);
+      if (doc.id.startsWith("ln-dec-")) declined.push(doc.id.slice("ln-dec-".length));
+      entries.push({ post: doc, seq: d.seq });
     }
-    all.sort((a, b) => a.seq - b.seq);
+    for (const d of inboxDocs) {
+      const doc = readInboxDoc(d.value);
+      // A Member's message is a post as it stands; their other asks (a Task, leaving, a Duck) are not Room lines.
+      if (!doc || doc.id !== d.id || doc.task || doc.act || !doc.text || d.device === port.ownerId) continue;
+      const id = `m-${doc.id}`;
+      if (have.has(id)) continue; // an older Owner's Mac also published it: that copy is the one
+      entries.push({
+        post: {
+          v: 1,
+          seq: 0,
+          id,
+          author: { kind: "person", id: d.device, name: d.name },
+          kind: "message",
+          level: "room",
+          text: doc.text,
+          ...(doc.replyTo ? { replyTo: doc.replyTo } : {}),
+          at: doc.at,
+        },
+        seq: d.seq,
+      });
+    }
+    if (declined.length > 0) port.noteAnswered(declined);
+    const numbered = entries.every((e) => e.seq !== undefined);
+    // With no cloud numbers: by time, then the Owner's own order for its posts, then id.
+    const own = (e: { post: RoomDoc; seq: number | undefined }): number =>
+      e.post.id.startsWith("m-") ? Number.MAX_SAFE_INTEGER : e.post.seq;
+    entries.sort((a, b) =>
+      numbered
+        ? a.seq! - b.seq!
+        : a.post.at - b.post.at || own(a) - own(b) || (a.post.id < b.post.id ? -1 : a.post.id > b.post.id ? 1 : 0),
+    );
+    const all: RoomDoc[] = entries.map((e, i) => ({ ...e.post, seq: numbered ? e.seq! : i + 1 }));
     const latestSeq = all.length ? all[all.length - 1]!.seq : 0;
     let posts: RoomDoc[];
     if (opts.since !== undefined) posts = all.filter((p) => p.seq > opts.since!).slice(0, limit);
@@ -563,6 +698,7 @@ export class RoomSync extends EventEmitter {
       turns: [],
       tasks,
       ...(owner && !owner.online ? { ownerOffline: { line: ownerOfflineLine(owner.name) } } : {}),
+      ...(note ? { earlier: { line: EARLIER_LINE } } : {}),
       canPost: caps.message && port.role !== "viewer",
     };
   }

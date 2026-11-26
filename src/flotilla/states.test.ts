@@ -42,6 +42,8 @@ class World {
     };
     return self;
   }
+  /** Who held a live connection last, by member id: what the relay's presence says (cloud-layer.md, "Live notices"). */
+  readonly live = new Map<string, number>();
   mac(
     name: string,
     options: {
@@ -62,6 +64,8 @@ class World {
       ...(options.owner ? { location: LOCATION } : {}),
       storeFor: () => verifying(store),
       now: () => this.clock.t,
+      presenceOf: async () =>
+        [...this.live].map(([memberId, at]) => ({ memberId, online: this.clock.t - at < 4 * 60_000, lastSeenAt: at })),
       ...(options.budgetMs ? { budgetMs: options.budgetMs } : {}),
       ...(options.live ? { liveState: options.live } : {}),
     });
@@ -262,7 +266,7 @@ describe("the relay is slow or gone", () => {
     const stale = await A.service.view(pondId);
     expect(stale).toMatchObject({ offline: true });
     expect(stale.pond.offlineLine).toBe(row!.offlineLine);
-    await expect(A.service.ripple(pondId, "x")).rejects.toMatchObject({ status: 503 });
+    await expect(A.service.renamePond(pondId, "x")).rejects.toMatchObject({ status: 503 });
     // The relay is back: a write goes through with no read first.
     await expect(A.service.removeMember(pondId, "none")).rejects.toThrow(/read-only/);
     // The relay is back: any write goes through at once, with no read first and no waiting for a flag to clear.
@@ -319,7 +323,7 @@ describe("the pond's people", () => {
     const w = world();
     const { A, pondId, others } = await flock(w, [{ name: "Aarav", role: "member" }]);
     const B = others[0]!;
-    await B.service.setPresence(pondId, { viewing: "pond" });
+    w.live.set(B.service.me.id, w.clock.t);
     let members = (await A.service.view(pondId)).members;
     expect(members.find((m) => m.name === "Aarav")).toMatchObject({
       online: true,
@@ -401,7 +405,7 @@ describe("threads and messages", () => {
       permissionMode: "default",
       state: "working",
     });
-    await B.service.setPresence(pondId, {});
+    w.live.set(B.service.me.id, w.clock.t);
     let [thread] = (await A.service.view(pondId)).threads;
     expect(thread).toMatchObject({
       id: t.id,
@@ -432,7 +436,7 @@ describe("threads and messages", () => {
       model: "m",
       mode: "own",
     });
-    await B.service.setPresence(pondId, {});
+    w.live.set(B.service.me.id, w.clock.t);
     await B.service.updateThread(pondId, t.id, { state: "waiting", waitingFor: "approval" });
     let view = await A.service.view(pondId);
     expect(view.threads[0]!.stateLine).toBe("Waiting for Aarav to approve an edit");

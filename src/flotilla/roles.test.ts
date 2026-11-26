@@ -178,7 +178,7 @@ describe("Viewer, Member and the Owner", () => {
     const mine = (await B.service.view(pondId)).starts!;
     expect(mine).toEqual([expect.objectContaining({ requestId, title: "Login bug", mine: true })]);
     expect(mine[0]).not.toHaveProperty("text");
-    expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "start" })]);
+    await A.bridge.runCommands(pondId); // the queued ask is applied: recorded as waiting
     expect(startedChats).toEqual([]);
     expect(A.service.ownThreads().some((t) => t.thread.sessionId.startsWith("n"))).toBe(false);
     // The Owner sees who asked and what, to Approve or Decline.
@@ -227,10 +227,11 @@ describe("Viewer, Member and the Owner", () => {
     await A.bridge.declineStart(pondId, requestId);
     expect(startedChats).toHaveLength(1);
     expect((await A.service.view(pondId)).starts).toBeUndefined();
-    await B.service.refresh(pondId);
+    B.service.noteAnswered(pondId, [requestId]);
     const view = await B.service.view(pondId);
     expect(view.starts).toBeUndefined();
-    const line = view.ripples.find((r) => r.ref === requestId)!;
+    // The Owner's Mac keeps the line and says it in the Room (room-sync.test.ts): the Member stops saying "Waiting" from that.
+    const line = (await A.service.view(pondId)).ripples.find((r) => r.ref === requestId)!;
     expect(`${line.actorName} ${line.text}`).toBe('Aarav2 declined the duck "Rewrite"');
   });
 

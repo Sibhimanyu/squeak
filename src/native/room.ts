@@ -719,7 +719,7 @@ export class Room extends EventEmitter {
    */
   feedRows(rows: RoomPostRow[]): RoomPostRow[] {
     return rows.filter((r) => {
-      if (isSqueakLine(r) || r.authorKind === "squeak") return false;
+      if (isSqueakLine(r) || (r.authorKind === "squeak" && !isPondLine(r))) return false;
       if (r.kind === "working") return false;
       if (r.kind !== "done") return true;
       if (r.authorKind !== "agent" || !r.sessionId) return false;
@@ -1517,6 +1517,11 @@ export interface HostEvents {
   off(event: "event", listener: (e: HostEvent) => void): unknown;
   on(event: "file-clash", listener: (c: FileClash) => void): unknown;
   off(event: "file-clash", listener: (c: FileClash) => void): unknown;
+}
+
+/** A line Squeak says about the Pond itself (joined, left, removed, renamed): kept in the feed, and Members read it too. */
+export function isPondLine(r: RoomPostRow): boolean {
+  return r.authorKind === "squeak" && r.id.startsWith("ln-");
 }
 
 /** The per-turn lines and `needs` posts Squeak used to make (the room derives turns from timelines now). */

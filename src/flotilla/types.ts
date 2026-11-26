@@ -713,3 +713,33 @@ export class FlotillaError extends Error {
     super(message);
   }
 }
+
+/** What a Member's queued ask can be besides a message or a Task (the `rposts` document's extra field): exactly one of these. */
+export interface MemberAct {
+  leave?: true;
+  removeDevice?: string;
+  start?: { requestId: string; text: string; agent: "claude" | "codex"; model: string; title?: string };
+}
+
+/** The ask a queued `rposts` value carries (leave, end a device, a Duck), strictly shaped, or null when it carries none. */
+export function readMemberAct(v: unknown): MemberAct | null {
+  if (!rec(v)) return null;
+  if (v.leave === true) return { leave: true };
+  if (typeof v.removeDevice === "string" && v.removeDevice.length > 0 && v.removeDevice.length <= 80)
+    return { removeDevice: v.removeDevice };
+  const st = v.start;
+  if (rec(st) && s(st.requestId, 80) && st.requestId && s(st.text, 4000) && st.text.trim()) {
+    if ((st.agent !== "claude" && st.agent !== "codex") || !s(st.model, 100) || !st.model) return null;
+    if (st.title !== undefined && !s(st.title, 200)) return null;
+    return {
+      start: {
+        requestId: st.requestId,
+        text: st.text,
+        agent: st.agent,
+        model: st.model,
+        ...(typeof st.title === "string" && st.title ? { title: st.title } : {}),
+      },
+    };
+  }
+  return null;
+}

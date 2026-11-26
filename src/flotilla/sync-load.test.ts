@@ -91,41 +91,17 @@ async function settled(A: { service: FlotillaService }, B: { service: FlotillaSe
 }
 
 describe("pond sync load", () => {
-  it("ignores the echo of its own presence write", async () => {
-    const { A, B, pondId } = await twoMembers();
-    await settled(A, B);
-    await A.service.setPresence(pondId, { viewing: "pond" });
-    await wait(150);
-    const a = A.service.takeStats();
-    expect(a).toMatchObject({ streamEvents: 1, skippedOwnEcho: 1, refreshes: 0 });
-    A.service.stop();
-    B.service.stop();
-  });
-
-  it("does not ping-pong: two members' presence writes cause one read each and no further writes", async () => {
+  it("presence is not a cloud write: viewing and typing cost no request and wake no one", async () => {
     const { r, A, B, pondId } = await twoMembers();
     await settled(A, B);
     const before = r.writes;
-    await A.service.setPresence(pondId, { viewing: "pond" });
-    await B.service.setPresence(pondId, { viewing: "pond" });
-    await wait(400);
-    expect(r.writes - before).toBe(2);
-    // Each Mac read once for the other's write (its own was an echo) and wrote nothing because of it.
-    expect(A.service.takeStats().refreshes).toBeLessThanOrEqual(1);
-    expect(B.service.takeStats().refreshes).toBeLessThanOrEqual(1);
-    A.service.stop();
-    B.service.stop();
-  });
-
-  it("writes an unchanged presence only when the heartbeat is due", async () => {
-    const { r, A, B, pondId } = await twoMembers();
-    await settled(A, B);
-    const before = r.writes;
-    for (let i = 0; i < 5; i++) await A.service.setPresence(pondId, { viewing: "pond" });
-    expect(r.writes - before).toBe(1);
+    for (let i = 0; i < 5; i++) await A.service.setPresence(pondId, { viewing: "pond", typing: "t" });
     r.clock.t += 120_000;
-    await A.service.setPresence(pondId, { viewing: "pond" });
-    expect(r.writes - before).toBe(2);
+    await B.service.setPresence(pondId, { viewing: "pond" });
+    await wait(300);
+    expect(r.writes - before).toBe(0);
+    expect(A.service.takeStats()).toMatchObject({ streamEvents: 0, refreshes: 0 });
+    expect(B.service.takeStats()).toMatchObject({ streamEvents: 0, refreshes: 0 });
     A.service.stop();
     B.service.stop();
   });

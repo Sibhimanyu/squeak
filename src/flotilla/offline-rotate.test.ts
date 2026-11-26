@@ -82,7 +82,7 @@ describe("offline pond details", () => {
     expect(view.ripples.map((r) => r.text)).toContain("Hello pond");
     const listed = await A.service.list();
     expect(listed[0]).toMatchObject({ id: pond.id, offline: true, memberCount: 1 });
-    await expect(A.service.ripple(pond.id, "nope")).rejects.toThrow(OFFLINE_WRITE);
+    await expect(A.service.renamePond(pond.id, "nope")).rejects.toThrow(OFFLINE_WRITE);
     await expect(A.service.rotateKey(pond.id)).rejects.toThrow(OFFLINE_WRITE);
 
     A.store.down = false;
@@ -167,7 +167,8 @@ describe("rotating the pond key", () => {
     expect(keysOf(B).current).toBe(2);
     const view = await B.service.view(pond.id);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
-    expect(view.ripples.map((r) => r.text)).toContain("changed the pond key");
+    // The Owner's Mac keeps the line; it is also said in the Room (room-sync.ts).
+    expect((await A.service.view(pond.id)).ripples.map((r) => r.text)).toContain("changed the pond key");
     expect(rtdb.tree.get(`channels/${pond.id}/pond/meta`)!.box.startsWith("2.")).toBe(true);
   });
 
@@ -198,6 +199,6 @@ describe("rotating the pond key", () => {
     await C.service.refresh(pond.id);
     const view = await C.service.view(pond.id);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Sibhi", "Vera"]);
-    expect(view.ripples.map((r) => r.text)).toContain("removed Aarav's Mac");
+    expect((await A.service.view(pond.id)).ripples.map((r) => r.text)).toContain("removed Aarav's Mac");
   });
 });

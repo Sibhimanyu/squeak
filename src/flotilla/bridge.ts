@@ -427,7 +427,9 @@ export class FlotillaBridge {
 
   // in: members' commands, on the starter's Mac
 
-  runCommands(pondId: string): Promise<CommandOutcome[]> {
+  async runCommands(pondId: string): Promise<CommandOutcome[]> {
+    // The Members' queued asks (a Duck, leaving) wait in the cloud for this Mac and are applied first, in the cloud's order.
+    await this.service.applyQueuedActsOf(pondId).catch(() => undefined);
     return this.service
       .processCommands(pondId, (v) => this.execute(pondId, v))
       .then(async (outcomes) => {

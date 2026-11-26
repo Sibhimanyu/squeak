@@ -180,7 +180,6 @@ export class HttpPondRelay implements PondRelay {
     return { token: body.token, expiresAt: body.expiresAt };
   }
 
-
   async inviteEmail(pondId: string, mail: InviteMail): Promise<{ sent: string[]; failed: string[] }> {
     const response = await this.fetchImpl(`${this.url}/ponds/${encodeURIComponent(pondId)}/invites/email`, {
       method: "POST",
