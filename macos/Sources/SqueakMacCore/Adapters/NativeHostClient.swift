@@ -99,13 +99,18 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     /// `duckId`, so the host's list is where the Mac learns it.
     public var branch: String?
     public var duckId: String?
+    /// While the chat is failed: when the person opened or dismissed that failure (the host's `errorSeenAt`); nil until then.
+    public var errorSeenAt: Date?
+    /// The failure's own words (`needsYou.text`, the host's one rule); nil when the host sent none.
+    public var failureText: String?
 
     enum CodingKeys: String, CodingKey {
-        case branch, duckId
+        case branch, duckId, errorSeenAt, needsYou
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
         case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt, helpersWorking, large, retryable, autoCompactAt, streamMissing
     }
 
+    private struct NeedsYouNote: Decodable { var reason: String?; var text: String? }
     private struct Background: Decodable { var count: Int? }
     private struct Context: Decodable { var used: Int?; var limit: Int? }
     private struct Large: Decodable { var reason: String?; var compacting: Bool? }
@@ -129,6 +134,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         archivedAt = c.lenient(String.self, .archivedAt).flatMap(DaemonDate.parse)
         branch = c.lenient(String.self, .branch)
         duckId = c.lenient(String.self, .duckId)
+        errorSeenAt = c.lenient(String.self, .errorSeenAt).flatMap(DaemonDate.parse)
+        failureText = c.lenient(NeedsYouNote.self, .needsYou)?.text
         backgroundCount = c.lenient(Background.self, .background)?.count
         ducklings = c.lenient(DucklingSet.self, .ducklings)
         helpersWorking = c.lenient(Bool.self, .helpersWorking) ?? false
@@ -966,6 +973,14 @@ public struct NativeHostClient: Sendable {
     public func retry(id: String) async throws -> (resent: Bool, reason: String?) {
         let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/retry", body: .object([:]), timeout: 30))
         return (j["resent"]?.bool ?? false, j["reason"]?.string)
+    }
+
+    /// The person opened this failed chat or dismissed it: it stops counting under Needs you. `false` when it was not failed
+    /// (another surface got there first), which is not an error.
+    @discardableResult
+    public func dismissError(id: String) async throws -> Bool {
+        let j = try await decode(NativeJSON.self, try await call("POST", "/native/sessions/\(Self.id(id))/dismiss-error", body: .object([:]), timeout: 10))
+        return j["dismissed"]?.bool ?? false
     }
 
     /// The opening message for a new thread that continues this chat: a cheap model's summary, which the person edits.

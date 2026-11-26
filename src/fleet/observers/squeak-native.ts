@@ -137,6 +137,7 @@ export class SqueakNativeObserver {
       state,
       detail: request ? request.summary : null,
       lastActivityAt: row.updated_at as string,
+      ...(state === "error" && typeof row.error_seen_at === "string" ? { errorSeenAt: row.error_seen_at } : {}),
       transcriptPath:
         agent === "claude" && agentSessionId
           ? path.join(this.projectsDir, claudeProjectFolder(cwd), `${agentSessionId}.jsonl`)

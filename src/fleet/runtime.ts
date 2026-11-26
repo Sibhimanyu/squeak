@@ -238,6 +238,7 @@ function serializeSession(
     ...(session.duckName ? { duckName: session.duckName } : {}),
     ...(session.duckDuty ? { duckDuty: session.duckDuty } : {}),
     ...(session.onMain ? { onMain: true as const } : {}),
+    ...(session.errorSeenAt ? { errorSeenAt: session.errorSeenAt } : {}),
     cwd: session.cwd,
     detail: session.detail,
     /**

@@ -16,8 +16,18 @@ describe("rollupStatus", () => {
   it("needs you wins over working and error", () => {
     const r = rollupStatus([s("working"), s("error"), s("awaiting_approval"), s("finished", { asks: "q?" })]);
     expect(r.activity).toBe("needs_you");
-    expect(r.needsYou).toBe(2);
+    // Waiting, a question and an unseen failure all count by the one rule.
+    expect(r.needsYou).toBe(3);
     expect(r.working).toBe(1);
+  });
+  it("counts an unseen failure as needing you but draws only the failed mark when nothing waits", () => {
+    expect(rollupStatus([s("error"), s("finished")])).toEqual({ activity: "error", working: 0, needsYou: 1 });
+  });
+  it("stops counting a failure the person opened, or one nobody touched for a day", () => {
+    const now = Date.parse("2026-11-26T12:00:00Z");
+    const seen = s("error", { errorSeenAt: "2026-11-26T11:00:00Z", lastActivityAt: "2026-11-26T10:00:00Z" });
+    const old = s("error", { lastActivityAt: "2026-11-25T10:00:00Z" });
+    expect(rollupStatus([seen, old], now)).toEqual({ activity: "idle", working: 0, needsYou: 0 });
   });
   it("working beats error, error beats idle", () => {
     expect(rollupStatus([s("error"), s("working")]).activity).toBe("working");

@@ -145,6 +145,8 @@ export interface ObservedSession {
   /** Human-readable "what is it doing / waiting on", shown on the card. */
   detail: string | null;
   lastActivityAt: string;
+  /** Squeak's own chats: when the person opened or dismissed this chat's failure (`needs-you.ts`); absent = not yet. */
+  errorSeenAt?: string;
   transcriptPath: string | null;
   /**
    * Share of the context window consumed, 0-100. Only Conductor reports this;

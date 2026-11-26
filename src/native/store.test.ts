@@ -108,9 +108,9 @@ describe("NativeStore", () => {
     old.db.exec("DROP TABLE pond_notebook;");
     old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
     old.db.exec(
-      "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body;",
+      "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body; ALTER TABLE sessions DROP COLUMN error_seen_at;",
     ); // the newest columns
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 24}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 25}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -160,9 +160,9 @@ describe("NativeStore", () => {
     old.db.exec("DROP TABLE pond_notebook;");
     old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
     old.db.exec(
-      "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body;",
+      "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body; ALTER TABLE sessions DROP COLUMN error_seen_at;",
     ); // the newest columns
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 20}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 21}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
@@ -288,9 +288,9 @@ describe("NativeStore", () => {
       old.db.exec("ALTER TABLE room_posts DROP COLUMN canvases;"); // the Room canvas cards are the newest
       old.db.exec("DROP TABLE host_migrations; DROP TABLE deleted_duck_chats;"); // the No Archived migration is the newest
       old.db.exec(
-        "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body;",
+        "ALTER TABLE sessions DROP COLUMN title_stage; ALTER TABLE messages DROP COLUMN hidden; ALTER TABLE room_posts DROP COLUMN summary; ALTER TABLE room_posts DROP COLUMN full_body; ALTER TABLE sessions DROP COLUMN error_seen_at;",
       ); // the newest columns
-      old.db.pragma(`user_version = ${MIGRATIONS.length - 12}`);
+      old.db.pragma(`user_version = ${MIGRATIONS.length - 13}`);
       old.close();
       return { ws, onBranch, inMain, d1, d2 };
     };

@@ -18,7 +18,8 @@ public struct StatusRollup: Equatable, Sendable {
         var working = 0, waiting = 0
         for (i, mark) in marks.enumerated() {
             let held = i < ducklingsRunning.count && ducklingsRunning[i] > 0
-            if mark?.kind == .waiting { waiting += 1 } else if mark?.kind == .working || held { working += 1 }
+            // The one rule (`NeedsYou`): waiting and a failure not yet seen both need the person; the mark still tells them apart.
+            if mark?.kind == .waiting || mark?.kind == .failed { waiting += 1 } else if mark?.kind == .working || held { working += 1 }
         }
         let overall = StreamGlyphState.of(marks: marks, ducklingsRunning: ducklingsRunning.reduce(0, +))
         return StatusRollup(state: overall, working: working, needsYou: waiting)
@@ -41,7 +42,8 @@ public struct StatusRollup: Equatable, Sendable {
     public func label(for name: String) -> String {
         var parts = [name]
         if working > 0 { parts.append("\(working) working") }
-        if needsYou > 0 { parts.append("\(needsYou) needs you") }
+        if state == .failed, needsYou > 0 { parts.append("\(needsYou) failed") }
+        else if needsYou > 0 { parts.append("\(needsYou) needs you") }
         if parts.count == 1, state == .failed { parts.append("failed") }
         return parts.joined(separator: ", ")
     }

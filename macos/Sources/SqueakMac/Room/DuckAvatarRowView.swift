@@ -111,8 +111,8 @@ private struct DuckChip: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(duck.opensChat ? "\(duck.name) \u{00B7} \(duck.presenceLine)" : "\(duck.name) has no chat yet")
-        .accessibilityLabel("\(duck.name), \(duck.presenceLine)")
+        .help(duck.opensChat ? [("\(duck.name) \u{00B7} \(duck.presenceLine)"), duck.failed ? duck.needsYouWords : nil].compactMap { $0 }.joined(separator: "\n") : "\(duck.name) has no chat yet")
+        .accessibilityLabel([ "\(duck.name), \(duck.presenceLine)", duck.failed ? duck.needsYouWords : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
     }
 
@@ -130,7 +130,11 @@ private struct DuckChip: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if duck.needsYou {
+                if duck.failed {
+                    // A failure the person has not seen: the failed mark, and the chip opens that chat (which sees it).
+                    Lucide(.circleX, size: 10, color: Theme.negative).frame(width: 15, height: 15)
+                        .background(Theme.bg, in: Circle()).offset(x: 3, y: -3)
+                } else if duck.needsYou {
                     Lucide(.triangleAlert, size: 10, color: Theme.warning).frame(width: 15, height: 15)
                         .background(Theme.bg, in: Circle()).offset(x: 3, y: -3)
                 }

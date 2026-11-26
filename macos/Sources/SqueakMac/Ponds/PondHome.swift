@@ -175,7 +175,11 @@ struct PondHomeView: View {
             .scrollIndicators(.hidden)   // no scroll bar riding along in the Dashboard/Room slide
         }
         .background(Theme.bg)
-        .onAppear { ponds.note = nil }
+        .onAppear { ponds.note = nil; if let asked = PondScopeRequest.shared.take(pond: key) { scope = asked } }
+        // A pond's mark clicked while this page is already open.
+        .onChange(of: PondScopeRequest.shared.pending[key]) { _, asked in
+            if asked != nil, let asked = PondScopeRequest.shared.take(pond: key) { scope = asked }
+        }
         .pondHeartbeat(pond: pond?.id)
         .task(id: native?.id) { roster?.keepFresh(host: model.nativeHost) }
     }

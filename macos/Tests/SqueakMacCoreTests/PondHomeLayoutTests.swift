@@ -121,14 +121,18 @@ struct PondHomeLayoutTests {
 
 @Suite("Pond dashboard discovery")
 struct PondDashboardDiscoveryTests {
-    @Test func stateScopesExcludeFailuresFromNeedsYou() {
+    @Test func needsYouScopeListsAFailureTheDaemonRuleNamesAndNotOneThatIsSeen() {
         let p = project([chat("waiting", age: 10, state: .blocked), chat("running", age: 20, state: .working), chat("failed", age: 30, state: .error)])
         let l = PondHomeLayout.build(project: p, detail: nil, me: "Me", hostIdFor: hostId)
         #expect(l.count(in: .all) == 3)
-        #expect(l.count(in: .needsYou) == 1)
+        // One rule (`NeedsYou`): waiting and a failure not yet seen both need the person.
+        #expect(l.count(in: .needsYou) == 2)
         #expect(l.count(in: .working) == 1)
-        #expect(l.filtered(query: "", scope: .needsYou).threads.map(\.title) == ["waiting"])
-        #expect(l.filtered(query: "failed", scope: .needsYou).isEmpty)
+        #expect(l.filtered(query: "", scope: .needsYou).threads.map(\.title) == ["waiting", "failed"])
+        #expect(l.filtered(query: "failed", scope: .needsYou).threads.map(\.title) == ["failed"])
+        var seen = chat("failed", age: 30, state: .error); seen.errorSeenAt = Date()
+        let after = PondHomeLayout.build(project: project([chat("waiting", age: 10, state: .blocked), seen]), detail: nil, me: "Me", hostIdFor: hostId)
+        #expect(after.count(in: .needsYou) == 1)
     }
 
     @Test func sharedCountsDoNotDuplicateLocalThreads() {

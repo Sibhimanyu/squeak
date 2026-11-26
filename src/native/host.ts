@@ -36,6 +36,8 @@ import { activeBranches, ducksOwnBranch, joinedStreamDirs, mainReadOnlyRoot } fr
 import { streamEdits } from "./stream-edits.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import { projectOfSession } from "./room.js";
+import { needsYouReason } from "../fleet/needs-you.js";
+import { toFleetState } from "../fleet/observers/squeak-native.js";
 import {
   deriveRule,
   describeRule,
@@ -760,6 +762,14 @@ export class SessionHost extends EventEmitter {
       ...(!BUSY.has(s.status) && helpersKeepWorking(ducklings, Date.now()) ? { helpersWorking: true } : {}),
     };
     const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
+    const reason = needsYouReason(
+      { state: toFleetState(s.status, s.lastTurnEndedAt), errorSeenAt: s.errorSeenAt, updatedAt: s.updatedAt },
+      Date.now(),
+    );
+    if (reason) {
+      const text = reason === "failed" ? (this.store.latestErrorText(s.id) ?? undefined) : undefined;
+      row.needsYou = { reason, ...(text ? { text } : {}) };
+    }
     return busy ? { ...row, busy: true } : row;
   }
 
@@ -1166,6 +1176,17 @@ export class SessionHost extends EventEmitter {
       }),
     );
     return true;
+  }
+
+  /**
+   * The person opened this failed chat or dismissed it: it stops counting under Needs you (`fleet/needs-you.ts`) until it
+   * fails again. A chat that is not failed has nothing to dismiss (`dismissed: false`, not an error: two surfaces may race).
+   */
+  dismissError(id: string): { dismissed: boolean } {
+    const s = this.require(id);
+    const dismissed = this.store.acknowledgeError(id);
+    if (dismissed) this.emit("event", { type: "status", sessionId: id, status: s.status } satisfies HostEvent);
+    return { dismissed };
   }
 
   /** A Task finished in this chat: its title is looked at once more and changes only if the scope shifted. */

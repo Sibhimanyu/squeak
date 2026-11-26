@@ -57,7 +57,7 @@ public struct ChatMark: Equatable, Sendable {
         case .blocked where s.alive != false: return ChatMark(.waiting, waiting: waitingKind(s))
         case .working where s.alive != false: return ChatMark(.working, quiet: s.backgroundWaiting == true)
         case _ where s.helpersKeepWorking: return ChatMark(.working, quiet: true)
-        case .error where SessionGrouping.isRecent(s, now: now): return ChatMark(.failed)
+        case .error where NeedsYou.failureCounts(s, now: now): return ChatMark(.failed)
         case .finished where unread: return ChatMark(.unread)
         default: return nil
         }

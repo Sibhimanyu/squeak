@@ -118,7 +118,8 @@ export function classifyAttentions(
       kinds.push("blocked_question");
       break;
     case "error":
-      kinds.push("errored");
+      // A failure the person has opened or dismissed is not asking for anything any more.
+      if (!session.errorSeenAt) kinds.push("errored");
       break;
     case "finished":
       // Work the user already signed off on should stop asking to be reviewed.

@@ -909,6 +909,9 @@ export class NativeServer {
     if (area === "sessions" && id && sub === "compact" && parts.length === 4 && method === "POST") {
       return this.json(res, 200, await host.compact(id));
     }
+    if (area === "sessions" && id && sub === "dismiss-error" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, host.dismissError(id));
+    }
     if (area === "sessions" && id && sub === "retry" && parts.length === 4 && method === "POST") {
       return this.json(res, 200, await host.retry(id));
     }
