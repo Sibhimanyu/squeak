@@ -82,6 +82,9 @@ final class ProjectActions {
     private func refresh(_ model: AppModel, _ project: NativeProject) async {
         await model.refreshNativeProjects()
         await model.refreshNativeWorkspaces()
+        // The directory read the Mac holds predates this pond: hold it live and read the directory again, so its page
+        // and a New duck page on it are never pruned to the global Dashboard.
+        await PondsModel.shared.noteMade(keys: [PondsModel.shared.key(forProject: project.id), project.id])
         // A project opened again appears unfolded.
         let key = "sidebarFolded"
         let folded = (UserDefaults.standard.string(forKey: key) ?? "").split(separator: "\n").map(String.init).filter { $0 != project.name }

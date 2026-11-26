@@ -105,7 +105,8 @@ final class PondsModel {
             if oldValue?.pondOwnThreads != directory?.pondOwnThreads { ponds = PondOwnThreads.adjusted(ponds, ownThreads: ownThreads) }
             // Ducks mode changes how the tree is built: every derived list and the focus read again.
             if oldValue?.ducksMode != directory?.ducksMode { AppModel.shared.inputsChanged() }
-            if let directory, directoryLoad.loaded { AppModel.shared.prunePonds(live: directory.liveKeys) }
+            if let directory { freshPonds.prune(listed: directory.liveKeys, now: Date()) }
+            if directory != nil, directoryLoad.loaded { AppModel.shared.prunePonds(live: liveKeys) }
             if directory != nil { AppModel.shared.flushPendingTabs() }
         }
     }
@@ -250,7 +251,19 @@ final class PondsModel {
     /// True when the directory has loaded and has no pond under `key`: its page must not draw.
     func isGone(_ key: String) -> Bool {
         guard directoryLoad.loaded, let directory else { return false }
-        return !directory.hasPond(key: key)
+        return !(liveKeys?.contains(key) ?? true)
+    }
+
+    /// Ponds this Mac just made that the directory read it holds does not list yet (`FreshPonds`).
+    private(set) var freshPonds = FreshPonds()
+
+    /// What a place may point at: the loaded directory's keys plus a pond made moments ago. Nil until the directory loads.
+    var liveKeys: Set<String>? { directoryLoad.loaded ? freshPonds.live(directory: directory?.liveKeys, now: Date()) : nil }
+
+    /// A pond this Mac made: held live until the directory lists it, and the directory is read again now.
+    func noteMade(keys: [String]) async {
+        for key in keys { freshPonds.add(key, at: Date()) }
+        await refreshDirectory()
     }
 
     /// What the directory load has seen so far; the sidebar reads it to tell "loading" from "no ponds".
@@ -573,7 +586,7 @@ final class PondsModel {
         let key = key ?? id
         if var d = directory { d.ponds.removeAll { $0.id == key || $0.id == id || $0.pondId == id }; directory = d }
         ponds.removeAll { $0.id == id }
-        if let live = directory?.liveKeys, directoryLoad.loaded { AppModel.shared.prunePonds(live: live) }
+        if let live = liveKeys { AppModel.shared.prunePonds(live: live) }
         else if AppModel.shared.location.pondKey == key || AppModel.shared.location.pondKey == id { WorkbenchNav.goHome(AppModel.shared) }
         await refreshDirectory()
     }

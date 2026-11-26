@@ -41,7 +41,7 @@ struct PondRouteView: View {
     var body: some View {
         if goneKey != nil {
             // Never an empty owner pond: the location is pruned to the Dashboard; nothing draws meanwhile.
-            Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.directory?.liveKeys) }
+            Color.clear.onAppear { AppModel.shared.prunePonds(live: PondsModel.shared.liveKeys) }
         } else if case .home(let project) = route, let room = roomProject(project) {
             let page = RoomViewPref.shared.mode(for: project)
             if let workspace = PondWorkspace(pond: project) {
