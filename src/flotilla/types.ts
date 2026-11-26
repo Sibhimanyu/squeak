@@ -35,6 +35,8 @@ export interface MemberDoc {
   /** "mac" (default) or "web": a browser with WebCrypto. */
   client?: "mac" | "web";
   addedAt: number;
+  /** The account's email: shown under the name and on hover, never a name by itself. Written by an owner's Mac. */
+  email?: string;
   /** A seam for Catalyst sign-in; unused today. */
   accountId?: string;
   /** What the owner lets this member do beyond their role's default (`effectiveCaps`); signed with the document. */
@@ -456,6 +458,7 @@ export function readMember(v: unknown): MemberDoc | null {
     ...(v.client ? { client: v.client } : {}),
     addedAt: v.addedAt,
     ...(typeof v.accountId === "string" ? { accountId: v.accountId } : {}),
+    ...(s(v.email, 200) ? { email: v.email as string } : {}),
     ...(readCapsPatch(v.caps) ? { caps: readCapsPatch(v.caps)! } : {}),
     ...(Array.isArray(v.devices) && v.devices.length > 0 ? { devices: readDevices(v.devices) } : {}),
     ...(v.primaryRetired === true && Array.isArray(v.devices) && v.devices.length > 0

@@ -18,6 +18,7 @@ import {
 } from "./permissions.js";
 import { FlotillaService } from "./service.js";
 import type { Role } from "./types.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 const actor = (role: Role, memberId: string): Actor => ({ kind: "human", memberId, role });
 const owner = actor("owner", "O");
@@ -176,9 +177,9 @@ describe("grants and holds over a store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-perm-"));
     dirs.push(dir);
     const service = new FlotillaService({
-      store: new RtdbRest(url),
+      store: verifying(new RtdbRest(url)),
       supportDir: dir,
-      displayName: name,
+      account: named(name),
       nest: name + "-mac",
       inviteLinkBase: "https://x.test/join",
     });

@@ -17,6 +17,7 @@ import { FakeHost, session } from "./journey-support.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
 import { FlotillaService } from "./service.js";
 import { devicesOf, readMember } from "./types.js";
+import { named } from "./named-account.test-fixture.js";
 
 const require = createRequire(import.meta.url);
 const fn = new URL("../../cloud/catalyst-relay/functions/squeak_relay/", import.meta.url).pathname;
@@ -183,7 +184,6 @@ async function mac(user: TestUser, options: DeviceOptions = {}) {
     account,
     store: createCloudStore(location, { fetch: doFetch, socket: streams.socket }),
     supportDir: dir,
-    displayName: user.name,
     nest,
     location,
     inviteLinkBase: "https://x.test/join",
@@ -512,7 +512,7 @@ describe("members are accounts: what must not attach", () => {
     const anon = new FlotillaService({
       store: null,
       supportDir: dir,
-      displayName: "Anon",
+      account: named("Anon"),
       nest: "anon-mac",
       storeFor: (loc, pondToken) =>
         new CatalystStore({

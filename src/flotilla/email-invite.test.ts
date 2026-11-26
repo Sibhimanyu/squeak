@@ -122,7 +122,6 @@ function setup() {
     return new FlotillaService({
       store: owner ? new CatalystStore({ baseUrl: RELAY_URL, relayKey: KEY, fetch: w.fetch }) : nostore,
       supportDir: dir,
-      displayName: label,
       nest: `${label}-mac`,
       ...(account ? { account } : {}),
       ...(owner ? { location, relay: new HttpPondRelay(RELAY_URL, KEY, w.fetch) } : {}),

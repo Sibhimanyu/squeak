@@ -12,6 +12,7 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 // The real relay handler (cloud/catalyst-relay) in process, over an in-memory store: the test double for the relay.
 const require = createRequire(import.meta.url);
@@ -103,7 +104,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
       service: new FlotillaService({
         store: owner ? ownerStore : nostore,
         supportDir: d,
-        displayName: name,
+        account: named(name),
         nest,
         ...(owner ? { location: ownerLocation, relay: new HttpPondRelay(RELAY_URL, KEY, relay.fetch) } : {}),
         storeFor,
@@ -247,7 +248,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     const near = new FlotillaService({
       store: ownerStore,
       supportDir: A.dir,
-      displayName: "Sibhi",
+      account: named("Sibhi"),
       nest: "sibhi-mac",
       location: ownerLocation,
       relay: new HttpPondRelay(RELAY_URL, KEY, relay.fetch),
@@ -294,7 +295,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     const lone = new FlotillaService({
       store: ownerStore,
       supportDir: dir(),
-      displayName: "X",
+      account: named("X"),
       nest: "x",
       location: ownerLocation,
       storeFor,
@@ -349,10 +350,10 @@ describe("a Firebase store keeps working, with no tokens", () => {
       new FlotillaService({
         store: new RtdbRest(url),
         supportDir: dir(),
-        displayName: name,
+        account: named(name),
         nest: `${name}-mac`,
         ...(owner ? { location } : {}),
-        storeFor: () => new RtdbRest(url),
+        storeFor: () => verifying(new RtdbRest(url)),
       });
     const A = make("A", true);
     const B = make("B", false);

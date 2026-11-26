@@ -20,7 +20,7 @@ import type { WorkspaceManager } from "../native/workspaces.js";
 import { MainRepoFinder } from "../fleet/repo-identity.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
-import { computerName, oldDefaults, personName } from "./person.js";
+import { computerName, oldDefaults } from "./person.js";
 import { HttpPondRelay, RelayRefused } from "./relay.js";
 import { RoomSync } from "./room-sync.js";
 import { FlotillaService, type AccountPort } from "./service.js";
@@ -215,7 +215,6 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     // No cloud set up: the service still works, with local ponds only, and makes no network call.
     store: where ? createCloudStore(where) : null,
     supportDir: deps.supportDir,
-    displayName: personName(),
     nest: computerName(),
     ...(where ? { location: where } : {}),
     // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
@@ -318,7 +317,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     });
   }
   // An install made before real names kept the login name and hostname: bring them up to date (and republish).
-  void service.updateOwnProfile({ name: personName(), nest: computerName() }, oldDefaults()).catch(() => undefined);
+  void service.updateOwnProfile({ nest: computerName() }, oldDefaults()).catch(() => undefined);
   bridge.start();
   roomSync?.start();
   return {

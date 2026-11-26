@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 const docs = new Map<string, ChannelDoc>();
@@ -29,12 +30,12 @@ const mk = (name: string, owner: boolean) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "approve-failure-"));
   dirs.push(dir);
   return new FlotillaService({
-    store: shared,
+    store: verifying(shared),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: `${name}-mac`,
     ...(owner ? { location: LOCATION } : {}),
-    storeFor: () => shared,
+    storeFor: () => verifying(shared),
   });
 };
 
@@ -106,21 +107,14 @@ describe("approving, removing and naming", () => {
     for (const r of ripples) expect(r.actorName).toBe("owner-login");
   });
 
-  it("a real name replaces the old login-name default, in the saved identity and the owner's member document", async () => {
+  it("a computer name replaces the old hostname default; the person's name stays the account's", async () => {
     const { A, pondId } = await joined();
-    expect(
-      await A.updateOwnProfile(
-        { name: "Sibhi M", nest: "Studio Mac" },
-        { name: "owner-login", nest: "owner-login-mac" },
-      ),
-    ).toBe(true);
-    expect(A.me.name).toBe("Sibhi M");
+    expect(await A.updateOwnProfile({ nest: "Studio Mac" }, { nest: "owner-login-mac" })).toBe(true);
+    expect(A.me.name).toBe("owner-login");
     const me = (await A.view(pondId)).members.find((m) => m.you)!;
-    expect(me).toMatchObject({ name: "Sibhi M", nest: "Studio Mac" });
-    // Run again, or after a name the person chose: nothing changes.
-    expect(
-      await A.updateOwnProfile({ name: "Other", nest: "X" }, { name: "owner-login", nest: "owner-login-mac" }),
-    ).toBe(false);
+    expect(me).toMatchObject({ name: "owner-login", nest: "Studio Mac" });
+    // Run again: nothing changes.
+    expect(await A.updateOwnProfile({ nest: "X" }, { nest: "owner-login-mac" })).toBe(false);
   });
 });
 

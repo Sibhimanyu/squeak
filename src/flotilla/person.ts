@@ -7,20 +7,12 @@ const run: Run = (file, args) =>
 
 const clean = (value: string | undefined): string => (value ?? "").replace(/\p{C}/gu, "").trim().slice(0, 100);
 
-/** The login name and hostname an older install saved as the owner's name and Nest: the defaults a real name may replace. */
-export function oldDefaults(): { name: string; nest: string } {
-  return { name: os.userInfo().username, nest: os.hostname().replace(/\.local$/, "") };
-}
-
-/** The person's full name (macOS `id -F`), never the short login name; the login name only when the Mac has no full name. */
-export function personName(exec: Run = run, login = os.userInfo().username): string {
-  try {
-    const full = clean(exec("id", ["-F"]));
-    if (full) return full;
-  } catch {
-    // no full name
-  }
-  return login;
+/**
+ * The hostname an older install saved as the Mac's Nest: the default a computer name may replace. A person's name is
+ * never read from the Mac: it is their Squeak account's.
+ */
+export function oldDefaults(): { nest: string } {
+  return { nest: os.hostname().replace(/\.local$/, "") };
 }
 
 /** The Mac's computer name (`scutil --get ComputerName`), else the hostname. */

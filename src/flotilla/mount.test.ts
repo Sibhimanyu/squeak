@@ -16,6 +16,7 @@ import { flotillaEnabled, hostPortFor, startInProject } from "./index.js";
 import { execFileSync } from "node:child_process";
 import { FlotillaRoutes, type MountDeps } from "./mount.js";
 import { FlotillaService } from "./service.js";
+import { named } from "./named-account.test-fixture.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -49,7 +50,7 @@ async function boot(
   const service = new FlotillaService({
     store: new RtdbRest(dbUrl),
     supportDir: dir,
-    displayName: "Me",
+    account: named("Me"),
     nest: "mac",
     location: { provider: "firebase", databaseUrl: dbUrl },
   });

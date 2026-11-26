@@ -7,6 +7,7 @@ import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { flotillaEnabled } from "./index.js";
 import { FlotillaService } from "./service.js";
+import { named } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 
@@ -37,7 +38,7 @@ function make(cloud: boolean) {
   const service = new FlotillaService({
     store: cloud ? counting.store : null,
     supportDir: dir,
-    displayName: "Me",
+    account: named("Me"),
     nest: "mac",
     ...(cloud ? { location: LOCATION } : {}),
   });

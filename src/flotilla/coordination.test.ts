@@ -8,6 +8,7 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CLAIM_MS, LOCK_MS, readClaim, readLock, readTask, resolveLocks, winningClaim, type LockDoc } from "./tasks.js";
 import { openAt, randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -26,9 +27,9 @@ function mac(name: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-co-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: `${name}-mac`,
     inviteLinkBase: "https://x.test/join",
     now: () => clock,

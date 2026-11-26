@@ -8,6 +8,7 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaService, OFFLINE_WRITE } from "./service.js";
 import { FlotillaError } from "./types.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -40,11 +41,11 @@ function flaky(inner: CloudStore): CloudStore & { down: boolean } {
 function mac(name: string, nest: string | null = name + "-mac") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-off-"));
   dirs.push(dir);
-  const store = flaky(new RtdbRest(url));
+  const store = verifying(flaky(new RtdbRest(url)));
   const service = new FlotillaService({
     store,
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest,
     inviteLinkBase: "https://x.test/join",
   });
@@ -98,7 +99,7 @@ describe("offline pond details", () => {
     const B = new FlotillaService({
       store: ((A.store.down = true), A.store),
       supportDir: A.dir,
-      displayName: "Sibhi",
+      account: named("Sibhi"),
       nest: "x",
     });
     await expect(B.view(pond.id)).rejects.toThrow();
@@ -120,7 +121,7 @@ describe("offline pond details", () => {
     expect(text).not.toContain(key);
 
     A.store.down = true;
-    const restarted = new FlotillaService({ store: A.store, supportDir: A.dir, displayName: "Sibhi", nest: "x" });
+    const restarted = new FlotillaService({ store: A.store, supportDir: A.dir, account: named("Sibhi"), nest: "x" });
     expect((await restarted.view(pond.id)).offline).toBe(true);
   });
 

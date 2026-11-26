@@ -23,6 +23,7 @@ import {
   roomDocOf,
 } from "./room-sync.js";
 import type { FlotillaBridge } from "./bridge.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -49,9 +50,9 @@ function mac(name: string, at: { now: number } = clock): Mac {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-room-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: name + "-mac",
     inviteLinkBase: "https://x.test/join",
     now: () => at.now,

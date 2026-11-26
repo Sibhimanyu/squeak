@@ -12,6 +12,7 @@ import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { openAt, randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService } from "./service.js";
 import { FlotillaError } from "./types.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -109,9 +110,9 @@ function mac(name: string, nest: string | null = name + "-mac") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest,
     inviteLinkBase: "https://x.test/join",
   });

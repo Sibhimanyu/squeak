@@ -13,6 +13,7 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaService } from "./service.js";
 import { readThreadEvent } from "./types.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
@@ -67,9 +68,9 @@ function mac(name: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-tl-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: name + "-mac",
     inviteLinkBase: "https://x.test/join",
   });

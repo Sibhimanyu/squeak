@@ -7,6 +7,7 @@ import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaRoutes } from "./mount.js";
 import { FlotillaService, CLOUD_DOWN } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -46,12 +47,12 @@ class World {
     this.dirs.push(dir);
     const store = this.storeFor(name);
     const service = new FlotillaService({
-      store,
+      store: verifying(store),
       supportDir: dir,
-      displayName: name,
+      account: named(name),
       nest: options.nest === undefined ? `${name}'s Mac` : options.nest,
       ...(options.owner ? { location: LOCATION } : {}),
-      storeFor: () => store,
+      storeFor: () => verifying(store),
       now: () => this.clock.t,
       ...(options.budgetMs ? { budgetMs: options.budgetMs } : {}),
     });

@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 const DAY = 24 * 60 * 60_000;
@@ -27,12 +28,12 @@ afterAll(() => {
 const clock = { t: Date.now() };
 function build(dir: string, name: string, owner: boolean) {
   return new FlotillaService({
-    store: shared,
+    store: verifying(shared),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: `${name}-mac`,
     ...(owner ? { location: LOCATION } : {}),
-    storeFor: () => shared,
+    storeFor: () => verifying(shared),
     now: () => clock.t,
   });
 }

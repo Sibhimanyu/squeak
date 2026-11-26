@@ -7,6 +7,7 @@ import { buildDirectory } from "./directory.js";
 import { owner } from "./fixtures/owner-shape.js";
 import { applyRepair, planRepair, type RepairProject, type RepairRecord } from "./repair.js";
 import { FlotillaService } from "./service.js";
+import { named } from "./named-account.test-fixture.js";
 
 const rec = (r: Partial<RepairRecord> & Pick<RepairRecord, "id" | "name">): RepairRecord => ({
   role: "owner",
@@ -161,7 +162,7 @@ describe("FlotillaService.repairPonds", () => {
       ponds[r.id] = { ...r, ownerKey: "k", location: null, keys: {}, current: 1, nonces: {} };
     fs.mkdirSync(path.join(dir, "flotilla"), { recursive: true });
     fs.writeFileSync(path.join(dir, "flotilla", "ponds.json"), JSON.stringify({ ponds }));
-    const service = new FlotillaService({ store: null, supportDir: dir, displayName: "Me", nest: "mac" });
+    const service = new FlotillaService({ store: null, supportDir: dir, account: named("Me"), nest: "mac" });
     return { dir, service };
   };
 

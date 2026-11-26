@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { CloudStore, WatchSource } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -47,12 +48,12 @@ class Relay {
     this.dirs.push(dir);
     const store = this.store();
     const service = new FlotillaService({
-      store,
+      store: verifying(store),
       supportDir: dir,
-      displayName: name,
+      account: named(name),
       nest: `${name}'s Mac`,
       ...(owner ? { location: LOCATION } : {}),
-      storeFor: () => store,
+      storeFor: () => verifying(store),
       now: () => this.clock.t,
       wakeDebounceMs: 30,
       wakeMinIntervalMs: 0,

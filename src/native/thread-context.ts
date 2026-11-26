@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 
 import { ASK_FORMAT_EXAMPLE_CHOICE, ASK_FORMAT_TEXT, NO_RETRY_LOOP_RULE } from "../fleet/ask-format.js";
 import type { AgentKind, MessageAuthor } from "./types.js";
@@ -174,21 +173,7 @@ export function withSender(
   return /^\//.test(bare) ? `${bare}\n[from ${label}]` : `[from ${label}]\n${bare}`;
 }
 
-let cachedFullName: string | null | undefined;
-
-/** The owner's name for a prefix: the pond member name if given, else the macOS full name, else "owner". */
-export function resolveOwnerName(pondName?: string | null, fullName: () => string | null = macFullName): string {
-  const pond = pondName?.trim();
-  if (pond) return pond;
-  return fullName()?.trim() || "owner";
-}
-
-function macFullName(): string | null {
-  if (cachedFullName !== undefined) return cachedFullName;
-  try {
-    cachedFullName = execFileSync("id", ["-F"], { encoding: "utf8", timeout: 2000 }).trim() || null;
-  } catch {
-    cachedFullName = null;
-  }
-  return cachedFullName;
+/** The owner's name for a prefix: the pond member name (the Squeak account's), else "owner". Never the Mac's own name. */
+export function resolveOwnerName(pondName?: string | null): string {
+  return pondName?.trim() || "owner";
 }

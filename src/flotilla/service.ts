@@ -269,8 +269,6 @@ interface LocalPond {
   id: string;
   name: string;
   status: StoredStatus;
-  /** The account name this Mac joined under (never typed): a label until the owner's member document says it. */
-  myName?: string;
   /** The owner's name when this Mac has read it (the owner's member document), for the sentences about them. */
   ownerName?: string;
   /** A joiner: when the invite lapses (from the code) and when the request went out. */
@@ -340,11 +338,8 @@ export interface FlotillaOptions {
   store?: CloudStore | null;
   /** Key files live in `<supportDir>/flotilla/`, mode 0600. */
   supportDir: string;
-  /**
-   * An internal label for this Mac's own unsigned state (the macOS full name). It is never published as a member's name
-   * when an account exists; with no account (tests, an old Firebase Mac) it stands in.
-   */
-  displayName: string;
+  /** Ignored: a name is the Squeak account's (name, else email), never a label from the Mac. Kept so callers still compile. */
+  displayName?: string;
   /** The Squeak account this Mac is signed in to. Present: joining needs it and names come from it (see `AccountPort`). */
   account?: AccountPort | null;
   /** null for a web-style member with no machine of its own (tests; the browser app does this in its own code). */
@@ -443,6 +438,8 @@ export interface PondSummary {
 export interface MemberView {
   id: string;
   name: string;
+  /** The account's email, shown under the name and on hover. Absent from an older host or a member with none on file. */
+  email?: string;
   role: Role;
   nest: string | null;
   /** The member's machine's name (null for a browser). */
@@ -794,35 +791,43 @@ export class FlotillaService extends EventEmitter {
     const file = this.identityFile.data;
     if (!file.identity) {
       file.identity = {
-        name: this.options.displayName,
+        name: this.accountLabel(),
         nest: this.options.nest,
         ...(this.options.nest === null ? { client: "web" as const } : {}),
         ...generateMemberKey(),
       };
       this.identityFile.save();
     }
-    // A signed-in Mac goes by its account's name; the saved label is only what an unsigned Mac falls back to.
-    const name = this.options.account?.name()?.trim() || file.identity.name;
-    return { ...file.identity, name, id: memberIdOf(file.identity.publicKey) };
+    // The name is the account's, always (name, else email); whatever the identity file saved is never read.
+    return { ...file.identity, name: this.accountLabel(), id: memberIdOf(file.identity.publicKey) };
+  }
+
+  /** The one name a person has: their Squeak account's name, else its email, else (signed out) a neutral label. */
+  private accountLabel(): string {
+    const account = this.options.account;
+    return (account?.name()?.trim() || account?.email()?.trim() || "Squeak member").slice(0, 100);
+  }
+
+  /** The signed-in account's email, shown under the name; null when signed out. */
+  private accountEmail(): string | null {
+    return this.options.account?.email()?.trim() || null;
+  }
+
+  /** `{ email }` for this account's own member document, or nothing when signed out. */
+  private emailField(): { email?: string } {
+    const email = this.accountEmail();
+    return email ? { email: email.slice(0, 200) } : {};
   }
 
   /**
-   * The person's real name and the Mac's computer name replace what an older install saved from the login name and
-   * hostname: only a value still equal to that old default changes (a name the person chose at join stays), and the
-   * owner's own member document in every published pond is rewritten (only an owner signs members documents).
-   * Returns whether anything changed.
+   * The Mac's computer name replaces what an older install saved from the hostname: only a value still equal to that
+   * old default changes, and the owner's own member document in every published pond is rewritten (only an owner signs
+   * members documents). A name is never part of this: it is the account's. Returns whether anything changed.
    */
-  async updateOwnProfile(
-    next: { name: string; nest: string | null },
-    was: { name: string; nest: string | null },
-  ): Promise<boolean> {
+  async updateOwnProfile(next: { nest: string | null }, was: { nest: string | null }): Promise<boolean> {
     const file = this.identityFile.data;
     if (!file.identity) return false;
     let changed = false;
-    if (next.name && file.identity.name === was.name && next.name !== was.name) {
-      file.identity.name = next.name;
-      changed = true;
-    }
     if (next.nest && file.identity.nest !== null && file.identity.nest === was.nest && next.nest !== was.nest) {
       file.identity.nest = next.nest;
       changed = true;
@@ -834,7 +839,7 @@ export class FlotillaService extends EventEmitter {
       if (pond.role !== "owner" || pond.local || pond.status !== "active") continue;
       try {
         const mine = (await this.members(pond)).get(me.id);
-        if (mine) await this.writeMember(pond, { ...mine, name: me.name, nest: me.nest });
+        if (mine) await this.writeMember(pond, { ...mine, name: me.name, ...this.emailField(), nest: me.nest });
       } catch {
         // Offline: the identity is already saved; the member document is not rewritten until a later run. Never blocks start.
       }
@@ -1285,6 +1290,7 @@ export class FlotillaService extends EventEmitter {
         await this.writeMember(target, {
           id: me.id,
           name: me.name,
+          ...this.emailField(),
           publicKey: me.publicKey,
           role: "owner",
           nest: me.nest,
@@ -1327,6 +1333,7 @@ export class FlotillaService extends EventEmitter {
     await this.writeMember(pond, {
       id: me.id,
       name: me.name,
+      ...this.emailField(),
       publicKey: me.publicKey,
       role: "owner",
       nest: me.nest,
@@ -1341,8 +1348,8 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** The name this Mac goes by in one pond: what was typed at joining, else its own. */
-  private nameIn(pond: LocalPond): string {
-    return this.options.account?.name()?.trim() || pond.myName || this.identity.name;
+  private nameIn(_pond: LocalPond): string {
+    return this.accountLabel();
   }
 
   private ownerLabel(pond: LocalPond): string {
@@ -1633,7 +1640,7 @@ export class FlotillaService extends EventEmitter {
       s: secret,
       e: expiresAt,
       r: role,
-      ...(this.identity.name ? { on: this.identity.name } : {}),
+      on: this.accountLabel(),
       // An emailed invite names the address it is for, so the page can say which account to sign in with.
       ...(keyless && email ? { em: normalizeEmail(email) } : {}),
       l: location,
@@ -1732,7 +1739,7 @@ export class FlotillaService extends EventEmitter {
     }
     let sent: string[] = [];
     if (made.size > 0) {
-      const inviterName = (this.options.account?.name() || this.identity.name || "Someone").trim() || "Someone";
+      const inviterName = this.accountLabel();
       try {
         const result = await relay.inviteEmail(pondId, {
           emails: [...made.keys()],
@@ -1798,7 +1805,7 @@ export class FlotillaService extends EventEmitter {
       if (normalizeEmail(request.verifiedEmail) !== normalizeEmail(invite.email)) continue;
       try {
         await this.decideJoin(pond.id, request.requestId, { approve: true });
-        this.emit("member-joined", pond.id, request.verifiedName || request.name);
+        this.emit("member-joined", pond.id, request.verifiedName || request.verifiedEmail || SIGNED_OUT_MEMBER);
         this.emit("changed", pond.id);
       } catch (error) {
         logger.warn("could not let in an invited person", { pond: pond.id, error: String(error) });
@@ -1896,7 +1903,7 @@ export class FlotillaService extends EventEmitter {
         throw new FlotillaError("Squeak's cloud can't be reached, so your request wasn't sent. Try again.", 503);
       }
     }
-    const name = (account?.name() || account?.email() || this.identity.name).trim().slice(0, 100) || "Squeak member";
+    const name = this.accountLabel();
     const me = this.identity;
     const requestId = retry?.requestId ?? randomId(12);
     const at = this.now();
@@ -1912,7 +1919,6 @@ export class FlotillaService extends EventEmitter {
       current: kv,
       words: joinWords(o, me.publicKey, p),
       requestId,
-      myName: name,
       ...(typeof body.on === "string" && body.on ? { ownerName: body.on.slice(0, 100) } : {}),
       inviteExpiresAt: e,
       requestedAt: retry?.requestedAt ?? at,
@@ -1991,16 +1997,13 @@ export class FlotillaService extends EventEmitter {
       if (stale && this.now() - since > STALE_REQUEST_KEEP_MS) continue;
       candidates.push({ id, request, invite, ...(stale ? { stale } : {}) });
     }
-    const identities = await Promise.all(
-      candidates.map((c) => (c.stale ? Promise.resolve({}) : this.verifiedIdentity(pond, c.id))),
-    );
-    const verifies = typeof (this.storeOf(pond) as { getRaw?: unknown }).getRaw === "function";
+    const identities = await Promise.all(candidates.map((c) => this.verifiedIdentity(pond, c.id)));
     candidates.forEach(({ id, request, invite, stale }, index) => {
       const known = identities[index] as { verifiedName?: string; verifiedEmail?: string };
       const row: Row = {
         requestId: id,
         // The name an approval will write: the verified account's, never the joiner's own claim (where something verifies).
-        name: stale || !verifies ? request.name : known.verifiedName || known.verifiedEmail || SIGNED_OUT_MEMBER,
+        name: known.verifiedName || known.verifiedEmail || SIGNED_OUT_MEMBER,
         nest: request.nest,
         client: request.client ?? (request.nest === null ? "web" : "mac"),
         role: invite.role,
@@ -2084,19 +2087,17 @@ export class FlotillaService extends EventEmitter {
 
   /**
    * Who a join request is: the account the relay saw sign it (name, else email), "Signed-out member" when a relay store
-   * has no sign-in behind the request. A store that cannot verify anything (no relay) has only the claimed name.
+   * has no sign-in behind the request. What the joiner's own app wrote as a name is never used.
    */
   private async memberIdentity(
     pond: LocalPond,
     requestId: string,
-    claimed: string,
-  ): Promise<{ name: string; accountId?: string }> {
-    const store = this.storeOf(pond) as CloudStore & { getRaw?: unknown };
-    if (typeof store.getRaw !== "function") return { name: claimed };
+  ): Promise<{ name: string; email?: string; accountId?: string }> {
     const v = await this.verifiedIdentity(pond, requestId);
     if (!v.verifiedId && !v.verifiedEmail) return { name: SIGNED_OUT_MEMBER };
     return {
       name: v.verifiedName || v.verifiedEmail || SIGNED_OUT_MEMBER,
+      ...(v.verifiedEmail ? { email: v.verifiedEmail.slice(0, 200) } : {}),
       ...(v.verifiedId ? { accountId: v.verifiedId } : {}),
     };
   }
@@ -2180,11 +2181,13 @@ export class FlotillaService extends EventEmitter {
     const invite = this.inviteFor(pond, requestId, request.publicKey, request.proof);
     if (request.stale && input.approve) throw new FlotillaError(request.stale, 409);
     const supersededRead = this.supersededJoins(pond, request).catch(() => [] as string[]);
+    // Who it was is what the relay verified, never what the joiner's app wrote (read before the identity note is dropped).
+    const usedBy = (await this.memberIdentity(pond, requestId)).name;
     const consume = (state: "accepted" | "declined"): void => {
       if (invite && !request.stale) {
         invite.state = state;
         invite.decidedAt = this.now();
-        invite.usedBy = request.name;
+        invite.usedBy = usedBy;
         delete invite.code;
         delete invite.link;
       }
@@ -2199,17 +2202,18 @@ export class FlotillaService extends EventEmitter {
       ]);
       consume("declined");
       if (!request.stale) {
-        await this.ripple(pondId, `turned down ${request.name}'s request to join`).catch(() => undefined);
+        await this.ripple(pondId, `turned down ${usedBy}'s request to join`).catch(() => undefined);
       }
       return;
     }
     const role = input.role ?? request.role;
     if (role !== "member" && role !== "viewer") throw new FlotillaError("Approve as a member or a viewer.");
     // The member's name is what the relay verified for the account that signed the request, never what the joiner wrote.
-    const who = await this.memberIdentity(pond, requestId, request.name);
+    const who = await this.memberIdentity(pond, requestId);
     const member: MemberDoc = {
       id: memberIdOf(request.publicKey),
       name: who.name,
+      ...(who.email ? { email: who.email } : {}),
       ...(who.accountId ? { accountId: who.accountId } : {}),
       publicKey: request.publicKey,
       role,
@@ -3162,15 +3166,22 @@ export class FlotillaService extends EventEmitter {
     const me = this.identity;
     const members = await this.members(pond);
     const mine = members.get(me.id);
-    const own = account.name()?.trim();
-    if (mine && own && mine.name !== own) await this.writeMember(pond, { ...mine, name: own });
+    const own = this.accountLabel();
+    const ownEmail = this.accountEmail();
+    if (mine && (mine.name !== own || (ownEmail && mine.email !== ownEmail))) {
+      const { email: _old, ...rest } = mine;
+      await this.writeMember(pond, { ...rest, name: own, ...this.emailField() });
+    }
     const withAccount = [...members.values()].filter((m) => m.accountId && m.id !== me.id);
     for (let i = 0; i < withAccount.length; i += 50) {
       const chunk = withAccount.slice(i, i + 50);
       const found = await account.names(chunk.map((m) => m.accountId!));
       for (const m of chunk) {
         const row = found.names[m.accountId!];
-        if (row && row.name && row.name !== m.name) await this.writeMember(pond, { ...m, name: row.name });
+        const name = row?.name || row?.email;
+        if (row && name && (name !== m.name || (row.email && row.email !== m.email))) {
+          await this.writeMember(pond, { ...m, name, ...(row.email ? { email: row.email.slice(0, 200) } : {}) });
+        }
       }
     }
   }
@@ -3613,6 +3624,7 @@ export class FlotillaService extends EventEmitter {
           {
             id: me.id,
             name: me.name,
+            ...this.emailField(),
             role: "owner",
             nest: me.nest,
             nestName: me.nest,
@@ -3693,6 +3705,8 @@ export class FlotillaService extends EventEmitter {
       members: [...members.values()].map((m) => ({
         id: m.id,
         name: this.shownName(pond, m),
+        // Under the name and on hover: the account's email (this Mac's own account for you, else what the document says).
+        ...(m.id === me.id ? this.emailField() : m.email ? { email: m.email } : {}),
         role: m.role,
         nest: m.nest,
         nestName: m.nest,

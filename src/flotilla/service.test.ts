@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../cloud/store.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 /**
  * The riskiest FlotillaService flows, on one shared in-memory cloud. (More lives beside it: local-ponds, states,
@@ -40,12 +41,12 @@ class Cloud {
     if (!options.dir) this.dirs.push(dir);
     const store = this.store();
     const service = new FlotillaService({
-      store,
+      store: verifying(store),
       supportDir: dir,
-      displayName: name,
+      account: named(name),
       nest: `${name}'s Mac`,
       ...(options.owner ? { location: LOCATION } : {}),
-      storeFor: () => store,
+      storeFor: () => verifying(store),
       ...(options.relay ? { relay: options.relay as never } : {}),
     });
     return { dir, service };
@@ -180,9 +181,8 @@ describe("a left pond is not asked for again, across a restart", () => {
       return new FlotillaService({
         store,
         supportDir: B.dir,
-        displayName: "Aarav",
         nest: "Aarav's Mac",
-        storeFor: () => store,
+        storeFor: () => verifying(store),
         relay: relayFor(),
         now: () => clock,
       });
@@ -265,9 +265,8 @@ describe("a left pond is not asked for again, across a restart", () => {
     const service = new FlotillaService({
       store,
       supportDir: B.dir,
-      displayName: "Aarav",
       nest: "Aarav's Mac",
-      storeFor: () => store,
+      storeFor: () => verifying(store),
       relay: {
         accountPonds: async () => [],
         requestDevice: async () => {

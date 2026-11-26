@@ -104,9 +104,9 @@ describe("sender lines", () => {
     expect(stripSenderPrefix("hello [from x]")).toBe("hello [from x]");
   });
   it("picks the owner name: pond member, then macOS full name, then owner", () => {
-    expect(resolveOwnerName("Pond Sibhi", () => "Full Name")).toBe("Pond Sibhi");
-    expect(resolveOwnerName(null, () => "Full Name")).toBe("Full Name");
-    expect(resolveOwnerName(null, () => null)).toBe("owner");
+    expect(resolveOwnerName("Pond Sibhi")).toBe("Pond Sibhi");
+    // Never the Mac's own full name: a person's name is their account's.
+    expect(resolveOwnerName(null)).toBe("owner");
   });
 });
 

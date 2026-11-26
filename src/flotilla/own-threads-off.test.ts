@@ -8,6 +8,7 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { FakeHost, session } from "./journey-support.js";
 import { FlotillaBridge } from "./bridge.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode is off by default (docs/ponds.md, SQUEAK_POND_OWN_THREADS).
 let rtdb: FakeRtdb;
@@ -29,9 +30,9 @@ function mac(name: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest: name + "-mac",
     inviteLinkBase: "https://x.test/join",
   });

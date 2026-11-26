@@ -183,7 +183,6 @@ async function mac(user: TestUser, nest: string | null = `${user.name}-mac`) {
     account,
     store: createCloudStore(location, { fetch: doFetch, socket: streams.socket }),
     supportDir: dir,
-    displayName: user.name,
     nest,
     location,
     inviteLinkBase: "https://x.test/join",

@@ -8,6 +8,7 @@ import type { ChannelDoc } from "../cloud/store.js";
 import { joinWords } from "./join-words.js";
 import { RelayRefused, type PondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 const LOCATION = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
 const docs = new Map<string, ChannelDoc>();
@@ -56,12 +57,11 @@ function mk(name: string, relay: PondRelay, owner = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "short-invite-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: shared,
+    store: verifying(shared),
     supportDir: dir,
-    displayName: name,
     nest: `${name}-mac`,
     ...(owner ? { location: LOCATION } : {}),
-    storeFor: () => shared,
+    storeFor: () => verifying(shared),
     relay,
     account,
     now: () => clock.t,
@@ -109,12 +109,12 @@ describe("short invite codes", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "short-invite-"));
     dirs.push(dir);
     const bare = new FlotillaService({
-      store: shared,
+      store: verifying(shared),
       supportDir: dir,
-      displayName: "O",
+      account: named("O"),
       nest: "o",
       location: LOCATION,
-      storeFor: () => shared,
+      storeFor: () => verifying(shared),
       now: () => clock.t,
     });
     const pond = await bare.createPond({ name: "S", projectId: "p" });

@@ -7,6 +7,7 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { FlotillaRoutes } from "./mount.js";
 import { FlotillaService } from "./service.js";
+import { named } from "./named-account.test-fixture.js";
 
 let rtdb: FakeRtdb;
 let url: string;
@@ -26,7 +27,7 @@ describe("task and lock routes", () => {
     const service = new FlotillaService({
       store: new RtdbRest(url),
       supportDir: dir,
-      displayName: "Sibhi",
+      account: named("Sibhi"),
       nest: "s-mac",
     });
     const pond = await service.createPond({ name: "R", projectId: "proj-R" });

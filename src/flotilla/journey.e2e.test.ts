@@ -9,6 +9,7 @@ import { FakeHost, session } from "./journey-support.js";
 import { FlotillaBridge } from "./bridge.js";
 import { randomId, sealAt, signedText, signText } from "./crypto.js";
 import { FlotillaService, type FlotillaOptions } from "./service.js";
+import { named, verifying } from "./named-account.test-fixture.js";
 
 // The stashed own-thread mode (docs/ponds.md): these tests exercise it, so it is on here.
 process.env.SQUEAK_POND_OWN_THREADS = "on";
@@ -30,9 +31,9 @@ function mac(name: string, nest: string | null = name + "-mac", extra: Partial<F
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-"));
   dirs.push(dir);
   const service = new FlotillaService({
-    store: new RtdbRest(url),
+    store: verifying(new RtdbRest(url)),
     supportDir: dir,
-    displayName: name,
+    account: named(name),
     nest,
     inviteLinkBase: "https://x.test/join",
     ...extra,
@@ -216,20 +217,15 @@ describe("the account-based invite: a short code, no link, a signed-in member", 
         return details;
       },
     };
-    const account = {
-      name: () => "Bea Lee",
-      email: () => "bea@example.com",
-      attest: async () => "ja.token",
-      names: async () => ({ names: {} }),
-    };
+    const account = named("Bea Lee", "bea@example.com");
     const location = { provider: "firebase", databaseUrl: "https://squeak-test-default-rtdb.firebaseio.com" };
     const A = mac("Owner", "Owner-mac", {
       relay: relay as never,
       account,
       location: location as never,
-      storeFor: () => new RtdbRest(url),
+      storeFor: () => verifying(new RtdbRest(url)),
     });
-    const C = mac("Bea", "Bea-mac", { relay: relay as never, account, storeFor: () => new RtdbRest(url) });
+    const C = mac("Bea", "Bea-mac", { relay: relay as never, account, storeFor: () => verifying(new RtdbRest(url)) });
     const pond = await A.service.createPond({
       name: "Docs",
       projectId: "p2",
