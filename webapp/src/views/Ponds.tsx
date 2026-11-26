@@ -1,12 +1,15 @@
 // The Ponds screen (issue #136): Invitations (Join, Decline), Needs you (questions only; approvals are the Mac's), and the Pond
-// list under All · Shared · Not shared, newest first. Every field is drawn as the relay sent it; nothing is worked out here.
+// list under All · Shared · Not shared, newest first. The relay sends only metadata; the line under a Pond, the marks and Needs
+// you were worked out in the browser from the Pond's own documents (`state/ponds-store.ts`).
 
 import { useState } from "preact/hooks";
-import type { Invitation, NeedsYouItem, PondSummary } from "../../../src/shared/shapes.js";
-import { age, hueOf, initial } from "../format.js";
+import type { Invitation, PondSummary } from "../../../src/shared/shapes.js";
+import { age, initial } from "../format.js";
+import type { NeedsYouItem, PondDerived } from "../pond/derive.js";
 import type { Connection } from "../relay/live.js";
 import { routePath } from "../router.js";
 import type { PondsState } from "../state/ponds-store.js";
+import { Avatar, Tile, tint, Warning, Working } from "./marks.js";
 
 export type PondFilter = "all" | "shared" | "not-shared";
 const FILTERS: { id: PondFilter; label: string }[] = [
@@ -18,44 +21,6 @@ const FILTERS: { id: PondFilter; label: string }[] = [
 export const FAILED_LIST = "Squeak can't be reached right now.";
 export const connectionLine = (c: Connection): string | null =>
   c === "live" ? "Live" : c === "reconnecting" ? "Reconnecting…" : null;
-
-const tint = (key: string): Record<string, string> => ({ "--h": String(hueOf(key)) });
-
-function Avatar({ name, small }: { name: string; small?: boolean }) {
-  return (
-    <span class={`avatar person${small ? " small" : ""}`} style={tint(name)} aria-hidden="true">
-      {initial(name)}
-    </span>
-  );
-}
-
-function Tile({ pond }: { pond: { pondId: string; name: string }; owner?: string }) {
-  return (
-    <span class="avatar tile" style={tint(pond.pondId)} aria-hidden="true">
-      {initial(pond.name)}
-    </span>
-  );
-}
-
-function Warning() {
-  return (
-    <svg class="waiting" viewBox="0 0 24 24" width="22" height="22" role="img" aria-label="Waiting for you">
-      <path
-        d="M12 3.5 2.8 19.5h18.4L12 3.5Z M12 10v4.5 M12 17.2v.1"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
-  );
-}
-
-/** The working mark: a small pixel tide, still in the markup and animated only in CSS (and not at all under reduced motion). */
-function Working() {
-  return <span class="tide" role="img" aria-label="Working" />;
-}
 
 function InvitationCard(props: {
   invitation: Invitation;
@@ -114,11 +79,19 @@ function NeedsYouRow({ item, now }: { item: NeedsYouItem; now: number }) {
   );
 }
 
-function PondRow({ pond, selected, now }: { pond: PondSummary; selected: boolean; now: number }) {
+function PondRow(props: { pond: PondSummary; derived: PondDerived | undefined; selected: boolean; now: number }) {
+  const { pond, selected, now } = props;
+  const d: PondDerived = props.derived ?? {
+    line: "",
+    working: false,
+    needsYou: false,
+    unread: false,
+    connecting: true,
+  };
   return (
     <li>
       <a
-        class={`item pond${selected ? " selected" : ""}${pond.unread ? " unread" : ""}`}
+        class={`item pond${selected ? " selected" : ""}${d.unread ? " unread" : ""}${d.connecting ? " connecting" : ""}`}
         href={`#${routePath({ name: "pond", pondId: pond.pondId, tab: "room" })}`}
         aria-current={selected ? "page" : undefined}
       >
@@ -128,15 +101,9 @@ function PondRow({ pond, selected, now }: { pond: PondSummary; selected: boolean
         </span>
         <span class="text">
           <strong>{pond.name}</strong>
-          <span class="sub">{pond.line}</span>
+          <span class="sub">{d.line}</span>
         </span>
-        {pond.needsYou ? (
-          <Warning />
-        ) : pond.working ? (
-          <Working />
-        ) : (
-          <span class="age">{age(now, pond.lastActivityAt)}</span>
-        )}
+        {d.needsYou ? <Warning /> : d.working ? <Working /> : <span class="age">{age(now, pond.lastActivityAt)}</span>}
       </a>
     </li>
   );
@@ -158,7 +125,8 @@ export function PondsScreen(props: PondsScreenProps) {
   const [filter, setFilter] = useState<PondFilter>("all");
   const { state } = props;
   const now = props.now ?? Date.now();
-  const { ponds, invitations, needsYou } = state.overview;
+  const { ponds, invitations } = state.overview;
+  const { needsYou } = state;
   const shown = ponds.filter((p) => (filter === "all" ? true : filter === "shared" ? p.shared : !p.shared));
   const line = connectionLine(state.connection);
 
@@ -241,7 +209,13 @@ export function PondsScreen(props: PondsScreenProps) {
             {shown.length > 0 ? (
               <ul class="card list-card">
                 {shown.map((p) => (
-                  <PondRow key={p.pondId} pond={p} now={now} selected={p.pondId === props.selectedPondId} />
+                  <PondRow
+                    key={p.pondId}
+                    pond={p}
+                    derived={state.derived[p.pondId]}
+                    now={now}
+                    selected={p.pondId === props.selectedPondId}
+                  />
                 ))}
               </ul>
             ) : (

@@ -33,7 +33,9 @@ describe("sign-in flow", () => {
     await auth.start();
     expect(auth.state()).toEqual({ status: "signed-in", account: ASHA, token: TOKEN });
     expect(seen).toEqual(["checking", "signed-in"]);
-    expect(fake.state.requests).toEqual([{ url: `${CONFIG.relayBase}/me`, account: TOKEN, credentials: "omit" }]);
+    expect(fake.state.requests.map((r) => [r.url, r.account, r.credentials])).toEqual([
+      [`${CONFIG.relayBase}/me`, TOKEN, "omit"],
+    ]);
   });
 
   it("forgets a token the relay refuses (401) and is signed out, not failed", async () => {

@@ -77,9 +77,28 @@ confirms.
 
 Relay routes this assumes, not built yet (the fake relay implements them; shapes in `src/shared/shapes.ts`):
 
-- `GET /account/overview` with `x-squeak-account`: `{ ponds: PondSummary[], invitations: Invitation[], needsYou: NeedsYouItem[] }`.
-  Pond content documents on `GET /changes` are sealed with Pond keys the web does not hold yet, so the list's summary line, unread, working
-  and waiting marks have to come from the relay as plain fields; the feed read of "reopen" is this one call.
+- `GET /account/overview` with `x-squeak-account`: `{ ponds: PondSummary[], invitations: Invitation[] }`, **metadata only** (the cloud never
+  reads content, ADR 0005): per Pond `pondId, name, ownerName, ownerKey, mine, role, shared, lastActivityAt` (time of the newest feed row),
+  `seqHead` (newest feed seq), `counts {members, ducks}`. No summary line, no marks, no questions: the browser works those out from the
+  Pond's decrypted documents. (Built in #137 as a contract change; only the fake relay has the route so far. `ownerKey` is what the
+  web pins a key grant's signature to: `GET /account/ponds` already carries it.)
 - `POST /account/invitations/<inviteId>/join` (200 `{ pondId }`) and `/decline` (204), same header. The invitation lifecycle is #126.
 - `liveBase` in `webapp/config/<env>.json`: the `squeak-live` URL (https), with CORS for the Slate origin and the `x-squeak-account` and
   `x-squeak-device` headers.
+
+## The web is a device (#137)
+
+`device/vault.ts` keeps this browser's key in IndexedDB (non-extractable P-256: one ECDSA key that signs, one ECDH key that opens
+boxes; one set per account). `pond/device.ts` registers it (`POST /account/devices`, kind web). For each Pond `pond/session.ts` asks the
+Owner's Mac (`POST /account/pond-devices` with both public keys) and the Pond reads "Connecting: waiting for <Owner>'s Mac" until the Mac
+writes `keys/<deviceId>` (sealed to the box key, every key version, a Pond token, signed by the Owner). The web believes a grant only when
+the Pond's pinned `ownerKey` signed it. `pond/feed.ts` reads `GET /changes` (account token), opens each document with the key its box
+names (AAD = its path), and checks its signature (Owner's key for `room`/`rtasks`/`members`; a member's keys for their `rposts`,
+`threads`; the starter's for `tevents`). Writes are sealed and signed with this device's key and sent with the Pond token to `PUT /doc`:
+`rposts` (a message, Make task, a Duck request) and `tcmds` (message, answer, stop). The wire layout is `src/shared/` (`box.ts`,
+`member-box.ts`), tested against the daemon's Node code.
+
+Format knowledge sits in `pond/room-format.ts` (Room), `pond/duck-format.ts` (Ducks, commands) and `pond/people-format.ts`.
+
+Mac-side follow-ups this needs (not done here): `adoptDeviceRequests` refuses the Owner's own account, so an Owner's browser cannot get
+keys yet; `stop` is not a command kind, so Owner Stop is ignored; the Owner's own `start` runs only from the Owner's Mac.

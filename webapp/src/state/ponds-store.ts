@@ -1,14 +1,25 @@
-// What the Ponds screen holds: the overview (Ponds, Invitations, Needs you), the connection state, and the two answers to an
-// invitation. Nothing is worked out here: the list is read from the relay (`GET /account/overview`) once on open and again when
-// a live notice or the 30 s poll says something changed. Join and Decline change the screen only after the cloud confirms.
+// What the Ponds screen holds: the overview (Ponds and Invitations, metadata only), one open session per Pond (its keys, its
+// feed, what it says), the connection state, and the two answers to an invitation.
+//
+// The relay says which Ponds there are and how far each has got. Everything else the list draws (the line under a name, the
+// working mark, Needs you, unread) is worked out here from the Pond's decrypted documents, and until the Owner's Mac has sealed
+// the Pond key to this browser a Pond reads "Connecting: waiting for <Owner>'s Mac". The overview is read once on open and again
+// when a live notice or the 30 s poll says something changed; each Pond's feed is read on the same cues.
 
-import type { PondsOverview } from "../../../src/shared/shapes.js";
+import type { PondsOverview, PondSummary } from "../../../src/shared/shapes.js";
+import type { KeyValueStore } from "../auth/session.js";
+import type { Device } from "../pond/device.js";
+import { lineOf, needsYouOf, type NeedsYouItem, type PondDerived } from "../pond/derive.js";
+import { createSession, type PondSession } from "../pond/session.js";
 import type { Relay } from "../relay/client.js";
-import { createLive, type Connection, type LiveOptions } from "../relay/live.js";
+import { createLive, readPresence, type Connection, type LiveOptions } from "../relay/live.js";
 
 export interface PondsState {
   status: "loading" | "ready" | "failed" | "signed-out";
   overview: PondsOverview;
+  /** What the browser worked out from each Pond's own documents, by Pond id. */
+  derived: Record<string, PondDerived>;
+  needsYou: NeedsYouItem[];
   connection: Connection;
   /** Invitations being answered, and the sentence for one that failed. */
   busy: string[];
@@ -16,8 +27,11 @@ export interface PondsState {
 }
 
 export const ANSWER_FAILED = "That didn't go through. Try again.";
+export const connectingLine = (owner: string): string =>
+  `Connecting: waiting for ${owner.trim().split(/\s+/)[0]}'s Mac`;
 
-const EMPTY: PondsOverview = { ponds: [], invitations: [], needsYou: [] };
+const EMPTY: PondsOverview = { ponds: [], invitations: [] };
+const SEEN = "squeak-seen-";
 
 export interface PondsStore {
   state(): PondsState;
@@ -25,6 +39,10 @@ export interface PondsStore {
   start(): void;
   stop(): void;
   refresh(): Promise<void>;
+  /** The open session of a Pond in the last overview, or null. */
+  session(pondId: string): PondSession | null;
+  /** This person has looked at the Pond up to its newest change: it is no longer unread. */
+  markSeen(pondId: string): void;
   /** Join: the Pond to open once the cloud confirms, or null. */
   join(inviteId: string): Promise<string | null>;
   decline(inviteId: string): Promise<void>;
@@ -34,8 +52,12 @@ export interface PondsStoreDeps {
   relay: Relay;
   token: string;
   liveBase: string | null;
+  device: Device;
+  /** Where "seen up to" is kept (localStorage). */
+  seen: KeyValueStore;
   deviceId?: string;
   fetch?: LiveOptions["fetch"];
+  now?: () => number;
   /** The session ended (a 401): the app signs out. */
   onSignedOut?(): void;
 }
@@ -44,17 +66,86 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
   let state: PondsState = {
     status: "loading",
     overview: EMPTY,
+    derived: {},
+    needsYou: [],
     connection: deps.liveBase ? "reconnecting" : "polling",
     busy: [],
     errors: {},
   };
   const listeners = new Set<(s: PondsState) => void>();
+  const emit = (): void => listeners.forEach((l) => l(state));
   const set = (patch: Partial<PondsState>): void => {
     state = { ...state, ...patch };
-    listeners.forEach((l) => l(state));
+    emit();
   };
+  const sessions = new Map<string, { session: PondSession; pond: PondSummary }>();
   let reading: Promise<void> | null = null;
   let again = false;
+
+  const seenOf = (pondId: string): number => Number(deps.seen.getItem(`${SEEN}${pondId}`) ?? "");
+  const setSeen = (pondId: string, seq: number): void => {
+    try {
+      deps.seen.setItem(`${SEEN}${pondId}`, String(seq));
+    } catch {
+      // storage refused: the Pond stays unread until the next visit
+    }
+  };
+
+  /** Everything the list draws from the sessions' documents; recomputed whenever a Pond's documents change. */
+  const derive = (): void => {
+    const derived: Record<string, PondDerived> = {};
+    const needsYou: NeedsYouItem[] = [];
+    for (const { session, pond } of sessions.values()) {
+      const s = session.state();
+      const items = s.data ? needsYouOf(pond, s.data) : [];
+      needsYou.push(...items);
+      const head = Math.max(pond.seqHead, s.data?.head ?? 0);
+      const seen = deps.seen.getItem(`${SEEN}${pond.pondId}`);
+      derived[pond.pondId] = {
+        line: s.data ? lineOf(pond, s.data) : connectingLine(pond.ownerName),
+        working: s.data?.ducks.some((d) => d.state === "working") ?? false,
+        needsYou: items.length > 0,
+        // A Pond never opened on this browser is not "unread": there is nothing to compare to yet.
+        unread: seen !== null && head > Number(seen),
+        connecting: s.access === "connecting",
+      };
+    }
+    needsYou.sort((a, b) => b.at - a.at || (a.id < b.id ? -1 : 1));
+    state = { ...state, derived, needsYou };
+    emit();
+  };
+
+  const syncSessions = (ponds: PondSummary[]): void => {
+    const ids = new Set(ponds.map((p) => p.pondId));
+    for (const [id, held] of sessions) {
+      if (!ids.has(id)) {
+        held.session.stop();
+        sessions.delete(id);
+      }
+    }
+    for (const pond of ponds) {
+      const held = sessions.get(pond.pondId);
+      if (held) {
+        held.pond = pond;
+        continue;
+      }
+      if (deps.seen.getItem(`${SEEN}${pond.pondId}`) === null) setSeen(pond.pondId, pond.seqHead);
+      const session = createSession({
+        relay: deps.relay,
+        token: deps.token,
+        pond,
+        device: () => deps.device.ready(),
+        ...(deps.liveBase ? { presence: () => readPresence(deps.liveBase!, deps.token, pond.pondId, deps.fetch) } : {}),
+        ...(deps.now ? { now: deps.now } : {}),
+        onSignedOut: () => {
+          set({ status: "signed-out" });
+          deps.onSignedOut?.();
+        },
+        onChange: derive,
+      });
+      sessions.set(pond.pondId, { session, pond });
+    }
+  };
 
   const read = async (): Promise<void> => {
     const result = await deps.relay.overview(deps.token);
@@ -66,8 +157,11 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
       // Newest first, always (docs/spec.md: every list is newest first).
       const ponds = [...o.ponds].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
       const invitations = [...o.invitations].sort((a, b) => b.at - a.at);
-      const needsYou = [...o.needsYou].sort((a, b) => b.at - a.at);
-      set({ status: "ready", overview: { ponds, invitations, needsYou } });
+      syncSessions(ponds);
+      set({ status: "ready", overview: { ponds, invitations } });
+      derive();
+      // Each Pond's own feed is read on the same cue; one that cannot be read leaves the list as it was.
+      void Promise.all([...sessions.values()].map((h) => h.session.refresh()));
     } else if (state.status !== "ready") {
       set({ status: "failed" });
     }
@@ -126,8 +220,22 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
     start() {
       void refresh().then(() => live.start());
     },
-    stop: () => live.stop(),
+    stop() {
+      live.stop();
+      for (const { session } of sessions.values()) session.stop();
+      sessions.clear();
+    },
     refresh,
+    session: (pondId) => sessions.get(pondId)?.session ?? null,
+    markSeen(pondId) {
+      const held = sessions.get(pondId);
+      if (!held) return;
+      const head = Math.max(held.pond.seqHead, held.session.state().data?.head ?? 0);
+      if (head > seenOf(pondId)) {
+        setSeen(pondId, head);
+        derive();
+      }
+    },
     join: (id) => answer(id, "join"),
     async decline(id) {
       await answer(id, "decline");

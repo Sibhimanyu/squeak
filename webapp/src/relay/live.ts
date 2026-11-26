@@ -183,3 +183,26 @@ export function createLive(o: LiveOptions): Live {
     },
   };
 }
+
+/** Who of a Pond is online now: `GET <live>/presence?pond=` (a renewed stream within a cycle; docs/cloud-layer.md). Null when unknown. */
+export async function readPresence(
+  base: string,
+  token: string,
+  pondId: string,
+  fetchFn: FetchLike = (url, init) => fetch(url, init),
+): Promise<{ userId: string; online: boolean }[] | null> {
+  try {
+    const res = await fetchFn(`${base.replace(/\/+$/, "")}/presence?pond=${encodeURIComponent(pondId)}`, {
+      headers: { [ACCOUNT_HEADER]: token },
+      credentials: "omit",
+    });
+    if (res.status !== 200) return null;
+    const body = (await res.json()) as { members?: unknown };
+    if (!Array.isArray(body.members)) return null;
+    return body.members.flatMap((m: { userId?: unknown; online?: unknown }) =>
+      typeof m?.userId === "string" && typeof m.online === "boolean" ? [{ userId: m.userId, online: m.online }] : [],
+    );
+  } catch {
+    return null;
+  }
+}

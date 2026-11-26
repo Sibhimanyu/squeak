@@ -17,41 +17,19 @@ const NOW = Date.now();
 const min = 60_000;
 const pond = (over: Partial<PondSummary> & { pondId: string; name: string }): PondSummary => ({
   ownerName: "Asha",
+  ownerKey: "AAAA",
   mine: true,
   role: "owner",
   shared: false,
-  line: "Not shared · Nothing running",
   lastActivityAt: NOW - 5 * min,
-  unread: false,
-  working: false,
-  needsYou: false,
+  seqHead: 0,
+  counts: { members: 1, ducks: 0 },
   ...over,
 });
 
+// What the relay says: metadata only. Lines, marks and Needs you are the browser's own (see ponds-list.test.tsx).
 const overview = (): PondsOverview => ({
   invitations: [{ inviteId: "i1", pondName: "harbour", inviterName: "Dev", at: NOW - 2 * min }],
-  needsYou: [
-    {
-      id: "q1",
-      kind: "question",
-      pondId: "p-green",
-      pondName: "greenroom",
-      duckId: "d-tabs",
-      duckName: "room-tabs",
-      title: "Which tab should open first?",
-      at: NOW - 4 * min,
-    },
-    {
-      id: "q2",
-      kind: "question",
-      pondId: "p-orch",
-      pondName: "orchard",
-      duckId: "d-pal",
-      duckName: "palette-pass",
-      title: "Keep the old Pond colours?",
-      at: NOW - 38 * min,
-    },
-  ],
   ponds: [
     pond({ pondId: "p-old", name: "asha-notes", lastActivityAt: NOW - 3 * 86_400_000 }),
     pond({
@@ -61,19 +39,10 @@ const overview = (): PondsOverview => ({
       ownerName: "Sibhi",
       role: "member",
       shared: true,
-      line: "Dev: Question is for whoever is free",
-      needsYou: true,
-      unread: true,
       lastActivityAt: NOW - min,
     }),
-    pond({
-      pondId: "p-farm",
-      name: "farm-dashboard",
-      shared: true,
-      line: "Shared with Dev, Meera",
-      lastActivityAt: NOW - 60 * min,
-    }),
-    pond({ pondId: "p-orch", name: "orchard", working: true, lastActivityAt: NOW - 3 * min }),
+    pond({ pondId: "p-farm", name: "farm-dashboard", shared: true, lastActivityAt: NOW - 60 * min }),
+    pond({ pondId: "p-orch", name: "orchard", lastActivityAt: NOW - 3 * min }),
   ],
 });
 
@@ -121,34 +90,16 @@ afterEach(() => {
 });
 
 describe("Ponds screen", () => {
-  it("draws Invitations, Needs you and the Pond list, newest first", async () => {
+  it("draws Invitations and the Pond list, newest first", async () => {
     await boot();
     expect(text('[data-block="invitations"] h2')).toBe("Invitations 1");
     expect(text('[data-block="invitations"] strong')).toBe("harbour");
     expect(text('[data-block="invitations"] .sub')).toBe("Dev invited you · 2 min ago");
-    expect(text('[data-block="needs-you"] h2')).toBe("Needs you 2");
-    const needs = [...root.querySelectorAll('[data-block="needs-you"] .item')];
-    expect(needs.map((n) => n.querySelector("strong")?.textContent)).toEqual([
-      "Which tab should open first?",
-      "Keep the old Pond colours?",
-    ]);
-    expect(needs[0]!.querySelector(".sub")?.textContent).toBe("greenroom · room-tabs · 4 min");
-    expect(needs[0]!.getAttribute("href")).toBe("#/ponds/p-green/ducks/d-tabs");
     expect(names()).toEqual(["greenroom", "orchard", "farm-dashboard", "asha-notes"]);
-  });
-
-  it("marks unread bold, waiting with the triangle, working with the tide, and others' Ponds with the owner's avatar", async () => {
-    await boot();
     const rows = [...root.querySelectorAll('[data-block="ponds"] .item')];
-    const [green, orchard, farm, notes] = rows;
-    expect(green!.classList.contains("unread")).toBe(true);
-    expect(green!.querySelector(".waiting")).not.toBeNull();
-    expect(green!.querySelector(".avatar.small")?.textContent).toBe("S");
-    expect(orchard!.querySelector(".tide")).not.toBeNull();
-    expect(orchard!.querySelector(".avatar.small")).toBeNull();
-    expect(farm!.querySelector(".age")?.textContent).toBe("1 h");
-    expect(notes!.querySelector(".avatar.small")).toBeNull();
-    expect(green!.getAttribute("href")).toBe("#/ponds/p-green/room");
+    expect(rows[0]!.querySelector(".avatar.small")?.textContent).toBe("S");
+    expect(rows[1]!.querySelector(".avatar.small")).toBeNull();
+    expect(rows[0]!.getAttribute("href")).toBe("#/ponds/p-green/room");
   });
 
   it("filters All, Shared and Not shared", async () => {
@@ -165,10 +116,9 @@ describe("Ponds screen", () => {
   });
 
   it("says so when a filter has nothing, and when there are no Ponds", async () => {
-    const empty: PondsOverview = { ponds: [pond({ pondId: "a", name: "a" })], invitations: [], needsYou: [] };
+    const empty: PondsOverview = { ponds: [pond({ pondId: "a", name: "a" })], invitations: [] };
     await boot({ overviews: { [TOKEN]: empty } });
     expect(root.querySelector('[data-block="invitations"]')).toBeNull();
-    expect(root.querySelector('[data-block="needs-you"]')).toBeNull();
     act(() => [...root.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === "Shared")!.click());
     expect(text("[data-empty]")).toBe("No shared Ponds.");
   });
@@ -318,17 +268,19 @@ describe("helpers and shapes", () => {
     expect(age(at + 26 * 3_600_000, at)).toBe("Yesterday");
   });
 
-  it("the overview reader drops anything it cannot draw, and approvals", () => {
+  it("the overview reader drops anything it cannot draw, and any content the relay should never send", () => {
     const parsed = parsePondsOverview({
-      ponds: [{ pondId: "p", name: "x" }, { ...pond({ pondId: "ok", name: "ok" }) }],
-      invitations: [{ inviteId: "i" }],
-      needsYou: [
-        { id: "a", kind: "approval", pondId: "p", pondName: "p", duckId: "d", duckName: "d", title: "t", at: 1 },
+      ponds: [
+        { pondId: "p", name: "x" },
+        { ...pond({ pondId: "ok", name: "ok" }), line: "Dev: secret words" },
       ],
+      invitations: [{ inviteId: "i" }],
+      needsYou: [{ id: "a", title: "a question" }],
     });
     expect(parsed?.ponds.map((p) => p.pondId)).toEqual(["ok"]);
     expect(parsed?.invitations).toEqual([]);
-    expect(parsed?.needsYou).toEqual([]);
+    expect(JSON.stringify(parsed)).not.toContain("secret words");
+    expect(JSON.stringify(parsed)).not.toContain("question");
     expect(parsePondsOverview("nope")).toBeNull();
   });
 });

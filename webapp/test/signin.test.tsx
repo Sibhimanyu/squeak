@@ -97,7 +97,7 @@ describe("App with a fake relay", () => {
     const fake = createFakeRelay({
       accounts: { [TOKEN]: ASHA },
       invites: { K7P4QD: INVITE },
-      overviews: { [TOKEN]: { ponds: [], invitations: [], needsYou: [] } },
+      overviews: { [TOKEN]: { ponds: [], invitations: [] } },
       ...relayState,
     });
     const relay = createRelay(CONFIG.relayBase, fake.fetch);
@@ -129,7 +129,27 @@ describe("App with a fake relay", () => {
 
   it("signed in: draws the router skeleton for each route", async () => {
     window.location.hash = "#/ponds/p1/ducks/d1";
-    boot(storedToken());
+    boot(storedToken(), {
+      overviews: {
+        [TOKEN]: {
+          invitations: [],
+          ponds: [
+            {
+              pondId: "p1",
+              name: "p1",
+              ownerName: "Asha",
+              ownerKey: "AAAA",
+              mine: true,
+              role: "owner" as const,
+              shared: false,
+              lastActivityAt: 1,
+              seqHead: 0,
+              counts: { members: 1, ducks: 0 },
+            },
+          ],
+        },
+      },
+    });
     await flush();
     expect(root.querySelector(".shell")?.getAttribute("data-route")).toBe("duck");
     expect(root.querySelector('[data-screen="duck"]')).not.toBeNull();

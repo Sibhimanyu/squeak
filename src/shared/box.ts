@@ -27,11 +27,21 @@ export async function importChannelKey(keyBase64: string): Promise<CryptoKey> {
   return key;
 }
 
-/** Encrypts a JSON value into a combined box (never compressed: the daemon reads both). */
-export async function seal(key: CryptoKey, value: unknown): Promise<string> {
+const params = (iv: Uint8Array, aad: string | undefined): AesGcmParams => ({
+  name: "AES-GCM",
+  iv: buf(iv),
+  ...(aad !== undefined ? { additionalData: buf(utf8(aad)) } : {}),
+});
+
+/**
+ * Encrypts a JSON value into a combined box (never compressed: the daemon reads both). `aad` binds the box to something
+ * outside it: a Pond document's box is bound to its own path (`sealAt` in src/flotilla/crypto.ts), so the cloud cannot
+ * move it to another path and have it open.
+ */
+export async function seal(key: CryptoKey, value: unknown, aad?: string): Promise<string> {
   const nonce = globalThis.crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
   const plain = buf(utf8(JSON.stringify(value)));
-  const body = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv: nonce }, key, plain));
+  const body = new Uint8Array(await subtle().encrypt(params(nonce, aad), key, plain));
   const combined = new Uint8Array(NONCE_BYTES + body.length);
   combined.set(nonce, 0);
   combined.set(body, NONCE_BYTES);
@@ -43,12 +53,12 @@ async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** Decrypts a combined box. Throws if it was tampered with or sealed under another key. */
-export async function open<T = unknown>(key: CryptoKey, box: string): Promise<T> {
+/** Decrypts a combined box. Throws if it was tampered with, sealed under another key or bound to another `aad`. */
+export async function open<T = unknown>(key: CryptoKey, box: string, aad?: string): Promise<T> {
   const raw = fromBase64(box);
   if (raw.length < NONCE_BYTES + TAG_BYTES) throw new Error("box too short");
-  const iv = buf(raw.subarray(0, NONCE_BYTES));
-  const plain = new Uint8Array(await subtle().decrypt({ name: "AES-GCM", iv }, key, buf(raw.subarray(NONCE_BYTES))));
+  const iv = raw.subarray(0, NONCE_BYTES);
+  const plain = new Uint8Array(await subtle().decrypt(params(iv, aad), key, buf(raw.subarray(NONCE_BYTES))));
   const json = plain[0] === COMPRESSED ? await inflateRaw(plain.subarray(1)) : plain;
   return JSON.parse(fromUtf8(json)) as T;
 }

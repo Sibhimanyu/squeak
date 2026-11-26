@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { InvitePreview } from "../../src/shared/shapes.js";
 import type { Auth, AuthState } from "./auth/auth.js";
-import type { Provider } from "./auth/session.js";
+import type { KeyValueStore, Provider } from "./auth/session.js";
+import { defaultVault, type KeyVault } from "./device/vault.js";
+import { createDevice } from "./pond/device.js";
 import type { FetchLike, Relay } from "./relay/client.js";
 import { routePath, type Route, type Router } from "./router.js";
 import { createPondsStore, type PondsState, type PondsStore } from "./state/ponds-store.js";
+import { DuckScreen } from "./views/Duck.js";
+import { PondScreen } from "./views/Pond.js";
 import { PondsScreen } from "./views/Ponds.js";
-import { DuckScreen, JoinScreen, PondScreen } from "./views/Screens.js";
+import { JoinScreen } from "./views/Screens.js";
 import { SignIn } from "./views/SignIn.js";
 
 function useSubscribed<T>(read: () => T, subscribe: (listener: (value: T) => void) => () => void): T {
@@ -36,9 +40,15 @@ export interface AppProps {
   liveBase?: string | null;
   /** The fetch the live stream uses (tests); the page's own by default. */
   liveFetch?: FetchLike;
+  /** Where this browser's device key is kept (IndexedDB); tests pass an in-memory one. */
+  vault?: KeyVault;
+  /** Where "seen up to" is kept per Pond (localStorage). */
+  seen?: KeyValueStore;
 }
 
-export function App({ auth, relay, router, liveBase = null, liveFetch }: AppProps) {
+const defaultSeen = (): KeyValueStore => window.localStorage;
+
+export function App({ auth, relay, router, liveBase = null, liveFetch, vault, seen }: AppProps) {
   const state: AuthState = useSubscribed(auth.state, auth.subscribe);
   const route: Route = useSubscribed(router.current, router.subscribe);
   const [invite, setInvite] = useState<InvitePreview | null>(null);
@@ -61,18 +71,22 @@ export function App({ auth, relay, router, liveBase = null, liveFetch }: AppProp
 
   // One Ponds store per signed-in session: one read on open, then live notices (or the 30 s poll) say when to read again.
   const token = state.status === "signed-in" ? state.token : null;
+  const userId = state.status === "signed-in" ? state.account.userId : null;
   const store = useMemo(
     () =>
-      token
+      token && userId
         ? createPondsStore({
             relay,
             token,
             liveBase,
+            // This browser is a device of the account: its key is made once and kept, and the Owner's Mac seals Pond keys to it.
+            device: createDevice({ relay, token, userId, vault: vault ?? defaultVault() }),
+            seen: seen ?? defaultSeen(),
             ...(liveFetch ? { fetch: liveFetch } : {}),
             onSignedOut: () => auth.signOut(),
           })
         : null,
-    [relay, token, liveBase, liveFetch, auth],
+    [relay, token, userId, liveBase, liveFetch, auth, vault, seen],
   );
   const ponds = useStore(store);
   useEffect(() => {
@@ -102,8 +116,24 @@ export function App({ auth, relay, router, liveBase = null, liveFetch }: AppProp
         />
       </div>
       <div class="detail">
-        {route.name === "pond" ? <PondScreen route={route} /> : null}
-        {route.name === "duck" ? <DuckScreen route={route} /> : null}
+        {route.name === "pond" ? (
+          <PondScreen
+            key={route.pondId}
+            route={route}
+            pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
+            session={store.session(route.pondId)}
+            connection={ponds.connection}
+            onSeen={() => store.markSeen(route.pondId)}
+          />
+        ) : null}
+        {route.name === "duck" ? (
+          <DuckScreen
+            key={`${route.pondId}/${route.duckId}`}
+            route={route}
+            pond={ponds.overview.ponds.find((p) => p.pondId === route.pondId)}
+            session={store.session(route.pondId)}
+          />
+        ) : null}
         {route.name === "join" ? <JoinScreen route={route} /> : null}
       </div>
     </div>

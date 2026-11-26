@@ -59,8 +59,9 @@ export function isAppRoute(value: unknown): value is string {
   );
 }
 
-// ---- The Pond list screen (issue #136): one overview of what the account sees. The daemon-side fields are drawn, never worked out
-// by the web: the order, the one-line summary, shared or not, unread and the mark all come from the relay's overview. ----
+// ---- The Pond list (issue #136, reshaped in #137): what the relay may say about an account's Ponds is metadata only. The cloud never
+// reads content (ADR 0005), so a Pond's summary line, its working and waiting marks and Needs you are worked out in the browser from
+// the Pond's decrypted documents; the relay sends ids, names, roles, the owner, invitations, how far the change feed has got and counts. ----
 
 export type PondRole = "owner" | "member" | "viewer";
 
@@ -69,20 +70,18 @@ export interface PondSummary {
   name: string;
   /** Whose Pond it is (first name); the web draws their avatar on a Pond that is not yours. */
   ownerName: string;
+  /** The Owner Mac's signing key (x963 base64) the Pond is pinned to: what the web checks a key grant's signature against. */
+  ownerKey: string;
   /** True when this account owns it. */
   mine: boolean;
   role: PondRole;
-  /** Shared out by you, or shared with you (the filter's "Shared"). */
+  /** Other people are in it (the filter's "Shared"). */
   shared: boolean;
-  /** The one line under the name ("Dev: Question is for whoever is free", "Not shared · Nothing running"). */
-  line: string;
-  /** Epoch ms of the latest activity; the list is newest first by it. */
+  /** Epoch ms of the Pond's newest change (the time of the last feed row, never its content); the list is newest first by it. */
   lastActivityAt: number;
-  unread: boolean;
-  /** A Duck is working in it (draws the working mark). */
-  working: boolean;
-  /** A question waits on you (draws the triangle). */
-  needsYou: boolean;
+  /** The newest `seq` in the Pond's change feed: unread is this beyond what this browser last opened. */
+  seqHead: number;
+  counts: { members: number; ducks: number };
 }
 
 /** An invitation waiting on this account: Join or Decline. */
@@ -94,26 +93,17 @@ export interface Invitation {
   at: number;
 }
 
-/** A question a Duck is waiting on. The web holds questions only (approvals are the Mac's). */
-export interface NeedsYouItem {
-  id: string;
-  kind: "question";
-  pondId: string;
-  pondName: string;
-  duckId: string;
-  duckName: string;
-  title: string;
-  at: number;
-}
-
 export interface PondsOverview {
   ponds: PondSummary[];
   invitations: Invitation[];
-  needsYou: NeedsYouItem[];
 }
 
 const ROLES: readonly string[] = ["owner", "member", "viewer"];
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+const count = (value: unknown): number | null => {
+  const n = num(value);
+  return n !== null && n >= 0 && Number.isInteger(n) ? n : null;
+};
 const list = <T>(value: unknown, read: (item: unknown) => T | null): T[] =>
   Array.isArray(value) ? value.flatMap((item) => read(item) ?? []) : [];
 
@@ -122,22 +112,24 @@ function parsePondSummary(value: unknown): PondSummary | null {
   const pondId = text(value["pondId"], 100);
   const name = text(value["name"]);
   const ownerName = text(value["ownerName"], 100);
+  const ownerKey = text(value["ownerKey"], 200);
   const lastActivityAt = num(value["lastActivityAt"]);
+  const seqHead = count(value["seqHead"]);
+  const counts = isRecord(value["counts"]) ? value["counts"] : {};
   const role = value["role"];
-  if (!pondId || !name || !ownerName || lastActivityAt === null) return null;
+  if (!pondId || !name || !ownerName || !ownerKey || lastActivityAt === null || seqHead === null) return null;
   if (typeof role !== "string" || !ROLES.includes(role)) return null;
   return {
     pondId,
     name,
     ownerName,
+    ownerKey,
     mine: value["mine"] === true,
     role: role as PondRole,
     shared: value["shared"] === true,
-    line: typeof value["line"] === "string" ? value["line"].slice(0, 300) : "",
     lastActivityAt,
-    unread: value["unread"] === true,
-    working: value["working"] === true,
-    needsYou: value["needsYou"] === true,
+    seqHead,
+    counts: { members: count(counts["members"]) ?? 0, ducks: count(counts["ducks"]) ?? 0 },
   };
 }
 
@@ -150,25 +142,11 @@ function parseInvitation(value: unknown): Invitation | null {
   return inviteId && pondName && inviterName && at !== null ? { inviteId, pondName, inviterName, at } : null;
 }
 
-function parseNeedsYou(value: unknown): NeedsYouItem | null {
-  if (!isRecord(value) || value["kind"] !== "question") return null;
-  const id = text(value["id"], 100);
-  const pondId = text(value["pondId"], 100);
-  const pondName = text(value["pondName"]);
-  const duckId = text(value["duckId"], 100);
-  const duckName = text(value["duckName"]);
-  const title = text(value["title"], 300);
-  const at = num(value["at"]);
-  if (!id || !pondId || !pondName || !duckId || !duckName || !title || at === null) return null;
-  return { id, kind: "question", pondId, pondName, duckId, duckName, title, at };
-}
-
-/** `GET /account/overview`: anything that cannot be drawn is dropped, never a half row. */
+/** `GET /account/overview`: anything that cannot be drawn is dropped, never a half row; any content field is ignored. */
 export function parsePondsOverview(value: unknown): PondsOverview | null {
   if (!isRecord(value)) return null;
   return {
     ponds: list(value["ponds"], parsePondSummary).slice(0, 200),
     invitations: list(value["invitations"], parseInvitation).slice(0, 50),
-    needsYou: list(value["needsYou"], parseNeedsYou).slice(0, 100),
   };
 }
