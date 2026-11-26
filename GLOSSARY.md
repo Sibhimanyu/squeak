@@ -40,8 +40,8 @@ A short-lived subagent a Duck spawns to do part of its work.
 _Avoid_: Subagent (in user-facing words), child
 
 **Member**:
-A person, identified by their account, who has access to a Pond.
-_Avoid_: Guest, user, device
+A person, identified by their account, who joined a Pond from an email invite. Roles: Owner, Member (posts, messages Ducks, makes Tasks that wait for the Owner) and Viewer (reads only).
+_Avoid_: Guest, collaborator, user, device
 
 **Owner**:
 The Member whose Mac holds the Pond's folder and runs its Ducks.
