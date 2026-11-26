@@ -64,7 +64,7 @@ async function call(deps: unknown, method: string, url: string, headers: Record<
 
 const provision = (f: ReturnType<typeof setup>, macId = MAC_A, name?: string) =>
   call(f.deps, "POST", "/account/macs/provision", { cookie: "x" }, { macId, ...(name ? { name } : {}) });
-const mk = (key: string) => ({ "x-squeak-mac-key": key });
+const mk = (key: string) => ({ "x-squeak-mac-key": key, "x-squeak-client": "mac/2.35.0" });
 const doc = { box: "sealed", sig: "s", device: "d", at: 1 };
 const put = (f: ReturnType<typeof setup>, key: string, ch: string, kind = "state", d = doc) =>
   call(f.deps, "PUT", `/doc?path=channels/${ch}/${kind}/d1`, mk(key), { doc: d });

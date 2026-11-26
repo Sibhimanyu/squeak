@@ -36,9 +36,25 @@ the in-memory double most tests use) stays, for what is still live:
 - The voice add-on's rendezvous database (`RENDEZVOUS_DATABASE`, `src/voice/claim-protocol.ts`) and the Home Assistant
   gateway's own store, which older add-ons still open.
 - The Cliq inbox in the Realtime Database, read next to the Catalyst `cliq` kind until the handlers are pasted again.
-- `firebase/` Hosting for `/app` (the old web app that read it was deleted in #138).
+- `firebase/` Hosting: `squeak-mac.web.app` only forwards to `squeak.onslate.in` (the same page Catalyst serves at `/app/index.html`,
+  `cloud/catalyst-relay/client/`; an invite code becomes `/invite?code=`), and `squeak-5c9gvo.web.app` keeps the SideStore source.
+  Disable both after 2027-02-12. The database rules stay for the iPhone (`pairing`, `commands`, `results`, ...) and the voice add-on.
 
-Remove each when its owner is gone; the remaining ticket steps (older Mac apps refused, `/app` redirect) come first.
+Remove each when its owner is gone.
+
+## Old Mac apps (#133)
+
+The Mac daemon sends `x-squeak-client: mac/<app version>` on every relay call (`src/cloud/client-version.ts`; the version is the app's
+own, from `app-install.json`, and `mac/dev` for a daemon run by hand). The relay (`functions/squeak_relay/client-gate.js`, also the
+`squeak-live` service) refuses the Pond routes to a Mac below `SQUEAK_MIN_MAC_VERSION` (default `2.35.0`; `off` turns it off), and to
+an old Mac that sends no header but its own key (`x-squeak-mac-key`), with `426 { error: "update-required", message: "Update Squeak to keep
+using shared Ponds" }`. Pond routes: `/ponds/*`, `/invites*`, `/account/ponds`, `/account/pond-leaves`, `/account/pond-devices`,
+`/account/invitations/*`, `/changes`, `/blob`, `/live*`, `/typing`, `/presence`, and `/doc` and `/list` on a Pond kind (`pond`,
+`members`, `joins`, `threads`, `tevents`, `holds`, `tcmds`, `keys`, `room`, `rposts`, `rtasks`, `roomnote`). Exempt: everything the iPhone
+app and the voice add-on use (a grant's key under `x-squeak-relay`, no client header; `/doc` and `/list` on `state`, `pairing`, `commands`,
+`results`, `live`, `media`, `voice*`, `devreqs`, `devresults`, `cliq`, `hist`; `/token`; `/account/devices`), the web (an account token, no
+client header) and every non-Pond route. The daemon marks a 426 (`updateGate`); `/state` and each Pond row then carry `connection:
+{ state: "update-required", line: "Update Squeak to keep using shared Ponds" }`, which the Mac draws as its connection word.
 
 When sign-in moves a Mac from an older store, the daemon writes a sealed, signed `state/move` document on that store.
 Compatible paired phones and voice gateways verify it and move to the new location. The Mac reads the old store for

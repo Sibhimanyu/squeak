@@ -319,6 +319,8 @@ export interface FlotillaOptions {
    * null when `squeak-live` is not configured (the old notice path; the state then follows what the cloud answered).
    */
   liveState?: () => "live" | "reconnecting" | null;
+  /** The relay has refused this app as too old for shared Ponds (client-version.ts `updateGate`). */
+  updateRequired?: () => boolean;
   /** A stream notice waits this long for company before it starts a read (default 1 s); 0 in tests. */
   wakeDebounceMs?: number;
   /** At least this long between two reads of one pond that a notice started (default 3 s). */
@@ -1356,6 +1358,7 @@ export class FlotillaService extends EventEmitter {
     if (row.status !== "active" || row.local) return rest;
     const connection = connectionOf({
       stream: this.options.liveState?.() ?? null,
+      updateRequired: this.options.updateRequired?.() ?? false,
       reachable: row.offline !== true,
       owner: row.role === "owner",
       ...(this.ownerSeen.has(row.id) ? { ownerOnline: this.ownerSeen.get(row.id)! } : {}),

@@ -1,3 +1,4 @@
+import { macClientHeaders, relayFetch } from "../cloud/client-version.js";
 import { relayBaseUrl, relayKeyHeader } from "../cloud/location.js";
 
 /** What a token may do (cloud/catalyst-relay/functions/squeak_relay/scoped.js): the relay enforces it, not this code. */
@@ -108,7 +109,7 @@ export class HttpPondRelay implements PondRelay {
   constructor(
     baseUrl: string,
     private readonly relayKey: string,
-    private readonly fetchImpl: FetchLike = fetch,
+    private readonly fetchImpl: FetchLike = relayFetch,
     /** Squeak's hosted relay: `relayKey` is this Mac's own key. */
     hosted = false,
   ) {
@@ -123,7 +124,7 @@ export class HttpPondRelay implements PondRelay {
   private async post(route: string, body: unknown): Promise<Response> {
     const response = await this.fetchImpl(`${this.url}${route}`, {
       method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
@@ -175,7 +176,7 @@ export class HttpPondRelay implements PondRelay {
   async accountPonds(): Promise<AccountPond[]> {
     const response = await this.fetchImpl(`${this.url}/account/ponds`, {
       method: "GET",
-      headers: { [this.keyHeader]: this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new RelayRefused(response.status);
@@ -206,7 +207,7 @@ export class HttpPondRelay implements PondRelay {
   async leaveAccountPond(pondId: string): Promise<void> {
     const response = await this.fetchImpl(`${this.url}/account/pond-leaves`, {
       method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       body: JSON.stringify({ pondId }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -216,7 +217,7 @@ export class HttpPondRelay implements PondRelay {
   async accountDevices(selfId: string): Promise<AccountDevice[]> {
     const response = await this.fetchImpl(`${this.url}/account/devices?deviceId=${encodeURIComponent(selfId)}`, {
       method: "GET",
-      headers: { [this.keyHeader]: this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new RelayRefused(response.status);
@@ -246,7 +247,7 @@ export class HttpPondRelay implements PondRelay {
   async removeAccountDevice(deviceId: string): Promise<void> {
     const response = await this.fetchImpl(`${this.url}/account/devices/${encodeURIComponent(deviceId)}`, {
       method: "DELETE",
-      headers: { [this.keyHeader]: this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new RelayRefused(response.status);
@@ -255,7 +256,7 @@ export class HttpPondRelay implements PondRelay {
   async requestDevice(request: DeviceRequestBody): Promise<{ reqId: string; token: string; expiresAt: number }> {
     const response = await this.fetchImpl(`${this.url}/account/pond-devices`, {
       method: "POST",
-      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey, ...macClientHeaders() },
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(10_000),
     });

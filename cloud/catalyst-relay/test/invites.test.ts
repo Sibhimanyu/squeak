@@ -397,7 +397,7 @@ describe("invitations from the Owner's Mac (its own key)", () => {
     return w;
   };
   const asMac = (deps: unknown, method: string, url: string, body?: unknown) =>
-    call(deps, method, url, { "x-squeak-mac-key": MAC_KEY }, body);
+    call(deps, method, url, { "x-squeak-mac-key": MAC_KEY, "x-squeak-client": "mac/2.35.0" }, body);
 
   it("the Mac's account becomes the Owner, the email names who invited, and the same Mac lists, withdraws and invites again", async () => {
     const { deps, people, sent } = mac();
@@ -429,9 +429,14 @@ describe("invitations from the Owner's Mac (its own key)", () => {
       pondName: "g",
     });
     expect((await call(deps, "GET", `/ponds/${POND}/invites`, { "x-squeak-relay": KEY })).status).toBe(401);
-    expect((await call(deps, "GET", `/ponds/${POND}/invites`, { "x-squeak-mac-key": "z".repeat(43) })).status).toBe(
-      401,
-    );
+    expect(
+      (
+        await call(deps, "GET", `/ponds/${POND}/invites`, {
+          "x-squeak-mac-key": "z".repeat(43),
+          "x-squeak-client": "mac/2.35.0",
+        })
+      ).status,
+    ).toBe(401);
   });
 });
 

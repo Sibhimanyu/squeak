@@ -10,6 +10,14 @@
 //   GET  /health
 // The behaviour is in hub.js; this file only speaks HTTP and proves who is calling.
 const http = require("node:http");
+// Staged beside this file in the bundle (live/build.sh); in the repo it is the relay's own module.
+const { createClientGate, UPDATE_MESSAGE } = (() => {
+  try {
+    return require("./client-gate");
+  } catch {
+    return require("../functions/squeak_relay/client-gate");
+  }
+})();
 
 const DEVICE = /^[A-Za-z0-9_-]{1,64}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -31,7 +39,8 @@ function createAuth({ key, scoped, tenants, now = Date.now }) {
   };
 }
 
-function createLiveServer({ hub, auth, people, lastSeen, log = (s) => console.error(s) }) {
+function createLiveServer({ hub, auth, people, lastSeen, minMacVersion, log = (s) => console.error(s) }) {
+  const oldMac = createClientGate(minMacVersion);
   const json = (res, status, body) => {
     res.writeHead(status, { "Content-Type": "application/json", ...NO_STORE });
     res.end(JSON.stringify(body));
@@ -111,6 +120,7 @@ function createLiveServer({ hub, auth, people, lastSeen, log = (s) => console.er
     const url = new URL(req.url || "/", "http://live");
     const route = url.pathname.replace(/\/+$/, "") || "/";
     let run;
+    if (oldMac(req, route, url)) return json(res, 426, { error: "update-required", message: UPDATE_MESSAGE });
     if (req.method === "GET" && (route === "/health" || route === "/_health")) {
       return json(res, 200, { status: "ok", ...hub.stats() });
     }
@@ -175,7 +185,13 @@ function main() {
       });
       const hub = createHub({ people, fanout, lastSeen, log: (s) => console.error(s) });
       hub.start();
-      const server = createLiveServer({ hub, auth: createAuth({ key, scoped, tenants }), people, lastSeen });
+      const server = createLiveServer({
+        hub,
+        auth: createAuth({ key, scoped, tenants }),
+        people,
+        lastSeen,
+        minMacVersion: process.env.SQUEAK_MIN_MAC_VERSION,
+      });
       server.listen(port, () => console.error(`squeak live on ${port}`));
       process.on("SIGTERM", () => {
         hub.stop();

@@ -11,6 +11,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { CatalystStore, type StreamSocket } from "../cloud/catalyst-store.js";
+import { macClientHeaders } from "../cloud/client-version.js";
 import { createCloudStore } from "../cloud/config.js";
 import { Room } from "../native/room.js";
 import { RoomTasks } from "../native/room-tasks.js";
@@ -248,7 +249,7 @@ async function admit(owner: Mac, pondId: string, who: Mac, email: string) {
 /** What the cloud holds of one kind, read with a Mac's own key (the relay's list route). */
 async function cloudList(who: Mac, pondId: string, kind: string): Promise<Array<{ id: string; doc: any }>> {
   const r = await fetch(`${deviceUrl}/list?prefix=${encodeURIComponent(`channels/${pondId}/${kind}`)}`, {
-    headers: { "x-squeak-mac-key": who.key },
+    headers: { "x-squeak-mac-key": who.key, ...macClientHeaders() },
   });
   return ((await r.json()) as { items: Array<{ id: string; doc: any }> }).items;
 }

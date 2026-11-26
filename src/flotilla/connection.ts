@@ -5,7 +5,9 @@
  * read at all, and (for someone else's Pond) whether the Owner's Mac is online.
  */
 
-export type ConnectionState = "live" | "reconnecting" | "owner-offline";
+import { UPDATE_LINE } from "../cloud/client-version.js";
+
+export type ConnectionState = "live" | "reconnecting" | "owner-offline" | "update-required";
 
 export interface Connection {
   state: ConnectionState;
@@ -23,6 +25,8 @@ export interface ConnectionFacts {
   /** Whether the Owner's Mac is online, as far as the Pond's presence says; undefined when not known yet. */
   ownerOnline?: boolean | undefined;
   ownerName?: string;
+  /** The relay refused this app as too old for shared Ponds (426, client-version.ts); nothing else can be said until it is updated. */
+  updateRequired?: boolean;
 }
 
 export const LIVE_LINE = "Live";
@@ -35,6 +39,7 @@ export function ownerOfflineWord(name: string | undefined): string {
 }
 
 export function connectionOf(f: ConnectionFacts): Connection {
+  if (f.updateRequired) return { state: "update-required", line: UPDATE_LINE };
   // Without a connection nothing else can be known (not even the Owner's presence), so this word wins.
   if (!f.reachable || f.stream === "reconnecting") return { state: "reconnecting", line: RECONNECTING_LINE };
   if (!f.owner && f.ownerOnline === false) return { state: "owner-offline", line: ownerOfflineWord(f.ownerName) };
@@ -48,6 +53,8 @@ export function connectionOf(f: ConnectionFacts): Connection {
  */
 export function overallConnection(ponds: Array<{ connection?: Connection; owner: boolean }>): Connection {
   const shared = ponds.filter((p) => p.connection);
+  const old = shared.find((p) => p.connection!.state === "update-required");
+  if (old) return old.connection!;
   if (shared.some((p) => p.connection!.state === "reconnecting")) {
     return { state: "reconnecting", line: RECONNECTING_LINE };
   }

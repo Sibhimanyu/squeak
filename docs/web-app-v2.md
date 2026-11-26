@@ -62,7 +62,7 @@ Relay contract this depends on (the fake relay implements it):
 4. Add the Slate origin and each preview origin to the relay's CORS allow-list and to `HANDOFF_ORIGINS`
    (`cloud/catalyst-relay/functions/squeak_relay/handler.js`); the daemon's control routes keep no CORS.
 5. Enable preview deploys per branch; open the preview, check sign-in, an invite link `/join#<code>`, light and dark.
-6. The old `web/` and the guest page are gone (#138); `/app/index.html` becomes a redirect in #133.
+6. The old `web/` and the guest page are gone (#138); `/app/index.html` is a redirect (#133).
 
 `/join` needs a real page because Slate ignores redirect rules; the build writes `join/index.html` with `<base href="/">`.
 

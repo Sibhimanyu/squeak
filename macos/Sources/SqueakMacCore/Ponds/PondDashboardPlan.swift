@@ -9,6 +9,8 @@ public enum PondConnection: Sendable, Equatable {
     case live
     case reconnecting
     case ownerOffline
+    /// The relay refused this app as too old for shared Ponds; the daemon words it (it is the daemon's sentence that is drawn).
+    case updateRequired
 
     /// The daemon's word for it (`live`, `reconnecting`, `owner-offline`); nil for a word this app does not know.
     public init?(daemon raw: String) {
@@ -16,6 +18,7 @@ public enum PondConnection: Sendable, Equatable {
         case "live": self = .live
         case "reconnecting": self = .reconnecting
         case "owner-offline": self = .ownerOffline
+        case "update-required": self = .updateRequired
         default: return nil
         }
     }
@@ -24,6 +27,8 @@ public enum PondConnection: Sendable, Equatable {
     /// Owner's presence); only this app's own trouble reaching the daemon overrides it, and an older daemon falls back to the
     /// freshness reading below.
     public static func resolve(_ daemon: PondConnectionInfo?, freshness: PondFreshness, role: PondRole) -> PondConnection {
+        // Too old for shared Ponds beats every other word: the reads fail for that reason, and Reconnecting would be a lie.
+        if daemon?.state == .updateRequired { return .updateRequired }
         switch freshness {
         case .couldntRead, .stale: return .reconnecting
         default: break
@@ -103,6 +108,7 @@ public struct PondDashboardHeader: Sendable, Equatable {
         case .live: "Live"
         case .reconnecting: "Reconnecting\u{2026}"
         case .ownerOffline: "\(owner)\u{2019}s Mac offline"
+        case .updateRequired: "Update Squeak to keep using shared Ponds"
         }
         let connection = f.connectionLine.flatMap { $0.isEmpty ? nil : $0 } ?? words
 

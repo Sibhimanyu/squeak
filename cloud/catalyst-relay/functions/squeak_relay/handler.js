@@ -85,6 +85,7 @@ const { createBlobs, BLOB_ID } = require("./blobs");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 const { createCleanStart } = require("./clean-start");
+const { createClientGate, UPDATE_MESSAGE } = require("./client-gate");
 
 const VERSION = require("./package.json").version;
 const PREFIX = /^\/server\/squeak_relay/;
@@ -260,6 +261,8 @@ const STATE_NOTICE_KINDS = new Set(["snapshot", "alive", "recent", "presence"]);
 
 function createRelay(deps) {
   const log = deps.log || (() => {});
+  // Old Mac apps are refused on Pond routes (client-gate.js); deps.minMacVersion is SQUEAK_MIN_MAC_VERSION.
+  const oldMac = createClientGate(deps.minMacVersion);
   const tenants = createTenants({
     store: deps.store,
     now: deps.now,
@@ -1721,6 +1724,8 @@ function createRelay(deps) {
       const url = new URL(req.url || "/", "http://relay");
       const route = url.pathname.replace(PREFIX, "") || "/";
       const method = req.method || "GET";
+      if (oldMac(req, route, url))
+        return send(res, 426, { error: "update-required", message: UPDATE_MESSAGE }, NO_STORE);
       if (route === "/invites/preview") return await handleInvitePreview(res, url, method);
       if (route === "/me") {
         if (method !== "GET") return send(res, 405, {});

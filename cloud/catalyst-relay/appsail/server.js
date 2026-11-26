@@ -14,13 +14,7 @@ const http = require("node:http");
  * function with the caller's own credential header, unchanged; every other route stays here. Only a (re)connect pays it.
  */
 const TOKEN_ROUTES = new Set(["/token", "/pond-stream"]);
-const FORWARD_HEADERS = [
-  "content-type",
-  "x-squeak-relay",
-  "x-squeak-mac-key",
-  "x-squeak-pond-token",
-  "x-squeak-join-attest",
-];
+const FORWARD_HEADERS = ["content-type", "x-squeak-relay", "x-squeak-mac-key", "x-squeak-pond-token"];
 const TOKEN_BODY_MAX = 4096;
 
 function routeOf(req) {

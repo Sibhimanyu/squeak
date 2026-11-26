@@ -13,6 +13,7 @@
  * and a new stream is tried with growing, jittered delays. The first hello after being down reads each Pond once, so anything
  * missed meanwhile is caught up.
  */
+import { updateGate } from "./client-version.js";
 import type { FeedChange, FeedPage } from "./change-feed.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -164,6 +165,7 @@ export class LiveClient {
         headers: { ...this.o.headers, "x-squeak-device": this.o.deviceId, accept: "text/event-stream" },
         signal: stream.abort.signal,
       });
+      updateGate.see(res);
       if (!res.ok || !res.body) throw new Error(`live ${res.status}`);
       this.feed(stream);
       const reader = res.body.getReader();

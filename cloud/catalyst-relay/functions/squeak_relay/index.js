@@ -267,6 +267,7 @@ module.exports = async (req, res) => {
     blobBucket: blobBucketFor(app),
     // The clean-start route (clean-start.js) exists only on a relay started for it: the development environment.
     cleanStart: process.env.SQUEAK_CLEAN_START === "on",
+    minMacVersion: process.env.SQUEAK_MIN_MAC_VERSION,
     // AppSail: no Catalyst user, ever (signing in is the function's job); the account-token routes still verify their own signature.
     currentUser: process.env.SQUEAK_NO_CATALYST_USER === "1" ? async () => null : currentUserOf(req, app),
     zoho: {

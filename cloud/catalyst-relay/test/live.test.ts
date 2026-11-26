@@ -568,11 +568,23 @@ describe("the HTTP service", () => {
       expect(hub.stats().connections).toBe(0);
 
       const mac = await fetch(`${base}/live?pond=${POND}`, {
-        headers: { "x-squeak-mac-key": "m".repeat(43), "x-squeak-device": "d2" },
+        headers: { "x-squeak-mac-key": "m".repeat(43), "x-squeak-client": "mac/2.35.0", "x-squeak-device": "d2" },
         signal: abort.signal.aborted ? new AbortController().signal : undefined,
       });
       expect(mac.status).toBe(200);
       await mac.body!.cancel();
+
+      // An old Mac (or one that says nothing but its key) is told to update (#133); the iPhone never opens this stream.
+      for (const headers of [{ "x-squeak-client": "mac/2.34.8" }, {}]) {
+        const old = await fetch(`${base}/live?pond=${POND}`, {
+          headers: { "x-squeak-mac-key": "m".repeat(43), "x-squeak-device": "d3", ...headers },
+        });
+        expect(old.status).toBe(426);
+        expect(await old.json()).toEqual({
+          error: "update-required",
+          message: "Update Squeak to keep using shared Ponds",
+        });
+      }
     } finally {
       hub.stop();
       server.closeAllConnections();

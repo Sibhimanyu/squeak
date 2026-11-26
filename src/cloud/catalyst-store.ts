@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import type { ChannelDoc } from "./store.js";
 import { FeedMirror, type FeedPage } from "./change-feed.js";
 import { LiveClient, type LiveState } from "./live-notices.js";
+import { macClientHeaders, updateGate } from "./client-version.js";
 import { onNetworkChange } from "../remote/network-change.js";
 import { BlobRefused, type CloudStore, type CloudWatchOptions, type WatchSource } from "./store.js";
 
@@ -315,7 +316,7 @@ export class CatalystStore implements CloudStore {
     if (!live || this.liveClient) return;
     const client = new LiveClient({
       baseUrl: live.url,
-      headers: { [this.header.name]: this.header.value },
+      headers: { [this.header.name]: this.header.value, ...macClientHeaders() },
       deviceId: live.deviceId,
       ponds: () => this.hub.channels(),
       changes: (pondId, since) => this.changes(pondId, since),
@@ -349,9 +350,11 @@ export class CatalystStore implements CloudStore {
       headers: {
         ...(init.headers as Record<string, string> | undefined),
         [this.header.name]: this.header.value,
+        ...macClientHeaders(),
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
+    updateGate.see(response);
     if (response.status === 401) this.onUnauthorized?.();
     return response;
   }

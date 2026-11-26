@@ -35,7 +35,10 @@
       "site": "squeak-mac",
       "public": "web-public",
       "ignore": ["**/.*"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "rewrites": [
+        { "source": "**/redirect.js", "destination": "/redirect.js" },
+        { "source": "**", "destination": "/index.html" }
+      ],
       "headers": [
         {
           "source": "**",

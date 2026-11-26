@@ -11,6 +11,7 @@
  * to `cloud.json` (0600) and is never logged, echoed or sent anywhere but the relay. Answers are fixed sentences.
  */
 
+import { macClientHeaders, relayFetch } from "./client-version.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -117,7 +118,7 @@ export class HostedCloud {
   private readonly fetchImpl: FetchLike;
 
   constructor(private readonly deps: HostedDeps) {
-    this.fetchImpl = deps.fetch ?? fetch;
+    this.fetchImpl = deps.fetch ?? relayFetch;
   }
 
   private accountPath(): string {
@@ -219,7 +220,7 @@ export class HostedCloud {
     let name = "";
     try {
       const response = await this.fetchImpl(`${this.deps.url}/me`, {
-        headers: { "x-squeak-account": token },
+        headers: { "x-squeak-account": token, ...macClientHeaders() },
         signal: AbortSignal.timeout(10_000),
       });
       if (response.status === 401) return { ok: false, reason: "That sign-in expired. Sign in again." };
@@ -407,7 +408,7 @@ export class HostedCloud {
     try {
       response = await this.fetchImpl(`${this.deps.url}/account/macs/provision`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-squeak-account": account.token },
+        headers: { "content-type": "application/json", "x-squeak-account": account.token, ...macClientHeaders() },
         body: JSON.stringify({ macId, name }),
         signal: AbortSignal.timeout(15_000),
       });

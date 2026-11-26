@@ -1,3 +1,4 @@
+import { macClientHeaders, relayFetch } from "../cloud/client-version.js";
 import { relayBaseUrl, relayKeyHeader } from "../cloud/location.js";
 
 /**
@@ -131,7 +132,7 @@ export class HttpPondInvites implements PondInvites {
   constructor(
     baseUrl: string,
     private readonly relayKey: string,
-    private readonly fetchImpl: FetchLike = fetch,
+    private readonly fetchImpl: FetchLike = relayFetch,
     hosted = false,
   ) {
     const checked = relayBaseUrl(baseUrl);
@@ -147,6 +148,7 @@ export class HttpPondInvites implements PondInvites {
         method,
         headers: {
           [this.keyHeader]: this.relayKey,
+          ...macClientHeaders(),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

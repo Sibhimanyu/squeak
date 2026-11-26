@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 /** A pond thread the person starts without naming a mode begins in Skip approvals, like `NEW_THREAD_PERMISSION_MODE` in native/server.ts. */
 const NEW_THREAD_MODE = "bypassPermissions";
 import { CatalystStore } from "../cloud/catalyst-store.js";
+import { updateGate } from "../cloud/client-version.js";
 import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
 import { Artifacts } from "../native/artifacts.js";
@@ -216,12 +217,14 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   };
   // The one live stream of this Mac (squeak-live) tells the service its connection state; absent, the old path runs.
   const connectionChanged = (): void => service.connectionChanged();
+  updateGate.onChange(connectionChanged);
   const store = where ? createCloudStore(where, { onLiveState: connectionChanged }) : null;
   const service: FlotillaService = new FlotillaService({
     account,
     // No cloud set up: the service still works, with local ponds only, and makes no network call.
     store,
     liveState: () => (store instanceof CatalystStore ? store.liveState() : null),
+    updateRequired: () => updateGate.required,
     supportDir: deps.supportDir,
     nest: computerName(),
     ...(where ? { location: where } : {}),

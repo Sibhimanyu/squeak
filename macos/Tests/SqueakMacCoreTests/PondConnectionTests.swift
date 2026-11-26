@@ -17,6 +17,15 @@ import Testing
         #expect(try summary(#"{"id":"p"}"#).connection == nil)
     }
 
+    @Test func anOldAppSaysUpdateSqueakPlainlyEvenWhenReadsFail() throws {
+        let p = try summary(#"{"id":"p","connection":{"state":"update-required","line":"Update Squeak to keep using shared Ponds"}}"#)
+        #expect(p.connection?.state == .updateRequired)
+        let c = PondConnection.resolve(p.connection, freshness: .couldntRead, role: .owner)
+        #expect(c == .updateRequired)
+        let h = PondDashboardHeader.make(.init(role: .owner, connection: c, connectionLine: p.connection?.line))
+        #expect(h.stateLine.hasSuffix("Update Squeak to keep using shared Ponds"))
+    }
+
     @Test func theDashboardLineDrawsTheDaemonsConnectionAndNothingElse() {
         // Freshness (an old offline read) and the role no longer decide it when the daemon sent a word.
         let offline = PondFreshness.offline(line: "x", asOf: nil)

@@ -117,6 +117,7 @@ import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader, gatewayRouteView } from "../voice/gateway-status.js";
 import { isNewer } from "../voice/addon-update.js";
 import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
+import { loadMacVersion } from "../cloud/client-version.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { ChannelsSetup, RESTART_DELAY_MS } from "./channels-setup.js";
@@ -1300,6 +1301,7 @@ export class SqueakApp {
       logger.info("telegram is off: no SQUEAK_BOT_TOKEN; the fleet, phone channel and Cliq still run");
     }
 
+    loadMacVersion(this.config.supportDir);
     if (fs.existsSync(claimPath(this.config.supportDir))) {
       const cliJs = fileURLToPath(new URL("./cli.js", import.meta.url));
       this.orphanWatch = new OrphanWatch(

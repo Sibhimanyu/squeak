@@ -1,3 +1,4 @@
+import { macClientHeaders } from "../cloud/client-version.js";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -74,7 +75,7 @@ export class CliqHandlers {
     try {
       const response = await (this.options.fetch ?? fetch)(`${cloud.relayUrl}/account/macs/cliq-token`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-squeak-mac-key": cloud.relayKey },
+        headers: { "content-type": "application/json", "x-squeak-mac-key": cloud.relayKey, ...macClientHeaders() },
         body: JSON.stringify({ channel: relayId, token }),
         signal: AbortSignal.timeout(10_000),
       });

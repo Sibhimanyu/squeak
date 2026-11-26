@@ -1,3 +1,4 @@
+import { macClientHeaders } from "../cloud/client-version.js";
 import crypto from "node:crypto";
 import { condenseHistory, liveHandle, type HistoryEntry } from "./live-turn.js";
 import { readHistoryAfter, HISTORY_DELTA_PAGE_MAX, type TranscriptReader } from "./history-delta.js";
@@ -349,6 +350,7 @@ export function relayHistStore(options: RelayHistOptions): HistStore & { registe
   const url = (doc: string) => `${base}/doc?path=${encodeURIComponent(`channels/${options.channel}/hist/${doc}`)}`;
   const headers = (json: boolean): Record<string, string> => ({
     [options.keyHeader]: options.key,
+    ...macClientHeaders(),
     "x-squeak-hist": options.token,
     ...(json ? { "content-type": "application/json" } : {}),
   });
@@ -385,7 +387,7 @@ export function relayHistStore(options: RelayHistOptions): HistStore & { registe
     async register(previous) {
       const response = await f(`${base}/account/macs/hist-token`, {
         method: "POST",
-        headers: { [options.keyHeader]: options.key, "content-type": "application/json" },
+        headers: { [options.keyHeader]: options.key, ...macClientHeaders(), "content-type": "application/json" },
         body: JSON.stringify({ channel: options.channel, token: options.token, ...(previous ? { previous } : {}) }),
         signal: AbortSignal.timeout(15_000),
       });
