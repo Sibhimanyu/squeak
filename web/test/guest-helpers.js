@@ -11,6 +11,7 @@ import { guestInviteBase } from "../../src/cloud/config.js";
 import { CatalystStore } from "../../src/cloud/catalyst-store.js";
 import { FlotillaService } from "../../src/flotilla/service.js";
 import { HttpPondRelay } from "../../src/flotilla/relay.js";
+import { named } from "../../src/flotilla/named-account.test-fixture.js";
 
 const require = createRequire(import.meta.url);
 const { createRelay } = require("../../cloud/catalyst-relay/functions/squeak_relay/handler.js");
@@ -112,6 +113,8 @@ export function mac(relay, name, { owner = false, now } = {}) {
     store: owner ? store : nostore,
     supportDir: tmp(),
     displayName: name,
+    // A name is the Squeak account's (docs/ponds.md, "Names"): the owner Mac is signed in as `name`.
+    account: named(name),
     nest: `${name}-mac`,
     ...(owner
       ? {
