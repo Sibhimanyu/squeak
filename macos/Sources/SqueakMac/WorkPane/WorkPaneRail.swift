@@ -33,7 +33,7 @@ struct WorkPaneRail: View {
                         .help("Open the Pond Notebook")
                 case .pane:
                     RailButton(title: tool.title, symbol: tool.symbol, selected: shown == .terminal, badge: nil) {
-                        WorkPaneStore.shared.toggle(.terminal, duck: scope.key)
+                        TerminalActions.toggle(AppModel.shared)
                     }
                     .help(shown == .terminal ? "Close Terminal" : "Terminal")
                 }

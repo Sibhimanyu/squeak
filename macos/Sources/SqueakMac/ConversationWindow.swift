@@ -94,7 +94,7 @@ struct ConversationView: View {
 
     /// The Pond whose page is on screen, when the new layout gives it a Pond-scoped rail and pane (DESIGN.md 8.12).
     private var pondScopeNow: PondWorkScope? {
-        guard model.focus.page != .chat || model.selectedSession == nil || roomContext != nil, roomContext != nil else { return nil }
+        // The Dashboard, the Room and the New duck page are the Pond's own pages: all three carry the Pond's rail and pane.
         return WorkPaneActions.pondScope(model: model)
     }
 
@@ -152,7 +152,7 @@ struct ConversationView: View {
         let newDuckView = chatOpen && roomCtx == nil && WorkPaneActions.isDuckView(model.selectedSession)
         let workPane = WorkPaneStore.shared.pane
         let duckSession = newDuckView ? model.selectedSession : nil
-        let pondScope = roomCtx == nil ? nil : pondScopeNow
+        let pondScope = pondScopeNow
         let paneScope: WorkPaneScope? = duckSession.map { .duck($0) } ?? pondScope.map { .pond($0) }
         let paneView = paneScope.flatMap { workPane.current == $0.key ? workPane.shown : nil }
         let showsInspectorWanted = roomCtx != nil ? (roomInspectorOpen && roomPanel) : homeCtx ? !layout.right.collapsed : (rightWanted && chatOpen && !newDuckView)
@@ -322,7 +322,7 @@ struct ConversationView: View {
             dock.update { $0.show(.code) }
         }
         // ⌘J shows the terminal wherever it is docked, or closes it when it is the one showing.
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in if !WorkPaneActions.toggle(.terminal, model: model) { TerminalActions.toggle(model) } }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in TerminalActions.toggle(model) }
         .background(ConversationWindowReader())
         .commandPalette()
         .background {

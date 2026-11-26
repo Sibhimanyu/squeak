@@ -36,10 +36,19 @@ import SqueakMacCore
 
     /// The Pond whose page is on screen, when the new layout gives it a Pond-scoped pane (a Pond with a folder on this Mac).
     static func pondScope(model: AppModel) -> PondWorkScope? {
-        guard case .pondHome(let key) = model.baseLocation, let project = PondsModel.shared.native(key: key) else { return nil }
+        guard let key = pondPageKey(model: model), let project = PondsModel.shared.native(key: key) else { return nil }
         if let waiting = PondsModel.shared.pond(key: key), PondStates.isGreyedRow(waiting) { return nil }
         guard WorkPaneScopeRule.pondScope(isNewLayout: MacLayoutPreference.shared.isNew, onPondPage: true, hasLocalFolder: !project.rootPath.isEmpty) else { return nil }
         return PondWorkScope(key: key, projectId: project.id, name: PondsModel.shared.name(key: key), root: project.rootPath)
+    }
+
+    /// The Pond whose own page is on screen: its Dashboard or Room, or the New duck page opened from it.
+    static func pondPageKey(model: AppModel) -> String? {
+        switch model.baseLocation {
+        case .pondHome(let key): return key
+        case .compose(.newThread, let pond, _): return pond ?? model.selectedSession.flatMap { PondsModel.shared.key(of: $0) }
+        default: return nil
+        }
     }
 
     /// Shows the Terminal pane for the page on screen. False when this is not a new-layout page (the caller keeps the old behaviour).
@@ -70,15 +79,39 @@ import SqueakMacCore
     /// The key of the new-layout page on screen (a Pond page or a Duck view); nil in the classic layout and elsewhere.
     private static func pageKey(model: AppModel) -> String? {
         if let pond = pondScope(model: model) { return pond.paneKey }
-        guard let session = model.selectedSession, isDuckView(session) else { return nil }
+        guard model.focus.page == .chat, let session = model.selectedSession, isDuckView(session) else { return nil }
         return duckKey(session)
+    }
+
+    /// The page on screen as the Terminal toggle sees it (what the folder is made of).
+    static func terminalPage(model: AppModel) -> TerminalToggle.Page {
+        if let pond = pondScope(model: model) { return .pond(paneKey: pond.paneKey, folder: pond.root) }
+        guard pageKey(model: model) != nil, let session = model.selectedSession else { return .none }
+        let pondFolder = PondsModel.shared.key(of: session).flatMap { PondsModel.pondTerminalFolder($0) }
+        return .duck(paneKey: duckKey(session), cwd: session.cwd, pondFolder: pondFolder)
+    }
+
+    /// The one Terminal toggle: ⌘J (Window menu), the rail's Terminal icon, the palette and the notification all end here.
+    /// Opens or closes the work pane for the page on screen, in the right folder, with the keys in the shell. False when the
+    /// page has no work pane (the caller keeps the classic dock).
+    @discardableResult
+    static func toggleTerminal(model: AppModel) -> Bool {
+        let store = WorkPaneStore.shared
+        let pane = store.pane
+        switch TerminalToggle.decide(page: terminalPage(model: model), shownFor: pane.shown == nil ? nil : pane.current) {
+        case .classic: return false
+        case .close: store.close()
+        case .open(let key, _):
+            // Before the pane mounts, so the shell takes the keys the moment it is drawn (also a shell that already exists).
+            TerminalHost.shared.focusPending = true
+            store.open(.terminal, duck: key)
+        }
+        return true
     }
 
     /// A shortcut or menu item: the Terminal icon's own behaviour (opens, or closes when it is showing).
     @discardableResult
     static func toggle(_ view: WorkPaneView, model: AppModel) -> Bool {
-        guard let key = pageKey(model: model) else { return false }
-        WorkPaneStore.shared.toggle(view, duck: key)
-        return true
+        toggleTerminal(model: model)
     }
 }

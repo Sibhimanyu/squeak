@@ -423,6 +423,8 @@ extension Scene {
 
     /// ⌘J: folds or unfolds the zone that holds the terminal; with no shell it opens one in the home zone.
     static func toggle(_ model: AppModel) {
+        // The new layout's pages have a work pane, not a dock: one decision for ⌘J, the rail icon and the palette.
+        if WorkPaneActions.toggleTerminal(model: model) { return }
         if let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder {
             DockStore.shared.syncTerminals(folder: folder, live: TerminalHost.shared.registry.tabs(folder).map(\.id))
         }

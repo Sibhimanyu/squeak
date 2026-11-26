@@ -29,7 +29,8 @@ private struct WorkPaneTerminal: View {
 
     private var cwd: String? {
         switch scope {
-        case .duck(let s): s.cwd
+        case .duck(let s):
+            TerminalToggle.folder(page: .duck(paneKey: scope.key, cwd: s.cwd, pondFolder: PondsModel.shared.key(of: s).flatMap { PondsModel.pondTerminalFolder($0) })) ?? s.cwd
         case .pond(let p): p.root
         }
     }
@@ -61,7 +62,14 @@ private struct WorkPaneTerminal: View {
                 Rectangle().fill(Theme.line).frame(height: 1)
             }
             switch scope {
-            case .duck(let session): TerminalPanelView(session: session)
+            case .duck(let session):
+                // The Duck's folder, else its Pond's (a Pond-wide Duck has none): the same answer ⌘J decided on.
+                let pondFolder = PondsModel.shared.key(of: session).flatMap { PondsModel.pondTerminalFolder($0) }
+                if let f = TerminalToggle.folder(page: .duck(paneKey: scope.key, cwd: session.cwd, pondFolder: pondFolder)) {
+                    TerminalPanelView(session: nil, cwd: f)
+                } else {
+                    TerminalPanelView(session: session)
+                }
             case .pond(let p): TerminalPanelView(session: nil, cwd: p.root)
             }
         }
