@@ -351,8 +351,16 @@ describe("run script", () => {
 
     const stopped = await call(h, "POST", url, { action: "stop" });
     expect(stopped.body.running).toBe(false);
-    expect(() => process.kill(bg, 0)).toThrow();
-    expect(() => process.kill(started.body.pid, 0)).toThrow();
+    // A killed process lingers a moment before it is reaped (a loaded CI runner): wait for both to be gone.
+    const gone = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    await until(() => gone(bg) && gone(started.body.pid));
     expect((await call(h, "POST", url, { action: "jump" })).status).toBe(400);
   });
 

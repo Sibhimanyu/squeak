@@ -157,7 +157,12 @@ struct PondFlowTests {
                             prompt: "fix it", author: RoomTurnAuthor(name: "Sibhi", me: true), outcomeText: "ok")
         f.apply(page: RoomPage(posts: [], latestSeq: 0, threads: [], turns: [turn], tasks: []))
         let items = RoomMessages.build(feed: f)
-        let mine = items.compactMap { if case .group(let g) = $0 { g } else { nil } }.flatMap(\.messages).first { $0.author.kind == .me }
+        // Typed step by step: older Swift (CI's runner) could not infer the one-line chain.
+        let groups: [RoomMessageGroup] = items.compactMap { item -> RoomMessageGroup? in
+            if case .group(let g) = item { return g }
+            return nil
+        }
+        let mine: RoomMessage? = groups.flatMap { $0.messages }.first { $0.author.kind == .me }
         #expect(mine?.goesTo == "s1")
     }
 
