@@ -13,7 +13,9 @@ import { ASHA, CONFIG, memoryStore, storedToken, TOKEN } from "./helpers.js";
 const INVITE = {
   inviter: "Sibhi",
   pond: "greenroom",
-  email: "asha@fernlabs.dev",
+  members: ["Sibhi", "Mo"],
+  state: "pending" as const,
+  masked: "a***@f***.dev",
   expiresAt: Date.UTC(2026, 11, 3, 12),
 };
 
@@ -47,12 +49,23 @@ describe("SignIn view", () => {
     mount(<SignIn state={{ status: "signed-out" }} invite={INVITE} onSignIn={() => {}} onRetry={() => {}} />);
     const card = root.querySelector(".invite-card")!;
     expect(card.querySelector("h2")?.textContent).toBe("Sibhi invited you to greenroom");
-    expect(card.textContent).toContain("Sign in as asha@fernlabs.dev to see it.");
+    expect(card.textContent).toContain("Sign in with a***@f***.dev and greenroom will be waiting.");
+    expect(card.textContent).not.toContain("asha@fernlabs.dev");
     expect(card.textContent).toContain("The invitation expires 3 Dec.");
     expect(
       card.compareDocumentPosition(root.querySelector(".buttons")!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(buttons()).toHaveLength(3);
+  });
+
+  it("a withdrawn invitation is one sentence plus who is in it, with no address or expiry", () => {
+    const withdrawn = { ...INVITE, state: "withdrawn" as const };
+    mount(<SignIn state={{ status: "signed-out" }} invite={withdrawn} onSignIn={() => {}} onRetry={() => {}} />);
+    const card = root.querySelector(".invite-card")!;
+    expect(card.textContent).toContain("Sibhi withdrew this invitation.");
+    expect(card.textContent).toContain("In greenroom: Sibhi, Mo.");
+    expect(card.textContent).not.toContain("a***");
+    expect(card.textContent).not.toContain("expires");
   });
 
   it("a failure is one sentence and Try again, with no provider buttons", () => {

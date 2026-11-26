@@ -1247,7 +1247,7 @@ function createRelay(deps) {
 
   /**
    * GET /invites/preview?code=<inviteId> (no sign-in; the web's /join page shows it above the buttons). Only what the invitee
-   * may see before signing in: the Pond's name, the inviter's and the members' first names, the state. No address, no ids,
+   * may see before signing in: the Pond's name, the inviter's and the members' first names, the state, the invited address masked. No full address, no ids,
    * no keys. Every miss is the same 404; guesses are counted for all callers together (a code is an unguessable id, this
    * only stops a flood).
    */
@@ -1264,11 +1264,13 @@ function createRelay(deps) {
     const pond = await deps.people.getPond(invite.pondId);
     if (!pond) return out(404, { error: "code" });
     const inviter = first(await deps.people.getAccount(invite.invitedBy)) || "Someone";
-    const members =
-      invite.state === "pending"
-        ? (await deps.people.membersOf(invite.pondId)).map(first).filter(Boolean).slice(0, INVITE_PREVIEW_MEMBERS)
-        : [];
-    return out(200, { pond: pond.name, inviter, members, state: invite.state, expiresAt: invite.expiresAt });
+    const members = (await deps.people.membersOf(invite.pondId))
+      .map(first)
+      .filter(Boolean)
+      .slice(0, INVITE_PREVIEW_MEMBERS);
+    // `masked` is the invited address masked as in the wrong-email refusal; never the address itself.
+    const masked = typeof invite.email === "string" && invite.email ? mailing.maskEmail(invite.email) : "";
+    return out(200, { pond: pond.name, inviter, members, state: invite.state, expiresAt: invite.expiresAt, masked });
   }
 
   return async function handle(req, res) {

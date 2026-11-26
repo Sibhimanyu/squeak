@@ -57,8 +57,21 @@ describe("shapes", () => {
   });
 
   it("reads an invite preview only when every field is there", () => {
-    const ok = { inviter: "Sibhi", pond: "greenroom", email: "asha@fernlabs.dev", expiresAt: 1_800_000_000_000 };
+    const ok = {
+      inviter: "Sibhi",
+      pond: "greenroom",
+      members: ["Sibhi", "Mo"],
+      state: "pending",
+      masked: "a***@f***.dev",
+      expiresAt: 1_800_000_000_000,
+    };
     expect(parseInvitePreview(ok)).toEqual(ok);
+    expect(parseInvitePreview({ ...ok, email: "asha@fernlabs.dev" })).toEqual(ok);
+    expect(parseInvitePreview({ ...ok, members: Array.from({ length: 15 }, (_, i) => `M${i}`) })?.members).toHaveLength(
+      10,
+    );
+    expect(parseInvitePreview({ ...ok, members: undefined })?.members).toEqual([]);
+    expect(parseInvitePreview({ ...ok, state: "weird" })).toBeNull();
     expect(parseInvitePreview({ ...ok, pond: "" })).toBeNull();
     expect(parseInvitePreview({ ...ok, expiresAt: "soon" })).toBeNull();
   });

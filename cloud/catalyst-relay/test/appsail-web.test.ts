@@ -170,8 +170,9 @@ describe("GET /invites/preview", () => {
     expect(j).toMatchObject({ pond: "Pier 9", inviter: "Ola", state: "pending" });
     expect(j.members).toEqual(["Ola", "Mo"]);
     expect(typeof j.expiresAt).toBe("number");
+    expect(j.masked).toBe("p***@e***.com");
     const text = JSON.stringify(j);
-    for (const secret of ["example.com", "owner1", "mem1", POND, "inv-abcdefghijklmnop"])
+    for (const secret of ["pat@", "mo@", "ola@", "example.com", "owner1", "mem1", POND, "inv-abcdefghijklmnop"])
       expect(text).not.toContain(secret);
   });
 
@@ -183,12 +184,13 @@ describe("GET /invites/preview", () => {
     expect((await get(bare.base, "inv-abcdefghijklmnop")).status).toBe(404);
   });
 
-  it("names no members once the invite is no longer pending, and only answers GET", async () => {
+  it("still names who is in it once the invite is no longer pending, and only answers GET", async () => {
     const { base, people } = await seeded();
     await people.settleInvite("inv-abcdefghijklmnop", "declined");
     const j = await (await get(base, "inv-abcdefghijklmnop")).json();
     expect(j.state).toBe("declined");
-    expect(j.members).toEqual([]);
+    expect(j.members).toEqual(["Ola", "Mo"]);
+    expect(JSON.stringify(j)).not.toContain("pat@example.com");
     expect((await fetch(`${base}/invites/preview?code=x`, { method: "POST", body: "{}" })).status).toBe(405);
   });
 

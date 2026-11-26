@@ -8,12 +8,18 @@ export interface AccountInfo {
   email: string;
 }
 
-/** What an invite link shows before sign-in: who invited you, to which Pond, for which address, until when. */
+export type InviteState = "pending" | "joined" | "declined" | "expired" | "withdrawn";
+const INVITE_STATES: readonly string[] = ["pending", "joined", "declined", "expired", "withdrawn"];
+
+/** What an invite link shows before sign-in: who invited you, to which Pond, who is in it, for which (masked) address. */
 export interface InvitePreview {
   inviter: string;
   pond: string;
-  /** The address the invitation was sent to; the person must sign in as it. */
-  email: string;
+  /** First names of the Pond's members, at most 10. */
+  members: string[];
+  state: InviteState;
+  /** The invited address masked ("a***@g***.com"); the full address is never sent. */
+  masked: string;
   /** Epoch milliseconds. */
   expiresAt: number;
 }
@@ -35,10 +41,15 @@ export function parseInvitePreview(value: unknown): InvitePreview | null {
   if (!isRecord(value)) return null;
   const inviter = text(value["inviter"], 100);
   const pond = text(value["pond"], 100);
-  const email = text(value["email"], 320);
+  const state = value["state"];
+  const masked = typeof value["masked"] === "string" && value["masked"].length <= 320 ? value["masked"] : "";
   const expiresAt = value["expiresAt"];
-  if (!inviter || !pond || !email || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
-  return { inviter, pond, email, expiresAt };
+  if (!inviter || !pond || typeof state !== "string" || !INVITE_STATES.includes(state)) return null;
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
+  const members = Array.isArray(value["members"])
+    ? value["members"].flatMap((m) => text(m, 100) ?? []).slice(0, 10)
+    : [];
+  return { inviter, pond, members, state: state as InviteState, masked, expiresAt };
 }
 
 /** The room a person was in when they had to sign in: a path in the app, never a full URL (no open redirect). */

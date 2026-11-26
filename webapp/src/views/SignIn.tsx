@@ -42,6 +42,13 @@ export const hueOf = (name: string): number => {
 export const expiryText = (epochMs: number): string =>
   new Date(epochMs).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
+const WHY: Record<Exclude<InvitePreview["state"], "pending">, (i: InvitePreview) => string> = {
+  withdrawn: (i) => `${i.inviter} withdrew this invitation.`,
+  declined: () => "This invitation was declined.",
+  joined: () => "This invitation was already used.",
+  expired: () => "This invitation has expired.",
+};
+
 function InviteCard({ invite }: { invite: InvitePreview }) {
   return (
     <section class="invite-card" aria-label="Invitation">
@@ -56,11 +63,25 @@ function InviteCard({ invite }: { invite: InvitePreview }) {
       <h2>
         {invite.inviter} invited you to {invite.pond}
       </h2>
-      <p>
-        Sign in as {invite.email} to see it.
-        <br />
-        The invitation expires {expiryText(invite.expiresAt)}.
-      </p>
+      {invite.state === "pending" ? (
+        <p>
+          {invite.masked
+            ? `Sign in with ${invite.masked} and ${invite.pond} will be waiting.`
+            : `${invite.pond} will be waiting.`}
+          <br />
+          The invitation expires {expiryText(invite.expiresAt)}.
+        </p>
+      ) : (
+        <p>
+          {WHY[invite.state](invite)}
+          {invite.members.length > 0 ? (
+            <>
+              <br />
+              In {invite.pond}: {invite.members.join(", ")}.
+            </>
+          ) : null}
+        </p>
+      )}
     </section>
   );
 }
