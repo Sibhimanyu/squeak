@@ -6,6 +6,7 @@ import readline from "node:readline";
 
 import type { CodexNotification } from "../types.js";
 import { logger } from "../utils/logger.js";
+import type { CodexUserInput } from "../native/codex-input.js";
 
 type JsonRpcId = number | string;
 
@@ -66,7 +67,7 @@ interface ResumeThreadOptions {
 
 interface StartTurnOptions {
   threadId: string;
-  input: string;
+  input: string | CodexUserInput[];
   cwd?: string | null;
   model?: string | null;
   effort?: string | null;
@@ -79,7 +80,7 @@ interface StartTurnOptions {
 interface SteerTurnOptions {
   threadId: string;
   expectedTurnId: string;
-  input: string;
+  input: string | CodexUserInput[];
 }
 
 interface InterruptTurnOptions {
@@ -102,8 +103,8 @@ function withOptionalFields(base: Record<string, unknown>, optional: Record<stri
   };
 }
 
-function buildTextInput(text: string): Array<{ type: "text"; text: string; text_elements: [] }> {
-  return [{ type: "text", text, text_elements: [] }];
+function buildInput(input: string | CodexUserInput[]): CodexUserInput[] {
+  return typeof input === "string" ? [{ type: "text", text: input, text_elements: [] }] : input;
 }
 
 function buildCollaborationMode(model?: string | null, effort?: string | null): Record<string, unknown> {
@@ -346,7 +347,7 @@ export class CodexAppServerAdapter extends EventEmitter {
       withOptionalFields(
         {
           threadId: options.threadId,
-          input: buildTextInput(options.input),
+          input: buildInput(options.input),
           serviceTier: null,
           summary: "none",
           sandboxPolicy: options.sandboxPolicy ?? { type: "dangerFullAccess" },
@@ -372,7 +373,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     await this.request("turn/steer", {
       threadId: options.threadId,
       expectedTurnId: options.expectedTurnId,
-      input: buildTextInput(options.input),
+      input: buildInput(options.input),
     });
   }
 

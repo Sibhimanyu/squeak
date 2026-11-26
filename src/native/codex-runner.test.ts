@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -21,7 +24,9 @@ class FakeClient extends EventEmitter {
     this.calls.push({ method: "startTurn", arg: o });
     return { turnId: "turn-1" };
   });
-  steerTurn = vi.fn(async () => {});
+  steerTurn = vi.fn(async (o: unknown) => {
+    this.calls.push({ method: "steerTurn", arg: o });
+  });
   interruptTurn = vi.fn(async () => {});
   respond = vi.fn(async (id: unknown, result: unknown) => {
     this.responses.push({ id, result });
@@ -452,5 +457,115 @@ describe("CodexRunner", () => {
       model: "gpt-next",
       effort: "high",
     });
+  });
+});
+
+describe("Codex images and compaction", () => {
+  function inStream() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-img-"));
+    const chat = path.join(dir, "chat");
+    const stream = path.join(dir, "stream");
+    fs.mkdirSync(path.join(chat, ".context", "attachments", "ab12"), { recursive: true });
+    fs.mkdirSync(stream);
+    const image = path.join(chat, ".context", "attachments", "ab12", "image-1.png");
+    fs.writeFileSync(image, "png");
+    fs.writeFileSync(path.join(chat, ".context", "attachments", "ab12", "notes.txt"), "x");
+    const client = new FakeClient();
+    const log = {
+      statuses: [] as string[],
+      messages: [] as { kind: string; payload: unknown }[],
+      context: [] as unknown[],
+    };
+    const hooks = {
+      onAgentSessionId() {},
+      onMessage: (_r: string, kind: string, payload: unknown) => log.messages.push({ kind, payload }),
+      onDelta() {},
+      onStatus: (s: string) => log.statuses.push(s),
+      onContext: (c: unknown) => log.context.push(c),
+      onRequest: async () => ({ decision: "allow" }),
+      onTurnEnd() {},
+      onExit() {},
+    };
+    const runner = new CodexRunner({
+      cwd: chat,
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: hooks as never,
+      client: client as unknown as CodexClient,
+      readOnlyRoot: chat,
+      streamDirs: () => [stream],
+    });
+    return { dir, chat, stream, image, client, log, runner };
+  }
+  const token = "@⟦image-1.png⟧(.context%2Fattachments%2Fab12%2Fimage-1.png)";
+
+  it("an image token becomes a localImage at the folder the attachment was saved in, not the Stream the turn runs in", async () => {
+    const { dir, stream, image, client, runner } = inStream();
+    try {
+      await runner.send(`See the attached image.\n\n${token}`);
+      const call = client.startTurn.mock.calls.at(-1)?.[0] as { cwd: string; input: unknown[] };
+      expect(call.cwd).toBe(stream);
+      expect(call.input).toEqual([
+        { type: "text", text: `See the attached image.\n\n${token}`, text_elements: [] },
+        { type: "localImage", path: image },
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a steer carries the image too, and an attached file's path is absolute", async () => {
+    const { dir, chat, image, client, runner } = inStream();
+    try {
+      await runner.send("go");
+      await runner.steer(`look\n\n${token}\nAttached file: .context/attachments/ab12/notes.txt`);
+      const arg = client.steerTurn.mock.calls.at(-1)?.[0] as unknown as { input: { type: string; text?: string }[] };
+      expect(arg.input[1]).toEqual({ type: "localImage", path: image });
+      expect(arg.input[0]?.text).toContain(`Attached file: ${path.join(chat, ".context/attachments/ab12/notes.txt")}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a missing image file is not sent as an image (Codex would fail the turn on it)", async () => {
+    const { dir, client, runner } = inStream();
+    try {
+      const text = "@⟦image-2.png⟧(.context%2Fattachments%2Fab12%2Fimage-2.png)";
+      await runner.send(text);
+      const call = client.startTurn.mock.calls.at(-1)?.[0] as { input: unknown };
+      expect(call.input).toBe(text);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("compacting shows Working, then a note and a reset context ring when Codex's compaction item completes", async () => {
+    const { dir, client, log, runner } = inStream();
+    try {
+      const compactThread = vi.fn(async () => {});
+      (client as unknown as { compactThread: typeof compactThread }).compactThread = compactThread;
+      await runner.compact();
+      expect(compactThread).toHaveBeenCalledWith({ threadId: "thread-1" });
+      expect(log.statuses.at(-1)).toBe("working");
+      note(client, "turn/started", { turn: { id: "t2" } });
+      note(client, "item/completed", { item: { type: "contextCompaction", id: "c1" } });
+      expect(log.context).toEqual([null]);
+      expect(log.messages).toEqual([{ kind: "system/note", payload: { text: "Compacted the conversation." } }]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a compaction Codex refuses to start leaves the chat idle and reports the error", async () => {
+    const { dir, client, log, runner } = inStream();
+    try {
+      (client as unknown as { compactThread: () => Promise<void> }).compactThread = async () => {
+        throw new Error("no thread");
+      };
+      await expect(runner.compact()).rejects.toThrow("no thread");
+      expect(log.statuses.at(-1)).toBe("idle");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

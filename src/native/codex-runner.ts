@@ -1,4 +1,5 @@
 import { codexContextFrom } from "./context-usage.js";
+import { codexInput, type CodexUserInput } from "./codex-input.js";
 import type { CodexApprovalPolicy, CodexSandboxMode, ServerRequestEnvelope } from "../adapters/codex-app-server.js";
 import type { CodexNotification } from "../types.js";
 import { MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
@@ -36,14 +37,14 @@ export interface CodexClient {
   compactThread?(o: { threadId: string }): Promise<void>;
   startTurn(o: {
     threadId: string;
-    input: string;
+    input: string | CodexUserInput[];
     cwd?: string | null;
     model?: string | null;
     effort?: string | null;
     approvalPolicy?: CodexApprovalPolicy;
     sandboxPolicy?: Record<string, unknown>;
   }): Promise<{ turnId: string }>;
-  steerTurn(o: { threadId: string; expectedTurnId: string; input: string }): Promise<void>;
+  steerTurn(o: { threadId: string; expectedTurnId: string; input: string | CodexUserInput[] }): Promise<void>;
   interruptTurn(o: { threadId: string; turnId: string }): Promise<void>;
   respond(id: number | string, result: Record<string, unknown>): Promise<void>;
   respondError(id: number | string, error: { code: number; message: string }): Promise<void>;
@@ -221,6 +222,12 @@ export class CodexRunner implements Runner {
         return;
       case "item/completed":
         if (!item || item.type === "userMessage") return;
+        if (item.type === "contextCompaction") {
+          // The summary replaced the history: the old reading is stale until the next turn reports a new one.
+          hooks.onContext?.(null);
+          hooks.onMessage("system", "system/note", { text: "Compacted the conversation." });
+          return;
+        }
         if (!this.turnOpen) {
           // Fed as an agent row it would open a turn that Codex never ends: the chat would show working for good.
           hooks.onMessage("system", "system/note", { text: lateItemNote(item) });
@@ -309,7 +316,7 @@ export class CodexRunner implements Runner {
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.
     const { turnId } = await this.options.client.startTurn({
       threadId,
-      input: text,
+      input: this.inputFor(text),
       cwd: this.runCwd(),
       model: this.model,
       effort: this.effort,
@@ -319,9 +326,20 @@ export class CodexRunner implements Runner {
     this.turnId ??= turnId;
   }
 
+  /** The text as Codex input: image tokens also go as images, with paths resolved from the chat's folder (not the run cwd). */
+  private inputFor(text: string): string | CodexUserInput[] {
+    const items = codexInput(text, this.options.cwd);
+    const [first] = items;
+    return items.length === 1 && first?.type === "text" && first.text === text ? text : items;
+  }
+
   async steer(text: string): Promise<boolean> {
     if (!this.threadId || !this.turnId) return false;
-    await this.options.client.steerTurn({ threadId: this.threadId, expectedTurnId: this.turnId, input: text });
+    await this.options.client.steerTurn({
+      threadId: this.threadId,
+      expectedTurnId: this.turnId,
+      input: this.inputFor(text),
+    });
     return true;
   }
 
@@ -329,7 +347,15 @@ export class CodexRunner implements Runner {
     const client = this.options.client;
     if (!client.compactThread) throw new Error("this Codex cannot compact a thread");
     const threadId = await this.ensureStarted();
-    await client.compactThread({ threadId });
+    // Codex runs a compaction as a turn of its own (turn/started, a contextCompaction item, turn/completed): the chat
+    // shows Working until it ends, and a note says it finished.
+    this.options.hooks.onStatus("working");
+    try {
+      await client.compactThread({ threadId });
+    } catch (error) {
+      this.options.hooks.onStatus("idle");
+      throw error;
+    }
   }
 
   async interrupt(): Promise<void> {
