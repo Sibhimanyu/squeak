@@ -11,7 +11,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-log="$(mktemp -t squeak-mac-test).log"
+log="${SQUEAK_TEST_LOG:-$(mktemp -t squeak-mac-test).log}"
 swift test "$@" >"$log" 2>&1
 code=$?
 

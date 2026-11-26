@@ -24,10 +24,14 @@ jobs:
     # reports nothing, and prints one line: xctest=N/failed swift-testing=N/failed-runs.
     # The package needs a recent Swift (built locally with 6.4): the newest runner, and its newest Xcode.
     runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - run: |
           xcode=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
           swift --version
-      - run: macos/scripts/test.sh
+      - run: SQUEAK_TEST_LOG="$RUNNER_TEMP/mac-test.log" macos/scripts/test.sh
+      # A hang or a crash: the last of the log says which test it was in.
+      - if: failure() || cancelled()
+        run: tail -80 "$RUNNER_TEMP/mac-test.log" || true
