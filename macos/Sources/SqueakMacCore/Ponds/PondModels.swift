@@ -172,35 +172,7 @@ public struct PondCaps: Sendable, Equatable, Decodable {
     }
 }
 
-/// One of a person's own devices signed in to a pond (only on the person's own row).
-public struct PondOwnDevice: Sendable, Equatable, Identifiable, Decodable {
-    public var id: String
-    /// `mac`, `web` or `ios`; anything else is kept as written.
-    public var client: String
-    public var nestName: String?
-    public var addedAt: Date?
-    public var current: Bool
-
-    enum CodingKeys: String, CodingKey { case id, client, nestName, addedAt, current }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        client = c.lenient(String.self, .client) ?? ""
-        nestName = c.lenient(String.self, .nestName)
-        addedAt = PondTime.decode(c, CodingKeys.addedAt)
-        current = c.lenient(Bool.self, .current) ?? false
-    }
-
-    public init(id: String, client: String, nestName: String? = nil, addedAt: Date? = nil, current: Bool = false) {
-        self.id = id; self.client = client; self.nestName = nestName; self.addedAt = addedAt; self.current = current
-    }
-}
-
 public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
-    /// How many devices this person is signed in on here, and (own row only) which; absent from an older host.
-    public var devices: Int? = nil
-    public var ownDevices: [PondOwnDevice]? = nil
     /// The owner's switches for this person; nil from an older host.
     public var caps: PondCaps? = nil
     public var muted: Bool = false
@@ -216,14 +188,12 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     public var client: String?
     public var lastSeenAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, name, role, nest, online, you, nestName, client, lastSeenAt, caps, muted, devices, ownDevices }
+    enum CodingKeys: String, CodingKey { case id, name, role, nest, online, you, nestName, client, lastSeenAt, caps, muted }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         caps = c.lenient(PondCaps.self, .caps)
-        devices = c.lenient(Int.self, .devices)
-        ownDevices = c.lenient([Failable<PondOwnDevice>].self, .ownDevices)?.compactMap(\.value)
         muted = c.lenient(Bool.self, .muted) ?? false
         name = c.lenient(String.self, .name) ?? ""
         role = PondRole(raw: c.lenient(String.self, .role))

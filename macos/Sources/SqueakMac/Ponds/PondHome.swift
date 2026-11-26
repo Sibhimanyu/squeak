@@ -765,7 +765,6 @@ struct PondFlockSection: View {
                         .lineLimit(dashboard ? 2 : 1).help(m.name)
                     Text(verbatim: PondMembers.chip(m)).font(Typo.meta).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 6).frame(height: 18).background(Theme.selected, in: Capsule())
-                    if let n = PondDevices.countLine(m) { Text(verbatim: n).font(Typo.meta).foregroundStyle(Theme.muted) }
                 }
                 Text(verbatim: (removingNow ? "Removing\u{2026}" : changing ? "Changing role\u{2026}" : (detail == nil ? "You \u{00B7} This Mac" : tail))
                     + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))

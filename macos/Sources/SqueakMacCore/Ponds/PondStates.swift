@@ -265,40 +265,6 @@ public enum PondMembers {
     }
 }
 
-// MARK: Devices
-
-public enum PondDevices {
-    /// "2 devices" under a person who is signed in on several; nil for one or an older host.
-    public static func countLine(_ m: FlockMember) -> String? {
-        guard let n = m.devices, n > 1 else { return nil }
-        return "\(n) devices"
-    }
-
-    public static func label(_ d: PondOwnDevice) -> String {
-        let kind: String
-        switch d.client {
-        case "mac": kind = d.current ? "This Mac" : "Mac"
-        case "web": kind = "Browser"
-        case "ios": kind = "iPhone"
-        default: kind = d.client.isEmpty ? "Device" : d.client
-        }
-        if let n = d.nestName, !n.isEmpty, n != kind { return "\(kind) \u{00B7} \(n)" }
-        return kind
-    }
-
-    public static func added(_ d: PondOwnDevice, now: Date = Date()) -> String? {
-        guard let t = d.addedAt else { return nil }
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .full
-        return "added " + f.localizedString(for: t, relativeTo: now)
-    }
-
-    /// A device can be ended only while another remains.
-    public static func canRemove(_ devices: [PondOwnDevice]) -> Bool { devices.count > 1 }
-
-    public static let removeMessage = "That device is signed out of this pond. Sign in on it again to come back."
-}
-
 // MARK: Owner actions' words
 
 public enum PondActionWords {

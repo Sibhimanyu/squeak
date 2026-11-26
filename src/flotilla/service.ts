@@ -454,9 +454,9 @@ export interface MemberView {
   muted?: boolean;
   /** Presence heartbeat younger than 45 s. */
   online: boolean;
-  /** How many devices this person is signed in on in this pond (one row per person). Absent from an older host. */
+  /** Not sent any more (no device appears in a pond); kept so an older client's shape still type-checks. */
   devices?: number;
-  /** Only on your own row: the devices to list and remove ("Your devices in this pond"). `client` is "mac", "web" or "ios". */
+  /** Not sent any more; see `devices`. */
   ownDevices?: Array<{
     id: string;
     client: "mac" | "web" | "ios";
@@ -501,6 +501,9 @@ const DECISION_KEEP_MS = 10 * 60_000;
 const NAME_REFRESH_MS = 30 * 60_000;
 /** A Ripple a member writes to ask the owner's Mac to end one of their own devices: `removed my device <id>`. */
 const DEVICE_REMOVE_PREFIX = "removed my device ";
+/** Device Ripples (the request above, and older "added/removed a device" ones) are plumbing: no pond shows them. */
+const isDeviceRipple = (text: string): boolean =>
+  text.startsWith(DEVICE_REMOVE_PREFIX) || /(^|\s)(added|removed) a device$/.test(text);
 /** A device request the relay wrote is honoured this long (the device's read token lives as long). */
 const DEVICE_REQUEST_MAX_MS = 24 * 60 * 60_000;
 /** An owner's Mac adds at most this many devices a minute to one pond: a stolen account token cannot spray keys. */
@@ -2415,7 +2418,6 @@ export class FlotillaService extends EventEmitter {
     members.set(left.id, left);
     pond.rotationPending = true;
     this.save();
-    await this.ripple(pondId, "removed a device", { id: member.id, name: member.name }).catch(() => undefined);
     await this.rotate(pond, members);
     delete pond.rotationPending;
     this.save();
@@ -2534,10 +2536,6 @@ export class FlotillaService extends EventEmitter {
       members.set(next.id, next);
       byAccount.set(req.userId, next);
       await this.dropDeviceRequest(pond, row.id);
-      await this.ripple(pond.id, "added a device", { id: next.id, name: this.shownName(pond, next) }).catch(
-        () => undefined,
-      );
-      this.emit("device-added", pond.id, next.id);
       this.emit("changed", pond.id);
     }
   }
@@ -3702,24 +3700,15 @@ export class FlotillaService extends EventEmitter {
         caps: effectiveCaps(m.role, m.caps),
         ...(m.caps?.muted ? { muted: true } : {}),
         online: online.has(m.id),
-        // A person once, however many devices they signed in on (docs/ponds.md, "Members are accounts").
-        devices: devicesOf(m).length,
-        ...(m.id === me.id
-          ? {
-              ownDevices: devicesOf(m).map((d) => ({
-                id: d.id,
-                client: d.client,
-                nestName: d.nest ?? null,
-                addedAt: d.addedAt,
-                current: d.id === this.identity.id,
-              })),
-            }
-          : {}),
+        // A person once. Nothing about their devices is in a pond (docs/ponds.md, "Members are accounts").
         ...(m.id === me.id ? { lastSeenAt: now } : beat.has(m.id) ? { lastSeenAt: beat.get(m.id)! } : {}),
         you: m.id === me.id,
       })),
       threads,
-      ripples: ripples.slice(0, 50).map((r) => this.rippleView(pond, r, members)),
+      ripples: ripples
+        .filter((r) => !isDeviceRipple(r.text))
+        .slice(0, 50)
+        .map((r) => this.rippleView(pond, r, members)),
       presence,
       holds: holds.map((h) => ({ ...h, heldBy: h.by, heldByName: h.byName })),
       ...(coordination ? { tasks: coordination[0], locks: coordination[1] } : {}),

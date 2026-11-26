@@ -338,13 +338,17 @@ describe("members are accounts: a second device of the same account joins withou
     await laptop.service.refresh(pondId);
     const summary = (await laptop.service.list()).find((p) => p.id === pondId)!;
     expect(summary.status).toBe("active");
-    expect(told).toEqual([memberId]);
-    // the owner sees a person once, with two devices, and a quiet Ripple
+    // a device is never an event in a pond (#129), though the adoption itself still happened
+    expect(told).toEqual([]);
+    expect(devicesOf((await membersOf(A, pondId)).get(memberId))).toHaveLength(2);
+    // the owner sees a person once; nothing about devices (no count, no Ripple) is in the pond
     const view = await A.service.view(pondId);
     const aarav = view.members.filter((m) => m.name === "Aarav");
     expect(aarav).toHaveLength(1);
-    expect(aarav[0]).toMatchObject({ devices: 2, role: "member" });
-    expect(view.ripples.map((r) => `${r.actorName ?? ""} ${r.text}`)).toContain("Aarav added a device");
+    expect(aarav[0]).toMatchObject({ role: "member" });
+    expect(aarav[0]).not.toHaveProperty("devices");
+    expect(aarav[0]).not.toHaveProperty("ownDevices");
+    expect(view.ripples.map((r) => r.text).filter((t) => /device/i.test(t))).toEqual([]);
     // the new Mac reads the owner's thread and its message reaches the owner as Aarav
     expect((await laptop.service.threads(pondId)).some((t) => t.id === thread)).toBe(true);
     expect((await laptop.bridge.message(pondId, thread, "from the laptop")).ok).toBe(true);
@@ -354,12 +358,8 @@ describe("members are accounts: a second device of the same account joins withou
       ["from the laptop", "Aarav", memberId],
       ["from the browser", "Aarav", memberId],
     ]);
-    // the person's own row lists their devices
-    const own = (await laptop.service.view(pondId)).members.find((m) => m.you)!;
-    expect(own.ownDevices?.map((d) => [d.client, d.current])).toEqual([
-      ["web", false],
-      ["mac", true],
-    ]);
+    // not even on the person's own row
+    expect((await laptop.service.view(pondId)).members.find((m) => m.you)).not.toHaveProperty("ownDevices");
     // asking again changes nothing
     expect(await laptop.service.syncAccountPonds()).toBe(0);
   });
@@ -419,6 +419,10 @@ describe("members are accounts: a second device of the same account joins withou
     await A.service.refresh(pondId);
     expect(pondOf(A, pondId).current).toBe(before + 1);
     expect(devicesOf((await membersOf(A, pondId)).get(memberId))).toHaveLength(1);
+    // no Pond shows it: neither the member's request nor the owner's removal is a Ripple anyone reads (#129)
+    for (const svc of [A.service, web.service]) {
+      expect((await svc.view(pondId)).ripples.map((r) => r.text).filter((t) => /device/i.test(t))).toEqual([]);
+    }
     await web.service.refresh(pondId);
     await expect(web.service.removeOwnDevice(pondId, web.service.me.id)).rejects.toThrow("only device");
   });

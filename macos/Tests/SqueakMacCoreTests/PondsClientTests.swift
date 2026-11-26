@@ -119,25 +119,13 @@ struct PondsClientTests {
         #expect(got == ["p1", "p2"])
     }
 
-    @Test func deviceFieldsDecodeAndAreOptional() throws {
-        let m = try JSONDecoder().decode(FlockMember.self, from: Data(#"{"id":"m","name":"Me","you":true,"devices":3,"ownDevices":[{"id":"k1","client":"mac","nestName":"Studio","addedAt":1789000000000,"current":true},{"id":"k2","client":"web"},{"client":"ios"}]}"#.utf8))
-        #expect(m.devices == 3 && m.ownDevices?.map(\.id) == ["k1", "k2"] && m.ownDevices?[0].current == true && m.ownDevices?[0].addedAt != nil)
-        let old = try JSONDecoder().decode(FlockMember.self, from: Data(#"{"id":"m","name":"Me"}"#.utf8))
-        #expect(old.devices == nil && old.ownDevices == nil && PondDevices.countLine(old) == nil)
-        #expect(PondDevices.countLine(m) == "3 devices")
-        #expect(PondDevices.countLine(FlockMember(id: "x", name: "X")) == nil)
-    }
-
-    @Test func deviceLabelsAndRemovalRule() {
-        #expect(PondDevices.label(PondOwnDevice(id: "a", client: "mac", nestName: "Studio", current: true)) == "This Mac \u{00B7} Studio")
-        #expect(PondDevices.label(PondOwnDevice(id: "b", client: "mac")) == "Mac")
-        #expect(PondDevices.label(PondOwnDevice(id: "c", client: "web")) == "Browser")
-        #expect(PondDevices.label(PondOwnDevice(id: "d", client: "ios")) == "iPhone")
-        let now = Date()
-        #expect(PondDevices.added(PondOwnDevice(id: "e", client: "web", addedAt: now.addingTimeInterval(-3 * 86400)), now: now)?.hasPrefix("added ") == true)
-        #expect(PondDevices.added(PondOwnDevice(id: "e", client: "web"), now: now) == nil)
-        #expect(!PondDevices.canRemove([PondOwnDevice(id: "a", client: "mac")]))
-        #expect(PondDevices.canRemove([PondOwnDevice(id: "a", client: "mac"), PondOwnDevice(id: "b", client: "web")]))
+    /// #129: nothing about a device is drawn in a pond, so a member carries no device fields; an older host that still
+    /// sends them decodes fine and they are ignored.
+    @Test func deviceFieldsAreIgnoredNotDrawn() throws {
+        let m = try JSONDecoder().decode(FlockMember.self, from: Data(#"{"id":"m","name":"Me","you":true,"devices":3,"ownDevices":[{"id":"k1","client":"mac","current":true}]}"#.utf8))
+        #expect(m.id == "m" && m.name == "Me" && m.you)
+        let mirror = Mirror(reflecting: m).children.compactMap(\.label)
+        #expect(!mirror.contains("devices") && !mirror.contains("ownDevices"))
     }
 
     @Test func removeMineAndSyncAccountSendTheContractsBodies() async throws {

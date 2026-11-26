@@ -315,7 +315,7 @@ own key; the member is the account those keys belong to.
   formed (both keys on-curve P-256, the id is the key's, at most 24 h old), that a **member of this pond has that `accountId`** and is
   not the owner, that the member has fewer than 8 devices, and that at most 5 devices were added to this pond in the last minute (the
   rest stay on the relay). It then writes `keys/<deviceId>` (the pond key and a device token) **before** the member document lists the
-  device, deletes the request and writes a quiet Ripple "added a device" (`onBehalf` the member; event `device-added`). A request for
+  device, deletes the request. No Ripple and no event: a device is never shown in a pond (#129). A request for
   a device already listed only sends its key again.
 - **This Mac as a later device.** `syncAccountPonds` (at start, on sign-in `POST /native/ponds/sync-account {}`, at most every 5 min
   from list/refresh) calls `GET /account/ponds`; for each pond this Mac has no record of, it sends a device request and keeps the
@@ -328,11 +328,12 @@ own key; the member is the account those keys belong to.
 /ponds/<id>/devices/remove`) removes one device (the last one is the member): its token is revoked at the relay (so it can never
   ask again), it gets the note, the member document drops it (or sets `primaryRetired`) and the pond key rotates; the person's other
   devices keep working. A member ends one of their own devices with `POST /ponds/<id>/devices/remove-mine { deviceKeyId }`: a
-  Ripple "removed my device <id>" that the owner's Mac reads (only for a device the writer owns) and then does the same removal.
+  Ripple "removed my device <id>" that the owner's Mac reads (only for a device the writer owns) and then does the same removal;
+  `view()` hides that Ripple (and any older "added/removed a device" one), and the removal writes none.
   Leaving a pond is leaving as a person: every device goes.
-- **Surfaces.** `view().members[]` is one row per person with `devices` (count) and, on your own row, `ownDevices` (`id`, `client`,
-  `nestName`, `addedAt`, `current`). The Mac's People list shows a person once with their device count; the person's own pond
-  settings list "Your devices in this pond" with Remove. The web signs in, asks `GET /account/ponds` on load and requests each pond
+- **Surfaces.** `view().members[]` is one row per person and carries nothing about devices (no count, no `ownDevices`; older
+  clients treat both as optional). Neither the Mac's People list nor Pond settings mention devices; an account-wide "Your devices"
+  list is #129's later part. The web signs in, asks `GET /account/ponds` on load and requests each pond
   it does not hold. The iPhone reads shared Pond and Room views through the Mac. See “The Room on iPhone” below.
 - **Migration.** Nothing is rewritten. Existing documents are one-device members. An owner's Mac adds the accounts of members that
   have an `accountId` to the relay index at its first pass after the update; a member who joined with no `accountId` stays one device
@@ -741,7 +742,7 @@ applies.
   A `thread` frame is sent on join and leave. `GET /native/projects/<id>/changes` lists a Duck once per Stream it is in
   (join order). The Mac draws one chip per Stream in the Duck's top bar ("Pond" when none; a click opens Changes narrowed
   to it), lists the Streams in the Duck circle's tooltip, groups Changes per Stream, and shows Squeak's `created/joined/left
-  Stream` Room lines as compact moment lines (`DuckStreams.swift`, `RailLists.swift`, `RoomMessages.swift`).
+Stream` Room lines as compact moment lines (`DuckStreams.swift`, `RailLists.swift`, `RoomMessages.swift`).
 - **Clean-up.** A working copy with no Duck in it (any Duck that joined it, or whose chat runs there), no busy chat, a
   clean folder and a branch pushed or merged is removed; the branch stays. After a leave, and every 15 min while the host
   runs.
