@@ -37,6 +37,9 @@ These also default to on and accept `off`, `0`, `false` or `no`.
 `pondOwnThreads` / `SQUEAK_POND_OWN_THREADS` is off by default. Set it to `on`, `1`, `true` or `yes` to let
 a Member run a Duck on their own Mac in a joined Git Pond.
 
+`SQUEAK_CLEAN_START=on` (an environment variable only, not in the registry) runs the start-clean migration once: shared Ponds
+become local again on this Owner's Mac (`FlotillaService.startClean`; docs/cloud-layer.md, "Clean start"). Off by default.
+
 Values are trimmed and case-insensitive.
 
 ## Environment switches outside the registry

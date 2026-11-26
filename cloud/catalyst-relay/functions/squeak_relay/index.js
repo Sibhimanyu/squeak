@@ -7,6 +7,11 @@ const { NoSQL, NoSQLItem, NoSQLEnum, NoSQLMarshall } = require("@zcatalyst/nosql
 const { Mail } = require("@zcatalyst/mail");
 const { createRelay } = require("./handler");
 const { createChannelsCache } = require("./channels-cache");
+const { Datastore } = require("@zcatalyst/datastore");
+const { ZCQL } = require("@zcatalyst/zcql");
+const { createPeople } = require("./people");
+const { createDataStoreTables } = require("./people-datastore");
+const peopleSchema = require("./people-schema.json");
 
 const TABLE = "squeak_docs";
 const CHANNEL_NAME = "squeak_notice";
@@ -187,6 +192,19 @@ const mailerFor = (app) => {
   };
 };
 
+/**
+ * The people tables (docs/cloud-layer.md, "People data"): wired only when SQUEAK_PEOPLE_TABLES=on, so a relay deployed before
+ * the tables exist behaves exactly as it did. Unverified against a live project: `new Datastore(app).table(name)` and
+ * `new ZCQL(app).executeZCQLQuery(sql)` per the @zcatalyst typings.
+ */
+const peopleFor = (app) => {
+  if (process.env.SQUEAK_PEOPLE_TABLES !== "on") return undefined;
+  const datastore = new Datastore(app);
+  const zcql = new ZCQL(app);
+  const sdk = { table: (name) => datastore.table(name), zcql: (q) => zcql.executeZCQLQuery(q) };
+  return createPeople({ tables: createDataStoreTables(sdk, peopleSchema) });
+};
+
 /** An env value that was really provided: the committed placeholder counts as unset. */
 const set = (v) => (v && v !== "REPLACED_AT_DEPLOY" ? v : undefined);
 
@@ -198,6 +216,9 @@ module.exports = async (req, res) => {
     store: storeFor(app),
     streams: streamsFor(app),
     mail: mailerFor(app),
+    people: peopleFor(app),
+    // The clean-start route (clean-start.js) exists only on a relay started for it: the development environment.
+    cleanStart: process.env.SQUEAK_CLEAN_START === "on",
     // AppSail: no Catalyst user, ever (signing in is the function's job); the account-token routes still verify their own signature.
     currentUser: process.env.SQUEAK_NO_CATALYST_USER === "1" ? async () => null : currentUserOf(req, app),
     zoho: {

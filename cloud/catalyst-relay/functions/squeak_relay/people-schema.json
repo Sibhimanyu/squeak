@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "note": "Catalyst Data Store tables for who is in a Pond (ADR 0005). Created by cloud/catalyst-relay/scripts/create-people-tables.mjs. Types: varchar (max 255), text (max 10000), bigint (epoch ms or small counters), int. `unique` is per column and cannot change after the column exists, so composite rules use a derived key column (memberKey = pondId:userId). Never list ROWID, CREATORID, CREATEDTIME or MODIFIEDTIME: Catalyst adds them. Epoch-ms bigint columns stand in for CREATEDTIME.",
+  "tables": [
+    {
+      "name": "people_accounts",
+      "about": "An account and the name sign-in gave it. email is lower-case.",
+      "columns": [
+        { "name": "userId", "type": "varchar", "unique": true },
+        { "name": "email", "type": "varchar" },
+        { "name": "name", "type": "varchar" },
+        { "name": "createdAt", "type": "bigint" },
+        { "name": "updatedAt", "type": "bigint" }
+      ]
+    },
+    {
+      "name": "people_devices",
+      "about": "A device an account signed in on (kind mac, ios or web).",
+      "columns": [
+        { "name": "deviceId", "type": "varchar", "unique": true },
+        { "name": "userId", "type": "varchar" },
+        { "name": "name", "type": "varchar" },
+        { "name": "kind", "type": "varchar" },
+        { "name": "publicKey", "type": "varchar" },
+        { "name": "createdAt", "type": "bigint" },
+        { "name": "lastSeenAt", "type": "bigint" }
+      ]
+    },
+    {
+      "name": "people_push_tokens",
+      "about": "One push token per device.",
+      "columns": [
+        { "name": "deviceId", "type": "varchar", "unique": true },
+        { "name": "userId", "type": "varchar" },
+        { "name": "token", "type": "text" },
+        { "name": "platform", "type": "varchar" },
+        { "name": "updatedAt", "type": "bigint" }
+      ]
+    },
+    {
+      "name": "people_ponds",
+      "about": "A shared Pond: id, owner, name, created.",
+      "columns": [
+        { "name": "pondId", "type": "varchar", "unique": true },
+        { "name": "ownerUserId", "type": "varchar" },
+        { "name": "name", "type": "varchar" },
+        { "name": "createdAt", "type": "bigint" }
+      ]
+    },
+    {
+      "name": "people_memberships",
+      "about": "One row per account per Pond (memberKey = pondId:userId, unique). In the Pond while slot >= 0 and leftAt = 0.",
+      "columns": [
+        { "name": "memberKey", "type": "varchar", "unique": true },
+        { "name": "pondId", "type": "varchar" },
+        { "name": "userId", "type": "varchar" },
+        { "name": "role", "type": "varchar" },
+        { "name": "slot", "type": "int" },
+        { "name": "joinedAt", "type": "bigint" },
+        { "name": "leftAt", "type": "bigint" },
+        { "name": "leftReason", "type": "varchar" }
+      ]
+    },
+    {
+      "name": "people_slots",
+      "about": "The 10-person cap without transactions: a member claims slot pondId:0..9, and a taken slot is refused by the unique rule.",
+      "columns": [
+        { "name": "slotKey", "type": "varchar", "unique": true },
+        { "name": "pondId", "type": "varchar" },
+        { "name": "userId", "type": "varchar" }
+      ]
+    },
+    {
+      "name": "people_invites",
+      "about": "The record whose state everyone draws: pending, joined, declined, withdrawn, expired.",
+      "columns": [
+        { "name": "inviteId", "type": "varchar", "unique": true },
+        { "name": "pondId", "type": "varchar" },
+        { "name": "email", "type": "varchar" },
+        { "name": "role", "type": "varchar" },
+        { "name": "invitedBy", "type": "varchar" },
+        { "name": "state", "type": "varchar" },
+        { "name": "createdAt", "type": "bigint" },
+        { "name": "expiresAt", "type": "bigint" },
+        { "name": "settledAt", "type": "bigint" }
+      ]
+    },
+    {
+      "name": "people_invite_locks",
+      "about": "One row per pending invite (lockKey = pondId:sha256(email), unique): deleted when the invite stops being pending.",
+      "columns": [
+        { "name": "lockKey", "type": "varchar", "unique": true },
+        { "name": "inviteId", "type": "varchar" },
+        { "name": "pondId", "type": "varchar" }
+      ]
+    }
+  ]
+}

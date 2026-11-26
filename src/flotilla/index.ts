@@ -31,6 +31,12 @@ export { FlotillaBridge, type HostPort } from "./bridge.js";
 export { FlotillaRoutes, type RouteContext } from "./mount.js";
 
 /** On for everyone; `SQUEAK_FLOTILLA=off` is the off switch (nothing in this folder is then constructed). */
+/**
+ * `SQUEAK_CLEAN_START=on` runs the start-clean migration once at start (`FlotillaService.startClean`): shared Ponds become
+ * local again on this Owner's Mac. Off until the clean-start release flips it, so no Mac loses its shared Ponds before the
+ * cloud's Pond data has been cleared (docs/cloud-layer.md, "Clean start").
+ */
+export const cleanStartRequested = (env: NodeJS.ProcessEnv = process.env): boolean => env.SQUEAK_CLEAN_START === "on";
 export const flotillaEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => env.SQUEAK_FLOTILLA !== "off";
 
 export interface Flotilla {
@@ -302,6 +308,10 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
       return { sessionId: session.id };
     },
   });
+  if (cleanStartRequested()) {
+    const cleaned = service.startClean();
+    if (cleaned.madeLocal || cleaned.dropped) logger.info("clean start: shared ponds are local again", { ...cleaned });
+  }
   service.start();
   // The one-time repair (idempotent: nothing to do after the first run): ponds.json obeys the directory's invariants.
   try {

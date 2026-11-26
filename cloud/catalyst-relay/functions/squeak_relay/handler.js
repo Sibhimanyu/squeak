@@ -36,6 +36,9 @@
 //                         the cookie on /me, /account/macs, /account/device-request and /account/avatar (so it lists Macs,
 //                         requests devices and owns the photo; it still mints neither tokens nor tickets)
 //   POST|GET /account/device-request (cookie): see docs/cloud-layer.md, "Accounts"
+//   POST   /admin/clean-start {confirm:"wipe-cloud-ponds", pondIds?, userIds?} (relay key only; 403 unless the relay runs with
+//                         SQUEAK_CLEAN_START=on, the development environment) -> 200 {ponds, documents, indexes, people}: clears every
+//                         Pond from the cloud (clean-start.js); Mac channels, accounts and devices stay
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
@@ -69,6 +72,7 @@ const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = 
 const scoped = require("./scoped");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
+const { createCleanStart } = require("./clean-start");
 
 const VERSION = require("./package.json").version;
 const PREFIX = /^\/server\/squeak_relay/;
@@ -1341,6 +1345,22 @@ function createRelay(deps) {
       if (!mac && given !== undefined && !req.headers["x-squeak-relay"])
         return await handleGuest(req, res, url, route, method, given);
       if (!mac && !sameKey(req.headers["x-squeak-relay"], deps.key)) return send(res, 401);
+
+      // Start clean (clean-start.js): the operator's key only, and only on a relay started for it (SQUEAK_CLEAN_START=on:
+      // the development environment; production leaves it off). A Mac's key never reaches it.
+      if (route === "/admin/clean-start") {
+        if (method !== "POST") return send(res, 405, {});
+        if (mac || !deps.cleanStart) return send(res, 403, { error: "clean-start-off" });
+        const body = await readJson(req, 64 * 1024);
+        if (body.confirm !== "wipe-cloud-ponds") return send(res, 400, { error: "confirm" });
+        const list = (v) => (Array.isArray(v) ? v.slice(0, 5000) : []);
+        const done = await createCleanStart({ store: deps.store, people: deps.people }).run({
+          pondIds: list(body.pondIds),
+          userIds: list(body.userIds),
+        });
+        log(`clean start: ${done.ponds} ponds, ${done.documents} documents, ${done.indexes} index rows`);
+        return send(res, 200, done);
+      }
 
       if (route === "/account/link" || route === "/account/unlink")
         return await handleAccountMac(req, res, route, method, mac);

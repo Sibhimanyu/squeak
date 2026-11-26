@@ -8,7 +8,7 @@ OUT="${1:-$HERE/build}"
 rm -rf "$OUT"; mkdir -p "$OUT"
 # Every module the function has (a fixed list here once missed channels-cache.js and the app could not start), and its
 # package.json; never the function's own catalyst-config.json or lockfile.
-for f in "$FN"/*.js "$FN"/kinds.json "$FN"/package.json; do cp "$f" "$OUT/$(basename "$f")"; done
+for f in "$FN"/*.js "$FN"/kinds.json "$FN"/people-schema.json "$FN"/package.json; do cp "$f" "$OUT/$(basename "$f")"; done
 cp "$HERE/server.js" "$OUT/server.js"
 # server.js is the entry; the function's package.json supplies version + the three @zcatalyst deps.
 node -e '

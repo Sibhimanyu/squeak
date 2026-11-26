@@ -44,6 +44,55 @@ When sign-in moves a Mac from an older store, the daemon writes a sealed, signed
 Compatible paired phones and voice gateways verify it and move to the new location. The Mac reads the old store for
 10 minutes after the move. A phone that missed the move can sign in again.
 
+## People data (Data Store tables) and clean start
+
+Who is in a Pond lives in server-readable Catalyst Data Store tables; what people and Ducks say stays sealed in NoSQL
+(ADR 0005, `docs/spec.md` "Cloud: what is stored where"). Code is in `cloud/catalyst-relay/functions/squeak_relay/`:
+
+- `people-schema.json` is the checked-in table definition: `people_accounts`, `people_devices`, `people_push_tokens`,
+  `people_ponds`, `people_memberships`, `people_slots`, `people_invites`, `people_invite_locks`. The setup script
+  `cloud/catalyst-relay/scripts/create-people-tables.mjs` creates them (dry run by default; `--apply` only in Development).
+- `people.js` is the one interface, `createPeople({ tables, now })`, over a small `Tables` port (`insert`, `get`, `select`,
+  `all`, `update`, `delete`, `clear`; the contract is at the top of the file). Two implementations of the port:
+  `people-datastore.js` (Catalyst: ZCQL reads, SDK writes, 300-row pages, bulk delete of 200) and `people-memory.js` (tests;
+  enforces the same unique columns). A route handler or test gets a `people` and never sees a table.
+- What it offers, grouped. Accounts: `upsertAccount` (names come from sign-in), `getAccount`, `accountByEmail`.
+  Devices: `addDevice`, `devicesOf`, `removeDevice`, `setPushToken`, `pushTokensOf`. Ponds: `createPond` (the Owner becomes
+  the first member), `getPond`, `pondsOf`, `pondIds`. Memberships: `addMember`, `removeMember`, `isMember`, `membershipOf`,
+  `membersOf`. Invites: `createInvite`, `settleInvite` (joined, declined, withdrawn, expired), `getInvite`, `invitesOf`,
+  `pendingInvitesFor`. Clean start: `cleanStart`. Refusals are `PeopleError` with a stable `code` (`already-member`,
+  `pond-full`, `invite-pending`, `invite-exists`, `pond-exists`, `device-taken`, `not-member`, `owner`, `not-pending`,
+  `no-invite`, `no-pond`, `invalid`); routes map them to statuses. Later tickets build on this: #120 (sequence numbers and the
+  change feed) reads `isMember` and `membersOf`, #126 (invites) uses the invite calls, #128 (removal) uses `removeMember`.
+- Rules live in the tables, not in code that reads then writes, because Data Store has no transactions and `IsUnique`
+  is per column: the membership key is `pondId:userId` (unique); the 10-person cap is ten slot rows `pondId:0..9`
+  (a taken slot is refused by the unique key); one pending invite per address per Pond is a lock row
+  `pondId:sha256(email)` that is deleted when the invite is settled (an expired invite's lock is cleared by the next invite
+  to that address). A membership row is written first, so a duplicate is refused before any slot is touched.
+- Names (accounts, devices, Ponds) are stored escaped (backslash doubled, characters above U+FFFF as `\u{hex}`) because Data
+  Store turns 4-byte UTF-8 into `?`; `people.js` encodes and decodes, so callers see plain text. Times are epoch-ms bigint
+  columns, never `CREATEDTIME`. Lookup values in ZCQL may not contain `'`, `\` or control characters (refused, never escaped).
+- Wiring: `index.js` builds `people` only when `SQUEAK_PEOPLE_TABLES=on`, so a relay deployed before the tables exist behaves
+  as before. No existing route reads the tables yet. The Data Store duplicate error shape, the ZCQL value escaping and the
+  SDK calls (`new Datastore(app).table()`, `new ZCQL(app).executeZCQLQuery()`) are **unmeasured against a live project**;
+  the live test plan in `cloud-spike-2026-11.md` covers them.
+
+### Clean start
+
+The release clears all cloud Pond data; every Pond and Duck stays on the Owner's Mac and shared Ponds become local again.
+
+- **Cloud side.** `POST /admin/clean-start {confirm:"wipe-cloud-ponds", pondIds?, userIds?}` with the operator's `x-squeak-relay`
+  key. It answers 403 unless the relay runs with `SQUEAK_CLEAN_START=on` (the development environment only; leave it unset
+  in production). It clears the Pond tables, each Pond's sealed documents (every kind under `channels/<pondId>/`), its pins,
+  revocations and channel claim, and every account's Pond index (`acctponds/<userId>`). It keeps accounts, devices, push
+  tokens and every Mac's own channel (a Pond id that is a Mac's key id is skipped), so the iPhone keeps working. The store
+  cannot list partitions: Pond ids come from the Pond table, from the account indexes of every account in the tables, and from
+  `pondIds` and `userIds` the operator names (needed for accounts the tables have not seen yet). Idempotent.
+- **Mac side.** `FlotillaService.startClean()` (once; recorded as `cleanStartedAt` in `flotilla/ponds.json`) makes each Pond
+  this Mac owns a local Pond again (same id, name, project and key; invites and tokens dropped; Ducks and Room history
+  untouched) and forgets records this Mac only joined. It runs at start when `SQUEAK_CLEAN_START=on` is set for the daemon
+  (see [flags](flags.md)); the release that clears production flips that to the default.
+
 ## Accounts (Catalyst Hosted login; relay routes)
 
 The account identifies the person; device keys authorise. The relay holds nothing that opens a Mac's channel, and a

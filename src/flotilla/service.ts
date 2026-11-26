@@ -614,7 +614,12 @@ export const OWN_THREADS_OFF =
 export class FlotillaService extends EventEmitter {
   private readonly now: () => number;
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
-  private readonly pondsFile: SecretFile<{ ponds: Record<string, LocalPond>; leftUntil?: Record<string, number> }>;
+  private readonly pondsFile: SecretFile<{
+    ponds: Record<string, LocalPond>;
+    leftUntil?: Record<string, number>;
+    /** When the start-clean migration ran on this Mac (once; docs/cloud-layer.md, "Clean start"). */
+    cleanStartedAt?: number;
+  }>;
   private readonly watches = new Map<string, () => void>();
   private readonly running = new Set<string>();
   private readonly dirty = new Set<string>();
@@ -4868,6 +4873,58 @@ export class FlotillaService extends EventEmitter {
         .catch(() => undefined);
     }
     this.forgetPond(pondId);
+  }
+
+  /**
+   * The start-clean migration (spec: People and remote, "Start clean"; docs/cloud-layer.md, "Clean start"), run once after
+   * the cloud's Pond data was cleared. Every Pond this Mac owns becomes a local Pond again: same id, name, project and
+   * key, its Ducks (threads) and Room history untouched, no cloud call. What the cloud held (invites, tokens handed out)
+   * is dropped, so the Owner re-invites people by email. A record that cannot be local (a Pond this Mac only joined, or
+   * one with no project) is forgotten; nothing of the Owner's is lost, since Ducks and the Room live under the project.
+   * Idempotent: it records that it ran, so a Pond shared again later is never undone.
+   */
+  startClean(): { madeLocal: number; dropped: number } {
+    const done = { madeLocal: 0, dropped: 0 };
+    if (this.pondsFile.data.cleanStartedAt) return done;
+    for (const pond of Object.values(this.pondsFile.data.ponds)) {
+      if (pond.local) continue;
+      if (pond.role !== "owner" || !pond.projectId || pond.kind === "joined" || pond.deviceJoin) {
+        this.forgetPond(pond.id);
+        done.dropped++;
+        continue;
+      }
+      this.watches.get(pond.id)?.();
+      this.watches.delete(pond.id);
+      this.stores.delete(pond.id);
+      pond.local = true;
+      pond.location = null;
+      pond.status = "active";
+      pond.invites = [];
+      pond.issued = {};
+      pond.nonces = {};
+      pond.results = [];
+      for (const key of [
+        "rotationPending",
+        "joinToken",
+        "token",
+        "requestId",
+        "requestedRole",
+        "inviteExpiresAt",
+        "words",
+        "requestedAt",
+        "endedAt",
+        "reapedAt",
+      ] as const)
+        delete pond[key];
+      this.summaryCache.delete(pond.id);
+      this.forgetSnapshot(pond.id);
+      done.madeLocal++;
+    }
+    delete this.pondsFile.data.leftUntil;
+    this.pondsFile.data.cleanStartedAt = this.now();
+    this.save();
+    for (const id of Object.keys(this.pondsFile.data.ponds)) this.emit("changed", id);
+    return done;
   }
 
   /** Forget a member's pending work and local ponds, for tests and for leaving. */

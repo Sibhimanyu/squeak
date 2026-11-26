@@ -5,8 +5,10 @@
   "main": "index.js",
   "dependencies": {
     "@zcatalyst/auth": "1.0.0",
+    "@zcatalyst/datastore": "1.0.0",
     "@zcatalyst/datastreams": "1.0.1",
     "@zcatalyst/mail": "1.0.0",
-    "@zcatalyst/nosql": "1.0.0"
+    "@zcatalyst/nosql": "1.0.0",
+    "@zcatalyst/zcql": "0.0.2"
   }
 }
