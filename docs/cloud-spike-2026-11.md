@@ -16,8 +16,7 @@ desk research written before the live test; where the live test measured somethi
 3. **The documented 100 concurrent requests per instance is real and open streams count against it** (Live, step 3/4): one
    AppSail app holds at most 500 open streams (5 instances x 100), also in Development; beyond that every request,
    streams and ordinary calls alike, gets HTTP 429 `Concurrency limit reached for the feature APP_COMPUTE`. So `squeak-live`
-   serves about 500 devices until Zoho raises the limit (ask now: draft below). The sharded Data Streams fallback (section
-   5) becomes the plan only if Zoho refuses and we pass about 400 devices.
+   serves about 500 devices until Zoho raises the limit (ask now: draft below). The sharded Data Streams fallback (section 5) becomes the plan only if Zoho refuses and we pass about 400 devices.
 4. **The platform ends every stream at about 45 s, cleanly** (Live, step 1), and **never tells the app when a client goes
    away** (Live, step 3). So the hub must rotate streams itself: send `event: bye` and close at 40 s, the client opens its
    replacement at about 35 s, heartbeat every 15 s. `lastSeen`, "last connection closed" and membership removal must not
