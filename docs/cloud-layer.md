@@ -125,6 +125,56 @@ The release clears all cloud Pond data; every Pond and Duck stays on the Owner's
   untouched) and forgets records this Mac only joined. It runs at start when `SQUEAK_CLEAN_START=on` is set for the daemon
   (see [flags](flags.md)); the release that clears production flips that to the default.
 
+## Live notices (`squeak-live`, issue #121)
+
+A device keeps one live connection and is told, in a few bytes, that something it watches changed; it then reads the change
+feed above. Decision and measurements: `docs/cloud-spike-2026-11.md` (SSE only, WebSocket is stripped by the front door).
+Code: `cloud/catalyst-relay/live/` (own folder, shares only the relay's modules), the relay's side in
+`functions/squeak_relay/live-notice.js`, the daemon's in `src/cloud/live-notices.ts` (`LiveClient`).
+
+- **A separate AppSail service, `squeak-live`.** An open stream counts toward the platform's 100 concurrent requests per
+  instance (5 instances, about 500 devices), so streams must not share that budget with the relay's ordinary calls, and a
+  relay deploy must not drop every device. Routes: `GET /live?pond=<id>&pond=<id>` (SSE; `x-squeak-account` or
+  `x-squeak-mac-key`, plus `x-squeak-device`), `POST /typing {pond}`, `GET /presence?pond=<id>`, `GET /health`.
+- **What a device says and gets.** It names its Ponds; the service checks each against `people.isMember` (cached 2 min per
+  account and Pond) and answers `event: hello {ponds, refused, maxAgeMs}`: a Pond the account is not in is refused, never
+  subscribed. Then `event: notice {pond, seq, kind}` after each stamped write (no content), `typing {pond, user}`,
+  `removed {pond}`, and `bye`. Heartbeat comment every 15 s.
+- **One stream per device, handed over without a gap.** The platform ends every response at about 45 s and never says a client
+  left. The service sends `bye` and closes at 40 s; the client opens its replacement at 35 s, so two streams overlap for a few
+  seconds, both deliver a notice, and the client drops the repeat by seq; it closes the old one when the new one says hello.
+  After a notice the client reads `GET /changes` from its own cursor; an idle device makes no request but the renewal.
+- **Between instances: one internal Data Streams channel, `squeak_live`.** Only the instances subscribe (at most five); no
+  device touches it. Messages: `{t:"n", pond, seq, kind}` (the relay publishes one after `feed.append`, `stamp()` in
+  `handler.js`), `{t:"rm", pond, user}` (published by `people.removeMember` through `withRemovalNotice`: the person's
+  subscriptions to that Pond close at once, the service sends `removed`), `{t:"pr", dev, user, at}` (presence renewals),
+  `{t:"ty", pond, user}` (typing). The instances cannot mint Data Streams tokens or publish themselves, so they ask the relay
+  with the relay key: `POST /live/token {name}` and `POST /live/publish {text}` (key only, never a Mac key or device).
+  In tests the channel is `createMemoryBus()` (`live/fanout.js`).
+- **Presence is not stored.** A device is online while its stream was renewed within 45 s (the service learns of renewals,
+  not disconnects). When a device lapses and no other device of the account is online, `lastseen/<userId>` is written once,
+  by the instance that took the last renewal. Typing is passed along and never stored.
+- **Fallback.** While no stream is open `LiveClient.state` is `reconnecting` (the UI of #130 says "Reconnecting...") and the
+  feed is polled every 30 s; new streams are tried with growing jittered delays, and the first hello after being down reads
+  each Pond once. Live again: no poll. The old shared `squeak_notice` channel and `/token` are unchanged for the iPhone app.
+- **Not wired yet.** `LiveClient` is not yet started by the daemon's `CatalystStore`; it takes the feed cursors of the
+  `FeedMirror` (`cursors`) and the same `changes` read, so wiring is #130's.
+
+Owner steps (nothing here is deployed; Development environment first):
+
+1. In the Catalyst console, Data Streams: create the channel `squeak_live` (same access-control function as `squeak_notice`,
+   `squeak_relay`). The relay finds it by name (`liveChannelId`); until it exists no notice is published and nothing breaks.
+2. Deploy the relay function with this change (`deploy-hosted.sh`), and, if the relay runs on AppSail, that app too.
+3. Stage and deploy the service: `cloud/catalyst-relay/live/build.sh /tmp/live-build`, then from a Catalyst project directory
+   `catalyst deploy appsail --name squeak-live --build-path /tmp/live-build --stack node22 --command "node server.js"`
+   with the env of `live/app-config.json` (`RELAY_KEY` the same as the relay's, `SQUEAK_RELAY_URL` the relay's base URL,
+   `SQUEAK_PEOPLE_TABLES=on`). Check `GET <service>/health`.
+4. Unverified live (list for the live test): the AppSail runtime initialising the Catalyst SDK without a request (`zcAuth.init`
+   in `live/server.js` `main()`), the people-table and NoSQL reads from `squeak-live`, the Data Streams WebSocket from an
+   AppSail instance, and the 500-stream cap (ask Zoho, see the spike's draft email).
+5. Rollback: delete the `squeak_live` channel (the relay then publishes nothing) and the `squeak-live` service; devices fall
+   back to the 30 s feed poll.
+
 ## Accounts (Catalyst Hosted login; relay routes)
 
 The account identifies the person; device keys authorise. The relay holds nothing that opens a Mac's channel, and a

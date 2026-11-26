@@ -1,0 +1,12 @@
+{
+  "command": "node server.js",
+  "build_path": "./build",
+  "stack": "node22",
+  "memory": 256,
+  "env_variables": {
+    "RELAY_KEY": "REPLACED_AT_DEPLOY",
+    "SQUEAK_RELAY_URL": "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay",
+    "SQUEAK_PEOPLE_TABLES": "on"
+  },
+  "catalyst_auth": false
+}

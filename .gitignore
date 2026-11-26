@@ -21,3 +21,4 @@ cloud/catalyst-relay/client/*
 .ship-host-commit
 firepit-log.txt
 firebase/*.log
+cloud/catalyst-relay/live/build/

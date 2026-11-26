@@ -10,6 +10,7 @@ const { createChannelsCache } = require("./channels-cache");
 const { Datastore } = require("@zcatalyst/datastore");
 const { ZCQL } = require("@zcatalyst/zcql");
 const { createPeople } = require("./people");
+const { createLiveNotices, withRemovalNotice, LIVE_CHANNEL } = require("./live-notice");
 const { createDataStoreTables } = require("./people-datastore");
 const peopleSchema = require("./people-schema.json");
 
@@ -126,6 +127,8 @@ function streamsFor(app) {
     // A pond's own channel for web guests (scoped.js). Found by name; creating it is not wired here (unverified against
     // the SDK), so until the owner makes it in the console /pond-stream answers 503. Cached with the channel list.
     pondChannelId: (pondId) => channels.idOf(pondStreamName(pondId)),
+    // The internal channel only the squeak-live instances subscribe to (cloud/catalyst-relay/live); made in the console.
+    liveChannelId: () => channels.idOf(LIVE_CHANNEL),
     token: (id, name) => streams.getTokenPair(id, { connectionName: name }),
   };
 }
@@ -229,7 +232,12 @@ const peopleFor = (app) => {
   const datastore = new Datastore(app);
   const zcql = new ZCQL(app);
   const sdk = { table: (name) => datastore.table(name), zcql: (q) => zcql.executeZCQLQuery(q) };
-  return createPeople({ tables: createDataStoreTables(sdk, peopleSchema) });
+  const people = createPeople({ tables: createDataStoreTables(sdk, peopleSchema) });
+  // A removal closes the person's live subscriptions to the Pond at once (live-notice.js).
+  return withRemovalNotice(
+    people,
+    createLiveNotices(streamsFor(app), (s) => console.error(s)),
+  );
 };
 
 /** An env value that was really provided: the committed placeholder counts as unset. */
@@ -268,3 +276,7 @@ module.exports = async (req, res) => {
   });
   return handle(req, res);
 };
+
+// The live service (cloud/catalyst-relay/live) reuses this wiring for the store and the people tables.
+module.exports.storeFor = storeFor;
+module.exports.peopleFor = peopleFor;

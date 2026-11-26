@@ -73,6 +73,7 @@ const crypto = require("node:crypto");
 const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
 const scoped = require("./scoped");
 const { createFeed, FEED_KINDS } = require("./feed");
+const { createLiveNotices } = require("./live-notice");
 const mailing = require("./mail");
 const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 const { createCleanStart } = require("./clean-start");
@@ -356,6 +357,7 @@ function createRelay(deps) {
   }
 
   const feed = createFeed(deps.store);
+  const live = createLiveNotices(deps.streams, log);
   /**
    * Gives a content write the Pond's next seq (feed.js) and returns the document to store: the same one with `seq` added
    * (an older client ignores the field), or the document untouched when the kind is not Pond content or the store has no
@@ -365,6 +367,8 @@ function createRelay(deps) {
   async function stamp(parsed, doc) {
     if (!feed.enabled || !FEED_KINDS.has(parsed.kind)) return doc;
     const seq = await feed.append(parsed.channel, { kind: parsed.kind, id: parsed.doc, doc });
+    // The seq's row is written, so a device told "seq n" can already read it: one short notice to the live service (live-notice.js).
+    if (seq !== null) await live.notice(parsed.channel, seq, parsed.kind);
     return doc && seq !== null ? { ...doc, seq } : doc;
   }
 
@@ -1539,6 +1543,23 @@ function createRelay(deps) {
           ...(channelId && !mac ? { channelId } : {}),
           version: VERSION,
         });
+      }
+
+      // The live service (cloud/catalyst-relay/live) holds no Data Streams grant of its own: with the relay key it asks this
+      // function for its token pair and has its messages published (instance to instance, nothing a device sends).
+      if (route === "/live/token" || route === "/live/publish") {
+        if (method !== "POST" || mac) return send(res, mac ? 403 : 405, {});
+        const body = await readJson(req, 4096);
+        if (route === "/live/publish") {
+          if (typeof body.text !== "string" || body.text.length > 2048) return send(res, 400, { error: "text" });
+          await live.raw(body.text);
+          return send(res, 204);
+        }
+        if (typeof body.name !== "string" || !NAME.test(body.name)) return send(res, 400, { error: "name" });
+        const id = deps.streams.liveChannelId ? await deps.streams.liveChannelId() : null;
+        if (!id) return send(res, 503, { error: "channel" });
+        const pair = await deps.streams.token(id, body.name);
+        return send(res, 200, { url: pair.url, key: pair.key, wssId: pair["wss-id"] });
       }
 
       if (route === "/token") {
