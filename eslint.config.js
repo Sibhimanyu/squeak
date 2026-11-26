@@ -29,7 +29,17 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: 2022, sourceType: "module", globals: { ...webGlobals, ...testGlobals } },
     rules: { "no-undef": "error", "no-unused-vars": "error" },
   },
+  // webapp/ is TypeScript (tsc checks it); its build script is plain Node.
   {
-    ignores: ["dist/", "node_modules/"],
+    files: ["webapp/scripts/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...testGlobals, console: "readonly", URL: "readonly" },
+    },
+    rules: { "no-undef": "error", "no-unused-vars": "error" },
+  },
+  {
+    ignores: ["dist/", "webapp/dist/", "node_modules/"],
   },
 );

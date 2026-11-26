@@ -1,0 +1,293 @@
+/* Squeak web. Tokens are DESIGN.md's Mac neutrals (warm, one hue), light and dark following the browser. The duck's yellow is
+   never text or a state; no coloured status dots. Phone width first; a second column appears from 860px. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f8f7f3;
+  --surface: #ffffff;
+  --selected: #f1ece6;
+  --ink: #292622;
+  --muted: #67625e;
+  --line: #e7e2dd;
+  --line-strong: #d9d3cc;
+  --negative: #dc2626;
+  --tint-bg: 90%;
+  --tint-fg: 28%;
+  --tint-sat: 55%;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #13100c;
+    --surface: #1c1915;
+    --selected: #26221e;
+    --ink: #ece7e2;
+    --muted: #afaaa5;
+    --line: rgba(255, 255, 255, 0.1);
+    --line-strong: rgba(255, 255, 255, 0.2);
+    --negative: #f87171;
+    --tint-bg: 24%;
+    --tint-fg: 82%;
+    --tint-sat: 40%;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+button,
+a {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Sign-in: one page, centred, nothing else. */
+.signin {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 32px 24px calc(32px + env(safe-area-inset-bottom));
+  max-width: 420px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.lockup {
+  display: block;
+  width: min(210px, 56vw);
+  height: auto;
+}
+
+.blurb,
+.quiet {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--selected);
+}
+
+.icon {
+  flex: none;
+}
+
+.failure {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.failure p {
+  color: var(--negative);
+}
+
+.invite-card {
+  width: 100%;
+  padding: 20px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.invite-card h2 {
+  font-size: 20px;
+  font-weight: 650;
+  margin-top: 14px;
+  text-wrap: balance;
+}
+
+.invite-card p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.avatars {
+  display: flex;
+  justify-content: center;
+}
+
+.avatar {
+  --h: 260;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font-weight: 700;
+  background: hsl(var(--h) var(--tint-sat) var(--tint-bg));
+  color: hsl(var(--h) 55% var(--tint-fg));
+}
+
+.avatar.person {
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--surface);
+  position: relative;
+  z-index: 1;
+}
+
+.avatar.tile {
+  border-radius: 12px;
+  margin-left: -4px;
+}
+
+/* Signed in: narrow shows one screen (Ponds, Pond or Duck); wide shows the list and the open Pond, never more than two columns. */
+.shell {
+  min-height: 100dvh;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar h1 {
+  flex: 1;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.back {
+  text-decoration: none;
+  font-size: 28px;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.avatar-button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--selected);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs a {
+  flex: 1;
+  padding: 12px;
+  text-align: center;
+  text-decoration: none;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+}
+
+.tabs a[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--ink);
+}
+
+.empty {
+  padding: 32px 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.shell[data-route="ponds"] .detail,
+.shell:not([data-route="ponds"]) .list {
+  display: none;
+}
+
+@media (min-width: 860px) {
+  .shell {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+  }
+  .shell .list,
+  .shell[data-route="ponds"] .detail,
+  .shell:not([data-route="ponds"]) .list {
+    display: block;
+  }
+  .list {
+    border-right: 1px solid var(--line);
+  }
+  .detail > .screen {
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  .shell[data-route="ponds"] .detail:empty::before {
+    content: "Pick a Pond.";
+    display: block;
+    padding: 48px 16px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .back {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

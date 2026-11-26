@@ -15,11 +15,14 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && scripts/addons.sh build",
     "dev": "tsx watch src/squeak/cli.ts start",
     "start": "tsx src/squeak/cli.ts start",
-    "typecheck": "tsc -p tsconfig.json --noEmit && scripts/addons.sh check",
-    "lint": "eslint --no-error-on-unmatched-pattern src/ web/ addons/",
-    "format:check": "prettier --check --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
-    "format": "prettier --write --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
-    "ci": "bash scripts/check-conflict-markers.sh && npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p webapp/tsconfig.json --noEmit && scripts/addons.sh check",
+    "lint": "eslint --no-error-on-unmatched-pattern src/ web/ webapp/ addons/",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern src/ web/ webapp/ cloud/ addons/",
+    "format": "prettier --write --no-error-on-unmatched-pattern src/ web/ webapp/ cloud/ addons/",
+    "ci": "bash scripts/check-conflict-markers.sh && npm run typecheck && npm run lint && npm run format:check && npm run test && npm run webapp:build",
+    "webapp:build": "node webapp/scripts/build.mjs",
+    "webapp:dev": "node webapp/scripts/build.mjs --serve",
+    "webapp:test": "vitest run webapp src/shared"
   },
   "keywords": [
     "coding-agents",
@@ -43,9 +46,9 @@
     "node": ">=22"
   },
   "dependencies": {
-    "undici": "^8.12.3",
     "@anthropic-ai/claude-agent-sdk": "0.3.319",
     "better-sqlite3": "^12.8.0",
+    "undici": "^8.12.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -55,6 +58,7 @@
     "esbuild": "0.27.4",
     "eslint": "^10.1.0",
     "jsdom": "^31.0.0",
+    "preact": "^11.2.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

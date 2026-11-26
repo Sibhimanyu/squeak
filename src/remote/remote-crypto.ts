@@ -17,8 +17,7 @@ import zlib from "node:zlib";
  *   alone — a photographed QR code, say — can read, but never command.
  */
 
-const NONCE_BYTES = 12;
-const TAG_BYTES = 16;
+import { COMPRESSED, NONCE_BYTES, TAG_BYTES } from "../shared/box.js";
 
 export interface ChannelSecret {
   /** 128 random bits, base64url: the Firestore path, and nothing more. */
@@ -34,12 +33,8 @@ export function generateChannel(): ChannelSecret {
   };
 }
 
-/**
- * A compressed box's plaintext starts with this byte, then raw DEFLATE of the
- * JSON. JSON never starts with a zero byte, so the two cannot be confused.
- * Only for a phone that said it reads them (its presence `caps` has "z").
- */
-const COMPRESSED = 0x00;
+// A compressed box's plaintext starts with COMPRESSED, then raw DEFLATE of the JSON (src/shared/box.ts). Only for a phone
+// that said it reads them (its presence `caps` has "z").
 
 /** Encrypt a JSON value into a CryptoKit-compatible combined box, compressed first when asked. */
 export function seal(keyBase64: string, value: unknown, options: { compress?: boolean } = {}): string {

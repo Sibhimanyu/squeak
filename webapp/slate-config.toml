@@ -1,0 +1,4 @@
+# Catalyst Slate config for the new web app (Slate builds it and serves webapp/dist as a static site; in-app addresses live
+# after the `#`, so no redirect rules are needed). Deploy steps: docs/web-app-v2.md.
+framework = "static"
+deployment_name = "default"
