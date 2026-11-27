@@ -886,6 +886,21 @@ describe("a chat whose helpers still run when its turn ends", () => {
     expect(statuses.filter((x, i) => x !== statuses[i - 1])).toEqual(["working", "idle", "working", "idle"]);
   });
 
+  it("a duckling from before the agent process restarted (a resumed session) no longer counts as running", async () => {
+    const { host, runners } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const h = runners[0]!.hooks;
+    launch(h);
+    h.onTurnEnd("idle");
+    await tick(20);
+    expect(host.list().find((x) => x.id === s.id)?.ducklings?.running).toBe(1);
+    // the same chat's runner now runs a newer process: the one that launched the duckling is gone
+    (runners[0] as unknown as { processSince: () => number }).processSince = () => Date.now() + 1000;
+    const row = host.list().find((x) => x.id === s.id)!;
+    expect(row.ducklings?.running).toBe(0);
+    expect(row.ducklings?.items[0]).toMatchObject({ id: "toolu_1", status: "unknown" });
+  });
+
   it("a restarted host still lists a started subagent (as unknown), a follow-up adds no second entry", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });

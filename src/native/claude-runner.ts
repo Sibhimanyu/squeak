@@ -757,6 +757,10 @@ export class ClaudeRunner implements Runner {
   }
 
   /** Spawns the process now (no message yet), so the first send does not wait for it. */
+  processSince(): number {
+    return this.query ? this.startedAt : 0;
+  }
+
   async warm(): Promise<void> {
     await this.ensureStarted();
   }

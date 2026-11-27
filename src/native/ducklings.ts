@@ -424,11 +424,15 @@ export class DucklingTracker {
     for (const t of this.tasks.values()) if (t.status === "running") this.end(t, "stopped", at);
   }
 
-  /** No live agent process any more (the host restarted, the runner closed): nothing is running. */
-  settle(live: boolean): void {
-    if (live) return;
+  /**
+   * No live agent process any more (the host restarted, the runner closed): nothing is running. `since`: when the
+   * live process started (ms); a helper last seen before it ran in a process that has gone (a restart or a resumed
+   * session), so it is no longer running either.
+   */
+  settle(live: boolean, since?: number): void {
     for (const t of this.tasks.values()) {
       if (t.status !== "running" && t.status !== "unknown") continue;
+      if (live && !(since && t.status === "running" && Date.parse(t.lastSeenAt ?? t.startedAt) < since)) continue;
       t.status = "unknown";
       t.lastSeenAt ??= t.startedAt;
     }

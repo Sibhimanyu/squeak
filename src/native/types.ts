@@ -99,6 +99,8 @@ export interface Runner {
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
   setModel?(model: string, effort?: string | null): Promise<void>;
   close(): Promise<void>;
+  /** When the agent process now running started (ms), 0 with none: helpers from an earlier process are gone. Claude only. */
+  processSince?(): number;
   /** Whether the agent is mid-turn or has streamed lately (optional: Claude only). */
   activity?(): { busy: boolean; lastAt: number };
 }

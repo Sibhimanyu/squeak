@@ -321,6 +321,25 @@ describe("DucklingTracker", () => {
       expect(t.list(Date.parse(at(60 * 60 * 20))).items).toHaveLength(1);
     });
 
+    it("one launched before the live process started is not running: it died with the old process", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.feed(row("agent", "system/task_started", { task_id: "t1", tool_use_id: "toolu_a" }, 3));
+      t.settle(true, Date.parse(at(10)));
+      const l = t.list(Date.parse(at(60)));
+      expect(l.running).toBe(0);
+      expect(l.items).toMatchObject([{ id: "toolu_a", status: "unknown", lastSeenAt: at(3) }]);
+    });
+
+    it("one launched or last seen since the live process started keeps running", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.feed(call("toolu_b", { description: "later", prompt: "p", run_in_background: true }, 20));
+      t.feed(row("agent", "assistant", { type: "assistant", parent_tool_use_id: "toolu_a", message: {} }, 15));
+      t.settle(true, Date.parse(at(10)));
+      expect(t.list(Date.parse(at(30))).running).toBe(2);
+    });
+
     it("an unknown one still ends at its notification, and shows done", () => {
       const t = new DucklingTracker();
       launchedBg(t);

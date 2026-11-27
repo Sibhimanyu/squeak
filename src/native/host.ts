@@ -653,11 +653,18 @@ export class SessionHost extends EventEmitter {
     return tracker;
   }
 
+  /** With no live agent process nothing runs; helpers launched before the live process started died with the last one. */
+  private settleDucklings(id: string, tracker: DucklingTracker): void {
+    const runner = this.runners.get(id);
+    const since = runner?.processSince?.();
+    tracker.settle(!!runner && since !== 0, since);
+  }
+
   /** The chat's helpers now; with no live agent process nothing runs (a restart or a closed runner). */
   private ducklingsOf(id: string): Ducklings | null {
     const tracker = this.trackerOf(id);
     if (!tracker) return null;
-    tracker.settle(this.runners.has(id));
+    this.settleDucklings(id, tracker);
     const list = tracker.list(Date.now());
     // Claude waits on a foreground duckling and does nothing itself: surfaces show the ducklings, not "Working".
     const status = this.store.getSession(id)?.status;
@@ -686,7 +693,7 @@ export class SessionHost extends EventEmitter {
     const tracker = this.trackerOf(id);
     const seq = tracker?.launchSeq(taskId);
     if (!tracker || seq === null || seq === undefined) return null;
-    tracker.settle(this.runners.has(id));
+    this.settleDucklings(id, tracker);
     const detail = tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
     if (!detail) return null;
     const file = tracker.outputFileOf(taskId);
