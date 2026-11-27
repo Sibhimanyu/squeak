@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.35.0
+
+**People in your Ponds: invite by email, roles, and a Room that works while your Mac sleeps.**
+
+- Invite people to a Pond by email as a Member or Viewer. They join from the email in their browser or on their own Mac; Invitations show at the top of the sidebar with Join and Decline.
+- People sheet: everyone in the Pond with their role and when they were last online. As the Owner you can change roles, remove someone, resend or withdraw an invite, or delete the Pond.
+- Members' new Tasks and Duck starts wait for your approval; approving edits and Stop stay yours.
+- Leave, Remove and Delete take effect at once. Posts stay in the Room marked "(left)".
+- The Room lives in Squeak Cloud, so Members can post and read while your Mac is asleep; your Mac catches up in order when it's back. Pictures travel encrypted.
+- One connection line per Pond: Live, Reconnecting… or Owner's Mac offline.
+- Starting a Duck opens it straight away while it's created.
+- A new Dashboard, and a Shared filter in the Pond list.
+- Shared Ponds start clean on this version: your Ponds are yours and local again until you invite people. Nothing in your folders or git changes.
+
 ## 2.34.8
 
 **One roster everywhere, a calmer top, and ducklings in tabs.**
