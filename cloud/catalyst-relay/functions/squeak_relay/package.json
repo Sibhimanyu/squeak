@@ -9,7 +9,6 @@
     "@zcatalyst/datastreams": "1.0.1",
     "@zcatalyst/mail": "1.0.0",
     "@zcatalyst/nosql": "1.0.0",
-    "@zcatalyst/stratus": "1.1.0",
-    "@zcatalyst/zcql": "0.0.2"
+    "@zcatalyst/stratus": "1.1.0"
   }
 }

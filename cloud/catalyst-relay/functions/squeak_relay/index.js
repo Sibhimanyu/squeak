@@ -8,10 +8,10 @@ const { Mail } = require("@zcatalyst/mail");
 const { createRelay } = require("./handler");
 const { createChannelsCache } = require("./channels-cache");
 const { Datastore } = require("@zcatalyst/datastore");
-const { ZCQL } = require("@zcatalyst/zcql");
 const { Stratus } = require("@zcatalyst/stratus");
 const { createPeople } = require("./people");
 const { createStratusBucket } = require("./blob-stratus");
+const { appGetter, adminAppOf } = require("./app-access");
 const { createLiveNotices, withRemovalNotice, LIVE_CHANNEL } = require("./live-notice");
 const { createDataStoreTables } = require("./people-datastore");
 const peopleSchema = require("./people-schema.json");
@@ -26,8 +26,19 @@ const posInt = (v) => (Number(v) > 0 ? Math.floor(Number(v)) : undefined);
 
 const keysOf = (pk, doc) => new NoSQLItem().addString("pk", pk).addString("doc", doc);
 
-function storeFor(app) {
-  const table = new NoSQL(app).table(TABLE);
+function storeFor(appOrGetter) {
+  // Built at the first call (appGetter): a missing credential fails that call, never the request's wiring.
+  const getApp = appGetter(appOrGetter);
+  const tableOf = () => new NoSQL(getApp()).table(TABLE);
+  const table = new Proxy(
+    {},
+    {
+      get:
+        (_, method) =>
+        (...args) =>
+          tableOf()[method](...args),
+    },
+  );
   const query = (pk, limit, startKey) =>
     table.queryTable({
       key_condition: {
@@ -226,19 +237,22 @@ const mailerFor = (app) => {
 
 /**
  * The people tables (docs/cloud-layer.md, "People data"): wired only when SQUEAK_PEOPLE_TABLES=on, so a relay deployed before
- * the tables exist behaves exactly as it did. Unverified against a live project: `new Datastore(app).table(name)` and
- * `new ZCQL(app).executeZCQLQuery(sql)` per the @zcatalyst typings.
+ * the tables exist behaves exactly as it did. `new Datastore(app).table(name)` and `.executeZCQLQuery(sql)`.
  */
-const peopleFor = (app) => {
+const peopleFor = (appOrGetter, { removalNotice = true } = {}) => {
   if (process.env.SQUEAK_PEOPLE_TABLES !== "on") return undefined;
-  const datastore = new Datastore(app);
-  const zcql = new ZCQL(app);
-  const sdk = { table: (name) => datastore.table(name), zcql: (q) => zcql.executeZCQLQuery(q) };
+  // Datastore does ZCQL itself (`executeZCQLQuery`); @zcatalyst/zcql@0.0.2 nests its own @zcatalyst/auth, so any app from ours fails its
+  // `instanceof` check with INVALID_PROJECT_CREDENTIALS (found live 2026-11-27). The SDK objects are built per call, from the app at
+  // that moment, so a missing credential fails one call and never the whole request.
+  const getApp = appGetter(appOrGetter);
+  const datastore = () => new Datastore(getApp());
+  const sdk = { table: (name) => datastore().table(name), zcql: (q) => datastore().executeZCQLQuery(q) };
   const people = createPeople({ tables: createDataStoreTables(sdk, peopleSchema) });
-  // A removal closes the person's live subscriptions to the Pond at once (live-notice.js).
+  // A removal closes the person's live subscriptions to the Pond at once (live-notice.js); only the relay publishes.
+  if (!removalNotice) return people;
   return withRemovalNotice(
     people,
-    createLiveNotices(streamsFor(app), (s) => console.error(s)),
+    createLiveNotices(streamsFor(getApp()), (s) => console.error(s)),
   );
 };
 
@@ -247,9 +261,24 @@ const peopleFor = (app) => {
  * owner made the bucket answers every /blob call with 503 and nothing else changes. UNMEASURED live: `new Stratus(app).bucket(name)`
  * per the @zcatalyst typings.
  */
-const blobBucketFor = (app) => {
+const blobBucketFor = (appOrGetter) => {
   const name = process.env.SQUEAK_BLOB_BUCKET;
-  return name ? createStratusBucket(new Stratus(app).bucket(name)) : undefined;
+  if (!name) return undefined;
+  // The package's `Stratus` is its admin client: a bucket reads and writes with a signed URL only when the app is admin-scoped.
+  // Built per call so a bad bucket name or credential fails that /blob call, not every request.
+  const getApp = appGetter(appOrGetter);
+  const bucket = () => new Stratus(getApp()).bucket(name);
+  return createStratusBucket(
+    new Proxy(
+      {},
+      {
+        get:
+          (_, method) =>
+          (...args) =>
+            bucket()[method](...args),
+      },
+    ),
+  );
 };
 
 /** An env value that was really provided: the committed placeholder counts as unset. */
@@ -257,14 +286,16 @@ const set = (v) => (v && v !== "REPLACED_AT_DEPLOY" ? v : undefined);
 
 module.exports = async (req, res) => {
   const app = await zcAuth.init(req);
+  // People tables and blobs act as the project, not as whoever is signed in (adminAppOf).
+  const admin = await adminAppOf(zcAuth, req).catch(() => app);
   const handle = createRelay({
     key: process.env.RELAY_KEY,
     cliqKey: process.env.CLIQ_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
     mail: mailerFor(app),
-    people: peopleFor(app),
-    blobBucket: blobBucketFor(app),
+    people: peopleFor(admin),
+    blobBucket: blobBucketFor(admin),
     // The clean-start route (clean-start.js) exists only on a relay started for it: the development environment.
     cleanStart: process.env.SQUEAK_CLEAN_START === "on",
     minMacVersion: process.env.SQUEAK_MIN_MAC_VERSION,
@@ -294,3 +325,4 @@ module.exports = async (req, res) => {
 // The live service (cloud/catalyst-relay/live) reuses this wiring for the store and the people tables.
 module.exports.storeFor = storeFor;
 module.exports.peopleFor = peopleFor;
+module.exports.blobBucketFor = blobBucketFor;

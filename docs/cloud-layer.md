@@ -92,7 +92,7 @@ Who is in a Pond lives in server-readable Catalyst Data Store tables; what peopl
   columns, never `CREATEDTIME`. Lookup values in ZCQL may not contain `'`, `\` or control characters (refused, never escaped).
 - Wiring: `index.js` builds `people` only when `SQUEAK_PEOPLE_TABLES=on`, so a relay deployed before the tables exist behaves
   as before. No existing route reads the tables yet. The Data Store duplicate error shape, the ZCQL value escaping and the
-  SDK calls (`new Datastore(app).table()`, `new ZCQL(app).executeZCQLQuery()`) are **unmeasured against a live project**;
+  SDK calls (`new Datastore(app).table()`, `new Datastore(app).executeZCQLQuery()`) are **unmeasured against a live project**; `@zcatalyst/zcql` is not used (0.0.2 nests its own `@zcatalyst/auth`, so every app of ours fails its `instanceof` check: `INVALID_PROJECT_CREDENTIALS`, found live 2026-11-27); the people tables and Stratus use an admin-scoped app (`app-access.js`), built per call;
   the live test plan in `cloud-spike-2026-11.md` covers them.
 
 ## Sequence numbers and the change feed
@@ -264,8 +264,8 @@ Owner steps (nothing here is deployed; Development environment first):
    `catalyst deploy appsail --name squeak-live --build-path /tmp/live-build --stack node22 --command "node server.js"`
    with the env of `live/app-config.json` (`RELAY_KEY` the same as the relay's, `SQUEAK_RELAY_URL` the relay's base URL,
    `SQUEAK_PEOPLE_TABLES=on`). Check `GET <service>/health`.
-4. Unverified live (list for the live test): the AppSail runtime initialising the Catalyst SDK without a request (`zcAuth.init`
-   in `live/server.js` `main()`), the people-table and NoSQL reads from `squeak-live`, the Data Streams WebSocket from an
+4. Unverified live (list for the live test): the project app taken from each request's `x-zc-*` headers (`live/server.js`: `zcAuth.init` with no
+   headers throws, so nothing is built at boot), the people-table and NoSQL reads from `squeak-live`, the Data Streams WebSocket from an
    AppSail instance, and the 500-stream cap (ask Zoho, see the spike's draft email).
 5. Rollback: delete the `squeak_live` channel (the relay then publishes nothing) and the `squeak-live` service; devices fall
    back to the 30 s feed poll.

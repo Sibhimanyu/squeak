@@ -147,6 +147,7 @@ function main() {
   const { createTenants } = require("./tenants");
   const { zcAuth } = require("@zcatalyst/auth");
   const wiring = require("./index.js");
+  const { adminAppOf } = require("./app-access");
   const { createDataStreamsFanout } = require("./fanout");
   const { createHub } = require("./hub");
   const key = process.env.RELAY_KEY;
@@ -162,42 +163,54 @@ function main() {
     if (!r.ok) throw new Error(`relay ${path} ${r.status}`);
     return r.status === 204 ? null : r.json();
   };
-  // Unverified live: the function initialises the SDK from the request's x-zc-* headers; with none here the store and tables
-  // need the project credentials the AppSail runtime provides (docs/cloud-layer.md, "Live notices", owner steps).
-  zcAuth
-    .init({ headers: {} })
-    .catch(() => null)
-    .then((app) => {
-      const store = wiring.storeFor(app);
-      const people = wiring.peopleFor(app);
-      const tenants = createTenants({ store });
-      const lastSeen = {
-        write: (userId, at) => store.put("lastseen", userId, JSON.stringify({ at })),
-        read: async (userId) => {
-          const j = await store.get("lastseen", userId);
-          return j ? JSON.parse(j).at : null;
-        },
-      };
-      const fanout = createDataStreamsFanout({
-        token: () => post("/live/token", { name: `live-${process.pid}-${Date.now()}` }),
-        publish: (text) => post("/live/publish", { text }),
-        log: (s) => console.error(s),
-      });
-      const hub = createHub({ people, fanout, lastSeen, log: (s) => console.error(s) });
-      hub.start();
-      const server = createLiveServer({
-        hub,
-        auth: createAuth({ key, scoped, tenants }),
-        people,
-        lastSeen,
-        minMacVersion: process.env.SQUEAK_MIN_MAC_VERSION,
-      });
-      server.listen(port, () => console.error(`squeak live on ${port}`));
-      process.on("SIGTERM", () => {
-        hub.stop();
-        server.close(() => process.exit(0));
-      });
-    });
+  // The AppSail gateway sends the project's x-zc-* headers with each request, not at boot (zcAuth.init with none throws, and
+  // getDefaultCredentials needs a self-client token this service does not have). So the project-scoped app is taken from the
+  // latest request's headers, before that request is handled, and the store and people tables read it at the moment of use.
+  let current = null;
+  const getApp = () => {
+    if (!current) throw new Error("no Catalyst credentials yet: no request has arrived");
+    return current;
+  };
+  const store = wiring.storeFor(getApp);
+  const people = wiring.peopleFor(getApp, { removalNotice: false });
+  const tenants = createTenants({ store });
+  const lastSeen = {
+    write: (userId, at) => store.put("lastseen", userId, JSON.stringify({ at })),
+    read: async (userId) => {
+      const j = await store.get("lastseen", userId);
+      return j ? JSON.parse(j).at : null;
+    },
+  };
+  const fanout = createDataStreamsFanout({
+    token: () => post("/live/token", { name: `live-${process.pid}-${Date.now()}` }),
+    publish: (text) => post("/live/publish", { text }),
+    log: (s) => console.error(s),
+  });
+  const hub = createHub({ people, fanout, lastSeen, log: (s) => console.error(s) });
+  hub.start();
+  const server = createLiveServer({
+    hub,
+    auth: createAuth({ key, scoped, tenants }),
+    people,
+    lastSeen,
+    minMacVersion: process.env.SQUEAK_MIN_MAC_VERSION,
+  });
+  // Take the project app from this request's headers before the handler runs (the first request must not race the init).
+  const handler = server.listeners("request")[0];
+  server.removeAllListeners("request");
+  server.on("request", async (req, res) => {
+    try {
+      current = await adminAppOf(zcAuth, req);
+    } catch (e) {
+      console.error(`live: no project credentials on this request (${(e && e.code) || (e && e.message) || e})`);
+    }
+    handler(req, res);
+  });
+  server.listen(port, () => console.error(`squeak live on ${port}`));
+  process.on("SIGTERM", () => {
+    hub.stop();
+    server.close(() => process.exit(0));
+  });
 }
 
 module.exports = { createLiveServer, createAuth };
