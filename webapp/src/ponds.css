@@ -185,14 +185,6 @@ ul {
   font-weight: 700;
   line-height: 18px;
 }
-.rail-empty {
-  flex: none;
-  width: 52px;
-  height: 52px;
-  margin: 5px 0;
-  border: 1.5px dashed #6b655f;
-  border-radius: 16px;
-}
 .rail .failure {
   padding: 0 6px;
   align-items: center;
@@ -508,12 +500,6 @@ ul {
     max-width: 60px;
   }
   .tile-wrap .avatar.tile,
-  .rail-empty {
-    width: 44px;
-    height: 44px;
-    font-size: 19px;
-    border-radius: 13px;
-  }
   .rail .item.selected::before {
     display: none;
   }

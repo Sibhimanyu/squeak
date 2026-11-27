@@ -239,10 +239,7 @@ export function PondsScreen(props: PondsScreenProps) {
                 ))}
               </ul>
             ) : (
-              <>
-                <span class="rail-empty" aria-hidden="true" />
-                <p class="empty">No Ponds yet.</p>
-              </>
+              <p class="empty">No Ponds yet.</p>
             )}
           </section>
         </div>

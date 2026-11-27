@@ -109,6 +109,22 @@ describe("Ponds screen", () => {
     expect(names()).toHaveLength(4);
   });
 
+  it("shows the Invites tile with its count only when there are invitations", async () => {
+    await boot();
+    expect(text(".rail-invites .label")).toBe("Invites");
+    expect(text(".rail-invites .cnt")).toBe("1");
+    unmount();
+    root.remove();
+    await boot({ overviews: { [TOKEN]: { ponds: overview().ponds, invitations: [] } } });
+    expect(root.querySelector(".rail-invites")).toBeNull();
+    expect(root.querySelector(".rail-empty")).toBeNull();
+    unmount();
+    root.remove();
+    await boot({ overviews: { [TOKEN]: { ponds: [], invitations: [] } } });
+    expect(root.querySelector(".rail-invites")).toBeNull();
+    expect(root.querySelector(".rail-empty")).toBeNull();
+  });
+
   it("says so when there are no Ponds", async () => {
     const empty: PondsOverview = { ponds: [], invitations: [] };
     await boot({ overviews: { [TOKEN]: empty } });
