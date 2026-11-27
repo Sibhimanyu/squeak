@@ -1,8 +1,7 @@
 // The Ponds screen (issue #136): Invitations (Join, Decline), Needs you (questions only; approvals are the Mac's), and the Pond
-// list under All · Shared · Not shared, newest first. The relay sends only metadata; the line under a Pond, the marks and Needs
+// list, newest first. The relay sends only metadata; the line under a Pond, the marks and Needs
 // you were worked out in the browser from the Pond's own documents (`state/ponds-store.ts`).
 
-import { useState } from "preact/hooks";
 import type { Invitation, PondSummary } from "../../../src/shared/shapes.js";
 import { age, initial } from "../format.js";
 import type { NeedsYouItem, PondDerived } from "../pond/derive.js";
@@ -10,13 +9,6 @@ import type { Connection } from "../relay/live.js";
 import { routePath } from "../router.js";
 import type { PondsState } from "../state/ponds-store.js";
 import { Avatar, Tile, tint, Warning, Working } from "./marks.js";
-
-export type PondFilter = "all" | "shared" | "not-shared";
-const FILTERS: { id: PondFilter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "shared", label: "Shared" },
-  { id: "not-shared", label: "Not shared" },
-];
 
 export const FAILED_LIST = "Squeak can't be reached right now.";
 export const connectionLine = (c: Connection): string | null =>
@@ -121,13 +113,13 @@ export interface PondsScreenProps {
 }
 
 export function PondsScreen(props: PondsScreenProps) {
-  const [filter, setFilter] = useState<PondFilter>("all");
   const { state } = props;
   const now = props.now ?? Date.now();
   const { ponds, invitations } = state.overview;
   const { needsYou } = state;
-  const shown = ponds.filter((p) => (filter === "all" ? true : filter === "shared" ? p.shared : !p.shared));
   const line = connectionLine(state.connection);
+  // The relay may send the email as the name when the account has none; then say it once.
+  const hasName = props.account.name.trim() !== "" && props.account.name !== props.account.email;
 
   return (
     <section class="screen" data-screen="ponds">
@@ -187,22 +179,9 @@ export function PondsScreen(props: PondsScreenProps) {
           ) : null}
           <section aria-labelledby="h-ponds" data-block="ponds">
             <h2 id="h-ponds">Ponds</h2>
-            <div class="segmented" role="tablist" aria-label="Show">
-              {FILTERS.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === f.id}
-                  onClick={() => setFilter(f.id)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            {shown.length > 0 ? (
+            {ponds.length > 0 ? (
               <ul class="card list-card">
-                {shown.map((p) => (
+                {ponds.map((p) => (
                   <PondRow
                     key={p.pondId}
                     pond={p}
@@ -213,15 +192,7 @@ export function PondsScreen(props: PondsScreenProps) {
                 ))}
               </ul>
             ) : (
-              <p class="empty" data-empty={filter}>
-                {ponds.length === 0
-                  ? "No Ponds yet."
-                  : filter === "shared"
-                    ? "No shared Ponds."
-                    : filter === "not-shared"
-                      ? "Every Pond is shared."
-                      : "No Ponds yet."}
-              </p>
+              <p class="empty">No Ponds yet.</p>
             )}
           </section>
         </div>
@@ -229,8 +200,8 @@ export function PondsScreen(props: PondsScreenProps) {
       <footer class="account">
         <Avatar name={props.account.name} />
         <span class="text">
-          <strong>{props.account.name}</strong>
-          <span class="sub">{props.account.email}</span>
+          {hasName ? <strong>{props.account.name}</strong> : null}
+          {hasName ? <span class="sub">{props.account.email}</span> : <strong>{props.account.email}</strong>}
         </span>
         <a class="link" href={`#${routePath({ name: "settings" })}`}>
           Settings

@@ -43,6 +43,15 @@ import Testing
         #expect(mine.names == ["a", "d"] && mine.hiddenCount == 0)
     }
 
+    @Test func funnelIsActiveForALabelOrANarrowScope() {
+        #expect(!PondFilter.isActive(label: "", scope: .all))
+        #expect(!PondFilter.isActive(label: nil, scope: .all))
+        #expect(PondFilter.isActive(label: "work", scope: .all))
+        #expect(PondFilter.isActive(label: "", scope: .shared))
+        #expect(PondFilter.isActive(label: nil, scope: .notShared))
+        #expect(PondSharing.Scope.all.menuTitle == "All ponds")
+    }
+
     @Test func filterOutcomesForEveryKindOfPond() {
         let owned = pond(role: .owner, members: 1)
         let sharedOut = pond(role: .owner, members: 3)

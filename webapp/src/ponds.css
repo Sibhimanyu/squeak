@@ -86,8 +86,7 @@ ul {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
-.pair button,
-.segmented button {
+.pair button {
   min-height: 46px;
   border-radius: 12px;
   font-weight: 600;
@@ -183,26 +182,6 @@ button:disabled {
   to {
     opacity: 0.9;
   }
-}
-.segmented {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 12px;
-  background: var(--selected);
-  border-radius: 14px;
-}
-.segmented button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  min-height: 40px;
-}
-.segmented button[aria-selected="true"] {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line);
 }
 .connection {
   color: var(--muted);

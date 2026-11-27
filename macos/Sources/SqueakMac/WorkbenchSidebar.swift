@@ -78,7 +78,6 @@ struct WorkbenchSidebar: View {
                     if let name = PondsModel.shared.homeProject, let delta = note.object as? Int { stepPond(name, by: delta) }
                 }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
-            PondScopePicker(scope: Binding(get: { scope }, set: { pondScope = $0.rawValue }))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if model.pondsLoading {

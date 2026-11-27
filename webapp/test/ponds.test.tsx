@@ -102,25 +102,28 @@ describe("Ponds screen", () => {
     expect(rows[0]!.getAttribute("href")).toBe("#/ponds/p-green/room");
   });
 
-  it("filters All, Shared and Not shared", async () => {
+  it("has no sharing filter", async () => {
     await boot();
-    const tab = (label: string) =>
-      [...root.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === label)!;
-    act(() => tab("Shared").click());
-    expect(names()).toEqual(["greenroom", "farm-dashboard"]);
-    expect(tab("Shared").getAttribute("aria-selected")).toBe("true");
-    act(() => tab("Not shared").click());
-    expect(names()).toEqual(["orchard", "asha-notes"]);
-    act(() => tab("All").click());
+    expect(root.querySelector('[role="tab"]')).toBeNull();
+    expect(root.querySelector(".segmented")).toBeNull();
     expect(names()).toHaveLength(4);
   });
 
-  it("says so when a filter has nothing, and when there are no Ponds", async () => {
-    const empty: PondsOverview = { ponds: [pond({ pondId: "a", name: "a" })], invitations: [] };
+  it("says so when there are no Ponds", async () => {
+    const empty: PondsOverview = { ponds: [], invitations: [] };
     await boot({ overviews: { [TOKEN]: empty } });
-    expect(root.querySelector('[data-block="invitations"]')).toBeNull();
-    act(() => [...root.querySelectorAll<HTMLElement>('[role="tab"]')].find((t) => t.textContent === "Shared")!.click());
-    expect(text("[data-empty]")).toBe("No shared Ponds.");
+    expect(text('[data-block="ponds"] .empty')).toBe("No Ponds yet.");
+  });
+
+  it("shows the name and email in the footer, and the email once when there is no name", async () => {
+    await boot();
+    expect(text("footer.account strong")).toBe("Asha");
+    expect(text("footer.account .sub")).toBe("asha@fernlabs.dev");
+    unmount();
+    root.remove();
+    await boot({ accounts: { [TOKEN]: { ...ASHA, name: ASHA.email } } });
+    expect(text("footer.account strong")).toBe("asha@fernlabs.dev");
+    expect(root.querySelector("footer.account .sub")).toBeNull();
   });
 
   it("Join waits for the cloud, then opens the Pond; the invitation becomes a Pond", async () => {

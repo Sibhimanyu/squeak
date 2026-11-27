@@ -15,6 +15,15 @@ public enum PondSharing {
             }
         }
 
+        /// The funnel menu's wording for this choice.
+        public var menuTitle: String {
+            switch self {
+            case .all: "All ponds"
+            case .shared: "Shared"
+            case .notShared: "Not shared"
+            }
+        }
+
         /// The saved choice back to a scope; the earlier "mine" is Not shared, anything unknown is All.
         public static func restore(_ raw: String?) -> Scope {
             if raw == "mine" { return .notShared }

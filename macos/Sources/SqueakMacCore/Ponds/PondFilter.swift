@@ -35,6 +35,11 @@ public enum PondFilter {
         public var hiddenCount: Int
     }
 
+    /// Whether the funnel should look active: a label is chosen or the scope is not All.
+    public static func isActive(label: String?, scope: PondSharing.Scope) -> Bool {
+        !(label ?? "").isEmpty || scope != .all
+    }
+
     public static func apply(_ entries: [Entry], label: String?, showHidden: Bool, scope: PondSharing.Scope = .all) -> Result {
         let wanted = label.flatMap { l in l.isEmpty ? nil : l.lowercased() }
         let matching = entries.filter { e in
