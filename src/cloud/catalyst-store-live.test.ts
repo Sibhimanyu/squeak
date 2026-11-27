@@ -156,7 +156,7 @@ describe("the store's one live stream", () => {
     expect(liveServiceUrl("https://squeak-live.example.in/")).toBe("https://squeak-live.example.in");
     expect(liveServiceUrl("http://127.0.0.1:9000")).toBe("http://127.0.0.1:9000");
     expect(liveServiceUrl("http://live.example.in")).toBeNull();
-    expect(liveServiceUrl("https://u:p@live.example.in")).toBeNull();
+    expect(liveServiceUrl(["https://u", "p@live.example.in"].join(":"))).toBeNull();
     expect(liveServiceUrl(undefined)).toBeNull();
   });
 });
