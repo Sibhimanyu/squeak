@@ -230,11 +230,11 @@ struct ChatComposerBox<Setup: View>: View {
 
     /// Attach, mention and command: icons only, quiet until pressed.
     @ViewBuilder private var newTools: some View {
-        if editable, let tray {
+        if editable, let tray, tray.canAttach {
             AttachButton(tray: tray, symbol: .paperclip)
         } else {
             Lucide(.paperclip, size: 15, color: Theme.subtle).frame(width: 28, height: 28)
-                .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
+                .help(editable ? (tray?.unavailable ?? "This chat's source does not take attachments") : "Attachments are available when the chat can be answered")
                 .accessibilityLabel("Attach unavailable")
         }
         ComposerTriggerButton(mark: "@", label: "Mention a file", help: "Mention a file (@)", enabled: editable) { insertTrigger("@") }
@@ -310,7 +310,7 @@ struct ChatComposerBox<Setup: View>: View {
             setup()
             if let mode { ModeChip(mode: mode, onPick: onMode) }
             Spacer(minLength: 8)
-            if editable, let tray {
+            if editable, let tray, tray.canAttach {
                 AttachButton(tray: tray, symbol: .paperclip)
             } else {
                 // Attachments need an editable chat whose source takes them; the button stays so the row is the same.
@@ -329,7 +329,7 @@ struct ChatComposerBox<Setup: View>: View {
     /// "+": attach, mention a file, run a command.
     private var plusMenu: some View {
         SqueakMenu {
-            if editable, let tray { Button("Attach images…") { tray.pick() }.disabled(tray.isFull) }
+            if editable, let tray { Button("Attach images…") { tray.pick() }.disabled(tray.isFull || !tray.canAttach) }
             Button("Mention a file (@)") { insertTrigger("@") }
             Button("Run a command (/)") { insertTrigger("/") }
         } label: {

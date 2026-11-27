@@ -11,16 +11,22 @@ enum ImageSource {
 }
 
 enum ImagePasteboard {
-    /// The images on a pasteboard. A copied image file always counts; raw image bytes (a screenshot, a copy from
-    /// a page) count only when there is no text beside them, so an ordinary text paste is never taken over.
+    /// The images on a pasteboard, as `ComposerPaste` decides: copied picture files, or raw picture bytes (a screenshot, a
+    /// copy from a page) when there is no text beside them, so an ordinary text paste is never taken over.
     static func sources(_ pb: NSPasteboard, rawNeedsNoText: Bool) -> [ImageSource] {
-        let files = (pb.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingFileURLsOnly: true, .urlReadingContentsConformToTypes: [UTType.image.identifier],
-        ]) as? [URL]) ?? []
-        if !files.isEmpty { return files.map(ImageSource.file) }
-        if rawNeedsNoText, pb.availableType(from: [.string]) != nil { return [] }
-        if let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) { return [.data(d)] }
-        return []
+        let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let pictures = urls.filter { (try? $0.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .image) == true }
+        let facts = ComposerPaste.Facts(types: (pb.types ?? []).map(\.rawValue), imageFileCount: pictures.count,
+                                        otherFileCount: urls.count - pictures.count)
+        switch ComposerPaste.decide(facts, rawNeedsNoText: rawNeedsNoText) {
+        case .imageFiles: return pictures.map(ImageSource.file)
+        case .imageData(let type):
+            // The chosen type first, then any other picture type: some apps list one they cannot hand over.
+            let order = [type] + ComposerPaste.imageTypes.filter { $0 != type }
+            for t in order { if let d = pb.data(forType: NSPasteboard.PasteboardType(t)), !d.isEmpty { return [.data(d)] } }
+            return []
+        case .text: return []
+        }
     }
 }
 
@@ -39,6 +45,10 @@ final class ImageTray {
     private(set) var items: [Item] = []
     private(set) var preparing = 0
     var error: String?
+    /// Why this composer cannot take a picture right now (no folder to save it in); nil: it can. A paste or drop says
+    /// so instead of doing nothing.
+    var unavailable: String?
+    var canAttach: Bool { unavailable == nil }
     /// Inline mode (the new layout's card): each picture is inserted where the caret is, as a pending token
     /// (`InlineAttachments.pendingToken`), the moment it is pasted, dropped or picked; the field draws it as a chip.
     /// Nil: the classic strip of thumbnails above the field, and the pictures go after the words on send.
@@ -60,6 +70,7 @@ final class ImageTray {
     var hasImages: Bool { !items.isEmpty }
 
     func add(_ sources: [ImageSource]) {
+        if let unavailable { error = unavailable; return }
         for source in sources {
             guard !isFull else { error = "Up to \(ImageAttachments.maxImages) images per message."; return }
             error = nil

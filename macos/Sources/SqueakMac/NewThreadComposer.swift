@@ -89,6 +89,9 @@ final class NewThreadState {
         return place?.displayTitle
     }
     var folder: String? { conductorWorkspace?.path ?? ((startsInMain || startsPondWide) ? main?.rootPath : nil) ?? place?.path }
+    /// Why a picture cannot be added yet: it is saved in the Duck's folder, which a Duck that has not started may not have.
+    /// Saying so on paste is the fix for the silent nothing; nil once the folder is known.
+    var imagesUnavailable: String? { folder == nil ? "This Duck has no folder yet, so it can't hold an image. Start it, then paste the image into the chat." : nil }
     var hasPlace: Bool { place != nil || conductorWorkspace != nil || startsInMain || startsPondWide }
 
     /// The thread runs on the pond owner's Mac (a signed request): there is no place on this Mac to name.
@@ -350,7 +353,7 @@ struct NewThreadComposer: View {
                 ComposerField(
                     text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
                     isEnabled: state.duck.inputOpen, focusToken: state.focus, onSend: start, onEscape: onEscape,
-                    fontSize: compact ? 13 : 14, onImages: state.hasPlace ? { state.images.add($0) } : nil,
+                    fontSize: compact ? 13 : 14, onImages: { state.images.add($0) },
                     onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle)
                     .padding(.horizontal, 6)
                     .frame(height: compact ? 96 : 150)
@@ -381,6 +384,7 @@ struct NewThreadComposer: View {
             }
         }
         .disabled(state.starting && !state.duck.holds)
+        .onChange(of: state.folder, initial: true) { _, _ in state.images.unavailable = state.imagesUnavailable }
         .onChange(of: state.form.text) { _, new in picker.pick.refresh(text: new, caret: picker.caret) }
         .onChange(of: picker.caret) { _, new in picker.pick.refresh(text: state.form.text, caret: new) }
         .onChange(of: pickerSource.identity) { _, _ in picker.pick.use(pickerSource); picker.pick.refresh(text: state.form.text, caret: picker.caret) }
@@ -566,11 +570,11 @@ struct NewThreadComposer: View {
                 text: $state.form.text, sendKey: .returnSends, placeholder: "What should it work on?",
                 isEnabled: state.duck.inputOpen, focusToken: state.focus, onSend: start, onEscape: onEscape,
                 onContentHeight: { cardHeight = $0 },
-                fontSize: compact ? 13 : 14, lineHeight: 22, chips: chips, onImages: state.hasPlace ? { state.images.add($0) } : nil,
+                fontSize: compact ? 13 : 14, lineHeight: 22, chips: chips, onImages: { state.images.add($0) },
                 onCaret: { picker.caret = $0 }, onPickerKey: picker.keyHandler, handle: picker.handle, onFocus: { fieldFocused = $0 })
                 .composerFieldFrame(cardHeight, minLines: compact ? 2 : 3)
         } leading: {
-            if state.hasPlace { AttachButton(tray: state.images, symbol: .paperclip) }
+            if state.images.canAttach { AttachButton(tray: state.images, symbol: .paperclip) }
             ComposerTriggerButton(mark: "@", label: "Mention a file", help: "Mention a file (@)") { insertTrigger("@") }
             ComposerTriggerButton(mark: "/", label: "Run a command", help: "Run a command (/)") { insertTrigger("/") }
             ComposerToolbarDivider()
@@ -624,7 +628,7 @@ struct NewThreadComposer: View {
             agentChip
             presetChip
             optionsChip
-            if state.hasPlace { AttachButton(tray: state.images, size: 26) }
+            if state.images.canAttach { AttachButton(tray: state.images, size: 26) }
             Spacer(minLength: 4)
             if let line = state.duck.statusLine { startingLabel(line) }
             Text("↵ starts · ⇧↵ newline").font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1)

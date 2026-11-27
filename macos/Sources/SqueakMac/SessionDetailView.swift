@@ -870,7 +870,7 @@ struct SessionDetail: View {
             text: Binding(get: { model.draft }, set: { model.setDraft($0) }),
             placeholder: placeholder, editable: editable, focusToken: focusToken,
             chatID: session.key.hostSessionId,
-            tray: editable && session.capabilities.attachments.isSupported ? images : nil,
+            tray: editable ? images : nil,
             canSend: canSend, working: working, agent: agent,
             sendHelp: session.capabilities.attachments.reason.map { "Send (↵). Attachments: \($0)" } ?? "Send (↵). Paste, drop or + attaches images",
             sendDefault: model.sendDefault,
@@ -901,6 +901,8 @@ struct SessionDetail: View {
                 NativeModelMenu(session: session)
             }
         }
+        // A chat that cannot save a picture says why on paste, instead of ignoring it.
+        .onChange(of: session.capabilities.attachments, initial: true) { _, caps in images.unavailable = caps.isSupported ? nil : (caps.reason ?? "This chat can't take images.") }
     }
 
     /// The card's status line: this chat's ducklings (chips open as tabs, "+N" lists the rest), the ready line, and the quiet
