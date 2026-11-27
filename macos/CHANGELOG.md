@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.35.1
+
+**A tidier Pond list and image paste that always answers.**
+
+- All · Shared · Not shared now lives in the filter menu next to Ponds instead of its own row. The filter icon darkens while a filter is on.
+- Pasting or dropping an image into a duck's chat or a new duck never silently does nothing: it attaches, or says under the box why it can't. Images copied from Finder, browsers and spreadsheets paste more reliably.
+
 ## 2.35.0
 
 **People in your Ponds: invite by email, roles, and a Room that works while your Mac sleeps.**
