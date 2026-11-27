@@ -51,7 +51,14 @@ Relay contract this depends on (the fake relay implements it):
 - CORS: the relay must allow the Slate origin (and preview origins) on `/me` and `/invites/preview`, with the
   `x-squeak-account` header.
 
-## Deploy to Slate (not done yet; needs the owner)
+## Deploy to Slate
+
+Live on Development since 2026-11-27 (Slate app `squeak`, app_type cli, `https://squeak.onslate.in`). It deploys from a local folder, not
+from GitHub: build with `SQUEAK_WEB_ENV=production npm run webapp:build`; in an empty temp folder run `catalyst init -p 53069000000381140 -ni`,
+copy `webapp/dist` to `app/` and `webapp/slate-config.toml` to `app/.catalyst/`; `catalyst slate:link --name squeak --framework static
+--source app --default` (it asks for the deployment name: `default`); then `catalyst deploy slate squeak -m "<note>"`. The steps below are
+the GitHub-driven alternative, not used.
+
 
 1. In the Catalyst console, Slate, create the project (or use `squeak.onslate.in`) from the GitHub repo
    `Sibhimanyu/squeak`, branch `master`.

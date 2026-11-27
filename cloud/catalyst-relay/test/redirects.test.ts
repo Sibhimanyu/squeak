@@ -36,6 +36,8 @@ const JOIN = "https://squeak-mac.web.app/join";
 describe("/app/index.html on the relay's Catalyst domain", () => {
   it("is the one page Catalyst client hosting serves, and it loads the forward", () => {
     expect(JSON.parse(read("cloud/catalyst-relay/client/client-package.json")).homepage).toBe("index.html");
+    // Catalyst refuses a client whose name differs from the one first deployed.
+    expect(JSON.parse(read("cloud/catalyst-relay/client/client-package.json")).name).toBe("squeak-guest");
     expect(JSON.parse(read("cloud/catalyst-relay/catalyst.json")).client).toEqual({ source: "client" });
     expect(read("cloud/catalyst-relay/client/index.html")).toContain('<script src="redirect.js"></script>');
   });

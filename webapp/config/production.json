@@ -1,5 +1,6 @@
 {
   "env": "production",
   "appOrigin": "https://squeak.onslate.in",
-  "relayBase": "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay"
+  "relayBase": "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay",
+  "liveBase": "https://squeak-live-50047538056.development.catalystappsail.in"
 }
