@@ -1,65 +1,288 @@
-/* Ponds screen (#136), appended to styles.css by the build. Pond tiles and people take one hue (--h, never the duck's band)
-   from their id or name. */
-:root {
-  --waiting: #9a5b00;
-  --primary-bg: #292622;
-  --primary-fg: #f8f7f3;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --waiting: #e3a53b;
-    --primary-bg: #ece7e2;
-    --primary-fg: #13100c;
-  }
-}
-.content {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  padding: 16px 16px 24px;
-  flex: 1;
-}
-.content h2 {
-  font-size: 17px;
-  font-weight: 650;
-  margin-bottom: 10px;
+/* The rail (a strip on a phone): the logo, Invites, one tile per Pond with its name under it, and the account at the end. A Pond's
+   triangle (waiting on you) or tide (working) sits on its tile's corner. The owner's avatar is the badge on a shared Pond. */
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 .count {
   color: var(--muted);
   font-weight: 400;
   margin-left: 4px;
 }
-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+
+.rail {
+  width: 88px;
+  height: 100%;
+  background: var(--rail);
+  color: #ece7e2;
+  align-items: center;
+  padding: 18px 0 16px;
+  gap: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
-.cards {
+.rail::-webkit-scrollbar {
+  display: none;
+}
+.rail .content,
+.rail [data-block] {
+  display: contents;
+}
+.rail ul {
+  display: contents;
+}
+.rail li {
+  display: contents;
+}
+.rail-logo {
+  flex: none;
+  display: block;
+  margin-bottom: 12px;
+  border-radius: 12px;
+}
+.rail-logo img {
+  display: block;
+  width: 44px;
+  height: auto;
+}
+.rail .item,
+.rail .account .acct {
+  position: relative;
+  flex: none;
+  width: 88px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  min-height: 0;
+  border: 0;
+  background: none;
+  color: #afaaa5;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-decoration: none;
 }
-.card {
-  background: var(--surface);
+.rail .item:hover,
+.rail .account .acct:hover {
+  background: none;
+  color: #fff;
+}
+.rail .item strong,
+.rail .item .label,
+.rail .account strong {
+  display: block;
+  max-width: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: inherit;
+  text-align: center;
+}
+.rail .item.unread {
+  color: #ece7e2;
+}
+.rail .item.unread strong {
+  font-weight: 700;
+}
+.rail .item.selected {
+  color: #fff;
+}
+.rail .item.selected strong {
+  font-weight: 700;
+}
+.rail .item.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 4px;
+  height: 28px;
+  border-radius: 0 4px 4px 0;
+  background: #f8f7f3;
+}
+.rail .item.connecting {
+  opacity: 0.7;
+}
+
+.tile-wrap {
+  position: relative;
+  flex: none;
+  display: block;
+}
+.tile-wrap .avatar.tile {
+  margin: 0;
+  width: 52px;
+  height: 52px;
+  font-size: 22px;
+  border-radius: 16px;
+  background: hsl(var(--h) 55% 70%);
+  color: hsl(var(--h) 70% 16%);
+}
+.tile-wrap .avatar.small {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 19px;
+  height: 19px;
+  font-size: 9px;
+  box-shadow: 0 0 0 2px var(--rail);
+}
+.rail .item.selected .avatar.tile {
+  box-shadow:
+    0 0 0 3px var(--rail),
+    0 0 0 5px hsl(var(--h) 80% 78%);
+}
+.rail .item:focus-visible .avatar.tile,
+.rail .acct:focus-visible .avatar {
+  outline: 2px solid #f8f7f3;
+  outline-offset: 3px;
+}
+.rail .item:focus-visible,
+.rail .acct:focus-visible {
+  outline: 0;
+}
+
+.rail .waiting,
+.rail .tide {
+  position: absolute;
+  top: -1px;
+  right: 3px;
+}
+.rail .waiting {
+  width: 16px;
+  height: 16px;
+  color: #e0a030;
+}
+.rail .tide {
+  top: 1px;
+  color: #7fb0ff;
+}
+
+/* Invites: a dashed tile with the count; the invitations open in a flyout beside it. */
+.rail-invites {
+  cursor: pointer;
+}
+.rail .avatar.tile.dashed {
+  background: transparent;
+  border: 1.5px dashed #6b655f;
+  color: #ece7e2;
+}
+.rail .cnt {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #f8f7f3;
+  color: #18191b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+.rail-empty {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  margin: 5px 0;
+  border: 1.5px dashed #6b655f;
+  border-radius: 16px;
+}
+.rail .failure {
+  padding: 0 6px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-align: center;
+  color: #ece7e2;
+}
+.rail .failure p {
+  color: #f4a3a3;
+}
+.rail .failure .button {
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: transparent;
+  color: #ece7e2;
+  border-color: #6b655f;
+  font-size: 11px;
+}
+
+.rail .account {
+  margin-top: auto;
+  flex: none;
+}
+.rail .account .acct .avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+}
+.rail .account .acct .avatar.person {
+  background: hsl(var(--h) 60% 87%);
+  color: hsl(var(--h) 55% 27%);
+}
+.avatar-button {
+  display: none;
+}
+
+.rail .flyout {
+  display: none;
+}
+.rail [data-open] .flyout {
+  display: flex;
+  position: fixed;
+  z-index: 30;
+  left: 100px;
+  top: 16px;
+  width: min(360px, 100vw - 120px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 20px;
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+}
+.rail .flyout li {
+  display: block;
+}
+.rail .flyout .sub {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  clip: auto;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .invitation {
-  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 4px;
 }
-.list-card {
-  overflow: hidden;
-}
-.list-card > li + li {
-  border-top: 1px solid var(--line);
-}
-.row {
+.invitation .row {
   display: flex;
   gap: 14px;
   align-items: center;
+}
+.invitation .tile-wrap .avatar.tile {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  border-radius: 14px;
+}
+.invitation .tile-wrap .avatar.small {
+  box-shadow: 0 0 0 2px var(--raised);
 }
 .text {
   display: flex;
@@ -67,16 +290,16 @@ ul {
   min-width: 0;
   flex: 1;
 }
-.text strong {
-  font-size: 17px;
+.invitation .text strong {
+  max-width: none;
+  color: var(--ink);
+  font-size: 16px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
 }
 .sub {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -87,308 +310,253 @@ ul {
   gap: 10px;
 }
 .pair button {
-  min-height: 46px;
+  min-height: 42px;
   border-radius: 12px;
   font-weight: 600;
-  cursor: pointer;
 }
-.primary {
-  border: 0;
-  background: var(--primary-bg);
-  color: var(--primary-fg);
+.pair .outline {
+  border: 1px solid var(--ls);
+  background: transparent;
 }
-.outline {
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
+
+/* The tide: still squares that twinkle (not at all under reduced motion). */
+.tide {
+  display: inline-flex;
+  flex: none;
+  color: var(--work);
 }
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.tide svg {
+  display: block;
 }
-.failure-line {
-  color: var(--negative);
-  font-size: 15px;
+.tide rect {
+  animation: twinkle 1.6s ease-in-out infinite alternate;
 }
-.item {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
-  text-decoration: none;
-  min-height: 64px;
-}
-.item:hover {
-  background: var(--selected);
-}
-.item.pond.selected {
-  background: color-mix(in srgb, var(--selected) 70%, hsl(150 40% 60%));
-}
-.item.pond strong {
-  font-weight: 600;
-}
-.item.unread strong {
-  font-weight: 800;
+@keyframes twinkle {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .waiting {
-  color: var(--waiting);
+  color: var(--warn);
   flex: none;
 }
 .age {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   flex: none;
 }
-.tile-wrap {
-  position: relative;
-  flex: none;
-  display: block;
-}
-.tile-wrap .avatar.tile {
-  margin: 0;
-  width: 48px;
-  height: 48px;
-  font-size: 20px;
-  border-radius: 14px;
-}
-.tile-wrap .avatar.small {
-  position: absolute;
-  right: -8px;
-  bottom: -6px;
-  width: 22px;
-  height: 22px;
-  font-size: 11px;
-  box-shadow: 0 0 0 2px var(--surface);
-}
+
+/* A Duck: the template thread duck, tinted. */
 .duck {
+  --h: 200;
   flex: none;
   width: 34px;
   height: 34px;
-  background: hsl(var(--h) 60% 48%);
+  background: hsl(var(--h) var(--td-s) var(--td-l));
   -webkit-mask: url("brand/duckThread.png") center / contain no-repeat;
   mask: url("brand/duckThread.png") center / contain no-repeat;
-}
-.tide {
-  flex: none;
-  width: 56px;
-  height: 18px;
-  background-image: radial-gradient(circle, hsl(225 70% 60%) 40%, transparent 45%);
-  background-size: 7px 6px;
-  animation: tide 1.6s ease-in-out infinite alternate;
-}
-@keyframes tide {
-  from {
-    opacity: 0.45;
-  }
-  to {
-    opacity: 0.9;
-  }
 }
 .connection {
   color: var(--muted);
   font-size: 14px;
 }
 .connection[data-connection="reconnecting"] {
-  color: var(--waiting);
-}
-.account {
-  display: none;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--line);
-}
-.account .avatar {
-  width: 36px;
-  height: 36px;
-  box-shadow: none;
-}
-.link {
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-@media (min-width: 860px) {
-  .shell {
-    grid-template-columns: 400px 1fr;
-  }
-  .account {
-    display: flex;
-  }
-  .avatar-button {
-    display: none;
-  }
-  .list .screen {
-    position: sticky;
-    top: 0;
-    max-height: 100dvh;
-    overflow-y: auto;
-  }
+  color: var(--warn);
 }
 
-/* A Pond and a Duck (#137): Room and Ducks tabs, the feed (oldest first, newest at the bottom) and the composer under it. */
-.titles {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.subtitle {
-  color: var(--muted);
-  font-size: 13px;
-}
-.flock {
-  display: flex;
-  gap: 4px;
-  padding: 0 16px 8px;
-}
-.banner {
-  margin: 0 16px 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 14px;
-}
-.room,
+/* Ducks tab: soft rows. */
 .ducks {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 0 16px 16px;
-}
-.feed {
-  max-height: 60dvh;
   overflow-y: auto;
+  gap: 14px;
+  padding: 18px 0 24px;
+  align-items: center;
 }
-.feed > ol,
-.tools ul,
-.options,
-.tasks ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.ducks > * {
+  width: min(860px, 100% - 48px);
+  flex: none;
 }
-.feed > ol {
+.ducks h2 {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ducks .list-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 680px;
-}
-.msg {
-  display: flex;
   gap: 8px;
-  align-items: flex-end;
 }
-.msg.mine {
-  justify-content: flex-end;
-}
-.bubble {
-  max-width: 80%;
-  padding: 8px 12px;
-  border-radius: 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.msg.mine .bubble {
-  background: var(--selected);
-}
-.msg.pending {
-  opacity: 0.85;
-}
-.who,
-.meta,
-.note,
-.earlier,
-.mac-line,
-.readonly {
-  color: var(--muted);
-  font-size: 13px;
-}
-.who {
-  display: block;
-}
-.state-line {
+.ducks .item {
   display: flex;
-  gap: 8px;
   align-items: center;
-  color: var(--muted);
-  font-size: 14px;
-}
-.state-line strong {
-  color: var(--ink);
-}
-.tools {
-  color: var(--muted);
-  font-size: 14px;
-}
-.tasks h2 {
-  font-size: 13px;
-  color: var(--muted);
-}
-.composer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: flex-end;
-  max-width: 680px;
-}
-.composer textarea {
-  flex: 1;
-  min-width: 0;
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid var(--line-strong);
+  gap: 14px;
+  min-height: 56px;
+  padding: 10px 16px;
   border-radius: 14px;
-  background: var(--surface);
-  color: var(--ink);
-  font: inherit;
-  resize: vertical;
+  background: var(--sel);
+  text-decoration: none;
 }
-.composer .failure-line,
-.composer .note {
-  flex-basis: 100%;
+.ducks a.item:hover {
+  background: var(--sel2);
 }
-.readonly {
-  padding: 12px 16px;
+.ducks .text strong {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ducks .duck {
+  width: 28px;
+  height: 28px;
+}
+.ducks .waiting {
+  width: 20px;
+  height: 20px;
 }
 .start {
   display: flex;
   gap: 12px;
   align-items: center;
 }
+.ducks .composer {
+  padding: 0;
+  align-items: stretch;
+}
+
+/* A Duck's screen: the question card sits above the composer. */
+.actions {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 40px 0;
+}
 .decision {
-  margin: 0 16px 12px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  max-width: 680px;
+  flex: none;
+  width: min(860px, 100% - 48px);
+  margin: 0 auto 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--acc, var(--sel2)) 9%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--acc, var(--sel2)) 22%, var(--line));
+}
+.question {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 .options {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 .option {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   width: 100%;
   min-height: 44px;
-  padding: 8px 12px;
-  border: 1px solid var(--line-strong);
+  padding: 8px 14px;
+  border: 0;
   border-radius: 12px;
-  background: none;
+  background: var(--sel);
   text-align: left;
-  cursor: pointer;
+}
+.option:hover:not(:disabled) {
+  background: var(--sel2);
 }
 .option .letter {
+  width: 22px;
   font-weight: 600;
   color: var(--muted);
 }
-.actions {
-  padding: 0 16px 8px;
+.decision .composer {
+  padding: 12px 0 0;
+}
+.decision .composer .field {
+  width: 100%;
+}
+
+@media (max-width: 859px) {
+  /* The strip: tiles in a row, scrolling sideways; the account is its last item. */
+  .rail {
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: calc(max(env(safe-area-inset-top), 12px) + 8px) 12px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .rail-logo {
+    display: none;
+  }
+  .rail .item,
+  .rail .account .acct {
+    width: 64px;
+    padding: 4px 0;
+  }
+  .rail .item strong,
+  .rail .item .label,
+  .rail .account strong {
+    max-width: 60px;
+  }
+  .tile-wrap .avatar.tile,
+  .rail-empty {
+    width: 44px;
+    height: 44px;
+    font-size: 19px;
+    border-radius: 13px;
+  }
+  .rail .item.selected::before {
+    display: none;
+  }
+  .rail .account {
+    margin-top: 0;
+    margin-left: auto;
+  }
+  .rail .waiting,
+  .rail .tide {
+    right: 6px;
+  }
+  .rail [data-open] .flyout {
+    left: 12px;
+    right: 12px;
+    top: 118px;
+    width: auto;
+  }
+  .ducks > *,
+  .decision {
+    width: calc(100% - 32px);
+  }
+  .actions {
+    padding: 10px 16px 0;
+  }
+}
+
+/* The rail does not list Needs you: the question is pinned in its Pond, and the tile triangle says where. */
+.rail [data-block="needs-you"] {
+  display: none;
+}
+
+.ducks .list-card {
+  border: 0;
+  background: none;
+  border-radius: 0;
+  overflow: visible;
+}
+.ducks .list-card > li + li {
+  border-top: 0;
+}
+
+.rail .flyout .card {
+  border: 0;
+  border-radius: 0;
+  background: none;
 }

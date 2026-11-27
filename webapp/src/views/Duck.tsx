@@ -8,7 +8,7 @@ import { age } from "../format.js";
 import { conversationOf, firstName, letter } from "../pond/derive.js";
 import type { PondSession, SendResult } from "../pond/session.js";
 import type { Route } from "../router.js";
-import { Avatar } from "./marks.js";
+import { Avatar, tint } from "./marks.js";
 import { deletedText } from "./Pond.js";
 import { BackBar, Composer, FAILED_SEND, OpenOnMac, useSession, useStickToBottom } from "./parts.js";
 
@@ -81,7 +81,7 @@ export function DuckScreen(props: DuckScreenProps) {
   };
 
   return (
-    <section class="screen" data-screen="duck" data-role={pond.role}>
+    <section class="screen pa" data-screen="duck" data-role={pond.role} style={tint(pond.pondId)}>
       <BackBar
         route={route}
         title={duck.title}
@@ -114,8 +114,9 @@ export function DuckScreen(props: DuckScreenProps) {
                     <div class="bubble">
                       {item.mine ? null : <span class="who">{item.author}</span>}
                       <p>{item.text}</p>
-                      <span class="meta">{age(now, item.at)}</span>
+                      {item.mine ? null : <span class="meta">{age(now, item.at)}</span>}
                     </div>
+                    {item.mine ? <span class="meta">{age(now, item.at)}</span> : null}
                   </li>
                 );
               case "reply":
@@ -159,8 +160,8 @@ export function DuckScreen(props: DuckScreenProps) {
             <li key={p.id} class="msg mine pending" data-item={p.id}>
               <div class="bubble">
                 <p>{p.text}</p>
-                <span class="meta">Sent</span>
               </div>
+              <span class="meta">Sent</span>
             </li>
           ))}
         </ol>

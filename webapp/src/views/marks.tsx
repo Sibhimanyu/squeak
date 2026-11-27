@@ -37,5 +37,22 @@ export function Warning() {
 
 /** The working mark: a small pixel tide, still in the markup and animated only in CSS (and not at all under reduced motion). */
 export function Working() {
-  return <span class="tide" role="img" aria-label="Working" />;
+  // A still frame of the pixel tide (TideGlyph's dots); CSS twinkles the squares and stops under reduced motion.
+  const dots: [number, number][] = [
+    [3, 0],
+    [1, 1],
+    [2, 1],
+    [3, 1],
+    [4, 1],
+    [2, 2],
+  ];
+  return (
+    <span class="tide" role="img" aria-label="Working">
+      <svg viewBox="0 0 23 11" width="23" height="11" fill="currentColor" aria-hidden="true">
+        {dots.map(([x, y], i) => (
+          <rect key={i} x={x * 4} y={y * 4} width="3" height="3" style={{ animationDelay: `${i * 0.23}s` }} />
+        ))}
+      </svg>
+    </span>
+  );
 }

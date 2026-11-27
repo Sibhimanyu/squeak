@@ -179,18 +179,12 @@ export function InvitePage(props: InvitePageProps) {
 
   return (
     <main class="invite" style={tint(invite.pond)} data-state={state}>
-      <header class="top">
-        <Lockup />
-        {pending && masked ? <span class="for">An invitation for {masked}</span> : null}
-      </header>
       <section class="hero">
         <div class="hero-text">
-          <p class="pond-line">
-            <span class="avatar tile big" style={tint(invite.pond)} aria-hidden="true">
-              {initial(invite.pond)}
-            </span>
-            <span class="kicker">{invite.pond} · a Pond</span>
-          </p>
+          <header class="top">
+            <img class="duck-mark" src="brand/squeak-duck-mono-ink.svg" alt="Squeak" width="44" height="40" />
+            {pending && masked ? <span class="for">An invitation for {masked}</span> : null}
+          </header>
           {pending ? (
             <h1>
               {invite.inviter} invited you to <span class="pond-name">{invite.pond}</span>
@@ -205,20 +199,6 @@ export function InvitePage(props: InvitePageProps) {
               A shared place where people and coding Ducks work on the same project, together in one Room.
             </p>
           ) : null}
-          {invite.members.length > 0 ? (
-            <p class="members">
-              <span class="flock" aria-hidden="true">
-                {invite.members.slice(0, 4).map((m) => (
-                  <Avatar key={m} name={m} />
-                ))}
-              </span>
-              <span>
-                {nameList(invite.members)} {invite.members.length === 1 ? "is" : "are"} in {invite.pond}
-                {pending ? " and waiting for you" : ""}.
-              </span>
-            </p>
-          ) : null}
-
           {pending ? (
             <>
               {mainButtons}
@@ -293,6 +273,40 @@ export function InvitePage(props: InvitePageProps) {
                 </button>
               ))}
             </div>
+          ) : null}
+        </div>
+        <div class="hero-pond">
+          <p class="pond-line">
+            <span class="avatar tile big" style={tint(invite.pond)} aria-hidden="true">
+              {initial(invite.pond)}
+            </span>
+            <span class="pond-title">
+              <span class="pond-h">{invite.pond}</span>
+              <span class="pond-sub">
+                {invite.inviter}&rsquo;s Pond
+                {pending && invite.expiresAt ? ` · until ${expiryShort(invite.expiresAt)}` : ""}
+              </span>
+            </span>
+          </p>
+          {invite.members.length > 0 ? (
+            <p class="members">
+              <span class="flock" aria-hidden="true">
+                {invite.members.slice(0, 4).map((m) => (
+                  <Avatar key={m} name={m} />
+                ))}
+              </span>
+              <span>
+                {nameList(invite.members)} {invite.members.length === 1 ? "is" : "are"} in {invite.pond}
+                {pending ? " and waiting for you" : ""}.
+              </span>
+            </p>
+          ) : null}
+
+          {pending ? (
+            <p class="role-note">
+              Members read and post in the Room, start Ducks and answer the questions they ask. {invite.inviter}{" "}
+              approves new Tasks.
+            </p>
           ) : null}
         </div>
       </section>

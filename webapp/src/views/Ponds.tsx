@@ -2,6 +2,7 @@
 // list, newest first. The relay sends only metadata; the line under a Pond, the marks and Needs
 // you were worked out in the browser from the Pond's own documents (`state/ponds-store.ts`).
 
+import { useEffect, useState } from "preact/hooks";
 import type { Invitation, PondSummary } from "../../../src/shared/shapes.js";
 import { age, initial } from "../format.js";
 import type { NeedsYouItem, PondDerived } from "../pond/derive.js";
@@ -120,9 +121,26 @@ export function PondsScreen(props: PondsScreenProps) {
   const line = connectionLine(state.connection);
   // The relay may send the email as the name when the account has none; then say it once.
   const hasName = props.account.name.trim() !== "" && props.account.name !== props.account.email;
+  const shownName = hasName ? props.account.name : props.account.email;
+  const [inviting, setInviting] = useState(false);
+  // The invitations flyout closes with Escape, and by itself once the last invitation is answered.
+  useEffect(() => {
+    if (invitations.length === 0) setInviting(false);
+  }, [invitations.length]);
+  useEffect(() => {
+    if (!inviting) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setInviting(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [inviting]);
 
   return (
-    <section class="screen" data-screen="ponds">
+    <section class="screen rail" data-screen="ponds">
+      <a class="rail-logo" href={`#${routePath({ name: "ponds" })}`} aria-label="Squeak, all Ponds">
+        <img src="brand/squeak-duck-full-color.svg" alt="" width="44" height="40" />
+      </a>
       <header class="bar">
         <h1>Ponds</h1>
         {state.status === "ready" && line ? (
@@ -146,11 +164,40 @@ export function PondsScreen(props: PondsScreenProps) {
       {state.status === "ready" ? (
         <div class="content">
           {invitations.length > 0 ? (
-            <section aria-labelledby="h-invitations" data-block="invitations">
+            <section aria-labelledby="h-invitations" data-block="invitations" data-open={inviting ? "" : undefined}>
               <h2 id="h-invitations">
                 Invitations <span class="count">{invitations.length}</span>
               </h2>
-              <ul class="cards">
+              <button
+                type="button"
+                class="item rail-invites"
+                aria-expanded={inviting}
+                aria-controls="invitations-flyout"
+                onClick={() => setInviting(!inviting)}
+              >
+                <span class="tile-wrap">
+                  <span class="avatar tile dashed" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="22"
+                      height="22"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <rect width="20" height="16" x="2" y="4" rx="2" />
+                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                    </svg>
+                  </span>
+                  <span class="cnt" aria-hidden="true">
+                    {invitations.length}
+                  </span>
+                </span>
+                <span class="label">Invites</span>
+              </button>
+              <ul class="cards flyout" id="invitations-flyout">
                 {invitations.map((i) => (
                   <InvitationCard
                     key={i.inviteId}
@@ -192,19 +239,25 @@ export function PondsScreen(props: PondsScreenProps) {
                 ))}
               </ul>
             ) : (
-              <p class="empty">No Ponds yet.</p>
+              <>
+                <span class="rail-empty" aria-hidden="true" />
+                <p class="empty">No Ponds yet.</p>
+              </>
             )}
           </section>
         </div>
       ) : null}
       <footer class="account">
-        <Avatar name={props.account.name} />
-        <span class="text">
-          {hasName ? <strong>{props.account.name}</strong> : null}
-          {hasName ? <span class="sub">{props.account.email}</span> : <strong>{props.account.email}</strong>}
-        </span>
-        <a class="link" href={`#${routePath({ name: "settings" })}`}>
-          Settings
+        <a
+          class="acct"
+          href={`#${routePath({ name: "settings" })}`}
+          aria-label={`Settings, signed in as ${props.account.email}`}
+        >
+          <Avatar name={shownName} />
+          <span class="text">
+            <strong>{hasName ? props.account.name : props.account.email}</strong>
+            {hasName ? <span class="sub">{props.account.email}</span> : null}
+          </span>
         </a>
       </footer>
     </section>

@@ -75,8 +75,11 @@ the GitHub-driven alternative, not used.
 
 ## Ponds screen (#136)
 
-`views/Ponds.tsx` draws Invitations (Join, Decline), Needs you (questions only) and the Pond list under All · Shared · Not shared, newest
-first; narrow is one screen, from 860 px the list is the left column (400 px) with the open Pond on the right. `state/ponds-store.ts`
+`views/Ponds.tsx` draws the rail (direction B "Chat first", mocks in `docs/mocks/2026-11-27/web-redesign/b`): the logo, an Invites tile
+(Join, Decline open in a flyout), one tile per Pond newest first with a triangle (waiting on you) or tide (working) on its corner, and the
+account at the end; no sharing filter. It is an 88 px dark column from 860 px and a strip across the top on a phone. Needs you is not listed in
+the rail: the open Pond pins its own question with Answer (`NeedsPin` in `views/Pond.tsx`). With no shared Ponds `views/Home.tsx` says so
+kindly. `state/ponds-store.ts`
 reads the overview once on open and again on a live notice or the 30 s poll; `relay/live.ts` is the web's `squeak-live` client (SSE read
 with fetch because EventSource cannot send `x-squeak-account`; 35 s handover, 30 s poll fallback, "Live" / "Reconnecting…" from what the
 stream knows; no `liveBase` in the config means polling and no connection line). Join and Decline change the screen only after the cloud

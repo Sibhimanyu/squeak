@@ -58,6 +58,7 @@ for (const name of [
   "squeak-lockup-horizontal-paper",
   "squeak-lockup-stacked-paper",
   "squeak-duck-full-color",
+  "squeak-duck-mono-ink",
 ]) {
   await cp(path.join(root, "..", "brand/logo/svg", `${name}.svg`), path.join(out, "brand", `${name}.svg`));
 }

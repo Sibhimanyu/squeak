@@ -16,7 +16,19 @@ export function BackBar({ route, title, sub }: { route: Route; title: string; su
     <header class="bar">
       {parent ? (
         <a class="back" href={href(parent)} aria-label="Back">
-          ‹
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m15 18-6-6 6-6" />
+          </svg>
         </a>
       ) : null}
       <div class="titles">
@@ -69,7 +81,9 @@ export interface ComposerProps {
   owner: string;
   label: string;
   placeholder: string;
-  send: (text: string) => Promise<SendResult>;
+  send: (text: string, asTask?: boolean) => Promise<SendResult>;
+  /** Offer "Make task": the message is posted and then asked to become a Task. */
+  taskOption?: boolean | undefined;
   /** A quiet line under the box ("Sibhi approves Tasks"). */
   note?: string | undefined;
 }
@@ -79,6 +93,7 @@ export function Composer(props: ComposerProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [task, setTask] = useState(false);
   if (props.role === "viewer") {
     return (
       <p class="readonly" data-readonly="">
@@ -92,26 +107,59 @@ export function Composer(props: ComposerProps) {
     if (!body || busy) return;
     setBusy(true);
     setFailed(false);
-    const result = await props.send(body);
+    const result = await props.send(body, task);
     setBusy(false);
-    if (result === "sent") setText("");
-    else setFailed(true);
+    if (result === "sent") {
+      setText("");
+      setTask(false);
+    } else setFailed(true);
   };
   return (
     <form class="composer" onSubmit={(e) => void submit(e)}>
-      <textarea
-        aria-label={props.label}
-        placeholder={props.placeholder}
-        rows={1}
-        value={text}
-        onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.isComposing) void submit(e);
-        }}
-      />
-      <button type="submit" class="primary" disabled={busy || !text.trim()}>
-        Send
-      </button>
+      <div class="field">
+        {props.taskOption ? (
+          <button type="button" class="task-chip" aria-pressed={task} onClick={() => setTask(!task)}>
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14M12 5v14" />
+            </svg>
+            Make task
+          </button>
+        ) : null}
+        <textarea
+          aria-label={props.label}
+          placeholder={props.placeholder}
+          rows={1}
+          value={text}
+          onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) void submit(e);
+          }}
+        />
+        <button type="submit" class="primary send" aria-label="Send" disabled={busy || !text.trim()}>
+          <svg
+            viewBox="0 0 24 24"
+            width="19"
+            height="19"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m5 12 7-7 7 7M12 19V5" />
+          </svg>
+        </button>
+      </div>
       {failed ? (
         <p class="failure-line" role="alert">
           {FAILED_SEND}{" "}

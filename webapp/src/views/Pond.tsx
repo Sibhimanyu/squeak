@@ -6,14 +6,14 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PondRole, PondSummary } from "../../../src/shared/shapes.js";
 import { age } from "../format.js";
-import { duckGroups, firstName, roomItems, taskLine } from "../pond/derive.js";
+import { duckGroups, firstName, roomItems, taskLine, type NeedsYouItem } from "../pond/derive.js";
 import { canMakeTask, EARLIER_LINE, roomPostIdOf } from "../pond/room-format.js";
 import type { Duck } from "../pond/duck-format.js";
 import type { PondSession, SendResult, SessionState } from "../pond/session.js";
 import type { Connection } from "../relay/live.js";
 import type { Route } from "../router.js";
 import { connectionLine } from "./Ponds.js";
-import { Avatar, tint, Warning, Working } from "./marks.js";
+import { Avatar, Tile, tint, Warning, Working } from "./marks.js";
 import { BackBar, Composer, FAILED_SEND, href, OpenOnMac, useSession, useStickToBottom } from "./parts.js";
 
 type PondRoute = Extract<Route, { name: "pond" }>;
@@ -46,6 +46,8 @@ export interface PondScreenProps {
   deletedName?: string | undefined;
   session: PondSession | null;
   connection: Connection;
+  /** Every question waiting on this person, across Ponds: the newest one here is pinned at the top. */
+  needsYou?: NeedsYouItem[];
   /** The Pond has been looked at up to its newest change. */
   onSeen: () => void;
   now?: number;
@@ -83,15 +85,29 @@ export function PondScreen(props: PondScreenProps) {
   const data = state?.data ?? null;
 
   return (
-    <section class="screen" data-screen="pond" data-role={pond.role}>
-      <BackBar route={route} title={pond.name} sub={sub} />
-      {data && data.members.length > 0 ? (
-        <a class="flock" href={href({ name: "people", pondId: pond.pondId })} aria-label="People in this Pond">
-          {data.members.map((m) => (
-            <Avatar key={m.id} name={m.name} small />
-          ))}
-        </a>
-      ) : null}
+    <section class="screen pa" data-screen="pond" data-role={pond.role} style={tint(pond.pondId)}>
+      <header class="hd">
+        <Tile pond={pond} />
+        <div class="titles">
+          <h1>{pond.name}</h1>
+          <span class="subtitle">{sub}</span>
+        </div>
+        {data && data.members.length > 0 ? (
+          <a class="flock" href={href({ name: "people", pondId: pond.pondId })} aria-label="People in this Pond">
+            {data.members.map((m) => (
+              <Avatar key={m.id} name={m.name} small />
+            ))}
+          </a>
+        ) : null}
+        <nav class="seg tabs" role="tablist" aria-label="Pond">
+          <a role="tab" aria-selected={route.tab === "room"} href={href({ ...route, tab: "room" })}>
+            Room
+          </a>
+          <a role="tab" aria-selected={route.tab === "ducks"} href={href({ ...route, tab: "ducks" })}>
+            Ducks
+          </a>
+        </nav>
+      </header>
       {props.macCard ? (
         <aside class="mac-card" data-card="mac">
           <a href={props.macCard.href}>Get Squeak for Mac to run Ducks of your own</a>
@@ -100,15 +116,10 @@ export function PondScreen(props: PondScreenProps) {
           </button>
         </aside>
       ) : null}
-      <nav class="tabs" role="tablist" aria-label="Pond">
-        <a role="tab" aria-selected={route.tab === "room"} href={href({ ...route, tab: "room" })}>
-          Room
-        </a>
-        <a role="tab" aria-selected={route.tab === "ducks"} href={href({ ...route, tab: "ducks" })}>
-          Ducks
-        </a>
-      </nav>
       <Status state={state} owner={owner} onRetry={() => void session?.refresh()} />
+      {state?.access === "ready" && data && session ? (
+        <NeedsPin items={props.needsYou ?? []} pond={pond} now={now} />
+      ) : null}
       {state?.access === "ready" && data && session ? (
         route.tab === "room" ? (
           <RoomTab
@@ -126,6 +137,34 @@ export function PondScreen(props: PondScreenProps) {
         )
       ) : null}
     </section>
+  );
+}
+
+/** The question waiting on this person in this Pond, pinned over the Room with Answer; others wait in the rail. */
+function NeedsPin({ items, pond, now }: { items: NeedsYouItem[]; pond: PondSummary; now: number }) {
+  const first = items.find((i) => i.pondId === pond.pondId);
+  if (!first) return null;
+  const others = items.filter((i) => i.id !== first.id);
+  const elsewhere = [...new Set(others.filter((i) => i.pondId !== pond.pondId).map((i) => i.pondName))];
+  const more =
+    others.length === 0
+      ? ""
+      : ` · and ${others.length} more waiting${elsewhere.length === 1 && others.every((i) => i.pondId !== pond.pondId) ? ` in ${elsewhere[0]}` : ""}`;
+  return (
+    <aside class="pin" data-block="pin" aria-label="Needs you">
+      <span class="duck" style={tint(first.duckId)} aria-hidden="true" />
+      <div class="tx">
+        <strong>{first.title}</strong>
+        <small>
+          {first.duckName} asks · {age(now, first.at)}
+          {more ? <span class="more">{more}</span> : null}
+        </small>
+      </div>
+      <Warning />
+      <a class="primary answer" href={href({ name: "duck", pondId: first.pondId, duckId: first.duckId })}>
+        Answer
+      </a>
+    </aside>
   );
 }
 
@@ -182,6 +221,30 @@ function RoomTab(props: {
   const taskOf = new Map(data.tasks.map((t) => [t.messageId, t]));
   const owner = firstName(pond.ownerName);
   const canWrite = pond.role !== "viewer";
+  // The Duck's newest line shows its mark (waiting on you, or working) at the right.
+  const latestOf = new Map<string, string>();
+  for (const item of items) if (item.kind === "state") latestOf.set(item.duck, item.id);
+  const duckState = new Map(data.ducks.map((d) => [d.title, d] as const));
+  const duckMark = (d: Duck | undefined) =>
+    d?.state === "waiting" && d.waitingFor !== "approval" ? <Warning /> : d?.state === "working" ? <Working /> : null;
+  const meta = (item: Extract<ReturnType<typeof roomItems>[number], { kind: "message" }>) => (
+    <span class="meta">
+      {age(now, item.at)}
+      {canWrite && canMakeTask(item.post) && !taskOf.has(item.id) ? (
+        props.asked.includes(item.id) ? (
+          <span class="asked"> · Task requested</span>
+        ) : (
+          <span class="task-act">
+            {" · "}
+            <button type="button" class="link make-task" onClick={() => void makeTask(item.id)}>
+              Make task
+            </button>
+          </span>
+        )
+      ) : null}
+      {taskOf.has(item.id) ? <span class="asked"> · Task: {taskOf.get(item.id)!.state}</span> : null}
+    </span>
+  );
   const stick = useStickToBottom(`${items.length}:${waiting.length}:${waiting.map((w) => w.status).join()}`);
 
   const send = async (item: PendingPost): Promise<void> => {
@@ -191,7 +254,7 @@ function RoomTab(props: {
       all.map((p) => (p.postId === item.postId ? { ...p, status: result === "sent" ? "sent" : "failed" } : p)),
     );
   };
-  const compose = async (text: string): Promise<SendResult> => {
+  const compose = async (text: string, asTask?: boolean): Promise<SendResult> => {
     const inboxId = session.newPostId();
     const item: PendingPost = { postId: roomPostIdOf(inboxId), inboxId, text, at: Date.now(), status: "sending" };
     props.setPending((all) => [...all, item]);
@@ -199,6 +262,7 @@ function RoomTab(props: {
     props.setPending((all) =>
       all.map((p) => (p.postId === item.postId ? { ...p, status: result === "sent" ? "sent" : "failed" } : p)),
     );
+    if (asTask && result === "sent") await makeTask(item.postId);
     // A failure stays in the list under its own words, with Try again; the box clears either way.
     return "sent";
   };
@@ -233,34 +297,21 @@ function RoomTab(props: {
                   <div class="bubble">
                     {item.mine ? null : <span class="who">{item.author}</span>}
                     <p>{item.text}</p>
-                    <span class="meta">
-                      {age(now, item.at)}
-                      {canWrite && canMakeTask(item.post) && !taskOf.has(item.id) ? (
-                        props.asked.includes(item.id) ? (
-                          <span class="asked"> · Task requested</span>
-                        ) : (
-                          <>
-                            {" · "}
-                            <button type="button" class="link make-task" onClick={() => void makeTask(item.id)}>
-                              Make task
-                            </button>
-                          </>
-                        )
-                      ) : null}
-                      {taskOf.has(item.id) ? <span class="asked"> · Task: {taskOf.get(item.id)!.state}</span> : null}
-                    </span>
+                    {item.mine ? null : meta(item)}
                   </div>
+                  {item.mine ? meta(item) : null}
                 </li>
               ) : (
                 <li key={item.id} class="state-line" data-post={item.id}>
                   <span class="duck" style={tint(item.duck)} aria-hidden="true" />
-                  <span>
+                  <span class="line">
                     <strong>{item.duck}</strong> {item.text}
-                    <span class="meta"> · {age(now, item.at)}</span>
                     {item.canvases.map((c) => (
                       <OpenOnMac key={c.id} text={`Canvas “${c.title}”`} />
                     ))}
                   </span>
+                  {latestOf.get(item.duck) === item.id ? duckMark(duckState.get(item.duck)) : null}
+                  <span class="meta">{age(now, item.at)}</span>
                 </li>
               ),
             ),
@@ -268,17 +319,17 @@ function RoomTab(props: {
               <li key={p.postId} class="msg mine pending" data-post={p.postId} data-status={p.status}>
                 <div class="bubble">
                   <p>{p.text}</p>
-                  {p.status === "failed" ? (
-                    <span class="failure-line" role="alert">
-                      {FAILED_SEND}{" "}
-                      <button type="button" class="link" onClick={() => void send(p)}>
-                        Try again
-                      </button>
-                    </span>
-                  ) : (
-                    <span class="meta">{p.status === "sending" ? "Sending…" : "Sent"}</span>
-                  )}
                 </div>
+                {p.status === "failed" ? (
+                  <span class="failure-line" role="alert">
+                    {FAILED_SEND}{" "}
+                    <button type="button" class="link" onClick={() => void send(p)}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  <span class="meta">{p.status === "sending" ? "Sending…" : "Sent"}</span>
+                )}
               </li>
             )),
           ]}
@@ -290,6 +341,7 @@ function RoomTab(props: {
         label="Message the Room"
         placeholder="Message the Room"
         send={compose}
+        taskOption={canWrite}
         note={pond.role === "member" ? `${owner} approves Tasks` : undefined}
       />
     </div>

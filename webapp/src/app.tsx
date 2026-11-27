@@ -12,6 +12,7 @@ import { DuckScreen } from "./views/Duck.js";
 import { PondScreen } from "./views/Pond.js";
 import { PeopleSheet } from "./views/People.js";
 import { PondsScreen } from "./views/Ponds.js";
+import { Home } from "./views/Home.js";
 import { InvitePage, type InviteLoad } from "./views/InvitePage.js";
 import { SettingsScreen } from "./views/Settings.js";
 import { SignIn } from "./views/SignIn.js";
@@ -183,6 +184,9 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
         />
       </div>
       <div class="detail">
+        {route.name === "ponds" ? (
+          <Home state={ponds} account={state.account} macHref={onMac ? MAC_DOWNLOAD_URL : null} />
+        ) : null}
         {route.name === "pond" || route.name === "people" ? (
           <PondScreen
             key={route.pondId}
@@ -191,6 +195,7 @@ export function App({ auth, relay, router, liveBase = null, liveFetch, vault, se
             deletedName={ponds.deleted[route.pondId]}
             session={store.session(route.pondId)}
             connection={ponds.connection}
+            needsYou={ponds.needsYou}
             onSeen={() => store.markSeen(route.pondId)}
             macCard={
               macCard

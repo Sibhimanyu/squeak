@@ -1,9 +1,11 @@
-/* The invite page: warm neutrals, the Pond's own colour as the only colour added (a soft wash behind the top, the Pond name and
-   section labels). The same tokens as the rest of the web app, light and dark. */
+/* The invite page (direction C's, chosen for /invite): a duck-yellow sheet with a big headline and one ink Join button, then the
+   Pond on paper. Figtree for the headline and JetBrains Mono for the kicker are the brand's own type, used on this page only.
+   The yellow sheet is the brand constant in both themes; the rest follows the browser. */
 .invite {
   --wash: hsl(var(--h) var(--tint-sat) var(--tint-bg));
-  --pond: hsl(var(--h) 55% var(--tint-fg));
+  --pond: hsl(var(--h) var(--acc-s) var(--acc-l));
   min-height: 100dvh;
+  background: var(--paper);
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
 }
 .invite.plain {
@@ -19,37 +21,147 @@
   height: 30px;
   width: auto;
 }
-.invite .top,
-.invite .hero,
 .invite .story,
 .invite .closing,
 .invite .foot,
 .invite .story-lede,
-.invite .member-line {
+.invite .hero-pond {
   width: min(1040px, 100% - 48px);
   margin-inline: auto;
 }
-.invite .top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 24px 0;
-}
-.invite .for,
-.invite .foot {
-  color: var(--muted);
-  font-size: 14px;
-}
-.invite .hero {
-  padding: 24px 0 56px;
-}
+
 .invite .hero-text {
-  max-width: 560px;
+  --ink: #18191b;
+  --muted: #3a3720;
+  --ls: rgba(24, 25, 27, 0.28);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: max(52px, env(safe-area-inset-top)) max(24px, calc((100% - 1040px) / 2)) 30px;
+  border-radius: 0 0 34px 34px;
+  background: var(--duck);
+  color: var(--inkb);
+}
+.invite .hero-text > * {
+  max-width: 640px;
+}
+.invite .top {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 24px;
+  max-width: none;
+}
+.invite .duck-mark {
+  display: block;
+  width: 44px;
+  height: auto;
+}
+.invite .for {
+  font:
+    500 11px/1.4 "JetBrains Mono",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.invite h1 {
+  margin-top: -2px;
+  font:
+    700 clamp(44px, 9vw, 84px) / 1 Figtree,
+    var(--font);
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.invite h1.settled {
+  font-size: clamp(34px, 7vw, 56px);
+}
+.invite .pond-name {
+  color: inherit;
+}
+.invite .lede {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #3a3720;
+}
+.invite .actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.invite .actions .button {
+  width: 100%;
+  min-height: 54px;
+  border-radius: 14px;
+  font-size: 17px;
+  text-decoration: none;
+  color: var(--inkb);
+}
+.invite .button.solid {
+  background: var(--inkb);
+  border: 0;
+  color: #f8f7f3;
+}
+.invite .button.solid:hover {
+  background: #2c2d30;
+}
+.invite .actions a.button:not(.solid) {
+  background: transparent;
+  border-color: rgba(24, 25, 27, 0.4);
+}
+.invite .providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.invite .providers .quiet {
+  font-size: 15px;
+  color: #3a3720;
+}
+.invite .providers .button {
+  background: #fff;
+  color: var(--inkb);
+  border-color: rgba(24, 25, 27, 0.2);
+}
+.invite .fine {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #3a3720;
+}
+.invite .fine strong {
+  color: var(--inkb);
+}
+.invite .link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #3a3720;
+  font: inherit;
+  text-decoration: underline;
+}
+.invite .problem {
+  color: #9b1c1c;
+  font-size: 15px;
+  font-weight: 500;
+}
+.invite .ask {
+  font-size: 19px;
+  font-weight: 600;
+}
+
+/* The Pond, on paper. */
+.invite .hero-pond {
+  display: flex;
+  flex-direction: column;
   gap: 18px;
+  max-width: 640px;
+  margin-inline: max(24px, calc((100% - 1040px) / 2));
+  width: auto;
+  padding: 24px 0 8px;
 }
 .invite .pond-line {
   display: flex;
@@ -57,162 +169,79 @@
   gap: 14px;
 }
 .invite .avatar.tile.big {
-  margin: 0;
   width: 56px;
   height: 56px;
   font-size: 24px;
   border-radius: 16px;
 }
-.invite .kicker {
+.invite .pond-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.invite .pond-h {
+  font:
+    700 28px / 1 Figtree,
+    var(--font);
+  letter-spacing: -0.03em;
   color: var(--pond);
+}
+.invite .pond-sub {
   font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.invite h1 {
-  font-size: clamp(36px, 7vw, 60px);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  font-weight: 700;
-  text-wrap: balance;
-}
-.invite h1.settled {
-  font-size: clamp(28px, 5vw, 40px);
-}
-.invite .pond-name {
-  color: var(--pond);
-}
-.invite .lede {
   color: var(--muted);
-  font-size: 19px;
-  line-height: 1.5;
 }
-.invite .members,
-.invite .member-line {
+.invite .members {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  font-size: 14.5px;
+  line-height: 1.4;
   color: var(--muted);
 }
 .invite .flock {
   display: flex;
   flex: none;
 }
-.invite .flock .avatar + .avatar {
+.invite .flock .avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 14px;
+  box-shadow: 0 0 0 2px var(--paper);
   margin-left: -10px;
 }
-.invite .actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 6px;
+.invite .flock .avatar:first-child {
+  margin-left: 0;
 }
-.invite .actions .button {
-  width: auto;
-  min-width: 180px;
-  text-decoration: none;
-  color: var(--ink);
-}
-.invite .button.solid {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--bg);
-}
-.invite .providers {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: min(360px, 100%);
-}
-.invite .fine {
-  color: var(--muted);
+.invite .role-note {
+  padding: 14px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
   font-size: 14px;
   line-height: 1.5;
-}
-.invite .fine strong {
-  color: var(--ink);
-}
-.invite .link {
-  border: 0;
-  background: none;
-  padding: 0;
   color: var(--muted);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
 }
-.invite .problem {
-  color: var(--negative);
-  font-size: 15px;
-}
-.invite .ask {
-  font-size: 19px;
-  font-weight: 600;
-}
-.invite .story-lede {
-  text-align: center;
-  color: var(--muted);
-  font-size: 20px;
-  max-width: 560px;
-  text-wrap: balance;
-}
-.invite .story {
-  display: flex;
-  flex-direction: column;
-  gap: 72px;
-  padding: 56px 0;
-}
-.invite .part {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 24px;
-  align-items: center;
-}
-.invite .part h2 {
-  font-size: clamp(26px, 4vw, 36px);
-  line-height: 1.1;
-  letter-spacing: -0.015em;
-  margin: 8px 0 12px;
-  text-wrap: balance;
-}
-.invite .part p:not(.kicker) {
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1.55;
-}
-.invite .shot {
-  display: block;
-  justify-self: center;
-  width: 100%;
-  border-radius: 20px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
-  border: 1px solid var(--line);
-}
-.invite .shot.phone {
-  max-width: 260px;
-}
-.invite .shot.wide {
-  max-width: 640px;
-}
+
 @media (min-width: 820px) {
-  .invite .part {
-    grid-template-columns: 1fr 1fr;
-    gap: 64px;
+  .invite .actions {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
-  .invite .part.flip .words {
-    order: 2;
+  .invite .actions .button {
+    width: auto;
+    min-width: 220px;
+    padding: 0 28px;
+  }
+  .invite .fine {
+    text-align: left;
   }
 }
-.invite .member-line {
-  padding: 24px 28px;
-  background: var(--wash);
-  border-radius: 20px;
-  color: var(--ink);
-  font-size: 18px;
-  line-height: 1.5;
-  max-width: 760px;
+@media (max-width: 819px) {
+  .invite .fine {
+    text-align: center;
+  }
 }
+
+.invite .story-lede,
 .invite .closing {
   display: flex;
   flex-direction: column;
@@ -236,18 +265,6 @@
   padding-top: 20px;
   border-top: 1px solid var(--line);
 }
-.invite[data-state="withdrawn"] .hero,
-.invite[data-state="expired"] .hero,
-.invite[data-state="declined"] .hero,
-.invite[data-state="joined"] .hero {
-  background: none;
-}
-.invite:not(.plain) {
-  background:
-    linear-gradient(180deg, var(--wash) 0, var(--bg) 640px) no-repeat,
-    var(--bg);
-}
-
 /* The "Get Squeak for Mac" card, once, in a Pond after joining on the web. */
 .mac-card {
   display: flex;
@@ -269,4 +286,12 @@
   color: var(--muted);
   font: inherit;
   cursor: pointer;
+}
+
+.invite .actions {
+  padding: 0;
+  justify-content: flex-start;
+}
+.invite .flock {
+  order: 0;
 }
