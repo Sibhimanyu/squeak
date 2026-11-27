@@ -8,6 +8,7 @@
 #   SQUEAK_ZOHO_CLIENT_ID/SECRET  optional; left as the REPLACED_AT_DEPLOY placeholder (= unset) when absent
 #   SQUEAK_CLIQ_KEY            default: SQUEAK_CLIQ_KEY in <support dir>/.env; becomes the function's CLIQ_KEY (never printed).
 #                              Without it CLIQ_KEY stays UNSET and Cliq's handlers get a 401.
+#   SQUEAK_PEOPLE_TABLES, SQUEAK_BLOB_BUCKET, SQUEAK_MIN_MAC_VERSION, SQUEAK_CLEAN_START  optional; passed to the function when set, left unset otherwise
 #   SQUEAK_CATALYST_PROJECT_ID    default 53069000000381140 (project "squeak")
 # Secrets are only read from the environment / cloud.json and written into the temp copy; never printed.
 set -euo pipefail
@@ -54,6 +55,7 @@ if (cliqKey) e.CLIQ_KEY = cliqKey;
 else console.error("Note: no SQUEAK_CLIQ_KEY in env or .env; CLIQ_KEY stays UNSET (Cliq handlers get 401).");
 e.RELAY_KEY = key;
 e.SQUEAK_RELAY_HOSTED = "1";
+for (const k of ["SQUEAK_PEOPLE_TABLES", "SQUEAK_BLOB_BUCKET", "SQUEAK_MIN_MAC_VERSION", "SQUEAK_CLEAN_START"]) if (process.env[k]) e[k] = process.env[k];
 if (process.env.SQUEAK_ZOHO_CLIENT_ID) e.SQUEAK_ZOHO_CLIENT_ID = process.env.SQUEAK_ZOHO_CLIENT_ID;
 if (process.env.SQUEAK_ZOHO_CLIENT_SECRET) e.SQUEAK_ZOHO_CLIENT_SECRET = process.env.SQUEAK_ZOHO_CLIENT_SECRET;
 const mailFrom = process.env.SQUEAK_MAIL_FROM || (()=>{try{const l=require("fs").readFileSync(require("path").join(process.env.HOME,"Library/Application Support/squeak/.env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_MAIL_FROM\s*=/.test(x));return l&&l.slice(l.indexOf("=")+1).trim();}catch{return undefined}})();
