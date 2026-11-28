@@ -321,14 +321,34 @@ describe("DucklingTracker", () => {
       expect(t.list(Date.parse(at(60 * 60 * 20))).items).toHaveLength(1);
     });
 
-    it("one launched before the live process started is not running: it died with the old process", () => {
+    it("one launched before the live process started is stopped then: it died with the old process", () => {
       const t = new DucklingTracker();
       launchedBg(t);
       t.feed(row("agent", "system/task_started", { task_id: "t1", tool_use_id: "toolu_a" }, 3));
       t.settle(true, Date.parse(at(10)));
       const l = t.list(Date.parse(at(60)));
       expect(l.running).toBe(0);
-      expect(l.items).toMatchObject([{ id: "toolu_a", status: "unknown", lastSeenAt: at(3) }]);
+      expect(l.items).toMatchObject([{ id: "toolu_a", status: "stopped", endedAt: at(10) }]);
+      // a finished helper leaves the list like any other, not a day later
+      expect(t.list(Date.parse(at(60 * 11))).items).toHaveLength(0);
+    });
+
+    it("an unknown one is stopped once a newer process runs the chat", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.settle(false);
+      t.settle(true, Date.parse(at(30)));
+      expect(t.list(Date.parse(at(31))).items).toMatchObject([{ id: "toolu_a", status: "stopped", endedAt: at(30) }]);
+    });
+
+    it("with no live process, last seen is the chat's latest agent row, not the launch (no '0s')", () => {
+      const t = new DucklingTracker();
+      launchedBg(t);
+      t.feed(
+        row("agent", "assistant", { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }, 2820),
+      );
+      t.settle(false);
+      expect(t.list(Date.parse(at(3000))).items).toMatchObject([{ status: "unknown", lastSeenAt: at(2820) }]);
     });
 
     it("one launched or last seen since the live process started keeps running", () => {

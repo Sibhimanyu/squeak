@@ -898,7 +898,7 @@ describe("a chat whose helpers still run when its turn ends", () => {
     (runners[0] as unknown as { processSince: () => number }).processSince = () => Date.now() + 1000;
     const row = host.list().find((x) => x.id === s.id)!;
     expect(row.ducklings?.running).toBe(0);
-    expect(row.ducklings?.items[0]).toMatchObject({ id: "toolu_1", status: "unknown" });
+    expect(row.ducklings?.items[0]).toMatchObject({ id: "toolu_1", status: "stopped" });
   });
 
   it("a restarted host still lists a started subagent (as unknown), a follow-up adds no second entry", async () => {

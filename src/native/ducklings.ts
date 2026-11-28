@@ -175,8 +175,12 @@ export class DucklingTracker {
   private readonly aliases = new Map<string, string>();
   /** The chat's own model, from its latest assistant row: what a helper that names none runs on. */
   private parentModel: string | undefined;
+  /** The chat's latest agent row: its process was alive then, and so were the helpers it ran. */
+  private lastAgentRowAt: string | undefined;
 
   feed(row: MessageRow): void {
+    if (row.role === "agent" && (!this.lastAgentRowAt || row.createdAt > this.lastAgentRowAt))
+      this.lastAgentRowAt = row.createdAt;
     const p = rec(row.payload);
     if (!p) return;
     if (row.role === "agent" && row.kind === "error" && p.content === "aborted by user") {
@@ -427,14 +431,23 @@ export class DucklingTracker {
   /**
    * No live agent process any more (the host restarted, the runner closed): nothing is running. `since`: when the
    * live process started (ms); a helper last seen before it ran in a process that has gone (a restart or a resumed
-   * session), so it is no longer running either.
+   * session): it is stopped, ended then. Unknown is only for no live process at all, last seen at the chat's latest row.
    */
   settle(live: boolean, since?: number): void {
     for (const t of this.tasks.values()) {
       if (t.status !== "running" && t.status !== "unknown") continue;
-      if (live && !(since && t.status === "running" && Date.parse(t.lastSeenAt ?? t.startedAt) < since)) continue;
+      if (live) {
+        // A newer process runs the chat: the one that ran this helper is gone, and the helper with it.
+        if (since && Date.parse(t.lastSeenAt ?? t.startedAt) < since)
+          this.end(t, "stopped", new Date(since).toISOString());
+        continue;
+      }
+      if (t.status === "running") {
+        // last seen: its own latest row, or the chat's, whichever is later (the process that ran it was alive then)
+        const seen = t.lastSeenAt ?? t.startedAt;
+        t.lastSeenAt = this.lastAgentRowAt && this.lastAgentRowAt > seen ? this.lastAgentRowAt : seen;
+      }
       t.status = "unknown";
-      t.lastSeenAt ??= t.startedAt;
     }
   }
 
