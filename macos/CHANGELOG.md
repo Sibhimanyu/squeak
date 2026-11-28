@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.35.3
+
+**Ducks are Open or Closed.**
+
+- "Off duty" is now Closed and "On duty" is now Open, everywhere: the roster, the Dashboard, search and the @ list. A closed Duck says "Closed 3d ago" and has Reopen.
+
 ## 2.35.2
 
 **Ducklings that died with a restart stop showing as running.**
