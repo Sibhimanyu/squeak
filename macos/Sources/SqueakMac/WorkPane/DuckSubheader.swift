@@ -62,7 +62,7 @@ struct DuckSubheader: View {
         let role = detail?.myRole ?? pond?.role ?? .owner
         let hostId = model.hostId(session)
         let canShare = ShareDuckRule.offered(
-            sharedPond: pond.map { !$0.local } ?? false, canMessage: role.canMessage, hostId: hostId,
+            sharedPond: pond.map { !$0.local } ?? false, canMessage: (detail?.can ?? PondCan(role: role)).allows(.startDuck), hostId: hostId,
             sharedSessionIds: Set((detail?.threads ?? []).compactMap(\.sessionId)))
         return SqueakMenu {
             Button("Copy branch name") {

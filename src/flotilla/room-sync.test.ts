@@ -166,8 +166,8 @@ describe("the Room reaches Members", () => {
     expect(said(page.posts)[0]!.author).toMatchObject({ kind: "person", name: "Sibhi", id: A.service.me.id });
     // What the cloud holds is opaque.
     const raw = await new RtdbRest(url).list(`channels/${pondId}/room`);
-    // Two posts and the Room's lines about the Pond (made, joined).
-    expect(raw.length).toBe(5);
+    // Two posts and the Room's lines about the Pond (made, joined, and the policy the fixture sets for the Owner).
+    expect(raw.length).toBe(6);
     expect(JSON.stringify(raw)).not.toContain("footer");
     // A viewer watches the Room too.
     expect(said((await vSync.page(pondId)).posts)).toHaveLength(2);
@@ -666,6 +666,22 @@ describe("a Member's Tasks need the Owner's approval", () => {
     await host.jobs.act(host.project.id, made.id, { action: "drop" });
     await host.sync.idle();
     expect((await bSync.page(pondId)).tasks.find((t) => t.id === made.id)).toMatchObject({ state: "dropped" });
+  });
+
+  it("under startDucks room (the default) a Member's Make task is not held: the Room's decider starts the Duck", async () => {
+    await A.service.setPolicy(pondId, { startDucks: "room" });
+    try {
+      const said = await bSync.post(pondId, "Please look at the sitemap");
+      await apply();
+      await bSync.makeTask(pondId, `m-${said.id}`);
+      await apply();
+      const made = host.jobs.list(host.project.id).find((t) => t.messageId === `m-${said.id}`)!;
+      expect(made.approval).toBeUndefined();
+      // The Member's page says what the policy lets them do in the Room.
+      expect((await bSync.page(pondId)).can).toEqual({ "post-room": true, "make-task": true });
+    } finally {
+      await A.service.setPolicy(pondId, { startDucks: "members-approval" });
+    }
   });
 
   it("a viewer cannot make a Task, and a Make task written past the check is dropped", async () => {

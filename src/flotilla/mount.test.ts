@@ -331,6 +331,20 @@ describe("flotilla routes", () => {
     ).toBe(400);
   });
 
+  it("the Owner sets the Pond policy over the route, and the pond view carries it with me.can", async () => {
+    const h = await boot(true, null);
+    const pond = (await h.call("POST", "/native/ponds", { name: "Pol", projectId: "proj-Pol" })).json.pond;
+    const first = (await h.call("GET", `/native/ponds/${pond.id}`)).json;
+    expect(first.policy).toEqual({ reachDucks: "room", startDucks: "room" });
+    expect(first.me.can).toMatchObject({ "set-policy": true, "message-duck": true });
+    const set = await h.call("POST", `/native/ponds/${pond.id}/policy`, { reachDucks: "direct" });
+    expect(set.status).toBe(200);
+    expect(set.json).toEqual({ reachDucks: "direct", startDucks: "room" });
+    expect((await h.call("GET", `/native/ponds/${pond.id}`)).json.policy.reachDucks).toBe("direct");
+    expect((await h.call("POST", `/native/ponds/${pond.id}/policy`, { reachDucks: "sometimes" })).status).toBe(400);
+    expect((await h.call("POST", `/native/ponds/${pond.id}/policy`, { nonsense: 1 })).status).toBe(400);
+  });
+
   it("startInProject runs in the folder itself unless it is a git repository", async () => {
     const h = await boot(true, null);
     const workspaces = new WorkspaceManager({

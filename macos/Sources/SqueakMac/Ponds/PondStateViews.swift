@@ -87,13 +87,13 @@ struct PondActionsSection: View {
 
     enum Confirm: Identifiable { case rotate; var id: Self { self } }
 
-    private var role: PondRole { detail?.myRole ?? pond.role }
+    private var can: PondCan { detail?.can ?? PondCan(role: pond.role) }
 
     var body: some View {
         let canWrite = ponds.freshness(pond).canWrite
         VStack(alignment: .leading, spacing: Space.m) {
             Text("This pond").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-            if role.canInvite {
+            if can.allows(.renamePond) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Name").font(Typo.label).foregroundStyle(Theme.ink)
                     if renaming {

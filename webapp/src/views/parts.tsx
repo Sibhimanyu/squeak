@@ -86,6 +86,8 @@ export interface ComposerProps {
   taskOption?: boolean | undefined;
   /** A quiet line under the box ("Sibhi approves Tasks"). */
   note?: string | undefined;
+  /** The Pond policy says this person may not use the box: the daemon's refusal sentence, shown as the reason. */
+  blocked?: string | undefined;
 }
 
 /** The composer at the bottom. A Viewer gets the reason instead (never a dead box). A failure keeps the words and says so once. */
@@ -99,6 +101,33 @@ export function Composer(props: ComposerProps) {
       <p class="readonly" data-readonly="">
         {VIEWER_LINE(props.owner)}
       </p>
+    );
+  }
+  if (props.blocked) {
+    return (
+      <form class="composer" data-blocked="" onSubmit={(e) => e.preventDefault()}>
+        <div class="field">
+          <textarea aria-label={props.label} placeholder={props.placeholder} rows={1} disabled />
+          <button type="submit" class="primary send" aria-label="Send" disabled>
+            <svg
+              viewBox="0 0 24 24"
+              width="19"
+              height="19"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m5 12 7-7 7 7M12 19V5" />
+            </svg>
+          </button>
+        </div>
+        <p class="note" data-reason="">
+          {props.blocked}
+        </p>
+      </form>
     );
   }
   const submit = async (e: Event): Promise<void> => {

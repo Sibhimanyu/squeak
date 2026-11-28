@@ -37,6 +37,9 @@ export async function admitMember(
 ): Promise<MemberDoc> {
   const o = inside(owner);
   const m = inside(member);
+  // These tests exercise Members who message Ducks and ask for them (approval), the rules before the Pond policy: a
+  // Pond whose Owner set none keeps them here. A test of the Room-first defaults sets its own policy before admitting.
+  if (!o.pond(pondId).policy) await owner.setPolicy(pondId, { reachDucks: "direct", startDucks: "members-approval" });
   // The first person in a Pond: it is published and the Ducks shared so far become Private (what the Owner's first invite did).
   await o.prepareFirstInvite(pondId);
   const pond = o.pond(pondId);

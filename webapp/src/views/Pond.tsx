@@ -6,6 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PondRole, PondSummary } from "../../../src/shared/shapes.js";
 import { age } from "../format.js";
+import { canOf } from "../pond/can.js";
 import { duckGroups, firstName, roomItems, taskLine, type NeedsYouItem } from "../pond/derive.js";
 import { canMakeTask, EARLIER_LINE, roomPostIdOf } from "../pond/room-format.js";
 import type { Duck } from "../pond/duck-format.js";
@@ -220,7 +221,7 @@ function RoomTab(props: {
   const waiting = props.pending.filter((p) => !landed.has(p.postId));
   const taskOf = new Map(data.tasks.map((t) => [t.messageId, t]));
   const owner = firstName(pond.ownerName);
-  const canWrite = pond.role !== "viewer";
+  const can = canOf(pond.role, state.selfId, data.policy);
   // The Duck's newest line shows its mark (waiting on you, or working) at the right.
   const latestOf = new Map<string, string>();
   for (const item of items) if (item.kind === "state") latestOf.set(item.duck, item.id);
@@ -230,7 +231,7 @@ function RoomTab(props: {
   const meta = (item: Extract<ReturnType<typeof roomItems>[number], { kind: "message" }>) => (
     <span class="meta">
       {age(now, item.at)}
-      {canWrite && canMakeTask(item.post) && !taskOf.has(item.id) ? (
+      {can.makeTask === true && canMakeTask(item.post) && !taskOf.has(item.id) ? (
         props.asked.includes(item.id) ? (
           <span class="asked"> · Task requested</span>
         ) : (
@@ -341,8 +342,8 @@ function RoomTab(props: {
         label="Message the Room"
         placeholder="Message the Room"
         send={compose}
-        taskOption={canWrite}
-        note={pond.role === "member" ? `${owner} approves Tasks` : undefined}
+        taskOption={can.makeTask === true}
+        note={can.waitsForOwner.makeTask ? `${owner} approves Tasks` : undefined}
       />
     </div>
   );
@@ -381,6 +382,7 @@ function DucksTab(props: {
   const data = state.data!;
   const [starting, setStarting] = useState(false);
   const owner = firstName(pond.ownerName);
+  const can = canOf(pond.role, state.selfId, data.policy);
   const groups = duckGroups(data.ducks);
   const shownRequests = new Set(data.ducks.flatMap((d) => (d.requestId ? [d.requestId] : [])));
   const waiting = props.ducks.filter((d) => !shownRequests.has(d.requestId));
@@ -397,21 +399,27 @@ function DucksTab(props: {
 
   return (
     <div class="ducks" data-tab="ducks">
-      {pond.role === "viewer" ? null : starting ? (
+      {can.postRoom !== true ? null : starting ? (
         <Composer
           role={pond.role}
           owner={owner}
           label="First message for the new Duck"
           placeholder="What should the Duck do?"
           send={start}
-          note={pond.role === "member" ? `${owner} approves new Ducks` : undefined}
+          note={can.waitsForOwner.startDuck ? `${owner} approves new Ducks` : undefined}
         />
       ) : (
         <div class="start">
-          <button type="button" class="outline" onClick={() => setStarting(true)}>
+          <button type="button" class="outline" disabled={can.startDuck !== true} onClick={() => setStarting(true)}>
             Start a Duck
           </button>
-          {pond.role === "member" ? <span class="note">{owner} approves new Ducks</span> : null}
+          {can.startDuck !== true ? (
+            <span class="note" data-reason="">
+              {can.startDuck}
+            </span>
+          ) : can.waitsForOwner.startDuck ? (
+            <span class="note">{owner} approves new Ducks</span>
+          ) : null}
         </div>
       )}
       {waiting.length > 0 ? (

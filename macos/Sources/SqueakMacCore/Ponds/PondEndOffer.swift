@@ -81,5 +81,5 @@ extension PondSummary {
 
     /// Invite is on every Pond this person owns, a local one with no Ducks included (the invite shares it first). `detailRole` is
     /// the role the Pond's page says; before it is read the row's own role answers.
-    public func mayInvite(detailRole: PondRole?) -> Bool { (detailRole ?? role).canInvite }
+    public func mayInvite(detailRole: PondRole?) -> Bool { PondCan(role: detailRole ?? role).allows(.invite) }
 }

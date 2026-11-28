@@ -39,6 +39,7 @@ struct PondSettingsView: View {
     private var removeEndsPond: Bool { pond.map { !$0.local && $0.role == .owner && $0.state == .active } ?? false }
     private var role: PondRole { ponds.detail(key: key)?.myRole ?? pond?.role ?? .owner }
     private var native: NativeProject? { ponds.native(key: key) }
+    private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,6 +72,9 @@ struct PondSettingsView: View {
                             } else {
                                 branches(native).id("Streams")
                                 scripts.id("Scripts")
+                            }
+                            if let pond, !pond.local, PondPermissions.offered(detail?.can ?? PondCan(role: role)) {
+                                PondPermissionsSection(pondId: pond.id).id("Permissions")
                             }
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
@@ -330,7 +334,7 @@ struct PondSettingsView: View {
     }
 
     @ViewBuilder private var invite: some View {
-        if role.canInvite, let p = pond {
+        if (detail?.can ?? PondCan(role: role)).allows(.invite), let p = pond {
             Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
         }
     }

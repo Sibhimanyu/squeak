@@ -238,7 +238,7 @@ struct PondFlockSection: View {
     private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
     private var person: String { PondsModel.shared.myName.isEmpty ? "You" : PondsModel.shared.myName }
-    private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
+    private var can: PondCan { detail?.can ?? PondCan(role: pond?.role ?? .owner) }
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
             project: model.pondProject(key), detail: detail, me: person,
@@ -283,11 +283,14 @@ struct PondFlockSection: View {
     }
 
     @ViewBuilder private func memberActions(_ m: FlockMember) -> some View {
-            ForEach(PondMembers.rolesToChangeTo(m), id: \.self) { r in
+            ForEach(PondMembers.rolesToChangeTo(m, can: can), id: \.self) { r in
                 Button("Make \(r.word.lowercased())") { if let p = pond { Task { await ponds.setRole(pond: p.id, member: m.id, role: r) } } }
             }
-            if m.role != .owner { Divider() }
-            Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
+            if let p = pond, PondMembers.menu(for: m, owner: can)?.offersPolicy == true {
+                PondPersonPolicyItems(pondId: p.id, member: m.id, policy: m.policy)
+            }
+            if can.allows(.removeMember) { Divider() }
+            if can.allows(.removeMember) { Button("Remove from pond\u{2026}", role: .destructive) { removing = m } }
     }
 
     private func memberRow(_ m: FlockMember, counts: [String: Int], presence: [PondPresenceEntry], offline: Bool, canWrite: Bool) -> some View {
@@ -307,6 +310,9 @@ struct PondFlockSection: View {
                 if let email = PersonName.emailLine(m) {
                     Text(verbatim: email).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 }
+                if let custom = PondPermissions.customLine(m.policy) {
+                    Text(verbatim: custom).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(2)
+                }
                 if let failed = pond.flatMap({ ponds.actions.failure("remove:\($0.id):\(m.id)") }) {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                         Text(verbatim: failed).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
@@ -320,7 +326,7 @@ struct PondFlockSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            if !dashboard, role.canRemoveMembers, !m.you, pond != nil {
+            if !dashboard, PondMembers.menu(for: m, owner: can) != nil, pond != nil {
                 SqueakMenu { memberActions(m) } label: { Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("More for \(m.name)")
                     .disabled(removingNow || changing || !canWrite)
@@ -329,7 +335,7 @@ struct PondFlockSection: View {
         .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .opacity(removingNow ? 0.6 : 1)
         .contextMenu {
-            if dashboard, role.canRemoveMembers, !m.you, pond != nil, !removingNow, !changing, canWrite { memberActions(m) }
+            if dashboard, PondMembers.menu(for: m, owner: can) != nil, pond != nil, !removingNow, !changing, canWrite { memberActions(m) }
         }
     }
 }

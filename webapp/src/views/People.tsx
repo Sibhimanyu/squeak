@@ -7,6 +7,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { PondSummary } from "../../../src/shared/shapes.js";
 import { ago, initial } from "../format.js";
+import { DEFAULT_POLICY } from "../../../src/shared/pond-policy.js";
+import { canOf } from "../pond/can.js";
 import { firstName } from "../pond/derive.js";
 import type { ActResult, PondInvite, PondPeople, PondPerson, Relay } from "../relay/client.js";
 import { href } from "./parts.js";
@@ -107,11 +109,12 @@ export function PeopleSheet(props: PeopleSheetProps) {
 
   const owner = people?.members.find((m) => m.role === "owner");
   const ownerFirst = firstName(owner ? shownName(owner) : pond.ownerName);
-  const isOwner = pond.role === "owner";
+  // The Owner-only people actions are role-only: no Pond policy setting reaches them.
+  const can = canOf(pond.role, props.selfUserId, DEFAULT_POLICY);
   const pending = people?.invites.filter((i) => i.state === "pending").length ?? 0;
   const invites = (people?.invites ?? []).filter((i) => i.state !== "joined");
   const countLine = people
-    ? isOwner
+    ? can.invite === true
       ? `${people.members.length + pending} of ${people.cap}, counting invites`
       : `${people.members.length} ${people.members.length === 1 ? "person" : "people"}`
     : "";
@@ -155,7 +158,7 @@ export function PeopleSheet(props: PeopleSheetProps) {
         ) : null}
         {load === "ready" && people ? (
           <>
-            {isOwner ? (
+            {can.invite === true ? (
               <form class="invite-form" onSubmit={(e) => void invite(e)}>
                 <input
                   type="email"
@@ -200,7 +203,7 @@ export function PeopleSheet(props: PeopleSheetProps) {
                       {m.name.trim() ? <span class="sub email">{m.email}</span> : null}
                       <span class="sub presence">{lastSeen(now, m)}</span>
                     </span>
-                    {isOwner && m.role !== "owner" ? (
+                    {can.changeRole === true && can.removeMember === true && m.role !== "owner" ? (
                       <span class="actions">
                         <select
                           aria-label={`Role of ${name}`}
@@ -250,7 +253,7 @@ export function PeopleSheet(props: PeopleSheetProps) {
                 );
               })}
             </ul>
-            {isOwner && invites.length > 0 ? (
+            {can.invite === true && invites.length > 0 ? (
               <>
                 <h3>
                   Invites <span class="count">{invites.length}</span>
@@ -318,7 +321,7 @@ export function PeopleSheet(props: PeopleSheetProps) {
                 </ul>
               </>
             ) : null}
-            {isOwner ? (
+            {can.deletePond === true ? (
               <section class="danger-zone" data-block="delete">
                 {confirm?.kind === "delete" ? (
                   <form

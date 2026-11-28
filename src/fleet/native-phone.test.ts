@@ -202,6 +202,24 @@ describe("NativePhone", () => {
       canMessage: false,
       reason: "The owner has turned off messaging for you in this pond.",
     });
+    // The host's Pond policy answers (me.can), whatever the role: its sentence is the reason, true opens it.
+    const room = await make({
+      id: "me",
+      role: "member",
+      caps: { message: true },
+      can: { "message-duck": "Ducks answer in the Room here: say it there and the right one picks it up." },
+    }).pondFlock("a");
+    expect(room).toMatchObject({
+      canMessage: false,
+      reason: "Ducks answer in the Room here: say it there and the right one picks it up.",
+    });
+    const direct = await make({
+      id: "me",
+      role: "member",
+      caps: { message: false },
+      can: { "message-duck": true },
+    }).pondFlock("a");
+    expect(direct?.canMessage).toBe(true);
   });
 
   it("reads the order and a pond's page from the host's own routes, and writes through them", async () => {

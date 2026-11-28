@@ -40,9 +40,13 @@ A short-lived subagent a Duck spawns to do part of its work.
 _Avoid_: Subagent (in user-facing words), child
 
 **Member**:
-A person, identified by their account, who joined a Pond from an email invite. Roles: Owner, Member (posts, messages Ducks, makes Tasks that wait for the Owner) and Viewer (reads only).
+A person, identified by their account, who joined a Pond from an email invite. Roles: Owner, Member (posts in the Room and makes Tasks; what else is the Pond policy's) and Viewer (reads only).
 _Avoid_: Guest, collaborator, user, device
 
 **Owner**:
 The Member whose Mac holds the Pond's folder and runs its Ducks.
 _Avoid_: Host, admin
+
+**Pond policy**:
+The two settings the Owner sets for what Members may do with Ducks, with per-person overrides. `reachDucks`: Members talk to Ducks in the Room (the default) or directly. `startDucks`: the Room's decider starts Ducks for them (the default), a Member asks and the Owner approves, or a Member starts them. Approving edits, shell and pushes, and Stop, are never in it: they stay the Owner's.
+_Avoid_: Switches, presets

@@ -50,6 +50,10 @@ public enum PondConnection: Sendable, Equatable {
 public struct PondDashboardHeader: Sendable, Equatable {
     public struct Facts: Sendable, Equatable {
         public var role: PondRole
+        /// What the daemon says this person may do; the role only stands in for an older daemon, inside `PondCan`.
+        public var can: PondCan
+        /// The daemon's sentence for why a Duck cannot be started here.
+        public var startReason: String?
         /// The directory knows the Pond (an invite, a rename and a delete need it).
         public var hasPond: Bool
         /// Only on this Mac: never shared yet.
@@ -74,8 +78,9 @@ public struct PondDashboardHeader: Sendable, Equatable {
         public init(
             role: PondRole, hasPond: Bool = true, isLocal: Bool = false, plainFolder: Bool = false, isRemote: Bool = false,
             ownerName: String? = nil, people: Int = 1, connection: PondConnection = .live, connectionLine: String? = nil, start: PondChrome.Start = .own,
-            startBlockedReason: String? = nil, canWrite: Bool = true
+            startBlockedReason: String? = nil, canWrite: Bool = true, can: PondCan? = nil, startReason: String? = nil
         ) {
+            self.can = can ?? PondCan(role: role); self.startReason = startReason
             self.role = role; self.hasPond = hasPond; self.isLocal = isLocal; self.plainFolder = plainFolder; self.isRemote = isRemote
             self.ownerName = ownerName; self.people = people; self.connection = connection; self.connectionLine = connectionLine; self.start = start
             self.startBlockedReason = startBlockedReason; self.canWrite = canWrite
@@ -128,22 +133,29 @@ public struct PondDashboardHeader: Sendable, Equatable {
         case .askOwner:
             start = .open(label: startLabel, help: "Asks \(owner) to start it on their Mac")
         case .hidden:
-            start = .closed(reason: f.role == .viewer ? viewerLine(f.ownerName) : "Ask \(owner) to let you start Ducks.")
+            start = .closed(reason: closedStartReason(f))
         }
-        if f.role == .viewer { start = .closed(reason: viewerLine(f.ownerName)) }
+        if !f.can.allows(.startDuck) { start = .closed(reason: closedStartReason(f)) }
         if case .open = start, let why = f.startBlockedReason { start = .closed(reason: why) }
         if case .closed(let reason) = start { closedLine = reason }
 
         let owns = f.role == .owner && !f.isRemote
         var menu: [MenuItem] = [.settings, .notebook]
-        if owns { if f.hasPond { menu += [.rename, .delete] } } else if f.isRemote || f.role != .owner { menu.append(.leave) }
+        if owns { if f.hasPond { if f.can.allows(.renamePond) { menu.append(.rename) }; if f.can.allows(.deletePond) { menu.append(.delete) } } }
+        else if f.isRemote || f.role != .owner { menu.append(.leave) }
 
         return PondDashboardHeader(
             stateLine: line, start: start,
-            showsInvite: owns && f.hasPond,
+            showsInvite: owns && f.hasPond && f.can.allows(.invite),
             inviteDisabledReason: f.canWrite ? nil : "Squeak can\u{2019}t reach the Pond right now. Invite works again when it\u{2019}s back.",
             showsPutOnGitHub: owns && f.plainFolder,
             closedLine: closedLine, menu: menu)
+    }
+
+    /// Why Start a Duck is closed: the daemon's sentence, else the viewer's line (a person who cannot post at all) or the old ask.
+    static func closedStartReason(_ f: Facts) -> String {
+        if let why = f.startReason ?? f.can.reason(.startDuck) { return why }
+        return f.can.allows(.postRoom) ? "Ask \(ownerWord(f.ownerName)) to let you start Ducks." : viewerLine(f.ownerName)
     }
 
     public static func viewerLine(_ ownerName: String?) -> String {
@@ -262,8 +274,9 @@ public enum PondDashboardNeedsYou {
     /// "Waiting for Sibhi".
     public static func build(
         rows: [PondChatRow], tasks: [RoomTask], role: PondRole, ownerName: String?,
-        starts: [PondPendingStart] = []
+        starts: [PondPendingStart] = [], can: PondCan? = nil
     ) -> [PondDashboardNeedsYouItem] {
+        let can = can ?? PondCan(role: role)
         var out: [PondDashboardNeedsYouItem] = []
         for r in rows where r.needsYou && !r.isFlock {
             let name = r.heading ?? r.title
@@ -272,7 +285,7 @@ public enum PondDashboardNeedsYou {
         }
         for s in starts {
             let title = s.title.isEmpty ? "A new duck" : s.title
-            if role == .owner, !s.mine {
+            if can.allows(.approveStart), !s.mine {
                 let who = s.name.isEmpty ? "A Member" : s.name
                 out.append(PondDashboardNeedsYouItem(kind: .startApproval(requestId: s.requestId), title: title, line: "\(who) asked for this Duck", needsDecision: true))
             } else if s.mine {
@@ -282,14 +295,14 @@ public enum PondDashboardNeedsYou {
         }
         for t in tasks where t.state == .waiting && !t.proposed {
             guard let who = t.approvalName else { continue }
-            if role == .owner {
+            if can.allows(.approveStart) {
                 out.append(PondDashboardNeedsYouItem(kind: .taskApproval(taskId: t.id), title: t.title, line: "\(who) asked for this Task", needsDecision: true))
             } else {
                 out.append(PondDashboardNeedsYouItem(
                     kind: .taskWaiting(taskId: t.id), title: t.title, line: "Waiting for \(PondDashboardHeader.ownerWord(ownerName))", needsDecision: false))
             }
         }
-        if role == .owner {
+        if can.allows(.approveStart) {
             for t in tasks where t.state == .blocked {
                 out.append(PondDashboardNeedsYouItem(kind: .taskBlocked(taskId: t.id), title: t.title, line: "Blocked", needsDecision: true))
             }
@@ -341,11 +354,14 @@ public struct PondDashboardBlocks: Sendable, Equatable {
     }
 
     /// The one sentence under the duck in an empty Ducks block, for the role.
-    public static func emptySentence(role: PondRole) -> String {
-        switch role {
-        case .owner: "No ducks yet. Start one and it gets to work in this Pond."
-        case .member: "No ducks here yet. Start one and it goes to the Owner to approve."
-        case .viewer: "No ducks to see yet."
-        }
+    public static func emptySentence(role: PondRole) -> String { emptySentence(can: PondCan(role: role), policy: nil) }
+
+    /// The same from what the daemon says: a Duck waits for the Owner only when the policy says so.
+    public static func emptySentence(can: PondCan, policy: PondEffectivePolicy?) -> String {
+        if can.allows(.approveStart) { return "No ducks yet. Start one and it gets to work in this Pond." }
+        if !can.allows(.postRoom) { return "No ducks to see yet." }
+        if policy?.startDucks.waitsForOwner == true { return "No ducks here yet. Start one and it goes to the Owner to approve." }
+        if can.allows(.startDuck) { return "No ducks here yet. Start one and it gets to work in this Pond." }
+        return "No ducks here yet. Say what you need in the Room and one will be started."
     }
 }

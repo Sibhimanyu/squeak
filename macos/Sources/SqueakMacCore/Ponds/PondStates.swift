@@ -173,8 +173,14 @@ public enum PondMembers {
     public static func chip(_ m: FlockMember) -> String { m.role.word }
 
     /// The roles an owner may change someone to (not the owner's own).
-    public static func rolesToChangeTo(_ m: FlockMember) -> [PondRole] {
-        m.role == .owner || m.you ? [] : [PondRole.member, .viewer].filter { $0 != m.role }
+    public static func rolesToChangeTo(_ m: FlockMember, can: PondCan? = nil) -> [PondRole] {
+        guard can?.allows(.changeRole) ?? true else { return [] }
+        return m.role == .owner || m.you ? [] : [PondRole.member, .viewer].filter { $0 != m.role }
+    }
+
+    /// The per-person menu for one member (role and the two overrides), from what the daemon says the signed-in person may do.
+    public static func menu(for m: FlockMember, owner: PondCan) -> PondPermissions.PersonMenu? {
+        PondPermissions.personMenu(owner: owner, you: m.you, connecting: false, currentRole: m.role)
     }
 
     /// Which machine a member is on: "Aarav\u{2019}s MacBook", "Web", or nil.
@@ -297,14 +303,15 @@ public enum PondThreadStatus {
     }
 
     /// Why the composer is closed: a viewer, or a chat that runs without asking (only its starter may message it).
-    public static func composerBlock(role: PondRole, asks: Bool?, isStarter: Bool, starterName: String) -> String? {
-        if !role.canMessage { return viewerLine }
+    public static func composerBlock(role: PondRole, asks: Bool?, isStarter: Bool, starterName: String, can: PondCan? = nil) -> String? {
+        let can = can ?? PondCan(role: role)
+        if !can.allows(.messageDuck) { return can.reason(.messageDuck) ?? viewerLine }
         if asks == false, !isStarter { return "Only \(starterName.isEmpty ? "the starter" : starterName) can message this duck while it runs without asking." }
         return nil
     }
 
     /// Whether answer controls (question buttons, the answer box) are offered: a viewer reads only.
-    public static func canAnswer(role: PondRole) -> Bool { role.canMessage }
+    public static func canAnswer(role: PondRole, can: PondCan? = nil) -> Bool { (can ?? PondCan(role: role)).allows(.answerQuestion) }
 
     /// "Private" or "Shared with the pond", for a row or a switch's caption.
     public static func visibility(isPrivate: Bool) -> String { isPrivate ? "Private" : "Shared with the pond" }
@@ -346,7 +353,7 @@ public enum PondNotes {
 
     /// The owner's: each new member (the person accepted an invite). A pond not read yet announces nothing from its first read.
     public static func owner(pond: PondSummary, old: PondDetail?, new: PondDetail) -> [PondNote] {
-        guard new.myRole == .owner else { return [] }
+        guard new.can.allows(.invite) else { return [] }
         var out: [PondNote] = []
         if let old {
             let known = Set(old.members.map(\.id))
@@ -359,7 +366,7 @@ public enum PondNotes {
 
     /// A member's: a teammate's thread that just started waiting on a question a member may answer. Approvals stay with the starter.
     public static func threads(pond: PondSummary, old: PondDetail?, new: PondDetail) -> [PondNote] {
-        guard let old, new.myRole.canMessage else { return [] }
+        guard let old, new.can.allows(.answerQuestion) else { return [] }
         let me = new.meMember?.id ?? new.me?.id
         let was = Dictionary(old.threads.map { ($0.id, PondThreadState(raw: $0.state)) }, uniquingKeysWith: { a, _ in a })
         return new.threads.compactMap { t -> PondNote? in

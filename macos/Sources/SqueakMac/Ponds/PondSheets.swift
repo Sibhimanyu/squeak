@@ -213,6 +213,11 @@ struct PeopleSheet: View {
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.ponds.first { $0.id == pondId } }
     private var pondName: String { pond?.name ?? "the pond" }
+    private func plan(_ people: PondPeople, now: Date) -> PeopleSheetPlan {
+        let detail = ponds.details[pondId]
+        let policies = Dictionary((detail?.members ?? []).compactMap { m in m.policy.map { (m.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        return PeopleSheetPlan.make(people, now: now, can: detail?.can, policies: policies)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
@@ -220,7 +225,7 @@ struct PeopleSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: PeopleSheetPlan.title(pond: pondName)).font(Typo.title).foregroundStyle(Theme.ink)
                     if let people = ponds.people[pondId] {
-                        Text(verbatim: PeopleSheetPlan.make(people, now: Date()).subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
+                        Text(verbatim: plan(people, now: Date()).subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
                     }
                 }
                 Spacer()
@@ -229,7 +234,7 @@ struct PeopleSheet: View {
             }
             if let people = ponds.people[pondId] {
                 TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                    content(PeopleSheetPlan.make(people, now: ctx.date))
+                    content(plan(people, now: ctx.date))
                 }
             } else {
                 Text("Reading the people\u{2026}").font(Typo.footnote).foregroundStyle(Theme.muted)
@@ -300,10 +305,17 @@ struct PeopleSheet: View {
                         if m.you { Text("(you)").font(Typo.label).foregroundStyle(Theme.muted) }
                     }
                     Text(verbatim: m.email).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    if let custom = m.customLine { Text(verbatim: custom).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(2) }
                 }
                 Spacer(minLength: Space.s)
                 if let seen = m.seen { Text(verbatim: seen).font(Typo.footnote).foregroundStyle(Theme.muted) }
                 roleControl(m).frame(width: 96, alignment: .leading)
+                if m.menu?.offersPolicy == true {
+                    SqueakMenu { PondPersonPolicyItems(pondId: pondId, member: m.id, policy: m.policy) } label: {
+                        Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(!canWrite).accessibilityLabel("Duck access for \(m.name)")
+                }
                 Group {
                     if m.canRemove {
                         Button(removingNow ? "Removing\u{2026}" : "Remove") { removing = m }

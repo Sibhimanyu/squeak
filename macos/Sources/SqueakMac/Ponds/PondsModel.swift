@@ -229,11 +229,12 @@ final class PondsModel {
     /// Which chrome a pond shows (`PondChrome`): its access, the owner's name, and what this member's caps allow.
     func chrome(key: String) -> PondChrome {
         let pond = pond(key: key)
-        let me = detail(key: key)?.me
-        let messaging = pond?.role.canMessage ?? true
-        let why: String? = messaging ? nil : ThreadAccess.watchLine
-        return PondChrome(access: membership(of: key), ownerName: pond.flatMap(PondSharing.sharerName), canStart: me?.caps?.start ?? true,
-                          canMessage: messaging, reason: why)
+        let detail = detail(key: key)
+        // What this person may do is the daemon's answer (`me.can`); the role only stands in for an older daemon, inside `PondCan`.
+        let can = detail?.can ?? PondCan(role: pond?.role ?? .owner)
+        var chrome = PondChrome(access: membership(of: key), ownerName: pond.flatMap(PondSharing.sharerName), can: can, policy: detail?.myPolicy)
+        if !chrome.canMessage, chrome.reason == nil { chrome.reason = ThreadAccess.watchLine }
+        return chrome
     }
 
     /// What the pond is called: the directory's name.
@@ -581,6 +582,18 @@ final class PondsModel {
         _ = await act("start:\(pond):\(request)", pond: pond, success: approve ? "Duck approved." : "Duck declined.") {
             if approve { try await self.client!.approveStart(pond: pond, request: request) }
             else { try await self.client!.declineStart(pond: pond, request: request) }
+        }
+    }
+
+    /// Owner: the Pond's two settings (Pond settings, Permissions). The daemon's answer is what shows.
+    func setPolicy(pond: String, reach: ReachDucks? = nil, start: StartDucks? = nil) async {
+        _ = await act("policy:\(pond)", pond: pond, success: nil) { try await self.client!.setPolicy(pond: pond, body: PondPermissions.body(reach: reach, start: start)) }
+    }
+
+    /// Owner: one person's own setting, or `Same as the Pond` (nil) to clear it.
+    func setOverride(pond: String, member: String, reach: PondOverrideChange<ReachDucks> = .keep, start: PondOverrideChange<StartDucks> = .keep) async {
+        _ = await act("policy:\(pond):\(member)", pond: pond, success: nil) {
+            try await self.client!.setPolicy(pond: pond, body: PondPermissions.overrideBody(member: member, reach: reach, start: start))
         }
     }
 

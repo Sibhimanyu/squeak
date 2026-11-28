@@ -359,6 +359,12 @@ public struct PeopleSheetPlan: Sendable, Equatable {
         public var roleChoices: [PondRole]
         public var canRemove: Bool
         public var connecting: Bool
+        /// The per-person menu (role and the two overrides): only the Owner, on someone else; nil draws none.
+        public var menu: PondPermissions.PersonMenu?
+        /// This person's effective policy, with which of the two is their own override; nil from an older daemon.
+        public var policy: PondEffectivePolicy?
+        /// "Can message Ducks directly" and the like, under the name when they have a custom setting.
+        public var customLine: String?
     }
 
     public struct InviteRow: Sendable, Equatable, Identifiable {
@@ -390,18 +396,21 @@ public struct PeopleSheetPlan: Sendable, Equatable {
     public static let finishedKeep: TimeInterval = 7 * 86400
     public static func title(pond: String) -> String { "People in \(pond)" }
 
-    public static func make(_ people: PondPeople, now: Date) -> PeopleSheetPlan {
-        let isOwner = people.me?.role == .owner
+    /// `can`: what the daemon says this person may do (`PondDetail.can`); `policies`: each member's effective policy by id.
+    public static func make(_ people: PondPeople, now: Date, can: PondCan? = nil, policies: [String: PondEffectivePolicy] = [:]) -> PeopleSheetPlan {
+        let can = can ?? PondCan(role: people.me?.role ?? .viewer)
         let ordered = people.members.filter(\.you) + people.members.filter { !$0.you }
         let members = ordered.map { m -> MemberRow in
             // A person still connecting has no member id the host's routes know: no role menu and no Remove yet.
             let fixed = m.role == .owner || m.you || m.connecting
+            let menu = PondPermissions.personMenu(owner: can, you: m.you, connecting: m.connecting, currentRole: m.role)
             return MemberRow(
                 id: m.id, name: m.name, email: m.email, you: m.you, seen: m.connecting ? "Connecting\u{2026}" : seen(m, now: now), role: m.role,
-                roleChoices: isOwner && !fixed ? [.member, .viewer] : [], canRemove: isOwner && !fixed, connecting: m.connecting)
+                roleChoices: can.allows(.changeRole) && !fixed ? [.member, .viewer] : [], canRemove: can.allows(.removeMember) && !fixed, connecting: m.connecting,
+                menu: menu, policy: policies[m.id], customLine: PondPermissions.customLine(policies[m.id]))
         }
         var invites: [InviteRow] = []
-        if isOwner {
+        if can.allows(.invite) {
             let shown = people.invites.filter { i in
                 switch i.state {
                 case .joined: false
@@ -422,7 +431,7 @@ public struct PeopleSheetPlan: Sendable, Equatable {
         return PeopleSheetPlan(
             members: members, invites: invites,
             subtitle: "\(people.used) of \(people.cap) places used: " + parts.joined(separator: " and "),
-            canInvite: isOwner && people.used < people.cap, cap: people.cap)
+            canInvite: can.allows(.invite) && people.used < people.cap, cap: people.cap)
     }
 
     static func seen(_ m: PondPerson, now: Date) -> String? {

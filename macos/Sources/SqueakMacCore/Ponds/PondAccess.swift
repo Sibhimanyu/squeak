@@ -35,13 +35,16 @@ public struct ThreadAccess: Sendable, Equatable {
     public static let watchLine = "You can watch this pond"
 
     public var role: PondRole
+    /// What the daemon says this person may do (`me.can`); the role only stands in for an older daemon, inside `PondCan`.
+    public var can: PondCan
     public var isMine: Bool
     public var starterName: String
     /// False when the chat runs without asking (`permissionMode`): other members cannot message it. Nil from an older host.
     public var asks: Bool?
 
-    public init(role: PondRole, starter: String, me: String?, starterName: String, asks: Bool? = nil) {
+    public init(role: PondRole, starter: String, me: String?, starterName: String, asks: Bool? = nil, can: PondCan? = nil) {
         self.role = role
+        self.can = can ?? PondCan(role: role)
         self.isMine = me != nil && starter == me
         self.starterName = starterName.trimmingCharacters(in: .whitespaces)
         self.asks = asks
@@ -51,7 +54,7 @@ public struct ThreadAccess: Sendable, Equatable {
 
     /// A viewer watches; a member (or owner) messages. Someone else's thread that runs without asking takes only its starter.
     public func composer(working: Bool) -> Composer {
-        if !role.canMessage { return .watchOnly(line: Self.watchLine) }
+        if !can.allows(.messageDuck) { return .watchOnly(line: can.reason(.messageDuck) ?? Self.watchLine) }
         if asks == false, !isMine {
             return .closed(reason: "Only \(starter) can message this duck while it runs without asking.")
         }
@@ -71,14 +74,15 @@ public struct ThreadAccess: Sendable, Equatable {
             case .watchOnly, .closed: ok = false
             }
             // Answering a question stays open to a Member even when the thread runs without asking.
-            if action == .answer, role.canMessage { return Gate(enabled: true, tooltip: nil, visible: true) }
-            return Gate(enabled: ok, tooltip: ok ? nil : (role.canMessage ? "Only \(starter) can message this duck while it runs without asking." : Self.watchLine), visible: true)
+            if action == .answer { return Gate(enabled: can.allows(.answerQuestion), tooltip: can.reason(.answerQuestion) ?? (can.allows(.answerQuestion) ? nil : Self.watchLine), visible: true) }
+            if ok { return Gate(enabled: true, tooltip: nil, visible: true) }
+            return Gate(enabled: false, tooltip: can.reason(.messageDuck) ?? (can.allows(.messageDuck) ? "Only \(starter) can message this duck while it runs without asking." : Self.watchLine), visible: true)
         case .viewChanges:
             return Gate(enabled: true, tooltip: nil, visible: true)
         case .approve:
-            return Gate(enabled: role == .owner, tooltip: role == .owner ? nil : Self.ownerOnly("approve edits"), visible: true)
+            return Gate(enabled: can.allows(.approveEdit), tooltip: can.allows(.approveEdit) ? nil : (can.reason(.approveEdit) ?? Self.ownerOnly("approve edits")), visible: true)
         case .stop:
-            return Gate(enabled: role == .owner, tooltip: role == .owner ? nil : Self.ownerOnly("stop a duck"), visible: true)
+            return Gate(enabled: can.allows(.stop), tooltip: can.allows(.stop) ? nil : (can.reason(.stop) ?? Self.ownerOnly("stop a duck")), visible: true)
         case .togglePrivate:
             return Gate(enabled: isMine, tooltip: nil, visible: isMine)
         }
