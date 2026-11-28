@@ -41,6 +41,7 @@ function world(opts: { mail?: boolean; failMail?: boolean } = {}) {
     store,
     people,
     now: () => clock.t,
+    mailRetryMs: 0,
     streams: {
       channelId: async () => "chan",
       publish: async (_id: string, text: string) => void published.push(text),
@@ -125,7 +126,7 @@ describe("invitations by email (routes)", () => {
     ).toBe(401);
     expect((await listing(deps, "sibhi")).json.invites).toHaveLength(1);
     // A Pond nobody has shared yet lists nothing.
-    expect((await listing(deps, "sibhi", OTHER)).json).toEqual({ invites: [] });
+    expect((await listing(deps, "sibhi", OTHER)).json).toEqual({ invites: [], invitations: [] });
   });
 
   it("refuses, each in a plain sentence: already a Member, already pending, over 10 counting pending, a bad address", async () => {
@@ -210,7 +211,9 @@ describe("invitations by email (routes)", () => {
     const gone = await act(deps, "sibhi", first.inviteId, "resend");
     expect(gone.status).toBe(409);
     expect(gone.json.message).toBe("That invitation is no longer waiting.");
-    expect((await act(deps, "sibhi", first.inviteId, "withdraw")).status).toBe(409);
+    expect(gone.json.invitation).toMatchObject({ state: "withdrawn" }); // a refusal carries the fresh view
+    // Withdraw is safe to repeat: it answers the withdrawn invitation again.
+    expect((await act(deps, "sibhi", first.inviteId, "withdraw")).json.invitation.state).toBe("withdrawn");
     const again = await act(deps, "sibhi", first.inviteId, "again", { role: "viewer" });
     expect(again.json.invite).toMatchObject({ email: "asha@example.com", role: "viewer", state: "pending" });
     expect(again.json.invite.inviteId).not.toBe(first.inviteId);
@@ -226,11 +229,15 @@ describe("invitations by email (routes)", () => {
     const { deps } = world({ failMail: true });
     const r = await invite(deps, "sibhi", ["asha@example.com"]);
     expect(r.status).toBe(200);
-    expect(r.json.results[0]).toMatchObject({ ok: true, mailed: false });
+    // The answer does not wait for the email: it says the row is written and the email is queued.
+    expect(r.json.results[0]).toMatchObject({ ok: true, status: "invited", queued: true });
     expect(r.text).not.toContain("SDK secret");
-    expect((await listing(deps, "sibhi")).json.invites[0].state).toBe("pending");
+    // After the retries gave up the Owner's list says so ("Email not delivered · Resend").
+    const failed = (await listing(deps, "sibhi")).json.invites[0];
+    expect(failed).toMatchObject({ state: "pending", emailFailed: true });
     const none = world({ mail: false });
-    expect((await invite(none.deps, "sibhi", ["asha@example.com"])).json.results[0]).toMatchObject({ mailed: false });
+    await invite(none.deps, "sibhi", ["asha@example.com"]);
+    expect((await listing(none.deps, "sibhi")).json.invites[0]).toMatchObject({ emailFailed: true });
   });
 
   it("wakes the Pond's watchers when an invite changes (send, withdraw, again, join, decline), so the Owner's Mac sees it at once", async () => {
@@ -276,6 +283,7 @@ describe("invitations by email (routes)", () => {
     const made = (await invite(deps, "sibhi", ["asha@example.com"], "viewer")).json.results[0].invite;
     await people.upsertAccount({ userId: "sibhi", email: "sibhi@example.com", name: "Sibhi" });
     const waiting = await mine(deps, "asha");
+    // The old rows (inviter as a string) stay for older apps; the views ride in `invitations` and in each row.
     expect(waiting.json.invites).toEqual([
       {
         inviteId: made.inviteId,
@@ -285,8 +293,22 @@ describe("invitations by email (routes)", () => {
         role: "viewer",
         state: "pending",
         expiresAt: made.expiresAt,
+        invitation: waiting.json.invitations[0],
       },
     ]);
+    expect(waiting.json.invitations[0]).toEqual({
+      inviteId: made.inviteId,
+      pondId: POND,
+      pondName: "greenroom",
+      inviter: { name: "Sibhi" },
+      role: "viewer",
+      state: "pending",
+      youAreMember: false,
+      expiresAt: made.expiresAt,
+      createdAt: made.createdAt,
+    });
+    const viaNew = await call(deps, "GET", "/account/invitations", as("asha"), undefined);
+    expect(viaNew.json.invitations).toEqual(waiting.json.invitations);
     expect((await mine(deps, "bea")).json.invites).toEqual([]);
     const joined = await answer(deps, "asha", made.inviteId, "accept");
     expect(joined.json.invite).toMatchObject({ state: "joined" });
@@ -298,7 +320,10 @@ describe("invitations by email (routes)", () => {
     // The Owner's Mac lists the account in the Pond's index: the Pond is the account's now, so the invitation goes.
     rows.set(`acctponds/asha\u0000${POND}`, JSON.stringify({ v: 1, ownerKey: "A".repeat(87) }));
     expect((await mine(deps, "asha")).json.invites).toEqual([]);
-    expect((await answer(deps, "asha", made.inviteId, "accept")).json).toMatchObject({ error: "was-joined" });
+    // Joining again (a retry, a second device) is the same success, not "already used".
+    const again = await answer(deps, "asha", made.inviteId, "accept");
+    expect([again.status, again.json.invitation.state, again.json.pondId]).toEqual([200, "joined", POND]);
+    expect(again.json.invite).toMatchObject({ inviteId: made.inviteId, state: "joined", email: "asha@example.com" });
   });
 
   it("wrong address: joining or declining with another account says so with the masked address and changes nothing", async () => {
@@ -323,7 +348,14 @@ describe("invitations by email (routes)", () => {
     const b = (await invite(deps, "sibhi", ["bea@example.com"])).json.results[0].invite;
     await act(deps, "sibhi", a.inviteId, "withdraw");
     const w = await answer(deps, "asha", a.inviteId, "accept");
-    expect([w.status, w.json]).toEqual([409, { error: "was-withdrawn", message: "This invitation was withdrawn." }]);
+    expect([w.status, w.json]).toMatchObject([
+      409,
+      {
+        error: "was-withdrawn",
+        message: "This invitation was withdrawn.",
+        invitation: { inviteId: a.inviteId, state: "withdrawn", youAreMember: false, pondName: "greenroom" },
+      },
+    ]);
     clock.t += 7 * DAY + 1;
     const e = await answer(deps, "bea", b.inviteId, "accept");
     expect(e.json).toMatchObject({ error: "was-expired", message: "This invitation expired." });
@@ -446,18 +478,172 @@ describe("the web's Ponds-screen verbs use the same lifecycle", () => {
     const [a, b] = (await invite(deps, "sibhi", ["asha@example.com", "bea@example.com"])).json.results;
     published.length = 0;
     const join = await call(deps, "POST", `/account/invitations/${a.invite.inviteId}/join`, as("asha"), {});
-    expect([join.status, join.json]).toEqual([200, { pondId: POND }]);
+    expect([join.status, join.json]).toMatchObject([
+      200,
+      { pondId: POND, pond: { pondId: POND, name: "greenroom" }, invitation: { state: "joined", youAreMember: true } },
+    ]);
     expect(published.length).toBeGreaterThan(0);
     expect(await people.membershipOf(POND, "asha")).toMatchObject({ role: "member" });
     published.length = 0;
     const eve = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/decline`, as("eve"), {});
     expect(eve.status).toBe(403);
     expect(published).toEqual([]);
-    expect((await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/decline`, as("bea"), {})).status).toBe(
-      204,
-    );
+    const declined = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/decline`, as("bea"), {});
+    expect([declined.status, declined.json.invitation.state]).toEqual([200, "declined"]);
     expect(published.length).toBeGreaterThan(0);
     const again = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/join`, as("bea"), {});
-    expect([again.status, again.json]).toEqual([409, { error: "state", state: "declined" }]);
+    expect([again.status, again.json]).toMatchObject([
+      409,
+      { error: "state", state: "declined", code: "was-declined", invitation: { state: "declined" } },
+    ]);
   });
 });
+
+describe("one Join route, old aliases, batch invite, instant send (issue #141)", () => {
+  it("Join through the new route and through the old alias answers the same Pond; the alias also carries the old record", async () => {
+    const { deps } = world();
+    const [a, b] = (await invite(deps, "sibhi", ["asha@example.com", "bea@example.com"])).json.results;
+    const viaNew = await call(deps, "POST", `/account/invitations/${a.invite.inviteId}/join`, as("asha"), {});
+    const viaOld = await call(deps, "POST", `/invites/${b.invite.inviteId}/accept`, as("bea"), {});
+    for (const r of [viaNew, viaOld]) {
+      expect(r.status).toBe(200);
+      expect(r.json).toMatchObject({ pondId: POND, pond: { name: "greenroom" }, invitation: { state: "joined" } });
+    }
+    expect(viaOld.json.invite).toMatchObject({ inviteId: b.invite.inviteId, state: "joined", role: "member" });
+    // Both are safe to repeat, from either route.
+    const retry = await call(deps, "POST", `/account/invitations/${b.invite.inviteId}/join`, as("bea"), {});
+    expect([retry.status, retry.json.pondId]).toEqual([200, POND]);
+    const retryOld = await call(deps, "POST", `/invites/${a.invite.inviteId}/accept`, as("asha"), {});
+    expect([retryOld.status, retryOld.json.pondId]).toEqual([200, POND]);
+  });
+
+  it("a Mac's own key can Join and read the list through the one route", async () => {
+    const w = world();
+    const MACID = "N".repeat(30);
+    const MKEY = "n".repeat(43);
+    const hash = require("node:crypto").createHash("sha256").update(MKEY).digest("base64url");
+    w.rows.set(`mac-keys\u0000${hash}`, JSON.stringify({ userId: "asha", macId: MACID, createdAt: 1 }));
+    w.rows.set(`mac-owners\u0000${MACID}`, JSON.stringify({ userId: "asha", channels: 0 }));
+    w.rows.set(`maclinks\u0000${MACID}`, JSON.stringify({ userId: "asha", email: "asha@example.com" }));
+    const made = (await invite(w.deps, "sibhi", ["asha@example.com"])).json.results[0].invite;
+    const hdr = {
+      "x-squeak-mac-key": MKEY,
+      "x-squeak-client": "mac/2.36.0",
+      "x-squeak-account-name": encodeURIComponent("Asha Rao"),
+    };
+    const list = await call(w.deps, "GET", "/account/invitations", hdr, undefined);
+    expect(list.json.invitations.map((v: any) => v.inviteId)).toEqual([made.inviteId]);
+    const joined = await call(w.deps, "POST", `/account/invitations/${made.inviteId}/join`, hdr, {});
+    expect(joined.json).toMatchObject({ pondId: POND, invitation: { state: "joined", youAreMember: true } });
+    // The name the Mac sent is kept, and an empty one later never blanks it.
+    expect((await w.people.getAccount("asha")).name).toBe("Asha Rao");
+    await call(w.deps, "GET", "/account/invitations", { ...hdr, "x-squeak-account-name": "" }, undefined);
+    expect((await w.people.getAccount("asha")).name).toBe("Asha Rao");
+  });
+
+  it("a batch of addresses in one call answers per address; a single `email` is still accepted", async () => {
+    const { deps, people } = world();
+    await people.upsertAccount({ userId: "bea", email: "bea@example.com", name: "Bea" });
+    await invite(deps, "sibhi", ["first@example.com"]);
+    await people.addMember({ pondId: POND, userId: "bea", role: "member" });
+    const r = await invite(deps, "sibhi", [
+      "bea@example.com",
+      "first@example.com",
+      "bad address",
+      "n1@example.com",
+      "n2@example.com",
+    ]);
+    expect(r.json.results.map((x: any) => [x.email, x.ok, x.status])).toEqual([
+      ["bea@example.com", false, "already-member"],
+      ["first@example.com", false, "already-invited"],
+      ["bad address", false, "refused"],
+      ["n1@example.com", true, "invited"],
+      ["n2@example.com", true, "invited"],
+    ]);
+    expect(r.json.results[3].invitation).toMatchObject({ state: "pending", email: "n1@example.com" });
+    const single = await call(deps, "POST", `/ponds/${POND}/invites`, as("sibhi"), {
+      email: "One@Example.com",
+      role: "viewer",
+    });
+    expect(single.json.results).toHaveLength(1);
+    expect(single.json.results[0]).toMatchObject({
+      email: "one@example.com",
+      ok: true,
+      invitation: { role: "viewer" },
+    });
+  });
+
+  it("the answer does not wait for the emails: they are sent after it, and each address is mailed once", async () => {
+    const w = world();
+    const order: string[] = [];
+    const mailer = w.deps.mail as { send: (m: unknown) => Promise<void> };
+    const send = mailer.send;
+    mailer.send = async (m: unknown) => {
+      order.push("mail");
+      return send(m);
+    };
+    const req: any = new EventEmitter();
+    req.method = "POST";
+    req.url = `/server/squeak_relay/ponds/${POND}/invites`;
+    req.headers = as("sibhi");
+    const res: any = { writeHead: () => undefined, end: () => void order.push("answered") };
+    const done = createRelay(w.deps)(req, res);
+    setImmediate(() => {
+      req.emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({ emails: ["a@example.com", "b@example.com"], role: "member", pondName: "greenroom" }),
+        ),
+      );
+      req.emit("end");
+    });
+    await done;
+    expect(order).toEqual(["answered", "mail", "mail"]);
+    expect(w.sent.map((m) => m.to).sort()).toEqual(["a@example.com", "b@example.com"]);
+  });
+
+  it("a send that fails once is retried and the invite is not marked failed", async () => {
+    const w = world();
+    let fails = 1;
+    const mailer = w.deps.mail as { send: (m: unknown) => Promise<void> };
+    const send = mailer.send;
+    mailer.send = async (m: unknown) => {
+      if (fails-- > 0) throw new Error("blip");
+      return send(m);
+    };
+    await invite(w.deps, "sibhi", ["asha@example.com"]);
+    expect(w.sent).toHaveLength(1);
+    expect((await listing(w.deps, "sibhi")).json.invites[0].emailFailed).toBeUndefined();
+  });
+
+  it("every action tells the invitee's account channel and the Pond's members channel", async () => {
+    const w = world();
+    const live: string[] = [];
+    (w.deps.streams as any).liveChannelId = async () => "live";
+    (w.deps.streams as any).publish = async (id: string, text: string) =>
+      void (id === "live" ? live : w.published).push(text);
+    await w.people.upsertAccount({ userId: "asha", email: "asha@example.com", name: "Asha" });
+    const made = (await invite(w.deps, "sibhi", ["asha@example.com", "new@example.com"])).json.results;
+    const told = live.map((t) => JSON.parse(t)).filter((m) => m.t === "inv");
+    expect(told.map((m) => m.user)).toEqual(["asha", expect.stringMatching(/^e-/)]);
+    expect(w.published.some((t) => t.includes("members"))).toBe(true);
+    live.length = 0;
+    await call(w.deps, "POST", `/account/invitations/${made[0].invite.inviteId}/decline`, as("asha"), {});
+    expect(live.map((t) => JSON.parse(t)).filter((m) => m.t === "inv")).toEqual([{ t: "inv", user: "asha" }]);
+  });
+
+  it("the inviter is named by their account name, else their masked email, never Someone", async () => {
+    const { deps, people } = world();
+    const made = (await invite(deps, "sibhi", ["asha@example.com"])).json.results[0].invite;
+    expect(made.inviter).toEqual({ name: "s***@e***.com" });
+    await people.upsertAccount({ userId: "sibhi", email: "sibhi@example.com", name: "Sibhi" });
+    const mine = await mine_(deps, "asha");
+    expect(mine.json.invitations[0].inviter).toEqual({ name: "Sibhi" });
+    const preview = await call(deps, "GET", `/invites/preview?code=${made.inviteId}`, {}, undefined);
+    expect(preview.json.inviter).toBe("Sibhi");
+    const overview = JSON.stringify(mine.json);
+    expect(overview).not.toContain("Someone");
+  });
+});
+
+const mine_ = (deps: unknown, who: string) => call(deps, "GET", "/invites", as(who), undefined);

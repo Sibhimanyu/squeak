@@ -1427,6 +1427,19 @@ public struct NativeHostClient: Sendable {
     func call(
         _ method: String, _ path: String, body: NativeJSON? = nil, timeout: TimeInterval = 8, maybeSent: Bool = false
     ) async throws -> Data {
+        let response = try await exchange(method, path, body: body, timeout: timeout, maybeSent: maybeSent)
+        guard (200..<300).contains(response.status) else {
+            let message = (try? JSONDecoder().decode(NativeJSON.self, from: response.body))?["error"]?.string
+            throw NativeHostError.http(response.status, message)
+        }
+        return response.body
+    }
+
+    /// The host's answer whatever its status (a refusal can carry a body the caller reads); only a transport failure or a
+    /// rejected token throws.
+    func exchange(
+        _ method: String, _ path: String, body: NativeJSON? = nil, timeout: TimeInterval = 8, maybeSent: Bool = false
+    ) async throws -> HTTPResponse {
         guard let token = tokenProvider() else { throw NativeHostError.tokenMissing }
         var headers = ["x-squeak-token": token]
         var payload: Data?
@@ -1446,10 +1459,6 @@ public struct NativeHostClient: Sendable {
             }
         }
         if response.status == 401 || response.status == 403 { throw NativeHostError.tokenRejected }
-        guard (200..<300).contains(response.status) else {
-            let message = (try? JSONDecoder().decode(NativeJSON.self, from: response.body))?["error"]?.string
-            throw NativeHostError.http(response.status, message)
-        }
-        return response.body
+        return response
     }
 }

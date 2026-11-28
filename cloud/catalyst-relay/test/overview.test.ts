@@ -215,21 +215,38 @@ describe("invitations: overview, join and decline", () => {
     const token = tokenOf("pat", "pat@example.com");
     const joined = await get(base, "/account/invitations/inv1/join", token, { method: "POST" });
     expect(joined.status).toBe(200);
-    expect(await joined.json()).toEqual({ pondId: POND_A });
+    // The old web reads `pondId`; the view and the Pond ride beside it.
+    expect(await joined.json()).toMatchObject({
+      pondId: POND_A,
+      pond: { pondId: POND_A, name: "Alpha" },
+      invitation: { inviteId: "inv1", state: "joined", youAreMember: true, inviter: { name: "Dana" } },
+    });
     expect(await people.isMember(POND_A, "pat")).toBe(true);
     expect((await people.getInvite("inv1")).state).toBe("joined");
     expect(((await (await get(base, "/account/overview", token)).json()) as any).invitations).toEqual([]);
-    // a second press says it is settled, never joins twice
-    expect((await get(base, "/account/invitations/inv1/join", token, { method: "POST" })).status).toBe(409);
+    // a second press is the same success, never a second membership
+    const again = await get(base, "/account/invitations/inv1/join", token, { method: "POST" });
+    expect([again.status, ((await again.json()) as any).pondId]).toEqual([200, POND_A]);
+    expect((await people.membersOf(POND_A)).length).toBe(2);
   });
 
-  it("decline settles it with 204 and joins nothing", async () => {
+  it("decline settles it, answers the fresh view, and joins nothing", async () => {
     const { base, people } = await invited();
     const token = tokenOf("pat", "pat@example.com");
-    expect((await get(base, "/account/invitations/inv1/decline", token, { method: "POST" })).status).toBe(204);
+    const declined = await get(base, "/account/invitations/inv1/decline", token, { method: "POST" });
+    expect([declined.status, ((await declined.json()) as any).invitation.state]).toEqual([200, "declined"]);
     expect((await people.getInvite("inv1")).state).toBe("declined");
     expect(await people.isMember(POND_A, "pat")).toBe(false);
-    expect((await get(base, "/account/invitations/inv1/join", token, { method: "POST" })).status).toBe(409);
+    // Joining a declined invitation keeps the old words the deployed web reads, and the new shape beside them.
+    const late = await get(base, "/account/invitations/inv1/join", token, { method: "POST" });
+    expect(late.status).toBe(409);
+    expect(await late.json()).toMatchObject({
+      error: "state",
+      state: "declined",
+      code: "was-declined",
+      message: "This invitation was declined.",
+      invitation: { state: "declined", youAreMember: false },
+    });
   });
 
   it("refuses another address, a stranger, no sign-in, a wrong verb and an unknown invitation", async () => {

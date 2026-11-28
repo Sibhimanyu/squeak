@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import type { ChannelDoc, CloudStore } from "../cloud/store.js";
-import { InviteRefused, type Invitation, type InviteRecord, type PondInvites } from "./invites-port.js";
+import { InviteRefused, type Invitation, type PondInvites } from "./invites-port.js";
 import { named } from "./named-account.test-fixture.js";
 import { FlotillaService } from "./service.js";
 
@@ -20,6 +20,7 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   inviter: "Sibhi",
   role: "member",
   state: "pending",
+  youAreMember: false,
   expiresAt: 9_000,
   ...over,
 });
@@ -35,17 +36,7 @@ function make(list: Invitation[]) {
     delete: async () => undefined,
     watch: () => () => undefined,
   };
-  const state = { list, reads: 0, refuse: null as InviteRefused | null };
-  const settled = (id: string, s: "joined" | "declined"): InviteRecord => ({
-    id,
-    email: "me@example.com",
-    role: "member",
-    state: s,
-    invitedBy: "u1",
-    createdAt: 1,
-    expiresAt: 2,
-    settledAt: 3,
-  });
+  const state = { list, reads: 0, refuse: null as InviteRefused | null, down: false };
   const port: PondInvites = {
     create: async () => [],
     list: async () => [],
@@ -54,17 +45,22 @@ function make(list: Invitation[]) {
     again: async () => Promise.reject(new Error("unused")),
     async mine() {
       state.reads += 1;
+      if (state.down) throw new InviteRefused("Squeak could not reach the cloud. Try again.", 503);
       return state.list;
     },
+    // The relay's Join answers the Pond and the invitation as it is now; its Decline answers the invitation.
     async accept(id) {
       if (state.refuse) throw state.refuse;
-      state.list = state.list.map((i) => (i.id === id ? { ...i, state: "joined" as const } : i));
-      return settled(id, "joined");
+      const found = state.list.find((i) => i.id === id) ?? invitation({ id });
+      const invitation_ = { ...found, state: "joined" as const, youAreMember: true };
+      state.list = state.list.map((i) => (i.id === id ? invitation_ : i));
+      return { pondId: found.pondId, pondName: found.pondName, invitation: invitation_ };
     },
     async decline(id) {
       if (state.refuse) throw state.refuse;
+      const found = state.list.find((i) => i.id === id) ?? invitation({ id });
       state.list = state.list.filter((i) => i.id !== id);
-      return settled(id, "declined");
+      return { ...found, state: "declined" as const };
     },
   };
   const clock = { t: 1_000_000 };
@@ -103,7 +99,10 @@ describe("invitations on the invited person's Mac", () => {
     expect(await service.list()).toEqual([]);
 
     state.refuse = null;
-    expect(await service.joinInvitation("i1")).toEqual({ pondId: "P".repeat(22) });
+    expect(await service.joinInvitation("i1")).toMatchObject({
+      pondId: "P".repeat(22),
+      invitation: { state: "joined", youAreMember: true },
+    });
     expect(await service.list()).toEqual([
       expect.objectContaining({
         id: "P".repeat(22),
@@ -125,6 +124,56 @@ describe("invitations on the invited person's Mac", () => {
     await service.declineInvitation("i1");
     expect((await service.invitations(true)).map((i) => i.id)).toEqual(["i2"]);
     expect(await service.list()).toEqual([]);
+  });
+
+  it("a refusal carries the relay's fresh view: the row is dropped or redrawn from it, and the surface gets it too", async () => {
+    const { service, state } = make([invitation(), invitation({ id: "i2", pondId: "Q".repeat(22) })]);
+    await service.invitations();
+    state.refuse = new InviteRefused("This invitation was withdrawn.", 409, invitation({ state: "withdrawn" }));
+    const refused = await service.joinInvitation("i1").catch((e) => e);
+    expect(refused).toMatchObject({
+      status: 409,
+      message: "This invitation was withdrawn.",
+      extra: { invitation: { id: "i1", state: "withdrawn" } },
+    });
+    // No second read: the answer alone removed the dead row.
+    expect(state.reads).toBe(1);
+    expect((await service.invitations()).map((i) => i.id)).toEqual(["i2"]);
+    expect(state.reads).toBe(1);
+  });
+
+  it("Join updates the list from its answer, with no read in between, and is safe to repeat", async () => {
+    const { service, state } = make([invitation()]);
+    await service.invitations();
+    expect(state.reads).toBe(1);
+    await service.joinInvitation("i1");
+    await service.joinInvitation("i1");
+    expect(state.reads).toBe(1);
+    expect((await service.invitations()).map((i) => [i.id, i.state, i.youAreMember])).toEqual([["i1", "joined", true]]);
+  });
+
+  it("a read that fails keeps the last list and says it is stale; the next good read clears it", async () => {
+    const { service, state, clock } = make([invitation()]);
+    expect(await service.invitationsRead()).toEqual({ invitations: [invitation()], stale: false });
+    state.down = true;
+    clock.t += 11_000;
+    expect(await service.invitationsRead()).toEqual({ invitations: [invitation()], stale: true });
+    // A Try again reads at once, whatever the ten seconds.
+    state.down = false;
+    expect(await service.invitationsRead(true)).toEqual({ invitations: [invitation()], stale: false });
+  });
+
+  it("an account notice reads the list again and wakes the surface", async () => {
+    const { service, state } = make([]);
+    const woke: string[] = [];
+    service.on("changed", (id: string) => woke.push(id));
+    await service.invitations();
+    state.list = [invitation({ id: "new" })];
+    service.invitationsChanged();
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await service.invitations()).map((i) => i.id)).toEqual(["new"]);
+    expect(state.reads).toBe(2);
+    expect(woke).toContain("");
   });
 
   it("a Mac with no cloud has no invitations, and says what is missing instead of pretending", async () => {

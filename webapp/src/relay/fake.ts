@@ -168,7 +168,11 @@ export const createFakeRelay = (state: Partial<FakeRelayState> = {}): { fetch: F
       const invitation = overview.invitations.find((i) => i.inviteId === answer[1]);
       if (!invitation) return json(404, { error: "invite" });
       if (full.respond === "fail") return json(503, { error: "cloud" });
-      if (full.refusal) return json(full.refusal.status, full.refusal.body);
+      if (full.refusal) {
+        // A settled invitation (409) is no longer one to answer: the next read of the overview does not list it.
+        if (full.refusal.status === 409) overview.invitations = overview.invitations.filter((i) => i !== invitation);
+        return json(full.refusal.status, full.refusal.body);
+      }
       overview.invitations = overview.invitations.filter((i) => i !== invitation);
       if (answer[2] === "decline") return new Response(null, { status: 204 });
       const pondId = `joined-${invitation.inviteId}`;

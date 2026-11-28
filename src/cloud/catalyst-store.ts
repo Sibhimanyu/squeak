@@ -320,6 +320,18 @@ export class CatalystStore implements CloudStore {
     return this.hub.healthy();
   }
 
+  private readonly inviteWatchers = new Set<() => void>();
+
+  /**
+   * Hears "an invitation of this account changed" from the live stream, and holds the stream open for it even when no Pond is
+   * watched yet (an invited person has none). Returns the way to stop. No-op without `squeak-live` (the daemon's own refresh stays).
+   */
+  watchInvites(onChange: () => void): () => void {
+    this.inviteWatchers.add(onChange);
+    this.startLive();
+    return () => void this.inviteWatchers.delete(onChange);
+  }
+
   /** The live stream's state ("live" / "reconnecting"); null when `squeak-live` is not configured (the old notice path). */
   liveState(): LiveState | null {
     return this.liveOptions ? (this.liveClient?.state ?? "reconnecting") : null;
@@ -340,6 +352,7 @@ export class CatalystStore implements CloudStore {
       changes: (pondId, since) => this.changes(pondId, since),
       onChanges: (pondId) => this.hub.wakeChannel(pondId),
       onRemoved: (pondId) => this.hub.wakeChannel(pondId),
+      onInvites: () => this.inviteWatchers.forEach((watch) => watch()),
       onState: (state) => {
         // Down: the 30 s feed poll wakes the watchers; live again: everything missed was read once at the hello.
         live.onState?.(state);

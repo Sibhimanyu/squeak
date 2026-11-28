@@ -191,7 +191,10 @@ describe("invites", () => {
     expect(await code(people.createInvite(inv({ inviteId: "i3", email: "cy@example.com" })))).toBe("ok");
     await people.createPond({ pondId: "Q".repeat(22), ownerUserId: "u1", name: "Q" });
     expect(await code(people.createInvite(inv({ inviteId: "i4", pondId: "Q".repeat(22) })))).toBe("ok");
-    expect((await people.invitesOf(POND)).map((i: any) => i.inviteId).sort()).toEqual(["i1", "i3"]);
+    expect([(await people.getInvite("i1"))?.state, (await people.getInvite("i3"))?.state]).toEqual([
+      "pending",
+      "pending",
+    ]);
   });
 
   it("refuses the same invite id twice", async () => {
@@ -224,16 +227,6 @@ describe("invites", () => {
     expect(await code(people.createInvite(inv({ inviteId: "i2", expiresAt: 20_000 })))).toBe("ok");
     expect((await people.getInvite("i1"))?.state).toBe("expired");
     expect((await people.getInvite("i2"))?.state).toBe("pending");
-  });
-
-  it("finds an address's pending invites across Ponds", async () => {
-    const { people } = make();
-    await people.createPond({ pondId: POND, ownerUserId: "u1", name: "P" });
-    await people.createPond({ pondId: "Q".repeat(22), ownerUserId: "u1", name: "Q" });
-    await people.createInvite(inv());
-    await people.createInvite(inv({ inviteId: "i2", pondId: "Q".repeat(22) }));
-    await people.settleInvite("i2", "withdrawn");
-    expect((await people.pendingInvitesFor(" BEA@example.com")).map((i: any) => i.inviteId)).toEqual(["i1"]);
   });
 
   it("validates its input", async () => {
@@ -276,169 +269,5 @@ describe("clean start", () => {
     // and the same Pond id and address are free again
     await people.createPond({ pondId: POND, ownerUserId: "u1", name: "P" });
     expect(await people.isMember(POND, "u2")).toBe(false);
-  });
-});
-
-describe("invite states (#126)", () => {
-  const DAY = 24 * 60 * 60 * 1000;
-  const setup = async () => {
-    const m = make(1000);
-    await m.people.createPond({ pondId: POND, ownerUserId: "u1", name: "P" });
-    await m.people.upsertAccount({ userId: "u1", email: "owner@example.com", name: "Owner" });
-    await m.people.upsertAccount({ userId: "u2", email: "bea@example.com", name: "Bea" });
-    return m;
-  };
-  const make1 = (people: any, id: string, email: string, over: Record<string, unknown> = {}) =>
-    people.createInvite({
-      inviteId: id,
-      pondId: POND,
-      email,
-      role: "member",
-      invitedBy: "u1",
-      expiresAt: 1000 + 7 * DAY,
-      ...over,
-    });
-  const bea = { userId: "u2", email: "Bea@Example.com" };
-
-  it("Pending -> Joined: the person is a Member at once with the invite's role, and the slot is theirs", async () => {
-    const { people, clock, tables } = await setup();
-    await make1(people, "i1", "bea@example.com", { role: "viewer" });
-    clock.t = 5000;
-    expect(await people.acceptInvite("i1", bea)).toMatchObject({ state: "joined", settledAt: 5000 });
-    expect(await people.membershipOf(POND, "u2")).toMatchObject({ role: "viewer", joinedAt: 5000 });
-    expect((await people.membersOf(POND)).length).toBe(2);
-    // The invite's slot passed to the person: two slots for two people, none left over.
-    expect((await tables.all("people_slots")).map((r: any) => r.userId).sort()).toEqual(["u1", "u2"]);
-  });
-
-  it("Pending -> Declined: states the time, frees the address and the slot", async () => {
-    const { people, clock, tables } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    clock.t = 4000;
-    expect(await people.declineInvite("i1", bea)).toMatchObject({ state: "declined", settledAt: 4000 });
-    expect(await people.isMember(POND, "u2")).toBe(false);
-    expect((await tables.all("people_slots")).length).toBe(1); // the Owner's
-    expect(await code(make1(people, "i2", "bea@example.com"))).toBe("ok");
-  });
-
-  it("Pending -> Withdrawn by the Owner, and nobody can then join or decline", async () => {
-    const { people, clock } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    clock.t = 3000;
-    expect(await people.withdrawInvite("i1")).toMatchObject({ state: "withdrawn", settledAt: 3000 });
-    expect(await code(people.acceptInvite("i1", bea))).toBe("was-withdrawn");
-    expect(await code(people.declineInvite("i1", bea))).toBe("was-withdrawn");
-    expect(await code(people.withdrawInvite("i1"))).toBe("not-pending");
-  });
-
-  it("Pending -> Expired at 7 days, stamped at the moment it lapsed, and it cannot be used afterwards", async () => {
-    const { people, clock, tables } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    clock.t = 1000 + 7 * DAY - 1;
-    expect((await people.getInvite("i1")).state).toBe("pending");
-    clock.t = 1000 + 7 * DAY + 50;
-    expect((await people.getInvite("i1")).state).toBe("expired");
-    expect(await code(people.acceptInvite("i1", bea))).toBe("was-expired");
-    expect(await people.getInvite("i1")).toMatchObject({ state: "expired", settledAt: 1000 + 7 * DAY });
-    expect((await tables.all("people_slots")).length).toBe(1); // the lapsed invite gave its slot back
-  });
-
-  it("Invite again after Declined, Expired or Withdrawn makes one new pending record and drops the old one", async () => {
-    const { people, clock } = await setup();
-    for (const [n, end] of [
-      ["a", "decline"],
-      ["b", "expire"],
-      ["c", "withdraw"],
-    ] as const) {
-      const email = `${n}@example.com`;
-      await make1(people, `i-${n}`, email, { expiresAt: clock.t + 7 * DAY });
-      if (end === "decline") await people.declineInvite(`i-${n}`, { userId: `x${n}`, email });
-      if (end === "withdraw") await people.withdrawInvite(`i-${n}`);
-      if (end === "expire") clock.t += 8 * DAY;
-      const again = await people.inviteAgain({
-        pondId: POND,
-        fromInviteId: `i-${n}`,
-        inviteId: `j-${n}`,
-        invitedBy: "u1",
-        expiresAt: clock.t + 7 * DAY,
-      });
-      expect(again).toMatchObject({ inviteId: `j-${n}`, state: "pending", email });
-      expect(await people.getInvite(`i-${n}`)).toBeNull();
-    }
-    const list = await people.listInvites(POND);
-    expect(list.map((i: any) => i.inviteId).sort()).toEqual(["j-a", "j-b", "j-c"]);
-  });
-
-  it("will not invite again while pending or after the person joined", async () => {
-    const { people } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    const again = (from: string, id: string) =>
-      people.inviteAgain({
-        pondId: POND,
-        fromInviteId: from,
-        inviteId: id,
-        invitedBy: "u1",
-        expiresAt: 1000 + 7 * DAY,
-      });
-    expect(await code(again("i1", "j1"))).toBe("still-pending");
-    await people.acceptInvite("i1", bea);
-    expect(await code(again("i1", "j2"))).toBe("joined");
-    expect(await code(again("ghost", "j3"))).toBe("no-invite");
-  });
-
-  it("counts pending invites in the 10-person cap, and a settled one gives its place back", async () => {
-    const { people } = await setup();
-    // Owner + Bea (member) + 8 pending = 10.
-    await people.addMember({ pondId: POND, userId: "u2", role: "member" });
-    for (let n = 0; n < 8; n++) await make1(people, `i${n}`, `p${n}@example.com`);
-    expect(await code(make1(people, "i-over", "late@example.com"))).toBe("pond-full");
-    const refused = await make1(people, "i-over2", "late@example.com").catch((e: any) => e.message);
-    expect(refused).toMatch(/10 people, counting invitations/);
-    await people.withdrawInvite("i0");
-    expect(await code(make1(people, "i-ok", "late@example.com"))).toBe("ok");
-    expect(await code(make1(people, "i-over3", "later@example.com"))).toBe("pond-full");
-  });
-
-  it("refuses an address that is already a Member, and a second pending invite, each with a plain sentence", async () => {
-    const { people } = await setup();
-    await people.addMember({ pondId: POND, userId: "u2", role: "member" });
-    const member = await make1(people, "i1", "BEA@example.com").catch((e: any) => e);
-    expect(member.code).toBe("already-member");
-    expect(member.message).toBe("bea@example.com is already in this Pond.");
-    await make1(people, "i2", "cy@example.com");
-    const twice = await make1(people, "i3", "cy@example.com").catch((e: any) => e);
-    expect(twice.code).toBe("invite-pending");
-    expect(twice.message).toBe("cy@example.com already has a pending invitation.");
-  });
-
-  it("wrong address: only the address the invite names may join or decline; the invite stays pending", async () => {
-    const { people } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    expect(await code(people.acceptInvite("i1", { userId: "u9", email: "eve@example.com" }))).toBe("wrong-address");
-    expect(await code(people.declineInvite("i1", { userId: "u9", email: "eve@example.com" }))).toBe("wrong-address");
-    expect((await people.getInvite("i1")).state).toBe("pending");
-  });
-
-  it("lists one invite per address, newest first, and clears finished ones a week after they were reached", async () => {
-    const { people, clock } = await setup();
-    await make1(people, "i1", "bea@example.com");
-    await people.declineInvite("i1", bea); // declined at 1000
-    clock.t = 2000;
-    await make1(people, "i2", "cy@example.com");
-    clock.t = 3000;
-    await make1(people, "i3", "bea@example.com", { expiresAt: 3000 + 7 * DAY });
-    expect((await people.listInvites(POND)).map((i: any) => i.inviteId)).toEqual(["i3", "i2"]);
-    clock.t = 1000 + 7 * DAY + 5;
-    clock.t = 3000 + 14 * DAY + 5;
-    expect(await people.listInvites(POND)).toEqual([]);
-  });
-
-  it("a person who joins on the last place still gets in", async () => {
-    const { people } = await setup();
-    await people.addMember({ pondId: POND, userId: "u2", role: "member" });
-    for (let n = 0; n < 7; n++) await make1(people, `i${n}`, `p${n}@example.com`);
-    await make1(people, "last", "last@example.com"); // 10 with Owner and Bea
-    expect(await code(people.acceptInvite("last", { userId: "u7", email: "last@example.com" }))).toBe("ok");
-    expect((await people.membersOf(POND)).length).toBe(3);
   });
 });

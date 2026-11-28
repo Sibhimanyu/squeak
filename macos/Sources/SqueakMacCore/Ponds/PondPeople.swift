@@ -22,13 +22,16 @@ public struct PondInviteRecord: Sendable, Equatable, Identifiable, Decodable {
     public var name: String?
     /// The account, once known.
     public var userId: String?
+    /// The relay could not deliver the email after its retries: the Owner can Resend.
+    public var emailFailed: Bool
 
-    enum CodingKeys: String, CodingKey { case id, email, role, state, invitedBy, createdAt, expiresAt, settledAt, name, userId }
+    enum CodingKeys: String, CodingKey { case id, email, role, state, invitedBy, createdAt, expiresAt, settledAt, name, userId, emailFailed }
 
     public init(id: String, email: String, role: PondRole, state: State, invitedBy: String, createdAt: Int, expiresAt: Int, settledAt: Int,
-                name: String? = nil, userId: String? = nil) {
+                name: String? = nil, userId: String? = nil, emailFailed: Bool = false) {
         self.id = id; self.email = email; self.role = role; self.state = state; self.invitedBy = invitedBy
         self.createdAt = createdAt; self.expiresAt = expiresAt; self.settledAt = settledAt; self.name = name; self.userId = userId
+        self.emailFailed = emailFailed
     }
 
     /// A record with an unknown state does not decode (the list skips it) so nothing is ever drawn wrongly.
@@ -47,6 +50,7 @@ public struct PondInviteRecord: Sendable, Equatable, Identifiable, Decodable {
         settledAt = c.lenient(Int.self, .settledAt) ?? 0
         name = c.lenient(String.self, .name).flatMap { $0.isEmpty ? nil : $0 }
         userId = c.lenient(String.self, .userId).flatMap { $0.isEmpty ? nil : $0 }
+        emailFailed = c.lenient(Bool.self, .emailFailed) ?? false
     }
 }
 
@@ -114,11 +118,17 @@ public struct PondInviteOutcome: Sendable, Equatable, Decodable {
     public var invite: PondInviteRecord?
     /// The plain sentence for a refusal.
     public var message: String?
+    /// What became of the address; nil from a host that does not say (then `ok` decides).
+    public var status: Status?
 
-    enum CodingKeys: String, CodingKey { case email, ok, invite, message }
+    public enum Status: String, Sendable, Equatable {
+        case invited, alreadyMember = "already-member", alreadyInvited = "already-invited", refused
+    }
 
-    public init(email: String, ok: Bool, invite: PondInviteRecord?, message: String?) {
-        self.email = email; self.ok = ok; self.invite = invite; self.message = message
+    enum CodingKeys: String, CodingKey { case email, ok, invite, message, status }
+
+    public init(email: String, ok: Bool, invite: PondInviteRecord?, message: String?, status: Status? = nil) {
+        self.email = email; self.ok = ok; self.invite = invite; self.message = message; self.status = status
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,6 +137,7 @@ public struct PondInviteOutcome: Sendable, Equatable, Decodable {
         ok = c.lenient(Bool.self, .ok) ?? false
         invite = c.lenient(PondInviteRecord.self, .invite)
         message = c.lenient(String.self, .message)
+        status = c.lenient(String.self, .status).flatMap(Status.init(rawValue:))
     }
 }
 
@@ -265,6 +276,69 @@ public struct InviteSheetPlan: Sendable, Equatable {
     public mutating func clearRefusals() { tokens = tokens.map { var t = $0; t.refusal = nil; return t } }
 }
 
+/// The Invite sheet once Invite is pressed: the field and role are locked and each address is a row, "Inviting\u{2026}" while the
+/// call runs, then "Invited \u{2713}" or the reason. Idle until `begin`; `done` when the answer is in (a refused address keeps its row).
+public struct InviteSheetRows: Sendable, Equatable {
+    public enum Phase: Sendable, Equatable { case idle, inviting, done }
+    public enum Outcome: Sendable, Equatable { case inviting, invited, refused(String) }
+
+    public struct Row: Sendable, Equatable, Identifiable {
+        public var address: String
+        public var outcome: Outcome
+        public var id: String { address }
+        public var text: String {
+            switch outcome {
+            case .inviting: "Inviting\u{2026}"
+            case .invited: "Invited \u{2713}"
+            case .refused(let why): why
+            }
+        }
+        public var failed: Bool { if case .refused = outcome { true } else { false } }
+    }
+
+    public private(set) var phase: Phase = .idle
+    public private(set) var rows: [Row] = []
+
+    public init() {}
+
+    /// Field and role are read-only from Invite until the call fails.
+    public var locked: Bool { phase != .idle }
+    public var showsDone: Bool { phase == .done }
+    public var invitedCount: Int { rows.filter { $0.outcome == .invited }.count }
+
+    public static func reason(for r: PondInviteOutcome?) -> String? {
+        guard let r else { return "Couldn\u{2019}t invite this address." }
+        let said = r.message.flatMap { $0.isEmpty ? nil : $0 }
+        switch r.status {
+        case .alreadyMember: return said ?? "Already a Member."
+        case .alreadyInvited: return said ?? "Already invited."
+        case .refused: return said ?? "Couldn\u{2019}t invite this address."
+        case .invited: return nil
+        case nil: return r.ok ? nil : (said ?? "Couldn\u{2019}t invite this address.")
+        }
+    }
+
+    public mutating func begin(_ addresses: [String]) {
+        phase = .inviting
+        rows = addresses.map { Row(address: $0, outcome: .inviting) }
+    }
+
+    /// The answer: one outcome per row, matched by address; an address the host left out is a refusal.
+    public mutating func finish(_ results: [PondInviteOutcome]) {
+        let by = Dictionary(results.map { (EmailAddress.normalized($0.email), $0) }, uniquingKeysWith: { a, _ in a })
+        rows = rows.map { row in
+            var r = row
+            let result = by[EmailAddress.normalized(row.address)]
+            r.outcome = Self.reason(for: result).map(Outcome.refused) ?? .invited
+            return r
+        }
+        phase = .done
+    }
+
+    /// Nothing could be asked: the sheet unlocks with its addresses as they were.
+    public mutating func fail() { phase = .idle; rows = [] }
+}
+
 // MARK: People sheet
 
 public struct PeopleSheetPlan: Sendable, Equatable {
@@ -298,6 +372,8 @@ public struct PeopleSheetPlan: Sendable, Equatable {
         /// "Member · Invited · 3 days ago".
         public var line: String
         public var actions: [InviteAction]
+        /// The invitation's email could not be delivered: the row says so with Resend in place of its status line.
+        public var emailFailed: Bool
     }
 
     public var members: [MemberRow]
@@ -306,6 +382,7 @@ public struct PeopleSheetPlan: Sendable, Equatable {
     public var canInvite: Bool
     public var cap: Int
 
+    public static let emailFailedText = "Email not delivered"
     public static let finishedFootnote = "Finished invites clear after 7 days."
     public static let finishedKeep: TimeInterval = 7 * 86400
     public static func title(pond: String) -> String { "People in \(pond)" }
@@ -358,7 +435,7 @@ public struct PeopleSheetPlan: Sendable, Equatable {
 
     static func row(_ i: PondInviteRecord, now: Date) -> InviteRow {
         let settled = Date(timeIntervalSince1970: Double(i.settledAt) / 1000)
-        let text: String
+        var text: String
         let actions: [InviteAction]
         switch i.state {
         case .pending:
@@ -366,12 +443,13 @@ public struct PeopleSheetPlan: Sendable, Equatable {
             let days = Int(s / 86400)
             text = "Invited \u{00B7} " + (days >= 1 ? "\(days) day\(days == 1 ? "" : "s") ago" : ago(Date(timeIntervalSince1970: Double(i.createdAt) / 1000), now: now))
             actions = [.resend, .withdraw]
+            if i.emailFailed { text = Self.emailFailedText }
         case .declined: text = "Declined \u{00B7} \(ago(settled, now: now))"; actions = [.inviteAgain]
         case .expired: text = "Expired"; actions = [.inviteAgain]
         case .withdrawn: text = "Withdrawn \u{00B7} \(ago(settled, now: now))"; actions = [.inviteAgain]
         case .joined: text = "Joined"; actions = []
         }
         let named = i.name.flatMap { $0.isEmpty ? nil : $0 }
-        return InviteRow(id: i.id, email: i.email, title: named ?? i.email, subtitle: named == nil ? nil : i.email, role: i.role, state: i.state, stateText: text, line: "\(i.role.word) \u{00B7} \(text)", actions: actions)
+        return InviteRow(id: i.id, email: i.email, title: named ?? i.email, subtitle: named == nil ? nil : i.email, role: i.role, state: i.state, stateText: text, line: "\(i.role.word) \u{00B7} \(text)", actions: actions, emailFailed: i.emailFailed && i.state == .pending)
     }
 }

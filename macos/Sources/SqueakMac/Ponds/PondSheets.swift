@@ -27,6 +27,7 @@ struct InvitePondSheet: View {
     let pondId: String
     @Environment(\.dismiss) private var dismiss
     @State private var plan: InviteSheetPlan
+    @State private var rows = InviteSheetRows()
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
     private var ponds: PondsModel { .shared }
@@ -46,8 +47,8 @@ struct InvitePondSheet: View {
             header
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Email addresses").font(Typo.footnote).foregroundStyle(Theme.muted)
-                field
-                if let line = plan.problemLine {
+                if rows.locked { rowsField } else { field }
+                if !rows.locked, let line = plan.problemLine {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                         Lucide(.triangleAlert, size: 12, color: Theme.negative)
                         Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
@@ -65,6 +66,7 @@ struct InvitePondSheet: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Role").font(Typo.footnote).foregroundStyle(Theme.muted)
                 HStack(spacing: Space.m) { ForEach(InviteSheetPlan.roles, id: \.self) { roleCard($0) } }
+                    .disabled(rows.locked)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityElement(children: .contain).accessibilityLabel("They can")
             }
@@ -88,6 +90,25 @@ struct InvitePondSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Invite pressed: the field is read-only and each address says where it stands.
+    private var rowsField: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            ForEach(rows.rows) { row in
+                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                    Text(verbatim: row.address).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: Space.s)
+                    Text(verbatim: row.text).font(Typo.footnote).foregroundStyle(row.failed ? Theme.negative : Theme.muted)
+                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(row.address), \(row.text)")
+            }
+        }
+        .padding(Space.m).frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+        .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).stroke(Theme.line))
     }
 
     private var field: some View {
@@ -149,10 +170,14 @@ struct InvitePondSheet: View {
         HStack {
             Text(verbatim: plan.placesLine).font(Typo.footnote).foregroundStyle(Theme.muted)
             Spacer()
-            Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-            Button(sending ? PondActionWords.pending(.invite, who: nil) : plan.sendTitle) { send() }
-                .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                .disabled(sending || !(plan.canSend || (draftIsAddress && !plan.tokens.contains { $0.refusal != nil })))
+            if rows.showsDone {
+                Button("Done") { dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            } else {
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(sending ? PondActionWords.pending(.invite, who: nil) : plan.sendTitle) { send() }
+                    .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    .disabled(sending || rows.locked || !(plan.canSend || (draftIsAddress && !plan.tokens.contains { $0.refusal != nil })))
+            }
         }
     }
 
@@ -166,12 +191,12 @@ struct InvitePondSheet: View {
 
     private func send() {
         commit()
-        guard plan.canSend, !sending else { return }
+        guard plan.canSend, !sending, !rows.locked else { return }
         let emails = plan.sendable, role = plan.role
+        rows.begin(emails)
         Task {
-            guard let results = await ponds.sendInvites(pond: pondId, emails: emails, role: role) else { return }
-            withAnimation(Motion.standard) { plan.apply(results) }
-            if plan.isDone { dismiss() }
+            guard let results = await ponds.sendInvites(pond: pondId, emails: emails, role: role) else { rows.fail(); return }
+            withAnimation(Motion.standard) { rows.finish(results) }
         }
     }
 }
@@ -326,10 +351,18 @@ struct PeopleSheet: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(verbatim: r.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
                     if let sub = r.subtitle { Text(verbatim: sub).font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle) }
-                    Text(verbatim: working.flatMap { ponds.actions.line($0) } ?? r.line).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    if r.emailFailed, working == nil {
+                        HStack(spacing: 0) {
+                            Text(verbatim: PeopleSheetPlan.emailFailedText + " \u{00B7} ").font(Typo.footnote).foregroundStyle(Theme.negative)
+                            Button("Resend") { run(.resend, r) }.buttonStyle(.plain).font(Typo.footnote).foregroundStyle(Theme.ink)
+                                .disabled(!canWrite)
+                        }
+                    } else {
+                        Text(verbatim: working.flatMap { ponds.actions.line($0) } ?? r.line).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    }
                 }
                 Spacer(minLength: Space.s)
-                ForEach(r.actions, id: \.self) { action in
+                ForEach(r.emailFailed ? r.actions.filter { $0 != .resend } : r.actions, id: \.self) { action in
                     switch action {
                     case .resend: Button("Resend") { run(action, r) }.buttonStyle(SecondaryButtonStyle())
                     case .withdraw: Button("Withdraw") { run(action, r) }.buttonStyle(.plain).font(Typo.label).foregroundStyle(Theme.negative)

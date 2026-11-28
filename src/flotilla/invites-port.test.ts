@@ -47,8 +47,19 @@ describe("the relay's invite port", () => {
       status: 200,
       body: {
         results: [
-          { email: "asha@example.com", ok: true, mailed: true, invite: raw("pending", { name: "Asha", userId: "u2" }) },
-          { email: "bea@example.com", ok: false, message: "bea@example.com is already in this Pond." },
+          {
+            email: "asha@example.com",
+            ok: true,
+            status: "invited",
+            queued: true,
+            invitation: raw("pending", { name: "Asha", userId: "u2" }),
+          },
+          {
+            email: "bea@example.com",
+            ok: false,
+            status: "already-member",
+            message: "bea@example.com is already in this Pond.",
+          },
           { email: "junk", ok: false },
         ],
       },
@@ -66,11 +77,20 @@ describe("the relay's invite port", () => {
     });
     expect(r[0]).toMatchObject({
       ok: true,
-      mailed: true,
+      status: "invited",
       invite: { id: "i1", state: "pending", name: "Asha", userId: "u2" },
     });
-    expect(r[1]).toEqual({ email: "bea@example.com", ok: false, message: "bea@example.com is already in this Pond." });
-    expect(r[2]).toMatchObject({ ok: false, message: "Squeak could not reach the cloud. Try again." });
+    expect(r[1]).toEqual({
+      email: "bea@example.com",
+      ok: false,
+      status: "already-member",
+      message: "bea@example.com is already in this Pond.",
+    });
+    expect(r[2]).toMatchObject({
+      ok: false,
+      status: "refused",
+      message: "Squeak could not reach the cloud. Try again.",
+    });
   });
 
   it("lists, resends, withdraws and invites again through the relay's routes", async () => {
@@ -124,21 +144,23 @@ describe("the relay's invite port", () => {
 });
 
 describe("the invitee's side of the port", () => {
-  const row = (state = "pending", extra: Record<string, unknown> = {}) => ({
+  /** An InvitationView as the relay's Invitation module answers it. */
+  const view = (state = "pending", extra: Record<string, unknown> = {}) => ({
     inviteId: "i1",
     pondId: POND,
-    pond: "greenroom",
-    inviter: "Sibhi",
+    pondName: "greenroom",
+    inviter: { name: "Sibhi" },
     role: "viewer",
     state,
+    youAreMember: state === "joined",
     expiresAt: 9,
     ...extra,
   });
 
-  it("reads the invitations for the account with the Mac's key; a malformed row is left out", async () => {
+  it("reads the views for the account with the Mac's key and its name; a malformed row is left out", async () => {
     const { invites, calls } = port(() => ({
       status: 200,
-      body: { invites: [row(), row("joined", { inviteId: "i2" }), row("withdrawn", { inviteId: "i3" }), { nope: 1 }] },
+      body: { invitations: [view(), view("joined", { inviteId: "i2" }), { nope: 1 }] },
     }));
     expect(await invites.mine()).toEqual([
       {
@@ -148,33 +170,74 @@ describe("the invitee's side of the port", () => {
         inviter: "Sibhi",
         role: "viewer",
         state: "pending",
+        youAreMember: false,
         expiresAt: 9,
       },
-      expect.objectContaining({ id: "i2", state: "joined" }),
+      expect.objectContaining({ id: "i2", state: "joined", youAreMember: true }),
     ]);
-    expect(calls[0]).toMatchObject({ url: "/server/squeak_relay/invites", method: "GET", key: "mac-key" });
+    expect(calls[0]).toMatchObject({ url: "/server/squeak_relay/account/invitations", method: "GET", key: "mac-key" });
   });
 
-  it("Join and Decline are posts to the invite; the answer is the relay's settled record, a refusal its sentence", async () => {
-    const ok = port(() => ({ status: 200, body: { invite: raw("joined") } }));
-    expect(await ok.invites.accept("i1")).toMatchObject({ id: "i1", state: "joined" });
-    expect(ok.calls[0]).toMatchObject({ url: "/server/squeak_relay/invites/i1/accept", method: "POST" });
-    const no = port(() => ({ status: 200, body: { invite: raw("declined") } }));
+  it("Join and Decline use the one account route and answer the relay's fresh view; a refusal keeps its sentence and view", async () => {
+    const ok = port(() => ({
+      status: 200,
+      body: { pondId: POND, pond: { pondId: POND, name: "greenroom" }, invitation: view("joined") },
+    }));
+    expect(await ok.invites.accept("i1")).toMatchObject({
+      pondId: POND,
+      pondName: "greenroom",
+      invitation: { id: "i1", state: "joined", youAreMember: true },
+    });
+    expect(ok.calls[0]).toMatchObject({ url: "/server/squeak_relay/account/invitations/i1/join", method: "POST" });
+    const no = port(() => ({ status: 200, body: { invitation: view("declined") } }));
     expect(await no.invites.decline("i1")).toMatchObject({ state: "declined" });
-    expect(no.calls[0]!.url).toBe("/server/squeak_relay/invites/i1/decline");
+    expect(no.calls[0]!.url).toBe("/server/squeak_relay/account/invitations/i1/decline");
     const late = port(() => ({
       status: 409,
-      body: { error: "was-withdrawn", message: "That invitation is no longer open." },
+      body: {
+        error: "state",
+        code: "was-withdrawn",
+        message: "This invitation was withdrawn.",
+        invitation: view("withdrawn"),
+      },
     }));
     await expect(late.invites.accept("i1")).rejects.toMatchObject({
       status: 409,
-      message: "That invitation is no longer open.",
+      message: "This invitation was withdrawn.",
+      invitation: { id: "i1", state: "withdrawn" },
     });
   });
 
-  it("reads only the two states an invitee acts on", () => {
-    expect(readInvitation(row("joined"))).toMatchObject({ state: "joined" });
-    expect(readInvitation(row("declined"))).toBeNull();
-    expect(readInvitation({ ...row(), role: "owner" })).toBeNull();
+  it("sends this Mac's account name with its key, URI-encoded, and nothing when it has none", async () => {
+    const calls: Array<Record<string, string>> = [];
+    const fetchImpl = async (_url: string, init?: RequestInit) => {
+      calls.push(init?.headers as Record<string, string>);
+      return new Response(JSON.stringify({ invitations: [] }), { status: 200 });
+    };
+    const named = new HttpPondInvites(
+      "https://squeak.catalystserverless.in/server/squeak_relay",
+      "k",
+      fetchImpl,
+      true,
+      () => "Zoë Rao",
+    );
+    await named.mine();
+    expect(calls[0]!["x-squeak-account-name"]).toBe(encodeURIComponent("Zoë Rao"));
+    const unnamed = new HttpPondInvites(
+      "https://squeak.catalystserverless.in/server/squeak_relay",
+      "k",
+      fetchImpl,
+      true,
+    );
+    await unnamed.mine();
+    expect(calls[1]!["x-squeak-account-name"]).toBeUndefined();
+  });
+
+  it("reads every state of a view (a refusal shows what it is now), and a missing inviter is a teammate, never Someone", () => {
+    expect(readInvitation(view("joined"))).toMatchObject({ state: "joined" });
+    expect(readInvitation(view("declined"))).toMatchObject({ state: "declined" });
+    expect(readInvitation(view("teleported"))).toBeNull();
+    expect(readInvitation({ ...view(), role: "owner" })).toBeNull();
+    expect(readInvitation(view("pending", { inviter: { name: "  " } }))!.inviter).toBe("A teammate");
   });
 });

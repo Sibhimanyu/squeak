@@ -17,6 +17,8 @@ function createLiveNotices(streams, log = () => undefined) {
   return {
     /** A change was stamped with `seq`. */
     notice: (pond, seq, kind) => send({ t: "n", pond, seq, kind }),
+    /** An invitation changed for this account (or, before it has one, for `e-<hash of the address>`): its devices re-read their invitations. Carries no content. */
+    invites: (user) => send({ t: "inv", user }),
     /** An account left or was removed: its subscriptions to the Pond close at once. */
     removed: (pond, user) => send({ t: "rm", pond, user }),
     /** Raw text from an instance (the live service has no SDK grant of its own; it publishes through the relay). */

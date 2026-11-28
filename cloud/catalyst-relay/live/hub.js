@@ -141,6 +141,9 @@ function createHub(deps) {
         for (const c of [...(byPond.get(msg.pond) ?? [])])
           if (c.userId !== msg.user) c.send("typing", { pond: msg.pond, user: msg.user });
         break;
+      case "inv": // an invitation changed for an account: {t, user}; every connection of that account hears it (targeted, ADR 0005)
+        for (const c of [...conns]) if (c.userId === msg.user) c.send("invites", {});
+        break;
       case "rm": // someone left or was removed
         cut(msg.pond, msg.user);
         break;

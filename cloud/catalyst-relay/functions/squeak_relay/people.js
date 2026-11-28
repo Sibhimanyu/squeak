@@ -15,6 +15,7 @@
 //   clear(table)                        -> number deleted
 const crypto = require("node:crypto");
 const { CHANNEL } = require("./rules");
+const { maskEmail, validEmail } = require("./mail");
 
 /** The most people in a Pond, the Owner included. */
 const MAX_MEMBERS = 10;
@@ -163,10 +164,11 @@ function createPeople(deps) {
     need(EMAIL.test(email), "email");
     const name = nameColumn(input.name);
     const t = now();
-    const patch = { email, name, updatedAt: t };
+    // A name is never blanked: a request that carries none (a Mac key, a sign-in without a profile) keeps the stored one.
+    const patch = { email, ...(name ? { name } : {}), updatedAt: t };
     if (await tables.update(T.accounts, "userId", input.userId, patch)) return getAccount(input.userId);
     try {
-      await tables.insert(T.accounts, { userId: input.userId, ...patch, createdAt: t });
+      await tables.insert(T.accounts, { userId: input.userId, name, ...patch, createdAt: t });
     } catch (e) {
       if (!isUnique(e)) throw e;
       await tables.update(T.accounts, "userId", input.userId, patch); // a concurrent first sign-in won: just refresh
@@ -479,84 +481,281 @@ function createPeople(deps) {
     return getInvite(input.inviteId);
   }
 
-  /** The invitee's side: only the address the invite names may use it (`who.email` is the account's verified address). */
-  async function openInvite(inviteId, who) {
-    const row = await tables.get(T.invites, "inviteId", String(inviteId));
+  // ---- the Invitation module's interface (issue #141) ----
+  //
+  // invite, join, decline, withdraw, again, listFor, listForPond. Each returns InvitationViews computed here, once:
+  //   { inviteId, pondId, pondName, inviter: {name}, role, state, youAreMember, expiresAt }
+  // and, for the Owner's side, also { email, invitedBy, createdAt, settledAt, userId?, name? } (what the People list draws).
+  // A refusal is a PeopleError carrying `.invitation`, the fresh view, so the caller redraws from the answer.
+  // Every change is announced through the notifier the relay sets (`onChange`): { pondId, invitee } where invitee is the
+  // account that holds the address (accounts/<userId>/invites) or, before it has one, "e-<hash of the address>".
+
+  let notifier = null;
+  const announce = async (row) => {
+    if (!notifier) return;
+    try {
+      const known = await accountByEmail(row.email);
+      await notifier({ pondId: row.pondId, invitee: known ? known.userId : `e-${emailHash(row.email)}` });
+    } catch {
+      /* a lost notice costs the watcher its next read, never the action */
+    }
+  };
+
+  const labelOf = (a) => (a && String(a.name || "").trim()) || (a && a.email ? maskEmail(a.email) : "") || "A teammate";
+
+  /** The one InvitationView of a stored invite for one viewer: `viewer.userId` (for youAreMember) and/or `viewer.owner`. */
+  async function viewOf(row, viewer = {}) {
+    const base = inviteView(row);
+    const p = await getPond(row.pondId);
+    const inviter = await getAccount(row.invitedBy);
+    const out = {
+      inviteId: base.inviteId,
+      pondId: base.pondId,
+      pondName: p ? p.name : "",
+      inviter: { name: labelOf(inviter) },
+      role: base.role,
+      state: base.state,
+      youAreMember: viewer.userId ? await isMember(row.pondId, viewer.userId) : false,
+      expiresAt: base.expiresAt,
+      createdAt: base.createdAt,
+    };
+    if (viewer.owner) {
+      const known = await accountByEmail(row.email);
+      Object.assign(out, {
+        email: base.email,
+        invitedBy: base.invitedBy,
+        settledAt: base.settledAt,
+        ...(known ? { userId: known.userId } : {}),
+        ...(known && known.name ? { name: known.name } : {}),
+      });
+    }
+    return out;
+  }
+  const rowOf = (inviteId) => tables.get(T.invites, "inviteId", String(inviteId));
+  const viewById = async (inviteId, viewer) => viewOf(await rowOf(inviteId), viewer);
+  /** Refuses with the fresh view attached. */
+  async function refuse(code, message, inviteId, viewer) {
+    const e = new PeopleError(code, message);
+    const row = inviteId ? await rowOf(inviteId) : null;
+    if (row) e.invitation = await viewOf(row, viewer);
+    throw e;
+  }
+  const WORDS = {
+    "was-withdrawn": "This invitation was withdrawn.",
+    "was-expired": "This invitation expired.",
+    "was-declined": "This invitation was declined.",
+    "was-joined": "This invitation was already used.",
+    "not-pending": "That invitation is no longer waiting.",
+    "wrong-address": "This invitation is for another address.",
+  };
+  const wasWords = (state) => WORDS[`was-${state}`] || WORDS["not-pending"];
+
+  /** The invitee's side: finds the invite, checks the address, applies expiry in this one place. */
+  async function forInvitee(inviteId, person) {
+    const row = await rowOf(inviteId);
     if (!row) throw new PeopleError("no-invite", "No such invite.");
-    const view = inviteView(row);
-    if (view.state === "expired" && row.state === "pending") await expireStale(row.pondId);
-    if (view.state !== "pending") throw new PeopleError(`was-${view.state}`, "That invitation is no longer open.");
-    if (normEmail(who && who.email) !== row.email)
-      throw new PeopleError("wrong-address", "This invitation is for another address.");
-    return row;
+    const viewer = { userId: person && person.userId };
+    if (normEmail(person && person.email) !== row.email)
+      await refuse("wrong-address", WORDS["wrong-address"], row.inviteId, viewer);
+    let state = inviteView(row).state;
+    if (state === "expired" && row.state === "pending") await expireStale(row.pondId);
+    return { row, state, viewer };
+  }
+  /** After a lost race: what the invite became, as a refusal unless it became `okState`. */
+  async function lostRace(row, okState, viewer) {
+    const was = inviteView(await rowOf(row.inviteId)).state;
+    if (was !== okState) await refuse(`was-${was}`, wasWords(was), row.inviteId, viewer);
   }
 
-  /** Join: the person becomes a Member at once (the slot the invite held is theirs) and the invite is Joined. */
-  async function acceptInvite(inviteId, who) {
-    need(isId(who && who.userId), "userId");
-    const row = await openInvite(inviteId, who);
-    const held = await tables.get(T.slots, "userId", inviteSlotOwner(row.inviteId));
-    // Claim the invite first (its lock): only one of Join, Decline and Withdraw can win.
-    await settleRow(row, "joined", now(), true);
-    try {
+  /**
+   * Join, idempotent: the membership goes in first (the slot the invite held becomes the person's), then the invite settles.
+   * Joined already, or already a Member: success with the Pond. A crash between the two steps is finished by the next call.
+   * Only a withdrawn, declined or expired invite, another address, or a person who has since left refuse.
+   */
+  async function join(person, inviteId) {
+    need(isId(person && person.userId), "userId");
+    const { row, state, viewer } = await forInvitee(inviteId, person);
+    if (state === "withdrawn" || state === "declined" || state === "expired")
+      await refuse(`was-${state}`, wasWords(state), row.inviteId, viewer);
+    const pondRow = await getPond(row.pondId);
+    if (!pondRow) await refuse("no-pond", "There is no such Pond.", row.inviteId, viewer);
+    const key = memberKey(row.pondId, person.userId);
+    const mine = membership(await tables.get(T.members, "memberKey", key));
+    if (state === "joined" && mine && !isIn(mine) && mine.leftAt > 0)
+      await refuse("was-joined", wasWords("joined"), row.inviteId, viewer); // let in once, and has since left
+    if (!isIn(mine)) {
+      if (mine && mine.leftAt === 0) await tables.delete(T.members, "memberKey", key); // a half-made row from a crash
+      const held = state === "pending" ? await tables.get(T.slots, "userId", inviteSlotOwner(row.inviteId)) : null;
       const transfer = held
         ? async () => {
-            await tables.update(T.slots, "slotKey", held.slotKey, { userId: who.userId });
+            await tables.update(T.slots, "slotKey", held.slotKey, { userId: person.userId });
             return Number(held.slotKey.slice(held.slotKey.lastIndexOf(":") + 1));
           }
         : undefined;
-      await enter(row.pondId, who.userId, row.role, transfer);
-    } catch (e) {
-      // Not in after all (already a member): the invite is closed as Withdrawn and its slot freed; anything else, back to pending.
-      if (e instanceof PeopleError && e.code === "already-member") {
-        await tables.update(T.invites, "inviteId", row.inviteId, { state: "withdrawn", settledAt: now() });
-        await freeInviteSlot(row.inviteId);
-      } else {
-        await tables.update(T.invites, "inviteId", row.inviteId, { state: "pending", settledAt: 0 });
-        await tables.insert(T.locks, {
-          lockKey: lockKeyOf(row.pondId, row.email),
-          inviteId: row.inviteId,
-          pondId: row.pondId,
+      try {
+        await enter(row.pondId, person.userId, row.role, transfer);
+      } catch (e) {
+        if (!(e instanceof PeopleError)) throw e;
+        if (e.code !== "already-member") await refuse(e.code, e.message, row.inviteId, viewer);
+      }
+    }
+    if (state === "pending") {
+      try {
+        await settleRow(row, "joined", now());
+      } catch (e) {
+        if (!(e instanceof PeopleError && e.code === "not-pending")) throw e;
+        await lostRace(row, "joined", viewer); // another Join won: fine; anything else says what it was
+      }
+    }
+    await announce(row);
+    return { pond: { pondId: pondRow.pondId, name: pondRow.name }, invitation: await viewById(row.inviteId, viewer) };
+  }
+
+  /** Decline, idempotent: declined already is success; a joined, withdrawn or expired invite refuses with its fresh view. */
+  async function decline(person, inviteId) {
+    const { row, state, viewer } = await forInvitee(inviteId, person);
+    if (state === "pending") {
+      try {
+        await settleRow(row, "declined", now());
+      } catch (e) {
+        if (!(e instanceof PeopleError && e.code === "not-pending")) throw e;
+        await lostRace(row, "declined", viewer);
+      }
+    } else if (state !== "declined") await refuse(`was-${state}`, wasWords(state), row.inviteId, viewer);
+    await announce(row);
+    return { invitation: await viewById(row.inviteId, viewer) };
+  }
+
+  /**
+   * One call for many addresses. Returns one result per address, in order:
+   *   { email, status: "invited" | "already-member" | "already-invited" | "refused", invitation?, message? }
+   * The first invite of a Pond that is not in the cloud yet creates it with `owner` as its Owner (`pondName` names it).
+   * Rows are written here; sending the emails is the caller's job and happens after it has answered.
+   */
+  async function invite(owner, pondId, input) {
+    need(isId(owner && owner.userId), "userId");
+    need(isPond(pondId), "pondId");
+    need(INVITE_ROLES.has(input.role), "role");
+    need(Array.isArray(input.emails) && input.emails.length > 0, "emails");
+    let p = await getPond(pondId);
+    if (p && p.ownerUserId !== owner.userId) throw new PeopleError("forbidden", "Only the Owner invites.");
+    if (!p) {
+      const name = String(input.pondName || "").trim();
+      need(name.length > 0, "pondName");
+      p = await createPond({ pondId, ownerUserId: owner.userId, name });
+    }
+    const viewer = { owner: true };
+    const results = [];
+    for (const email of [...new Set(input.emails.map((e) => (typeof e === "string" ? normEmail(e) : "")))]) {
+      if (!validEmail(email)) {
+        results.push({
+          email,
+          status: "refused",
+          code: "email",
+          message: `${email || "That"} is not an email address.`,
+        });
+        continue;
+      }
+      try {
+        const made = await createInvite({
+          inviteId: input.newInviteId(),
+          pondId,
+          email,
+          role: input.role,
+          invitedBy: owner.userId,
+          expiresAt: input.expiresAt,
+        });
+        await announce(made);
+        results.push({ email, status: "invited", invitation: await viewById(made.inviteId, viewer) });
+      } catch (e) {
+        if (!(e instanceof PeopleError)) throw e;
+        const status =
+          e.code === "already-member" ? "already-member" : e.code === "invite-pending" ? "already-invited" : "refused";
+        const existing =
+          status === "already-invited"
+            ? (await tables.select(T.invites, "pondId", pondId)).find(
+                (r) => r.email === email && inviteView(r).state === "pending",
+              )
+            : null;
+        results.push({
+          email,
+          status,
+          code: e.code,
+          message: e.message,
+          ...(existing ? { invitation: await viewOf(existing, viewer) } : {}),
         });
       }
-      throw e;
     }
-    return getInvite(row.inviteId);
+    return { pond: p, results };
   }
-  async function declineInvite(inviteId, who) {
-    const row = await openInvite(inviteId, who);
-    await settleRow(row, "declined", now());
-    return getInvite(row.inviteId);
+
+  /** The Owner's guard for acting on one invite of their Pond. */
+  async function ownedInvite(owner, pondId, inviteId) {
+    const p = await getPond(pondId);
+    if (!p) throw new PeopleError("no-pond", "There is no such Pond.");
+    if (p.ownerUserId !== (owner && owner.userId)) throw new PeopleError("forbidden", "Only the Owner can do that.");
+    const row = await rowOf(inviteId);
+    if (!row || row.pondId !== pondId) throw new PeopleError("no-invite", "There is no such invitation.");
+    return row;
   }
-  /** The Owner takes a pending invite back. (The route checks it is the Owner and that the invite is of that Pond.) */
-  const withdrawInvite = (inviteId) => settleInvite(inviteId, "withdrawn");
+
+  /** Withdraw, idempotent: a withdrawn invite answers as it is; a joined, declined or expired one refuses with its fresh view. */
+  async function withdraw(owner, pondId, inviteId) {
+    const row = await ownedInvite(owner, pondId, inviteId);
+    const state = inviteView(row).state;
+    if (state === "pending") {
+      try {
+        await settleRow(row, "withdrawn", now());
+      } catch (e) {
+        if (!(e instanceof PeopleError && e.code === "not-pending")) throw e;
+        await lostRace(row, "withdrawn", { owner: true });
+      }
+    } else if (state !== "withdrawn") await refuse("not-pending", WORDS["not-pending"], row.inviteId, { owner: true });
+    await announce(row);
+    return { invitation: await viewById(row.inviteId, { owner: true }) };
+  }
 
   /** A finished (declined, expired or withdrawn) invite is made again as a new pending one; the old record goes. */
-  async function inviteAgain(input) {
-    const row = await tables.get(T.invites, "inviteId", String(input.fromInviteId));
-    if (!row || row.pondId !== input.pondId) throw new PeopleError("no-invite", "No such invite.");
-    const view = inviteView(row);
-    if (view.state === "joined") throw new PeopleError("joined", `${row.email} already joined.`);
-    if (view.state === "pending") throw new PeopleError("still-pending", "That invitation is still waiting.");
+  async function again(owner, pondId, fromInviteId, input) {
+    const row = await ownedInvite(owner, pondId, fromInviteId);
+    const state = inviteView(row).state;
+    const viewer = { owner: true };
+    if (state === "joined") await refuse("joined", `${row.email} already joined.`, row.inviteId, viewer);
+    if (state === "pending") await refuse("still-pending", "That invitation is still waiting.", row.inviteId, viewer);
     const made = await createInvite({
-      inviteId: input.inviteId,
-      pondId: input.pondId,
+      inviteId: input.newInviteId(),
+      pondId,
       email: row.email,
       role: input.role || row.role,
-      invitedBy: input.invitedBy,
+      invitedBy: owner.userId,
       expiresAt: input.expiresAt,
     });
     await tables.delete(T.invites, "inviteId", row.inviteId);
-    return made;
+    await announce(made);
+    return { invitation: await viewById(made.inviteId, viewer) };
   }
 
-  const getInvite = async (inviteId) => inviteView(await tables.get(T.invites, "inviteId", String(inviteId)));
-  const invitesOf = async (pondId) => (await tables.select(T.invites, "pondId", String(pondId))).map(inviteView);
+  /** Resend is only meaningful for a pending invite; the caller sends the email. Returns the fresh view. */
+  async function pendingForResend(owner, pondId, inviteId) {
+    const row = await ownedInvite(owner, pondId, inviteId);
+    if (inviteView(row).state !== "pending")
+      await refuse("not-pending", WORDS["not-pending"], row.inviteId, { owner: true });
+    return viewById(row.inviteId, { owner: true });
+  }
+
+  /** The stored invite, as the preview and a mail need it. */
+  const getInvite = async (inviteId) => inviteView(await rowOf(inviteId));
+
   /**
-   * What the Owner sees: expired ones settled, one invite per address (the newest), newest first. A finished invite clears
-   * a week after it was reached. Joined ones are returned too (the person is in Members; surfaces do not draw them again).
+   * What the Owner sees (`listForPond`): expired ones settled, one invite per address (the newest), newest first. A finished
+   * invite clears a week after it was reached. Joined ones are returned too (the person is in Members; surfaces do not draw
+   * them again).
    */
-  async function listInvites(pondId) {
+  async function listForPond(owner, pondId) {
+    const p = await getPond(pondId);
+    if (!p) return [];
+    if (p.ownerUserId !== (owner && owner.userId))
+      throw new PeopleError("forbidden", "Only the Owner can see invitations.");
     await expireStale(pondId);
     const byEmail = new Map();
     for (const row of await tables.select(T.invites, "pondId", String(pondId))) {
@@ -567,15 +766,38 @@ function createPeople(deps) {
       const seen = byEmail.get(row.email);
       if (!seen || num(row.createdAt) > num(seen.createdAt)) byEmail.set(row.email, row);
     }
-    return [...byEmail.values()].map(inviteView).sort((a, b) => b.createdAt - a.createdAt);
+    const views = [];
+    for (const row of byEmail.values()) views.push(await viewOf(row, { owner: true }));
+    return views.sort((a, b) => b.createdAt - a.createdAt);
   }
-  const pendingInvitesFor = async (email) =>
-    (await tables.select(T.invites, "email", normEmail(email))).map(inviteView).filter((i) => i.state === "pending");
-  /** The invites this address joined that are still within their keep time (the Owner's Mac may not have let the person in yet). */
-  const joinedInvitesFor = async (email) =>
-    (await tables.select(T.invites, "email", normEmail(email)))
-      .map(inviteView)
-      .filter((i) => i.state === "joined" && i.settledAt + FINISHED_KEEP_MS > now());
+
+  /**
+   * What a person sees (`listFor`): their pending invitations, and ones they joined that are not yet "listed" (the caller's
+   * test: the Owner's Mac has not opened the Pond to the account yet), newest first. Nothing else is drawn.
+   */
+  async function listFor(person, options = {}) {
+    const listed = options.isListed || (async () => true);
+    const rows = await tables.select(T.invites, "email", normEmail(person && person.email));
+    const views = [];
+    for (const row of rows) {
+      const state = inviteView(row).state;
+      const viewer = { userId: person.userId };
+      if (state === "pending") views.push(await viewOf(row, viewer));
+      else if (
+        state === "joined" &&
+        num(row.settledAt) + FINISHED_KEEP_MS > now() &&
+        (await isMember(row.pondId, person.userId)) &&
+        !(await listed(row.pondId))
+      )
+        views.push(await viewOf(row, viewer));
+    }
+    return views.filter((v) => v.pondName).sort((a, b) => b.expiresAt - a.expiresAt);
+  }
+
+  /** The relay sets one notifier: it is told { pondId, invitee } after every change (see the interface note above). */
+  const onChange = (fn) => {
+    notifier = typeof fn === "function" ? fn : null;
+  };
 
   // ---- clean start ----
 
@@ -616,15 +838,17 @@ function createPeople(deps) {
     pondsOf,
     createInvite,
     settleInvite,
-    acceptInvite,
-    declineInvite,
-    withdrawInvite,
-    inviteAgain,
     getInvite,
-    invitesOf,
-    listInvites,
-    pendingInvitesFor,
-    joinedInvitesFor,
+    invite,
+    join,
+    decline,
+    withdraw,
+    again,
+    pendingForResend,
+    listFor,
+    listForPond,
+    viewOf,
+    onChange,
     cleanStart,
   };
 }

@@ -206,7 +206,7 @@ export function peopleJourney(world: JourneyWorld, step: Step): void {
   );
 
   step("join on the web: joined on the Owner's side, the Pond is Connecting for the invitee", async () => {
-    assert.deepEqual(await web.service.joinInvitation(inviteId), { pondId });
+    assert.equal((await web.service.joinInvitation(inviteId)).pondId, pondId);
     assert.equal((await stateOnOwner(users.invitee.email)).state, "joined");
     const [row] = await web.service.list();
     assert.equal(row!.id, pondId);

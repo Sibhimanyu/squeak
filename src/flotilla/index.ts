@@ -232,7 +232,11 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
     ...(catalystRelay ? { relay: catalystRelay } : {}),
     ...(where?.provider === "catalyst"
-      ? { invites: new HttpPondInvites(where.relayUrl, where.relayKey, undefined, where.hosted === true) }
+      ? {
+          invites: new HttpPondInvites(where.relayUrl, where.relayKey, undefined, where.hosted === true, () =>
+            account.name(),
+          ),
+        }
       : {}),
     storeFor: (loc, pondToken) => {
       const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
@@ -242,6 +246,9 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
       return createCloudStore(at as CloudLocation);
     },
   });
+  // An invitation of this account changed (the relay's account notice): read the list again, so Join, Decline and a withdrawal
+  // show without waiting for the next poll. The live stream is held open for it even before this Mac has a Pond.
+  if (store instanceof CatalystStore) store.watchInvites(() => service.invitationsChanged());
   const artifactsOf = new Artifacts({ store: deps.store });
   const bridge = new FlotillaBridge(service, hostPortFor(deps), {
     // A member's thread on this Mac: in the pond's folder (Main for a git pond), always asking first.

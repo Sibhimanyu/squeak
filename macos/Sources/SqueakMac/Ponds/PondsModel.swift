@@ -472,32 +472,59 @@ final class PondsModel {
     var invitationsToAnswer: [PondInvitation] { PondInvitations.toAnswer(invitations) }
     private(set) var answering: Set<String> = []
 
-    /// Join: the Pond appears as Connecting at once; the invitation leaves the list only on the host's answer.
+    /// The daemon could not read the cloud on the last read: the list is its last good one (the block says so, quietly).
+    private(set) var invitationsStale = false
+    /// The last Join or Decline was refused: its sentence (`note`) stays visible even when the row left the list.
+    private(set) var invitationRefused = false
+
+    /// Asks the daemon; its answer is the invitation's fresh view. A refusal gives the sentence in `note` and, when the daemon
+    /// sent one, the view too.
+    private func answerInvitation(_ call: (PondsClient) async throws -> PondInvitation?) async -> (ok: Bool, view: PondInvitation?) {
+        guard let client else { return (false, nil) }
+        do { let view = try await call(client); note = nil; return (true, view) }
+        catch let refusal as PondInvitationRefusal { note = refusal.sentence; invitationRefused = true; return (false, refusal.invitation) }
+        catch let e as NativeHostError { note = e.reason; return (false, nil) }
+        catch { note = "That didn't go through"; return (false, nil) }
+    }
+
+    /// The row takes the daemon's answer at once (replaced, or dropped when no longer pending or joined); an answer without a
+    /// view sends us to read.
+    private func settle(_ view: PondInvitation?) async {
+        if let view { invitations = PondInvitations.applying(view, to: invitations) } else { await refreshInvitations() }
+    }
+
+    /// Join: the row shows the daemon's answer without waiting for a re-read, then the Pond home opens.
     func join(invitation id: String) async {
         guard !answering.contains(id) else { return }
-        answering.insert(id); note = nil
-        if await attempt({ try await client!.joinInvitation(id: id) }) {
-            await refreshInvitations()
-            await refresh()
-            if let pond = invitations.first(where: { $0.id == id })?.pondId ?? ponds.first(where: { $0.connecting })?.id,
-               let row = ponds.first(where: { $0.id == pond }) {
-                AppModel.shared.openPondHome(key(forPond: row))
-            }
+        answering.insert(id); note = nil; invitationRefused = false
+        defer { answering.remove(id) }
+        let before = invitations.first { $0.id == id }
+        let answer = await answerInvitation { try await $0.joinInvitation(id: id) }
+        await settle(answer.view)
+        guard answer.ok else { return }
+        await refresh()
+        if let pond = answer.view?.pondId ?? before?.pondId ?? ponds.first(where: { $0.connecting })?.id,
+           let row = ponds.first(where: { $0.id == pond }) {
+            AppModel.shared.openPondHome(key(forPond: row))
         }
-        answering.remove(id)
     }
 
     func decline(invitation id: String) async {
         guard !answering.contains(id) else { return }
-        answering.insert(id); note = nil
-        if await attempt({ try await client!.declineInvitation(id: id) }) { await refreshInvitations() }
-        answering.remove(id)
+        answering.insert(id); note = nil; invitationRefused = false
+        defer { answering.remove(id) }
+        let answer = await answerInvitation { try await $0.declineInvitation(id: id) }
+        await settle(answer.view)
     }
 
-    func refreshInvitations() async {
-        guard let client, let list = try? await client.invitations() else { return }
-        if list != invitations { invitations = list }
+    func refreshInvitations(fresh: Bool = false) async {
+        guard let client, let answer = try? await client.invitations(fresh: fresh) else { return }
+        if answer.stale != invitationsStale { invitationsStale = answer.stale }
+        if answer.invitations != invitations { invitations = answer.invitations }
     }
+
+    /// "Try again" under a stale list: the daemon tries the cloud before it answers.
+    func retryInvitations() async { await refreshInvitations(fresh: true) }
 
     private func scheduleClear(_ key: String) {
         Task { try? await Task.sleep(for: .seconds(5)); result[key] = nil }

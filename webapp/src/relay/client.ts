@@ -24,7 +24,7 @@ export type RespondResult =
   | { status: "ok"; pondId: string | null }
   | { status: "unauthorized" }
   /** The cloud said no on purpose: another address (`email`), a full Pond (`full`) or an invite already settled (`withdrawn`, `expired`, `joined`, `declined`). */
-  | { status: "refused"; why: string }
+  | { status: "refused"; why: string; /** The relay's own plain sentence, when it gave one. */ message?: string }
   | { status: "failed" };
 
 /** A sealed document as the relay stores it (`ChannelDoc` in src/cloud/store.ts). The relay never sees what is inside `box`. */
@@ -80,6 +80,8 @@ export interface PondInvite {
   /** When it reached its state (the time shown: "Declined · 2 h ago"); `createdAt` while pending. */
   settledAt: number;
   expiresAt: number;
+  /** The email could not be delivered after the relay's retries: the row says so and offers Resend. */
+  emailFailed?: boolean;
 }
 export interface PondPeople {
   owner: string;
@@ -220,6 +222,7 @@ export function createRelay(base: string, fetchFn: FetchLike = (url, init) => fe
             createdAt: num(i["createdAt"]),
             settledAt: num(i["settledAt"]) || num(i["createdAt"]),
             expiresAt: num(i["expiresAt"]),
+            ...(i["emailFailed"] === true ? { emailFailed: true } : {}),
           });
         }
         const owner = typeof b["owner"] === "string" ? b["owner"] : "";
@@ -376,9 +379,18 @@ export function createRelay(base: string, fetchFn: FetchLike = (url, init) => fe
         });
         if (res.status === 401) return { status: "unauthorized" };
         if (res.status === 403 || res.status === 409) {
-          const refusal = (await res.json().catch(() => null)) as { error?: unknown; state?: unknown } | null;
-          const why = refusal?.error === "state" ? refusal.state : refusal?.error;
-          return typeof why === "string" ? { status: "refused", why } : { status: "failed" };
+          const refusal = (await res.json().catch(() => null)) as {
+            error?: unknown;
+            state?: unknown;
+            message?: unknown;
+            invitation?: { state?: unknown } | null;
+          } | null;
+          // `error` keeps the words the web has always read; the relay's fresh `invitation` view says the same when it is there.
+          const why = refusal?.error === "state" ? (refusal.state ?? refusal.invitation?.state) : refusal?.error;
+          const message = typeof refusal?.message === "string" && refusal.message ? refusal.message : undefined;
+          return typeof why === "string"
+            ? { status: "refused", why, ...(message ? { message } : {}) }
+            : { status: "failed" };
         }
         if (res.status !== 200 && res.status !== 204) return { status: "failed" };
         const body = res.status === 200 ? ((await res.json().catch(() => null)) as { pondId?: unknown } | null) : null;
