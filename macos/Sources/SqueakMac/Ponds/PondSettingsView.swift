@@ -82,8 +82,8 @@ struct PondSettingsView: View {
                                 Text("The people in this pond and where they’re working.")
                                     .font(Typo.footnote).foregroundStyle(Theme.muted)
                                 PondFlockSection(key: key, showsHeading: false)
+                                // A local Pond's one way out is "Remove this pond" under This Mac (same route), never twice.
                                 if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]).padding(.top, Space.m) }
-                                else if let pond { PondEndSection(pond: pond).padding(.top, Space.m) }
                             }.id("Flock")
                             agents(native).id("Agents")
                             thisMac(native).id("This Mac")
