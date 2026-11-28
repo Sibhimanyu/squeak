@@ -53,6 +53,12 @@ export interface RoomProgress {
 export interface RoomAsk {
   question: string;
   options: Array<{ letter: string; text: string; recommended: boolean }>;
+  /**
+   * Set when the Duck asked with its question tool and is waiting on that very request: answering it (here or in the
+   * chat) is `POST /native/requests/:id` with `answers` of `{ [question]: option text }`, and either settles it. Unset
+   * for a question asked in a reply's words: its answer is a new message to the chat.
+   */
+  requestId?: string;
 }
 
 /** What a chat's cache keeps of one turn. */
@@ -292,4 +298,32 @@ export class TurnReader {
   drop(sessionId: string): void {
     this.chats.delete(sessionId);
   }
+}
+
+/**
+ * The question a Duck is waiting on through its question tool (AskUserQuestion), as the Room carries it. One question
+ * with options is answerable from the Room; several questions, or one that takes several answers, show the first
+ * question and send the person to the chat. null when the request holds no question.
+ */
+export function askOfRequest(requestId: string, payload: unknown): RoomAsk | null {
+  const input = (payload as { input?: { questions?: unknown } } | null)?.input;
+  const qs = Array.isArray(input?.questions) ? (input.questions as Array<Record<string, unknown>>) : [];
+  const first = qs.find((q) => typeof q?.question === "string" && q.question.trim());
+  if (!first) return null;
+  const question = (first.question as string).trim();
+  const raw = Array.isArray(first.options) ? (first.options as Array<Record<string, unknown>>) : [];
+  const options = raw
+    .filter((o) => typeof o?.label === "string" && (o.label as string).trim())
+    .map((o, i) => {
+      const label = (o.label as string).trim();
+      const recommended = /\(recommended\)$/i.test(label);
+      return {
+        letter: String.fromCharCode(65 + i),
+        text: recommended ? label.replace(/\s*\(recommended\)$/i, "") : label,
+        recommended,
+      };
+    })
+    .slice(0, 8);
+  const single = qs.length === 1 && first.multiSelect !== true && options.length >= 2;
+  return single ? { question, options, requestId } : { question, options: [] };
 }

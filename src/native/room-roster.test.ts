@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { Room, statusLineOf, type DuckHelpers } from "./room.js";
+import { Room, type DuckHelpers } from "./room.js";
+import { statusLine } from "./room-voice.js";
 import { NativeStore } from "./store.js";
 import type { SessionRow } from "./types.js";
 
@@ -48,7 +49,7 @@ describe("the Pond roster", () => {
     expect(p.state).toBe("working");
     expect(p.activity).toBe("working");
     expect(p.ducklingsRunning).toBe(1);
-    expect(p.statusLine).toBe("Working · 1 duckling on audit");
+    expect(p.statusLine).toBe("Working on audit");
     expect(r.room.duckCounts(r.project.id)).toMatchObject({ open: 2, working: 1, needsYou: 0, total: 2 });
     // The Room's thread for the same chat says Working too.
     expect(r.room.threads(r.project.id).find((t) => t.sessionId === pickle.s.id)?.state).toBe("working");
@@ -137,10 +138,10 @@ describe("the Pond roster", () => {
   it("writes the status line once for every surface", () => {
     const now = Date.now();
     const min = 60_000;
-    expect(statusLineOf("needsYou", true, 0, undefined, now, now)).toBe("Needs you");
-    expect(statusLineOf("idle", true, 0, undefined, now - 4 * min, now)).toBe("Idle · 4m");
-    expect(statusLineOf("working", true, 0, undefined, now, now)).toBe("Working");
-    expect(statusLineOf("working", true, 2, undefined, now, now)).toBe("Working · 2 ducklings");
-    expect(statusLineOf("idle", false, 0, undefined, now - 3 * 24 * 60 * min, now)).toBe("Closed 3d ago");
+    expect(statusLine("needsYou", true, undefined, now, now)).toBe("Needs you");
+    expect(statusLine("idle", true, undefined, now - 4 * min, now)).toBe("Idle · 4m");
+    expect(statusLine("working", true, undefined, now, now)).toBe("Working");
+    expect(statusLine("working", true, "the Zoom setup", now, now)).toBe("Working on the Zoom setup");
+    expect(statusLine("idle", false, undefined, now - 3 * 24 * 60 * min, now)).toBe("Closed 3d ago");
   });
 });

@@ -85,11 +85,14 @@ describe("folder Pond file locks", () => {
     r.edit(pixel, "a.md");
     r.edit(pixel, "a.md"); // retried: still one line
     const posts = r.store.roomPosts(r.project.id, { limit: 50 });
-    const clashes = posts.filter((p) => p.text.includes("a.md"));
+    const clashes = posts.filter((p) => p.kind === "needs");
     expect(clashes).toHaveLength(1);
     expect(clashes[0]).toMatchObject({ kind: "needs", sessionId: pixel.id });
     expect(clashes[0]!.text).toContain("Pixel");
     expect(clashes[0]!.text).toContain("Sage");
+    // The line itself is plain words (no file name); the file is in the folded detail.
+    expect(clashes[0]!.text).not.toContain("a.md");
+    expect(clashes[0]!.detail).toContain("a.md");
     expect(clashes[0]!.detail).toContain("@mention Sage");
   });
 

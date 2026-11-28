@@ -212,13 +212,18 @@ struct AskCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Lucide(.triangleAlert, size: 13, color: Theme.warning)
-                Text(verbatim: "\(card.name) needs your answer").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(verbatim: "\(card.name) needs you").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
             }
             .padding(.bottom, 6)
             Text(verbatim: card.question).font(.system(size: 14)).lineSpacing(3).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
             if !card.options.isEmpty {
                 VStack(spacing: 6) { ForEach(card.options) { o in OptionRow(option: o, disabled: sent) { send(o.letter) } } }.padding(.top, 10)
             }
+            if card.requestId != nil {
+                // A question asked with the question tool is answered by an option; words of one's own go to the chat.
+                Button("Write a different message instead") { open(card.sessionId) }
+                    .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(Theme.muted).padding(.top, 8)
+            } else {
             HStack(spacing: 8) {
                 TextField("Or tell \(card.name) something else\u{2026}", text: $text).textFieldStyle(.plain).font(.system(size: 14))
                     .onSubmit(sendText).disabled(sent).accessibilityLabel("Your own answer")
@@ -231,6 +236,7 @@ struct AskCardView: View {
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
             .padding(.top, 8)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: 640, alignment: .leading)

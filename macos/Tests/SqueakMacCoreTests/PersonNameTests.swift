@@ -15,15 +15,18 @@ import Foundation
         #expect(try JSONDecoder().decode(FlockMember.self, from: Data(without.utf8)).email == nil)
     }
 
-    @Test func aNameIsTheAccountsAndFallsBackToTheEmail() {
+    @Test func aNameIsTheAccountsAndFallsBackToTheEmailsFirstPart() {
         #expect(PersonName.shown(FlockMember(id: "a", name: "Aarav", email: "a@x.com")) == "Aarav")
-        #expect(PersonName.shown(FlockMember(id: "a", name: "", email: "a@x.com")) == "a@x.com")
+        #expect(PersonName.shown(FlockMember(id: "a", name: "", email: "asha.rao@x.com")) == "Asha")
+        #expect(PersonName.shown(FlockMember(id: "a", name: "asha@x.com", email: "asha@x.com")) == "Asha")
+        #expect(!PersonName.shown(FlockMember(id: "a", name: "", email: "a@x.com")).contains("@"))
         #expect(PersonName.shown(FlockMember(id: "a", name: " ")) == "Someone")
     }
 
     @Test func theEmailLineShowsUnderANameButNeverRepeatsIt() {
         #expect(PersonName.emailLine(FlockMember(id: "a", name: "Aarav", email: "a@x.com")) == "a@x.com")
-        #expect(PersonName.emailLine(FlockMember(id: "a", name: "a@x.com", email: "a@x.com")) == nil)
+        #expect(PersonName.emailLine(FlockMember(id: "a", name: "a@x.com", email: "a@x.com")) == "a@x.com")
+        #expect(PersonName.emailLine(FlockMember(id: "a", name: "Aarav", email: "Aarav")) == nil)
         #expect(PersonName.emailLine(FlockMember(id: "a", name: "Aarav")) == nil)
     }
 
@@ -31,7 +34,7 @@ import Foundation
         let d = Self.detail([FlockMember(id: "me", name: "Sib M", you: true, email: "sib@x.com"), FlockMember(id: "a", name: "Aarav")])
         #expect(PersonName.mine(in: [d]) == "Sib M")
         let emailOnly = Self.detail([FlockMember(id: "me", name: "", you: true, email: "sib@x.com")])
-        #expect(PersonName.mine(in: [emailOnly]) == "sib@x.com")
+        #expect(PersonName.mine(in: [emailOnly]) == "Sib")
         // No pond has said who "you" is: empty, so views say "You"; the Mac's login name is never used.
         #expect(PersonName.mine(in: []) == "")
     }

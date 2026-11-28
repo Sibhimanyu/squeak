@@ -1,4 +1,5 @@
 import type { TitleModelCall } from "./auto-title.js";
+import { check, RULE } from "./room-voice.js";
 
 /**
  * The Room message a Duck did not write. A Duck posts its own message at the end of a Task; when it finishes the Task's
@@ -16,6 +17,7 @@ export const FINISH_SYSTEM = [
   "You write one message in a team room for a coding agent that has just finished a task, from the agent's last reply.",
   "Write two or three plain sentences in the first person: what you did, what you found, and what you need from the reader (leave that out if nothing).",
   "No greeting or preamble, no markdown, no code blocks, and never copy tool output or logs. Reply with the message only.",
+  RULE,
 ].join(" ");
 
 export interface FinishInput {
@@ -83,7 +85,8 @@ export async function writeFinish(
         abort.signal.addEventListener("abort", () => reject(new Error("finish message timed out")), { once: true }),
       );
       const text = cleanFinish((await Promise.race([w.write(input, abort.signal), timedOut])) ?? "");
-      if (text) return text;
+      // A line that reads like a commit log is not posted: the next writer is tried, and none left drops it.
+      if (text && check(text).ok) return text;
     } catch (error) {
       onError?.(error);
     } finally {

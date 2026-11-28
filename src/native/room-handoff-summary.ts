@@ -1,4 +1,5 @@
 import type { TitleModelCall } from "./auto-title.js";
+import { check, RULE } from "./room-voice.js";
 import type { NativeStore, RoomPostRow } from "./store.js";
 
 /**
@@ -17,6 +18,7 @@ export const SUMMARY_SYSTEM = [
   "You write one line of a team chat: what a coding agent told another agent to do or to know, from the message it sent.",
   "Write one plain sentence, two at most, addressed to nobody and starting with the substance: no greeting, no markdown, no code.",
   "Never copy tool output or logs, and never start with 'I'. Reply with the line only.",
+  RULE,
 ].join(" ");
 
 export function summaryPrompt(message: string): string {
@@ -87,7 +89,7 @@ export async function writeSummary(
         abort.signal.addEventListener("abort", () => reject(new Error("summary timed out")), { once: true }),
       );
       const text = cleanSummary((await Promise.race([w.write(message, abort.signal), timedOut])) ?? "");
-      if (text) return text;
+      if (text && check(text).ok) return text;
     } catch (error) {
       onError?.(error);
     } finally {

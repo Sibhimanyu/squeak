@@ -332,7 +332,9 @@ describe("agent tools: streams, open_stream, leave_stream", () => {
     expect(fs.existsSync(streams[0]!.path)).toBe(true);
     // The chat itself did not move: still Main, still read-only.
     expect(h.store.getSession(first.id)).toMatchObject({ cwd: h.pond.rootPath, workspaceId: null });
-    expect(roomLines(h)).toEqual([{ who: "Quiet Creek", kind: "message", text: "created Stream Login form" }]);
+    expect(roomLines(h)).toEqual([
+      { who: "Quiet Creek", kind: "message", text: "set up a separate place to work: Login form" },
+    ]);
     // Opening it again is a no-op: no second line, no second Stream.
     expect(text(await h.tool(first.id, "open_stream", { name: "Login form" }))).toMatch(/already in/);
     expect(roomLines(h)).toHaveLength(1);
@@ -361,9 +363,9 @@ describe("agent tools: streams, open_stream, leave_stream", () => {
     const view = text(await h.tool(b.id, "streams"));
     expect(view).toMatch(/feat\/billing.*Quiet Creek, Staff Otter; you are in it/);
     expect(roomLines(h).map((r) => r.text)).toEqual([
-      "created Stream Login",
-      "created Stream Feat Billing",
-      "joined Stream Feat Billing",
+      "set up a separate place to work: Login",
+      "set up a separate place to work: Feat Billing",
+      "joined the separate work on Feat Billing",
     ]);
 
     // Leaving needs a name once in several; the Duck leaves just that one.
@@ -372,7 +374,7 @@ describe("agent tools: streams, open_stream, leave_stream", () => {
     expect(left.isError).toBeUndefined();
     expect(h.store.duckStreams(duckA.id).map((w) => w.branch)).toEqual([expect.stringMatching(/login/)]);
     expect(h.store.duckStreams(duckB.id)).toHaveLength(1);
-    expect(roomLines(h).at(-1)!.text).toBe("left Stream Feat Billing");
+    expect(roomLines(h).at(-1)!.text).toBe("left the separate work on Feat Billing");
     // With one left, no name is needed; a Duck in none is told so.
     expect((await h.tool(a.id, "leave_stream")).isError).toBeUndefined();
     expect(text(await h.tool(a.id, "leave_stream"))).toMatch(/not in any branch/);

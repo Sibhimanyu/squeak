@@ -35,6 +35,7 @@ import {
   type PondInvites,
 } from "./invites-port.js";
 import { RelayRefused, type AccountDevice, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
+import { personName } from "../native/room-voice.js";
 import type { RoomPort, RoomSignedDoc } from "./room-sync.js";
 import type { Standing } from "./standing.js";
 import {
@@ -744,10 +745,11 @@ export class FlotillaService extends EventEmitter {
     return { ...file.identity, name: this.accountLabel(), id: memberIdOf(file.identity.publicKey) };
   }
 
-  /** The one name a person has: their Squeak account's name, else its email, else (signed out) a neutral label. */
+  /** The one name a person has: their Squeak account's name, else the part of its email before the @ (never the address), else (signed out) a neutral label. */
   private accountLabel(): string {
     const account = this.options.account;
-    return (account?.name()?.trim() || account?.email()?.trim() || "Squeak member").slice(0, 100);
+    const email = account?.email()?.trim();
+    return (account?.name()?.trim() || (email ? personName(null, email) : "Squeak member")).slice(0, 100);
   }
 
   /** The signed-in account's email, shown under the name; null when signed out. */
@@ -2024,7 +2026,7 @@ export class FlotillaService extends EventEmitter {
         if (recent.length >= DEVICE_ADDS_PER_MINUTE) break;
         const doc: MemberDoc = {
           id: req.reqId,
-          name: invite.name || req.name || invite.email,
+          name: personName(invite.name || req.name, invite.email),
           email: invite.email,
           accountId: invite.userId!,
           publicKey,
@@ -2787,7 +2789,7 @@ export class FlotillaService extends EventEmitter {
       const found = await account.names(chunk.map((m) => m.accountId!));
       for (const m of chunk) {
         const row = found.names[m.accountId!];
-        const name = row?.name || row?.email;
+        const name = row ? personName(row.name, row.email) : undefined;
         if (row && name && (name !== m.name || (row.email && row.email !== m.email))) {
           await this.writeMember(pond, { ...m, name, ...(row.email ? { email: row.email.slice(0, 200) } : {}) });
         }

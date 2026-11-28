@@ -478,6 +478,13 @@ struct PondRoomView: View {
 
     /// An answer to a needs-you card goes through the chat's own send path, marked as an answer (a letter is just the letter).
     private func answer(_ sessionId: String, _ text: String) {
+        // A question the Duck asked with its question tool is answered the way its chat card answers it: the option's words, to that request.
+        if let ask = room.feed.threads.first(where: { $0.sessionId == sessionId })?.ask, let rid = ask.requestId,
+           let option = ask.options.first(where: { $0.letter == text }) {
+            let answers = NativeJSON.object([ask.question: .string(option.text)])
+            Task { _ = await model.nativeAdapter.respond(requestId: rid, allow: true, message: nil, answers: answers) }
+            return
+        }
         guard let s = session(sessionId) else { return }
         Task { _ = await model.send(text, to: s.key, answering: true) }
     }

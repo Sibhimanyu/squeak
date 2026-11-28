@@ -52,13 +52,13 @@ describe("a person's name is their account's", () => {
     expect(me.email).toBe("sibhi@example.com");
   });
 
-  it("shows the email when the account has no name, owner included", async () => {
+  it("shows the part of the email before the @ when the account has no name, owner included (never the address)", async () => {
     const s = make(account({ name: null, email: "sibhi@example.com" }));
-    expect(s.me.name).toBe("sibhi@example.com");
+    expect(s.me.name).toBe("Sibhi");
     const pond = await s.createPond({ name: "P", projectId: "proj-P" });
     const v = await s.view(pond.id);
-    expect(v.members.find((m) => m.you)!.name).toBe("sibhi@example.com");
-    expect(v.me.name).toBe("sibhi@example.com");
+    expect(v.members.find((m) => m.you)!.name).toBe("Sibhi");
+    expect(v.me.name).toBe("Sibhi");
   });
 
   it("a device-local name change never changes how the person is shown", () => {

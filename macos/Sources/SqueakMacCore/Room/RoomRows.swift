@@ -29,6 +29,10 @@ public enum RoomRowPlan {
     /// Mine are marked only by the Pond-coloured line; the avatar and name stay like everyone's.
     public static func isOwn(_ author: RoomMessageAuthor) -> Bool { author.kind == .me }
 
+    /// The small word beside a name: only "you" on my own rows. A Duck is never tagged "Claude", "Codex" or "Duck" in the Room:
+    /// teammates read names, and which agent runs a Duck is not theirs to care about.
+    public static func tag(for author: RoomMessageAuthor) -> String? { isOwn(author) ? "you" : nil }
+
     /// A group's first row carries the avatar, name and time; the rest of the run shows only its text (the time on hover).
     public static func showsHeader(index: Int) -> Bool { index == 0 }
 

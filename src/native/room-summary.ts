@@ -2,7 +2,8 @@ import { flag } from "../squeak/flags.js";
 import { logger } from "../utils/logger.js";
 import { defaultTitleCall, TITLE_TIMEOUT_MS, type TitleModelCall } from "./auto-title.js";
 import type { HostEvent } from "./host.js";
-import { projectOfSession, type HostEvents, type Room } from "./room.js";
+import { check, RULE } from "./room-voice.js";
+import { agentName, projectOfSession, type HostEvents, type Room } from "./room.js";
 import type { NativeStore } from "./store.js";
 
 /**
@@ -22,7 +23,8 @@ const KEEP_LABELS = 8;
 export const SUMMARY_SYSTEM = [
   "You write one status line for a team room saying what a coding agent is working on right now.",
   "Reply with the line only: present tense, at most 12 words, no quotes, no markdown, no trailing punctuation.",
-  'Say the intent, not the commands. Example: "Wiring retry into the uploader".',
+  'Say the intent, not the commands. Example: "Setting up the new sign-in screen".',
+  RULE,
 ].join(" ");
 
 export function summaryPrompt(prompt: string, labels: string[]): string {
@@ -165,7 +167,8 @@ export class RoomSummariser {
           timedOut,
         ]),
       );
-      if (!text) return;
+      // A line that reads like a commit log is dropped, not posted.
+      if (!text || !check(text).ok) return;
       const s = this.o.store.getSession(sessionId);
       // The turn may have ended, or the agent posted its own line, while the call ran.
       if (!s || s.status !== "working") return;
@@ -174,7 +177,7 @@ export class RoomSummariser {
       if (this.o.room.quietFor(projectId)) return;
       this.o.room.post({
         projectId,
-        author: { kind: "squeak", name: s.title?.trim() || "Claude" },
+        author: { kind: "squeak", name: agentName(s) },
         sessionId,
         kind: "working",
         text,

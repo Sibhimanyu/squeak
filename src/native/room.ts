@@ -12,6 +12,7 @@ import type { DuckRow, DuckState, NativeStore, RoomAuthorKind, RoomLevel, RoomPo
 import { resolveOwnerName } from "./thread-context.js";
 import {
   askOf,
+  askOfRequest,
   firstSentence,
   type RoomAsk,
   type RoomDucklings,
@@ -21,6 +22,7 @@ import {
   TurnReader,
 } from "./room-turns.js";
 import { FINISH_ID_PREFIX } from "./room-finish.js";
+import { check as checkVoice, duckName, NEUTRAL_DUCK, refusal, statusLine, waitingLine } from "./room-voice.js";
 import { TimelineLog } from "./timeline-log.js";
 import type { TimelineEvent } from "./timeline.js";
 import type { SessionRow } from "./types.js";
@@ -233,7 +235,7 @@ export type { RoomAsk, RoomDucklings, RoomProgress, RoomTurn } from "./room-turn
 
 export const DUCK_NAME_MAX = 32;
 /** What a Duck's row says when the host has no identity for it. */
-export const NEUTRAL_DUCK_NAME = "A Duck";
+export const NEUTRAL_DUCK_NAME = NEUTRAL_DUCK;
 /** A Duck name as people see it: never with a digit ("Quill 2" is "Quill"). */
 export const plainDuckName = stripNumberSuffix;
 export const DUCK_ROLE_MAX = 80;
@@ -425,6 +427,12 @@ export class Room extends EventEmitter {
         : Room.cleanText(input.text, input.kind);
     const detail = Room.cleanDetail(input.detail, input.kind);
     const duckToDuck = input.author.kind === "agent" && (!!input.toSessionId || input.kind === "handoff");
+    // A Duck writes for people who are not engineers: a post that reads like a commit log is sent back to be rewritten.
+    // Duck-to-Duck posts and the agents level are for agents, and Squeak's own lines are written plain.
+    if (input.author.kind === "agent" && level === "room" && !duckToDuck) {
+      const verdict = checkVoice(text);
+      if (!verdict.ok) throw new RoomError(refusal(verdict.rewrite));
+    }
     const summary = duckToDuck && input.summary?.trim() ? cleanSummary(input.summary) : null;
     const fullBody = duckToDuck && input.fullBody?.trim() ? input.fullBody.trim().slice(0, ROOM_FULL_BODY_MAX) : null;
     const replyTo = input.replyTo ? this.cardOf(input.projectId, input.replyTo) : null;
@@ -1208,14 +1216,7 @@ export class Room extends EventEmitter {
       ...(reason ? { needsYouReason: reason } : {}),
       ...(failure ? { failure } : {}),
       ducklingsRunning,
-      statusLine: statusLineOf(
-        activity,
-        duck.state === "open",
-        ducklingsRunning,
-        helpers?.task,
-        lastActiveAt,
-        this.now(),
-      ),
+      statusLine: statusLine(activity, duck.state === "open", helpers?.task, lastActiveAt, this.now()),
       heading: duck.state === "closed" ? (chatTitle ?? name) : name,
       state: activity === "needsYou" ? "waiting" : activity,
       lastActiveAt,
@@ -1290,7 +1291,7 @@ export class Room extends EventEmitter {
     const last = turns[turns.length - 1];
     const open = last && last.endedAt === undefined ? last : undefined;
     const progress = state === "working" && open ? this.progressOf(s.id, open.startSeq) : undefined;
-    const ask = state === "waiting" ? askOf(last?.reply) : null;
+    const ask = this.askOf(s, state, last);
     const duck = this.duckOfSession(s);
     const place = this.placeOf(s);
     const streams = this.streamsOf(duck?.id);
@@ -1321,6 +1322,32 @@ export class Room extends EventEmitter {
       ...(ask ? { ask } : {}),
       ...(open ? { turnStartedAt: open.startedAt } : {}),
     };
+  }
+
+  /**
+   * The question a Duck has for the person, once for every surface: what its question tool is waiting on, else the
+   * options in the reply it is waiting on, else the options in the reply it ended its turn with (the chat shows that
+   * as a question card, and the Room must too). It is gone the moment either place answers: the request resolves, or a
+   * newer turn starts.
+   */
+  private askOf(s: SessionRow, state: RoomThread["state"], last: TurnBase | undefined): RoomAsk | null {
+    const request = this.store
+      .openRequests(s.id)
+      .filter((r) => r.kind === "question")
+      .at(-1);
+    const asked = request ? askOfRequest(request.id, request.payload) : null;
+    if (asked) return asked;
+    if (state === "waiting") return askOf(last?.reply);
+    const endedAt = last?.endedAt;
+    if (
+      state === "idle" &&
+      last?.outcome === "finished" &&
+      endedAt !== undefined &&
+      this.now() - endedAt < ROOM_THREAD_WINDOW_MS
+    ) {
+      return askOf(last.reply);
+    }
+    return null;
   }
 
   /** The duck's name: the person's, else the chat title. */
@@ -1479,44 +1506,9 @@ function projectIdOf(store: NativeStore, s: SessionRow): string {
   return projectOfSession(store, s)?.id ?? "";
 }
 
+/** What a chat's Duck is called when it has no name: a short label from the chat's title, never "Claude" or "Codex". */
 export function agentName(s: SessionRow): string {
-  return s.title?.trim() || (s.agent === "codex" ? "Codex" : "Claude");
-}
-
-function agoShort(ms: number): string {
-  const m = Math.max(0, Math.floor(ms / 60_000));
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
-}
-
-/** The status line of a Duck, written once for every surface. */
-export function statusLineOf(
-  activity: DuckActivity,
-  open: boolean,
-  running: number,
-  task: string | undefined,
-  lastActiveAt: number,
-  now: number,
-): string {
-  if (!open) {
-    const ago = agoShort(now - lastActiveAt);
-    return ago === "now" ? "Closed just now" : `Closed ${ago} ago`;
-  }
-  switch (activity) {
-    case "working": {
-      if (running < 1) return "Working";
-      const on = task?.trim() ? ` on ${task.trim()}` : "";
-      return `Working · ${running} duckling${running === 1 ? "" : "s"}${on}`;
-    }
-    case "needsYou":
-      return "Needs you";
-    case "error":
-      return "Error";
-    default:
-      return `Idle · ${agoShort(now - lastActiveAt)}`;
-  }
+  return duckName(null, s.title);
 }
 
 function threadState(status: string, lastTurnEndedAt: string | null): RoomThread["state"] {
@@ -1574,7 +1566,7 @@ export function attachSqueakPosts(host: HostEvents, store: NativeStore, room: Ro
       if (!s) return;
       room.agentPost(s, {
         kind: "needs",
-        text: `${c.name} is waiting on ${c.file}, which ${c.holder.name} is editing`,
+        text: waitingLine(c.name, c.holder.name),
         detail: `${c.name} tried to edit ${c.file} while ${c.holder.name} held it. ${c.name} was told to @mention ${c.holder.name} here to agree who goes first; the lock frees when ${c.holder.name}'s turn ends or after ten idle minutes.`,
       });
     } catch (error) {

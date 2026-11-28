@@ -205,14 +205,14 @@ describe("Room lines for a join and a decline", () => {
     expect(lines.filter((l) => l.kind === "invite")).toHaveLength(1);
   });
 
-  it("does not say it twice after a restart, and names the address when there is no account name", async () => {
+  it("does not say it twice after a restart, and names the person by the part of the address before the @ when there is no account name", async () => {
     const first = make();
     const pond = first.service.ensureLocalPond({ name: "greenroom", projectId: "p1" });
     await first.service.inviteEmails(pond.id, ["asha@example.com"], "member");
     first.relay.set("i1", "declined");
     await first.service.people(pond.id);
     expect(lineTexts(first.lines.filter((l) => l.kind === "invite"))).toEqual([
-      "asha@example.com declined the invitation (invite)",
+      "Asha declined the invitation (invite)",
     ]);
     const again = new FlotillaService({
       store: null,

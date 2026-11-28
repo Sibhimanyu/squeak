@@ -32,6 +32,15 @@ const invite = (state: InviteState, over: Partial<InviteRecord> = {}): InviteRec
 });
 
 describe("the People view", () => {
+  it("never draws an email address as a name, including a member saved with their email as the name", () => {
+    const view = buildPeople(
+      [member({}), member({ id: "m2", name: "asha.rao@example.com", email: "asha.rao@example.com", you: false })],
+      [invite("joined", { email: "bea@example.com", userId: "u2" })],
+    );
+    expect(view.members.map((m) => m.name)).toEqual(["Sibhi", "Asha", "Bea"]);
+    expect(view.members.every((m) => !m.name.includes("@"))).toBe(true);
+  });
+
   it("draws the host's members and passes the relay's invites through untouched", () => {
     const invites = (["pending", "declined", "expired", "withdrawn"] as const).map((s) => invite(s));
     const view = buildPeople(
@@ -88,7 +97,7 @@ describe("Room lines for invites", () => {
     const lines = owedLines(all, {});
     expect(lines.map((l) => [l.state, l.who.name, l.text, l.kind])).toEqual([
       ["joined", "Bea", "joined", "joined"],
-      ["declined", "declined@example.com", "declined the invitation", "invite"],
+      ["declined", "Declined", "declined the invitation", "invite"],
     ]);
     expect(lines[0]!.who.id).toBe("u2");
   });

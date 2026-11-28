@@ -19,6 +19,7 @@ import { AttachmentError, stripAttachmentLines } from "./room-attachments.js";
 import { FINISH_ID_PREFIX, writeFinish, type FinishWriterPort } from "./room-finish.js";
 import { firstSentence, oneLine, type TurnBase } from "./room-turns.js";
 import type { HostEvent } from "./host.js";
+import { RULE } from "./room-voice.js";
 import type { DuckRow, NativeStore, RoomPostRow } from "./store.js";
 import type { SessionRow } from "./types.js";
 
@@ -1021,7 +1022,9 @@ export class RoomTasks extends EventEmitter {
     parts.push(
       [
         "How to work this task:",
-        '- When you finish this task, write one message in the room (post_to_room kind message): two or three plain sentences saying what you did, what you found and what you need from the reader, starting with the substance, with no greeting or preamble and no copied tool output; the details stay in your own thread. Skip "took it" and "finished" lines. If you get blocked, post kind needs saying what you need; to pass work on, handoff.',
+        "- When you finish this task, write one message in the room (post_to_room kind message): two or three plain sentences saying what you did, what you found and what you need from the reader, starting with the substance, with no greeting or preamble and no copied tool output; the details stay in your own thread. " +
+          RULE +
+          ' Skip "took it" and "finished" lines. If you get blocked, post kind needs saying what you need; to pass work on, handoff.',
         "- To give work to another duck, call hand_off: with toDuck it goes straight to that duck (shown as an @mention), without it Squeak decides who takes it and may hatch a new duck. A plain @mention only nudges.",
         "- The shared notebook is for lessons that will last past this task (a command that must run, a trap, a convention), never a log of what you did. Only when you are finishing this task, add at most a few with note_to_notebook (taskDone true); the host refuses it before then.",
         "- Judge the size first. A small task: just do it. More than small (several steps, files or decisions): post a spec and plan card first (post_to_room kind plan, the title as text and the spec and plan as detail) and keep going; comments on it reach you at your next turn.",

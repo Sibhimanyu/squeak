@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { personName } from "../native/room-voice.js";
 import type { InviteRecord } from "./invites-port.js";
 import type { MemberView } from "./service.js";
 
@@ -34,7 +35,7 @@ export interface PeopleView {
 export function buildPeople(members: MemberView[], invites: InviteRecord[]): PeopleView {
   const out: PeopleMember[] = members.map((m) => ({
     id: m.id,
-    name: m.name,
+    name: personName(m.name, m.email),
     ...(m.email ? { email: m.email } : {}),
     role: m.role === "owner" || m.role === "viewer" ? m.role : "member",
     online: m.online,
@@ -46,7 +47,7 @@ export function buildPeople(members: MemberView[], invites: InviteRecord[]): Peo
     if (i.state !== "joined" || known.has(i.email.toLowerCase())) continue;
     out.push({
       id: `acct:${i.userId ?? i.id}`,
-      name: i.name ?? i.email,
+      name: personName(i.name, i.email),
       email: i.email,
       role: i.role,
       online: false,
@@ -78,7 +79,7 @@ export function owedLines(invites: InviteRecord[], announced: Record<string, str
     out.push({
       inviteId: i.id,
       state: i.state,
-      who: { id: i.userId ?? `invite:${i.id}`, name: i.name ?? i.email },
+      who: { id: i.userId ?? `invite:${i.id}`, name: personName(i.name, i.email) },
       text: i.state === "joined" ? "joined" : "declined the invitation",
       kind: i.state === "joined" ? "joined" : "invite",
     });

@@ -180,7 +180,7 @@ describe("a Task is one live item that fills in place", () => {
     const device: FinishWriterPort = {
       write: async (i) => (
         prompts.push(i.reply),
-        "I fixed the spacing. Tests pass. Nothing needed. A fourth sentence."
+        "I fixed the spacing. Everything still works. Nothing needed. A fourth sentence."
       ),
     };
     const r = rig([device]);
@@ -194,7 +194,7 @@ describe("a Task is one live item that fills in place", () => {
     expect(prompts).toHaveLength(1);
     const post = r.store.roomPostById(`${FINISH_ID_PREFIX}${id}`)!;
     expect(post).toMatchObject({ authorKind: "agent", sessionId: s.id, kind: "message", level: "room" });
-    expect(post.text).toBe("I fixed the spacing. Tests pass. Nothing needed.");
+    expect(post.text).toBe("I fixed the spacing. Everything still works. Nothing needed.");
     const [served] = r.room.page(r.pid, {}).posts.filter((p) => p.id === post.id);
     expect(served).toMatchObject({ onBehalf: true, turnId: "u1", author: { name: "Layout builder" } });
     // One item, same id, state done first and the summary filled in place after.

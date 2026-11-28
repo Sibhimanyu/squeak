@@ -244,7 +244,7 @@ private struct DuckRow: View {
         HStack(alignment: .center, spacing: 0) {
             Button(action: open) { info.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()) }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(duck.heading)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.streamLabels.joined(separator: ", ")). \(duck.presenceLine)")
+                .accessibilityLabel("\(duck.heading). \(duck.role ?? ""). \(duck.streamLabels.joined(separator: ", ")). \(duck.presenceLine)")
                 .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
             if hover || !duck.isOpen {
                 HStack(spacing: 2) {
@@ -271,7 +271,6 @@ private struct DuckRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(verbatim: duck.heading).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                    if let l = duck.agentLabel { Text(verbatim: l).font(.system(size: 11)).foregroundStyle(Theme.subtle) }
                 }
                 if !duck.isOpen, let summary = duck.lastSummary {
                     Text(verbatim: summary).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)

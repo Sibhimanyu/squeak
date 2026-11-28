@@ -18,6 +18,15 @@ import Testing
         #expect(!RoomRowPlan.showsHeader(index: 1))
     }
 
+    @Test func theRoomShowsNoAgentTagOnADuckOnlyYouOnMine() {
+        let claudeDuck = RoomMessageAuthor.duck(RoomThread(sessionId: "s1", title: "T", agent: "claude", state: .idle, name: "Upma", isOpen: true), sessionId: "s1", fallbackName: "T", agent: "claude")
+        let codexDuck = RoomMessageAuthor.duck(nil, sessionId: "s2", fallbackName: "Nibs", agent: "codex")
+        #expect(RoomRowPlan.tag(for: claudeDuck) == nil)
+        #expect(RoomRowPlan.tag(for: codexDuck) == nil)
+        #expect(RoomRowPlan.tag(for: .person("Anya")) == nil)
+        #expect(RoomRowPlan.tag(for: .me) == "you")
+    }
+
     @Test func groupsBreakAfterFiveMinutes() {
         #expect(RoomMessages.groupGap == 5 * 60 * 1000)
     }

@@ -319,7 +319,7 @@ struct RoomGroupView: View {
 
     private func header(_ m: RoomMessage) -> some View {
         let a = group.author
-        let tag: String? = a.kind == .duck ? (a.agentLabel ?? "Duck") : (own ? "you" : nil)
+        let tag = RoomRowPlan.tag(for: a)
         return RoomNameLine(tag: tag, at: group.at, mark: RoomRowPlan.fallbackMark(for: m)) { nameText }
     }
 

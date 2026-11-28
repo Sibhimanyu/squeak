@@ -22,6 +22,7 @@ import { TaskError, type RoomTasks } from "./room-tasks.js";
 import { clipAtWord } from "./room-handoff-summary.js";
 import { ducksOwnBranch, Placement, PlacementError } from "./placement.js";
 import { agentName, projectOfSession, Room, RoomError, ROOM_MAX_TEXT } from "./room.js";
+import { createdLine, joinedLine, leftLine, RULE } from "./room-voice.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
 import type { AgentKind, SessionRow } from "./types.js";
@@ -308,7 +309,9 @@ export const TOOLS: ToolDef[] = [
   {
     name: "post_to_room",
     description:
-      'Write a message in this pond\'s room, the shared chat the person and the other chats read. Use kind message. Write one when you finish a task from the room, and when someone in the room asked you something: two or three plain sentences saying what you did, what you found, and what you need from the reader (leave that out if nothing). Start with the substance, with no greeting or preamble, and never paste tool output, logs or code; the details are in your chat, which the reader can open from your message. A "took it" or "finished" line is not needed: the room already shows the task moving. Other kinds: needs (you are blocked and need the person; say what you need), handoff (you are passing work on; name the chat in toChatId), plan (a spec and plan card, only for a task that is more than small: text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). done and working still post, but the room shows only what a person would read, so prefer a message. level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). When you write to another chat with toChatId, also give summary: one plain sentence (two at most) of what this tells that chat to do or know, which is what the room shows. At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
+      "Write a message in this pond's room, the shared chat the person and the other chats read. Use kind message. Write one when you finish a task from the room, and when someone in the room asked you something: two or three plain sentences saying what you did, what you found, and what you need from the reader (leave that out if nothing). Start with the substance, with no greeting or preamble, and never paste tool output, logs or code. " +
+      RULE +
+      ' A post that reads like a commit log is refused; the details are in your chat, which the reader can open from your message. A "took it" or "finished" line is not needed: the room already shows the task moving. Other kinds: needs (you are blocked and need the person; say what you need), handoff (you are passing work on; name the chat in toChatId), plan (a spec and plan card, only for a task that is more than small: text is its title, detail the spec and plan; people comment on it and you get the comments at your next turn). done and working still post, but the room shows only what a person would read, so prefer a message. level: room (default, what the person sees) or agents (coordination the person need not see; shown collapsed). When you write to another chat with toChatId, also give summary: one plain sentence (two at most) of what this tells that chat to do or know, which is what the room shows. At most 500 characters of text, 4000 of detail; 30 posts per chat per hour. In a pond nobody else reads, status lines are skipped and you are told so.',
     inputSchema: obj(
       {
         text: { type: "string" },
@@ -1401,7 +1404,7 @@ export class AgentTools {
       if (name === "streams") return this.streamsText(s, placement);
       if (name === "leave_stream" || name === "move_to_main") {
         const left = placement.leaveStream(s.id, text("name"));
-        this.streamLine(s, `left Stream ${left.stream.title || left.stream.branch}`);
+        this.streamLine(s, leftLine(left.stream.title || left.stream.branch));
         const rest = left.streams.length
           ? `You are still in: ${left.streams.map((w) => w.branch).join(", ")}.`
           : "You are in no branch now; your folder is the read-only main folder.";
@@ -1435,8 +1438,8 @@ export class AgentTools {
       const opened = await placement.openStream(s.id, req);
       if (opened.created) this.streamOpens.push({ from: s.id, at: this.now() });
       const label = opened.stream.title || opened.stream.branch;
-      if (opened.created) this.streamLine(s, `created Stream ${label}`);
-      else if (opened.joined) this.streamLine(s, `joined Stream ${label}`);
+      if (opened.created) this.streamLine(s, createdLine(label));
+      else if (opened.joined) this.streamLine(s, joinedLine(label));
       const folder = opened.stream.path;
       const lead = opened.created
         ? `Created branch ${opened.stream.branch}`

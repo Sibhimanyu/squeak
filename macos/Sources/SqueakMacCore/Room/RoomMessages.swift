@@ -28,6 +28,8 @@ public struct RoomAskCard: Sendable, Equatable {
     public var name: String
     public var question: String
     public var options: [RoomAskOption]
+    /// The Duck is waiting on its question tool: answering sends that request's answer, and "write a different message" opens its chat.
+    public var requestId: String? = nil
 }
 
 /// A duck offering to take a job, or asking to take it after its turn.
@@ -229,7 +231,8 @@ public enum RoomMessages {
                 asked.turnId = RoomTurnId.bare(t.id, session: t.sessionId)
                 add(asked, order: 0)
             }
-            let asking = thread?.state == .waiting && newest[t.sessionId]?.id == t.id
+            // A Duck's question shows in the Room whether it is waiting on it or ended its turn on it (a question card in the chat).
+            let asking = (thread?.state == .waiting || thread?.ask != nil) && newest[t.sessionId]?.id == t.id
             let a = author(t.sessionId, t.threadTitle, t.agent)
             if asking {
                 askedSessions.insert(t.sessionId)
@@ -249,7 +252,7 @@ public enum RoomMessages {
             }
         }
         // A waiting question with no turn (a host that serves none, or a turn off the page).
-        for th in feed.threads where th.state == .waiting && !askedSessions.contains(th.sessionId) {
+        for th in feed.threads where (th.state == .waiting || th.ask != nil) && !askedSessions.contains(th.sessionId) {
             let at = th.turnStartedAt ?? th.workingOnAt ?? th.lastAt ?? 0
             let a = author(th.sessionId, th.title, th.agent)
             let part: RoomPart = th.ask.map { _ in askPart(th, fallback: nil) } ?? .text(th.workingOn ?? "Waiting on you", .attention)
@@ -374,7 +377,7 @@ public enum RoomMessages {
         let q = th.ask?.question ?? ""
         let text = q.isEmpty ? (fallback?.outcomeText ?? th.workingOn ?? "Waiting on you") : q
         if let a = th.ask, !a.options.isEmpty || !q.isEmpty {
-            return .ask(RoomAskCard(sessionId: th.sessionId, name: th.duckName, question: text, options: a.options))
+            return .ask(RoomAskCard(sessionId: th.sessionId, name: th.duckName, question: text, options: a.options, requestId: a.requestId))
         }
         return .text(text, .attention)
     }

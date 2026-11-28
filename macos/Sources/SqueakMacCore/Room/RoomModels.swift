@@ -296,12 +296,15 @@ public struct RoomAskOption: Sendable, Equatable, Decodable, Identifiable {
 public struct RoomAsk: Sendable, Equatable, Decodable {
     public var question: String
     public var options: [RoomAskOption]
-    public init(question: String, options: [RoomAskOption] = []) { self.question = question; self.options = options }
-    private enum CodingKeys: String, CodingKey { case question, options }
+    /// Set when the Duck asked with its question tool: an option answers that request (the same answer the chat's card sends), and either place settles it.
+    public var requestId: String?
+    public init(question: String, options: [RoomAskOption] = [], requestId: String? = nil) { self.question = question; self.options = options; self.requestId = requestId }
+    private enum CodingKeys: String, CodingKey { case question, options, requestId }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         question = (try? c.decode(String.self, forKey: .question)) ?? ""
         options = ((try? c.decode([Failable<RoomAskOption>].self, forKey: .options)) ?? []).compactMap(\.value)
+        requestId = try? c.decodeIfPresent(String.self, forKey: .requestId)
     }
 }
 

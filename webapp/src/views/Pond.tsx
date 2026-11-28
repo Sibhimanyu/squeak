@@ -355,9 +355,7 @@ function DuckRow({ duck, now, pond }: { duck: Duck; now: number; pond: string })
         <span class="duck" style={tint(duck.id)} aria-hidden="true" />
         <span class="text">
           <strong>{duck.title}</strong>
-          <span class="sub">
-            {duck.starterName} · {duck.agent}
-          </span>
+          <span class="sub">{duck.starterName}</span>
         </span>
         {duck.state === "waiting" && duck.waitingFor !== "approval" ? (
           <Warning />
