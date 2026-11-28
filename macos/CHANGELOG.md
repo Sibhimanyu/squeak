@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.35.4
+
+**The Room speaks plainly.**
+
+- Ducks write in the Room for teammates who aren't engineers: what changed, whether it's ready to try, and what you need to do. Commit codes, file names and test counts stay in the Duck's own chat.
+- When a Duck asks you a question, it shows in the Room too, with its options as buttons. Answer there or in the chat.
+- No more "Claude" tags or email addresses in the Room: Ducks and people show by name.
+
 ## 2.35.3
 
 **Ducks are Open or Closed.**
