@@ -24,8 +24,8 @@
 //                         and answers a join-scope token (docs/ponds.md, "Members are accounts")
 //   GET    /account/overview (account token) -> {ponds:[{pondId, name, ownerName, ownerKey, mine, role, shared, lastActivityAt, seqHead,
 //                         counts:{members, ducks}}], invitations:[{inviteId, pondName, inviterName, at}]}: metadata only, for the web's
-//                         Ponds screen; POST /account/invitations/<inviteId>/join (-> {pondId}) | /decline (204), account token, the
-//                         invited address only (minimal; the full lifecycle is #126)
+//                         Ponds screen; POST /account/invitations/<inviteId>/join (-> {pondId, pond, invitation}) | /decline (-> {invitation}),
+//                         the one Join (account token or a Mac's key), idempotent; the invited address only (docs/cloud-layer.md, "Invitations")
 //   GET    /account/devices?deviceId=<this device> (account token or Mac key) -> {devices:[{deviceId, name, kind: mac|web|iphone,
 //                         createdAt, lastSeenAt, thisDevice}]}: the account's devices, never a Pond's; POST /account/devices {publicKey,
 //                         name, kind} registers or refreshes one -> {deviceId}; DELETE /account/devices/<deviceId> -> 204: removes it
@@ -185,6 +185,7 @@ const INVITE_PREVIEW_PK = "invite-preview";
 const INVITE_PREVIEW_PER_MIN = 60;
 const INVITE_PREVIEW_MEMBERS = 10;
 const INVITE_MAIL_PK = "invite-mail";
+const INVITE_MAIL_STATE_PK = "invite-mail-state";
 const INVITE_MAIL_MAX = 10;
 const INVITE_MAIL_PER_MAC_DAY = 20;
 const INVITE_PAGE = "https://squeak.onslate.in/invite";
@@ -330,6 +331,13 @@ function createRelay(deps) {
 
   const feed = createFeed(deps.store);
   const live = createLiveNotices(deps.streams, log);
+  // Every invitation change wakes the Pond's members channel (the Owner's Mac) and the invitee's own account channel
+  // (accounts/<userId>/invites, or `e-<hash>` before the address has an account), per ADR 0005's targeted notices.
+  if (deps.people && deps.people.onChange)
+    deps.people.onChange(async ({ pondId, invitee }) => {
+      await invitesChanged(pondId);
+      await live.invites(invitee);
+    });
   /** The Room kept whole and sealed, paged out oldest first past a byte cap per Pond (room-cloud.js). */
   /** Pictures and files as sealed blobs in a Stratus bucket (blobs.js); off, and every /blob call a 503, until the bucket is wired. */
   const blobs = createBlobs({
@@ -1094,16 +1102,8 @@ function createRelay(deps) {
     ponds.sort((a, b) => b.lastActivityAt - a.lastActivityAt || (a.pondId < b.pondId ? -1 : 1));
     const invitations = [];
     if (deps.people && user.email) {
-      for (const inv of await deps.people.pendingInvitesFor(user.email).catch(() => [])) {
-        const pond = await deps.people.getPond(inv.pondId).catch(() => null);
-        if (!pond) continue;
-        const inviter = await deps.people.getAccount(inv.invitedBy).catch(() => null);
-        invitations.push({
-          inviteId: inv.inviteId,
-          pondName: pond.name,
-          inviterName: (inviter && inviter.name) || "Someone",
-          at: inv.createdAt,
-        });
+      for (const v of await deps.people.listFor({ userId: user.userId, email: user.email }).catch(() => [])) {
+        invitations.push({ inviteId: v.inviteId, pondName: v.pondName, inviterName: v.inviter.name, at: v.createdAt });
       }
     }
     invitations.sort((a, b) => b.at - a.at);
@@ -1111,40 +1111,80 @@ function createRelay(deps) {
   }
 
   /**
-   * POST /account/invitations/<inviteId>/join (200 {pondId}) and /decline (204), account token. Minimal: the invitation must
-   * be pending and addressed to the caller's signed-in email (403 otherwise, 404 unknown, 409 already settled). Join records
-   * the membership in the people tables and settles the invite; decline only settles it. The full lifecycle (emailing,
-   * withdrawing, the Owner's Mac learning of it) is #126's; this is only the two verbs the web's Ponds screen calls.
+   * The one Join and Decline: POST /account/invitations/<inviteId>/join | /decline, from the web (account token) and from a
+   * Mac (its own key). Join is idempotent (people.js `join`): already joined or already a Member answers 200 with the Pond.
+   *   200 {pondId, pond:{pondId,name}, invitation}   (Decline: 200 {invitation})
+   *   refusal {error, code, message, invitation}     `invitation` is always the fresh view; `error` keeps the old words the
+   *   deployed web reads (403 email, 409 full, 409 state + `state`, 404 invite), `code` is the rule's own.
+   * The older Mac's POST /invites/<id>/accept | /decline are aliases (legacy = true): the same answer plus `invite` (the old
+   * record they read) and `error` = the rule's code, with the masked address on a wrong address.
    */
-  async function handleInvitation(req, res, method, inviteId, verb) {
+  async function handleInvitation(req, res, method, mac, inviteId, verb, legacy = false) {
     const out = (status, body) => send(res, status, body, NO_STORE);
     if (method !== "POST") return out(405, {});
-    const user = await accountUser(req, true);
-    if (!user || !USER_ID.test(String(user.userId))) return out(401, { error: "signin" });
     if (!deps.people) return out(404, { error: "invite" });
-    const email = String(user.email || "")
-      .trim()
-      .toLowerCase();
-    const who = { userId: user.userId, email };
-    if (email)
-      await deps.people.upsertAccount({ userId: user.userId, email, name: user.name || "" }).catch(() => undefined);
+    const user = await peopleUser(req, mac);
+    if (!user) return out(401, { error: "signin" });
+    const old = async () => ({
+      invite: await deps.people.viewOf(await deps.people.getInvite(inviteId), { userId: user.userId, owner: true }),
+    });
     try {
-      const done =
-        verb === "join"
-          ? await deps.people.acceptInvite(inviteId, who)
-          : await deps.people.declineInvite(inviteId, who);
-      // The Owner's Mac is woken and says the join or the decline in the Room.
-      if (verb === "join") await restoreAccount(done.pondId, user.userId);
-      await invitesChanged(done.pondId);
-      return verb === "join" ? out(200, { pondId: done.pondId }) : out(204);
+      if (verb === "join") {
+        const done = await deps.people.join(user, inviteId);
+        await restoreAccount(done.pond.pondId, user.userId);
+        return out(200, {
+          pondId: done.pond.pondId,
+          pond: done.pond,
+          invitation: done.invitation,
+          ...(legacy ? await old() : {}),
+        });
+      }
+      const done = await deps.people.decline(user, inviteId);
+      return out(200, { invitation: done.invitation, ...(legacy ? await old() : {}) });
     } catch (e) {
-      if (!(e && e.name === "PeopleError")) throw e;
-      if (e.code === "wrong-address") return out(403, { error: "email" });
-      if (e.code === "no-invite" || e.code === "no-pond") return out(404, { error: "invite" });
-      if (e.code === "pond-full") return out(409, { error: "full" });
-      const state = String(e.code).startsWith("was-") ? String(e.code).slice(4) : undefined;
-      return out(409, { error: "state", ...(state ? { state } : {}) });
+      const r = refusalOf(e, legacy);
+      if (legacy && r.body.code === "wrong-address") {
+        const row = await deps.people.getInvite(inviteId);
+        if (row) r.body.masked = mailing.maskEmail(row.email);
+      }
+      return out(r.status, r.body);
     }
+  }
+
+  /** What a refusal of the Invitation module is on the wire (see handleInvitation). */
+  function refusalOf(e, legacy = false) {
+    if (!(e && e.name === "PeopleError")) throw e;
+    const code = e.code;
+    const status =
+      code === "invalid"
+        ? 400
+        : code === "no-invite" || code === "no-pond"
+          ? 404
+          : code === "wrong-address" || code === "forbidden"
+            ? 403
+            : 409;
+    const was = code.startsWith("was-") ? code.slice(4) : undefined;
+    const error = legacy
+      ? code
+      : code === "wrong-address"
+        ? "email"
+        : code === "pond-full"
+          ? "full"
+          : was
+            ? "state"
+            : code === "no-invite" || code === "no-pond"
+              ? "invite"
+              : code;
+    return {
+      status,
+      body: {
+        error,
+        code,
+        message: INVITE_WORDS[code] || e.message,
+        ...(was && !legacy ? { state: was } : {}),
+        ...(e.invitation ? { invitation: e.invitation } : {}),
+      },
+    };
   }
 
   /** The signed-in account behind a request: a Mac's own key, or an account token (never the operator's key, a pond token or a cookie-less call). */
@@ -1325,7 +1365,7 @@ function createRelay(deps) {
           );
           members.push({ userId: m.userId, name: m.name, email: m.email, role: m.role, lastSeenAt: seen });
         }
-        const invites = isOwner ? await Promise.all((await deps.people.listInvites(pondId)).map(inviteOut)) : [];
+        const invites = isOwner ? await Promise.all((await deps.people.listForPond(user, pondId)).map(withMail)) : [];
         return out(200, { owner: pond.ownerUserId, name: pond.name, cap: 10, members, invites });
       }
       if (!isOwner) return out(403, {});
@@ -1375,7 +1415,7 @@ function createRelay(deps) {
       }
       return out(405, {});
     } catch (e) {
-      const r = asRefusal(e);
+      const r = refusalOf(e, true);
       return out(r.status, r.body);
     }
   }
@@ -1541,7 +1581,7 @@ function createRelay(deps) {
     const first = (a) => (a && typeof a.name === "string" ? a.name.trim().split(/\s+/)[0] || "" : "");
     const pond = await deps.people.getPond(invite.pondId);
     if (!pond) return out(404, { error: "code" });
-    const inviter = first(await deps.people.getAccount(invite.invitedBy)) || "Someone";
+    const inviter = (await deps.people.viewOf(invite, {})).inviter.name.split(/\s+/)[0];
     const members = (await deps.people.membersOf(invite.pondId))
       .map(first)
       .filter(Boolean)
@@ -1567,18 +1607,18 @@ function createRelay(deps) {
     "no-invite": "There is no such invitation.",
     "no-pond": "There is no such Pond.",
   };
-  const asRefusal = (e) => {
-    if (!(e && e.name === "PeopleError")) throw e;
-    const status =
-      e.code === "invalid"
-        ? 400
-        : e.code === "no-invite" || e.code === "no-pond"
-          ? 404
-          : e.code === "wrong-address"
-            ? 403
-            : 409;
-    return { status, body: { error: e.code, message: INVITE_WORDS[e.code] || e.message } };
-  };
+  /** A Mac sends its account's name (URI-encoded) with its own key, so an invite names who sent it; empty when it does not. */
+  function sentName(req, mac) {
+    const raw = mac ? req.headers["x-squeak-account-name"] : undefined;
+    if (typeof raw !== "string") return "";
+    try {
+      return decodeURIComponent(raw)
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .trim();
+    } catch {
+      return "";
+    }
+  }
 
   /** The signed-in account (account token, cookie or a Mac's own key) with the email and name sign-in gave, kept in the people tables. */
   async function peopleUser(req, mac) {
@@ -1591,7 +1631,7 @@ function createRelay(deps) {
       email = (link && link.email) || "";
     }
     const known = await deps.people.getAccount(who.userId).catch(() => null);
-    const name = (who.name || (rec && rec.name) || (known && known.name) || "").slice(0, 100);
+    const name = (who.name || sentName(req, mac) || (rec && rec.name) || (known && known.name) || "").slice(0, 100);
     if (email) await deps.people.upsertAccount({ userId: who.userId, email, name }).catch(() => undefined);
     return { userId: who.userId, email, name };
   }
@@ -1599,13 +1639,17 @@ function createRelay(deps) {
   /** An invite changed: wake the Pond's watchers (the Owner's Mac re-reads the record and says join and decline in the Room). */
   const invitesChanged = (pondId) => publishNotice(`channels/${pondId}/members`, "invites").catch(() => undefined);
 
-  const inviteOut = async (invite) => {
-    const known = await deps.people.accountByEmail(invite.email);
-    return {
-      ...invite,
-      ...(known ? { userId: known.userId } : {}),
-      ...(known && known.name ? { name: known.name } : {}),
-    };
+  /** What the Owner's lists and answers draw: the InvitationView, with "Email not delivered" when the send gave up. */
+  const withMail = async (view) => {
+    const m = parseOr(await deps.store.get(INVITE_MAIL_STATE_PK, view.inviteId));
+    return m && m.failed === true && view.state === "pending" ? { ...view, emailFailed: true } : view;
+  };
+  const mailWho = (user) => {
+    const first =
+      String(user.name || "")
+        .trim()
+        .split(/\s+/)[0] || "";
+    return first || (user.email ? mailing.maskEmail(user.email) : "") || "A teammate";
   };
 
   /** Sends the invitation email for a pending invite through the mail path; false (with the reason logged) when it did not go. */
@@ -1618,7 +1662,7 @@ function createRelay(deps) {
       .filter(Boolean)
       .slice(0, INVITE_PREVIEW_MEMBERS);
     const m = mailing.buildInviteMail({
-      inviterName: first(user) || "Someone",
+      inviterName: mailWho(user),
       pondName: pond.name,
       email: invite.email,
       url: inviteUrl(invite.inviteId),
@@ -1636,165 +1680,167 @@ function createRelay(deps) {
   }
 
   /**
-   * /ponds/<pondId>/invites... (Owner only: the account that owns the Pond; a Mac's own key stands for its account).
-   *   POST  /ponds/<id>/invites {emails, role, pondName?}      one invite per address; the first one makes the Pond exist in the
-   *                                                            cloud with this account as Owner. -> {results:[{email, ok, invite? | message}]}
-   *   GET   /ponds/<id>/invites                                -> {invites:[...]} the one record per address, with its state and times
-   *   POST  /ponds/<id>/invites/<inviteId>/resend              -> {invite, mailed}
-   *   POST  /ponds/<id>/invites/<inviteId>/withdraw            -> {invite}
-   *   POST  /ponds/<id>/invites/<inviteId>/again {role?}       -> {invite, mailed}  (declined, expired or withdrawn only)
+   * Emails go out after the answer: each job is tried up to three times with a short wait, and the outcome is kept
+   * (invite-mail-state/<inviteId>) so the Owner's People list can say "Email not delivered" and offer Resend.
+   */
+  async function sendQueued(jobs) {
+    const waits = deps.mailRetryMs !== undefined ? [deps.mailRetryMs, deps.mailRetryMs] : [500, 2000];
+    for (const job of jobs) {
+      let sent = false;
+      for (let attempt = 0; attempt <= waits.length && !sent; attempt++) {
+        if (attempt > 0 && waits[attempt - 1] > 0) await new Promise((r) => setTimeout(r, waits[attempt - 1]));
+        sent = await mailInvite(job.user, job.pond, job.invite).catch(() => false);
+      }
+      await deps.store
+        .put(INVITE_MAIL_STATE_PK, job.invite.inviteId, JSON.stringify({ failed: !sent, at: clock() }))
+        .catch(() => undefined);
+      if (!sent) await invitesChanged(job.invite.pondId); // the Owner's list now says so
+    }
+  }
+
+  /**
+   * /ponds/<pondId>/invites... (Owner only: the account that owns the Pond; a Mac's own key stands for its account). Every
+   * answer carries the fresh InvitationView(s) (people.js); `invite`/`invites` are the same objects under the names older apps read.
+   *   POST  /ponds/<id>/invites {emails:[...], role, pondName?}   (a single `email` is still accepted) one invite per address; the first one
+   *                                                            makes the Pond exist in the cloud with this account as Owner. Emails are
+   *                                                            queued and sent after the answer. -> {results:[{email, ok, status, code?, message?,
+   *                                                            invitation?, invite?, mailed}]}  status: invited | already-member | already-invited | refused
+   *   GET   /ponds/<id>/invites                                -> {invites, invitations} one view per address
+   *   POST  /ponds/<id>/invites/<inviteId>/resend              -> {invitation, invite, mailed}
+   *   POST  /ponds/<id>/invites/<inviteId>/withdraw            -> {invitation, invite}  (idempotent)
+   *   POST  /ponds/<id>/invites/<inviteId>/again {role?}       -> {invitation, invite, mailed}  (declined, expired or withdrawn only)
    */
   async function handlePondInvites(req, res, method, mac, parts) {
-    const out = (status, body) => send(res, status, body, NO_STORE);
+    const later = [];
+    const out = async (status, body) => {
+      const sent = send(res, status, body, NO_STORE);
+      await sendQueued(later);
+      return sent;
+    };
     const [pondId, , inviteId, action] = parts;
     if (!scoped.POND.test(pondId)) return out(400, { error: "ids" });
     if (mac && !(await tenants.channelAllowed(mac, pondId))) return out(403, {});
     const user = await peopleUser(req, mac);
     if (!user) return out(401, { error: "signin" });
-    let pond = await deps.people.getPond(pondId);
+    const pond = await deps.people.getPond(pondId);
     try {
       if (!inviteId) {
         if (method === "GET") {
-          if (!pond || pond.ownerUserId !== user.userId) return out(pond ? 403 : 200, pond ? {} : { invites: [] });
-          const invites = await Promise.all((await deps.people.listInvites(pondId)).map(inviteOut));
-          return out(200, { invites });
+          const views = await Promise.all((await deps.people.listForPond(user, pondId)).map(withMail));
+          return out(200, { invites: views, invitations: views });
         }
         if (method !== "POST") return out(405, {});
         const body = await readJson(req, 8 * 1024);
-        const emails = body && body.emails;
-        if (
-          !Array.isArray(emails) ||
-          emails.length < 1 ||
-          emails.length > INVITE_MAIL_MAX ||
-          (body.role !== "member" && body.role !== "viewer")
-        )
+        const emails = Array.isArray(body && body.emails)
+          ? body.emails
+          : typeof (body && body.email) === "string"
+            ? [body.email]
+            : null;
+        const role = body && body.role === undefined ? "member" : body && body.role;
+        if (!emails || emails.length < 1 || emails.length > INVITE_MAIL_MAX || (role !== "member" && role !== "viewer"))
           return out(400, { error: "body" });
         if (pond && pond.ownerUserId !== user.userId) return out(403, {});
-        if (!pond) {
-          const name = typeof body.pondName === "string" ? body.pondName.trim().slice(0, 100) : "";
-          if (!name) return out(400, { error: "pondName" });
-          if (!user.email) return out(401, { error: "signin" });
-          pond = await deps.people.createPond({ pondId, ownerUserId: user.userId, name });
-        }
-        const list = [...new Set(emails.map((e) => (typeof e === "string" ? normEmail(e) : "")))];
-        if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, list.length)))
+        const name = typeof body.pondName === "string" ? body.pondName.trim().slice(0, 100) : "";
+        if (!pond && !name) return out(400, { error: "pondName" });
+        if (!pond && !user.email) return out(401, { error: "signin" });
+        const count = new Set(emails.map((e) => (typeof e === "string" ? normEmail(e) : ""))).size;
+        if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, count)))
           return out(429, { error: "busy" });
+        const done = await deps.people.invite(user, pondId, {
+          emails,
+          role,
+          pondName: name,
+          newInviteId,
+          expiresAt: clock() + INVITE_TTL_MS,
+        });
         const results = [];
-        for (const email of list) {
-          if (!mailing.validEmail(email)) {
-            results.push({ email, ok: false, error: "email", message: `${email || "That"} is not an email address.` });
-            continue;
-          }
-          try {
-            const invite = await deps.people.createInvite({
-              inviteId: newInviteId(),
-              pondId,
-              email,
-              role: body.role,
-              invitedBy: user.userId,
-              expiresAt: clock() + INVITE_TTL_MS,
+        for (const r of done.results) {
+          if (r.status === "invited") {
+            later.push({ user, pond: done.pond, invite: r.invitation });
+            results.push({
+              email: r.email,
+              ok: true,
+              status: r.status,
+              mailed: true,
+              queued: true,
+              invitation: r.invitation,
+              invite: r.invitation,
             });
-            const mailed = await mailInvite(user, pond, invite);
-            results.push({ email, ok: true, mailed, invite: await inviteOut(invite) });
-          } catch (e) {
-            const r = asRefusal(e);
-            results.push({ email, ok: false, error: r.body.error, message: r.body.message });
+          } else {
+            results.push({
+              email: r.email,
+              ok: false,
+              status: r.status,
+              error: r.code,
+              message: r.message,
+              ...(r.invitation ? { invitation: r.invitation, invite: r.invitation } : {}),
+            });
           }
         }
-        if (results.some((r) => r.ok)) await invitesChanged(pondId);
         return out(200, { results });
       }
       // One invite of this Pond, by the Owner.
       if (method !== "POST") return out(405, {});
-      if (!pond || pond.ownerUserId !== user.userId) return out(pond ? 403 : 404, pond ? {} : { error: "no-pond" });
-      const existing = await deps.people.getInvite(inviteId);
-      if (!existing || existing.pondId !== pondId)
-        return out(404, { error: "no-invite", message: INVITE_WORDS["no-invite"] });
       if (action === "withdraw") {
-        const done = await deps.people.withdrawInvite(inviteId);
-        await invitesChanged(pondId);
-        return out(200, { invite: await inviteOut(done) });
+        const done = await deps.people.withdraw(user, pondId, inviteId);
+        return out(200, { invitation: await withMail(done.invitation), invite: done.invitation });
       }
       if (action === "resend") {
-        if (existing.state !== "pending")
-          return out(409, { error: "not-pending", message: INVITE_WORDS["not-pending"] });
+        const view = await deps.people.pendingForResend(user, pondId, inviteId);
         if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY)))
           return out(429, { error: "busy" });
-        return out(200, { invite: await inviteOut(existing), mailed: await mailInvite(user, pond, existing) });
+        later.push({ user, pond, invite: view });
+        return out(200, { invitation: view, invite: view, mailed: true, queued: true });
       }
       if (action === "again") {
         const body = await readJson(req, 1024);
         if (body && body.role !== undefined && body.role !== "member" && body.role !== "viewer")
           return out(400, { error: "body" });
-        const invite = await deps.people.inviteAgain({
-          pondId,
-          fromInviteId: inviteId,
-          inviteId: newInviteId(),
-          invitedBy: user.userId,
+        const done = await deps.people.again(user, pondId, inviteId, {
+          newInviteId,
           expiresAt: clock() + INVITE_TTL_MS,
           ...(body && body.role ? { role: body.role } : {}),
         });
-        await invitesChanged(pondId);
-        return out(200, { invite: await inviteOut(invite), mailed: await mailInvite(user, pond, invite) });
+        later.push({ user, pond, invite: done.invitation });
+        return out(200, { invitation: done.invitation, invite: done.invitation, mailed: true, queued: true });
       }
       return out(404, {});
     } catch (e) {
-      const r = asRefusal(e);
+      const r = refusalOf(e, true);
       return out(r.status, r.body);
     }
   }
 
   /**
-   * The invited person's side, signed in. GET /invites -> {invites:[{inviteId, pondId, pond, inviter, role, state, expiresAt}]}:
-   * the pending invitations for the account's verified address, and the ones it joined whose Pond the Owner's Mac has not yet
-   * opened to it (state "joined": the device draws "Connecting" from it until the Pond is listed under /account/ponds);
-   * POST /invites/<id>/accept | /decline. Only that address may use an invitation: another account is refused with the
-   * masked address, and the invite stays pending.
+   * The invited person's side, signed in (account token or a Mac's own key). GET /account/invitations and, for older apps,
+   * GET /invites answer the same: {invitations:[InvitationView], invites:[{inviteId, pondId, pond, inviter, role, state,
+   * expiresAt, invitation}]} (the old rows carry `inviter` as a string; the view's is {name}). Listed: the pending
+   * invitations for the account's verified address, and the ones it joined whose Pond the Owner's Mac has not yet opened to it
+   * (state "joined": the device draws "Connecting"). Join and Decline: handleInvitation (POST /invites/<id>/accept is its alias).
    */
   async function handleMyInvites(req, res, method, mac, parts) {
     const out = (status, body) => send(res, status, body, NO_STORE);
+    if (parts.length !== 1)
+      return handleInvitation(req, res, method, mac, parts[1], parts[2] === "accept" ? "join" : "decline", true);
+    if (method !== "GET") return out(405, {});
     const user = await peopleUser(req, mac);
     if (!user || !user.email) return out(401, { error: "signin" });
-    if (parts.length === 1) {
-      if (method !== "GET") return out(405, {});
-      const invites = [];
-      const row = async (i, state) => {
-        const pond = await deps.people.getPond(i.pondId);
-        if (!pond) return;
-        const inviter = await deps.people.getAccount(i.invitedBy);
-        invites.push({
-          inviteId: i.inviteId,
-          pondId: i.pondId,
-          pond: pond.name,
-          inviter: (inviter && inviter.name) || "Someone",
-          role: i.role,
-          state,
-          expiresAt: i.expiresAt,
-        });
-      };
-      for (const i of await deps.people.pendingInvitesFor(user.email)) await row(i, "pending");
-      for (const i of await deps.people.joinedInvitesFor(user.email)) {
-        // Still Connecting only while this account is a Member in the cloud and the Owner's Mac has not listed the Pond for it.
-        if (!(await deps.people.isMember(i.pondId, user.userId))) continue;
-        if ((await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, i.pondId)) !== null) continue;
-        await row(i, "joined");
-      }
-      return out(200, { invites });
-    }
-    if (method !== "POST" || parts.length !== 3 || !["accept", "decline"].includes(parts[2])) return out(404, {});
-    try {
-      const done =
-        parts[2] === "accept"
-          ? await deps.people.acceptInvite(parts[1], user)
-          : await deps.people.declineInvite(parts[1], user);
-      if (parts[2] === "accept") await restoreAccount(done.pondId, user.userId);
-      await invitesChanged(done.pondId);
-      return out(200, { invite: await inviteOut(done) });
-    } catch (e) {
-      const r = asRefusal(e);
-      const row = r.body.error === "wrong-address" ? await deps.people.getInvite(parts[1]) : null;
-      return out(r.status, row ? { ...r.body, masked: mailing.maskEmail(row.email) } : r.body);
-    }
+    const views = await deps.people.listFor(user, {
+      isListed: async (pondId) => (await deps.store.get(`${ACCT_PONDS_PK}/${user.userId}`, pondId)) !== null,
+    });
+    return out(200, {
+      invitations: views,
+      invites: views.map((v) => ({
+        inviteId: v.inviteId,
+        pondId: v.pondId,
+        pond: v.pondName,
+        inviter: v.inviter.name,
+        role: v.role,
+        state: v.state,
+        expiresAt: v.expiresAt,
+        invitation: v,
+      })),
+    });
   }
 
   return async function handle(req, res) {
@@ -1871,13 +1917,23 @@ function createRelay(deps) {
       if (route === "/account/overview") return await handleOverview(req, res, method);
       {
         const inv = /^\/account\/invitations\/([A-Za-z0-9_-]{1,100})\/(join|decline)$/.exec(route);
-        if (inv) return await handleInvitation(req, res, method, inv[1], inv[2]);
+        if (inv) return await handleInvitation(req, res, method, mac, inv[1], inv[2]);
       }
       if (route === "/account/ponds") return await handleAccountPonds(req, res, method, mac);
       if (route === "/account/pond-leaves") return await handlePondLeave(req, res, method, mac);
       if (route === "/account/pond-devices") return await handlePondDevice(req, res, method, mac);
-      if (route === "/invites" || /^\/invites\/[^/]+\/(accept|decline)$/.test(route))
-        return await handleMyInvites(req, res, method, mac, route.split("/").slice(1));
+      if (
+        route === "/account/invitations" ||
+        route === "/invites" ||
+        /^\/invites\/[^/]+\/(accept|decline)$/.test(route)
+      )
+        return await handleMyInvites(
+          req,
+          res,
+          method,
+          mac,
+          route.startsWith("/invites/") ? route.split("/").slice(1) : ["list"],
+        );
       {
         const m = /^\/ponds\/([^/]+)\/invites(?:\/([^/]+)\/(resend|withdraw|again))?$/.exec(route);
         if (m) return await handlePondInvites(req, res, method, mac, [m[1], "invites", m[2], m[3]]);

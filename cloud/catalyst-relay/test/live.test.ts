@@ -101,6 +101,23 @@ describe("who gets a notice", () => {
     hub.stop();
   });
 
+  it("an invitation notice reaches every device of that account and nobody else's (targeted, ADR 0005)", async () => {
+    const people = fakePeople();
+    const bus = createMemoryBus();
+    const hub = createHub({ people, fanout: bus.instance() });
+    hub.start();
+    const phone = device(hub, "asha", [], "asha-phone");
+    const mac = device(hub, "asha", [], "asha-mac");
+    const ann = device(hub, "ann", [], "ann-mac");
+    await Promise.all([phone.ready, mac.ready, ann.ready]);
+    await bus.publish(JSON.stringify({ t: "inv", user: "asha" }));
+    await flush();
+    const heard = (d: { events: Array<{ event: string | null }> }) =>
+      d.events.filter((e) => e.event === "invites").length;
+    expect([heard(phone), heard(mac), heard(ann)]).toEqual([1, 1, 0]);
+    hub.stop();
+  });
+
   it("removing a member closes their Pond subscription at once (the others keep theirs)", async () => {
     const people = fakePeople();
     people.add(POND, "ann");
@@ -380,6 +397,34 @@ describe("the device client against the hub", () => {
     expect(svc.peak()).toBe(2); // overlapped, never more
     expect(svc.open()).toBe(1);
     c.stop();
+    hub.stop();
+  });
+
+  it("an invitation notice reaches the client of that account even with no Pond watched, and no other", async () => {
+    const bus = createMemoryBus();
+    const hub = createHub({ people: fakePeople(), fanout: bus.instance() });
+    hub.start();
+    const heard: string[] = [];
+    const run = (user: string) => {
+      const svc = service(hub, user);
+      const f = feed(bus);
+      const { c } = client({
+        fetch: svc.fetchImpl,
+        changes: f.changes,
+        ponds: () => [],
+        onInvites: () => void heard.push(user),
+      });
+      c.start();
+      return c;
+    };
+    const asha = run("asha");
+    const ann = run("ann");
+    await vi.advanceTimersByTimeAsync(100);
+    await bus.publish(JSON.stringify({ t: "inv", user: "asha" }));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(heard).toEqual(["asha"]);
+    asha.stop();
+    ann.stop();
     hub.stop();
   });
 
