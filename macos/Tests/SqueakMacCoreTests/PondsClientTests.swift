@@ -73,6 +73,35 @@ struct PondsClientTests {
         #expect(body?["role"]?.string == "viewer" && body?["emails"]?.array?.compactMap(\.string) == ["a@x.co", "b@x.co"])
     }
 
+    @Test func invitationsReadsStaleAndAsksFreshOnRetry() async throws {
+        let t = PondStub(body: #"{"invitations":[{"id":"i1","pondId":"p1","pondName":"O","inviter":"S","state":"pending"}],"stale":true}"#)
+        let c = client(t)
+        let l = try #require(try await c.invitations())
+        let f = try #require(try await c.invitations(fresh: true))
+        #expect(l.stale && f.invitations.count == 1)
+        #expect(t.requests[0].url.query == nil && t.requests[1].url.query == "fresh=1")
+        #expect(try await client(PondStub(status: 404)).invitations() == nil)
+    }
+
+    @Test func joinAnswersTheFreshViewAndARefusalCarriesSentenceAndView() async throws {
+        let view = #"{"id":"i1","pondId":"p1","pondName":"O","inviter":"S","state":"joined","youAreMember":true}"#
+        let ok = try await client(PondStub(body: #"{"pondId":"p1","invitation":\#(view)}"#)).joinInvitation(id: "i1")
+        #expect(ok?.state == .joined)
+        let gone = #"{"id":"i1","pondId":"p1","pondName":"O","inviter":"S","state":"expired"}"#
+        let c = client(PondStub(status: 409, body: #"{"error":"That invitation has expired.","invitation":\#(gone)}"#))
+        do { _ = try await c.declineInvitation(id: "i1"); Issue.record("should throw") }
+        catch let r as PondInvitationRefusal { #expect(r.sentence == "That invitation has expired." && r.invitation?.state == .expired) }
+        let bare = client(PondStub(status: 409, body: #"{"error":"Not yours."}"#))
+        do { _ = try await bare.joinInvitation(id: "i1"); Issue.record("should throw") }
+        catch let r as PondInvitationRefusal { #expect(r.sentence == "Not yours." && r.invitation == nil) }
+    }
+
+    @Test func inviteResultsCarryStatusAndMessage() async throws {
+        let t = PondStub(body: #"{"results":[{"email":"a@x.co","ok":true,"status":"invited"},{"email":"b@x.co","ok":false,"status":"already-member","message":"Already a Member."}]}"#)
+        let r = try await client(t).invite(pond: "p9", emails: ["a@x.co", "b@x.co"], role: .member)
+        #expect(r.map(\.status) == [.invited, .alreadyMember] && r[1].message == "Already a Member.")
+    }
+
     @Test func resendWithdrawAndInviteAgainHitTheirOwnRoutes() async throws {
         let t = PondStub(body: #"{"invite":\#(Self.record)}"#)
         let c = client(t)

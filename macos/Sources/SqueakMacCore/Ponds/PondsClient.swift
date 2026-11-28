@@ -138,8 +138,9 @@ public struct PondsClient: Sendable {
         catch where Self.isAbsent(error) { return nil }
     }
 
-    /// Owner: one email invite per address. A refused address (already a Member, already invited, over the cap) comes back
-    /// as `ok: false` with a plain sentence; the call itself only fails when nothing could be asked.
+    /// Owner: one email invite per address, in the order asked. `ok` means the invite is written (the relay sends the email
+    /// afterwards); an address that is already a Member, already invited or refused comes back with its `status` and a plain
+    /// `message`. The call itself only fails when nothing could be asked.
     public func invite(pond: String, emails: [String], role: PondRole) async throws -> [PondInviteOutcome] {
         let body: [String: NativeJSON] = ["emails": .array(emails.map { .string($0) }), "role": .string(role.rawValue)]
         return try decode(PondInviteResults.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 90)).results
@@ -162,20 +163,31 @@ public struct PondsClient: Sendable {
         try await inviteCall(pond, invite, "again", body: role.map { ["role": .string($0.rawValue)] } ?? [:])
     }
 
-    /// The invitations for this Mac's account: to answer, and joined ones whose Pond is still opening. nil from an older host.
-    public func invitations() async throws -> [PondInvitation]? {
-        struct R: Decodable { var invitations: [Failable<PondInvitation>] }
-        do { return try decode(R.self, try await host.call("GET", "/native/ponds/invitations", timeout: Self.readTimeout)).invitations.compactMap(\.value) }
+    /// The invitations for this Mac's account: to answer, and joined ones whose Pond is still opening, with whether the daemon
+    /// could not read the cloud just now (`stale`, an older host never says). `fresh` makes it try the cloud before answering.
+    /// nil from an older host without the route.
+    public func invitations(fresh: Bool = false) async throws -> PondInvitationList? {
+        do { return try decode(PondInvitationList.self, try await host.call("GET", "/native/ponds/invitations" + (fresh ? "?fresh=1" : ""), timeout: Self.readTimeout)) }
         catch where Self.isAbsent(error) { return nil }
     }
 
-    /// Join: the host asks the relay and answers once it has; the Pond then shows as Connecting.
-    public func joinInvitation(id: String) async throws {
-        _ = try await host.call("POST", "/native/ponds/invitations/\(NativeHostClient.id(id))/join", body: .object([:]), timeout: 60)
-    }
+    /// Join: the host asks the relay and answers with the invitation's fresh view (already joined is success too). A refusal
+    /// throws `PondInvitationRefusal`.
+    @discardableResult
+    public func joinInvitation(id: String) async throws -> PondInvitation? { try await answerInvitation(id, "join") }
 
-    public func declineInvitation(id: String) async throws {
-        _ = try await host.call("POST", "/native/ponds/invitations/\(NativeHostClient.id(id))/decline", body: .object([:]), timeout: 60)
+    @discardableResult
+    public func declineInvitation(id: String) async throws -> PondInvitation? { try await answerInvitation(id, "decline") }
+
+    private func answerInvitation(_ id: String, _ verb: String) async throws -> PondInvitation? {
+        struct R: Decodable { var invitation: PondInvitation? }
+        let response = try await host.exchange("POST", "/native/ponds/invitations/\(NativeHostClient.id(id))/\(verb)", body: .object([:]), timeout: 60)
+        let view = (try? JSONDecoder().decode(R.self, from: response.body))?.invitation
+        guard (200..<300).contains(response.status) else {
+            let said = (try? JSONDecoder().decode(NativeJSON.self, from: response.body))?["error"]?.string
+            throw PondInvitationRefusal(sentence: ChatErrorText.hostSentence(status: response.status, message: said), invitation: view)
+        }
+        return view
     }
 
     // MARK: Threads

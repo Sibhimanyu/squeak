@@ -9,11 +9,22 @@ struct InvitationsBlock: View {
 
     var body: some View {
         let list = ponds.invitationsToAnswer
-        if !list.isEmpty {
+        if !list.isEmpty || (ponds.invitationRefused && ponds.note != nil) {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(needsYou ? "Needs you" : "Invitations").font(needsYou ? Typo.label : Typo.meta).foregroundStyle(Theme.muted)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(list) { invitation in InvitationRow(invitation: invitation) }
+                if ponds.invitationsStale, !list.isEmpty {
+                    HStack(spacing: 0) {
+                        Text(verbatim: PondInvitations.staleText).font(Typo.footnote).foregroundStyle(Theme.muted)
+                        Button { Task { await ponds.retryInvitations() } } label: {
+                            Text(verbatim: PondInvitations.staleAction).font(Typo.footnote).foregroundStyle(Theme.ink)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(PondInvitations.staleLine)
+                }
                 if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }
             }
             .padding(.horizontal, needsYou ? 0 : Space.s).padding(.vertical, Space.s)
