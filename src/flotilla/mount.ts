@@ -1,4 +1,3 @@
-import { flag } from "../squeak/flags.js";
 import type http from "node:http";
 
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
@@ -104,9 +103,7 @@ export class FlotillaRoutes {
       const ponds = rows.map((p) => ({
         ...p,
         // With own-Mac threads stashed, a pond someone else owns starts only on the owner's Mac (docs/ponds.md).
-        canStartHere:
-          (p.role === "owner" || p.local === true || flag("pondOwnThreads")) &&
-          Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
+        canStartHere: service.startsOnThisMac(p.id) && Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
       }));
       ctx.json(200, { ponds, cloud: service.hasCloud(), connection: service.overallConnection(rows) });
       return true;
@@ -224,6 +221,23 @@ export class FlotillaRoutes {
     if (b === "members" && c && parts.length === 4 && method === "DELETE") {
       await service.removeMember(pondId, c);
       ctx.json(200, { ok: true });
+      return true;
+    }
+    // The Pond policy (docs/adr/0006-pond-policy.md): the Owner's two settings and each person's overrides.
+    if (b === "policy" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["reachDucks", "startDucks", "overrides"]);
+      const overrides = body.overrides;
+      if (overrides !== undefined && (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)))
+        throw new FlotillaError("overrides is a list of people");
+      ctx.json(
+        200,
+        await service.setPolicy(pondId, {
+          reachDucks: body.reachDucks,
+          startDucks: body.startDucks,
+          ...(overrides ? { overrides: overrides as Record<string, unknown> } : {}),
+        }),
+      );
       return true;
     }
     if (b === "members" && c && d === "role" && parts.length === 5 && method === "POST") {

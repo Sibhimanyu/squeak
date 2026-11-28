@@ -14,7 +14,7 @@ import { blobView, readBlobRefs, type BlobRef } from "./blobs.js";
 import { TaskError, type RoomTask, type RoomTasks, type TaskOrigin, type TaskState } from "../native/room-tasks.js";
 import type { NativeStore, RoomPostKind } from "../native/store.js";
 import { randomId } from "./crypto.js";
-import type { Caps } from "./permissions.js";
+import type { Action, Caps, Context, Decision } from "./permissions.js";
 import { DOC_ID, FlotillaError, type Role } from "./types.js";
 import type { FlotillaService } from "./service.js";
 import { readMemberAct, type MemberAct, type Ripple } from "./types.js";
@@ -48,6 +48,8 @@ export interface RoomSignedDoc {
   role: Role;
   name: string;
   caps: Caps;
+  /** What the Pond policy lets the signer do now: the one question every Room decision asks (`decide`). */
+  can(action: Action, ctx?: Context): Decision;
   /** The cloud's number for this document (the Pond's one order); absent on a store with no change feed. */
   seq?: number;
   /** When the writer sealed it. */
@@ -68,6 +70,8 @@ export interface RoomPort {
   remove(kind: string, docId: string): Promise<void>;
   list(kind: string): Promise<RoomSignedDoc[]>;
   caps(): Promise<Caps>;
+  /** What the Pond policy lets this Mac's person do (a Member's Mac: its last read of the policy). */
+  can(action: Action, ctx?: Context): Decision;
   owner(): Promise<{ name: string; online: boolean }>;
   /** Seals picture or file bytes under the current Pond key and keeps them in the cloud for the post document `ref`; the blob id. */
   putBlob(bytes: Buffer, ref: { kind: "room" | "rposts"; doc: string }): Promise<string>;
@@ -353,6 +357,8 @@ export interface MemberRoomPage {
   ownerOffline?: { line: string };
   /** False when the Owner turned off messaging for this Member: the Room is read-only. */
   canPost: boolean;
+  /** What the Pond policy lets this person do in the Room (the same answers as the pond view's me.can). */
+  can?: Record<string, boolean>;
   /** Set when the cloud paged the oldest posts out (25 MB cap): the one sentence the Room shows above its first post. */
   earlier?: { line: string };
 }
@@ -565,15 +571,22 @@ export class RoomSync extends EventEmitter {
     let applied = 0;
     for (const { doc, from, seq } of waiting) {
       const now = this.now();
+      // The Pond policy decides (`post-room`, `make-task`); a Duck a Member's words need is the decider's to pick or start.
+      const verdict = from.can(doc.task ? "make-task" : "post-room", { via: "room" });
       if (from.device === port.ownerId) {
         // The Owner's own key never queues an ask.
       } else if (
-        from.role !== "viewer" &&
-        from.caps.message &&
+        verdict.ok &&
         (seq !== undefined || now - doc.at <= ROOM_INBOX_LIFE_MS) &&
         this.takeSlot(pondId, from.device, doc.at)
       ) {
-        const origin: TaskOrigin = { memberId: from.device, name: from.name, canStart: from.role === "owner" };
+        // A Duck started on a Member's Room words waits for the Owner only under `startDucks: members-approval`.
+        const start = from.can("start-duck", { via: "room" });
+        const origin: TaskOrigin = {
+          memberId: from.device,
+          name: from.name,
+          canStart: from.role === "owner" || (start.ok && !start.approval),
+        };
         if (doc.task) {
           // "Make task": the Owner's Task rules, with the approval gate for a Member without the start permission.
           try {
@@ -730,19 +743,16 @@ export class RoomSync extends EventEmitter {
     const limit = Math.min(200, Math.max(1, opts.limit ?? 100));
     // The members, the three kinds and the note are read once for the whole page, not once per kind.
     const once = await port.readPage?.(["room", "rtasks", "rposts"]).catch(() => null);
-    let caps: Caps;
     let roomDocs: RoomSignedDoc[];
     let taskDocs: RoomSignedDoc[];
     let inboxDocs: RoomSignedDoc[];
     let owner: { name: string; online: boolean } | null;
     let note: { removed: number; before: number; at: number } | null;
     if (once) {
-      caps = once.caps;
       [roomDocs, taskDocs, inboxDocs] = once.lists as [RoomSignedDoc[], RoomSignedDoc[], RoomSignedDoc[]];
       owner = once.owner;
       note = once.note;
     } else {
-      caps = await port.caps();
       [roomDocs, taskDocs, inboxDocs, owner, note] = await Promise.all([
         port.list("room"),
         port.list("rtasks"),
@@ -819,7 +829,8 @@ export class RoomSync extends EventEmitter {
       tasks,
       ...(owner && !owner.online ? { ownerOffline: { line: ownerOfflineLine(owner.name) } } : {}),
       ...(note ? { earlier: { line: EARLIER_LINE } } : {}),
-      canPost: caps.message && port.role !== "viewer",
+      canPost: port.can("post-room").ok,
+      can: { "post-room": port.can("post-room").ok, "make-task": port.can("make-task").ok },
     };
   }
 
@@ -836,7 +847,8 @@ export class RoomSync extends EventEmitter {
   ): Promise<{ id: string; offline: boolean; line?: string }> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: post from the pond.", 400);
-    if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
+    const allowed = port.can("post-room");
+    if (!allowed.ok) throw new FlotillaError(port.role === "viewer" ? "A viewer can only watch." : allowed.reason, 403);
     let clean: string;
     let checked: ReturnType<typeof checkAttachments>;
     try {
@@ -948,7 +960,8 @@ export class RoomSync extends EventEmitter {
   async makeTask(pondId: string, messageId: unknown): Promise<{ id: string; offline: boolean; line?: string }> {
     const port = this.o.service.roomPort(pondId);
     if (port.role === "owner") throw new FlotillaError("That is your own Room: make the task from the pond.", 400);
-    if (port.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
+    const allowed = port.can("make-task");
+    if (!allowed.ok) throw new FlotillaError(port.role === "viewer" ? "A viewer can only watch." : allowed.reason, 403);
     if (typeof messageId !== "string" || !messageId || messageId.length > 80) {
       throw new FlotillaError("messageId must be a Room message id");
     }

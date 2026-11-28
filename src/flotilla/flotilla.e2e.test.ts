@@ -428,4 +428,110 @@ describe("members with no Nest and the wire", () => {
   });
 });
 
+describe("the Pond policy on the wire (docs/adr/0006-pond-policy.md)", () => {
+  const ROOM = { reachDucks: "room", startDucks: "room" } as const;
+  let A: Mac;
+  let B: Mac;
+  let C: Mac;
+  let pondId = "";
+  let threadId = "";
+  beforeAll(async () => {
+    A = mac("Polly");
+    B = mac("Bram");
+    C = mac("Cora");
+    const pond = await A.service.createPond({ name: "Policy", projectId: "proj-Policy" });
+    pondId = pond.id;
+    // Room first, as a new Pond is: set before anyone is admitted, so the test fixture leaves it alone.
+    await A.service.setPolicy(pondId, ROOM);
+    await admitMember(A.service, B.service, pondId, "member");
+    await admitMember(A.service, C.service, pondId, "member");
+    A.host.sessions.set("p1", session("p1"));
+    threadId = (await A.bridge.share(pondId, "p1")).id;
+    await A.bridge.flush();
+    await B.service.refresh(pondId);
+    await C.service.refresh(pondId);
+  });
+
+  it("a Pond's policy defaults to Room first and reaches Members through the signed meta document", async () => {
+    const view = await B.service.view(pondId);
+    expect(view.policy).toEqual(ROOM);
+    expect(view.me.can).toMatchObject({ "post-room": true, "make-task": true });
+    expect(view.me.can!["message-duck"]).toMatch(/Room/);
+    expect(view.me.can!["start-duck"]).toMatch(/Room/);
+    expect(view.me.can!["set-policy"]).toBe("Only the Owner can do that.");
+    expect((await A.service.view(pondId)).me.can).toMatchObject({ "set-policy": true, "message-duck": true });
+    expect(view.members.find((m) => m.you)?.policy).toMatchObject({ reachDucks: "room", startDucks: "room" });
+  });
+
+  it("a Member's direct message to a Duck is refused under reachDucks room: on their Mac and, if forged, on the Owner's", async () => {
+    expect(await B.bridge.message(pondId, threadId, "go faster")).toMatchObject({
+      ok: false,
+      state: "refused",
+      line: expect.stringMatching(/Room/),
+    });
+    await rawCommand(B, pondId, { kind: "message", threadId, text: "forged" });
+    expect(await A.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: expect.stringMatching(/Room/) }),
+    ]);
+    expect(A.host.sent).toHaveLength(0);
+  });
+
+  it("only the Owner sets the policy", async () => {
+    await expect(B.service.setPolicy(pondId, { reachDucks: "direct" })).rejects.toThrow(/Only an owner/);
+    await expect(A.service.setPolicy(pondId, { reachDucks: "everyone" })).rejects.toThrow(/room or directly/);
+  });
+
+  it("a per-person override lets that Member message the Duck, and nobody else", async () => {
+    await A.service.setPolicy(pondId, { overrides: { [B.service.me.id]: { reachDucks: "direct" } } });
+    await B.service.refresh(pondId);
+    await C.service.refresh(pondId);
+    const mine = await B.service.view(pondId);
+    expect(mine.me.can!["message-duck"]).toBe(true);
+    expect(mine.me.policy).toMatchObject({ reachDucks: "direct", custom: { reachDucks: true } });
+    expect(await B.bridge.message(pondId, threadId, "Use port 4000")).toMatchObject({ ok: true });
+    expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "message" })]);
+    expect(A.host.sent.map((s) => s.text)).toEqual(["Use port 4000"]);
+    expect(await C.bridge.message(pondId, threadId, "me too")).toMatchObject({ ok: false, state: "refused" });
+    // The Owner's page says each person's effective policy.
+    const seen = (await A.service.view(pondId)).members;
+    expect(seen.find((m) => m.id === B.service.me.id)?.policy).toMatchObject({ reachDucks: "direct" });
+    expect(seen.find((m) => m.id === C.service.me.id)?.policy).toMatchObject({ reachDucks: "room" });
+  });
+
+  it("reachDucks direct for everyone, then back to room: the next message follows at once", async () => {
+    await A.service.setPolicy(pondId, { reachDucks: "direct", overrides: { [B.service.me.id]: null } });
+    await C.service.refresh(pondId);
+    expect(await C.bridge.message(pondId, threadId, "now it works")).toMatchObject({ ok: true });
+    expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true })]);
+    await A.service.setPolicy(pondId, ROOM);
+    await C.service.refresh(pondId);
+    expect(await C.bridge.message(pondId, threadId, "again")).toMatchObject({ ok: false });
+  });
+
+  it("asking for a Duck: refused under startDucks room, held under members-approval, started under members", async () => {
+    const asked = { text: "Fix the footer", agent: "claude", model: "m" };
+    await expect(B.service.requestStart(pondId, asked)).rejects.toThrow(/Room/);
+    // A forged start command is refused by the Owner's Mac too.
+    await rawCommand(B, pondId, { kind: "start", threadId: "", text: "forged", agent: "claude", model: "m" });
+    expect(await A.bridge.runCommands(pondId)).toEqual([
+      expect.objectContaining({ ok: false, reason: expect.stringMatching(/Room/) }),
+    ]);
+
+    await A.service.setPolicy(pondId, { startDucks: "members-approval" });
+    await B.service.refresh(pondId);
+    await B.service.requestStart(pondId, asked);
+    await A.service.applyQueuedActsOf(pondId);
+    expect((await A.service.view(pondId)).starts).toEqual([expect.objectContaining({ text: "Fix the footer" })]);
+
+    const started: string[] = [];
+    A.service.setOwnerStarter(async (_pond, request) => void started.push(request.text));
+    await A.service.setPolicy(pondId, { startDucks: "members" });
+    await B.service.refresh(pondId);
+    await B.service.requestStart(pondId, { ...asked, text: "Second Duck" });
+    await A.service.applyQueuedActsOf(pondId);
+    expect(started).toEqual(["Second Duck"]);
+    A.service.setOwnerStarter(null);
+  });
+});
+
 void FlotillaError;

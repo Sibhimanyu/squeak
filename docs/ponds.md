@@ -20,21 +20,31 @@ A Pond can use any folder. Members see the Ducks that are not Private. By defaul
 Members work with Ducks on the Owner's Mac. The experimental `SQUEAK_POND_OWN_THREADS=on` lets Members of a Git
 Pond run their own Ducks and share their chats. Code moves through Git.
 
-A Member can read, view changes, message, steer and answer; a Viewer only reads. The Duck's starter
+A Member can read, view changes, post in the Room and answer, and message or steer a Duck when the Pond policy lets them (by default they say it in the Room); a Viewer only reads. The Duck's starter
 handles approvals and Stop on the Mac that runs it. A question hold expires 2 minutes after its last renewal.
 Other readers see who is answering.
 
-- **Three roles: Owner, Member, Viewer.** Only the Owner invites, removes, changes roles and decides what a Member asked
-  for. Approving edits and Stop are the Owner's alone, on every Duck in the Pond, including one a Member asked for (it
-  runs on the Owner's Mac); a Member or a Viewer never. A **Viewer** reads and posts nothing. A **Member** reads, posts in
-  the Room, messages Ducks, answers questions and makes Tasks or asks for a Duck; **Tasks and new Ducks always wait for
-  the Owner's approval**, because they spend the Owner's tokens. There are no per-Member switches (finer permissions come
-  later): an old `MemberDoc.canStartTasks` is ignored. The Owner changes a role from People
-  (`POST /ponds/<id>/members/<memberId>/role { role }`); it takes effect on the next read and is a Ripple.
+- **Three roles: Owner, Member, Viewer, and the Pond policy** ([ADR 0006](adr/0006-pond-policy.md)). Only the Owner invites,
+  removes, changes roles, renames, deletes, sets the policy and decides what a Member asked for. Approving edits and Stop
+  are the Owner's alone, on every Duck in the Pond; a Member or a Viewer never. A **Viewer** reads and posts nothing (the
+  relay refuses a Viewer's Room post and command too). A **Member** reads, posts in the Room and makes Tasks; what else
+  they may do with Ducks is the **Pond policy**, two settings the Owner sets, each overridable per person:
+  `reachDucks` (`room`, the default: Members talk in the Room and its decider picks or starts the Duck, no direct
+  messages; `direct`: they may also message a Duck) and `startDucks` (`room`, the default: the decider starts Ducks for
+  their Room posts and Tasks, no direct start; `members-approval`: they may ask for a Duck and Tasks wait for the
+  Owner's approval; `members`: they start Ducks without asking). The policy is `policy` in the signed `pond/meta`
+  document (with `overrides` by member id) and `LocalPond.policy` on each Mac. One pure function decides:
+  `decide(actor, action, ctx, policy)` in `src/flotilla/permissions.ts`, asked only where requests arrive on the Owner's
+  Mac (`verifyCommand`, `receiveStart`, the Room inbox `drain`) and before a Member's Mac sends. The pond view carries
+  `policy`, `me.can` (action to `true` or the refusal sentence), `me.policy` and each member's effective `policy`; Mac,
+  web and phone draw from them and compare no roles for these actions. The Owner sets it with
+  `POST /ponds/<id>/policy { reachDucks?, startDucks?, overrides?: { <memberId>: { reachDucks?, startDucks? } | null } }`
+  (a field set to null, or an override of null, takes the override away); changing a role stays
+  `POST /ponds/<id>/members/<memberId>/role { role }`. Both take effect on the next read and the policy change is a Ripple.
   Migration: old documents' `caps`, presets, `muted`, `canStartTasks`, per-Duck `locked`/`allow`/`deny` and machine grants
   are ignored (an old Viewer is a Viewer, every other role a Member); the `caps` the pond view still sends is derived from
   the role (`capsOf`) only so older clients decode it (`start` is true for a Member: it means "may ask").
-- **A Member's Duck waits for the Owner.** The Member's `start` command is verified on the Owner's Mac like any command,
+- **A Member's Duck waits for the Owner** (under `startDucks: members-approval`; by default the Room's decider starts it, and under `members` it starts at once). The Member's `start` command is verified on the Owner's Mac like any command,
   then recorded, not run: `LocalPond.pendingStarts` (never in the cloud) holds who asked, the first message, agent, model
   and title; a Ripple says "asked for a duck". The pond view carries `starts` (all of them on the Owner's Mac with the
   first message; the Member's own on theirs, `mine: true`, title only, kept in `LocalPond.asked`). The Owner's Dashboard

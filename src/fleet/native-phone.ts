@@ -587,12 +587,17 @@ export class NativePhone implements RemoteNative {
     const caps = rec(me?.caps);
     const myId = typeof me?.id === "string" ? me.id : "";
     const role = me?.role;
-    const canMessage = role !== "viewer" && caps?.message !== false;
+    // The host's Pond policy answers (`me.can`): true, or the sentence that says why not. An older host sends no `can`.
+    const can = rec(me?.can);
+    const said = can?.["message-duck"];
+    const canMessage = can ? said === true : role !== "viewer" && caps?.message !== false;
     const reason = canMessage
       ? undefined
-      : role === "viewer"
-        ? "You can watch this pond"
-        : "The owner has turned off messaging for you in this pond.";
+      : typeof said === "string"
+        ? said
+        : role === "viewer"
+          ? "You can watch this pond"
+          : "The owner has turned off messaging for you in this pond.";
     const threads: PhoneFlockThread[] = [];
     for (const raw of Array.isArray(view.threads) ? view.threads : []) {
       const t = rec(raw);

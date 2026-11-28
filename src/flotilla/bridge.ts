@@ -461,7 +461,7 @@ export class FlotillaBridge {
     if (cmd.kind === "start") {
       // The Owner's own device asks: it runs now. Only a Member's waits for the Owner's approval.
       if (from.role === "owner") return this.startOwn(pondId, from, cmd);
-      return this.service.holdStart(pondId, from, cmd);
+      return this.service.receiveStart(pondId, from, cmd);
     }
     if (cmd.kind === "artifacts" || cmd.kind === "artifact") return this.artifactsFor(pondId, v);
     const thread = v.thread;

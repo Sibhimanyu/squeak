@@ -10,3 +10,5 @@ neither smooth nor stable (2026-11-26). We chose cloud-enforced removal over wai
 removal that depends on a sleeping laptop does not feel final; key rotation still needs the Mac, so until it runs the
 relay's refusal is what keeps a removed person out. The relay never holds a Pond key: invites stay keyless and the
 Owner's Mac seals the key to each new device.
+
+Superseded in part by [0006](0006-pond-policy.md): per-Member switches are back for exactly two settings (`reachDucks`, `startDucks`) and per-person overrides of them.

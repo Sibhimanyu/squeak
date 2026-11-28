@@ -383,6 +383,23 @@ function createRelay(deps) {
     return send(res, 200, await feed.changes(pondId, since, limitText === null ? 100 : Number(limitText)), NO_STORE);
   }
 
+  /**
+   * A Viewer only reads (docs/adr/0006-pond-policy.md): the people tables say who an account is in a Pond, and the Owner's
+   * Mac enforces the rest. True when the account (a userId), or the account a device belongs to (a memberId a pond token
+   * names), is a current Viewer of the Pond. A device the relay cannot place is not refused here: the Owner's Mac drops it.
+   */
+  async function isViewer(pondId, ids) {
+    if (!deps.people) return false;
+    let userId = ids.userId;
+    if (userId === undefined && ids.memberId !== undefined) {
+      const dev = await deps.people.deviceOf(ids.memberId).catch(() => null);
+      userId = dev ? dev.userId : undefined;
+    }
+    if (userId === undefined) return false;
+    const m = await deps.people.membershipOf(pondId, userId).catch(() => null);
+    return Boolean(m) && m.role === "viewer" && m.leftAt === 0;
+  }
+
   /** A web guest: one pond's channel, by a scoped token, never the relay key. */
   async function handleGuest(req, res, url, route, method, given) {
     const who = scoped.verify(deps.key, given, Date.now());
@@ -415,6 +432,10 @@ function createRelay(deps) {
         // A Member's post is part of the Room for good: a token may add one, never overwrite or delete anyone's (the
         // Owner's own key pages and removes).
         if (parsed.kind === "rposts" && method === "DELETE") return send(res, 403, {});
+        // A Viewer reads: a Room post, a Task ask or a command from one is refused here, not left for the Owner's Mac to drop.
+        if (method === "PUT" && (parsed.kind === "rposts" || parsed.kind === "tcmds")) {
+          if (await isViewer(who.pondId, { memberId: who.memberId })) return send(res, 403, { error: "viewer" });
+        }
         if (method === "PUT") {
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
@@ -472,6 +493,7 @@ function createRelay(deps) {
         if (!deps.people || !(await deps.people.isMember(pond, mac.userId))) return send(res, 403, {}, NO_STORE);
         kinds = ["rposts"];
         canDelete = false;
+        if (method === "PUT" && (await isViewer(pond, { userId: mac.userId }))) return send(res, 403, {}, NO_STORE);
       }
       by = mac.macId;
     } else if (!hasKey && token !== undefined) {
@@ -482,6 +504,7 @@ function createRelay(deps) {
       if (who.pondId !== pond) return send(res, 403, {}, NO_STORE);
       // A join token (an invite's) writes the join request only.
       if (!scoped.SCOPES[who.scope].write.has("rposts")) return send(res, 403, {}, NO_STORE);
+      if (method === "PUT" && (await isViewer(pond, { memberId: who.memberId }))) return send(res, 403, {}, NO_STORE);
       by = who.memberId;
       kinds = ["rposts"];
       canDelete = false;
@@ -1023,6 +1046,12 @@ function createRelay(deps) {
     const at = Date.now();
     for (const userId of new Set(add)) {
       const role = roles[userId];
+      // The Owner's Mac changed a role: the people tables follow, so the relay's Viewer refusal (isViewer) is current.
+      if (deps.people && (role === "member" || role === "viewer")) {
+        const had = await deps.people.membershipOf(pondId, userId).catch(() => null);
+        if (had && had.leftAt === 0 && had.slot >= 0 && had.role !== role)
+          await deps.people.setRole({ pondId, userId, role }).catch(() => undefined);
+      }
       await deps.store.put(
         `${ACCT_PONDS_PK}/${userId}`,
         pondId,

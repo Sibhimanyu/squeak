@@ -24,7 +24,26 @@ import {
   signText,
   verifyText,
 } from "./crypto.js";
-import { can, capsOf, type Action, type Actor, type Context, type Caps } from "./permissions.js";
+import {
+  canMap,
+  capsOf,
+  decide,
+  DEFAULT_POLICY,
+  isReachDucks,
+  isStartDucks,
+  memberPolicyView,
+  readPolicy,
+  START_FROM_ROOM,
+  TALK_IN_ROOM,
+  type Action,
+  type Actor,
+  type CanMap,
+  type Caps,
+  type Context,
+  type MemberPolicyView,
+  type PolicySettings,
+  type PondPolicy,
+} from "./permissions.js";
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { AnnouncedInvites, buildPeople, owedLines, type PeopleView } from "./pond-people.js";
 import {
@@ -107,15 +126,19 @@ function canonicalPoint(key: string): string | null {
 
 /** What each command a member can send is, for `can`. There is no approve to map; `stop` is the Owner's alone (`can` refuses everyone else). */
 const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
-  message: "message",
-  steer: "message",
+  message: "message-duck",
+  steer: "message-duck",
   answer: "answer-question",
   diff: "request-diff",
-  start: "start-thread",
+  start: "start-duck",
   artifacts: "view-pond",
   artifact: "view-pond",
   stop: "stop",
 };
+
+/** A caller's own sentence stands in for a refusal, except the Pond policy's: those say what to do instead. */
+const refusalSentence = (reason: string, message?: string): string =>
+  message === undefined || reason === TALK_IN_ROOM || reason === START_FROM_ROOM ? reason : message;
 
 /** Said when anyone but the Owner asks a Mac to stop a Duck. */
 const ONLY_OWNER_STOPS = "Only the Owner can stop a duck.";
@@ -203,6 +226,8 @@ interface LocalPond {
   answered?: string[];
   /** The owner's first invite has been made: Ducks shared before it were set Private then; later ones are visible. */
   invited?: true;
+  /** The Pond policy (docs/adr/0006-pond-policy.md): the Owner's own setting, or a Member's last read of the meta document. */
+  policy?: PondPolicy;
   role: Role;
   ownerKey: string;
   location: unknown;
@@ -418,6 +443,10 @@ export interface MemberView {
   client: "mac" | "web";
   /** What this member may do now, derived from the role; kept so an older client's shape decodes. */
   caps?: Caps;
+  /** This person's effective policy (the Pond's setting with their own override laid over it), for the People page. */
+  policy?: MemberPolicyView;
+  /** What the policy lets this person do here: action to true, or the sentence that says why not. */
+  can?: CanMap;
   /** Presence heartbeat younger than 45 s. */
   online: boolean;
   /** Not sent any more (no device appears in a pond); kept so an older client's shape still type-checks. */
@@ -462,13 +491,25 @@ export interface PondView {
   /** Whether this Mac has a cloud store an invite could publish to. */
   cloud?: boolean;
   members: MemberView[];
+  /** The Pond policy as the Owner set it (the defaults on a Pond that never set one). Overrides are per person. */
+  policy?: PondPolicy;
   threads: PondThread[];
   ripples: Array<Ripple & { actorName?: string }>;
   /** Ducks waiting for the Owner's approval: all of them on the Owner's Mac, a Member's own on theirs. */
   starts?: PendingStartView[];
   presence: PresenceDoc[];
   holds: Hold[];
-  me: { id: string; name: string; role: Role; nest: string | null; caps?: Caps };
+  me: {
+    id: string;
+    name: string;
+    role: Role;
+    nest: string | null;
+    caps?: Caps;
+    /** Every action this person may do here: true, or the sentence that says why not. Surfaces draw from it, never from the role. */
+    can?: CanMap;
+    /** This person's effective policy settings. */
+    policy?: MemberPolicyView;
+  };
   /** The relay could not be reached: this is the last known pond, read-only. */
   offline?: true;
   /** Unix ms of the last good read; present only with `offline`. */
@@ -955,6 +996,13 @@ export class FlotillaService extends EventEmitter {
     return pond.role === "owner" ? "owner" : joinedAccess(flag("pondOwnThreads"), pond.gitRemote);
   }
 
+  /** Whether this Mac starts the person's own Ducks for the pond (the Owner's Mac, a local pond, or the stashed own-Mac mode). */
+  startsOnThisMac(pondId: string): boolean {
+    const pond = this.pond(pondId);
+    if (!decide(this.actorOf(pond), "start-thread", {}, this.policyOf(pond)).ok) return false;
+    return pond.role === "owner" || pond.local === true || flag("pondOwnThreads");
+  }
+
   gitRemoteOf(pondId: string): string | null {
     return this.pond(pondId).gitRemote ?? null;
   }
@@ -965,11 +1013,24 @@ export class FlotillaService extends EventEmitter {
     return { kind: "human", memberId: this.selfId(pond), role: pond.role };
   }
 
-  /** Throws the refusal `can` gives (or `message` when the caller keeps an older sentence); 404 for "no such thread". */
+  private memberActor(pond: LocalPond, m: MemberDoc): Actor {
+    return {
+      kind: "human",
+      memberId: m.id,
+      role: m.id === this.identity.id && pond.role === "owner" ? "owner" : m.role,
+    };
+  }
+
+  /** The Pond policy as this Mac knows it: the Owner's own setting, or a Member's last read of the meta document. */
+  private policyOf(pond: LocalPond): PondPolicy {
+    return pond.policy ?? DEFAULT_POLICY;
+  }
+
+  /** Throws the refusal `decide` gives (or `message` when the caller keeps an older sentence); 404 for "no such thread". */
   private allow(pond: LocalPond, action: Action, ctx: Context, message?: string): void {
-    const verdict = can(this.actorOf(pond), action, ctx);
+    const verdict = decide(this.actorOf(pond), action, ctx, this.policyOf(pond));
     if (verdict.ok) return;
-    throw new FlotillaError(message ?? verdict.reason, verdict.reason === "no such thread" ? 404 : 403);
+    throw new FlotillaError(refusalSentence(verdict.reason, message), verdict.reason === "no such thread" ? 404 : 403);
   }
 
   /**
@@ -984,9 +1045,12 @@ export class FlotillaService extends EventEmitter {
   ): Promise<Map<string, MemberDoc>> {
     const members = await this.members(pond);
     const role = members.get(this.selfId(pond))?.role ?? pond.role;
-    const verdict = can({ kind: "human", memberId: this.selfId(pond), role }, action, ctx);
+    const verdict = decide({ kind: "human", memberId: this.selfId(pond), role }, action, ctx, this.policyOf(pond));
     if (!verdict.ok)
-      throw new FlotillaError(message ?? verdict.reason, verdict.reason === "no such thread" ? 404 : 403);
+      throw new FlotillaError(
+        refusalSentence(verdict.reason, message),
+        verdict.reason === "no such thread" ? 404 : 403,
+      );
     return members;
   }
 
@@ -1162,6 +1226,7 @@ export class FlotillaService extends EventEmitter {
         ownerKey: me.publicKey,
         created: this.now(),
         ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+        ...(pond.policy ? { policy: pond.policy } : {}),
       };
       try {
         await this.put(target, "pond", "meta", meta);
@@ -1314,10 +1379,16 @@ export class FlotillaService extends EventEmitter {
   /** What needs this person: a question anyone but a viewer may answer, or an approval on their own thread. */
   private needsCount(pond: LocalPond, threads: PondThread[]): number {
     const me = this.selfId(pond);
+    const mayAnswer = decide(
+      this.actorOf(pond),
+      "answer-question",
+      { thread: { starter: "", private: false } },
+      this.policyOf(pond),
+    ).ok;
     return threads.filter((t) => {
       if (t.state !== "waiting") return false;
       if (t.starter === me) return true;
-      return pond.role !== "viewer" && t.waitingFor === "question";
+      return t.waitingFor === "question" && mayAnswer;
     }).length;
   }
 
@@ -2482,6 +2553,90 @@ export class FlotillaService extends EventEmitter {
     await this.allowLive(pond, "start-thread", {}, VIEWERS_READ);
   }
 
+  /** A Member's Mac takes the policy the Owner's meta document carries. True when it changed. */
+  private adoptPolicy(pond: LocalPond, meta: PondMeta): boolean {
+    const next = readPolicy(meta.policy);
+    if (JSON.stringify(next) === JSON.stringify(pond.policy ?? DEFAULT_POLICY)) return false;
+    pond.policy = next;
+    return true;
+  }
+
+  /**
+   * Owner: sets the Pond policy (docs/adr/0006-pond-policy.md). `reachDucks` and `startDucks` are the Pond's own settings;
+   * `overrides` maps a member id to that person's own settings, or to null to take the override away (the Pond's setting
+   * applies again). It travels in the Pond's signed meta document, so every Member's Mac and the web read the same thing.
+   */
+  async setPolicy(
+    pondId: string,
+    input: { reachDucks?: unknown; startDucks?: unknown; overrides?: Record<string, unknown> },
+  ): Promise<PondPolicy> {
+    const pond = this.activePond(pondId);
+    this.allow(pond, "set-policy", {}, "Only an owner can change what Members may do.");
+    const current = this.policyOf(pond);
+    const settings: PolicySettings = { reachDucks: current.reachDucks, startDucks: current.startDucks };
+    if (input.reachDucks !== undefined) {
+      if (!isReachDucks(input.reachDucks)) throw new FlotillaError("Ducks are reached in the room or directly.");
+      settings.reachDucks = input.reachDucks;
+    }
+    if (input.startDucks !== undefined) {
+      if (!isStartDucks(input.startDucks))
+        throw new FlotillaError("Ducks are started by the room, by members with approval, or by members.");
+      settings.startDucks = input.startDucks;
+    }
+    const overrides: Record<string, Partial<PolicySettings>> = { ...current.overrides };
+    if (input.overrides) {
+      const members = pond.local ? new Map<string, MemberDoc>() : await this.members(pond);
+      for (const [memberId, raw] of Object.entries(input.overrides)) {
+        const found = members.get(memberId);
+        if (!found && !pond.local) throw new FlotillaError("No such member.", 404);
+        if (found?.role === "owner") throw new FlotillaError("The Owner's place can't be limited.", 409);
+        if (raw === null) {
+          delete overrides[memberId];
+          continue;
+        }
+        const w = raw as Record<string, unknown>;
+        const next: Partial<PolicySettings> = { ...overrides[memberId] };
+        if ("reachDucks" in w) {
+          if (w.reachDucks === null) delete next.reachDucks;
+          else if (isReachDucks(w.reachDucks)) next.reachDucks = w.reachDucks;
+          else throw new FlotillaError("Ducks are reached in the room or directly.");
+        }
+        if ("startDucks" in w) {
+          if (w.startDucks === null) delete next.startDucks;
+          else if (isStartDucks(w.startDucks)) next.startDucks = w.startDucks;
+          else throw new FlotillaError("Ducks are started by the room, by members with approval, or by members.");
+        }
+        if (Object.keys(next).length === 0) delete overrides[memberId];
+        else overrides[memberId] = next;
+      }
+    }
+    // An override of someone who is no longer here is dropped with the next change.
+    if (!pond.local) {
+      const ids = new Set((await this.members(pond)).keys());
+      for (const id of Object.keys(overrides)) if (!ids.has(id)) delete overrides[id];
+    }
+    const next: PondPolicy = { ...settings, ...(Object.keys(overrides).length > 0 ? { overrides } : {}) };
+    // Setting the defaults on a Pond that never set any still records that the Owner chose them.
+    if (pond.policy && JSON.stringify(next) === JSON.stringify(current)) return current;
+    pond.policy = next;
+    this.save();
+    if (!pond.local) {
+      const me = this.identity;
+      await this.put(pond, "pond", "meta", {
+        id: pond.id,
+        name: pond.name,
+        owner: me.id,
+        ownerKey: me.publicKey,
+        created: this.now(),
+        ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+        policy: next,
+      } satisfies PondMeta);
+      await this.ripple(pondId, "changed what members may do").catch(() => undefined);
+    }
+    this.emit("changed", pondId);
+    return next;
+  }
+
   /** What a member may do in this pond now (derived from their role; the owner always may). */
   private capsIn(pond: LocalPond, members: Map<string, MemberDoc>, memberId: string): Caps {
     if (pond.role === "owner" && memberId === this.identity.id) return capsOf("owner");
@@ -2491,7 +2646,7 @@ export class FlotillaService extends EventEmitter {
   /** Owner: a member becomes a viewer or a member. Their member document is signed again; the key does not change. */
   async changeRole(pondId: string, memberId: string, role: Role): Promise<void> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can change a role.");
+    this.allow(pond, "change-role", {}, "Only an owner can change a role.");
     if (role !== "member" && role !== "viewer") throw new FlotillaError("A role is member or viewer.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner's role can't be changed.");
     if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
@@ -2550,7 +2705,7 @@ export class FlotillaService extends EventEmitter {
   /** Owner: renames the pond for everyone (the meta document), and here. */
   async renamePond(pondId: string, name: string): Promise<void> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can rename the pond.");
+    this.allow(pond, "rename-pond", {}, "Only an owner can rename the pond.");
     const next = name.trim();
     if (!next || next.length > 200) throw new FlotillaError("A pond needs a name.");
     if (next === pond.name) return;
@@ -2563,6 +2718,7 @@ export class FlotillaService extends EventEmitter {
         ownerKey: me.publicKey,
         created: this.now(),
         ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+        ...(pond.policy ? { policy: pond.policy } : {}),
       } satisfies PondMeta);
     }
     pond.name = next;
@@ -2574,7 +2730,7 @@ export class FlotillaService extends EventEmitter {
   /** Owner: ends the pond for everyone. Their access ends (tokens, member documents), then its documents go. */
   async deletePond(pondId: string): Promise<void> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can delete the pond.");
+    this.allow(pond, "delete-pond", {}, "Only an owner can delete the pond.");
     if (pond.local) {
       this.forgetPond(pondId);
       return;
@@ -2679,6 +2835,7 @@ export class FlotillaService extends EventEmitter {
       ownerKey: me.publicKey,
       created: this.now(),
       ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+      ...(pond.policy ? { policy: pond.policy } : {}),
     } satisfies PondMeta);
     // Nothing already in the cloud is rewritten: each document keeps the key version in its box tag, every member holds
     // every version (`sendKeyToDevice`), and only new writes use the new key.
@@ -2740,6 +2897,7 @@ export class FlotillaService extends EventEmitter {
       if (meta) {
         pond.name = meta.name;
         if (meta.gitRemote) pond.gitRemote = meta.gitRemote;
+        this.adoptPolicy(pond, meta);
         this.save();
       }
       this.emit("joined", pond.id);
@@ -2788,6 +2946,11 @@ export class FlotillaService extends EventEmitter {
       if (meta && meta.name !== pond.name) {
         pond.name = meta.name;
         this.save();
+      }
+      // ...or changed what Members may do: this Mac's own checks and `me.can` follow at once.
+      if (meta && this.adoptPolicy(pond, meta)) {
+        this.save();
+        this.emit("changed", pond.id);
       }
     }
     // This Mac's account may be a member of ponds it has not opened yet (it joined in a browser first).
@@ -3268,7 +3431,15 @@ export class FlotillaService extends EventEmitter {
         ripples: [],
         presence: [],
         holds: [],
-        me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
+        me: {
+          id: me.id,
+          name: me.name,
+          role: pond.role,
+          nest: me.nest,
+          can: canMap(this.actorOf(pond), this.policyOf(pond)),
+          policy: memberPolicyView(this.policyOf(pond), this.selfId(pond)),
+        },
+        policy: this.policyOf(pond),
       };
     }
     const members = await this.members(pond);
@@ -3324,6 +3495,8 @@ export class FlotillaService extends EventEmitter {
         client: m.client ?? (m.nest === null ? "web" : "mac"),
         // Derived from the role, in the shape older clients read.
         caps: capsOf(m.role),
+        policy: memberPolicyView(this.policyOf(pond), m.id),
+        can: canMap(this.memberActor(pond, m), this.policyOf(pond)),
         online: online.has(m.id),
         // A person once. Nothing about their devices is in a pond (docs/ponds.md, "Members are accounts").
         ...(m.id === me.id ? { lastSeenAt: now } : beat.has(m.id) ? { lastSeenAt: beat.get(m.id)! } : {}),
@@ -3342,7 +3515,10 @@ export class FlotillaService extends EventEmitter {
         role: pond.role,
         nest: me.nest,
         caps: this.capsIn(pond, members, me.id),
+        can: canMap(this.actorOf(pond), this.policyOf(pond)),
+        policy: memberPolicyView(this.policyOf(pond), this.selfId(pond)),
       },
+      policy: this.policyOf(pond),
     };
   }
 
@@ -3423,7 +3599,12 @@ export class FlotillaService extends EventEmitter {
       if (
         hold &&
         holder &&
-        holder.role !== "viewer" &&
+        decide(
+          { kind: "human", memberId: holder.id, role: holder.role },
+          "answer-question",
+          { thread: { starter: "", private: false } },
+          this.policyOf(pond),
+        ).ok &&
         hold.requestId === id &&
         hold.by === read.device &&
         hold.until > this.now()
@@ -3510,6 +3691,8 @@ export class FlotillaService extends EventEmitter {
           role: member.role,
           name: this.shownName(pond, member),
           caps: capsOf(member.role),
+          can: (action, ctx = {}) =>
+            decide({ kind: "human", memberId: member.id, role: member.role }, action, ctx, this.policyOf(pond)),
           ...(doc.seq !== undefined ? { seq: doc.seq } : {}),
           ...(doc.at !== undefined ? { at: doc.at } : {}),
         });
@@ -3603,6 +3786,7 @@ export class FlotillaService extends EventEmitter {
       },
       noteAnswered: (ids) => this.noteAnswered(pondId, ids),
       caps: async () => this.capsIn(pond, await this.members(pond), this.selfId(pond)),
+      can: (action, ctx = {}) => decide(this.actorOf(pond), action, ctx, this.policyOf(pond)),
       owner: async () => this.ownerStanding(pond, await this.members(pond)),
     };
   }
@@ -3922,7 +4106,12 @@ export class FlotillaService extends EventEmitter {
     lifeMs = 5 * 60_000,
   ): Promise<{ id: string; starterName: string }> {
     const pond = this.activePond(pondId);
-    await this.allowLive(pond, COMMAND_ACTION[input.kind], { thread: { starter: "", private: false } }, VIEWERS_READ);
+    await this.allowLive(
+      pond,
+      COMMAND_ACTION[input.kind],
+      { thread: { starter: "", private: false }, via: "direct" },
+      VIEWERS_READ,
+    );
     const me = this.meIn(pond);
     const threads = await this.threadsOf(pond);
     const thread = threads.find((t) => t.id === threadId);
@@ -4269,7 +4458,7 @@ export class FlotillaService extends EventEmitter {
   ): Promise<{ requestId: string; ownerName: string }> {
     const pond = this.activePond(pondId);
     if (pond.role === "owner") throw new FlotillaError("That is your own Mac: start the thread here.");
-    const members = await this.allowLive(pond, "start-thread", {}, VIEWERS_READ);
+    const members = await this.allowLive(pond, "start-duck", { via: "direct" }, VIEWERS_READ);
     const ownerId = memberIdOf(pond.ownerKey);
     const owner = members.get(ownerId);
     if (!owner) throw new FlotillaError("Can't reach Squeak's cloud.", 503);
@@ -4382,7 +4571,7 @@ export class FlotillaService extends EventEmitter {
         return;
       }
       if (from.role !== "member" || !this.takeStartSlot(pondId, from.id)) return;
-      await this.holdStart(pondId, from, {
+      await this.receiveStart(pondId, from, {
         id: r.requestId,
         kind: "start",
         threadId: "",
@@ -4414,6 +4603,37 @@ export class FlotillaService extends EventEmitter {
     pond.answered = [...(pond.answered ?? []), ...fresh].slice(-200);
     this.save();
     this.emit("changed", pondId);
+  }
+
+  /**
+   * The Owner's Mac: a Member asks for a Duck of their own. The Pond policy decides (`start-duck`): refused under
+   * `startDucks: room` (they say it in the Room), held for the Owner's approval under `members-approval`, started at once
+   * under `members`. Every way a request arrives (a verified command, a queued ask) comes through here.
+   */
+  async receiveStart(pondId: string, from: { id: string; name: string; role: Role }, cmd: CommandDoc): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner") throw new FlotillaError("Only the Owner's Mac holds a Duck for approval.", 403);
+    const verdict = decide(
+      { kind: "human", memberId: from.id, role: from.role },
+      "start-duck",
+      { via: "direct" },
+      this.policyOf(pond),
+    );
+    if (!verdict.ok) throw new FlotillaError(verdict.reason, 403);
+    if (verdict.approval) return this.holdStart(pondId, from, cmd);
+    const text = cmd.text?.trim();
+    const agent = cmd.agent === "codex" ? "codex" : cmd.agent === "claude" ? "claude" : null;
+    if (!text || !agent || !cmd.model) throw new FlotillaError("choose Claude or Codex and a model");
+    await this.ownerStarter?.(pondId, {
+      requestId: cmd.requestId ?? cmd.id,
+      memberId: from.id,
+      name: from.name,
+      text,
+      agent,
+      model: cmd.model,
+      ...(cmd.title ? { title: cmd.title } : {}),
+      at: this.now(),
+    });
   }
 
   /**
@@ -4454,7 +4674,7 @@ export class FlotillaService extends EventEmitter {
   /** The Owner takes one waiting request to run it (nothing is left behind), or hears it is gone. */
   async takeStart(pondId: string, requestId: string): Promise<PendingStart> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can approve a duck.");
+    this.allow(pond, "approve-start", {}, "Only an owner can approve a duck.");
     const found = (pond.pendingStarts ?? []).find((p) => p.requestId === requestId);
     if (!found) throw new FlotillaError("That duck is no longer waiting.", 404);
     const from = (await this.members(pond)).get(found.memberId);
@@ -4482,7 +4702,7 @@ export class FlotillaService extends EventEmitter {
   /** The Owner declines: the request is dropped and the Room says so in one line, naming the request for its Member's Mac. */
   async declineStart(pondId: string, requestId: string): Promise<void> {
     const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can decline a duck.");
+    this.allow(pond, "approve-start", {}, "Only an owner can decline a duck.");
     const found = (pond.pendingStarts ?? []).find((p) => p.requestId === requestId);
     if (!found) throw new FlotillaError("That duck is no longer waiting.", 404);
     pond.pendingStarts = (pond.pendingStarts ?? []).filter((p) => p.requestId !== requestId);
@@ -4624,6 +4844,12 @@ export class FlotillaService extends EventEmitter {
     return outcomes;
   }
 
+  /** The fixed sentence for a refused command: the older ones keep their words, the policy's say what to do instead. */
+  private commandRefusal(kind: (typeof COMMAND_KINDS)[number], reason: string): string {
+    if (reason === TALK_IN_ROOM || reason === START_FROM_ROOM) return reason;
+    return kind === "stop" ? ONLY_OWNER_STOPS : VIEWERS_READ;
+  }
+
   /** A verified command, a fixed reason it is refused, or `not-mine` (leave it for its starter). */
   private verifyCommand(
     pond: LocalPond,
@@ -4657,10 +4883,13 @@ export class FlotillaService extends EventEmitter {
     if (!podLevel && !thread) return "not-mine";
     // The only things a member can ask of a starter are COMMAND_ACTION's: approving is not among them, and stopping is the Owner's.
     if (thread?.private) return "that thread is private";
-    const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
-      thread: { starter: this.selfId(pond), private: false },
-    });
-    if (!verdict.ok) return cmd.kind === "stop" ? ONLY_OWNER_STOPS : VIEWERS_READ;
+    const verdict = decide(
+      { kind: "human", memberId: from.id, role: from.role },
+      COMMAND_ACTION[cmd.kind],
+      { thread: { starter: this.selfId(pond), private: false }, via: "direct" },
+      this.policyOf(pond),
+    );
+    if (!verdict.ok) return this.commandRefusal(cmd.kind, verdict.reason);
     // Code (changed files, patches) leaves this Mac only for a member at the "git" level: the owner's own flag is on, the
     // pond has a Git remote and the member has a machine of their own. Anyone else is remote, whatever their client claims.
     if (

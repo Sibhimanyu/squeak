@@ -5,6 +5,7 @@
 
 import { memberIdOf as memberIdOfKey } from "./crypto.js";
 import { readTimelineEvent, type TimelineEvent } from "../native/timeline.js";
+import { readPolicy, type PondPolicy } from "./permissions.js";
 
 export type Role = "owner" | "member" | "viewer";
 export const ROLES: readonly Role[] = ["owner", "member", "viewer"];
@@ -21,6 +22,8 @@ export interface PondMeta {
   ownerKey: string;
   gitRemote?: string;
   created: number;
+  /** The Pond policy the Owner set (docs/adr/0006-pond-policy.md); absent on an older Pond, which reads as the defaults. */
+  policy?: PondPolicy;
 }
 
 export interface MemberDoc {
@@ -427,6 +430,7 @@ export function readMeta(v: unknown): PondMeta | null {
     ownerKey: v.ownerKey,
     created: v.created,
     ...(v.gitRemote ? { gitRemote: v.gitRemote as string } : {}),
+    ...(v.policy !== undefined ? { policy: readPolicy(v.policy) } : {}),
   };
 }
 

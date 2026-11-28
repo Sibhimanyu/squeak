@@ -205,6 +205,9 @@ function createPeople(deps) {
     }
     return device(await tables.get(T.devices, "deviceId", input.deviceId));
   }
+  /** The device row an id names (its account is who the id belongs to), or null. */
+  const deviceOf = async (deviceId) =>
+    isId(deviceId) ? device(await tables.get(T.devices, "deviceId", deviceId)) : null;
   const devicesOf = async (userId) => (await tables.select(T.devices, "userId", String(userId))).map(device);
   async function removeDevice(deviceId) {
     await tables.delete(T.pushTokens, "deviceId", String(deviceId));
@@ -821,6 +824,7 @@ function createPeople(deps) {
     accountByEmail,
     addDevice,
     devicesOf,
+    deviceOf,
     removeDevice,
     setPushToken,
     pushTokensOf,
