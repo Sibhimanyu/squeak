@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.35.2
+
+**Ducklings that died with a restart stop showing as running.**
+
+- When a duck's session restarts, a duckling it had running ends with it. Squeak now shows that duckling as stopped instead of "1 duckling running" forever, and it leaves the bar after ten minutes like any finished one.
+- A duckling whose state is unknown shows how long it really ran, not "0s".
+
 ## 2.35.1
 
 **A tidier Pond list and image paste that always answers.**
