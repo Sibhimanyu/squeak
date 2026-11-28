@@ -267,6 +267,7 @@ export function PeopleSheet(props: PeopleSheetProps) {
                           {inviteLine(now, i)}
                           {" · "}
                           {ROLE_LABEL[i.role]}
+                          {i.emailFailed && i.state === "pending" ? " · Email not delivered" : ""}
                         </span>
                         <span class="buttons">
                           {i.state === "pending" ? (

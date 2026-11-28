@@ -172,6 +172,23 @@ describe("Ponds screen", () => {
     expect(window.location.hash).toBe("#/ponds");
   });
 
+  it("a refusal shows the relay's own sentence and the list is read again, so a dead invitation goes", async () => {
+    await boot({
+      refusal: {
+        status: 409,
+        body: {
+          error: "state",
+          state: "withdrawn",
+          message: "This invitation was withdrawn.",
+          invitation: { state: "withdrawn" },
+        },
+      },
+    });
+    act(() => root.querySelector<HTMLElement>(".invitation .primary")!.click());
+    await flush();
+    expect(root.querySelector(".invitation")).toBeNull();
+  });
+
   it("an unreachable relay is one sentence and Try again, which recovers", async () => {
     const { fake } = await boot();
     unmount();

@@ -228,7 +228,11 @@ export function createPondsStore(deps: PondsStoreDeps): PondsStore {
       deps.onSignedOut?.();
       return null;
     }
-    set({ busy, errors: { ...state.errors, [inviteId]: ANSWER_FAILED } });
+    // A refusal is the relay's own sentence ("This invitation was withdrawn."); the list is read again so the row goes or
+    // changes from what the relay now says, never left as it was.
+    const refused = result.status === "refused";
+    set({ busy, errors: { ...state.errors, [inviteId]: (refused && result.message) || ANSWER_FAILED } });
+    if (refused) await refresh();
     return null;
   };
 

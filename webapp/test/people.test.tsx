@@ -91,6 +91,14 @@ const openSheet = async (role: "owner" | "member" | "viewer", invites: PondInvit
 };
 
 describe("People sheet: what each role sees", () => {
+  it("a pending invite whose email never arrived says so and keeps Resend", async () => {
+    await openSheet("owner", [{ ...invite("late@fernlabs.dev", "pending", mins(5)), emailFailed: true }]);
+    expect(q('[data-invite="i-late@fernlabs.dev"] .sub')?.textContent).toBe(
+      "Invited · 5 min ago · Member · Email not delivered",
+    );
+    expect(qa('[data-invite="i-late@fernlabs.dev"] button').map((b) => b.textContent)).toEqual(["Resend", "Withdraw"]);
+  });
+
   it("the Owner sees email under each name, online or last seen as text, roles, and every invite state with its own buttons", async () => {
     await openSheet("owner", [
       invite("vikram@northwind.io", "pending", mins(3 * 24 * 60)),
