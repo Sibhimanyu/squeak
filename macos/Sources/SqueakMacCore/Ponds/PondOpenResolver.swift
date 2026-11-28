@@ -28,14 +28,14 @@ public enum PondOpenResolver {
     public struct Plan: Sendable, Equatable {
         /// The duck's host session id, or nil when no chat is known for it (the view says "Couldn't open <name>").
         public var sessionId: String?
-        /// The duck is off duty: put it back on duty as it opens.
-        public var putOnDuty: Bool
+        /// The duck is closed: reopen it as it opens.
+        public var reopen: Bool
     }
 
-    /// `onDuty` is the room's own word for the duck (nil when the room does not list it: nothing to put back).
-    public static func plan(_ target: PondOpenTarget, known: some Collection<String>, onDuty: (String) -> Bool?) -> Plan {
-        guard let id = sessionId(for: target.duck, among: known) else { return Plan(sessionId: nil, putOnDuty: false) }
-        return Plan(sessionId: id, putOnDuty: onDuty(id) == false)
+    /// `open` is the room's own word for the duck (nil when the room does not list it: nothing to put back).
+    public static func plan(_ target: PondOpenTarget, known: some Collection<String>, open: (String) -> Bool?) -> Plan {
+        guard let id = sessionId(for: target.duck, among: known) else { return Plan(sessionId: nil, reopen: false) }
+        return Plan(sessionId: id, reopen: open(id) == false)
     }
 
     /// The line shown when nothing could be opened.

@@ -20,12 +20,12 @@ _Avoid_: Channel, lobby, pond chat
 
 **Duck**:
 An AI agent teammate in a Pond that you chat with like a normal session, and that takes up Tasks in the Pond. A Duck is
-either Available or Off duty.
+either Open or Closed.
 _Avoid_: Thread, bot, session (in user-facing words)
 
-**Off duty**:
-A Duck that is resting: not working, out of the Pond's active list, history kept, and able to come back for related work.
-_Avoid_: Archived, closed, dead
+**Closed**:
+A Duck that is resting: not working, out of the Pond's active list, history kept, and can be reopened for related work.
+_Avoid_: Archived, dead
 
 **Task**:
 A piece of work agreed in a Room that a Duck takes up and carries to done.

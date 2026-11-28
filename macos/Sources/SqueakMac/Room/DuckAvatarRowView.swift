@@ -4,7 +4,7 @@ import SwiftUI
 
 // DESIGN.md 8.12, New layout: the centre top of a Pond is a row of round Duck avatars instead of tabs. What is in it,
 // in what order and what is selected comes from `DuckAvatarRow` (SqueakMacCore); this file only draws it and sends the
-// two clicks (Room, a Duck) to the same navigation the rest of the app uses. It changes no Duck's duty.
+// two clicks (Room, a Duck) to the same navigation the rest of the app uses. It opens or closes no Duck.
 
 /// The row for one Pond. Draws nothing for a Pond this Mac has no host project for (a Member's remote Pond keeps the old
 /// strip): ask `isAvailable` before replacing the strip.
@@ -16,7 +16,7 @@ struct DuckAvatarRowView: View {
 
     static func isAvailable(pond key: String) -> Bool { PondsModel.shared.native(key: key) != nil }
 
-    /// Whether the row draws anything now: false while nobody is on duty (the page's header then carries the sidebar clearance).
+    /// Whether the row draws anything now: false while nobody is open (the page's header then carries the sidebar clearance).
     static func isShown(pond key: String, place: DuckRowPlace) -> Bool {
         guard let project = PondsModel.shared.native(key: key) else { return false }
         let threads = PondRoomStore.shared.model(for: project.id).feed.threads
@@ -51,7 +51,7 @@ private struct DuckAvatarRowContent: View {
         let threads = room.feed.threads
         let ducks = roster.list
         let row = DuckAvatarRow.build(roster: RoomRoster.roster(ducks, threads: threads), place: place)
-        // Nothing on duty and no Duck open: no strip at all (the pond header's Dashboard | Room switch is the way to the Room).
+        // Nothing open and no Duck open: no strip at all (the pond header's Dashboard | Room switch is the way to the Room).
         // The sidebar's toggle then sits in the pond header, which carries the clearance itself.
         VStack(spacing: 0) { if !row.isEmpty { strip(row) } }
         // The roster is the host's list, read through its one shared model (one poll; the Room's changes ask for an early read).
@@ -79,7 +79,7 @@ private struct DuckAvatarRowContent: View {
         .accessibilityElement(children: .contain).accessibilityLabel("Ducks")
     }
 
-    /// The Duck's chat in the centre. Duty is not touched: an Off duty Duck stays Off duty while it is open.
+    /// The Duck's chat in the centre. Open or closed is not touched: A Closed Duck stays Closed while it is open.
     private func open(_ d: DuckRowAvatar) {
         guard let sessionId = d.sessionId else { return }
         model.openFromPond(.duck(sessionId), pond: key, page: RoomViewPref.shared.mode(for: key))
@@ -87,7 +87,7 @@ private struct DuckAvatarRowContent: View {
 }
 
 /// One Duck: its tinted thread duck on a soft round tile, the name and a quiet status line beside it. The working glyph
-/// only while it works, the amber triangle only while it waits on the person; an Off duty Duck is dimmed.
+/// only while it works, the amber triangle only while it waits on the person; a Closed Duck is dimmed.
 private struct DuckChip: View {
     let duck: DuckRowAvatar
     let selected: Bool
@@ -107,7 +107,7 @@ private struct DuckChip: View {
             .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 5)
             .background(selected ? Theme.selected : .clear, in: Capsule())
             .overlay(Capsule().strokeBorder(selected ? Theme.lineStrong : .clear))
-            .opacity(duck.onDuty ? 1 : 0.6)
+            .opacity(duck.isOpen ? 1 : 0.6)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

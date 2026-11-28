@@ -7,33 +7,33 @@ import Testing
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     func ms(_ ago: TimeInterval) -> Int64 { Int64((now.timeIntervalSince1970 - ago) * 1000) }
 
-    @Test func groupsOnDutyNewestFirstThenOffDuty() {
+    @Test func groupsOpenNewestFirstThenClosed() {
         let ducks = [
             PondDuck(id: "a", name: "Ada", lastActiveAt: ms(7200), createdAt: 1),
-            PondDuck(id: "b", name: "Bo", duty: .off, lastActiveAt: ms(10)),
+            PondDuck(id: "b", name: "Bo", isOpen: false, lastActiveAt: ms(10)),
             PondDuck(id: "c", name: "Cy", lastActiveAt: ms(60)),
             PondDuck(id: "d", name: "Di", createdAt: ms(5)),
         ]
         let r = RoomRoster.roster(ducks, now: now)
-        #expect(r.onDuty.map(\.id) == ["d", "c", "a"])
-        #expect(r.offDuty.map(\.id) == ["b"])
+        #expect(r.open.map(\.id) == ["d", "c", "a"])
+        #expect(r.closed.map(\.id) == ["b"])
         #expect(r.count == 4)
-        #expect(RoomRoster.header(4) == "Ducks \u{00B7} 4" && RoomRoster.offDutyLabel(1) == "Off duty \u{00B7} 1")
+        #expect(RoomRoster.header(4) == "Ducks \u{00B7} 4" && RoomRoster.closedLabel(1) == "Closed \u{00B7} 1")
     }
 
     @Test func defaultListIsAvailableOnlyAndSearchCoversEveryDuck() {
         let ducks = [
             PondDuck(id: "a", name: "Ada", role: "Layout builder", lastActiveAt: ms(7200)),
-            PondDuck(id: "b", name: "Bo", role: "Tester", duty: .off, lastActiveAt: ms(10), chatTitle: "Bo tester run"),
+            PondDuck(id: "b", name: "Bo", role: "Tester", isOpen: false, lastActiveAt: ms(10), chatTitle: "Bo tester run"),
             PondDuck(id: "c", name: "Cy\u{00E9}", lastActiveAt: ms(60)),
-            PondDuck(id: "d", name: "Old Dan", role: "layout reviewer", duty: .off, lastActiveAt: 1),
+            PondDuck(id: "d", name: "Old Dan", role: "layout reviewer", isOpen: false, lastActiveAt: 1),
         ]
         #expect(RoomRoster.visible(ducks, query: "", now: now).map(\.id) == ["c", "a"])
         #expect(RoomRoster.visible(ducks, query: "   ", now: now).map(\.id) == ["c", "a"])
-        // by name (on duty) or chat title (off duty, which wears no name), greyed (onDuty false)
+        // by name (open) or chat title (closed, which wears no name), greyed (open false)
         let bo = RoomRoster.visible(ducks, query: "bo", now: now)
-        #expect(bo.map(\.id) == ["b"] && bo[0].onDuty == false)
-        // by role; Available first, then off duty; case-insensitive
+        #expect(bo.map(\.id) == ["b"] && bo[0].isOpen == false)
+        // by role; Available first, then closed; case-insensitive
         #expect(RoomRoster.visible(ducks, query: "LAYOUT", now: now).map(\.id) == ["a", "d"])
         #expect(RoomRoster.visible(ducks, query: "layout rev", now: now).map(\.id) == ["d"])
         #expect(RoomRoster.visible(ducks, query: "cye", now: now).map(\.id) == ["c"])
@@ -42,17 +42,17 @@ import Testing
     }
 
     @Test func bringBackPutsTheDuckInTheDefaultList() {
-        var ducks = [PondDuck(id: "a", name: "Ada"), PondDuck(id: "b", name: "Bo", duty: .off)]
+        var ducks = [PondDuck(id: "a", name: "Ada"), PondDuck(id: "b", name: "Bo", isOpen: false)]
         #expect(RoomRoster.visible(ducks, query: "", now: now).map(\.id) == ["a"])
-        ducks = RoomRoster.upserting(PondDuck(id: "b", name: "Bo", duty: .on), into: ducks)
+        ducks = RoomRoster.upserting(PondDuck(id: "b", name: "Bo", isOpen: true), into: ducks)
         #expect(Set(RoomRoster.visible(ducks, query: "", now: now).map(\.id)) == ["a", "b"])
-        #expect(DuckAction.duty(duck: "b", on: true).request.path == "/native/ducks/b/duty")
+        #expect(DuckAction.setOpen(duck: "b", open: true).request.path == "/native/ducks/b/state")
         #expect(RoomRoster.header(RoomRoster.roster(ducks, now: now).available.count) == "Ducks \u{00B7} 2")
     }
 
     @Test func tiesAreByNameThenId() {
         let r = RoomRoster.roster([PondDuck(id: "2", name: "zed"), PondDuck(id: "1", name: "Amy")], now: now)
-        #expect(r.onDuty.map(\.name) == ["Amy", "zed"])
+        #expect(r.open.map(\.name) == ["Amy", "zed"])
     }
 
     @Test func presenceText() {
@@ -62,7 +62,7 @@ import Testing
         #expect(working.presence == .working && working.presenceLine == "Working \u{00B7} 3 of 5" && working.agentLabel == "Claude")
         #expect(RoomRoster.row(PondDuck(id: "a", name: "A", currentSessionId: session, state: .waiting), now: now).presenceLine == "Waiting on you")
         #expect(RoomRoster.row(PondDuck(id: "a", name: "A", currentSessionId: session, lastActiveAt: ms(7200)), now: now).presenceLine == "Idle \u{00B7} 2h ago")
-        #expect(RoomRoster.row(PondDuck(id: "a", name: "A", duty: .off, currentSessionId: session, state: .working), now: now).presenceLine == "Off duty")
+        #expect(RoomRoster.row(PondDuck(id: "a", name: "A", isOpen: false, currentSessionId: session, state: .working), now: now).presenceLine == "Closed")
         #expect(RoomRoster.row(PondDuck(id: "a", name: "A"), now: now).presenceLine == "Ready for a job")
     }
 
@@ -94,16 +94,24 @@ import Testing
         let r = DuckAction.rename(duck: "d1", name: "Bo").request
         #expect(r.method == "PATCH" && r.path == "/native/ducks/d1" && r.body == .object(["name": .string("Bo")]))
         #expect(DuckAction.setRole(duck: "d1", role: nil).request.body == .object(["role": .null]))
-        let d = DuckAction.duty(duck: "d1", on: false).request
-        #expect(d.method == "POST" && d.path == "/native/ducks/d1/duty" && d.body == .object(["on": .bool(false)]))
+        let d = DuckAction.setOpen(duck: "d1", open: false).request
+        #expect(d.method == "POST" && d.path == "/native/ducks/d1/state" && d.body == .object(["open": .bool(false)]))
     }
 
     @Test func decodesLeniently() throws {
-        let json = #"{"id":"d1","name":"Ada","colourSeed":"seed","duty":"off","state":"working","extra":1}"#
+        let json = #"{"id":"d1","name":"Ada","colourSeed":"seed","open":false,"state":"working","extra":1}"#
         let d = try JSONDecoder().decode(PondDuck.self, from: Data(json.utf8))
-        #expect(d.colourSeed == "seed" && d.duty == .off && d.state == .working && d.activity == .working && d.currentSessionId == nil)
+        #expect(d.colourSeed == "seed" && d.isOpen == false && d.state == .working && d.activity == .working && d.currentSessionId == nil)
         let bare = try JSONDecoder().decode(PondDuck.self, from: Data(#"{"id":"x"}"#.utf8))
-        #expect(bare.name == "Duck" && bare.colourSeed == "x" && bare.duty == .on)
+        #expect(bare.name == "Duck" && bare.colourSeed == "x" && bare.isOpen)
+    }
+
+    @Test func anOlderDaemonsDutyKeyStillDecodes() throws {
+        let off = try JSONDecoder().decode(PondDuck.self, from: Data(#"{"id":"d1","duty":"off"}"#.utf8))
+        let on = try JSONDecoder().decode(PondDuck.self, from: Data(#"{"id":"d2","duty":"on"}"#.utf8))
+        #expect(off.isOpen == false && on.isOpen)
+        let thread = try JSONDecoder().decode(RoomThread.self, from: Data(#"{"sessionId":"s","duty":"off"}"#.utf8))
+        #expect(thread.isOpen == false)
     }
 
     @Test func upsertsByDuckId() throws {
@@ -132,7 +140,7 @@ import Testing
             RoomThread(sessionId: "a", title: "A", state: .waiting, ask: ask, name: "Ada", lastActiveAt: 10),
             RoomThread(sessionId: "b", title: "B", state: .waiting, name: "Bo", lastActiveAt: 20),
             RoomThread(sessionId: "c", title: "C", state: .working),
-            RoomThread(sessionId: "d", title: "D", state: .waiting, duty: .off),
+            RoomThread(sessionId: "d", title: "D", state: .waiting, isOpen: false),
         ]
         let rows = PondInspectorSections.needsYou(threads)
         #expect(rows.map(\.sessionId) == ["b", "a"])

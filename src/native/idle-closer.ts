@@ -2,7 +2,7 @@ import { logger } from "../utils/logger.js";
 
 import type { Room } from "./room.js";
 
-export interface DutyKeeperOptions {
+export interface IdleCloserOptions {
   room: Pick<Room, "retireIdleDucks">;
   /** Ducks holding an open Task right now. */
   busy: () => ReadonlySet<string>;
@@ -12,20 +12,20 @@ export interface DutyKeeperOptions {
   schedule?: (fn: () => void, ms: number) => { stop: () => void };
 }
 
-/** Puts Ducks that had no new work for an hour Off duty: on a timer, never at start (the hour is watched while the host runs). */
-export class DutyKeeper {
+/** Puts Ducks that had no new work for an hour Closed: on a timer, never at start (the hour is watched while the host runs). */
+export class IdleCloser {
   private timer: { stop: () => void } | null = null;
 
-  constructor(private readonly o: DutyKeeperOptions) {}
+  constructor(private readonly o: IdleCloserOptions) {}
 
-  /** One look; returns how many Ducks went Off duty. */
+  /** One look; returns how many Ducks closed. */
   tick(): number {
     try {
       const off = this.o.room.retireIdleDucks(this.o.busy());
-      if (off) logger.info("ducks idle for an hour put off duty", { off });
+      if (off) logger.info("ducks idle for an hour closed", { off });
       return off;
     } catch (error) {
-      logger.warn("off-duty check failed", { error: String(error) });
+      logger.warn("closed check failed", { error: String(error) });
       return 0;
     }
   }

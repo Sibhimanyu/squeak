@@ -8,7 +8,7 @@ import SwiftUI
 // when the chat has rules) and the ⋯ menu. There is no separate Duck header.
 // Flow per control: a Stream chip opens the rail's Changes list narrowed to that Stream; the Git cluster commits, pushes,
 // opens a pull request or merges; the shield lists what this chat may do without asking; the ⋯ menu holds Open in, sharing
-// the chat with a shared Pond, Off duty and Delete Duck.
+// the chat with a shared Pond, Closed and Delete Duck.
 
 struct DuckSubheader: View {
     static let height = CGFloat(PondBarMetrics.subheaderHeight)
@@ -85,16 +85,16 @@ struct DuckSubheader: View {
             }
             if model.hasDuckLife(session) {
                 Divider()
-                // Flow: resting a Duck is a choice made here; closing its tab never changes duty.
-                if model.isOnDuty(session) { Button("Off duty") { model.setDuty(session, on: false) } }
-                else { Button(RoomRoster.bringBackTitle) { model.setDuty(session, on: true) } }
+                // Flow: resting a Duck is a choice made here; closing its tab never opens or closes the duck.
+                if model.isOpen(session) { Button("Close") { model.setOpen(session, open: false) } }
+                else { Button(RoomRoster.bringBackTitle) { model.setOpen(session, open: true) } }
                 Button("Delete Duck\u{2026}", role: .destructive) { model.confirmDeleteDuck(session) }
             }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel("More for this duck").help("Open in, share the chat, Off duty, Delete Duck")
+        .accessibilityLabel("More for this duck").help("Open in, share the chat, Closed, Delete Duck")
     }
 }
 

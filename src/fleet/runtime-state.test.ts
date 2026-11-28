@@ -86,7 +86,7 @@ describe("/state conductorWaiting", () => {
 });
 
 describe("/state duck fields", () => {
-  it("carries duckId, duckName, duckDuty and onMain from a native chat's session (live shape)", () => {
+  it("carries duckId, duckName, duckClosed and onMain from a native chat's session (live shape)", () => {
     const sessions = [
       {
         key: "squeak-native:d7d89252-31b6-4f65-9c77-74f46c6ea5aa",
@@ -96,7 +96,7 @@ describe("/state duck fields", () => {
         branch: "rethink-presence",
         duckId: "b661a98c-97be-4b39-8a02-4287efbf2c10",
         duckName: "Rebuild and Improve Website Content",
-        duckDuty: "off",
+        duckClosed: true,
         onMain: true,
         state: "working",
         lastActivityAt: "2026-10-23T00:00:00.000Z",
@@ -127,7 +127,7 @@ describe("/state duck fields", () => {
     expect(out.active[0]).toMatchObject({
       duckId: "b661a98c-97be-4b39-8a02-4287efbf2c10",
       duckName: "Rebuild and Improve Website Content",
-      duckDuty: "off",
+      duckClosed: true,
       onMain: true,
       branch: "rethink-presence",
     });

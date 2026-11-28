@@ -60,20 +60,20 @@ public struct HostDuckChanges: Decodable, Sendable, Equatable, Identifiable {
     public var duckId: String
     public var duckName: String
     public var colourSeed: String
-    public var onDuty: Bool
+    public var isOpen: Bool
     public var branch: String
     public var workspaceId: String
     public var changes: HostChangeGroup
     public var id: String { duckId }
 
-    enum CodingKeys: String, CodingKey { case duckId, duckName, colourSeed, duty, branch, workspaceId }
+    enum CodingKeys: String, CodingKey { case duckId, duckName, colourSeed, open, olderDuty = "duty", branch, workspaceId }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         guard let id = c.lenient(String.self, .duckId), !id.isEmpty else { throw NativeHostError.badResponse }
         duckId = id
         duckName = c.lenient(String.self, .duckName) ?? "Duck"
         colourSeed = c.lenient(String.self, .colourSeed) ?? id
-        onDuty = (c.lenient(String.self, .duty) ?? "on") != "off"
+        isOpen = c.duckIsOpen(.open, olderKey: .olderDuty)
         branch = c.lenient(String.self, .branch) ?? ""
         workspaceId = c.lenient(String.self, .workspaceId) ?? ""
         changes = try HostChangeGroup(from: decoder)

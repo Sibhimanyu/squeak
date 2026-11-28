@@ -3,10 +3,10 @@ import Testing
 @testable import SqueakMacCore
 
 @Suite struct PondDashboardPlanTests {
-    private func row(_ id: String, _ state: PondThreadState = .finished, at: TimeInterval? = nil, onDuty: Bool = true, needs: Bool = false) -> PondChatRow {
+    private func row(_ id: String, _ state: PondThreadState = .finished, at: TimeInterval? = nil, open: Bool = true, needs: Bool = false) -> PondChatRow {
         var r = PondChatRow(id: id, title: id, agent: nil, state: state, mark: nil, lastAt: at.map { Date(timeIntervalSince1970: $0) },
                             local: nil, pondThread: nil, people: [])
-        r.onDuty = onDuty
+        r.isOpen = open
         if needs { r.hostNeedsYou = true }
         return r
     }
@@ -99,50 +99,50 @@ import Testing
 
     // MARK: Ducks order
 
-    @Test func workingFirstThenMostRecentAndOffDutyFolded() {
+    @Test func workingFirstThenMostRecentAndClosedFolded() {
         let rows = [
             row("old-idle", at: 10), row("new-idle", at: 90), row("work-old", .working, at: 20), row("work-new", .working, at: 50),
-            row("off-new", at: 95, onDuty: false), row("off-old", at: 5, onDuty: false),
+            row("off-new", at: 95, open: false), row("off-old", at: 5, open: false),
         ]
         let s = PondDuckSections.build(rows)
-        #expect(s.onDuty.map(\.id) == ["work-new", "work-old", "new-idle", "old-idle"])
-        #expect(s.offDuty.map(\.id) == ["off-new", "off-old"])
+        #expect(s.open.map(\.id) == ["work-new", "work-old", "new-idle", "old-idle"])
+        #expect(s.closed.map(\.id) == ["off-new", "off-old"])
     }
 
     @Test func aWaitingDuckStaysInTheListByRecencyNotByState() {
         let rows = [row("idle", at: 100), row("waiting", .needsYou, at: 50, needs: true)]
-        #expect(PondDuckSections.build(rows).onDuty.map(\.id) == ["idle", "waiting"])
+        #expect(PondDuckSections.build(rows).open.map(\.id) == ["idle", "waiting"])
     }
 
     @Test func aDuckWithDucklingsRunningCountsAsWorkingOnlyWhenTheHostSaysNothing() {
         var a = row("a", at: 1); a.ducklingsRunning = 2
         var b = row("b", at: 2); b.ducklingsRunning = 2; b.statusLine = "Idle \u{00B7} 4m"
-        #expect(PondDuckSections.build([b, a]).onDuty.map(\.id) == ["a", "b"])
+        #expect(PondDuckSections.build([b, a]).open.map(\.id) == ["a", "b"])
     }
 
     @Test func equalTimesBreakTiesByTitle() {
         let s = PondDuckSections.build([row("b", at: 1), row("a", at: 1)])
-        #expect(s.onDuty.map(\.id) == ["a", "b"])
+        #expect(s.open.map(\.id) == ["a", "b"])
     }
 
     // MARK: Blocks
 
     @Test func emptyPondShowsOnlyTheGuide() {
         let b = PondDashboardBlocks.of(needsYou: 0, ducks: PondDuckSections.build([]), latest: 0)
-        #expect(b == PondDashboardBlocks(needsYou: false, ducks: false, offDuty: false, latest: false, emptyGuide: true))
+        #expect(b == PondDashboardBlocks(needsYou: false, ducks: false, closed: false, latest: false, emptyGuide: true))
     }
 
     @Test func blocksAppearOnlyWhenTheyHaveSomething() {
-        let ducks = PondDuckSections.build([row("a"), row("z", onDuty: false)])
+        let ducks = PondDuckSections.build([row("a"), row("z", open: false)])
         let b = PondDashboardBlocks.of(needsYou: 2, ducks: ducks, latest: 3)
-        #expect(b.needsYou && b.ducks && b.offDuty && b.latest && !b.emptyGuide)
+        #expect(b.needsYou && b.ducks && b.closed && b.latest && !b.emptyGuide)
         let quiet = PondDashboardBlocks.of(needsYou: 0, ducks: PondDuckSections.build([row("a")]), latest: 0)
-        #expect(!quiet.needsYou && quiet.ducks && !quiet.offDuty && !quiet.latest)
+        #expect(!quiet.needsYou && quiet.ducks && !quiet.closed && !quiet.latest)
     }
 
-    @Test func onlyOffDutyDucksStillCountAsNotEmpty() {
-        let b = PondDashboardBlocks.of(needsYou: 0, ducks: PondDuckSections.build([row("z", onDuty: false)]), latest: 0)
-        #expect(!b.emptyGuide && !b.ducks && b.offDuty)
+    @Test func onlyClosedDucksStillCountAsNotEmpty() {
+        let b = PondDashboardBlocks.of(needsYou: 0, ducks: PondDuckSections.build([row("z", open: false)]), latest: 0)
+        #expect(!b.emptyGuide && !b.ducks && b.closed)
     }
 
     @Test func emptySentenceIsOneSentencePerRole() {

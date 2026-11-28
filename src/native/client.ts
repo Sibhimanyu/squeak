@@ -59,7 +59,7 @@ export class NativeHostClient {
     await this.call("POST", `/native/sessions/${encodeURIComponent(id)}/interrupt`, {});
   }
 
-  /** Takes a chat off duty (archive) or back on duty (unarchive): Ducks have no archive. A working chat is refused unless `stop`. */
+  /** Closes a chat (archive) or reopens it (unarchive): Ducks have no archive. A working chat is refused unless `stop`. */
   async archive(id: string, archived: boolean, stop = false): Promise<void> {
     await this.call(
       "POST",

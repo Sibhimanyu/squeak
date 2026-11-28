@@ -158,30 +158,30 @@ describe("duck migration", () => {
     const b = mk("Other");
     store.duckOf(a.id); // creates the tables
     store.db
-      .prepare("INSERT INTO session_ducks (session_id, name, role, duty) VALUES (?,?,?,?)")
-      .run(a.id, "Pip", "layout", "off");
+      .prepare("INSERT INTO session_ducks (session_id, name, role, state) VALUES (?,?,?,?)")
+      .run(a.id, "Pip", "layout", "closed");
     new Room({ store });
     new Room({ store });
     const ducks = store.listDucks(project.id);
     expect(ducks).toHaveLength(2);
     const da = store.duckBySession(a.id)!;
-    // Off duty the name went back to the pool; it is kept as the last name.
+    // Closed the name went back to the pool; it is kept as the last name.
     expect(da).toMatchObject({
       name: null,
       lastName: "Pip",
       role: "layout",
-      duty: "off",
+      state: "closed",
       colourSeed: a.id,
       currentSessionId: a.id,
     });
     expect(store.duckBySession(b.id)).toMatchObject({ name: expect.any(String), colourSeed: b.id });
-    expect(store.duckOf(a.id)).toEqual({ name: null, role: "layout", duty: "off" });
-    expect(store.offDutyIds().has(a.id)).toBe(true);
+    expect(store.duckOf(a.id)).toEqual({ name: null, role: "layout", state: "closed" });
+    expect(store.closedIds().has(a.id)).toBe(true);
   });
 });
 
 describe("one-time stale duck cleanup", () => {
-  it("puts ducks quiet for over a day off duty once, keeps recent and working ones on", () => {
+  it("puts ducks quiet for over a day closed once, keeps recent and working ones on", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ducks-stale-"));
     const store = new NativeStore(":memory:");
     store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
@@ -196,13 +196,13 @@ describe("one-time stale duck cleanup", () => {
     store.db.prepare("UPDATE sessions SET updated_at=?, status='working' WHERE id=?").run(ago(48), busy.id);
     const room = new Room({ store });
     expect(room.retireStaleDucksOnce()).toBe(1);
-    expect(store.duckBySession(old.id)!.duty).toBe("off");
-    expect(store.duckBySession(recent.id)!.duty).toBe("on");
-    expect(store.duckBySession(busy.id)!.duty).toBe("on");
+    expect(store.duckBySession(old.id)!.state).toBe("closed");
+    expect(store.duckBySession(recent.id)!.state).toBe("open");
+    expect(store.duckBySession(busy.id)!.state).toBe("open");
     // Once only: a duck brought back stays on.
-    store.updateDuck(store.duckBySession(old.id)!.id, { duty: "on" });
+    store.updateDuck(store.duckBySession(old.id)!.id, { state: "open" });
     expect(new Room({ store }).retireStaleDucksOnce()).toBe(0);
-    expect(store.duckBySession(old.id)!.duty).toBe("on");
+    expect(store.duckBySession(old.id)!.state).toBe("open");
   });
 });
 
@@ -212,7 +212,7 @@ describe("identity-only ducks and routes", () => {
     const res = await h.call("POST", `/native/projects/${h.project.id}/ducks`, { name: "Pip", role: "layout" });
     expect(res.status).toBe(201);
     const { duck } = (await res.json()) as any;
-    expect(duck).toMatchObject({ name: "Pip", role: "layout", state: "idle", sessions: 0, duty: "on", notebook: "" });
+    expect(duck).toMatchObject({ name: "Pip", role: "layout", state: "idle", sessions: 0, open: true, notebook: "" });
     expect(duck.currentSessionId).toBeUndefined();
     expect(duck.place).toBeUndefined();
     expect(duck.colourSeed).toBe(duck.id);
@@ -242,9 +242,9 @@ describe("identity-only ducks and routes", () => {
       await h.call("PATCH", `/native/ducks/${duck.id}`, { name: "Quill", role: "tests" })
     ).json()) as any;
     expect(patched.duck).toMatchObject({ name: "Quill", role: "tests" });
-    expect((await h.call("POST", `/native/ducks/${duck.id}/duty`, { on: "no" })).status).toBe(400);
-    const off = (await (await h.call("POST", `/native/ducks/${duck.id}/duty`, { on: false })).json()) as any;
-    expect(off).toMatchObject({ duty: "off", duck: { duty: "off" } });
+    expect((await h.call("POST", `/native/ducks/${duck.id}/state`, { open: "no" })).status).toBe(400);
+    const off = (await (await h.call("POST", `/native/ducks/${duck.id}/state`, { open: false })).json()) as any;
+    expect(off).toMatchObject({ open: false, duck: { open: false } });
   });
 
   it("DELETE removes the duck for good, keeps its chats in history (archived), and is refused while one is busy", async () => {
@@ -270,20 +270,20 @@ describe("identity-only ducks and routes", () => {
     const h = rig("folder");
     const s = h.chatIn("Layout builder");
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
-    await h.call("POST", `/native/sessions/${s.id}/duty`, { on: false });
+    await h.call("POST", `/native/sessions/${s.id}/state`, { open: false });
     const duck = h.store.duckBySession(s.id)!;
-    expect(duck).toMatchObject({ name: null, lastName: "Pip", duty: "off" });
+    expect(duck).toMatchObject({ name: null, lastName: "Pip", state: "closed" });
     const list = (await (await h.call("GET", `/native/projects/${h.project.id}/ducks`)).json()) as any;
-    expect(list.ducks[0]).toMatchObject({ id: duck.id, currentSessionId: s.id, sessions: 1, duty: "off" });
+    expect(list.ducks[0]).toMatchObject({ id: duck.id, currentSessionId: s.id, sessions: 1, open: false });
   });
 
-  it("an off-duty duck is never a candidate, even with no session", async () => {
+  it("a closed duck is never a candidate, even with no session", async () => {
     const h = rig("folder");
     const { duck } = (await (
       await h.call("POST", `/native/projects/${h.project.id}/ducks`, { name: "Pip", role: "webcam layout builder" })
     ).json()) as any;
     expect(h.jobs.rank(h.project.id, "fix webcam layout builder")).toHaveLength(1);
-    h.room.setDutyById(duck.id, false);
+    h.room.setOpenById(duck.id, false);
     expect(h.jobs.rank(h.project.id, "fix webcam layout builder")).toEqual([]);
   });
 });

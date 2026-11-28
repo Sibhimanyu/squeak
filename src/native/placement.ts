@@ -156,10 +156,10 @@ function duckNameOf(store: NativeStore, d: DuckRow): string {
   return s?.title?.trim() || DUCK_NAME_FALLBACK;
 }
 
-/** A duck is live in its working copy while it is on duty and its current chat is not archived. */
+/** A duck is live in its working copy while it is open and its current chat is not archived. */
 function liveDucks(store: NativeStore, workspaceId: string): DuckRow[] {
   return store.ducksInStream(workspaceId).filter((d) => {
-    if (d.duty === "off" || !d.currentSessionId) return false;
+    if (d.state === "closed" || !d.currentSessionId) return false;
     const s = store.getSession(d.currentSessionId);
     return !!s && !s.archivedAt;
   });

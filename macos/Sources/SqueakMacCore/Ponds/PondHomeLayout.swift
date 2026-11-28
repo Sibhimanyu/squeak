@@ -15,18 +15,18 @@ public struct PondChatPerson: Sendable, Equatable, Identifiable {
 }
 
 /// A chat in a workspace card: this Mac's own, or another Mac's thread that lands there.
-/// What an Off-duty Duck's Dashboard row says under its chat title.
-public struct PondOffDutyNote: Sendable, Equatable {
+/// What a Closed Duck's Dashboard row says under its chat title.
+public struct PondClosedNote: Sendable, Equatable {
     public var line: String
     public var summary: String?
     public init(line: String, summary: String? = nil) { self.line = line; self.summary = summary }
 
     /// From the host's duck list, by the chat's session id.
-    public static func notes(_ ducks: [PondDuck], now: Date = Date()) -> [String: PondOffDutyNote] {
-        var out: [String: PondOffDutyNote] = [:]
-        for d in ducks where d.duty == .off {
+    public static func notes(_ ducks: [PondDuck], now: Date = Date()) -> [String: PondClosedNote] {
+        var out: [String: PondClosedNote] = [:]
+        for d in ducks where d.isOpen == false {
             guard let sid = d.currentSessionId else { continue }
-            out[sid] = PondOffDutyNote(line: RoomRoster.offDutyAgo(d.lastActiveAt, now: now), summary: d.lastSummary)
+            out[sid] = PondClosedNote(line: RoomRoster.closedAgo(d.lastActiveAt, now: now), summary: d.lastSummary)
         }
         return out
     }
@@ -55,19 +55,19 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     /// Background helpers still running in this Mac's chat (the sidebar row's duckling). Another Mac's thread carries none:
     /// the pond data does not say, so it stays 0 rather than invented.
     public var ducklingsRunning: Int = 0
-    /// The duck is on duty (the host's roster says; a row it does not list is on duty).
-    public var onDuty: Bool = true
-    /// An Off-duty Duck's row: "off duty 3d ago" and its last summary line. Known by its title, never a name.
-    public var offDuty: PondOffDutyNote? = nil
+    /// The duck is open (the host's roster says; a row it does not list is open).
+    public var isOpen: Bool = true
+    /// A Closed Duck's row: "Closed 3d ago" and its last summary line. Known by its title, never a name.
+    public var closedNote: PondClosedNote? = nil
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
-    /// The host's roster line for this Duck ("Working \u{00B7} 1 duckling on x", "Idle \u{00B7} 4m", "off duty 3d ago"), drawn as sent.
+    /// The host's roster line for this Duck ("Working \u{00B7} 1 duckling on x", "Idle \u{00B7} 4m", "Closed 3d ago"), drawn as sent.
     public var statusLine: String? = nil
-    /// The host's heading (name on duty, chat title off duty).
+    /// The host's heading (name while open, chat title when closed).
     public var heading: String? = nil
     /// The Duck's Stream chips ("Pond" when it is in none). Never a folder branch.
     public var streamLabels: [String] = []
-    /// A thread of another Mac that matches no Duck of this Pond: shown under "From the flock", never counted toward duty.
+    /// A thread of another Mac that matches no Duck of this Pond: shown under "From the flock", never counted as open or closed.
     public var isFlock = false
     /// The Duck behind the row (the roster's id); nil for a flock thread.
     public var duckId: String? = nil
@@ -77,7 +77,7 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var failed = false
     /// The failure's own words, when the host sent them.
     public var failureText: String? = nil
-    /// Under Needs you by the one rule: waiting, or a failure the person has not seen. Any duty.
+    /// Under Needs you by the one rule: waiting, or a failure the person has not seen. Open or closed.
     /// The host's roster flag (`needsYou`) where it sent one: the tiles and the list read the same rows it counted.
     public var hostNeedsYou: Bool? = nil
     public var needsYou: Bool { hostNeedsYou ?? (state == .needsYou || state == .failed || failed) }
@@ -140,7 +140,7 @@ public struct PondHomeLayout: Sendable, Equatable {
     }
 
     /// Rows the Pond's Duck list holds: every roster Duck, not a flock thread.
-    public var dutyCount: Int { threads.filter { !$0.isFlock }.count }
+    public var duckCount: Int { threads.filter { !$0.isFlock }.count }
 
     /// The roster as the page draws it (the one list of a Pond's Ducks): one row per host Duck, in the host's order and with the
     /// host's words. This Mac's chat only supplies what a click opens; another Mac's thread joins the Duck whose chat it is, else
@@ -159,7 +159,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         func peopleOf(_ t: PondThread) -> [PondChatPerson] {
             base.threadPeople[t.id] ?? [you]
         }
-        let sorted = RoomRoster.roster(ducks).onDuty + RoomRoster.roster(ducks).offDuty
+        let sorted = RoomRoster.roster(ducks).open + RoomRoster.roster(ducks).closed
         let rows = sorted.map { d -> PondChatRow in
             let s = d.sessionId.flatMap { bySession[$0] }
             let thread = d.sessionId.flatMap { sid in threads.first { $0.sessionId == sid } }
@@ -177,7 +177,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                 pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: d.ducklingsRunning,
                 isLooping: s?.isLoopingNow ?? false, loopSentence: s?.loopingSentence, people: thread.map(peopleOf) ?? [you])
                 .withPrivate(thread?.isPrivate ?? false)
-            row.onDuty = d.onDuty
+            row.isOpen = d.isOpen
             row.statusLine = d.presenceLine
             row.heading = d.heading
             row.streamLabels = d.streamLabels
@@ -185,7 +185,7 @@ public struct PondHomeLayout: Sendable, Equatable {
             row.failed = d.needsYouReason == "failed"
             row.failureText = d.failure
             row.duckId = d.id
-            if !d.onDuty { row.offDuty = PondOffDutyNote(line: d.presenceLine, summary: d.lastSummary) }
+            if !d.isOpen { row.closedNote = PondClosedNote(line: d.presenceLine, summary: d.lastSummary) }
             return row
         }
         var flock: [PondChatRow] = []
@@ -211,7 +211,7 @@ public struct PondHomeLayout: Sendable, Equatable {
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
         emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil },
-        hiddenThreads: Set<String> = [], ownThreads: Bool = true, offDutySessions: Set<String> = [], offDutyNotes: [String: PondOffDutyNote] = [:]
+        hiddenThreads: Set<String> = [], ownThreads: Bool = true, closedSessions: Set<String> = [], closedNotes: [String: PondClosedNote] = [:]
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -255,7 +255,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.helpersKeepWorking ? (s.ducklings?.running ?? 0) : 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
-                if let id = hostIdFor(s), offDutySessions.contains(id) { made.onDuty = false; made.offDuty = offDutyNotes[id] ?? PondOffDutyNote(line: "Off duty") }
+                if let id = hostIdFor(s), closedSessions.contains(id) { made.isOpen = false; made.closedNote = closedNotes[id] ?? PondClosedNote(line: "Closed") }
                 return made
             }
             var card = PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
@@ -319,18 +319,18 @@ public struct PondHomeLayout: Sendable, Equatable {
 
 /// A dashboard scope always filters the same deduplicated rows that the branch list displays.
 public enum PondDashboardScope: String, CaseIterable, Sendable {
-    case all, onDuty, working, needsYou, offDuty, shared
+    case all, open, working, needsYou, closed, shared
 
     /// The dashboard's tiles, left to right. Shared is a filter in the search field's menu, not a tile.
-    public static let tiles: [PondDashboardScope] = [.onDuty, .working, .needsYou, .offDuty]
+    public static let tiles: [PondDashboardScope] = [.open, .working, .needsYou, .closed]
 
     public var title: String {
         switch self {
         case .all: "All ducks"
-        case .onDuty: "On duty"
+        case .open: "Open"
         case .working: "Working"
         case .needsYou: "Needs you"
-        case .offDuty: "Off duty"
+        case .closed: "Closed"
         case .shared: "Shared"
         }
     }
@@ -338,10 +338,10 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
     public func includes(_ row: PondChatRow) -> Bool {
         switch self {
         case .all: true
-        case .onDuty: row.onDuty && !row.isFlock
+        case .open: row.isOpen && !row.isFlock
         case .needsYou: !row.isFlock && row.needsYou
-        case .working: row.onDuty && !row.isFlock && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
-        case .offDuty: !row.onDuty && !row.isFlock
+        case .working: row.isOpen && !row.isFlock && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
+        case .closed: !row.isOpen && !row.isFlock
         case .shared: row.shared
         }
     }

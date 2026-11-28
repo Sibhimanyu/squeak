@@ -121,8 +121,8 @@ struct PondWorkspaceTabStrip: View {
         .accessibilityAddTraits(tab == selected ? .isSelected : [])
     }
 
-    /// Flow: an item tab closes its item; an Off-duty Duck's tab (open only while its chat shows) closes back to the Room.
-    /// Closing never changes duty.
+    /// Flow: an item tab closes its item; a Closed Duck's tab (open only while its chat shows) closes back to the Room.
+    /// Closing never opens or closes the duck.
     private func close(_ tab: PondStripTab) {
         guard tab.closable else { return }
         if tab.duck == nil { model.closePondItem(tab.item); return }
@@ -267,7 +267,7 @@ struct PondOvalTab: View {
                 Capsule().fill(selected ? TopSurfaceGlass.tabSelected : (hovering ? TopSurfaceGlass.tabHover : TopSurfaceGlass.tab))
                     .shadow(color: selected ? TopSurfaceGlass.tabShadow : .clear, radius: 3, y: 1)
             }
-            .opacity(gone || (tab.duck.map { !$0.onDuty } ?? false) ? 0.7 : 1)
+            .opacity(gone || (tab.duck.map { !$0.isOpen } ?? false) ? 0.7 : 1)
             .onHover { hovering = $0 }
             .help(help)
             .accessibilityElement(children: .combine)

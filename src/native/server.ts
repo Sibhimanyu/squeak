@@ -328,7 +328,7 @@ export class NativeServer {
   }
 
   /**
-   * A Duck woken from Off duty whose Stream folder was cleaned up while it rested gets a working copy of its branch
+   * A Duck woken from Closed whose Stream folder was cleaned up while it rested gets a working copy of its branch
    * again, so waking it just works. If that fails, the chat's own banner offers the move.
    */
   private async restoreWoken(id: string): Promise<void> {
@@ -583,7 +583,7 @@ export class NativeServer {
       ducks: (id) =>
         this.room
           .listDucks(id)
-          .map((d) => ({ duty: d.duty, working: d.activity === "working", needsYou: d.activity === "needsYou" })),
+          .map((d) => ({ open: d.open, working: d.activity === "working", needsYou: d.activity === "needsYou" })),
     });
     return { ...built, pondOwnThreads: flag("pondOwnThreads"), ducksOwnBranch: flag("ducksOwnBranch") };
   }
@@ -699,9 +699,9 @@ export class NativeServer {
         const clientNonce = str(b.clientNonce)?.slice(0, 80);
         // Set by the Mac's room composer for an @duck send: that turn is the room's (a direct chat's never is).
         const room = b.room === true;
-        // The person messaging an off-duty duck puts it back on duty.
-        if (store.duckOf(id).duty === "off") {
-          this.room.setDuty(id, true);
+        // The person messaging a closed duck reopens it.
+        if (store.duckOf(id).state === "closed") {
+          this.room.setOpen(id, true);
           await this.restoreWoken(id);
         }
         return this.json(
@@ -773,14 +773,14 @@ export class NativeServer {
         } as never);
       return this.json(res, 200, { ok: true, deleted: true });
     }
-    if (area === "ducks" && id && sub === "duty" && parts.length === 4 && method === "POST") {
+    if (area === "ducks" && id && sub === "state" && parts.length === 4 && method === "POST") {
       if (!store.duckRow(id)) throw new HttpError(404, "no such duck");
       const b = await this.body(req);
-      const unknown = Object.keys(b).filter((k) => k !== "on");
+      const unknown = Object.keys(b).filter((k) => k !== "open");
       if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
-      if (typeof b.on !== "boolean") throw new HttpError(400, "on must be true or false");
-      const duty = this.room.setDutyById(id, b.on);
-      return this.json(res, 200, { duty, duck: this.room.duckView(store.duckRow(id)!) });
+      if (typeof b.open !== "boolean") throw new HttpError(400, "open must be true or false");
+      const open = this.room.setOpenById(id, b.open);
+      return this.json(res, 200, { open, duck: this.room.duckView(store.duckRow(id)!) });
     }
     if (area === "ducks" && id && sub === "place" && parts.length === 4 && method === "POST") {
       const duck = store.duckRow(id);
@@ -851,13 +851,13 @@ export class NativeServer {
         throw error;
       }
     }
-    if (area === "sessions" && id && sub === "duty" && parts.length === 4 && method === "POST") {
+    if (area === "sessions" && id && sub === "state" && parts.length === 4 && method === "POST") {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
       const b = await this.body(req);
-      const unknown = Object.keys(b).filter((k) => k !== "on");
+      const unknown = Object.keys(b).filter((k) => k !== "open");
       if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
-      if (typeof b.on !== "boolean") throw new HttpError(400, "on must be true or false");
-      return this.json(res, 200, { duty: this.room.setDuty(id, b.on) });
+      if (typeof b.open !== "boolean") throw new HttpError(400, "open must be true or false");
+      return this.json(res, 200, { open: this.room.setOpen(id, b.open) });
     }
     if (area === "sessions" && id && sub === "timeline" && parts.length === 4 && method === "GET") {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -954,10 +954,10 @@ export class NativeServer {
       if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
       if (b.stop !== undefined && typeof b.stop !== "boolean") throw new HttpError(400, "stop must be true or false");
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
-      // Ducks have no archive: the old routes map to Off duty (and back on duty).
+      // Ducks have no archive: the old routes map to Closed (and reopened).
       if (sub === "archive") await host.standDown(id, { stop: b.stop === true });
-      const duty = this.room.setDuty(id, sub === "unarchive");
-      return this.json(res, 200, { ok: true, archived: false, duty });
+      const open = this.room.setOpen(id, sub === "unarchive");
+      return this.json(res, 200, { ok: true, archived: false, open });
     }
     if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
       const b = await this.body(req);

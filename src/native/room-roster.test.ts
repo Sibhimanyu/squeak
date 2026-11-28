@@ -11,7 +11,7 @@ import type { SessionRow } from "./types.js";
 /**
  * One Pond roster: the host's Duck list is the only list of a Pond's Ducks. The owner's greenroom contradictions
  * (2026-11-25) are each one case here: a Duck whose Ducklings still work is Working everywhere, a nameless old closed
- * import is listed Off duty and counted, and a Duck on Main with a Stream names that Stream, never a folder branch.
+ * import is listed Closed and counted, and a Duck on Main with a Stream names that Stream, never a folder branch.
  */
 function rig() {
   const store = new NativeStore(":memory:");
@@ -31,7 +31,7 @@ function rig() {
     const s = chat(title);
     const d = store.createDuck({ projectId: project.id, name });
     store.attachSessionToDuck(d.id, s.id);
-    if (opts.off) store.updateDuck(d.id, { duty: "off" });
+    if (opts.off) store.updateDuck(d.id, { state: "closed" });
     return { s, d: store.duckRow(d.id)! };
   };
   return { store, project, room, helpers, duck, dir };
@@ -49,12 +49,12 @@ describe("the Pond roster", () => {
     expect(p.activity).toBe("working");
     expect(p.ducklingsRunning).toBe(1);
     expect(p.statusLine).toBe("Working · 1 duckling on audit");
-    expect(r.room.duckCounts(r.project.id)).toMatchObject({ onDuty: 2, working: 1, needsYou: 0, total: 2 });
+    expect(r.room.duckCounts(r.project.id)).toMatchObject({ open: 2, working: 1, needsYou: 0, total: 2 });
     // The Room's thread for the same chat says Working too.
     expect(r.room.threads(r.project.id).find((t) => t.sessionId === pickle.s.id)?.state).toBe("working");
   });
 
-  it("lists every Duck, nameless old closed imports included, Off duty, and counts exactly the listed rows", () => {
+  it("lists every Duck, nameless old closed imports included, Closed, and counts exactly the listed rows", () => {
     const r = rig();
     r.duck("Pip", "Task");
     const old = r.duck(null, "Unreleased items", { off: true });
@@ -64,14 +64,14 @@ describe("the Pond roster", () => {
     const list = r.room.listDucks(r.project.id);
     expect(list).toHaveLength(7);
     const un = list.find((d) => d.chatTitle === "Unreleased items")!;
-    expect(un.duty).toBe("off");
+    expect(un.open).toBe(false);
     expect(un.heading).toBe("Unreleased items");
-    expect(un.statusLine).toBe("off duty 40d ago");
+    expect(un.statusLine).toBe("Closed 40d ago");
     const counts = r.room.duckCounts(r.project.id);
-    expect(counts).toEqual({ onDuty: 1, working: 0, needsYou: 0, offDuty: 6, total: list.length });
+    expect(counts).toEqual({ open: 1, working: 0, needsYou: 0, closed: 6, total: list.length });
   });
 
-  it("counts a failed Duck under Needs you whatever its duty (the owner's greenroom Zoom chat), says why, and lets go once dismissed", () => {
+  it("counts a failed Duck under Needs you whether it is open or closed (the owner's greenroom Zoom chat), says why, and lets go once dismissed", () => {
     const r = rig();
     r.duck("Pickle", "Fix Bugs Using Ducklings");
     const zoom = r.duck(null, "Zoom SDK Video Subscription Instability", { off: true });
@@ -82,9 +82,9 @@ describe("the Pond roster", () => {
     const before = r.room
       .listDucks(r.project.id)
       .find((d) => d.chatTitle === "Zoom SDK Video Subscription Instability")!;
-    expect(before).toMatchObject({ needsYou: true, needsYouReason: "failed", activity: "error", duty: "off" });
+    expect(before).toMatchObject({ needsYou: true, needsYouReason: "failed", activity: "error", open: false });
     expect(before.failure).toBe("Squeak couldn't load this chat's earlier conversation.");
-    expect(r.room.duckCounts(r.project.id)).toMatchObject({ onDuty: 1, needsYou: 1, offDuty: 1 });
+    expect(r.room.duckCounts(r.project.id)).toMatchObject({ open: 1, needsYou: 1, closed: 1 });
 
     expect(r.store.acknowledgeError(zoom.s.id)).toBe(true);
     const after = r.room
@@ -137,10 +137,10 @@ describe("the Pond roster", () => {
   it("writes the status line once for every surface", () => {
     const now = Date.now();
     const min = 60_000;
-    expect(statusLineOf("needsYou", "on", 0, undefined, now, now)).toBe("Needs you");
-    expect(statusLineOf("idle", "on", 0, undefined, now - 4 * min, now)).toBe("Idle · 4m");
-    expect(statusLineOf("working", "on", 0, undefined, now, now)).toBe("Working");
-    expect(statusLineOf("working", "on", 2, undefined, now, now)).toBe("Working · 2 ducklings");
-    expect(statusLineOf("idle", "off", 0, undefined, now - 3 * 24 * 60 * min, now)).toBe("off duty 3d ago");
+    expect(statusLineOf("needsYou", true, 0, undefined, now, now)).toBe("Needs you");
+    expect(statusLineOf("idle", true, 0, undefined, now - 4 * min, now)).toBe("Idle · 4m");
+    expect(statusLineOf("working", true, 0, undefined, now, now)).toBe("Working");
+    expect(statusLineOf("working", true, 2, undefined, now, now)).toBe("Working · 2 ducklings");
+    expect(statusLineOf("idle", false, 0, undefined, now - 3 * 24 * 60 * min, now)).toBe("Closed 3d ago");
   });
 });

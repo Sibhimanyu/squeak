@@ -204,7 +204,7 @@ describe("activeBranches", () => {
     store.updateDuck(one.duck.id, { name: "Quiet Creek" });
     const two = chat(store, a.cwd, a.workspaceId, project.id, "Other");
     store.setStatus(two.s.id, "idle");
-    store.setDuty(two.s.id, false);
+    store.setOpen(two.s.id, false);
     const list = activeBranches(store, project.id);
     expect(list.map((x) => x.branch).sort()).toEqual(["feat/a", "feat/b"]);
     const first = list.find((x) => x.branch === "feat/a")!;
@@ -232,12 +232,12 @@ describe("Placement.cleanup", () => {
     expect(store.getWorkspace(used.workspaceId!)?.state).toBe("ready");
   });
 
-  it("an off-duty duck or an archived chat no longer holds its working copy", async () => {
+  it("a closed duck or an archived chat no longer holds its working copy", async () => {
     const { placement, project, store } = setup();
     const a = await placement.resolve(project.id, { kind: "new", branch: "feat/a" });
     const { s } = chat(store, a.cwd, a.workspaceId, project.id);
     expect(await placement.cleanup(project.id)).toHaveLength(0);
-    store.setDuty(s.id, false);
+    store.setOpen(s.id, false);
     expect(await placement.cleanup(project.id)).toHaveLength(1);
   });
 
@@ -261,7 +261,7 @@ describe("Placement.cleanup", () => {
     const { placement, project, store } = setup();
     const a = await placement.resolve(project.id, { kind: "new", branch: "feat/busy" });
     const { s } = chat(store, a.cwd, a.workspaceId, project.id);
-    store.setDuty(s.id, false);
+    store.setOpen(s.id, false);
     store.setStatus(s.id, "working");
     expect(await placement.cleanup(project.id)).toHaveLength(0);
   });

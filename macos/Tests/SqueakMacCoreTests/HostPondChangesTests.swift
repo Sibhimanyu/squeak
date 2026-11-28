@@ -18,10 +18,10 @@ private final class Replier: HTTPTransport, @unchecked Sendable {
      "main":{"branch":"main","base":null,"truncated":false,"totals":{"added":1,"removed":1,"files":1},
              "files":[{"path":"a.txt","status":"M","added":1,"removed":1}]},
      "ducks":[
-       {"duckId":"d1","duckName":"Pip","colourSeed":"s1","duty":"on","branch":"sq/pip","workspaceId":"w1","base":"abc","truncated":true,
+       {"duckId":"d1","duckName":"Pip","colourSeed":"s1","open":true,"branch":"sq/pip","workspaceId":"w1","base":"abc","truncated":true,
         "totals":{"added":9,"removed":0,"files":5},
         "files":[{"path":"a.txt","status":"M","added":1,"removed":0},{"path":"new.txt","status":"A","added":2,"removed":0,"untracked":true},{"nope":1}]},
-       {"duckId":"d2","duckName":"Moss","duty":"off","branch":"sq/moss","workspaceId":"w2","files":[],"totals":{"added":0,"removed":0,"files":0},"truncated":false},
+       {"duckId":"d2","duckName":"Moss","open":false,"branch":"sq/moss","workspaceId":"w2","files":[],"totals":{"added":0,"removed":0,"files":0},"truncated":false},
        {"duckName":"no id"}],
      "ducksTruncated":false}
     """#
@@ -33,11 +33,11 @@ private final class Replier: HTTPTransport, @unchecked Sendable {
         #expect(r.main?.changes.added == 1 && r.main?.changes.removed == 1)
         #expect(r.ducks.map(\.duckName) == ["Pip", "Moss"])
         let pip = r.ducks[0]
-        #expect(pip.branch == "sq/pip" && pip.workspaceId == "w1" && pip.onDuty && pip.changes.base == "abc")
+        #expect(pip.branch == "sq/pip" && pip.workspaceId == "w1" && pip.isOpen && pip.changes.base == "abc")
         #expect(pip.changes.files.map(\.path) == ["a.txt", "new.txt"])
         #expect(pip.changes.files[1].status == "A" && pip.changes.files[1].untracked)
         #expect(pip.changes.fileCount == 5 && pip.changes.truncated && pip.changes.added == 9)
-        #expect(!r.ducks[1].onDuty && r.ducks[1].changes.files.isEmpty && r.ducks[1].colourSeed == "d2")
+        #expect(!r.ducks[1].isOpen && r.ducks[1].changes.files.isEmpty && r.ducks[1].colourSeed == "d2")
     }
 
     @Test func aFolderPondHasNoMain() throws {

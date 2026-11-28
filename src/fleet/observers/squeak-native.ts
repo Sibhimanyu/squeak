@@ -62,12 +62,17 @@ export class SqueakNativeObserver {
       const hasDucks = Boolean(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'duck_sessions'").get(),
       );
+      // An older native.db (the host has not migrated it yet) still names the column `duty` and holds 'off' for closed.
+      const duckStateColumn =
+        hasDucks && (db.prepare("PRAGMA table_info(ducks)").all() as Row[]).some((c) => c.name === "duty")
+          ? "duty"
+          : "state";
       const sessions = db
         .prepare(
           `SELECT s.*, w.name AS ws_name, ${hasTitle ? "w.title" : "NULL"} AS ws_title, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
                   ${hasDucks ? "(SELECT duck_id FROM duck_sessions WHERE session_id = s.id)" : "NULL"} AS duck_id,
                   ${hasDucks ? "(SELECT d.name FROM ducks d JOIN duck_sessions ds ON ds.duck_id = d.id WHERE ds.session_id = s.id)" : "NULL"} AS duck_name,
-                  ${hasDucks ? "(SELECT d.duty FROM ducks d JOIN duck_sessions ds ON ds.duck_id = d.id WHERE ds.session_id = s.id)" : "NULL"} AS duck_duty,
+                  ${hasDucks ? `(SELECT d.${duckStateColumn} FROM ducks d JOIN duck_sessions ds ON ds.duck_id = d.id WHERE ds.session_id = s.id)` : "NULL"} AS duck_closed,
                   COALESCE(p.id, pm.id) AS project_id, COALESCE(p.name, pm.name) AS project_name, p.default_branch AS project_default_branch
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
@@ -126,7 +131,7 @@ export class SqueakNativeObserver {
             ? (row.ws_branch as string)
             : readGitBranch(cwd),
       ...(typeof row.duck_id === "string" ? { duckId: row.duck_id } : {}),
-      ...(row.duck_duty === "off" ? { duckDuty: "off" as const } : {}),
+      ...(row.duck_closed === "closed" ? { duckClosed: true as const } : {}),
       ...(typeof row.duck_id === "string"
         ? {
             duckName: (typeof row.duck_name === "string" && row.duck_name.trim()) || title || "Duck",

@@ -11,7 +11,7 @@ import Testing
         RoomRoster.roster([
             PondDuck(id: "ada", name: "Ada", colourSeed: "seed-ada", currentSessionId: "s-ada", state: .working, lastActiveAt: ms(10)),
             PondDuck(id: "bo", name: "Bo", currentSessionId: "s-bo", state: .waiting, lastActiveAt: ms(60)),
-            PondDuck(id: "cy", name: "Cy", duty: .off, currentSessionId: "s-cy", lastActiveAt: ms(5)),
+            PondDuck(id: "cy", name: "Cy", isOpen: false, currentSessionId: "s-cy", lastActiveAt: ms(5)),
             PondDuck(id: "di", name: "Di", lastActiveAt: ms(7200)),
         ], now: now)
     }
@@ -43,11 +43,11 @@ import Testing
 
     // MARK: The Duck row
 
-    @Test func roomPageSelectsRoomAndListsOnDutyDucksInRosterOrder() {
+    @Test func roomPageSelectsRoomAndListsOpenDucksInRosterOrder() {
         let m = DuckAvatarRow.build(roster: roster(), place: .room)
         #expect(m.roomSelected && m.selectedDuck == nil)
         #expect(m.ducks.map(\.id) == ["ada", "bo", "di"])
-        #expect(m.ducks.allSatisfy { $0.onDuty })
+        #expect(m.ducks.allSatisfy { $0.isOpen })
     }
 
     @Test func dashboardShowsTheSameRowWithNothingSelected() {
@@ -67,15 +67,15 @@ import Testing
         #expect(m.selectedDuck == "ada")
     }
 
-    @Test func offDutyDuckOpenedAppearsLastWhileOpenWithoutChangingDuty() {
+    @Test func closedDuckOpenedAppearsLastWhileOpenWithoutClosingOrOpeningIt() {
         let r = roster()
         let m = DuckAvatarRow.build(roster: r, place: .chat(sessionId: "s-cy", duckId: nil))
         #expect(m.ducks.map(\.id) == ["ada", "bo", "di", "cy"])
         #expect(m.selectedDuck == "cy")
-        #expect(m.ducks.last?.onDuty == false)
+        #expect(m.ducks.last?.isOpen == false)
         // Leaving it (Room) drops it from the row; the roster itself is untouched.
         #expect(DuckAvatarRow.build(roster: r, place: .room).ducks.map(\.id) == ["ada", "bo", "di"])
-        #expect(r.offDuty.map(\.id) == ["cy"])
+        #expect(r.closed.map(\.id) == ["cy"])
     }
 
     @Test func unknownChatSelectsNothingAndAddsNothing() {

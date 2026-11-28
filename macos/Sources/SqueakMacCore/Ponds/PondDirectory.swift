@@ -31,8 +31,8 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         public var streams: [Stream]
         public var archivedStreams: Int
         public var counts: Counts
-        /// The pond's duck numbers (on duty...) from the daemon, so a sidebar row needs no roster; nil from an older daemon.
-        public var dutyCounts: PondCounts?
+        /// The pond's duck numbers (open...) from the daemon, so a sidebar row needs no roster; nil from an older daemon.
+        public var duckCounts: PondCounts?
         public var folder: String?
         /// The daemon's word for how this person belongs (`owner`, `remote`, `git`); nil from a daemon that does not say.
         public var access: PondMembership?
@@ -42,7 +42,7 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
         public var membership: PondMembership { access ?? (isJoined ? .remote : .owner) }
 
         enum CodingKeys: String, CodingKey {
-            case id, kind, name, projectId, pondId, shared, members, hidden, colour, labels, lastActivityAt, streams, archivedStreams, counts, dutyCounts, folder, access
+            case id, kind, name, projectId, pondId, shared, members, hidden, colour, labels, lastActivityAt, streams, archivedStreams, counts, duckCounts, folder, access
         }
 
         public init(from decoder: Decoder) throws {
@@ -61,7 +61,7 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
             streams = (try? c.decode([Stream].self, forKey: .streams)) ?? []
             archivedStreams = (try? c.decode(Int.self, forKey: .archivedStreams)) ?? 0
             counts = (try? c.decode(Counts.self, forKey: .counts)) ?? Counts()
-            dutyCounts = try? c.decode(PondCounts.self, forKey: .dutyCounts)
+            duckCounts = try? c.decode(PondCounts.self, forKey: .duckCounts)
             folder = try? c.decode(String.self, forKey: .folder)
             access = (try? c.decode(String.self, forKey: .access)).flatMap(PondMembership.init(rawValue:))
         }
@@ -70,7 +70,7 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
                     hidden: Bool = false, labels: [String] = [], streams: [Stream] = [], folder: String? = nil, lastActivityAt: String? = nil, access: PondMembership? = nil) {
             self.id = id; self.kind = kind; self.name = name; self.projectId = projectId; self.pondId = pondId; self.shared = shared
             self.members = []; self.hidden = hidden; self.colour = nil; self.labels = labels; self.lastActivityAt = lastActivityAt
-            self.streams = streams; self.archivedStreams = 0; self.counts = Counts(); self.dutyCounts = nil; self.folder = folder; self.access = access
+            self.streams = streams; self.archivedStreams = 0; self.counts = Counts(); self.duckCounts = nil; self.folder = folder; self.access = access
         }
     }
 

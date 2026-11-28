@@ -178,7 +178,7 @@ public struct RoomFeed: Sendable, Equatable {
         for th in t { if let a = th.ask, !a.options.isEmpty { askOptions[th.sessionId + "|" + a.question] = a.options } }
     }
 
-    /// One thread changed (a `thread` frame: name, role, duty): replaced in place, or added.
+    /// One thread changed (a `thread` frame: name, role, open or closed): replaced in place, or added.
     public mutating func upsert(thread: RoomThread) {
         var t = threads
         if let i = t.firstIndex(where: { $0.sessionId == thread.sessionId }) { t[i] = thread } else { t.append(thread) }

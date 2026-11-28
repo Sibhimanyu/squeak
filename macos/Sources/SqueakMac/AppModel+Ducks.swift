@@ -101,16 +101,16 @@ struct DuckMenuItems: View {
         }
         if model.hasDuckLife(session) {
             Divider()
-            // Closing a tab never changes duty: resting is a choice made here, not a side effect of closing.
-            if model.isOnDuty(session) { Button("Put off duty") { model.setDuty(session, on: false) } }
-            else { Button(RoomRoster.bringBackTitle) { model.setDuty(session, on: true) } }
+            // Closing a tab never opens or closes the duck: resting is a choice made here, not a side effect of closing.
+            if model.isOpen(session) { Button("Close") { model.setOpen(session, open: false) } }
+            else { Button(RoomRoster.bringBackTitle) { model.setOpen(session, open: true) } }
             Button("Delete Duck\u{2026}", role: .destructive) { model.confirmDeleteDuck(session) }
         }
     }
 }
 
 extension AppModel {
-    /// The duck's project and host session id, for the room and the duty routes (a native chat of a Duck in ducks mode).
+    /// The duck's project and host session id, for the room and the open and close routes (a native chat of a Duck in ducks mode).
     private func duckHostRef(_ s: HostSession) -> (project: String, id: String)? {
         guard ducksMode, s.source == .squeak, s.duckId != nil, let pond = duckPondKey(s),
               let project = PondsModel.shared.entry(pond)?.projectId else { return nil }
@@ -124,18 +124,18 @@ extension AppModel {
         return ComposerChip.duckName(duckId: s.duckId, sessionId: s.key.hostSessionId, ducks: ducks, chatTitle: s.title) ?? ""
     }
 
-    /// Whether the duck menu offers Off duty and Delete Duck for this chat.
+    /// Whether the duck menu offers Closed and Delete Duck for this chat.
     func hasDuckLife(_ s: HostSession) -> Bool { duckHostRef(s) != nil }
 
-    func isOnDuty(_ s: HostSession) -> Bool {
+    func isOpen(_ s: HostSession) -> Bool {
         guard let r = duckHostRef(s) else { return true }
-        return RoomRosterStore.shared.model(for: r.project).list.first { $0.currentSessionId == r.id }?.duty != .off
+        return RoomRosterStore.shared.model(for: r.project).list.first { $0.currentSessionId == r.id }?.isOpen ?? true
     }
 
-    func setDuty(_ s: HostSession, on: Bool) {
+    func setOpen(_ s: HostSession, open: Bool) {
         guard let r = duckHostRef(s) else { return }
         Task {
-            await PondRoomStore.shared.model(for: r.project).setDuty(sessionId: r.id, on: on, host: nativeHost)
+            await PondRoomStore.shared.model(for: r.project).setOpen(sessionId: r.id, open: open, host: nativeHost)
             await RoomRosterStore.shared.model(for: r.project).refresh(host: nativeHost)
         }
     }
@@ -146,7 +146,7 @@ extension AppModel {
         let name = RoomRosterStore.shared.model(for: r.project).list.first { $0.currentSessionId == r.id }?.name ?? workbenchTitle(s)
         let alert = NSAlert()
         alert.messageText = "Delete \(name)?"
-        alert.informativeText = "This removes the duck for good. Its chats stay in history. To rest it instead, put it off duty."
+        alert.informativeText = "This removes the duck for good. Its chats stay in history. To rest it instead, close it."
         alert.addButton(withTitle: "Delete Duck")
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true

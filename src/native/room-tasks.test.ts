@@ -971,13 +971,13 @@ describe("the decider routes a new Task", () => {
     expect(t.routing!.reason).toBe("knows ToolbarBadge.swift");
   });
 
-  it("an Off-duty Duck can come back for related work", async () => {
+  it("A Closed Duck can come back for related work", async () => {
     const { r, layout } = layoutRig();
-    r.room.setDuty(layout.id, false);
+    r.room.setOpen(layout.id, false);
     const t = await settled(r, r.jobs.fromMessage(r.pid, r.say(SPACING).id));
     expect(t.routing).toMatchObject({ kind: "duck" });
     await r.jobs.act(r.pid, t.id, { action: "go" });
-    expect(r.store.duckBySession(layout.id)!.duty).toBe("on");
+    expect(r.store.duckBySession(layout.id)!.state).toBe("open");
   });
 
   it("an unsure score asks the model, and a model that is unsure hatches", async () => {

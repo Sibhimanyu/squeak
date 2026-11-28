@@ -265,7 +265,7 @@ struct RoomComposer: View {
 
     private func choose(_ c: RoomMention.Candidate) {
         if let insertion = c.insertion {
-            // An Off-duty Duck: the mention goes into the message (the host wakes it and gives it a fresh name).
+            // A Closed Duck: the mention goes into the message (the host wakes it and gives it a fresh name).
             var d = draft
             if let m = mention { d.replaceSubrange(m.range, with: insertion) }
             else { d += (d.isEmpty || d.hasSuffix(" ") ? "" : " ") + insertion }

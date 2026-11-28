@@ -33,7 +33,7 @@ struct PondHomeView: View {
     let key: String
     private var project: String { ponds.name(key: key) }
     @Environment(AppModel.self) private var model
-    @State private var offDutyOpen = false
+    @State private var closedOpen = false
     @State private var confirmGitPond = false
     @State private var gitPondBusy = false
     @State private var gitFailure: String?
@@ -61,14 +61,14 @@ struct PondHomeView: View {
             emptyBranches: model.ducksMode ? [] : PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: model.ducksMode ? nil : native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
-            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, offDutySessions: roster?.offDutySessions ?? [], offDutyNotes: roster?.offDutyNotes ?? [:])
+            hiddenThreads: ponds.hides.hiddenIds, ownThreads: ponds.ownThreads, closedSessions: roster?.closedSessions ?? [], closedNotes: roster?.closedNotes ?? [:])
     }
 
     var body: some View {
         let plan = ponds.dashboardHeader(key: key)
         let ducks = PondDuckSections.build(layout)
         let needs = PondDashboardNeedsYou.build(
-            rows: ducks.onDuty + ducks.offDuty, tasks: room?.feed.jobs ?? [], role: role, ownerName: pond?.ownerName,
+            rows: ducks.open + ducks.closed, tasks: room?.feed.jobs ?? [], role: role, ownerName: pond?.ownerName,
             starts: detail?.starts ?? [])
         let latest = PondLatest.build(room?.feed.rows.map(\.post) ?? [])
         let blocks = PondDashboardBlocks.of(needsYou: needs.count, ducks: ducks, latest: latest.count)
@@ -235,7 +235,7 @@ struct PondHomeView: View {
 
     /// Open goes to the Duck, or for a Task to the Room, where its card is.
     private func openNeeds(_ item: PondDashboardNeedsYouItem, ducks: PondDuckSections) {
-        if case .duck(let rowId) = item.kind, let row = (ducks.onDuty + ducks.offDuty).first(where: { $0.id == rowId }) { open(row); return }
+        if case .duck(let rowId) = item.kind, let row = (ducks.open + ducks.closed).first(where: { $0.id == rowId }) { open(row); return }
         model.applyCentre(pond: key) { $0.switchTo(.room) }
     }
 
@@ -270,33 +270,33 @@ struct PondHomeView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Ducks").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-                Text(verbatim: "\(ducks.onDuty.count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                    .accessibilityLabel("\(ducks.onDuty.count) ducks on duty")
+                Text(verbatim: "\(ducks.open.count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    .accessibilityLabel("\(ducks.open.count) ducks open")
                 Spacer(minLength: 0)
             }
             if blocks.ducks {
                 VStack(spacing: 0) {
-                    ForEach(ducks.onDuty) { r in PondChatRowView(row: r, members: members, open: open) }
+                    ForEach(ducks.open) { r in PondChatRowView(row: r, members: members, open: open) }
                 }
                 .padding(.vertical, Space.xs).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
             }
-            if blocks.offDuty { offDuty(ducks.offDuty, members: members) }
+            if blocks.closed { closed(ducks.closed, members: members) }
         }
     }
 
-    /// Off duty is folded at the end until asked for.
-    private func offDuty(_ rows: [PondChatRow], members: [FlockMember]) -> some View {
+    /// Closed is folded at the end until asked for.
+    private func closed(_ rows: [PondChatRow], members: [FlockMember]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(Motion.standard) { offDutyOpen.toggle() } } label: {
+            Button { withAnimation(Motion.standard) { closedOpen.toggle() } } label: {
                 HStack(spacing: 8) {
-                    Lucide(offDutyOpen ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
-                    Text(verbatim: "Off duty \u{00B7} \(rows.count)").font(Typo.label).foregroundStyle(Theme.muted)
+                    Lucide(closedOpen ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
+                    Text(verbatim: "Closed \u{00B7} \(rows.count)").font(Typo.label).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).pointerHand().accessibilityAddTraits(.isButton)
-            if offDutyOpen {
+            if closedOpen {
                 VStack(spacing: 0) {
                     ForEach(rows) { r in PondChatRowView(row: r, members: members, open: open) }
                 }

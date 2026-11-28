@@ -934,7 +934,7 @@ export class AgentTools {
       target = this.deps.store.listDucks(pond.id).find((d) => d.name?.toLowerCase() === want);
       if (!target?.name) throw new ToolError(`No duck named ${args.toDuck.trim()} in this pond.`);
       if (target.currentSessionId === s.id) throw new ToolError("That is you: do the work yourself.");
-      if (target.duty === "off") throw new ToolError(`${target.name} is off duty; hand the work to someone else.`);
+      if (target.state === "closed") throw new ToolError(`${target.name} is closed; hand the work to someone else.`);
     }
     const body = args.text.trim();
     const parent = jobs.currentFor(s.id);
@@ -1297,8 +1297,8 @@ export class AgentTools {
     const target = this.deps.store.getSession(chatId);
     if (!target) throw new ToolError("No chat with that id.");
     if (message.length > LIMITS.maxMessage) throw new ToolError(`Keep it under ${LIMITS.maxMessage} characters.`);
-    if (this.deps.store.duckOf(chatId).duty === "off") {
-      throw new ToolError("That chat is off duty; the person has to put it back on duty or message it themselves.");
+    if (this.deps.store.duckOf(chatId).state === "closed") {
+      throw new ToolError("That chat is closed; the person has to reopen it or message it themselves.");
     }
     this.prune();
     if (this.sent.filter((x) => x.from === s.id && x.to === chatId).length >= LIMITS.perTargetPerHour) {

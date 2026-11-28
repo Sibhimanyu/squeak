@@ -749,36 +749,36 @@ describe("host server errors", () => {
     expect((await call(h, "POST", `/native/sessions/nope/title`, { title: "x" })).status).toBe(404);
     expect(h.store.getSession(s.id)?.title).toBe("Fix the build");
   });
-  it("POST /native/sessions/:id/archive and /unarchive map to Off duty and On duty, refuse a busy chat and are strict", async () => {
+  it("POST /native/sessions/:id/archive and /unarchive map to Closed and Open, refuse a busy chat and are strict", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
     expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, { x: 1 })).status).toBe(400);
     expect((await call(h, "POST", `/native/sessions/nope/archive`, {})).status).toBe(404);
     const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(ok.status).toBe(200);
-    expect(ok.json).toMatchObject({ ok: true, archived: false, duty: "off" });
+    expect(ok.json).toMatchObject({ ok: true, archived: false, open: false });
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
-    expect(h.store.duckOf(s.id).duty).toBe("off");
+    expect(h.store.duckOf(s.id).state).toBe("closed");
     expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, {})).status).toBe(200);
-    expect(h.store.duckOf(s.id).duty).toBe("on");
+    expect(h.store.duckOf(s.id).state).toBe("open");
     h.store.setStatus(s.id, "working");
     const busy = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(busy.status).toBe(409);
-    expect(JSON.stringify(busy.json)).toContain("Stop the chat before taking it off duty.");
-    expect(h.store.duckOf(s.id).duty).toBe("on");
+    expect(JSON.stringify(busy.json)).toContain("Stop the chat before closing it.");
+    expect(h.store.duckOf(s.id).state).toBe("open");
   });
-  it("taking a chat waiting on the person off duty is at once and denies what it waited on", async () => {
+  it("taking a chat waiting on the person closed is at once and denies what it waited on", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
     h.store.createRequest(s.id, "tool", { toolName: "Bash" });
     h.store.setStatus(s.id, "awaiting_approval");
     const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
     expect(ok.status).toBe(200);
-    expect(h.store.duckOf(s.id).duty).toBe("off");
+    expect(h.store.duckOf(s.id).state).toBe("closed");
     expect(h.store.getSession(s.id)?.status).toBe("idle");
     expect(h.store.openRequests(s.id)).toEqual([]);
   });
-  it("a working chat goes off duty only with stop: the turn stops and the queue is dropped", async () => {
+  it("a working chat goes closed only with stop: the turn stops and the queue is dropped", async () => {
     const h = await start();
     const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
     h.store.setStatus(s.id, "working");
@@ -791,7 +791,7 @@ describe("host server errors", () => {
     const now = h.store.getSession(s.id);
     expect(now?.archivedAt).toBeNull();
     expect(now?.status).toBe("idle");
-    expect(h.store.duckOf(s.id).duty).toBe("off");
+    expect(h.store.duckOf(s.id).state).toBe("closed");
     expect(h.store.queued(s.id)).toEqual([]);
   });
 });

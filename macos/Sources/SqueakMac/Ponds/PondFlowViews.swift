@@ -75,7 +75,7 @@ extension AppModel {
     }
 
     /// What a click in the room opens: a duck's tab, or a duck's tab with its ducklings' tabs. False when no chat is known
-    /// for the duck (nothing opened); an off-duty duck is the caller's to put back on duty.
+    /// for the duck (nothing opened); a closed duck is the caller's to reopen.
     @discardableResult
     func openFromPond(_ target: PondOpenTarget, pond: String?, page: PondPage) -> Bool {
         guard let s = pondDuckSession(target.duck) else { return false }

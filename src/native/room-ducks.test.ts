@@ -64,13 +64,13 @@ async function server() {
 }
 
 describe("ducks", () => {
-  it("threads carry name (a short host-picked one by default, the title kept apart), role, duty (default on) and lastActiveAt", async () => {
+  it("threads carry name (a short host-picked one by default, the title kept apart), role, open (default true) and lastActiveAt", async () => {
     const h = await server();
     const s = h.chat("Layout builder");
     const t = h.srv.room.threads(h.project.id)[0]!;
     const hostName = h.srv.room.duckName(s);
     expect(hostName).not.toBe("Layout builder");
-    expect(t).toMatchObject({ sessionId: s.id, name: hostName, duty: "on", title: "Layout builder" });
+    expect(t).toMatchObject({ sessionId: s.id, name: hostName, open: true, title: "Layout builder" });
     expect(t.role).toBeUndefined();
     expect(t.lastActiveAt).toBe(Date.parse(s.updatedAt));
     h.srv.room.setDuck(s.id, { name: "Pip", role: "Layout builder & webcam views" });
@@ -98,7 +98,7 @@ describe("ducks", () => {
     expect(await cleared.json()).toEqual({ name: expect.any(String) });
   });
 
-  it("POST duty: strict body, toggles, and a thread frame streams on each change", async () => {
+  it("POST state: strict body, toggles, and a thread frame streams on each change", async () => {
     const h = await server();
     const s = h.chat("Layout builder");
     const res = await h.call("GET", `/native/projects/${h.project.id}/room/stream`);
@@ -113,21 +113,21 @@ describe("ducks", () => {
       }
     };
     await until("event: hello");
-    const url = `/native/sessions/${s.id}/duty`;
-    expect((await h.call("POST", url, { on: "no" })).status).toBe(400);
-    expect((await h.call("POST", url, { on: false, y: 1 })).status).toBe(400);
-    expect(await (await h.call("POST", url, { on: false })).json()).toEqual({ duty: "off" });
+    const url = `/native/sessions/${s.id}/state`;
+    expect((await h.call("POST", url, { open: "no" })).status).toBe(400);
+    expect((await h.call("POST", url, { open: false, y: 1 })).status).toBe(400);
+    expect(await (await h.call("POST", url, { open: false })).json()).toEqual({ open: false });
     await until("event: thread");
-    expect(buf).toContain('"duty":"off"');
+    expect(buf).toContain('"open":false');
     expect(buf).toContain(`"sessionId":"${s.id}"`);
-    // A name is worn on duty only: back on duty the Duck takes a fresh one, which a rename then replaces.
-    expect(await (await h.call("POST", url, { on: true })).json()).toEqual({ duty: "on" });
+    // A name is worn while open only: reopened the Duck takes a fresh one, which a rename then replaces.
+    expect(await (await h.call("POST", url, { open: true })).json()).toEqual({ open: true });
     await h.call("PATCH", `/native/sessions/${s.id}/duck`, { name: "Pip" });
     await until('"name":"Pip"');
     await reader.cancel();
   });
 
-  it("an off-duty duck is not a candidate, gets no open jobs, cannot claim, and is not woken by agents", async () => {
+  it("a closed duck is not a candidate, gets no open jobs, cannot claim, and is not woken by agents", async () => {
     const h = await server();
     const a = h.chat("Layout builder");
     const b = h.chat("Other work");
@@ -136,25 +136,25 @@ describe("ducks", () => {
     await h.srv.jobs.routed(made.id);
     const job = h.srv.jobs.get(made.id)!.job;
     expect(job.suggestion?.sessionId).toBe(a.id);
-    h.srv.room.setDuty(a.id, false);
+    h.srv.room.setOpen(a.id, false);
     expect(h.srv.room.candidates(h.project.id, Infinity).map((c) => c.session.id)).not.toContain(a.id);
-    expect(h.srv.room.candidates(h.project.id, Infinity, { offDuty: true }).map((c) => c.session.id)).toContain(a.id);
+    expect(h.srv.room.candidates(h.project.id, Infinity, { closed: true }).map((c) => c.session.id)).toContain(a.id);
     expect(h.srv.jobs.rank(h.project.id, "fix the layout builder spacing")).toEqual([]);
     expect((await h.tool(a, "open_jobs")).content[0]!.text).toBe("No open jobs fit this chat.");
     const claim = await h.tool(a, "claim_job", { jobId: job.id });
     expect(claim.isError).toBe(true);
-    expect(claim.content[0]!.text).toMatch(/off duty/);
+    expect(claim.content[0]!.text).toMatch(/closed/);
     const wake = await h.tool(b, "send_to_chat", { chatId: a.id, message: "hello there" });
     expect(wake.isError).toBe(true);
-    expect(wake.content[0]!.text).toMatch(/off duty/);
+    expect(wake.content[0]!.text).toMatch(/closed/);
   });
 
-  it("a person's message to an off-duty duck puts it on duty", async () => {
+  it("a person's message to a closed duck reopens it", async () => {
     const h = await server();
     const s = h.chat("Layout builder");
-    h.srv.room.setDuty(s.id, false);
+    h.srv.room.setOpen(s.id, false);
     await h.call("POST", `/native/sessions/${s.id}/messages`, { text: "are you there" });
-    expect(h.store.duckOf(s.id).duty).toBe("on");
+    expect(h.store.duckOf(s.id).state).toBe("open");
   });
 
   it("role and name words count in matching like title words, and the pitch is first person", async () => {

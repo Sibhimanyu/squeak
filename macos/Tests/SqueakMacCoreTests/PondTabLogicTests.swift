@@ -30,17 +30,17 @@ import Testing
         #expect(DuckOpen.target(old, ducksMode: false, pool: [old, cur]).key == old.key)
     }
 
-    @Test func onDutyIsWorkingOrNeedingYouWithBranchAndNeedsFirst() {
+    @Test func openIsWorkingOrNeedingYouWithBranchAndNeedsFirst() {
         let a = chat("a", duck: "A", state: .working, branch: "feat/a", ago: 5)
         let b = chat("b", duck: "B", state: .blocked, branch: "feat/b", ago: 50)
         let c = chat("c", duck: "C", state: .idle, ago: 1)
         let d = chat("d", duck: "D", state: .working, ago: 1)
         let rows = DuckList.rows([a, b, c, d], main: nil)
-        let out = PondOnDuty.rows(rows, title: { $0.title }, offDuty: { $0.key == d.key })
+        let out = PondOpenDucks.rows(rows, title: { $0.title }, closed: { $0.key == d.key })
         #expect(out.map(\.title) == ["b", "a"])
         #expect(out.map(\.branch) == ["feat/b", "feat/a"])
-        #expect(PondOnDuty.rows(rows, title: { $0.title }, showsBranch: false).allSatisfy { $0.branch == nil })
-        #expect(PondOnDuty.rows([], title: { $0.title }).isEmpty)
+        #expect(PondOpenDucks.rows(rows, title: { $0.title }, showsBranch: false).allSatisfy { $0.branch == nil })
+        #expect(PondOpenDucks.rows([], title: { $0.title }).isEmpty)
     }
 
     @Test func recentKeepsOnlyActionableEvents() {

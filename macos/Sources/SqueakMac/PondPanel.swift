@@ -28,15 +28,15 @@ struct PondPanel: View {
         PondThreadFact(key: s.key, title: model.workbenchTitle(s), state: s.state, lastActivityAt: s.lastActivityAt, looping: s.isLoopingNow)
     }
 
-    /// Ducks mode on a pond this Mac runs: the compact Pond tab (On duty now, Recent, People); else today's look.
+    /// Ducks mode on a pond this Mac runs: the compact Pond tab (Open now, Recent, People); else today's look.
     private var compact: Bool { model.ducksMode && key.map { !PondsModel.shared.chrome(key: $0).isRemote } == true }
 
-    private func onDuty(key: String) -> [PondOnDuty.Row] {
+    private func open(key: String) -> [PondOpenDucks.Row] {
         let projectId = PondsModel.shared.entry(key)?.projectId
-        let off = projectId.map { RoomRosterStore.shared.model(for: $0).offDutySessions } ?? []  // the roster's list
-        return PondOnDuty.rows(
+        let off = projectId.map { RoomRosterStore.shared.model(for: $0).closedSessions } ?? []  // the roster's list
+        return PondOpenDucks.rows(
             model.duckRows(pond: key, fromPage: true), title: { model.workbenchTitle($0) }, looping: { $0.isLoopingNow },
-            offDuty: { s in model.hostId(s).map(off.contains) ?? false })
+            closed: { s in model.hostId(s).map(off.contains) ?? false })
     }
 
     var body: some View {
@@ -49,7 +49,7 @@ struct PondPanel: View {
                     VStack(alignment: .leading, spacing: Space.l) {
                         if let pond = detail?.pond { PondFreshnessStrip(pond: pond) }
                         if compact {
-                            onDutySection(onDuty(key: key), key: key)
+                            openSection(open(key: key), key: key)
                             let recent = PondRecent.actionable(glance.recent)
                             if !recent.isEmpty { recentSection(recent) }
                             peopleRow(glance.people, key: key, detail: detail)
@@ -153,8 +153,8 @@ struct PondPanel: View {
         .padding(.horizontal, Space.m).padding(.top, Space.s)
     }
 
-    private func onDutySection(_ rows: [PondOnDuty.Row], key: String) -> some View {
-        section("On duty now") {
+    private func openSection(_ rows: [PondOpenDucks.Row], key: String) -> some View {
+        section("Open now") {
             if rows.isEmpty {
                 Text("No duck is working right now.").font(Typo.body).foregroundStyle(Theme.muted)
             } else {

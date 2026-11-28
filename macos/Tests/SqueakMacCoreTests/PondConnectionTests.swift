@@ -56,8 +56,8 @@ import Testing
 
     @Test func theRoomHeaderEndsWithTheSameWord() {
         let c = PondConnectionInfo(state: .reconnecting, line: "Reconnecting\u{2026}")
-        #expect(RoomDucks.subtitle(people: 2, ducks: 1, connection: c) == "2 people \u{00B7} 1 duck on duty \u{00B7} Reconnecting\u{2026}")
-        #expect(RoomDucks.subtitle(people: 2, ducks: 1, connection: nil) == "2 people \u{00B7} 1 duck on duty")
+        #expect(RoomDucks.subtitle(people: 2, ducks: 1, connection: c) == "2 people \u{00B7} 1 duck open \u{00B7} Reconnecting\u{2026}")
+        #expect(RoomDucks.subtitle(people: 2, ducks: 1, connection: nil) == "2 people \u{00B7} 1 duck open")
     }
 }
 

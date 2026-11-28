@@ -14,7 +14,7 @@ one sentence and the same three buttons. Sidebar shows the Pond list with the Al
 **owner-busy-shared** - Shared Git Pond: "Shared with 3 people · Live", avatars of Sibhi, Asha, Dev and an outlined
 envelope avatar for the pending invite; Put on GitHub is gone. Needs you: Pip's question with lettered options
 (recommended marked) and a free-text field, and Asha's Task waiting for approval (Approve, Decline, amber triangle).
-Ducks: two working (animated glyph slot), Pip waiting (triangle), two idle (age only, no icon), Off duty folded. Latest in the Room:
+Ducks: two working (animated glyph slot), Pip waiting (triangle), two idle (age only, no icon), Closed folded. Latest in the Room:
 three lines. Sidebar also shows the Invitations block (Dev invites you to field-notes, Join / Decline).
 
 **people-sheet** - The People sheet over the Dashboard. Members with the email under the name, "online" or

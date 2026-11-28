@@ -15,10 +15,10 @@ struct RoomMessagesTests {
         RoomTurn(id: id, sessionId: s, threadTitle: "T-\(s)", agent: "claude", startedAt: at, endedAt: ended ?? (outcome == nil ? nil : at + 4 * min), outcome: outcome, prompt: prompt,
                  author: RoomTurnAuthor(name: "Sibhi", me: me), answer: answer, outcomeText: text, durationMs: outcome == nil ? nil : 260_000, filesChanged: files, ducklings: ducklings)
     }
-    private func thread(_ s: String, name: String? = nil, state: RoomThreadState = .idle, duty: RoomDuty = .on, role: String? = nil, ask: RoomAsk? = nil, progress: RoomProgress? = nil,
+    private func thread(_ s: String, name: String? = nil, state: RoomThreadState = .idle, isOpen: Bool = true, role: String? = nil, ask: RoomAsk? = nil, progress: RoomProgress? = nil,
                         lastActive: Int64? = nil, workingOn: String? = nil, started: Int64? = nil) -> RoomThread {
         RoomThread(sessionId: s, title: "T-\(s)", agent: s == "s2" ? "codex" : "claude", state: state, workingOn: workingOn, progress: progress, ask: ask, turnStartedAt: started,
-                   name: name, role: role, duty: duty, lastActiveAt: lastActive)
+                   name: name, role: role, isOpen: isOpen, lastActiveAt: lastActive)
     }
     private func feed(turns: [RoomTurn] = [], posts: [RoomPost] = [], threads: [RoomThread] = [], jobs: [RoomTask]? = nil, serves: Bool = true) -> RoomFeed {
         var f = RoomFeed()
@@ -336,8 +336,8 @@ struct RoomMessagesTests {
         #expect(w[0].detail == nil && w[0].name == "T-s2")
     }
 
-    @Test func headerShowsOnlyDucksOnDuty() {
-        let closed = [PondDuck(id: "a", name: "A", duty: .off, currentSessionId: "a"), PondDuck(id: "b", name: "B", duty: .off, currentSessionId: "b")]
+    @Test func headerShowsOnlyDucksOpen() {
+        let closed = [PondDuck(id: "a", name: "A", isOpen: false, currentSessionId: "a"), PondDuck(id: "b", name: "B", isOpen: false, currentSessionId: "b")]
         #expect(RoomDucks.headerDucks(roster: closed, now: now).isEmpty)
         let mixed = closed + [PondDuck(id: "c", name: "C", currentSessionId: "c")]
         #expect(RoomDucks.headerDucks(roster: mixed, now: now).map(\.sessionId) == ["c"])
@@ -347,45 +347,45 @@ struct RoomMessagesTests {
         let hour = now.addingTimeInterval(-7200)
         let ms = Int64(hour.timeIntervalSince1970 * 1000)
         let ducks = RoomDucks.roster([
-            thread("off", name: "Juno", duty: .off, lastActive: ms),
+            thread("off", name: "Juno", isOpen: false, lastActive: ms),
             thread("idle", name: "Nibs", role: "Control bar", lastActive: ms),
             thread("work", name: "Pip", state: .working, progress: RoomProgress(current: 3, total: 5), lastActive: ms + 3_600_000),
             thread("wait", name: "Marlow", state: .waiting, lastActive: ms + 1_800_000),
         ], now: now)
         #expect(ducks.map(\.name) == ["Pip", "Marlow", "Nibs", "Juno"])
-        #expect(ducks.map(\.presenceLine) == ["Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "off duty 2h ago"])
+        #expect(ducks.map(\.presenceLine) == ["Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Closed 2h ago"])
         #expect(ducks.map(\.presence) == [.working, .waiting, .idle, .off])
-        #expect(ducks[2].roleLine == "Control bar" && ducks[0].roleLine == "T-work" && !ducks[3].onDuty)
+        #expect(ducks[2].roleLine == "Control bar" && ducks[0].roleLine == "T-work" && !ducks[3].isOpen)
         #expect(RoomDucks.ago(ms - 86_400_000 + 1, now: now) == "yesterday" || true)
         #expect(RoomDucks.ago(Int64(now.addingTimeInterval(-90_000).timeIntervalSince1970 * 1000), now: now) == "yesterday")
         #expect(RoomDucks.agentLabel("claude") == "Claude" && RoomDucks.agentLabel("codex") == "Codex" && RoomDucks.agentLabel(nil) == nil)
     }
 
     @Test func headerWordsAndTabTooltip() {
-        #expect(RoomDucks.subtitle(people: 2, ducks: 5) == "2 people \u{00B7} 5 ducks on duty")
-        #expect(RoomDucks.subtitle(people: 1, ducks: 1) == "1 person \u{00B7} 1 duck on duty")
-        #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks on duty")
+        #expect(RoomDucks.subtitle(people: 2, ducks: 5) == "2 people \u{00B7} 5 ducks open")
+        #expect(RoomDucks.subtitle(people: 1, ducks: 1) == "1 person \u{00B7} 1 duck open")
+        #expect(RoomDucks.subtitle(people: 1, ducks: 0) == "1 person \u{00B7} no ducks open")
         #expect(RoomDucks.cleanName("  Pip ") == "Pip" && RoomDucks.cleanName("") == nil && RoomDucks.cleanName(String(repeating: "x", count: 33)) == nil)
         #expect(RoomDucks.cleanRole("") == .clear && RoomDucks.cleanRole(" Builder ") == .set("Builder") && RoomDucks.cleanRole(String(repeating: "x", count: 81)) == nil)
     }
 
     // MARK: Lenient decode, mentions, routes
 
-    @Test func decodesDucksLenientlyAndOlderHostsRenderWithNameTitleAndDutyOn() throws {
+    @Test func decodesDucksLenientlyAndOlderHostsRenderWithNameTitleAndOpen() throws {
         let json = """
         {"posts":[],"latestSeq":0,"threads":[
           {"sessionId":"a","title":"Fix feed","state":"idle"},
-          {"sessionId":"b","title":"Old title","state":"working","name":"Pip","role":"Layout builder","duty":"off","lastActiveAt":99,"future":1},
-          {"sessionId":"c","title":"T","state":"idle","duty":"sideways","name":""}],
+          {"sessionId":"b","title":"Old title","state":"working","name":"Pip","role":"Layout builder","open":false,"lastActiveAt":99,"future":1},
+          {"sessionId":"c","title":"T","state":"idle","open":"sideways","name":""}],
          "turns":[{"id":"b:1","sessionId":"b","threadTitle":"T","startedAt":1,"ducklings":{"count":2,"done":1,"items":[{"label":"x","state":"done"},{"label":"y","state":"weird"},{"nope":1}]}},
                   {"id":"b:2","sessionId":"b","threadTitle":"T","startedAt":2,"ducklings":{"count":0}}],
          "tasks":[{"id":"job:1","messageId":"p","state":"waiting","suggestion":{"sessionId":"b","title":"Pip","pitch":"did it"}}]}
         """
         let page = try JSONDecoder().decode(RoomPage.self, from: Data(json.utf8))
         let t = page.threads
-        #expect(t[0].duckName == "Fix feed" && t[0].onDuty && t[0].role == nil)
-        #expect(t[1].duckName == "Pip" && !t[1].onDuty && t[1].role == "Layout builder" && t[1].lastActiveAt == 99)
-        #expect(t[2].duckName == "T" && t[2].onDuty)
+        #expect(t[0].duckName == "Fix feed" && t[0].isOpen && t[0].role == nil)
+        #expect(t[1].duckName == "Pip" && !t[1].isOpen && t[1].role == "Layout builder" && t[1].lastActiveAt == 99)
+        #expect(t[2].duckName == "T" && t[2].isOpen)
         let d = page.turns?[0].ducklings
         #expect(d?.count == 2 && d?.done == 1 && d?.items.map(\.state) == [.done, .running])
         #expect(page.turns?[1].ducklings == nil)
@@ -394,8 +394,8 @@ struct RoomMessagesTests {
 
     @Test func aThreadFrameReplacesTheDuckInPlace() {
         var f = feed(threads: [thread("s1", name: "Pip"), thread("s2")])
-        f.upsert(thread: thread("s1", name: "Pipette", duty: .off, role: "Layout"))
-        #expect(f.threads.map(\.duckName) == ["Pipette", "T-s2"] && f.threads[0].duty == .off)
+        f.upsert(thread: thread("s1", name: "Pipette", isOpen: false, role: "Layout"))
+        #expect(f.threads.map(\.duckName) == ["Pipette", "T-s2"] && f.threads[0].isOpen == false)
         f.upsert(thread: thread("s3"))
         #expect(f.threads.count == 3)
     }
@@ -403,9 +403,9 @@ struct RoomMessagesTests {
     @Test func mentionsPickDucksByTheirNames() {
         #expect(RoomMention.active(in: "hello @pi")?.query == "pi")
         #expect(RoomMention.active(in: "mail a@b") == nil)
-        let threads = [thread("a", name: "Pip", state: .working), thread("b", name: "Pia", duty: .off), thread("c", name: "Nibs")]
+        let threads = [thread("a", name: "Pip", state: .working), thread("b", name: "Pia", isOpen: false), thread("c", name: "Nibs")]
         let c = RoomMention.candidates(query: "pi", threads: threads, people: ["Pia Nair"])
-        // Names are masks: the Off-duty Duck "b" is known by its chat title ("T-b"), not "Pia".
+        // Names are masks: the Closed Duck "b" is known by its chat title ("T-b"), not "Pia".
         #expect(c.map(\.id) == ["t:a", "p:Pia Nair"])
         #expect(RoomMention.candidates(query: "t-b", threads: threads, people: []).map(\.id) == ["t:b"])
         #expect(c[0].addressee == .thread(sessionId: "a", title: "Pip") && c[0].insertion == nil)
@@ -414,7 +414,7 @@ struct RoomMessagesTests {
         #expect(RoomMention.roomText("hello", to: .everyone) == "hello")
     }
 
-    @Test func dutyAndDuckBodiesAreStrict() {
+    @Test func stateAndDuckBodiesAreStrict() {
         #expect(RoomDuckField.unchanged.json == nil && RoomDuckField.clear.json == .null && RoomDuckField.set("x").json == .string("x"))
     }
 

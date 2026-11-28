@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { DutyKeeper } from "./duty-keeper.js";
+import { IdleCloser } from "./idle-closer.js";
 import { Room } from "./room.js";
 import { NativeStore } from "./store.js";
 
@@ -13,14 +13,14 @@ const HOUR = 3_600_000;
 function rig() {
   let clock = Date.now();
   const store = new NativeStore(":memory:");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "idle-closer-"));
   const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
   const room = new Room({ store, ownerName: () => "Sam", now: () => clock });
   const chat = () =>
     store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title: "c" });
   const busy = new Set<string>();
   const ticks: Array<() => void> = [];
-  const keeper = new DutyKeeper({
+  const keeper = new IdleCloser({
     room,
     busy: () => busy,
     schedule: (fn) => {
@@ -28,7 +28,7 @@ function rig() {
       return { stop: () => ticks.splice(0) };
     },
   });
-  const duty = (sid: string) => store.duckBySession(sid)!.duty;
+  const state = (sid: string) => store.duckBySession(sid)!.state;
   const duck = (sid: string) => store.duckForSession(sid, project.id)!.id;
   return {
     store,
@@ -37,27 +37,27 @@ function rig() {
     busy,
     keeper,
     ticks,
-    duty,
+    state,
     duck,
     advance: (ms: number) => void (clock += ms),
   };
 }
 
-describe("Off duty after an idle hour", () => {
-  it("a Duck with no new work for an hour goes Off duty, and history stays readable", () => {
+describe("Closed after an idle hour", () => {
+  it("a Duck with no new work for an hour closes, and history stays readable", () => {
     const r = rig();
     const s = r.chat();
     r.duck(s.id);
     r.advance(HOUR - 60_000);
     expect(r.keeper.tick()).toBe(0);
-    expect(r.duty(s.id)).toBe("on");
+    expect(r.state(s.id)).toBe("open");
     r.advance(120_000);
     expect(r.keeper.tick()).toBe(1);
-    expect(r.duty(s.id)).toBe("off");
+    expect(r.state(s.id)).toBe("closed");
     expect(r.store.getSession(s.id)).toBeTruthy();
   });
 
-  it("a running turn, a waiting turn or a held Task keeps it on duty", () => {
+  it("a running turn, a waiting turn or a held Task keeps it open", () => {
     const r = rig();
     const working = r.chat();
     const waiting = r.chat();
@@ -69,27 +69,27 @@ describe("Off duty after an idle hour", () => {
     r.busy.add(r.duck(held.id));
     r.advance(2 * HOUR);
     r.keeper.tick();
-    expect([r.duty(working.id), r.duty(waiting.id), r.duty(held.id)]).toEqual(["on", "on", "on"]);
+    expect([r.state(working.id), r.state(waiting.id), r.state(held.id)]).toEqual(["open", "open", "open"]);
   });
 
-  it("a Duck put back on duty gets a fresh hour", () => {
+  it("a Duck reopened gets a fresh hour", () => {
     const r = rig();
     const s = r.chat();
     const id = r.duck(s.id);
     r.advance(2 * HOUR);
     r.keeper.tick();
-    expect(r.duty(s.id)).toBe("off");
-    r.room.setDutyById(id, true);
+    expect(r.state(s.id)).toBe("closed");
+    r.room.setOpenById(id, true);
     r.advance(30 * 60_000);
     expect(r.keeper.tick()).toBe(0);
     r.advance(31 * 60_000);
     expect(r.keeper.tick()).toBe(1);
   });
 
-  it("a Duck idle for days before a host restart stays on duty at start and goes off an hour later", () => {
+  it("a Duck idle for days before a host restart stays open at start and goes off an hour later", () => {
     let clock = Date.now();
     const store = new NativeStore(":memory:");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duty-restart-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "idle-closer-restart-"));
     const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
     const s = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title: "c" });
     store.db
@@ -101,19 +101,19 @@ describe("Off duty after an idle hour", () => {
     // The host starts now: a new Room over the same store, five days after the Duck last worked.
     const room = new Room({ store, ownerName: () => "Sam", now: () => clock });
     const ticks: Array<() => void> = [];
-    const keeper = new DutyKeeper({
+    const keeper = new IdleCloser({
       room,
       busy: () => new Set(),
       schedule: (fn) => (ticks.push(fn), { stop: () => ticks.splice(0) }),
     });
     keeper.start();
     ticks[0]!();
-    expect(store.duckBySession(s.id)!.duty).toBe("on");
+    expect(store.duckBySession(s.id)!.state).toBe("open");
     clock += HOUR - 60_000;
     expect(keeper.tick()).toBe(0);
     clock += 120_000;
     expect(keeper.tick()).toBe(1);
-    expect(store.duckBySession(s.id)!.duty).toBe("off");
+    expect(store.duckBySession(s.id)!.state).toBe("closed");
     keeper.stop();
   });
 
@@ -123,15 +123,15 @@ describe("Off duty after an idle hour", () => {
     r.duck(s.id);
     r.advance(2 * HOUR);
     r.keeper.start();
-    expect(r.duty(s.id)).toBe("on");
+    expect(r.state(s.id)).toBe("open");
     expect(r.ticks).toHaveLength(1);
     r.ticks[0]!();
-    expect(r.duty(s.id)).toBe("off");
+    expect(r.state(s.id)).toBe("closed");
     const s2 = r.chat();
     r.duck(s2.id);
     r.advance(2 * HOUR);
     r.ticks[0]!();
-    expect(r.duty(s2.id)).toBe("off");
+    expect(r.state(s2.id)).toBe("closed");
     r.keeper.stop();
   });
 });

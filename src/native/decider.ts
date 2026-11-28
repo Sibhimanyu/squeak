@@ -3,7 +3,7 @@ import { type TitleModelCall } from "./auto-title.js";
 /**
  * The decider: when a Task is made, one choice: give it to a Duck, hatch a new Duck, or wait. Score-based, no hard
  * rule about any one input. Similarity and code-area overlap say how well a Duck fits; a full context window counts
- * against it (less for a small, closely related Task); being busy counts only a little; an Off-duty Duck is as eligible
+ * against it (less for a small, closely related Task); being busy counts only a little; a Closed Duck is as eligible
  * as any other, so it can come back for related work. A model is asked only when the score is unsure, and when it is
  * still unsure the answer is a new Duck (a mistake then costs a fresh start, not a polluted context).
  *
@@ -15,7 +15,7 @@ import { type TitleModelCall } from "./auto-title.js";
 export interface DeciderDuck {
   id: string;
   name: string;
-  duty: "on" | "off";
+  open: boolean;
   /** Working a turn right now. */
   busy: boolean;
   /** How full its context window is, 0..100; null when unknown (never a fake 0). */

@@ -434,12 +434,12 @@ struct PondDashboard: View {
         let counts = PondCounts.resolve(item.pond?.counts, sessions: item.sessions)
         return Grid(horizontalSpacing: 12, verticalSpacing: 12) {
             GridRow {
-                tile(item, .onDuty, "person.crop.circle.badge.checkmark", Theme.ink, counts)
+                tile(item, .open, "person.crop.circle.badge.checkmark", Theme.ink, counts)
                 tile(item, .working, "bolt.horizontal", Theme.working, counts)
             }
             GridRow {
                 tile(item, .needsYou, "exclamationmark.bubble", Theme.needsYou, counts)
-                tile(item, .offDuty, "moon", Theme.muted, counts)
+                tile(item, .closed, "moon", Theme.muted, counts)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
@@ -450,9 +450,9 @@ struct PondDashboard: View {
         return Button { Haptics.play(.navigate); path.append(.scope(item.id, scope)) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(count > 0 || scope == .onDuty ? tint : Theme.subtle)
+                    Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(count > 0 || scope == .open ? tint : Theme.subtle)
                     Spacer()
-                    Text("\(count)").font(scope == .onDuty ? .largeTitle.bold() : .title.bold()).monospacedDigit().foregroundStyle(Theme.ink)
+                    Text("\(count)").font(scope == .open ? .largeTitle.bold() : .title.bold()).monospacedDigit().foregroundStyle(Theme.ink)
                 }
                 Text(scope.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
                 if let line = PondTileModel.secondary(scope, counts) { Text(line).font(.caption).foregroundStyle(Theme.subtle) }

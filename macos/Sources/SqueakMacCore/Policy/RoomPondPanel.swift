@@ -25,7 +25,7 @@ public struct RoomPondPanel: Equatable, Sendable {
         if members.isEmpty { people = [Person(id: "you", name: youName.isEmpty ? "You" : youName, you: true)] }
         return RoomPondPanel(
             present: people,
-            working: roster.onDuty.filter { $0.presence == .working },
+            working: roster.open.filter { $0.presence == .working },
             waiting: tasks.filter { $0.state == .waiting },
             blocked: tasks.filter { $0.state == .blocked })
     }

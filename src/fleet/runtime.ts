@@ -236,7 +236,7 @@ function serializeSession(
     // Ducks own their branch: the duck behind the chat and how the cards name it (absent for a plain chat).
     ...(session.duckId ? { duckId: session.duckId } : {}),
     ...(session.duckName ? { duckName: session.duckName } : {}),
-    ...(session.duckDuty ? { duckDuty: session.duckDuty } : {}),
+    ...(session.duckClosed ? { duckClosed: session.duckClosed } : {}),
     ...(session.onMain ? { onMain: true as const } : {}),
     ...(session.errorSeenAt ? { errorSeenAt: session.errorSeenAt } : {}),
     cwd: session.cwd,

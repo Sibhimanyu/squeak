@@ -171,7 +171,7 @@ struct RoomHeader: View {
 private struct HeaderDuck: View {
     let duck: RoomDuck
     var body: some View {
-        DuckAvatar(sessionId: duck.sessionId, agent: duck.agent, size: 30, off: !duck.onDuty)
+        DuckAvatar(sessionId: duck.sessionId, agent: duck.agent, size: 30, off: !duck.isOpen)
             .overlay(alignment: .topTrailing) {
                 switch duck.presence {
                 case .working: WorkingGlyph(slot: 12, alignment: .center, grid: .micro).scaleEffect(0.8).frame(width: 14, height: 14).background(Theme.bg, in: Circle()).offset(x: 5, y: -5)

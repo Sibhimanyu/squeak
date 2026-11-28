@@ -101,7 +101,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     ...(native?.workspaceTitle ? { workspaceTitle: native.workspaceTitle } : {}),
     ...(native?.duckId ? { duckId: native.duckId } : {}),
     ...(native?.duckName ? { duckName: native.duckName } : {}),
-    ...(native?.duckDuty ? { duckDuty: native.duckDuty } : {}),
+    ...(native?.duckClosed ? { duckClosed: native.duckClosed } : {}),
     ...(native?.onMain ? { onMain: true as const } : {}),
     ...(native?.errorSeenAt ? { errorSeenAt: native.errorSeenAt } : {}),
     branch: native?.branch ?? conductor?.branch ?? base.branch,

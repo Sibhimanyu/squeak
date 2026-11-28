@@ -93,7 +93,7 @@ private enum Fixtures {
     static func bar(width: Double, centre: PondCentre, progress: Double? = nil, withPip: Bool = false, duckling: Bool = false, name: String = "greenroom", seed: PondSeed = greenroom) -> some View {
         let tabs = tabs(withPip: withPip, duckling: duckling)
         return PondTopBar(
-            name: name, subtitle: "2 people, 2 ducks on duty", leadingInset: 0,
+            name: name, subtitle: "2 people, 2 ducks open", leadingInset: 0,
             switchSelection: centre.switchSelection, switchProgress: progress, pick: { _ in }, hasTabs: true,
             tile: { tile(name, seed: seed) },
             tabs: {
@@ -188,7 +188,7 @@ private enum Fixtures {
                 Text("Pond overview").font(Typo.heading).foregroundStyle(Theme.ink)
                 Text("2 people \u{00B7} 2 ducks \u{00B7} 1 task running").font(Typo.footnote).foregroundStyle(Theme.muted)
                 VStack(alignment: .leading, spacing: Space.s) {
-                    Text("On duty").font(Typo.heading).foregroundStyle(Theme.ink)
+                    Text("Open").font(Typo.heading).foregroundStyle(Theme.ink)
                     ForEach([dhol, pip]) { d in
                         HStack(spacing: Space.s) {
                             ThreadDuckView(id: d.colourSeed, size: 24)

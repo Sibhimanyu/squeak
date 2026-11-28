@@ -8,11 +8,11 @@ import { Room, duckMentionTokens, mentionedToken } from "./room.js";
 import { RoomTasks } from "./room-tasks.js";
 import { NativeStore } from "./store.js";
 
-/** Names are masks: an Off-duty Duck is known by its chat title, and an @mention of that title wakes it. */
+/** Names are masks: A Closed Duck is known by its chat title, and an @mention of that title wakes it. */
 
 function rig() {
   const store = new NativeStore(":memory:");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "off-duty-mention-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "closed-mention-"));
   const project = store.createProject({ name: "app", rootPath: dir, defaultBranch: "main", kind: "folder" });
   const delivered: Array<{ id: string; text: string; woke?: boolean }> = [];
   const room = new Room({
@@ -25,17 +25,17 @@ function rig() {
     const s = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default", title });
     const d = store.createDuck({ projectId: project.id, name: name ?? "Temp" });
     store.attachSessionToDuck(d.id, s.id);
-    store.updateDuck(d.id, { duty: "off", ...(name === null ? { name: null } : {}) } as never);
+    store.updateDuck(d.id, { state: "closed", ...(name === null ? { name: null } : {}) } as never);
     return { s, d: store.duckRow(d.id)! };
   };
   return { store, room, project, offDuck, delivered, dir };
 }
 
-describe("Off-duty Ducks by title", () => {
-  it("names an Off-duty Duck by its chat title or session id, an on-duty one by its name", () => {
+describe("Closed Ducks by title", () => {
+  it("names a Closed Duck by its chat title or session id, an open one by its name", () => {
     const base = { currentSessionId: "sess-1" };
-    expect(duckMentionTokens({ ...base, name: "Pip", duty: "on" }, "Zoom review fixes")).toEqual(["Pip"]);
-    expect(duckMentionTokens({ ...base, name: null, duty: "off" }, "Zoom review fixes")).toEqual([
+    expect(duckMentionTokens({ ...base, name: "Pip", state: "open" }, "Zoom review fixes")).toEqual(["Pip"]);
+    expect(duckMentionTokens({ ...base, name: null, state: "closed" }, "Zoom review fixes")).toEqual([
       "Zoom review fixes",
       "sess-1",
     ]);
@@ -44,13 +44,13 @@ describe("Off-duty Ducks by title", () => {
     );
   });
 
-  it("an @mention of the title from a person wakes the Off-duty Duck", () => {
+  it("an @mention of the title from a person wakes the Closed Duck", () => {
     const r = rig();
     const off = r.offDuck("Zoom Marketplace review fixes");
     r.room.personPost(r.project.id, "@Zoom Marketplace review fixes can you carry on?");
     expect(r.delivered).toHaveLength(1);
     expect(r.delivered[0]).toMatchObject({ id: off.s.id, woke: true });
-    expect(r.store.duckRow(off.d.id)!.duty).toBe("on");
+    expect(r.store.duckRow(off.d.id)!.state).toBe("open");
   });
 
   it("an @mention of the session id wakes it too, and a Duck's mention never does", () => {
@@ -66,7 +66,7 @@ describe("Off-duty Ducks by title", () => {
       text: "@Settings page polish ping",
     });
     expect(r.delivered).toHaveLength(0);
-    expect(r.store.duckRow(again.d.id)!.duty).toBe("off");
+    expect(r.store.duckRow(again.d.id)!.state).toBe("closed");
   });
 
   it("an @mention of the title that asks for work is a Task for that Duck", () => {
@@ -81,7 +81,7 @@ describe("Off-duty Ducks by title", () => {
     expect(jobs.mentionedDuck(r.project.id, "@Zoom Marketplace review fixes add dark mode")?.id).toBe(off.d.id);
   });
 
-  it("the duck list carries the last summary of an Off-duty Duck", () => {
+  it("the duck list carries the last summary of a Closed Duck", () => {
     const r = rig();
     const off = r.offDuck("Zoom Marketplace review fixes");
     expect(r.room.duckView(off.d).lastSummary).toBeUndefined();

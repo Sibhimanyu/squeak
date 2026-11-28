@@ -36,7 +36,7 @@ export interface PondDuckChanges extends PondChangeGroup {
   duckId: string;
   duckName: string;
   colourSeed: string;
-  duty: "on" | "off";
+  open: boolean;
   /** One of the Duck's Streams (a Duck in several has one entry each): its branch and id. */
   branch: string;
   workspaceId: string;
@@ -156,7 +156,7 @@ export class PondChangesReader {
           duckId: duck.id,
           duckName: duck.name,
           colourSeed: duck.colourSeed,
-          duty: duck.duty,
+          open: duck.open,
           branch: place.branch,
           workspaceId: ws.id,
         });

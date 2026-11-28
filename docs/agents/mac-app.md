@@ -51,7 +51,7 @@ Read before touching `macos/`, the session timeline or control routes. Full deta
 ## Pond pages (new layout)
 
 The pond header's Dashboard | Room switch is the only switcher: no Room pill in the Duck row, and the row is not drawn
-while nobody is on duty. Neither page has a side panel. The Dashboard (`PondDashboard.swift`) is the Pond's name, state line, avatars and role-drawn
+while nobody is open. Neither page has a side panel. The Dashboard (`PondDashboard.swift`) is the Pond's name, state line, avatars and role-drawn
 buttons, then Needs you, Ducks (working first) and Latest in the Room; every decision (state line, buttons, menu, block
 visibility, Ducks order, Needs you items) is in `PondDashboardPlan.swift` (SqueakMacCore). The bar no longer holds the Pond's
 name. Both pages carry the Pond-scoped rail and work pane (`PondWorkScope`, `WorkPaneScope.pond`; the header and Duck row are

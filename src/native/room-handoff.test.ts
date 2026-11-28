@@ -140,15 +140,15 @@ describe("a Duck hands work on with hand_off", () => {
     expect(r.hatched).toEqual(["translate the onboarding strings to french"]);
   });
 
-  it("refuses a name that is no Duck's, itself, an off-duty Duck and an empty text", async () => {
+  it("refuses a name that is no Duck's, itself, a closed Duck and an empty text", async () => {
     const r = rig();
     const pip = r.duck("Pip");
     const sage = r.duck("Sage");
-    r.store.setDuty(sage.s.id, false);
+    r.store.setOpen(sage.s.id, false);
     const bad = (a: Record<string, unknown>) => r.tools.call(pip.s.id, "hand_off", a).catch((e: Error) => e.message);
     expect(await bad({ text: "do it", toDuck: "Ghost" })).toMatch(/No duck named Ghost/);
     expect(await bad({ text: "do it", toDuck: "Pip" })).toMatch(/That is you/);
-    expect(await bad({ text: "do it", toDuck: "Sage" })).toMatch(/No duck named Sage/); // Off duty: the name is released
+    expect(await bad({ text: "do it", toDuck: "Sage" })).toMatch(/No duck named Sage/); // Closed: the name is released
     expect(await bad({ text: " " })).toMatch(/text is required/);
     expect(r.jobs.list(r.pid)).toEqual([]);
   });

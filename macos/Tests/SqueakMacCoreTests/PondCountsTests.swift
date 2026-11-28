@@ -12,11 +12,11 @@ private func chat(_ id: String, state: SessionState = .idle) -> HostSession {
 
 @Suite("Pond dashboard counts")
 struct PondCountsTests {
-    /// The host's roster for the five chats: a, e working (e is off duty), b needs you, c and d idle (d off duty).
+    /// The host's roster for the five chats: a, e working (e is closed), b needs you, c and d idle (d closed).
     private func layout() -> PondHomeLayout {
         let chats = [chat("a", state: .working), chat("b", state: .blocked), chat("c"), chat("d"), chat("e", state: .working)]
         func duck(_ id: String, _ activity: PondDuckActivity, off: Bool = false) -> PondDuck {
-            var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), duty: off ? .off : .on, currentSessionId: id)
+            var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), isOpen: !off, currentSessionId: id)
             d.activity = activity
             d.needsYou = activity == .needsYou  // the host sends its one rule with the activity
             return d
@@ -27,24 +27,30 @@ struct PondCountsTests {
 
     @Test func tilesCountExactlyTheListedRows() {
         let l = layout()
-        #expect(l.dutyCount == 5)
-        #expect(l.count(in: .onDuty) == 3 && l.count(in: .offDuty) == 2 && l.count(in: .working) == 1 && l.count(in: .needsYou) == 1)
+        #expect(l.duckCount == 5)
+        #expect(l.count(in: .open) == 3 && l.count(in: .closed) == 2 && l.count(in: .working) == 1 && l.count(in: .needsYou) == 1)
     }
 
-    @Test func sentCountsWinAndTilesFilterByDuty() {
+    @Test func sentCountsWinAndTilesFilterByState() {
         let l = layout()
-        let sent = PondCounts(onDuty: 9, working: 8, needsYou: 7, offDuty: 6, total: 15)
-        #expect(sent.count(.offDuty) == 6)
-        #expect(PondCounts.secondary(.offDuty, sent) == "15 in all")
-        #expect(PondCounts.secondary(.onDuty, sent) == nil)
-        #expect(PondDashboardScope.tiles == [.onDuty, .working, .needsYou, .offDuty])
-        #expect(l.count(in: .onDuty) == 3 && l.count(in: .offDuty) == 2 && l.count(in: .working) == 1)
+        let sent = PondCounts(open: 9, working: 8, needsYou: 7, closed: 6, total: 15)
+        #expect(sent.count(.closed) == 6)
+        #expect(PondCounts.secondary(.closed, sent) == "15 in all")
+        #expect(PondCounts.secondary(.open, sent) == nil)
+        #expect(PondDashboardScope.tiles == [.open, .working, .needsYou, .closed])
+        #expect(l.count(in: .open) == 3 && l.count(in: .closed) == 2 && l.count(in: .working) == 1)
     }
 
     @Test func decodesFromTheRosterBodyAndAnOldDaemonWithout() throws {
         struct R: Decodable { var counts: PondCounts? }
-        let json = #"{"counts":{"onDuty":2,"working":1,"needsYou":0,"offDuty":1,"total":3}}"#
-        #expect(try JSONDecoder().decode(R.self, from: Data(json.utf8)).counts == PondCounts(onDuty: 2, working: 1, needsYou: 0, offDuty: 1, total: 3))
+        let json = #"{"counts":{"open":2,"working":1,"needsYou":0,"closed":1,"total":3}}"#
+        #expect(try JSONDecoder().decode(R.self, from: Data(json.utf8)).counts == PondCounts(open: 2, working: 1, needsYou: 0, closed: 1, total: 3))
         #expect(try JSONDecoder().decode(R.self, from: Data("{}".utf8)).counts == nil)
+    }
+
+    @Test func anOlderDaemonsCountKeysStillDecode() throws {
+        struct R: Decodable { var counts: PondCounts? }
+        let json = #"{"counts":{"onDuty":2,"working":1,"needsYou":0,"offDuty":1,"total":3}}"#
+        #expect(try JSONDecoder().decode(R.self, from: Data(json.utf8)).counts == PondCounts(open: 2, working: 1, needsYou: 0, closed: 1, total: 3))
     }
 }

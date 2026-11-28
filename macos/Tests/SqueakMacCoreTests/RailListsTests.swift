@@ -33,10 +33,10 @@ import Testing
     {"projectId":"p1",
      "main":{"branch":"main","files":[{"path":"m.txt","status":"M","added":1,"removed":0}],"totals":{"added":1,"removed":0,"files":1}},
      "ducks":[
-       {"duckId":"d1","duckName":"Pip","duty":"on","branch":"sq/pip","truncated":true,"totals":{"added":9,"removed":0,"files":5},
+       {"duckId":"d1","duckName":"Pip","open":true,"branch":"sq/pip","truncated":true,"totals":{"added":9,"removed":0,"files":5},
         "files":[{"path":"a.txt","status":"M","added":1,"removed":0},{"path":"b.txt","status":"A","added":2,"removed":0}]},
-       {"duckId":"d2","duckName":"Moss","duty":"on","branch":"sq/moss","files":[],"totals":{"added":0,"removed":0,"files":0}},
-       {"duckId":"d3","duckName":"Ivy","duty":"off","branch":"","files":[{"path":"c.txt"}],"totals":{"added":0,"removed":0,"files":1}}],
+       {"duckId":"d2","duckName":"Moss","open":true,"branch":"sq/moss","files":[],"totals":{"added":0,"removed":0,"files":0}},
+       {"duckId":"d3","duckName":"Ivy","open":false,"branch":"","files":[{"path":"c.txt"}],"totals":{"added":0,"removed":0,"files":1}}],
      "ducksTruncated":false}
     """#
 

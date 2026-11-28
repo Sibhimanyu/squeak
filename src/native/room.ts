@@ -8,7 +8,7 @@ import { toFleetState } from "../fleet/observers/squeak-native.js";
 import { logger } from "../utils/logger.js";
 import type { HostEvent } from "./host.js";
 import type { FileClash } from "./file-locks.js";
-import type { DuckRow, NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
+import type { DuckRow, DuckState, NativeStore, RoomAuthorKind, RoomLevel, RoomPostKind, RoomPostRow } from "./store.js";
 import { resolveOwnerName } from "./thread-context.js";
 import {
   askOf,
@@ -140,15 +140,15 @@ export type DuckActivity = "working" | "needsYou" | "idle" | "error";
 export interface DuckView {
   id: string;
   projectId: string;
-  /** The mask it wears on duty; Off duty the chat title (the name went back to the pool). */
+  /** The mask it wears while open; closed, the chat title (the name went back to the pool). */
   name: string;
-  /** The name it wore before going Off duty; only present while Off duty. */
+  /** The name it wore before closing; only present while Closed. */
   lastName?: string;
   /** The title of the chat it is on: what it is working on ("Pip · Zoom SDK video fix"). */
   chatTitle?: string;
   role?: string;
   colourSeed: string;
-  duty: "on" | "off";
+  open: boolean;
   /** The duck's current session; absent for a duck that has not worked yet. */
   currentSessionId?: string;
   /** The Streams it has joined, in order; absent when it is in none (the Pond itself). */
@@ -157,7 +157,7 @@ export interface DuckView {
   streamLabels: string[];
   /** Working when the turn runs or any Duckling still works; needsYou when it waits on the person. */
   activity: DuckActivity;
-  /** The Duck needs the person, by the one rule (`fleet/needs-you.ts`): waiting, or a failure not yet seen. Any duty. */
+  /** The Duck needs the person, by the one rule (`fleet/needs-you.ts`): waiting, or a failure not yet seen. Open or Closed. */
   needsYou: boolean;
   /** Why it needs the person; absent when it does not. */
   needsYouReason?: NeedsYouReason;
@@ -165,9 +165,9 @@ export interface DuckView {
   failure?: string;
   /** How many Ducklings run for it now. */
   ducklingsRunning: number;
-  /** The one status line every surface shows: "Working · 1 duckling on <task>", "Needs you", "Idle · 4m", "off duty 3d ago". */
+  /** The one status line every surface shows: "Working · 1 duckling on <task>", "Needs you", "Idle · 4m", "Closed 3d ago". */
   statusLine: string;
-  /** What the Duck is called: its name on duty, its chat title off duty. */
+  /** What the Duck is called: its name while open, its chat title when closed. */
   heading: string;
   /** Members' own ducks (design only, `pondOwnThreads` stays off): which Mac runs this duck. Never set today. */
   nest?: string;
@@ -175,7 +175,7 @@ export interface DuckView {
   poweredBy?: string;
   state: "working" | "waiting" | "idle" | "error";
   lastActiveAt: number;
-  /** An Off-duty Duck only: the last thing it reported finishing (names are masks: it is known by its chat title). */
+  /** A Closed Duck only: the last thing it reported finishing (names are masks: it is known by its chat title). */
   lastSummary?: string;
   /** How many sessions it has had (the current one and its history). */
   sessions: number;
@@ -199,17 +199,17 @@ export interface RoomThread {
   /** The duck's current session; empty for a duck that has not worked yet. */
   sessionId: string;
   title: string;
-  /** The duck's name while on duty; Off duty the chat title (the name went back to the pool). */
+  /** The duck's name while open; closed, the chat title (the name went back to the pool). */
   name: string;
-  /** The name it wore before going Off duty; only present while Off duty. */
+  /** The name it wore before closing; only present while Closed. */
   lastName?: string;
   /** One line the person set for what this duck is for. */
   role?: string;
-  /** "off" = the person closed the duck's tab: never suggested for jobs, never woken. */
-  duty: "on" | "off";
+  /** false = the person closed the duck: never suggested for jobs, never woken (until reopened). */
+  open: boolean;
   /** When the chat last did anything (ms epoch). */
   lastActiveAt: number;
-  /** An Off-duty Duck only: the last thing it reported finishing. */
+  /** A Closed Duck only: the last thing it reported finishing. */
   lastSummary?: string;
   agent: string;
   state: "working" | "waiting" | "idle" | "error";
@@ -316,7 +316,7 @@ export interface RoomOptions {
    * Wakes a Duck with a message (the host's `send`: it starts a turn on an idle chat and waits in the queue behind a
    * running one, never mid-step). The Room wakes a Duck only on an @mention or a comment on its own card.
    */
-  /** `woke`: the Duck was Off duty and this message put it back on duty (its Stream may have been cleaned up meanwhile). */
+  /** `woke`: the Duck was Closed and this message reopened it (its Stream may have been cleaned up meanwhile). */
   deliver?: (
     sessionId: string,
     text: string,
@@ -533,9 +533,9 @@ export class Room extends EventEmitter {
           if (!mentionedToken(row.text, duckMentionTokens(duck, this.store.getSession(sid)?.title))) continue;
           // A message that is already a Task routed to this Duck reaches it as the Task, not as a second nudge.
           if (this.routedTo(row.id, duck.id)) continue;
-          if (duck.duty === "off") {
+          if (duck.state === "closed") {
             if (row.authorKind !== "person") continue;
-            this.setDutyById(duck.id, true);
+            this.setOpenById(duck.id, true);
             woke.add(sid);
           }
           targets.set(sid, `[Room] ${row.authorName} mentioned you:\n${row.text.trim()}`);
@@ -676,7 +676,7 @@ export class Room extends EventEmitter {
     return plainDuckName(d?.name?.trim() || d?.lastName?.trim() || NEUTRAL_DUCK_NAME);
   }
 
-  /** The name a chat's Duck posts under now: its on-duty name, else its last one, else the chat's title. */
+  /** The name a chat's Duck posts under now: its open name, else its last one, else the chat's title. */
   private maskOf(s: SessionRow): string {
     const d = this.store.duckBySession(s.id);
     const own = d?.name?.trim() || d?.lastName?.trim();
@@ -998,8 +998,8 @@ export class Room extends EventEmitter {
   }
 
   /**
-   * Once per install: every duck quiet for more than a day starts off duty. Before closing a duck existed every old chat
-   * stayed on duty, so a pond listed all of them; a duck working or waiting on the person is never put off duty.
+   * Once per install: every duck quiet for more than a day starts closed. Before closing a duck existed every old chat
+   * stayed open, so a pond listed all of them; a duck working or waiting on the person is never closed.
    */
   retireStaleDucksOnce(): number {
     if (!this.store.markOnce("ducks-duty-cleanup-v1", this.now())) return 0;
@@ -1008,26 +1008,26 @@ export class Room extends EventEmitter {
     for (const p of this.store.listProjects()) {
       this.sessionsOf(p.id); // makes a duck of any chat that has none yet
       for (const d of this.store.listDucks(p.id)) {
-        if (d.duty !== "on") continue;
+        if (d.state !== "open") continue;
         const s = d.currentSessionId ? this.store.getSession(d.currentSessionId) : null;
         if (s && (s.status === "working" || /^(awaiting_|needs_)/.test(s.status))) continue;
         const last = Date.parse(s?.updatedAt ?? d.createdAt);
         if (Number.isFinite(last) && last > cutoff) continue;
-        this.store.updateDuck(d.id, { duty: "off" });
+        this.store.updateDuck(d.id, { state: "closed" });
         off += 1;
       }
     }
     return off;
   }
 
-  /** When a duck was last put on duty in this run (a duck put back on duty gets a fresh hour). */
-  private readonly onDutyAt = new Map<string, number>();
+  /** When a duck was last reopened in this run (a duck reopened gets a fresh hour). */
+  private readonly openedAt = new Map<string, number>();
 
   /** When this host run began: the idle hour is watched while the host runs, so a restart never retires anyone. */
   private readonly startedAt: number;
 
   /**
-   * Puts every on-duty duck with no new work for `idleMs` off duty (history stays). Busy means a running or waiting turn,
+   * Puts every open duck with no new work for `idleMs` closed (history stays). Busy means a running or waiting turn,
    * or a Task it holds (`busyDuckIds`, from the Tasks); a new message in any of its chats counts as work.
    */
   retireIdleDucks(busyDuckIds: ReadonlySet<string> = new Set(), idleMs = 3_600_000): number {
@@ -1036,8 +1036,8 @@ export class Room extends EventEmitter {
     for (const p of this.store.listProjects()) {
       this.sessionsOf(p.id);
       for (const d of this.store.listDucks(p.id)) {
-        if (d.duty !== "on" || busyDuckIds.has(d.id)) continue;
-        let last = Math.max(Date.parse(d.createdAt) || 0, this.onDutyAt.get(d.id) ?? 0, this.startedAt);
+        if (d.state !== "open" || busyDuckIds.has(d.id)) continue;
+        let last = Math.max(Date.parse(d.createdAt) || 0, this.openedAt.get(d.id) ?? 0, this.startedAt);
         let busy = false;
         for (const sid of this.store.duckSessionIds(d.id)) {
           const s = this.store.getSession(sid);
@@ -1046,7 +1046,7 @@ export class Room extends EventEmitter {
           last = Math.max(last, Date.parse(s.updatedAt) || 0);
         }
         if (busy || last > cutoff) continue;
-        this.setDutyById(d.id, false);
+        this.setOpenById(d.id, false);
         off += 1;
       }
     }
@@ -1080,14 +1080,14 @@ export class Room extends EventEmitter {
     return out.slice(0, 60);
   }
 
-  /** The pond's on-duty, non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
+  /** The pond's open, non-archived chats active within `windowMs`, newest activity first, with their state (job matching). */
   candidates(
     projectId: string,
     windowMs: number,
-    opts: { offDuty?: boolean } = {},
+    opts: { closed?: boolean } = {},
   ): Array<{ session: SessionRow; state: RoomThread["state"]; at: number }> {
     const cutoff = this.now() - windowMs;
-    const off = opts.offDuty ? new Set<string>() : this.store.offDutyIds();
+    const off = opts.closed ? new Set<string>() : this.store.closedIds();
     return this.sessionsOf(projectId)
       .filter((s) => !off.has(s.id))
       .map((s) => ({ session: s, state: threadState(s.status, s.lastTurnEndedAt), at: Date.parse(s.updatedAt) }))
@@ -1105,14 +1105,14 @@ export class Room extends EventEmitter {
   duckCandidates(
     projectId: string,
     windowMs: number,
-    opts: { offDuty?: boolean } = {},
+    opts: { closed?: boolean } = {},
   ): Array<{ duck: DuckRow; session: SessionRow | null; state: RoomThread["state"]; at: number }> {
     if (!this.store.getProject(projectId)) return [];
     this.sessionsOf(projectId); // makes ducks for chats that have none
     const cutoff = this.now() - windowMs;
     const out: Array<{ duck: DuckRow; session: SessionRow | null; state: RoomThread["state"]; at: number }> = [];
     for (const duck of this.store.listDucks(projectId)) {
-      if (!opts.offDuty && duck.duty === "off") continue;
+      if (!opts.closed && duck.state === "closed") continue;
       const session = duck.currentSessionId ? this.store.getSession(duck.currentSessionId) : null;
       if (session) {
         if (session.archivedAt) continue;
@@ -1130,7 +1130,7 @@ export class Room extends EventEmitter {
   threads(projectId: string): RoomThread[] {
     if (!this.store.getProject(projectId)) return [];
     const marks = this.store.latestRoomMarks(projectId);
-    return this.duckCandidates(projectId, ROOM_THREAD_WINDOW_MS, { offDuty: true }).map((c) =>
+    return this.duckCandidates(projectId, ROOM_THREAD_WINDOW_MS, { closed: true }).map((c) =>
       c.session ? this.threadOf(c.session, marks) : this.threadOfDuck(c.duck),
     );
   }
@@ -1146,7 +1146,7 @@ export class Room extends EventEmitter {
       name: duck.name ?? duck.lastName ?? "Duck",
       ...(duck.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(duck.role ? { role: duck.role } : {}),
-      duty: duck.duty,
+      open: duck.state === "open",
       lastActiveAt: at,
       agent: "claude",
       state: "idle",
@@ -1193,13 +1193,13 @@ export class Room extends EventEmitter {
     return {
       id: duck.id,
       projectId: duck.projectId,
-      // Off duty the name is released: the Duck reads by its chat title (`lastName` is history only).
+      // Closed the name is released: the Duck reads by its chat title (`lastName` is history only).
       name,
       ...(duck.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(chatTitle ? { chatTitle } : {}),
       ...(duck.role ? { role: duck.role } : {}),
       colourSeed: duck.colourSeed,
-      duty: duck.duty,
+      open: duck.state === "open",
       ...(s ? { currentSessionId: s.id } : {}),
       ...(streams.length ? { streams } : {}),
       streamLabels: streams.length ? streams.map((x) => x.branch || x.title?.trim() || "Stream") : ["Pond"],
@@ -1208,11 +1208,18 @@ export class Room extends EventEmitter {
       ...(reason ? { needsYouReason: reason } : {}),
       ...(failure ? { failure } : {}),
       ducklingsRunning,
-      statusLine: statusLineOf(activity, duck.duty, ducklingsRunning, helpers?.task, lastActiveAt, this.now()),
-      heading: duck.duty === "off" ? (chatTitle ?? name) : name,
+      statusLine: statusLineOf(
+        activity,
+        duck.state === "open",
+        ducklingsRunning,
+        helpers?.task,
+        lastActiveAt,
+        this.now(),
+      ),
+      heading: duck.state === "closed" ? (chatTitle ?? name) : name,
       state: activity === "needsYou" ? "waiting" : activity,
       lastActiveAt,
-      ...(duck.duty === "off" && s ? this.lastSummaryOf(s.id) : {}),
+      ...(duck.state === "closed" && s ? this.lastSummaryOf(s.id) : {}),
       sessions: this.store.duckSessionIds(duck.id).length,
       notebook: duck.notebook,
       createdAt: created,
@@ -1236,7 +1243,7 @@ export class Room extends EventEmitter {
 
   /**
    * The Pond's roster, the only list of its Ducks: every Duck that is not archived (nameless ones and closed imports
-   * too, so they stay Off duty), whatever its age, keyed by Duck id, newest activity first.
+   * too, so they stay Closed), whatever its age, keyed by Duck id, newest activity first.
    */
   listDucks(projectId: string): DuckView[] {
     if (!this.store.getProject(projectId)) return [];
@@ -1254,7 +1261,7 @@ export class Room extends EventEmitter {
   duckCounts(projectId: string): PondCounts {
     return pondCounts(
       this.listDucks(projectId).map((d) => ({
-        duty: d.duty,
+        open: d.open,
         working: d.activity === "working",
         needsYou: d.needsYou,
       })),
@@ -1296,8 +1303,8 @@ export class Room extends EventEmitter {
       name: duck?.name ?? agentName(s),
       ...(duck?.lastName && !duck.name ? { lastName: duck.lastName } : {}),
       ...(duck?.role ? { role: duck.role } : {}),
-      duty: duck?.duty ?? "on",
-      ...(duck?.duty === "off" ? this.lastSummaryOf(s.id) : {}),
+      open: duck ? duck.state === "open" : true,
+      ...(duck?.state === "closed" ? this.lastSummaryOf(s.id) : {}),
       lastActiveAt: Date.parse(s.updatedAt),
       agent: s.agent,
       state,
@@ -1345,27 +1352,27 @@ export class Room extends EventEmitter {
     return { name: t.name ?? (cur ? agentName(cur) : "Duck"), ...(t.role ? { role: t.role } : {}) };
   }
 
-  /** Puts a chat's duck on or off duty; tells `thread` listeners only on a change. */
-  setDuty(sessionId: string, on: boolean): "on" | "off" {
+  /** Puts a chat's duck open or closed; tells `thread` listeners only on a change. */
+  setOpen(sessionId: string, open: boolean): boolean {
     const s = this.store.getSession(sessionId);
     if (!s) throw new RoomError("No such chat.");
     const duck = this.duckOfSession(s);
     if (!duck) throw new RoomError("No such chat.");
-    return this.setDutyById(duck.id, on);
+    return this.setOpenById(duck.id, open);
   }
 
-  setDutyById(duckId: string, on: boolean): "on" | "off" {
+  setOpenById(duckId: string, open: boolean): boolean {
     const duck = this.store.duckRow(duckId);
     if (!duck) throw new RoomError("No such duck.");
-    if (duck.duty !== (on ? "on" : "off")) {
-      this.store.updateDuck(duckId, { duty: on ? "on" : "off" });
-      if (on) this.onDutyAt.set(duckId, this.now());
+    if ((duck.state === "open") !== open) {
+      this.store.updateDuck(duckId, { state: open ? "open" : "closed" });
+      if (open) this.openedAt.set(duckId, this.now());
       this.emitDuck(duckId);
     }
-    return on ? "on" : "off";
+    return open;
   }
 
-  /** Tells `thread` listeners the duck changed (its place, name, role, duty). */
+  /** Tells `thread` listeners the duck changed (its place, name, role, open or closed). */
   emitDuck(duckId: string): void {
     try {
       const duck = this.store.duckRow(duckId);
@@ -1432,16 +1439,16 @@ export function cleanDuckPatch(patch: { name?: unknown; role?: unknown }): {
 
 /** `@Name` in text, as a whole word (case-insensitive); a name may hold spaces. */
 /**
- * What an @mention can name. An on-duty Duck: its name. An Off-duty Duck wears no name (names are masks), so it is
+ * What an @mention can name. An open Duck: its name. A Closed Duck wears no name (names are masks), so it is
  * named by its chat title or its session id; the Mac's @ list inserts the title.
  */
 export function duckMentionTokens(
-  duck: { name: string | null; duty: "on" | "off"; currentSessionId: string | null },
+  duck: { name: string | null; state: DuckState; currentSessionId: string | null },
   title: string | null | undefined,
 ): string[] {
   const out: string[] = [];
   if (duck.name) out.push(duck.name);
-  if (duck.duty === "off") {
+  if (duck.state === "closed") {
     if (title?.trim()) out.push(title.trim());
     if (duck.currentSessionId) out.push(duck.currentSessionId);
   }
@@ -1487,15 +1494,15 @@ function agoShort(ms: number): string {
 /** The status line of a Duck, written once for every surface. */
 export function statusLineOf(
   activity: DuckActivity,
-  duty: "on" | "off",
+  open: boolean,
   running: number,
   task: string | undefined,
   lastActiveAt: number,
   now: number,
 ): string {
-  if (duty === "off") {
+  if (!open) {
     const ago = agoShort(now - lastActiveAt);
-    return ago === "now" ? "off duty just now" : `off duty ${ago} ago`;
+    return ago === "now" ? "Closed just now" : `Closed ${ago} ago`;
   }
   switch (activity) {
     case "working": {

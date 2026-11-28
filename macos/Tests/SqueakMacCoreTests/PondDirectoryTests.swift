@@ -18,13 +18,13 @@ import Testing
 
     private func decode() throws -> PondDirectory { try JSONDecoder().decode(PondDirectory.self, from: Data(json.utf8)) }
 
-    @Test func dutyCountsDecodeWhenSentAndAreNilFromAnOlderDaemon() throws {
+    @Test func duckCountsDecodeWhenSentAndAreNilFromAnOlderDaemon() throws {
         let d = try decode()
-        #expect(d.ponds[0].dutyCounts == nil)
-        let sent = #"{"schema":1,"ponds":[{"id":"p1","name":"s","dutyCounts":{"onDuty":2,"working":1,"needsYou":1,"offDuty":1,"total":3}}]}"#
+        #expect(d.ponds[0].duckCounts == nil)
+        let sent = #"{"schema":1,"ponds":[{"id":"p1","name":"s","duckCounts":{"open":2,"working":1,"needsYou":1,"closed":1,"total":3}}]}"#
         let e = try JSONDecoder().decode(PondDirectory.self, from: Data(sent.utf8))
-        let c = e.ponds[0].dutyCounts
-        #expect(c == PondCounts(onDuty: 2, working: 1, needsYou: 1, offDuty: 1, total: 3))
+        let c = e.ponds[0].duckCounts
+        #expect(c == PondCounts(open: 2, working: 1, needsYou: 1, closed: 1, total: 3))
     }
 
     @Test func decodesTheHostsShape() throws {

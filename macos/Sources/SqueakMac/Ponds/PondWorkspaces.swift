@@ -156,17 +156,17 @@ struct PondChatRowView: View {
                         InlineTitleEditor(session: s, font: Typo.label)
                     } else {
                         // The Duck's name is the label; the chat's title is only secondary text (never the sender or the label).
-                        // An Off-duty Duck wears no name: its chat title leads.
-                        let name = row.heading ?? (row.offDuty != nil ? nil : row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) })
+                        // A Closed Duck wears no name: its chat title leads.
+                        let name = row.heading ?? (row.closedNote != nil ? nil : row.local.flatMap { model.session($0) }.flatMap { model.duckName(of: $0) })
                         Text(verbatim: name ?? row.title).font(Typo.label).foregroundStyle(Theme.ink)
                             .lineLimit(2).multilineTextAlignment(.leading)
-                        if let name, name != row.title, row.offDuty == nil {
+                        if let name, name != row.title, row.closedNote == nil {
                             Text(verbatim: row.title).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                         }
                     }
                     HStack(spacing: 6) {
                         if let m = row.mark { ChatMarkGlyph(mark: m, leading: true) } else { PondStateMark(state: row.state, leading: true) }
-                        Text(verbatim: row.statusLine ?? row.offDuty?.line ?? row.mark?.words ?? PondSentence.stateWord(row.state.session))
+                        Text(verbatim: row.statusLine ?? row.closedNote?.line ?? row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
                         if row.ducklingsRunning > 0, row.statusLine == nil {
                             HStack(spacing: 2) {
@@ -176,7 +176,7 @@ struct PondChatRowView: View {
                             .help("\(DucklingWords.count(row.ducklingsRunning)) running")
                             .accessibilityLabel("\(DucklingWords.count(row.ducklingsRunning)) running")
                         }
-                        if row.offDuty == nil, row.statusLine == nil, let at = row.lastAt {
+                        if row.closedNote == nil, row.statusLine == nil, let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
@@ -185,7 +185,7 @@ struct PondChatRowView: View {
                             Text(verbatim: row.streamLabels.joined(separator: ", ")).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    if let summary = row.offDuty?.summary {
+                    if let summary = row.closedNote?.summary {
                         Text(verbatim: summary).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     if let visibility = row.visibility {

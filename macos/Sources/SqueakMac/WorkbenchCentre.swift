@@ -692,7 +692,7 @@ private struct WorkbenchTabs: View {
 
     /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
     /// the pond's overview page, or stays on a file tab open in the stream.
-    /// Closing a tab only closes it: the duck keeps its duty.
+    /// Closing a tab only closes it: the duck stays open or closed as it was.
     private func closeLabel(_ s: HostSession) -> String { "Close \(model.workbenchTitle(s))" }
 
     private func closeTab(_ s: HostSession) {

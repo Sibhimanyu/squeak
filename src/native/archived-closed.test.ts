@@ -17,7 +17,7 @@ afterEach(async () => {
 
 /** A store with one pond; the host is started by the test so the migration runs on its own start. */
 function rig() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "archived-off-duty-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "archived-closed-"));
   const root = path.join(dir, "root");
   fs.mkdirSync(root);
   const store = new NativeStore(":memory:");
@@ -54,8 +54,8 @@ function rig() {
   return { store, host, project, call, chat };
 }
 
-describe("archived chats become Off-duty Ducks at host start", () => {
-  it("an archived chat comes back as a named Off-duty Duck in its pond, with its history, and runs once", async () => {
+describe("archived chats become Closed Ducks at host start", () => {
+  it("an archived chat comes back as a named Closed Duck in its pond, with its history, and runs once", async () => {
     const h = rig();
     const s = h.chat("Old work");
     h.store.appendMessage(s.id, "user", "user", { text: "hello" });
@@ -64,22 +64,22 @@ describe("archived chats become Off-duty Ducks at host start", () => {
 
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
     const duck = h.store.duckBySession(s.id)!;
-    expect(duck).toMatchObject({ duty: "off", projectId: h.project.id });
-    expect(duck.name).toBeNull(); // Off duty: the name went back to the pool
+    expect(duck).toMatchObject({ state: "closed", projectId: h.project.id });
+    expect(duck.name).toBeNull(); // Closed: the name went back to the pool
     expect(h.store.messagesAfter(s.id).length).toBeGreaterThan(0);
 
     const list = await h.call("GET", `/native/projects/${h.project.id}/ducks`);
     const listed = list.json.ducks.find((d: any) => d.id === duck.id);
-    expect(listed).toMatchObject({ duty: "off" });
+    expect(listed).toMatchObject({ open: false });
 
-    // Idempotent: a person puts it on duty, a restart does not take it off again.
-    await h.call("POST", `/native/ducks/${duck.id}/duty`, { on: true });
+    // Idempotent: a person reopens it, a restart does not close it again.
+    await h.call("POST", `/native/ducks/${duck.id}/state`, { open: true });
     h.host.start();
-    expect(h.store.duckRow(duck.id)?.duty).toBe("on");
+    expect(h.store.duckRow(duck.id)?.state).toBe("open");
     expect(h.store.duckBySession(s.id)?.id).toBe(duck.id);
   });
 
-  it("an existing Duck's archived current chat is unarchived and set Off duty, keeping its name as the last name", () => {
+  it("an existing Duck's archived current chat is unarchived and set Closed, keeping its name as the last name", () => {
     const h = rig();
     const s = h.chat("Named");
     const duck = h.store.duckForSession(s.id, h.project.id)!;
@@ -87,7 +87,7 @@ describe("archived chats become Off-duty Ducks at host start", () => {
     h.store.setArchivedAt(s.id, new Date().toISOString());
     h.host.start();
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
-    expect(h.store.duckRow(duck.id)).toMatchObject({ name: null, lastName: "Pip", duty: "off" });
+    expect(h.store.duckRow(duck.id)).toMatchObject({ name: null, lastName: "Pip", state: "closed" });
   });
 
   it("a Duck's older chat stays in its history; a chat Delete Duck archived stays gone", async () => {
@@ -109,15 +109,15 @@ describe("archived chats become Off-duty Ducks at host start", () => {
   });
 });
 
-describe("the archive routes are Off duty", () => {
-  it("POST archive puts the Duck off duty without archiving; unarchive puts it back on duty", async () => {
+describe("the archive routes are Closed", () => {
+  it("POST archive closes the Duck without archiving; unarchive reopens it", async () => {
     const h = rig();
     const s = h.chat("Chat");
     const off = await h.call("POST", `/native/sessions/${s.id}/archive`, {});
-    expect(off.json).toMatchObject({ ok: true, archived: false, duty: "off" });
+    expect(off.json).toMatchObject({ ok: true, archived: false, open: false });
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
-    expect(h.store.duckOf(s.id).duty).toBe("off");
+    expect(h.store.duckOf(s.id).state).toBe("closed");
     const on = await h.call("POST", `/native/sessions/${s.id}/unarchive`, {});
-    expect(on.json).toMatchObject({ duty: "on" });
+    expect(on.json).toMatchObject({ open: true });
   });
 });

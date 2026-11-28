@@ -465,7 +465,7 @@ final class AppModel {
         saveTabs(tabStore.prune(exists: { $0.kind != .file || !gone.contains($0.id) }))
     }
 
-    /// Closes a Duck's tab and only that (never its duty). Returns the chat of the tab that becomes current, if it is a chat.
+    /// Closes a Duck's tab and only that (never whether it is open). Returns the chat of the tab that becomes current, if it is a chat.
     func closeDuckTab(_ s: HostSession, in workspace: SidebarWorkspace) -> SessionKey? {
         let pond = tabPond(of: s)
         let next = tabStore.close(.of(s), in: pond)

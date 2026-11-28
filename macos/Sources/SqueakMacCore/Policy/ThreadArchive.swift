@@ -1,7 +1,7 @@
 import Foundation
 
 /// Archiving an add-on thread: which menu items appear, which chats the lists show, and the archived view's words.
-/// Squeak's own chats (Ducks) have no archive: the host moves old archived ones to Off duty, and Off duty and Delete
+/// Squeak's own chats (Ducks) have no archive: the host moves old archived ones to Closed, and Closed and Delete
 /// Duck are all a Duck has. Two kinds still archive:
 ///  - any other thread (Conductor, terminal, Codex, desktop, headless): hidden in Squeak only, by the daemon
 ///    (`archived-sessions.json`); Conductor's database and the agent's files are never touched;
@@ -28,7 +28,7 @@ public enum ThreadArchive {
     /// "Archive" for any thread in the list (a working Squeak chat asks to stop first); "Unarchive" for an archived one;
     /// nothing for a row with no key. One rule for the sidebar, chat tabs, pond rows, Main chats and the Archived page.
     public static func menuItem(_ s: HostSession) -> MenuItem? {
-        // Ducks have no archive, only Off duty and Delete Duck: a Squeak chat offers neither Archive nor Unarchive.
+        // Ducks have no archive, only Closed and Delete Duck: a Squeak chat offers neither Archive nor Unarchive.
         guard kind(s) == .fleet else { return nil }
         if s.archivedAt != nil { return .unarchive }
         return s.state != .working && s.state != .blocked ? .archive : nil

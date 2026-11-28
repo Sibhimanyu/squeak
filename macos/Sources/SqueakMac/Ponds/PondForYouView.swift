@@ -11,7 +11,7 @@ extension AppModel {
         var ducks: [RosterDuck] = []
         if let native = PondsModel.shared.native(key: key) {
             let threads = PondRoomStore.shared.model(for: native.id).feed.threads
-            ducks = RoomRoster.roster(RoomRosterStore.shared.model(for: native.id).list, threads: threads).onDuty
+            ducks = RoomRoster.roster(RoomRosterStore.shared.model(for: native.id).list, threads: threads).open
         }
         func sid(_ s: HostSession) -> String { NativeAdapter.nativeId(s) ?? s.key.hostSessionId }
         func duck(for s: HostSession) -> RosterDuck? { ducks.first { $0.sessionId == sid(s) || (s.duckId != nil && $0.id == s.duckId) } }
@@ -35,6 +35,6 @@ extension AppModel {
         let roster = RoomRosterStore.shared.model(for: native.id).list
         let sid = NativeAdapter.nativeId(s) ?? s.key.hostSessionId
         let d = RoomRoster.roster(roster, threads: threads)
-        return (d.onDuty + d.offDuty).first { $0.sessionId == sid || (s.duckId != nil && $0.id == s.duckId) }?.name
+        return (d.open + d.closed).first { $0.sessionId == sid || (s.duckId != nil && $0.id == s.duckId) }?.name
     }
 }

@@ -1,7 +1,7 @@
 import Foundation
 
-// The new layout's centre top (DESIGN.md "New layout"): a row of avatars instead of a tab strip. The Pond's on-duty Ducks in roster order. A Duck opened while Off duty (from the roster or search) shows at the
-// end of the row for as long as it is open; showing it never changes its duty. Pure: the view only draws, and every
+// The new layout's centre top (DESIGN.md "New layout"): a row of avatars instead of a tab strip. The Pond's open Ducks in roster order. A Duck opened while Closed (from the roster or search) shows at the
+// end of the row for as long as it is open; showing it never opens or closes it. Pure: the view only draws, and every
 // word and flag here comes from the host's roster.
 
 /// What the centre shows now, as the row needs it.
@@ -30,10 +30,10 @@ public struct DuckRowAvatar: Equatable, Sendable, Identifiable {
     /// The chat's title (the host's), and whether the Duck's name is worn right now.
     public var title: String?
     public var wearsName = true
-    public var onDuty: Bool { presence != .off }
+    public var isOpen: Bool { presence != .off }
     /// The working glyph shows only on a working Duck.
     public var showsWorkingGlyph: Bool { presence == .working }
-    /// The Duck needs the person by the host's one rule: waiting, or a failure not yet seen (any duty).
+    /// The Duck needs the person by the host's one rule: waiting, or a failure not yet seen (open or closed).
     public var needsYou: Bool { presence == .waiting || failed }
     /// The host says its chat failed and the person has not seen it: the circle-x badge, not the triangle.
     public var failed: Bool = false
@@ -63,12 +63,12 @@ public enum DuckRowSelection: Equatable, Sendable {
 }
 
 public struct DuckRowModel: Equatable, Sendable {
-    /// The Pond's on-duty Ducks in roster order (the Room has no avatar here: the pond header's switch goes there).
+    /// The Pond's open Ducks in roster order (the Room has no avatar here: the pond header's switch goes there).
     public var ducks: [DuckRowAvatar]
     public var selection: DuckRowSelection
     public var selectedDuck: String? { if case .duck(let id) = selection { id } else { nil } }
     public var roomSelected: Bool { selection == .room }
-    /// Nothing on duty and no Duck open: the row is not drawn at all (the Dashboard | Room switch is the way to the Room).
+    /// Nothing open and no Duck open: the row is not drawn at all (the Dashboard | Room switch is the way to the Room).
     public var isEmpty: Bool { ducks.isEmpty }
 }
 
@@ -78,12 +78,12 @@ public enum DuckAvatarRow {
             DuckRowAvatar(id: d.id, name: d.name, colourSeed: d.colourSeed, agent: d.agent, presence: d.presence, presenceLine: d.presenceLine, sessionId: d.sessionId, streams: d.streams, title: d.title, wearsName: d.wearsName,
                           failed: d.needsYouReason == "failed", failureText: d.failure)
         }
-        var ducks = roster.onDuty.map(avatar)
+        var ducks = roster.open.map(avatar)
         switch place {
         case .room: return DuckRowModel(ducks: ducks, selection: .room)
         case .dashboard: return DuckRowModel(ducks: ducks, selection: .none)
         case .chat(let sessionId, let duckId):
-            let opened = (roster.onDuty + roster.offDuty).first { d in
+            let opened = (roster.open + roster.closed).first { d in
                 if let duckId, d.id == duckId { return true }
                 if let sessionId, d.sessionId == sessionId { return true }
                 return false

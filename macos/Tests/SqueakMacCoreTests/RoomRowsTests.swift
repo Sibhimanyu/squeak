@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct RoomRowsTests {
     private func thread(_ id: String, name: String) -> RoomThread {
-        RoomThread(sessionId: id, title: "T", agent: "claude", state: .idle, name: name, duty: .on)
+        RoomThread(sessionId: id, title: "T", agent: "claude", state: .idle, name: name, isOpen: true)
     }
     private let ducks = [("s1", "Sage 2"), ("s2", "Dot 2")]
     private var threads: [RoomThread] { ducks.map { thread($0.0, name: $0.1) } }

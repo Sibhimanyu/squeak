@@ -21,9 +21,9 @@ public struct RoomDuck: Sendable, Equatable, Identifiable {
     /// The person's one-line role, else the chat's title when it is not the duck's name.
     public var roleLine: String?
     public var presence: RoomDuckPresence
-    /// "Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Off duty".
+    /// "Working \u{00B7} 3 of 5", "Waiting on you", "Idle \u{00B7} 2h ago", "Closed".
     public var presenceLine: String
-    public var onDuty: Bool { presence != .off }
+    public var isOpen: Bool { presence != .off }
     public var role: String?
 }
 
@@ -35,19 +35,19 @@ public enum RoomDucks {
         return agent.map { $0.prefix(1).uppercased() + $0.dropFirst() }
     }
 
-    /// Newest activity first, off duty last; ties by name, so the roster only moves when something real happens.
+    /// Newest activity first, closed last; ties by name, so the roster only moves when something real happens.
     public static func roster(_ threads: [RoomThread], now: Date = Date()) -> [RoomDuck] {
         func key(_ t: RoomThread) -> Int64 { t.lastActiveAt ?? t.turnStartedAt ?? t.lastAt ?? 0 }
         return threads.sorted { a, b in
-            if a.onDuty != b.onDuty { return a.onDuty }
+            if a.isOpen != b.isOpen { return a.isOpen }
             if key(a) != key(b) { return key(a) > key(b) }
             return (a.duckName, a.sessionId) < (b.duckName, b.sessionId)
         }.map { duck($0, now: now) }
     }
 
-    /// The header's avatars: the roster's on-duty Ducks (the host's list), newest first; none when every duck is closed.
+    /// The header's avatars: the roster's open Ducks (the host's list), newest first; none when every duck is closed.
     public static func headerDucks(roster ducks: [PondDuck], threads: [RoomThread] = [], now: Date = Date()) -> [RoomDuck] {
-        RoomRoster.roster(ducks, threads: threads, now: now).onDuty.map { d in
+        RoomRoster.roster(ducks, threads: threads, now: now).open.map { d in
             let title = (d.chatTitle ?? "").trimmingCharacters(in: .whitespaces)
             return RoomDuck(
                 sessionId: d.sessionId ?? d.id, name: d.name, agent: d.agent, agentLabel: d.agentLabel,
@@ -57,7 +57,7 @@ public enum RoomDucks {
     }
 
     public static func duck(_ t: RoomThread, now: Date = Date()) -> RoomDuck {
-        let presence: RoomDuckPresence = !t.onDuty ? .off : (t.state == .working ? .working : (t.state == .waiting ? .waiting : .idle))
+        let presence: RoomDuckPresence = !t.isOpen ? .off : (t.state == .working ? .working : (t.state == .waiting ? .waiting : .idle))
         let title = t.title.trimmingCharacters(in: .whitespaces)
         return RoomDuck(
             sessionId: t.sessionId, name: t.duckName, agent: t.agent, agentLabel: agentLabel(t.agent),
@@ -67,7 +67,7 @@ public enum RoomDucks {
 
     static func presenceLine(_ t: RoomThread, presence: RoomDuckPresence, now: Date) -> String {
         switch presence {
-        case .off: return RoomRoster.offDutyAgo(t.lastActiveAt, now: now)
+        case .off: return RoomRoster.closedAgo(t.lastActiveAt, now: now)
         case .waiting: return "Waiting on you"
         case .working:
             if let p = t.progress { return "Working \u{00B7} \(p.current) of \(p.total)" }
@@ -89,13 +89,13 @@ public enum RoomDucks {
         return "\(s / 86_400)d ago"
     }
 
-    /// "2 people \u{00B7} 5 ducks on duty": the header counts only ducks with a live chat; off duty Ducks are not counted.
-    /// The same line from the host's counts (the Dashboard's On duty tile and this subtitle are one number).
-    public static func subtitle(people: Int, counts: PondCounts?) -> String { subtitle(people: people, ducks: counts?.onDuty ?? 0) }
+    /// "2 people \u{00B7} 5 ducks open": the header counts only ducks with a live chat; closed Ducks are not counted.
+    /// The same line from the host's counts (the Dashboard's Open tile and this subtitle are one number).
+    public static func subtitle(people: Int, counts: PondCounts?) -> String { subtitle(people: people, ducks: counts?.open ?? 0) }
 
     public static func subtitle(people: Int, ducks: Int) -> String {
         let p = people == 1 ? "1 person" : "\(people) people"
-        let d = ducks == 0 ? "no ducks on duty" : (ducks == 1 ? "1 duck on duty" : "\(ducks) ducks on duty")
+        let d = ducks == 0 ? "no ducks open" : (ducks == 1 ? "1 duck open" : "\(ducks) ducks open")
         return "\(p) \u{00B7} \(d)"
     }
 

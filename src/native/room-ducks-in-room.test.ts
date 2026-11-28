@@ -255,12 +255,12 @@ describe("waking", () => {
     expect(r.delivered[0]!.text).toContain("can you look at the build");
   });
 
-  it("wakes on a Duck's @mention in the agents level, never itself, and never an off-duty Duck", () => {
+  it("wakes on a Duck's @mention in the agents level, never itself, and never a closed Duck", () => {
     const r = rig({ members: 1 });
     const pip = r.duck("Pip");
     const sage = r.duck("Sage");
     const mina = r.duck("Mina");
-    r.store.updateDuck(mina.d.id, { duty: "off" } as never);
+    r.store.updateDuck(mina.d.id, { state: "closed" } as never);
     r.room.agentPost(pip.s, {
       kind: "message",
       level: "agents",

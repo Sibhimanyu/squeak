@@ -505,11 +505,11 @@ export class SessionHost extends EventEmitter {
     this.titler?.backfillWeak();
     // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
     this.store.adoptWorkspaces();
-    // Ducks have no archive: chats archived before become Off-duty Ducks, once.
+    // Ducks have no archive: chats archived before become Closed Ducks, once.
     try {
-      this.store.migrateArchivedToOffDuty((s) => projectOfSession(this.store, s));
+      this.store.migrateArchivedToClosed((s) => projectOfSession(this.store, s));
     } catch (error) {
-      logHostError("archived to off duty", error);
+      logHostError("archived to closed", error);
     }
     // Notes the Ducks-to-Pond move wrote counted as activity: hide them and restore the chats' last activity (once).
     try {
@@ -1211,17 +1211,17 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * Takes a chat off duty (Ducks have no archive). A chat waiting on the person (approval, plan, question) is stood down
+   * Closes a chat (Ducks have no archive). A chat waiting on the person (approval, plan, question) is stood down
    * at once: what it waits on is denied, as a Stop does. A working chat is refused unless `stop` is true, which stops the
    * turn (waiting for it to settle, up to `timeoutMs`; the agent is closed if it will not) and drops the queued
-   * messages. Its idle agent process is closed. The caller sets the Duck's duty.
+   * messages. Its idle agent process is closed. The caller sets whether the Duck is open.
    */
   async standDown(id: string, options: { stop?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const s = this.require(id);
     const waiting = NEEDS.has(s.status);
     const working = BUSY.has(s.status) && !waiting;
     if (!waiting && (working || this.runners.get(id)?.activity?.().busy === true) && options.stop !== true)
-      throw new HostError("Stop the chat before taking it off duty.", 409);
+      throw new HostError("Stop the chat before closing it.", 409);
     if (waiting || working || options.stop === true) await this.stopForArchive(id, options.timeoutMs ?? 8000);
     const runner = this.runners.get(id);
     if (runner) {

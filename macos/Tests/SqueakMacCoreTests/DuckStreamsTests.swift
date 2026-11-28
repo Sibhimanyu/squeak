@@ -27,7 +27,7 @@ import Testing
     @Test func streamsFlowFromTheHostDuckToTheRosterAndTheAvatar() throws {
         let duck = PondDuck(id: "d1", name: "Pip", currentSessionId: "s1", streams: [RoomStream(workspaceId: "w1", branch: "a")])
         let roster = RoomRoster.roster([duck])
-        #expect(roster.onDuty[0].streams.map(\.branch) == ["a"])
+        #expect(roster.open[0].streams.map(\.branch) == ["a"])
         let row = DuckAvatarRow.build(roster: roster, place: .dashboard)
         #expect(row.ducks[0].streams.map(\.branch) == ["a"])
     }

@@ -196,14 +196,14 @@ public struct PondAvatarRow: Sendable, Equatable {
 
 // MARK: Ducks
 
-/// The Dashboard's one list of Ducks: working first, then the rest most recent first; Off duty folded at the end
+/// The Dashboard's one list of Ducks: working first, then the rest most recent first; Closed folded at the end
 /// (DESIGN.md 8.12 allows this one state-based order; every other list stays newest first and never moves by state).
 public struct PondDuckSections: Sendable, Equatable {
-    public var onDuty: [PondChatRow]
-    public var offDuty: [PondChatRow]
+    public var open: [PondChatRow]
+    public var closed: [PondChatRow]
 
     public static func isWorking(_ row: PondChatRow) -> Bool {
-        row.onDuty && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
+        row.isOpen && (row.state == .working || (row.statusLine == nil && row.ducklingsRunning > 0))
     }
 
     public static func build(_ layout: PondHomeLayout) -> PondDuckSections { build(layout.threads) }
@@ -213,14 +213,14 @@ public struct PondDuckSections: Sendable, Equatable {
             let x = a.lastAt ?? .distantPast, y = b.lastAt ?? .distantPast
             return x != y ? x > y : a.title.localizedCompare(b.title) == .orderedAscending
         }
-        let on = rows.filter(\.onDuty), off = rows.filter { !$0.onDuty }
+        let on = rows.filter(\.isOpen), off = rows.filter { !$0.isOpen }
         let working = on.filter(isWorking).sorted(by: recent)
         let rest = on.filter { !isWorking($0) }.sorted(by: recent)
-        return PondDuckSections(onDuty: working + rest, offDuty: off.sorted(by: recent))
+        return PondDuckSections(open: working + rest, closed: off.sorted(by: recent))
     }
 
-    public var isEmpty: Bool { onDuty.isEmpty && offDuty.isEmpty }
-    public var count: Int { onDuty.count + offDuty.count }
+    public var isEmpty: Bool { open.isEmpty && closed.isEmpty }
+    public var count: Int { open.count + closed.count }
 }
 
 // MARK: Needs you
@@ -330,14 +330,14 @@ public enum PondLatest {
 public struct PondDashboardBlocks: Sendable, Equatable {
     public var needsYou: Bool
     public var ducks: Bool
-    public var offDuty: Bool
+    public var closed: Bool
     public var latest: Bool
     /// No Ducks at all: the brand duck and one sentence, and nothing else to press.
     public var emptyGuide: Bool
 
     public static func of(needsYou: Int, ducks: PondDuckSections, latest: Int) -> PondDashboardBlocks {
         PondDashboardBlocks(
-            needsYou: needsYou > 0, ducks: !ducks.onDuty.isEmpty, offDuty: !ducks.offDuty.isEmpty, latest: latest > 0, emptyGuide: ducks.isEmpty)
+            needsYou: needsYou > 0, ducks: !ducks.open.isEmpty, closed: !ducks.closed.isEmpty, latest: latest > 0, emptyGuide: ducks.isEmpty)
     }
 
     /// The one sentence under the duck in an empty Ducks block, for the role.

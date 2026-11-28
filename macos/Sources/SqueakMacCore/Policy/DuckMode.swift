@@ -178,11 +178,11 @@ public enum DuckList {
 
 /// The number on a pond's sidebar row (shown when the pond is folded or lists nothing).
 public enum PondRowCount {
-    /// Ducks mode: the pond's on-duty ducks, the pond dashboard's "On duty" tile (the daemon's `counts`). The sidebar tree
+    /// Ducks mode: the pond's open ducks, the pond dashboard's "Open" tile (the daemon's `counts`). The sidebar tree
     /// holds only the last day's chats, so it cannot count a pond's ducks; it is the fallback until the roster arrives.
     /// Flag off: the chats in the tree, or the listed rows when more.
     public static func of(ducksMode: Bool, counts: PondCounts?, treeChats: Int, listed: Int) -> Int {
-        if ducksMode, let counts { return counts.onDuty }
+        if ducksMode, let counts { return counts.open }
         return max(treeChats, listed)
     }
 }

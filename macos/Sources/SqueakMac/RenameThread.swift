@@ -20,7 +20,7 @@ struct RenameThreadItem: View {
 }
 
 extension AppModel {
-    /// Archives or unarchives an add-on thread (a Squeak chat is a Duck and has no archive; Off duty is its only rest). The
+    /// Archives or unarchives an add-on thread (a Squeak chat is a Duck and has no archive; Closed is its only rest). The
     /// thread is hidden in Squeak only, by the daemon. A refusal shows as the note;
     /// the lists follow the next refresh, which is asked for now.
     func archiveThread(_ s: HostSession, archived: Bool) {
@@ -30,7 +30,7 @@ extension AppModel {
             let result: NativeActionResult
             switch kind {
             case .squeak:
-                return  // Ducks have no archive (Off duty and Delete Duck)
+                return  // Ducks have no archive (Closed and Delete Duck)
             case .fleet:
                 result = await self.client.archiveThread(sessionKey: s.key.hostSessionId, archived: archived)
             }

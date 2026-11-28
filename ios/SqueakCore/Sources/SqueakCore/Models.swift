@@ -117,7 +117,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var duckId: String? = nil
         public var branch: String? = nil
         public var onMain: Bool? = nil
-        /// "off" when the chat's duck is off duty; absent = on duty (and from an older Mac).
+        /// True when the chat's duck is closed; absent = open.
+        public var duckClosed: Bool? = nil
+        /// What an older Mac sent in place of `duckClosed` ("off" = closed); read only, never written by this app.
         public var duckDuty: String? = nil
         /// What the chat runs, named by the Mac: "Opus 5.5 · 1M", its thinking level ("Medium", "Extra high")
         /// and whether fast mode is on. Absent from an older Mac and for a terminal agent.
@@ -571,7 +573,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var activity: String? = nil
         public var working: Int? = nil
         public var needsYou: Int? = nil
-        /// The Mac's dashboard numbers for the pond (on duty, working, needs you, off duty, total); an older Mac sends none.
+        /// The Mac's dashboard numbers for the pond (open, working, needs you, closed, total); an older Mac sends none.
         public var counts: PondCounts? = nil
         public struct Member: Codable, Equatable, Sendable {
             public let name: String

@@ -173,11 +173,11 @@ export const MIGRATIONS: string[] = [
   // branches (the stream's branch on its chats and on the duck sitting in it), Main chats stay branch-less (= main).
   `
   CREATE TABLE IF NOT EXISTS session_ducks (
-    session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on');
+    session_id TEXT PRIMARY KEY, name TEXT, role TEXT, state TEXT NOT NULL DEFAULT 'open');
   CREATE TABLE IF NOT EXISTS ducks (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, role TEXT, colour_seed TEXT NOT NULL,
     notebook TEXT NOT NULL DEFAULT '', current_session_id TEXT, created_at TEXT NOT NULL,
-    duty TEXT NOT NULL DEFAULT 'on');
+    state TEXT NOT NULL DEFAULT 'open');
   CREATE INDEX IF NOT EXISTS ducks_project ON ducks(project_id);
   CREATE TABLE IF NOT EXISTS duck_sessions (
     session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
@@ -238,7 +238,7 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE room_posts ADD COLUMN canvases TEXT;
   `,
   // No Archived: one-shot host migrations are recorded here so each runs once, and a deleted Duck's chats are
-  // remembered so the archived-to-Off-duty migration never brings a deleted Duck back.
+  // remembered so the archived-to-Closed migration never brings a deleted Duck back.
   `
   CREATE TABLE IF NOT EXISTS host_migrations (name TEXT PRIMARY KEY, at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS deleted_duck_chats (session_id TEXT PRIMARY KEY, at TEXT NOT NULL);
@@ -291,12 +291,15 @@ export interface NotebookRow {
   lastUsedAt: number;
 }
 
+/** A Duck is Open (listed, working, can be mentioned) or Closed (resting: history kept, can be reopened). */
+export type DuckState = "open" | "closed";
+
 export interface DuckRow {
   id: string;
   projectId: string;
-  /** The mask it wears while on duty; null while Off duty (the name goes back to the pool) or before it has one. */
+  /** The mask it wears while open; null while Closed (the name goes back to the pool) or before it has one. */
   name: string | null;
-  /** The name it wore when it last went Off duty (history only; never routes new @mentions). */
+  /** The name it wore when it last closed (history only; never routes new @mentions). */
   lastName: string | null;
   role: string | null;
   /** Seeds the duck's colour: a migrated duck's first session id, else its own id. */
@@ -304,7 +307,7 @@ export interface DuckRow {
   notebook: string;
   currentSessionId: string | null;
   createdAt: string;
-  duty: "on" | "off";
+  state: DuckState;
   /** The working copy (WorkspaceRow, an internal worktree) the duck works in; null = Main, or no session yet. */
   workspaceId: string | null;
   /** The duck's branch (denormalised from that working copy); null = Main, or no session yet. */
@@ -1588,7 +1591,7 @@ export class NativeStore {
 
   /**
    * Once (recorded in `host_migrations`): a Duck name never shows a digit. Stored sender names on Duck posts and
-   * Off-duty Ducks' last names that end in a space and digits ("Quill 2") lose the suffix, or become the Duck's
+   * Closed Ducks' last names that end in a space and digits ("Quill 2") lose the suffix, or become the Duck's
    * current or last name when the stored one is one of its `duck_aliases` (it was renamed). A leading "@Quill 2 " on
    * a hand-off's text follows. Returns how many posts and Ducks were rewritten.
    */
@@ -1843,11 +1846,11 @@ export class NativeStore {
     // `session_ducks` is the older per-session table; it is only read once, to turn its rows into ducks.
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS session_ducks (
-         session_id TEXT PRIMARY KEY, name TEXT, role TEXT, duty TEXT NOT NULL DEFAULT 'on');
+         session_id TEXT PRIMARY KEY, name TEXT, role TEXT, state TEXT NOT NULL DEFAULT 'open');
        CREATE TABLE IF NOT EXISTS ducks (
          id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT, role TEXT, colour_seed TEXT NOT NULL,
          notebook TEXT NOT NULL DEFAULT '', current_session_id TEXT, created_at TEXT NOT NULL,
-         duty TEXT NOT NULL DEFAULT 'on');
+         state TEXT NOT NULL DEFAULT 'open');
        CREATE INDEX IF NOT EXISTS ducks_project ON ducks(project_id);
        CREATE TABLE IF NOT EXISTS duck_sessions (
          session_id TEXT PRIMARY KEY, duck_id TEXT NOT NULL, started_at TEXT NOT NULL);
@@ -1862,13 +1865,29 @@ export class NativeStore {
     if (!(this.db.prepare("PRAGMA table_info(ducks)").all() as Row[]).some((c) => c.name === "last_name")) {
       this.db.exec("ALTER TABLE ducks ADD COLUMN last_name TEXT");
     }
+    this.migrateLegacyStateColumn("ducks");
+    this.migrateLegacyStateColumn("session_ducks");
     this.ducksReady = true;
   }
 
-  /** A chat's duck settings: its duck's name and role (null = none) and duty (default on). */
-  duckOf(sessionId: string): { name: string | null; role: string | null; duty: "on" | "off" } {
+  /**
+   * Once per table, idempotent: an older native.db keeps a `duty` column holding 'on' / 'off'. It becomes `state`
+   * holding 'open' / 'closed' (rename, then rewrite the values in the same transaction), so no row is lost and a
+   * second run finds nothing to do. A table that already has `state` is left alone.
+   */
+  private migrateLegacyStateColumn(table: "ducks" | "session_ducks"): void {
+    const cols = (this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((c) => c.name as string);
+    if (!cols.includes("duty") || cols.includes("state")) return;
+    this.db.transaction(() => {
+      this.db.exec(`ALTER TABLE ${table} RENAME COLUMN duty TO state`);
+      this.db.exec(`UPDATE ${table} SET state = CASE state WHEN 'off' THEN 'closed' ELSE 'open' END`);
+    })();
+  }
+
+  /** A chat's duck settings: its duck's name and role (null = none) and state (default open). */
+  duckOf(sessionId: string): { name: string | null; role: string | null; state: DuckState } {
     const d = this.duckBySession(sessionId);
-    return { name: d?.name ?? null, role: d?.role ?? null, duty: d?.duty ?? "on" };
+    return { name: d?.name ?? null, role: d?.role ?? null, state: d?.state ?? "open" };
   }
 
   duckRow(id: string): DuckRow | null {
@@ -1915,20 +1934,20 @@ export class NativeStore {
     role?: string | null;
     colourSeed?: string;
     currentSessionId?: string | null;
-    duty?: "on" | "off";
+    state?: DuckState;
     createdAt?: string;
   }): DuckRow {
     this.ducksTable();
     const id = randomUUID();
     const at = input.currentSessionId ? this.getSession(input.currentSessionId) : null;
     const seed = input.colourSeed ?? id;
-    const off = input.duty === "off";
+    const off = input.state === "closed";
     const given = input.name?.trim() ? input.name : null;
-    // A name is a mask worn on duty: an Off-duty Duck holds none (a given one is kept as its last name).
+    // A name is a mask worn while open: A Closed Duck holds none (a given one is kept as its last name).
     const name = off ? null : (given ?? this.freshDuckName(input.projectId, seed));
     this.db
       .prepare(
-        `INSERT INTO ducks (id, project_id, name, last_name, role, colour_seed, notebook, current_session_id, created_at, duty, workspace_id, branch)
+        `INSERT INTO ducks (id, project_id, name, last_name, role, colour_seed, notebook, current_session_id, created_at, state, workspace_id, branch)
          VALUES (?,?,?,?,?,?,'',?,?,?,?,?)`,
       )
       .run(
@@ -1940,21 +1959,21 @@ export class NativeStore {
         seed,
         input.currentSessionId ?? null,
         input.createdAt ?? nowIso(),
-        input.duty ?? "on",
+        input.state ?? "open",
         at?.workspaceId ?? null,
         at?.branch ?? null,
       );
     return this.duckRow(id)!;
   }
 
-  /** Name, role (null clears), notebook, duty and current session; a key left out is kept. */
+  /** Name, role (null clears), notebook, state and current session; a key left out is kept. */
   updateDuck(
     id: string,
     patch: {
       name?: string | null;
       role?: string | null;
       notebook?: string;
-      duty?: "on" | "off";
+      state?: DuckState;
       currentSessionId?: string | null;
       projectId?: string;
     },
@@ -1962,28 +1981,28 @@ export class NativeStore {
     const cur = this.duckRow(id);
     if (!cur) return;
     const pond = patch.projectId !== undefined ? patch.projectId : cur.projectId;
-    const duty = patch.duty !== undefined ? patch.duty : cur.duty;
+    const state = patch.state !== undefined ? patch.state : cur.state;
     let name: string | null;
     let lastName = cur.lastName;
-    if (duty === "off") {
-      // Off duty releases the name back to the pool; the chat title identifies the Duck until it is back on duty.
+    if (state === "closed") {
+      // Closed releases the name back to the pool; the chat title identifies the Duck until it is reopened.
       name = null;
       if (cur.name?.trim()) lastName = cur.name;
     } else {
       const wanted = patch.name !== undefined ? patch.name : cur.name;
-      // On duty a Duck always wears a name: a blank one (or coming back on duty) gets a fresh unused one.
+      // An open Duck always wears a name: a blank one (or being reopened) gets a fresh unused one.
       name = wanted?.trim() ? wanted : this.freshDuckName(pond, cur.colourSeed, id);
     }
     this.db
       .prepare(
-        "UPDATE ducks SET name=?, last_name=?, role=?, notebook=?, duty=?, current_session_id=?, project_id=? WHERE id=?",
+        "UPDATE ducks SET name=?, last_name=?, role=?, notebook=?, state=?, current_session_id=?, project_id=? WHERE id=?",
       )
       .run(
         name,
         lastName,
         patch.role !== undefined ? patch.role : cur.role,
         patch.notebook !== undefined ? patch.notebook : cur.notebook,
-        duty,
+        state,
         patch.currentSessionId !== undefined ? patch.currentSessionId : cur.currentSessionId,
         patch.projectId !== undefined ? patch.projectId : cur.projectId,
         id,
@@ -1991,10 +2010,10 @@ export class NativeStore {
     if (patch.currentSessionId) this.syncDuckLinks(id);
   }
 
-  /** A short name for a Duck going on duty: unused by the Pond's on-duty Ducks, seeded by its colour seed. */
+  /** A short name for a Duck opening: unused by the Pond's open Ducks, seeded by its colour seed. */
   freshDuckName(projectId: string, seed: string, exceptId?: string): string {
     const taken = this.listDucks(projectId)
-      .filter((d) => d.id !== exceptId && d.duty === "on" && d.name)
+      .filter((d) => d.id !== exceptId && d.state === "open" && d.name)
       .map((d) => d.name as string);
     return pickDuckName(seed, taken);
   }
@@ -2013,9 +2032,9 @@ export class NativeStore {
   }
 
   /**
-   * Once (recorded in `host_migrations`): a name is a mask worn on duty. Every on-duty Duck whose name ends in a space
+   * Once (recorded in `host_migrations`): a name is a mask worn while open. Every open Duck whose name ends in a space
    * and digits ("Dot 2") gets a fresh unused one (oldest first, seeded by colour; the old name stays as an alias);
-   * Duck posts keep the name their sender wore (stored on the post); every Off-duty Duck releases its name to
+   * Duck posts keep the name their sender wore (stored on the post); every Closed Duck releases its name to
    * `last_name`. Returns how many Ducks changed.
    */
   releaseDuckNames(): number {
@@ -2024,14 +2043,14 @@ export class NativeStore {
     if (this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(NAME)) return 0;
     const rows = this.db
       .prepare(
-        "SELECT id, project_id, name, colour_seed, duty FROM ducks WHERE name IS NOT NULL ORDER BY created_at, id",
+        "SELECT id, project_id, name, colour_seed, state FROM ducks WHERE name IS NOT NULL ORDER BY created_at, id",
       )
       .all() as Row[];
     let changed = 0;
     this.db.transaction(() => {
       for (const r of rows) {
         const old = (r.name as string).trim();
-        if (r.duty !== "on" || !/\s\d+$/.test(old)) continue;
+        if (r.state !== "open" || !/\s\d+$/.test(old)) continue;
         const fresh = this.freshDuckName(r.project_id as string, r.colour_seed as string, r.id as string);
         this.db.prepare("UPDATE ducks SET name=? WHERE id=?").run(fresh, r.id);
         this.db.prepare("INSERT OR IGNORE INTO duck_aliases (duck_id, alias) VALUES (?,?)").run(r.id, old);
@@ -2046,8 +2065,10 @@ export class NativeStore {
            SELECT 1 FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id
            WHERE ds.session_id = room_posts.session_id AND d.name IS NOT NULL AND TRIM(d.name) <> '')`,
       );
-      const off = this.db.prepare("SELECT COUNT(*) AS n FROM ducks WHERE duty='off' AND name IS NOT NULL").get() as Row;
-      this.db.exec("UPDATE ducks SET last_name=name, name=NULL WHERE duty='off' AND name IS NOT NULL");
+      const off = this.db
+        .prepare("SELECT COUNT(*) AS n FROM ducks WHERE state='closed' AND name IS NOT NULL")
+        .get() as Row;
+      this.db.exec("UPDATE ducks SET last_name=name, name=NULL WHERE state='closed' AND name IS NOT NULL");
       changed += off.n as number;
       this.db.prepare("INSERT OR IGNORE INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
     })();
@@ -2058,7 +2079,7 @@ export class NativeStore {
   nameUnnamedDucks(): number {
     this.ducksTable();
     const rows = this.db
-      .prepare("SELECT id FROM ducks WHERE duty='on' AND (name IS NULL OR TRIM(name)='') ORDER BY created_at, id")
+      .prepare("SELECT id FROM ducks WHERE state='open' AND (name IS NULL OR TRIM(name)='') ORDER BY created_at, id")
       .all() as Row[];
     for (const r of rows) this.updateDuck(r.id as string, {});
     return rows.length;
@@ -2085,11 +2106,11 @@ export class NativeStore {
   }
 
   /**
-   * Ducks have no archive, only Off duty and Delete Duck. Once (recorded in `host_migrations`): every archived chat
-   * becomes an Off-duty Duck that keeps its history, named when it has no name, and is listed again. A chat that
+   * Ducks have no archive, only Closed and Delete Duck. Once (recorded in `host_migrations`): every archived chat
+   * becomes a Closed Duck that keeps its history, named when it has no name, and is listed again. A chat that
    * Delete Duck archived stays gone. `pondOf` finds a chat's pond. Returns how many chats were migrated.
    */
-  migrateArchivedToOffDuty(pondOf: (s: SessionRow) => { id: string } | null): number {
+  migrateArchivedToClosed(pondOf: (s: SessionRow) => { id: string } | null): number {
     const NAME = "archived-to-off-duty";
     this.ducksTable();
     if (this.db.prepare("SELECT 1 FROM host_migrations WHERE name=?").get(NAME)) return 0;
@@ -2106,7 +2127,7 @@ export class NativeStore {
         duck ??= this.duckForSession(s.id, pondOf(s)?.id ?? "");
         if (!duck) continue;
         this.setArchivedAt(s.id, null);
-        this.updateDuck(duck.id, { duty: "off" });
+        this.updateDuck(duck.id, { state: "closed" });
         n += 1;
       }
       this.db.prepare("INSERT INTO host_migrations (name, at) VALUES (?,?)").run(NAME, nowIso());
@@ -2162,7 +2183,7 @@ export class NativeStore {
       .run(duckId);
   }
 
-  /** Ducks of a pond whose working copy is `workspaceId` (any duty), for placement and clean-up. */
+  /** Ducks of a pond whose working copy is `workspaceId` (any state), for placement and clean-up. */
   ducksInWorkspace(workspaceId: string): DuckRow[] {
     this.ducksTable();
     return (
@@ -2200,7 +2221,7 @@ export class NativeStore {
       .filter((w): w is WorkspaceRow => !!w && w.state !== "archived");
   }
 
-  /** Every Duck in a Stream: those that joined it, and older Ducks whose chat runs in its folder (any duty). */
+  /** Every Duck in a Stream: those that joined it, and older Ducks whose chat runs in its folder (any state). */
   ducksInStream(workspaceId: string): DuckRow[] {
     this.ducksTable();
     return (
@@ -2229,7 +2250,7 @@ export class NativeStore {
 
   /**
    * One duck per session that has none: the session's own pond, its first session id as the colour seed, and the
-   * older `session_ducks` row's name, role and duty when it has one. Idempotent. Returns the duck.
+   * older `session_ducks` row's name, role and state when it has one. Idempotent. Returns the duck.
    */
   duckForSession(sessionId: string, projectId: string): DuckRow | null {
     const had = this.duckBySession(sessionId);
@@ -2246,7 +2267,7 @@ export class NativeStore {
       role: (old?.role as string | null | undefined) ?? null,
       colourSeed: sessionId,
       currentSessionId: sessionId,
-      duty: old?.duty === "off" ? "off" : "on",
+      state: old?.state === "closed" ? "closed" : "open",
       createdAt: s.createdAt,
     });
     this.db
@@ -2261,9 +2282,9 @@ export class NativeStore {
     if (d) this.updateDuck(d.id, patch);
   }
 
-  setDuty(sessionId: string, on: boolean): void {
+  setOpen(sessionId: string, on: boolean): void {
     const d = this.duckForSession(sessionId, "");
-    if (d) this.updateDuck(d.id, { duty: on ? "on" : "off" });
+    if (d) this.updateDuck(d.id, { state: on ? "open" : "closed" });
   }
 
   /** Sessions the older per-session duck table has a row for (read once, to migrate them). */
@@ -2272,13 +2293,13 @@ export class NativeStore {
     return (this.db.prepare("SELECT session_id FROM session_ducks").all() as Row[]).map((r) => r.session_id as string);
   }
 
-  /** Every session of an off-duty duck. */
-  offDutyIds(): Set<string> {
+  /** Every session of a closed duck. */
+  closedIds(): Set<string> {
     this.ducksTable();
     return new Set(
       (
         this.db
-          .prepare("SELECT ds.session_id FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id WHERE d.duty='off'")
+          .prepare("SELECT ds.session_id FROM duck_sessions ds JOIN ducks d ON d.id=ds.duck_id WHERE d.state='closed'")
           .all() as Row[]
       ).map((r) => r.session_id as string),
     );
@@ -2397,7 +2418,7 @@ function duckRow(r: Row): DuckRow {
     notebook: (r.notebook as string | null) ?? "",
     currentSessionId: (r.current_session_id as string | null) ?? null,
     createdAt: r.created_at as string,
-    duty: r.duty === "off" ? "off" : "on",
+    state: r.state === "closed" ? "closed" : "open",
     workspaceId: (r.workspace_id as string | null) ?? null,
     branch: (r.branch as string | null) ?? null,
   };

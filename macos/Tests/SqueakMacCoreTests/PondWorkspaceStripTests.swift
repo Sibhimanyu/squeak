@@ -35,13 +35,13 @@ import Testing
         #expect(store.pondItems(pond) == [artifact, diff, review, file])
     }
 
-    @Test func tabsListOnDutyDucksFirstNotClosableThenOffDutyThenItems() {
+    @Test func tabsListOpenDucksFirstNotClosableThenClosedThenItems() {
         let roster = makeRoster()
         let place = DuckRowPlace.chat(sessionId: "s-off", duckId: "off")
         let strip = PondWorkspaceStrip(roster: roster, place: place, items: [file, diff], current: nil)
         let tabs = strip.tabs()
         #expect(tabs.map(\.item) == [.duck("a"), .duck("b"), .duck("no-chat"), .duck("off"), file, diff])
-        #expect(tabs.filter { $0.duck?.onDuty == true }.allSatisfy { !$0.closable })
+        #expect(tabs.filter { $0.duck?.isOpen == true }.allSatisfy { !$0.closable })
         #expect(tabs.first { $0.item == .duck("off") }?.closable == true)
         #expect(tabs.suffix(2).allSatisfy { $0.closable && $0.duck == nil && $0.status == nil })
     }
@@ -56,13 +56,13 @@ import Testing
         #expect(PondTabStatus.line(for: duck(.working, "Working"), activity: "Starting\u{2026}") == "Working")
         #expect(PondTabStatus.line(for: duck(.waiting, "Waiting on you")) == "Needs you")
         #expect(PondTabStatus.line(for: duck(.idle, "Idle \u{00B7} 4m ago")) == "Idle \u{00B7} 4m")
-        #expect(PondTabStatus.line(for: duck(.off, "Off duty")) == "Off duty")
+        #expect(PondTabStatus.line(for: duck(.off, "Closed")) == "Closed")
     }
 
     @Test func aDuckTabIsTitleOverNamePrefixedStatus() {
         let roster = RoomRoster.roster([
             PondDuck(id: "a", name: "Pip", currentSessionId: "s-a", state: .working),
-            PondDuck(id: "off", name: "Cy", duty: .off, currentSessionId: "s-off", wearsName: false)
+            PondDuck(id: "off", name: "Cy", isOpen: false, currentSessionId: "s-off", wearsName: false)
         ], threads: [
             thread("s-a", title: "Fix login", state: .working),
             thread("s-off", title: "Old spike", state: .idle)
@@ -75,13 +75,13 @@ import Testing
         #expect(pip?.help == "Fix login\nPip \u{00B7} Working")
         let off = tabs.first { $0.item == .duck("off") }
         #expect(off?.title == "Old spike")
-        #expect(off?.status == "Off duty")
+        #expect(off?.status == "Closed")
         let open = PondWorkspaceStrip(roster: roster, place: .chat(sessionId: "s-a", duckId: "a"), items: [], current: nil)
         #expect(open.tabs(activity: "Editing auth.ts\u{2026}").first?.status == "Pip \u{00B7} Working \u{00B7} editing auth.ts")
     }
 
-    @Test func aMissingNameIsNotWornEvenOnDuty() throws {
-        let json = #"{"id":"d","name":null,"duty":"on","currentSessionId":"s","title":"Fix login"}"#
+    @Test func aMissingNameIsNotWornEvenOpen() throws {
+        let json = #"{"id":"d","name":null,"open":true,"currentSessionId":"s","title":"Fix login"}"#
         let duck = try JSONDecoder().decode(PondDuck.self, from: Data(json.utf8))
         #expect(!duck.wearsName)
         let tab = PondWorkspaceStrip(roster: RoomRoster.roster([duck]), place: .dashboard, items: [], current: nil).tabs().first
@@ -218,16 +218,16 @@ import Testing
         #expect(empty.step(by: 1) == nil)
     }
 
-    @Test func anOffDutyDuckAppearsOnlyWhileItsChatIsShowing() {
+    @Test func anClosedDuckAppearsOnlyWhileItsChatIsShowing() {
         let roster = makeRoster()
         let place = DuckRowPlace.chat(sessionId: "s-off", duckId: "off")
         let chat = PondWorkspaceStrip(roster: roster, place: place, items: [file], current: nil)
         #expect(chat.row.ducks.last?.id == "off")
-        #expect(chat.row.ducks.last?.onDuty == false)
+        #expect(chat.row.ducks.last?.isOpen == false)
         #expect(chat.step(by: 1) == file)
         let item = PondWorkspaceStrip(roster: roster, place: place, items: [file], current: file)
         #expect(!item.row.ducks.contains { $0.id == "off" })
-        #expect(roster.offDuty.map(\.id) == ["off"])
+        #expect(roster.closed.map(\.id) == ["off"])
     }
 
     @Test func overflowFadesTheHiddenEdgesOnly() {
@@ -244,7 +244,7 @@ import Testing
         RoomRoster.roster([
             PondDuck(id: "a", name: "Ada", currentSessionId: "s-a"),
             PondDuck(id: "b", name: "Bo", currentSessionId: "s-b"),
-            PondDuck(id: "off", name: "Cy", duty: .off, currentSessionId: "s-off"),
+            PondDuck(id: "off", name: "Cy", isOpen: false, currentSessionId: "s-off"),
             PondDuck(id: "no-chat", name: "Dot")
         ])
     }

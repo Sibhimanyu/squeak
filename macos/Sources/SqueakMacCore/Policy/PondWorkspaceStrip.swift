@@ -1,6 +1,6 @@
 import Foundation
 
-/// The centre strip in the new layout. The roster owns duty and Duck order. The tab store owns opened items.
+/// The centre strip in the new layout. The roster owns which Ducks are open and their order. The tab store owns opened items.
 public struct PondWorkspaceStrip: Equatable, Sendable {
     public let row: DuckRowModel
     public let items: [TabItem]
@@ -14,7 +14,7 @@ public struct PondWorkspaceStrip: Equatable, Sendable {
 
     public var isEmpty: Bool { row.isEmpty && items.isEmpty }
 
-    /// Every tab of the one bar in order: on-duty Ducks first (never closable), then an Off-duty Duck whose chat is showing,
+    /// Every tab of the one bar in order: open Ducks first (never closable), then a Closed Duck whose chat is showing,
     /// then the opened items. `activity` is the open Duck's current step ("editing auth.ts"), which only that Duck knows.
     /// A Duckling's pill follows its parent Duck's tab (`ducklings` has the host's record of each, by tab); the other items follow all Ducks.
     public func tabs(activity: String? = nil, ducklings: [TabItem: Duckling] = [:], now: Date = Date()) -> [PondStripTab] {
@@ -28,7 +28,7 @@ public struct PondWorkspaceStrip: Equatable, Sendable {
         var out: [PondStripTab] = []
         for duck in row.ducks {
             out.append(PondStripTab(
-                item: .duck(duck.id), duck: duck, closable: !duck.onDuty,
+                item: .duck(duck.id), duck: duck, closable: !duck.isOpen,
                 title: PondTabStatus.title(for: duck),
                 status: PondTabStatus.fullLine(for: duck, activity: duck.id == row.selectedDuck ? activity : nil)))
             out += items.filter { $0.kind == .duckling && $0.parentDuck == duck.id }.map(pill)
@@ -75,7 +75,7 @@ public struct PondStripTab: Equatable, Sendable, Identifiable {
     public var item: TabItem
     /// Set for a Duck's tab.
     public var duck: DuckRowAvatar?
-    /// On-duty Ducks cannot be closed; Off-duty Ducks and items can.
+    /// Open Ducks cannot be closed; Closed Ducks and items can.
     public var closable: Bool
     /// A Duck tab's first line: the chat's title (what the Duck is used for), else its name. Nil for an item.
     public var title: String?
@@ -97,18 +97,18 @@ public enum PondTabStatus {
         return title.isEmpty ? duck.name : title
     }
 
-    /// Line 2: the status, prefixed by the Duck's name while it wears one and the title is not already the name. An Off-duty
-    /// Duck wears none: "Off duty".
+    /// Line 2: the status, prefixed by the Duck's name while it wears one and the title is not already the name. A Closed
+    /// Duck wears none: "Closed".
     public static func fullLine(for duck: DuckRowAvatar, activity: String? = nil) -> String {
         let status = line(for: duck, activity: activity)
-        let named = duck.wearsName && duck.onDuty && title(for: duck) != duck.name
+        let named = duck.wearsName && duck.isOpen && title(for: duck) != duck.name
         return named ? "\(duck.name) \u{00B7} \(status)" : status
     }
 
     public static func line(for duck: DuckRowAvatar, activity: String? = nil) -> String {
         switch duck.presence {
         case .waiting: return "Needs you"
-        case .off: return "Off duty"
+        case .off: return "Closed"
         case .working:
             if let step = clean(activity) { return "Working \u{00B7} \(step)" }
             return duck.presenceLine.hasPrefix("Working") ? duck.presenceLine : "Working"

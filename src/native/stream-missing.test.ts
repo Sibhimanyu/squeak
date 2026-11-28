@@ -123,7 +123,7 @@ async function duckOnStream(h: Rig) {
   return { ws, s, duck, agentId, oldDir };
 }
 
-/** What disk clean-up does to an Off-duty Duck's Stream: the working copy goes, the branch stays. */
+/** What disk clean-up does to a Closed Duck's Stream: the working copy goes, the branch stays. */
 function removeWorktree(h: Rig, ws: { path: string }) {
   git(h.repo, "worktree", "remove", "--force", ws.path);
 }
@@ -247,7 +247,7 @@ describe("a Duck whose Stream folder is gone", () => {
     expect(h.store.duckRow(duck.id)).toMatchObject({ workspaceId: null, branch: null });
   });
 
-  it("a Duck on duty can recover a teammate with the recover_stream tool", async () => {
+  it("a Duck open can recover a teammate with the recover_stream tool", async () => {
     const h = await start();
     const { ws, s } = await duckOnStream(h);
     const helper = h.store.createSession({
@@ -269,8 +269,8 @@ describe("a Duck whose Stream folder is gone", () => {
   });
 });
 
-describe("messaging an Off-duty Duck", () => {
-  it("wakes it: the message is accepted, the Duck is on duty and its agent starts, with no error", async () => {
+describe("messaging a Closed Duck", () => {
+  it("wakes it: the message is accepted, the Duck is open and its agent starts, with no error", async () => {
     const h = await start();
     const s = h.store.createSession({
       cwd: h.repo,
@@ -280,7 +280,7 @@ describe("messaging an Off-duty Duck", () => {
       title: "Resting",
     });
     const duck = h.store.duckForSession(s.id, h.pond.id)!;
-    h.store.updateDuck(duck.id, { duty: "off" });
+    h.store.updateDuck(duck.id, { state: "closed" });
     // a chat in a git pond's Main moves to its own Stream first, so give this one its own
     const ws = h.workspaces.createWorkspace(h.pond.id);
     h.store.moveSessionPlace(s.id, { cwd: ws.path, workspaceId: ws.id, branch: ws.branch });
@@ -288,16 +288,16 @@ describe("messaging an Off-duty Duck", () => {
     const res = await h.call("POST", `/native/sessions/${s.id}/messages`, { text: "are you there" });
     expect(res.status).toBe(200);
     expect(res.json.error).toBeUndefined();
-    expect(h.store.duckOf(s.id).duty).toBe("on");
+    expect(h.store.duckOf(s.id).state).toBe("open");
     await until(() => h.sent.length > 0);
     expect(h.sent.map((x) => x.text)).toEqual(["are you there"]);
     expect(h.store.messagesAfter(s.id, 0).some((m) => m.kind === "system/error")).toBe(false);
   });
 
-  it("an Off-duty Duck whose Stream was cleaned up while it rested returns to the Pond when a person messages it", async () => {
+  it("A Closed Duck whose Stream was cleaned up while it rested returns to the Pond when a person messages it", async () => {
     const h = await start();
     const { ws, s, duck, agentId } = await duckOnStream(h);
-    h.store.updateDuck(duck.id, { duty: "off" });
+    h.store.updateDuck(duck.id, { state: "closed" });
     removeWorktree(h, ws);
     h.store.setWorkspaceState(ws.id, "archived"); // disk clean-up removed it: the Duck was resting
 
@@ -305,7 +305,7 @@ describe("messaging an Off-duty Duck", () => {
     expect(res.status).toBe(200);
     await until(() => h.sent.length > 0);
     const moved = h.store.getSession(s.id)!;
-    expect(h.store.duckOf(s.id).duty).toBe("on");
+    expect(h.store.duckOf(s.id).state).toBe("open");
     expect(moved.cwd).toBe(h.repo);
     expect(moved.agentSessionId).toBe(agentId);
     expect(h.sent).toEqual([{ session: s.id, cwd: h.repo, text: "are you there" }]);

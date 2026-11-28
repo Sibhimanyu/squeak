@@ -358,7 +358,7 @@ struct PondTopBar<Tile: View, Tabs: View, Trailing: View>: View {
     var body: some View {
         HStack(spacing: 0) {
             if leadingInset > 0 { Color.clear.frame(width: leadingInset) }
-            // Flow: hover the icon or name to read who is here and how many Ducks are on duty (the subtitle lives only here).
+            // Flow: hover the icon or name to read who is here and how many Ducks are open (the subtitle lives only here).
             if showsName {
                 HStack(spacing: CGFloat(PondBarMetrics.logoGap)) {
                     tile()

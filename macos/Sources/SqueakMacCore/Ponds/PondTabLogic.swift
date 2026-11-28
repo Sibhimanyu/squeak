@@ -1,10 +1,10 @@
 import Foundation
 
-// The Pond tab in ducks mode (DESIGN.md "Pond tab"): who is on duty right now, what is worth reading in Recent, and which
+// The Pond tab in ducks mode (DESIGN.md "Pond tab"): who is open right now, what is worth reading in Recent, and which
 // chat a duck's click opens. Pure; the view only draws.
 
-/// The ducks to show under "On duty now": working or needing the person, each with its branch label.
-public enum PondOnDuty {
+/// The ducks to show under "Open now": working or needing the person, each with its branch label.
+public enum PondOpenDucks {
     public struct Row: Equatable, Sendable, Identifiable {
         public var key: SessionKey
         public var title: String
@@ -16,14 +16,14 @@ public enum PondOnDuty {
 
     public static let cap = 6
 
-    /// Needs-you ducks first, then working ones, newest first inside each. Off-duty ducks and idle or finished ones are left out.
+    /// Needs-you ducks first, then working ones, newest first inside each. Closed ducks and idle or finished ones are left out.
     public static func rows(
         _ ducks: [DuckRow], title: (HostSession) -> String, looping: (HostSession) -> Bool = { _ in false },
-        offDuty: (HostSession) -> Bool = { _ in false }, showsBranch: Bool = true, cap: Int = PondOnDuty.cap
+        closed: (HostSession) -> Bool = { _ in false }, showsBranch: Bool = true, cap: Int = PondOpenDucks.cap
     ) -> [Row] {
         let picked: [(Row, Date)] = ducks.compactMap { d in
             let s = d.session
-            guard !offDuty(s) else { return nil }
+            guard !closed(s) else { return nil }
             let needs = s.state == .blocked || looping(s)
             guard needs || s.state == .working else { return nil }
             return (Row(key: s.key, title: title(s), branch: showsBranch ? d.label : nil, needsYou: needs), s.lastActivityAt ?? .distantPast)

@@ -379,7 +379,7 @@ export class RoomTasks extends EventEmitter {
     };
   }
 
-  /** Ducks holding an open Task (waiting on them or being worked): never put off duty for being quiet. */
+  /** Ducks holding an open Task (waiting on them or being worked): never closed for being quiet. */
   busyDuckIds(): Set<string> {
     const out = new Set<string>();
     for (const p of this.o.store.listProjects()) {
@@ -913,7 +913,7 @@ export class RoomTasks extends EventEmitter {
     if (saved.inLine) this.startSoon(projectId);
   }
 
-  /** The pond's ducks as the decider reads them: Off-duty ones too (they can come back for related work). */
+  /** The pond's ducks as the decider reads them: Closed ones too (they can come back for related work). */
   private deciderPool(projectId: string): Array<{
     duck: DeciderDuck;
     row: DuckRow;
@@ -921,7 +921,7 @@ export class RoomTasks extends EventEmitter {
     state: RoomThread["state"];
   }> {
     const tasks = this.o.store.roomJobRows(projectId).map((r) => JSON.parse(r.data) as RoomTask);
-    return this.o.room.duckCandidates(projectId, 30 * 24 * 3_600_000, { offDuty: true }).map((c) => {
+    return this.o.room.duckCandidates(projectId, 30 * 24 * 3_600_000, { closed: true }).map((c) => {
       const texts: string[] = [];
       const add = (t: string | null | undefined): void => {
         const clean = (t ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
@@ -945,7 +945,7 @@ export class RoomTasks extends EventEmitter {
         duck: {
           id: c.duck.id,
           name: c.duck.name ?? c.session?.title ?? "Duck",
-          duty: c.duck.duty,
+          open: c.duck.state === "open",
           busy: c.state === "working",
           contextPercent: c.session ? (this.o.contextPercent?.(c.session) ?? null) : null,
           tasks: texts.slice(0, 10),
@@ -1203,7 +1203,7 @@ export class RoomTasks extends EventEmitter {
   /** Suggested jobs of this pond, best fit for `session`'s duck first (the agent's `open_jobs`). */
   openFor(projectId: string, session: SessionRow): Array<{ job: RoomTask; why: string }> {
     const marks = this.o.store.latestRoomMarks(projectId);
-    // An off-duty duck is not a candidate, so it is offered nothing.
+    // a closed duck is not a candidate, so it is offered nothing.
     const me = this.o.room.duckCandidates(projectId, JOB_MATCH_WINDOW_MS).find((c) => c.session?.id === session.id);
     if (!me) return [];
     const out: Array<{ job: RoomTask; why: string; score: number }> = [];
@@ -1236,8 +1236,8 @@ export class RoomTasks extends EventEmitter {
     const job = found.job;
     if (job.state !== "waiting") throw new TaskError("That task is no longer open.", 409);
     if (job.approval) throw new TaskError("That task is waiting for the Owner's approval.", 409);
-    if (this.o.store.duckOf(session.id).duty === "off") {
-      throw new TaskError("You are off duty, so you can't take jobs; the person can put you back on duty.", 409);
+    if (this.o.store.duckOf(session.id).state === "closed") {
+      throw new TaskError("You are closed, so you can't take jobs; the person can reopen you.", 409);
     }
     const c = job.claim;
     if (c && c.sessionId === session.id) {
@@ -1392,7 +1392,7 @@ export class RoomTasks extends EventEmitter {
               const inPond =
                 s &&
                 !s.archivedAt &&
-                this.o.room.candidates(projectId, Infinity, { offDuty: true }).some((c) => c.session.id === s.id);
+                this.o.room.candidates(projectId, Infinity, { closed: true }).some((c) => c.session.id === s.id);
               if (!s || !inPond) throw new TaskError("That thread isn't available in this pond any more.", 409);
               duck = this.o.room.duckOfSession(s);
               // The person picked that very thread: it continues there, wherever it is.
@@ -1519,8 +1519,8 @@ export class RoomTasks extends EventEmitter {
     job.state = "working";
     job.handedTo = { sessionId: s.id, duckId: duck.id, title: this.o.room.duckName(s), newThread: false };
     job.updatedAt = this.now();
-    // The person sending a job to an off-duty duck puts it back on duty.
-    this.o.room.setDutyById(duck.id, true);
+    // The person sending a job to a closed duck reopens it.
+    this.o.room.setOpenById(duck.id, true);
     try {
       await this.o.send(s.id, this.briefingOf(projectId, job, duck) + this.attachLines(projectId, job, s.cwd));
     } catch (error) {
@@ -1558,7 +1558,7 @@ export class RoomTasks extends EventEmitter {
       const name = duck.name ?? this.o.room.duckName(cur);
       throw new TaskError(`${name} is busy in another stream; wait for it to finish, or let it claim this after.`, 409);
     }
-    this.o.room.setDutyById(duck.id, true);
+    this.o.room.setOpenById(duck.id, true);
     let child: SessionRow;
     try {
       if (this.o.start) {

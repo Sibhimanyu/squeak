@@ -601,16 +601,16 @@ RoomTask = { id: "task:<uuid>", messageId /* the message that made it */, text, 
 ### Ducks
 
 A **duck** is a person-like identity that belongs to the **pond**, not to a stream or a chat: a name, a role, a colour, a
-duty (user-facing copy says duck; the code keeps session/thread). Lessons live in the **Pond Notebook**, not on the duck.
+open or closed state (user-facing copy says duck; the code keeps session/thread). Lessons live in the **Pond Notebook**, not on the duck.
 A duck works in one place at a time.
 Taking a job in another place starts a **fresh session there** carrying its name and role; the old session
 becomes history (still the duck's: its turns carry the duck's `duckId`). Squeak never chats and nothing starts without
-the person's Go or Allow. Host side: `room.ts` (`duckView`, `listDucks`, `createDuck`, `setDuckById`, `setDutyById`,
+the person's Go or Allow. Host side: `room.ts` (`duckView`, `listDucks`, `createDuck`, `setDuckById`, `setOpenById`,
 ), `store.ts` (`ducks` and `duck_sessions`, created lazily like `room_jobs`, no numbered migration;
 `session_ducks` is only read once, to migrate).
 
 ```
-Duck = { id, projectId, name, role?, colourSeed, duty: "on"|"off", currentSessionId?, place?: Place,
+Duck = { id, projectId, name, role?, colourSeed, open: boolean, currentSessionId?, place?: Place,
          state: "working"|"waiting"|"idle"|"error", lastActiveAt, sessions /* how many it has had */,
          notebook /* always "": migrated into the Pond Notebook */, createdAt }
 Place = { kind: "stream", workspaceId, branch }     // absent: Main, a plain-folder pond, or no session yet
@@ -669,21 +669,21 @@ Stream` Room lines as compact moment lines (`DuckStreams.swift`, `RailLists.swif
   in the pond's own folder). Flag off, nothing of this is sent or drawn.
 
 - **Migration** (first start, idempotent): every non-archived session in a pond, and every session with an old
-  `session_ducks` row, becomes one duck (its name, role and duty kept). A migrated duck's `colourSeed` is its first
+  `session_ducks` row, becomes one duck (its name, role and open or closed state kept). A migrated duck's `colourSeed` is its first
   session id, so colours do not change; a new duck's is its own id. A chat that appears later gets its duck the first time
   the room sees it. A `name` of null follows the chat title.
 - Routes (token-gated, strict bodies, unknown keys 400): `GET /native/projects/<id>/ducks` -> `{ducks: Duck[]}` (ducks
   with no session, and those whose chat was active in 30 days, newest first); `POST /native/projects/<id>/ducks
 {name: 1..32, role?: 0..80}` -> 201 `{duck}` (identity only: idle, no place, no session);
-  `PATCH /native/ducks/<id> {name?, role?}` -> `{duck}`; `POST /native/ducks/<id>/duty {on}` -> `{duty, duck}`. The
-  session routes `PATCH /native/sessions/<id>/duck` and `POST .../duty` still work and resolve the session's duck.
-  SSE `event: thread` carries the `RoomThread` on a name, role, duty or place change.
+  `PATCH /native/ducks/<id> {name?, role?}` -> `{duck}`; `POST /native/ducks/<id>/state {open}` -> `{open, duck}`. The
+  session routes `PATCH /native/sessions/<id>/duck` and `POST .../state` still work and resolve the session's duck.
+  SSE `event: thread` carries the `RoomThread` on a name, role, open or closed, or place change.
 - **The room page's `threads` are one per duck** (a duck with no session has `sessionId: ""`, state idle). Each adds
   `duckId`, `colourSeed` and `place`; `sessionId` is the duck's current session. A duck is listed while its chat was
   active in 24 h, and always while it has had no session. `RoomTurn.duckId` names the duck that worked a turn.
-  `RoomThread` still carries `name`, `role?`, `duty`, `lastActiveAt` and `RoomTurn.ducklings?` as before.
-- Off duty: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to the duck's chats
-  refused. A person's message to it, or a Go/Allow on a job, puts it back on duty.
+  `RoomThread` still carries `name`, `role?`, `open`, `lastActiveAt` and `RoomTurn.ducklings?` as before.
+- Closed: never a job candidate or suggestion, `open_jobs` empty, `claim_job` refused, `send_to_chat` to the duck's chats
+  refused. A person's message to it, or a Go/Allow on a job, reopens it.
 - Matching ranks **ducks**: name, role and the current chat's title count 3 each, the `working` intent 2, notebook words (none now) and
   the duck's last four turns (across all its sessions) 1.5. `suggestion.sessionId` is its current session ("" for a duck
   with none), `suggestion.duckId` its id; a working duck is suggested with `state: "working"` (it can claim "after this").

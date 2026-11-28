@@ -58,16 +58,16 @@ describe("Duck names from the host", () => {
     expect(again).toEqual(names);
   });
 
-  it("names existing unnamed Ducks when the host starts, and leaves duty alone", () => {
+  it("names existing unnamed Ducks when the host starts, and leaves open or closed alone", () => {
     const r = rig();
     const s = r.chat("Claude");
     const d = r.store.duckForSession(s.id, r.project.id)!;
-    r.store.db.prepare("UPDATE ducks SET name=NULL, duty='off' WHERE id=?").run(d.id);
+    r.store.db.prepare("UPDATE ducks SET name=NULL, state='closed' WHERE id=?").run(d.id);
     new Room({ store: r.store, ownerName: () => "Sam" });
     const after = r.store.duckRow(d.id)!;
-    expect(after.name).toBeNull(); // Off duty wears no name
-    expect(after.duty).toBe("off");
-    r.store.db.prepare("UPDATE ducks SET name=NULL, duty='on' WHERE id=?").run(d.id);
+    expect(after.name).toBeNull(); // Closed wears no name
+    expect(after.state).toBe("closed");
+    r.store.db.prepare("UPDATE ducks SET name=NULL, state='open' WHERE id=?").run(d.id);
     new Room({ store: r.store, ownerName: () => "Sam" });
     expect(r.store.duckRow(d.id)!.name).toBeTruthy();
   });
@@ -115,13 +115,13 @@ describe("Duck-to-Duck posts name the receiver", () => {
   });
 });
 
-describe("A name is a mask worn on duty", () => {
-  it("Off duty releases the name (kept as last name); back on duty gets a fresh unused one", () => {
+describe("A name is a mask worn while open", () => {
+  it("Closed releases the name (kept as last name); reopened gets a fresh unused one", () => {
     const r = rig();
     const s = r.chat("Fix the login");
     const duck = r.store.duckForSession(s.id, r.project.id)!;
     const worn = duck.name!;
-    r.room.setDuty(s.id, false);
+    r.room.setOpen(s.id, false);
     const off = r.store.duckRow(duck.id)!;
     expect(off.name).toBeNull();
     expect(off.lastName).toBe(worn);
@@ -130,28 +130,28 @@ describe("A name is a mask worn on duty", () => {
     // The released name is free for others while this Duck rests.
     const taken = r.store.listDucks(r.project.id).map((d) => d.name);
     expect(taken).not.toContain(worn);
-    r.room.setDuty(s.id, true);
+    r.room.setOpen(s.id, true);
     const back = r.store.duckRow(duck.id)!;
     expect(back.name).toBeTruthy();
     expect(back.name).not.toMatch(/\d/);
   });
 
-  it("names are unique among on-duty Ducks only", () => {
+  it("names are unique among open Ducks only", () => {
     const r = rig();
     const ids = Array.from({ length: DUCK_NAMES.length }, (_, i) => r.chat(`Chat ${i}`).id);
     const ducks = ids.map((id) => r.store.duckForSession(id, r.project.id)!);
     expect(new Set(ducks.map((d) => d.name!.toLowerCase())).size).toBe(ducks.length);
     // Rest half of them: a newcomer can then take a released name, and no name ever has a digit.
-    for (const id of ids.slice(0, 60)) r.room.setDuty(id, false);
+    for (const id of ids.slice(0, 60)) r.room.setOpen(id, false);
     const extra = r.chat("Newcomer");
     const nd = r.store.duckForSession(extra.id, r.project.id)!;
     expect(DUCK_NAMES).toContain(nd.name);
-    const live = r.store.listDucks(r.project.id).filter((d) => d.duty === "on");
+    const live = r.store.listDucks(r.project.id).filter((d) => d.state === "open");
     expect(new Set(live.map((d) => d.name!.toLowerCase())).size).toBe(live.length);
-    // Everyone on duty at once: more Ducks than the pool, still no digits.
+    // Everyone open at once: more Ducks than the pool, still no digits.
     for (let i = 0; i < 20; i++) r.chat(`More ${i}`);
-    for (const id of ids.slice(0, 60)) r.room.setDuty(id, true);
-    const all = r.store.listDucks(r.project.id).filter((d) => d.duty === "on");
+    for (const id of ids.slice(0, 60)) r.room.setOpen(id, true);
+    const all = r.store.listDucks(r.project.id).filter((d) => d.state === "open");
     expect(all.length).toBeGreaterThan(DUCK_NAMES.length);
     expect(all.every((d) => d.name && !/\d/.test(d.name))).toBe(true);
     expect(new Set(all.map((d) => d.name!.toLowerCase())).size).toBe(all.length);
@@ -163,7 +163,7 @@ describe("A name is a mask worn on duty", () => {
     const duck = r.store.duckForSession(s.id, r.project.id)!;
     const worn = duck.name!;
     const row = r.room.agentPost(s, { kind: "message", text: "hello" })!;
-    r.room.setDuty(s.id, false);
+    r.room.setOpen(s.id, false);
     expect(r.room.toPosts(r.project.id, [row])[0]!.author.name).toBe(worn);
     // A stored-name-less row falls back to the last name, then the title.
     r.store.db.prepare("UPDATE room_posts SET author_name='' WHERE id=?").run(row.id);
@@ -173,12 +173,12 @@ describe("A name is a mask worn on duty", () => {
     expect(r.room.senderName(bare)).toBe("Fix the login");
   });
 
-  it("new @mentions route by the current on-duty name only", () => {
+  it("new @mentions route by the current open name only", () => {
     const r = rig();
     const s = r.chat("Fix the login");
     const duck = r.store.duckForSession(s.id, r.project.id)!;
     const worn = duck.name!;
-    r.room.setDuty(s.id, false);
+    r.room.setOpen(s.id, false);
     const off = r.store.duckRow(duck.id)!;
     expect(r.store.listDucks(r.project.id).some((d) => d.name === worn)).toBe(false);
     expect(r.store.duckNames(off)).toContain(worn); // stored-text replay only
@@ -188,20 +188,20 @@ describe("A name is a mask worn on duty", () => {
 describe("One-time migration: names stop carrying numbers", () => {
   function seeded() {
     const r = rig();
-    const mk = (title: string, name: string, duty: "on" | "off") => {
+    const mk = (title: string, name: string, state: "open" | "closed") => {
       const s = r.chat(title);
       const d = r.store.duckForSession(s.id, r.project.id)!;
-      r.store.db.prepare("UPDATE ducks SET name=?, last_name=NULL, duty=? WHERE id=?").run(name, duty, d.id);
+      r.store.db.prepare("UPDATE ducks SET name=?, last_name=NULL, state=? WHERE id=?").run(name, state, d.id);
       return { s, d };
     };
     return { r, mk };
   }
 
-  it("renames on-duty numbered Ducks, releases Off-duty names, keeps others, keeps aliases and posts, runs once", () => {
+  it("renames open numbered Ducks, releases Closed names, keeps others, keeps aliases and posts, runs once", () => {
     const { r, mk } = seeded();
-    const plain = mk("A", "Scout", "on");
-    const numbered = mk("B", "Dot 2", "on");
-    const rest = mk("C", "Pip", "off");
+    const plain = mk("A", "Scout", "open");
+    const numbered = mk("B", "Dot 2", "open");
+    const rest = mk("C", "Pip", "closed");
     const post = r.room.agentPost(numbered.s, { kind: "message", text: "hi" })!;
     r.store.db.prepare("UPDATE room_posts SET author_name='B title' WHERE id=?").run(post.id);
     r.store.db.prepare("DELETE FROM host_migrations WHERE name='duck-names-are-masks'").run();
@@ -221,7 +221,7 @@ describe("One-time migration: names stop carrying numbers", () => {
 
   it("an old @mention of a renamed Duck's old name still reaches it in stored hand-off notes", () => {
     const { r, mk } = seeded();
-    const numbered = mk("B", "Dot 2", "on");
+    const numbered = mk("B", "Dot 2", "open");
     r.store.db.prepare("DELETE FROM host_migrations WHERE name='duck-names-are-masks'").run();
     r.store.releaseDuckNames();
     const d = r.store.duckRow(numbered.d.id)!;

@@ -2286,7 +2286,7 @@ export class RemoteBridge {
       }
       return pondCounts(
         [...ducks.values()].map((s) => ({
-          duty: s.duckDuty === "off" ? "off" : "on",
+          open: !s.duckClosed,
           needsYou: needsYou(s),
           working: s.state === "working" || (s.ducklings?.running ?? 0) > 0,
         })),
@@ -5995,8 +5995,8 @@ export class RemoteBridge {
       ...this.pondRef(session),
       // Ducks own their branch (flag on): the chat's duck and where it works (a branch, or `onMain`). Older phones ignore them.
       ...this.duckRef(session),
-      // Its duck is off duty (absent = on duty); older phones ignore it.
-      ...(session.duckDuty === "off" ? { duckDuty: "off" as const } : {}),
+      // Its duck is closed (absent = open); older phones ignore it.
+      ...(session.duckClosed ? { duckClosed: true as const } : {}),
       label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
       // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
       title: chatTitle(session),

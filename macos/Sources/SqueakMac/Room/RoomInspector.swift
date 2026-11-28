@@ -14,7 +14,7 @@ struct RoomInspector: View {
     @State private var editing: DuckEdit?
     @State private var search = ""
     @State private var adding = false
-    @State private var offDutyOpen = false
+    @State private var closedOpen = false
     @State private var notice: String?
     @State private var noticeLine = RoomRoster.noJobLine
     private var roster: RoomRosterModel { RoomRosterStore.shared.model(for: room.projectId) }
@@ -103,7 +103,7 @@ struct RoomInspector: View {
         let all = RoomRoster.roster(allDucks, threads: room.feed.threads)
         let rows = RoomRoster.visible(allDucks, threads: room.feed.threads, query: search)
         let searching = !search.trimmingCharacters(in: .whitespaces).isEmpty
-        let offDuty = RoomRoster.offDutyGroup(allDucks, threads: room.feed.threads)
+        let closed = RoomRoster.closedGroup(allDucks, threads: room.feed.threads)
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(verbatim: RoomRoster.header(all.available.count)).font(.system(size: 11)).foregroundStyle(Theme.subtle).padding(.horizontal, 6)
@@ -134,10 +134,10 @@ struct RoomInspector: View {
             } else if searching && rows.isEmpty {
                 Text(verbatim: RoomRoster.noMatchLine(search)).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             } else if !searching && rows.isEmpty && !adding {
-                Text(RoomRoster.noneOnDutyLine).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
+                Text(RoomRoster.noneOpenLine).font(.system(size: 12)).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             }
             ForEach(rows) { d in duckRow(d) }
-            if !searching, !offDuty.rows.isEmpty { offDutyGroup(offDuty) }
+            if !searching, !closed.rows.isEmpty { closedGroup(closed) }
             if let e = roster.error { Text(verbatim: e).font(.system(size: 12)).foregroundStyle(Theme.negative).padding(.horizontal, 6).padding(.top, 4) }
         }
         .task { roster.keepFresh(host: model.nativeHost) }
@@ -158,23 +158,23 @@ struct RoomInspector: View {
         }
     }
 
-    /// "Off duty - N", collapsed: the recent ones with Bring back, then a line pointing at the search for the rest.
+    /// "Closed - N", collapsed: the recent ones with Reopen, then a line pointing at the search for the rest.
     @ViewBuilder
-    private func offDutyGroup(_ g: (rows: [RosterDuck], more: Int)) -> some View {
+    private func closedGroup(_ g: (rows: [RosterDuck], more: Int)) -> some View {
         let total = g.rows.count + g.more
-        Button { withAnimation(Motion.standard) { offDutyOpen.toggle() } } label: {
+        Button { withAnimation(Motion.standard) { closedOpen.toggle() } } label: {
             HStack(spacing: 6) {
-                Lucide(.chevronRight, size: 11, color: Theme.subtle).rotationEffect(.degrees(offDutyOpen ? 90 : 0))
-                Text(verbatim: RoomRoster.offDutyLabel(total)).font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                Lucide(.chevronRight, size: 11, color: Theme.subtle).rotationEffect(.degrees(closedOpen ? 90 : 0))
+                Text(verbatim: RoomRoster.closedLabel(total)).font(.system(size: 11)).foregroundStyle(Theme.subtle)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 6).frame(height: 24).contentShape(Rectangle())
         }
         .buttonStyle(.plain).padding(.top, 4)
-        .accessibilityLabel(RoomRoster.offDutyLabel(total)).accessibilityValue(offDutyOpen ? "expanded" : "collapsed")
-        if offDutyOpen {
+        .accessibilityLabel(RoomRoster.closedLabel(total)).accessibilityValue(closedOpen ? "expanded" : "collapsed")
+        if closedOpen {
             ForEach(g.rows) { d in duckRow(d) }
-            if g.more > 0 { Text(verbatim: RoomRoster.offDutyMoreLine(g.more)).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.horizontal, 6) }
+            if g.more > 0 { Text(verbatim: RoomRoster.closedMoreLine(g.more)).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.horizontal, 6) }
         }
     }
 
@@ -183,10 +183,10 @@ struct RoomInspector: View {
             DuckRow(
                 duck: d, open: { open(d) },
                 edit: { editing = DuckEdit(duckId: d.id, field: $0, text: $0 == .name ? d.name : (d.role ?? "")) },
-                duty: { on in
+                setOpen: { open in
                     Task {
-                        await roster.perform(.duty(duck: d.id, on: on), host: model.nativeHost)
-                        if on, roster.error == nil { search = "" }
+                        await roster.perform(.setOpen(duck: d.id, open: open), host: model.nativeHost)
+                        if open, roster.error == nil { search = "" }
                     }
                 })
             if notice == d.id { Text(verbatim: noticeLine).font(.system(size: 11)).foregroundStyle(Theme.muted).padding(.leading, 51).padding(.bottom, 4) }
@@ -203,7 +203,7 @@ struct RoomInspector: View {
         case .open(let sessionId):
             notice = nil
             guard model.openFromPond(.duck(sessionId), pond: key, page: .room) else { show(PondOpenResolver.failureNote(name: d.name), for: d); return }
-            if !d.onDuty { Task { await roster.perform(.duty(duck: d.id, on: true), host: model.nativeHost) } }
+            if !d.isOpen { Task { await roster.perform(.setOpen(duck: d.id, open: true), host: model.nativeHost) } }
         }
     }
 
@@ -232,12 +232,12 @@ struct DuckEdit: Identifiable {
 }
 
 /// One duck in the roster: avatar, name and agent, role, place, presence. Click opens its tab; hover shows Open and
-/// Close (off duty) or Bring back; the menu renames, sets a role or changes its duty.
+/// Close or Reopen; the menu renames, sets a role or opens or closes it.
 private struct DuckRow: View {
     let duck: RosterDuck
     let open: () -> Void
     let edit: (DuckEdit.Field) -> Void
-    let duty: (Bool) -> Void
+    let setOpen: (Bool) -> Void
     @State private var hover = false
 
     var body: some View {
@@ -246,14 +246,14 @@ private struct DuckRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(duck.heading)\(duck.agentLabel.map { ", " + $0 } ?? ""). \(duck.role ?? ""). \(duck.streamLabels.joined(separator: ", ")). \(duck.presenceLine)")
                 .accessibilityHint(duck.hasJob ? "Opens the duck" : "Has no job yet")
-            if hover || !duck.onDuty {
+            if hover || !duck.isOpen {
                 HStack(spacing: 2) {
-                    if duck.hasJob && duck.onDuty { hoverButton("Open", action: open) }
-                    hoverButton(duck.onDuty ? "Close" : RoomRoster.bringBackTitle) { duty(!duck.onDuty) }
+                    if duck.hasJob && duck.isOpen { hoverButton("Open", action: open) }
+                    hoverButton(duck.isOpen ? "Close" : RoomRoster.bringBackTitle) { setOpen(!duck.isOpen) }
                 }
             }
         }
-        .opacity(duck.onDuty ? 1 : 0.55)
+        .opacity(duck.isOpen ? 1 : 0.55)
         .padding(.horizontal, 6).padding(.vertical, 7)
         .background(hover ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .onHover { hover = $0 }
@@ -261,19 +261,19 @@ private struct DuckRow: View {
             Button("Rename\u{2026}") { edit(.name) }
             Button("Set role\u{2026}") { edit(.role) }
             Divider()
-            if duck.onDuty { Button("Put off duty") { duty(false) } } else { Button("Bring back") { duty(true) } }
+            if duck.isOpen { Button("Close") { setOpen(false) } } else { Button(RoomRoster.bringBackTitle) { setOpen(true) } }
         }
     }
 
     private var info: some View {
         HStack(alignment: .center, spacing: 11) {
-            DuckAvatar(sessionId: duck.colourSeed, agent: duck.agent, size: 34, off: !duck.onDuty)
+            DuckAvatar(sessionId: duck.colourSeed, agent: duck.agent, size: 34, off: !duck.isOpen)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(verbatim: duck.heading).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     if let l = duck.agentLabel { Text(verbatim: l).font(.system(size: 11)).foregroundStyle(Theme.subtle) }
                 }
-                if !duck.onDuty, let summary = duck.lastSummary {
+                if !duck.isOpen, let summary = duck.lastSummary {
                     Text(verbatim: summary).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 if let r = duck.role { Text(verbatim: r).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1) }

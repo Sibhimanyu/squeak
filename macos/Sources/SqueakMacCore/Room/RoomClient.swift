@@ -7,7 +7,7 @@ public enum RoomStreamEvent: Sendable, Equatable {
     case turn(RoomTurn)
     /// A Task appeared or changed: upsert by id.
     case task(RoomTask)
-    /// A duck's name, role or duty changed (`thread` frame): upsert by session id.
+    /// A duck's name, role or open state changed (`thread` frame): upsert by session id.
     case thread(RoomThread)
     /// A Member's stream only: whether the Owner's Mac is running (the sentence to show while it is not).
     case owner(offline: String?)
@@ -116,9 +116,9 @@ public struct RoomClient: Sendable {
         return (j?["name"]?.string, j?["role"]?.string)
     }
 
-    /// Put a duck on or off duty: `POST /native/sessions/<id>/duty { on }`.
-    public func setDuty(sessionId: String, on: Bool) async throws {
-        _ = try await host.call("POST", "/native/sessions/\(NativeHostClient.id(sessionId))/duty", body: .object(["on": .bool(on)]), timeout: 15)
+    /// Put a duck open or closed: `POST /native/sessions/<id>/state { open }`.
+    public func setOpen(sessionId: String, open: Bool) async throws {
+        _ = try await host.call("POST", "/native/sessions/\(NativeHostClient.id(sessionId))/state", body: .object(["open": .bool(open)]), timeout: 15)
     }
 
     /// The stream sends the bare Task; a wrapped `{ task }` is read too.

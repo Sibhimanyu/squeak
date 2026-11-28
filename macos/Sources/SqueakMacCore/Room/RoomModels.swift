@@ -144,11 +144,11 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var ask: RoomAsk?
     public var turnStartedAt: Int64?
     public var filesChanged: Int?
-    /// Ducks (CONTRACT-ducks): the person's chosen name (else the title), a one-line role, on/off duty and the last activity.
-    /// All optional: an older host sends none (name = title, duty = on).
+    /// Ducks (CONTRACT-ducks): the person's chosen name (else the title), a one-line role, open or closed and the last activity.
+    /// All optional: an older host sends none (name = title, open).
     public var name: String?
     public var role: String?
-    public var duty: RoomDuty
+    public var isOpen: Bool
     public var lastActiveAt: Int64?
     /// Pond-level ducks: the duck's own id, the seed its colour comes from, and where it works. All optional (older host).
     public var duckId: String?
@@ -156,7 +156,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
     public var place: RoomPlace?
     /// The Streams the Duck has joined, in join order; empty when none (or an older host).
     public var streams: [RoomStream] = []
-    /// An Off-duty Duck's last summary line, when the host has one.
+    /// A Closed Duck's last summary line, when the host has one.
     public var lastSummary: String?
     public var id: String { sessionId }
 
@@ -166,16 +166,15 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         let t = title.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? "Duck" : t
     }
-    public var onDuty: Bool { duty == .on }
-    /// What the Duck is known by in lists: its name on duty; its chat title off duty (names are masks).
-    public var heading: String { onDuty ? duckName : RoomRoster.offDutyHeading(title: title) }
+    /// What the Duck is known by in lists: its name while open; its chat title when closed (names are masks).
+    public var heading: String { isOpen ? duckName : RoomRoster.closedHeading(title: title) }
 
     public init(
         sessionId: String, title: String, agent: String? = nil, state: RoomThreadState, workingOn: String? = nil, workingOnAt: Int64? = nil,
         lastState: String? = nil, lastAt: Int64? = nil, progress: RoomProgress? = nil, ask: RoomAsk? = nil, turnStartedAt: Int64? = nil, filesChanged: Int? = nil,
-        name: String? = nil, role: String? = nil, duty: RoomDuty = .on, lastActiveAt: Int64? = nil
+        name: String? = nil, role: String? = nil, isOpen: Bool = true, lastActiveAt: Int64? = nil
     ) {
-        self.name = name; self.role = role; self.duty = duty; self.lastActiveAt = lastActiveAt
+        self.name = name; self.role = role; self.isOpen = isOpen; self.lastActiveAt = lastActiveAt
         self.sessionId = sessionId; self.title = title; self.agent = agent; self.state = state
         self.workingOn = workingOn; self.workingOnAt = workingOnAt; self.lastState = lastState; self.lastAt = lastAt
         self.progress = progress; self.ask = ask; self.turnStartedAt = turnStartedAt; self.filesChanged = filesChanged
@@ -183,7 +182,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, title, agent, state, workingOn, workingOnAt, lastState, lastAt, progress, ask, turnStartedAt, filesChanged
-        case name, role, duty, lastActiveAt, duckId, colourSeed, place, streams, lastSummary
+        case name, role, open, olderDuty = "duty", lastActiveAt, duckId, colourSeed, place, streams, lastSummary
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -201,7 +200,7 @@ public struct RoomThread: Sendable, Equatable, Decodable, Identifiable {
         filesChanged = try? c.decode(Int.self, forKey: .filesChanged)
         name = (try? c.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 }
         role = (try? c.decode(String.self, forKey: .role)).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
-        duty = (try? c.decode(String.self, forKey: .duty)).flatMap(RoomDuty.init(rawValue:)) ?? .on
+        isOpen = c.duckIsOpen(.open, olderKey: .olderDuty)
         lastActiveAt = try? c.decode(Int64.self, forKey: .lastActiveAt)
         duckId = (try? c.decode(String.self, forKey: .duckId)).flatMap { $0.isEmpty ? nil : $0 }
         colourSeed = (try? c.decode(String.self, forKey: .colourSeed)).flatMap { $0.isEmpty ? nil : $0 }
@@ -219,7 +218,13 @@ public struct RoomPlace: Sendable, Equatable, Decodable {
     public init(kind: String = "stream", workspaceId: String? = nil, branch: String? = nil) { self.kind = kind; self.workspaceId = workspaceId; self.branch = branch }
 }
 
-public enum RoomDuty: String, Sendable, Equatable { case on, off }
+extension KeyedDecodingContainer {
+    /// Whether a Duck is open: the daemon's `open` flag; an older daemon sent `duty: "on" | "off"` instead. Absent = open.
+    func duckIsOpen(_ key: Key, olderKey: Key) -> Bool {
+        if let open = try? decode(Bool.self, forKey: key) { return open }
+        return (try? decode(String.self, forKey: olderKey)) != "off"
+    }
+}
 
 public enum RoomDucklingState: String, Sendable, Equatable { case running, done, failed }
 

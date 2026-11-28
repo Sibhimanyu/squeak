@@ -88,7 +88,7 @@ struct NeedsYouTests {
     // MARK: the Pond Dashboard tile and the Ducks list
 
     private func duck(_ id: String, off: Bool = false, reason: String? = nil, failure: String? = nil, activity: PondDuckActivity = .idle) -> PondDuck {
-        var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), duty: off ? .off : .on, currentSessionId: id)
+        var d = PondDuck(id: "duck-\(id)", name: id.uppercased(), isOpen: !off, currentSessionId: id)
         d.activity = activity
         d.needsYou = reason != nil
         d.needsYouReason = reason
@@ -96,8 +96,8 @@ struct NeedsYouTests {
         return d
     }
 
-    @Test func theTileAndTheListCountTheFailedOffDutyDuckThatTheOldTileMissed() {
-        // greenroom: Pickle on duty and idle, the Zoom chat's Duck off duty with an unseen failure.
+    @Test func theTileAndTheListCountTheFailedClosedDuckThatTheOldTileMissed() {
+        // greenroom: Pickle open and idle, the Zoom chat's Duck closed with an unseen failure.
         let ducks = [duck("pickle"), duck("zoom", off: true, reason: "failed", failure: "Couldn't load", activity: .error)]
         let sessions = [chat("pickle", .idle), chat("zoom", .error, title: Self.zoom)]
         let l = PondHomeLayout.buildRoster(ducks: ducks, sessions: sessions, detail: nil, me: "Me", hostIdFor: { $0.key.hostSessionId })
@@ -106,8 +106,8 @@ struct NeedsYouTests {
         #expect(row.failed && row.failureText == "Couldn't load" && row.needsYou)
         #expect(PondDashboardScope.needsYou.includes(row))
         #expect(!PondDashboardScope.needsYou.includes(l.threads.first { $0.duckId == "duck-pickle" }!))
-        // The host's counts agree: the same rule, any duty.
-        let counts = PondCounts(onDuty: 1, working: 0, needsYou: 1, offDuty: 1, total: 2)
+        // The host's counts agree: the same rule, open or closed.
+        let counts = PondCounts(open: 1, working: 0, needsYou: 1, closed: 1, total: 2)
         #expect(counts.count(.needsYou) == 1)
     }
 
@@ -121,7 +121,7 @@ struct NeedsYouTests {
     }
 
     @Test func decodesTheHostsRosterFieldsAndAnOldHostWithout() throws {
-        let sent = #"{"id":"d","name":"","duty":"off","activity":"error","needsYou":true,"needsYouReason":"failed","failure":"Boom"}"#
+        let sent = #"{"id":"d","name":"","open":false,"activity":"error","needsYou":true,"needsYouReason":"failed","failure":"Boom"}"#
         let d = try JSONDecoder().decode(PondDuck.self, from: Data(sent.utf8))
         #expect(d.needsYou && d.needsYouReason == "failed" && d.failure == "Boom")
         let old = try JSONDecoder().decode(PondDuck.self, from: Data(#"{"id":"d","name":"x","activity":"needsYou"}"#.utf8))

@@ -15,10 +15,10 @@ final class RoomRosterModel {
     static let pollSeconds = 5
     /// The daemon's dashboard numbers; nil from an older daemon (the page then counts its rows).
     private(set) var counts: PondCounts?
-    /// Chats whose duck is off duty: the dashboard's Off duty filter.
-    var offDutySessions: Set<String> { Set((ducks ?? []).filter { $0.duty == .off }.compactMap(\.currentSessionId)) }
-    /// Each Off-duty Duck's "off duty 3d ago" and last summary, by chat id: the dashboard rows.
-    var offDutyNotes: [String: PondOffDutyNote] { PondOffDutyNote.notes(ducks ?? []) }
+    /// Chats whose duck is closed: the dashboard's Closed filter.
+    var closedSessions: Set<String> { Set((ducks ?? []).filter { $0.isOpen == false }.compactMap(\.currentSessionId)) }
+    /// Each Closed Duck's "Closed 3d ago" and last summary, by chat id: the dashboard rows.
+    var closedNotes: [String: PondClosedNote] { PondClosedNote.notes(ducks ?? []) }
     var error: String?
     private(set) var creating = false
 
@@ -52,7 +52,7 @@ final class RoomRosterModel {
         ducks = r.ducks; counts = r.counts
     }
 
-    /// Rename, set role, duty: optimistic.
+    /// Rename, set role, open or close: optimistic.
     func perform(_ action: DuckAction, host: NativeHostClient) async {
         let before = ducks
         error = nil
@@ -60,7 +60,7 @@ final class RoomRosterModel {
             switch action {
             case .rename(let id, let n): if let i = list.firstIndex(where: { $0.id == id }) { list[i].name = n }
             case .setRole(let id, let r): if let i = list.firstIndex(where: { $0.id == id }) { list[i].role = r }
-            case .duty(let id, let on): if let i = list.firstIndex(where: { $0.id == id }) { list[i].duty = on ? .on : .off }
+            case .setOpen(let id, let open): if let i = list.firstIndex(where: { $0.id == id }) { list[i].isOpen = open }
             case .create: break
             }
             ducks = list

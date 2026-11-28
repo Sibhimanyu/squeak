@@ -31,7 +31,7 @@ function fakeModel(answer: ModelChoice | null | Error) {
 const duck = (id: string, over: Partial<DeciderDuck> = {}): DeciderDuck => ({
   id,
   name: id,
-  duty: "on",
+  open: true,
   busy: false,
   contextPercent: 10,
   tasks: [`${id} work`],
@@ -90,11 +90,11 @@ describe("decider scoring", () => {
     expect(await d.decide(SMALL, [duck("a", { busy: true })])).toMatchObject({ kind: "duck", duckId: "a" });
   });
 
-  it("an Off-duty Duck is as eligible as an on-duty one", async () => {
+  it("A Closed Duck is as eligible as an open one", async () => {
     const d = new Decider({ similarity: fixed({ "a work": 0.8, "b work": 0.8 }) });
-    const [on, off] = await Promise.all([d.rank(SMALL, [duck("a")]), d.rank(SMALL, [duck("b", { duty: "off" })])]);
+    const [on, off] = await Promise.all([d.rank(SMALL, [duck("a")]), d.rank(SMALL, [duck("b", { open: false })])]);
     expect(off[0]!.score).toBe(on[0]!.score);
-    expect(await d.decide(SMALL, [duck("b", { duty: "off" })])).toMatchObject({ kind: "duck", duckId: "b" });
+    expect(await d.decide(SMALL, [duck("b", { open: false })])).toMatchObject({ kind: "duck", duckId: "b" });
   });
 
   it("files the Duck touched add to a modest text match", async () => {

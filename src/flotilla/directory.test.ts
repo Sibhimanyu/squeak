@@ -285,21 +285,21 @@ describe("the directory's duck numbers", () => {
     order: { mode: "newest" as const, ids: [] },
     sessions: [],
   };
-  it("carries the roster's numbers per project, a waiting duck counted once and off-duty ducks apart", () => {
+  it("carries the roster's numbers per project, a waiting duck counted once and closed ducks apart", () => {
     const d = buildDirectory({
       ...input,
       ducks: () => [
-        { duty: "on", working: true, needsYou: false },
-        { duty: "on", working: true, needsYou: true },
-        { duty: "off", working: true, needsYou: false },
+        { open: true, working: true, needsYou: false },
+        { open: true, working: true, needsYou: true },
+        { open: false, working: true, needsYou: false },
       ],
     });
-    expect(d.ponds[0]!.dutyCounts).toEqual({ onDuty: 2, working: 1, needsYou: 1, offDuty: 1, total: 3 });
+    expect(d.ponds[0]!.duckCounts).toEqual({ open: 2, working: 1, needsYou: 1, closed: 1, total: 3 });
     expect(d.ponds[0]!.counts).toEqual({ threads: 0, needsYou: 0, working: 0 });
   });
   it("sends none without a duck source, and keeps them through the fleet overlay", () => {
-    expect(buildDirectory(input).ponds[0]!.dutyCounts).toBeUndefined();
+    expect(buildDirectory(input).ponds[0]!.duckCounts).toBeUndefined();
     const d = buildDirectory({ ...input, ducks: () => [] });
-    expect(withFleetSessions(d, []).ponds[0]!.dutyCounts?.total).toBe(0);
+    expect(withFleetSessions(d, []).ponds[0]!.duckCounts?.total).toBe(0);
   });
 });

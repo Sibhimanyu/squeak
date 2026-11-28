@@ -205,7 +205,7 @@ describe("createDecider", () => {
     {
       id: "d1",
       name: "Ada",
-      duty: "on" as const,
+      open: true as const,
       busy: false,
       contextPercent: 10,
       tasks: ["toolbar icon spacing"],

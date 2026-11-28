@@ -85,7 +85,7 @@ extension EnvironmentValues {
 }
 
 /// A Duck's avatar and name are one hit target: one pointer-hand click opens its chat; hovering either shows a ring on the
-/// avatar and an underline on the name. An off-duty Duck opens too (no duty change). People's avatars use plain views.
+/// avatar and an underline on the name. a closed Duck opens too (it stays closed). People's avatars use plain views.
 struct DuckHitAvatar: View {
     let target: PondOpenTarget
     let name: String
@@ -567,7 +567,7 @@ private struct RoomStatusLineView: View {
     }
 
     /// A moment is not chat: one compact centred line, a small duck glyph then "Ruby 2 finished \u{00B7} summary" in muted 12pt.
-    /// A tap opens that Duck (an off-duty one too). A canvas or a longer detail sits quietly under it.
+    /// A tap opens that Duck (a closed one too). A canvas or a longer detail sits quietly under it.
     private var moment: some View {
         let target = PondClick.target(status: status, threads: threads)
         let text = RoomMoment.line(name: status.name, verb: status.verb, summary: status.summary)

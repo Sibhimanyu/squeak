@@ -165,16 +165,16 @@ import Testing
 }
 
 @Suite struct PondRowCountTests {
-    @Test func ducksModeShowsOnDutyNotTreeChats() {
-        let c = PondCounts(onDuty: 2, working: 1, needsYou: 0, offDuty: 3, total: 5)
+    @Test func ducksModeShowsOpenNotTreeChats() {
+        let c = PondCounts(open: 2, working: 1, needsYou: 0, closed: 3, total: 5)
         #expect(PondRowCount.of(ducksMode: true, counts: c, treeChats: 0, listed: 0) == 2)
-        #expect(PondRowCount.of(ducksMode: true, counts: PondCounts(onDuty: 0, working: 0, needsYou: 0, offDuty: 4, total: 4), treeChats: 3, listed: 3) == 0)
+        #expect(PondRowCount.of(ducksMode: true, counts: PondCounts(open: 0, working: 0, needsYou: 0, closed: 4, total: 4), treeChats: 3, listed: 3) == 0)
     }
     @Test func ducksModeWithoutCountsFallsBack() {
         #expect(PondRowCount.of(ducksMode: true, counts: nil, treeChats: 1, listed: 4) == 4)
     }
     @Test func flagOffIgnoresCounts() {
-        let c = PondCounts(onDuty: 9, working: 0, needsYou: 0, offDuty: 0, total: 9)
+        let c = PondCounts(open: 9, working: 0, needsYou: 0, closed: 0, total: 9)
         #expect(PondRowCount.of(ducksMode: false, counts: c, treeChats: 5, listed: 2) == 5)
     }
 }
