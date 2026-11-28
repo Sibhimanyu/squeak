@@ -36,7 +36,7 @@ struct PondSettingsView: View {
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
     /// Removing the project deletes its shared Pond for everyone first (the daemon's PondEnding); a local Pond just goes with it.
-    private var removeEndsPond: Bool { pond.map { !$0.local && $0.role == .owner && $0.state == .active } ?? false }
+    private var removeEndsPond: Bool { pond.map { !$0.local && $0.endOffering.primary == .delete && $0.state == .active } ?? false }
     private var role: PondRole { ponds.detail(key: key)?.myRole ?? pond?.role ?? .owner }
     private var native: NativeProject? { ponds.native(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }

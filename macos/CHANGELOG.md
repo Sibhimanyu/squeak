@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.35.6
+
+**Ponds you control.**
+
+- Permissions: in Pond settings, choose how members reach Ducks (through the Room, the default, or directly too) and who starts Ducks (the Room, the default; members with your approval; or members freely). Give one person more or less from their menu under People.
+- One Delete Pond for every Pond, on its right-click menu and in its settings. A shared Pond is deleted for everyone and picks up where it stopped if it is interrupted; a local Pond is removed from Squeak and its folder stays.
+- Invite is on every Pond you own, even one with no Ducks yet: inviting shares it.
+
 ## 2.35.5
 
 **Invitations that just work.**
