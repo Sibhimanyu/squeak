@@ -38,6 +38,8 @@ export interface LiveClientOptions {
   onRemoved?(pondId: string): void;
   /** Another member is typing; shown briefly, never stored. */
   onTyping?(pondId: string, userId: string): void;
+  /** One of this account's invitations changed (accounts/<userId>/invites): read them again. Carries no content. */
+  onInvites?(): void;
   /** Where each Pond's feed cursor already is (the caller's mirror); a Pond not named starts at its current end. */
   cursors?: Map<string, number>;
   fetch?: FetchLike;
@@ -218,6 +220,9 @@ export class LiveClient {
           this.o.onRemoved?.(body.pond);
           this.cursors.delete(body.pond);
         }
+        break;
+      case "invites":
+        this.o.onInvites?.();
         break;
       case "typing":
         if (typeof body.pond === "string" && typeof body.user === "string") this.o.onTyping?.(body.pond, body.user);

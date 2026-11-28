@@ -1613,22 +1613,28 @@ export class FlotillaService extends EventEmitter {
 
   // ---- the invited person's side (#127): the relay's record of the invitations for this Mac's account ----
 
-  private myInvitations: { at: number; list: Invitation[] } | null = null;
+  private myInvitations: { at: number; list: Invitation[]; stale: boolean } | null = null;
 
   /**
    * The invitations for this Mac's account, as the relay holds them: the ones to answer (`pending`) and the ones joined whose
-   * Pond the Owner's Mac has not opened to this account yet (`joined`, drawn as Connecting). Read at most every ten seconds;
-   * the last good answer stays when the cloud cannot be reached. A Pond already here is no invitation.
+   * Pond the Owner's Mac has not opened to this account yet (`joined`, drawn as Connecting). Read at most every ten seconds,
+   * again at once on a notice or an action's answer; when the cloud cannot be read the last good list stays and `stale` is
+   * true, so the surface says so ("Couldn't refresh") instead of showing an old list as if it were new. A Pond already here
+   * is no invitation.
    */
   async invitations(fresh = false): Promise<Invitation[]> {
+    return (await this.invitationsRead(fresh)).invitations;
+  }
+
+  async invitationsRead(fresh = false): Promise<{ invitations: Invitation[]; stale: boolean }> {
     const port = this.options.invites;
-    if (!port?.mine) return [];
+    if (!port?.mine) return { invitations: [], stale: false };
     if (fresh || !this.myInvitations || this.now() - this.myInvitations.at >= INVITATIONS_TTL_MS) {
       try {
-        this.myInvitations = { at: this.now(), list: await port.mine() };
+        this.myInvitations = { at: this.now(), list: await port.mine(), stale: false };
       } catch {
-        // Signed out, or the cloud did not answer: keep the last good list, try again at the next read.
-        this.myInvitations = { at: this.now(), list: this.myInvitations?.list ?? [] };
+        // Signed out, or the cloud did not answer: keep the last good list and say it is old.
+        this.myInvitations = { at: this.now(), list: this.myInvitations?.list ?? [], stale: true };
       }
     }
     const open = this.myInvitations.list.filter((i) => !this.holds(i.pondId));
@@ -1640,7 +1646,26 @@ export class FlotillaService extends EventEmitter {
       this.accountSyncAt = 0;
       void this.syncAccountPonds().catch(() => undefined);
     }
-    return open;
+    return { invitations: open, stale: this.myInvitations.stale };
+  }
+
+  /** The relay told this account's stream that an invitation changed (accounts/<userId>/invites): read them again. */
+  invitationsChanged(): void {
+    void this.invitations(true)
+      .then(() => this.emit("changed", ""))
+      .catch(() => undefined);
+  }
+
+  /** The cache learns from an action's answer: the fresh view replaces the row, and a row that is no longer open goes. */
+  private learn(view: Invitation): void {
+    const list = this.myInvitations?.list ?? [];
+    const open = view.state === "pending" || view.state === "joined";
+    const rest = list.filter((i) => i.id !== view.id);
+    this.myInvitations = {
+      at: this.now(),
+      list: open ? [view, ...rest] : rest,
+      stale: this.myInvitations?.stale ?? false,
+    };
   }
 
   /** This device holds the Pond as one it is in or waiting for; a removed, denied or expired entry is only a note of what was. */
@@ -1652,41 +1677,61 @@ export class FlotillaService extends EventEmitter {
   /** Ponds this account joined in the cloud that this Mac has not been let into yet. */
   private readonly expecting = new Map<string, Invitation>();
 
-  /** Join: the person is a Member in the cloud at once; the Pond shows as Connecting until the Owner's Mac lets this device in. */
-  async joinInvitation(inviteId: string): Promise<{ pondId: string }> {
-    const found = (await this.invitations()).find((i) => i.id === inviteId);
+  /**
+   * Join, idempotent at the relay: the person is a Member in the cloud at once (already joined, or already a Member, is the same
+   * success); the Pond shows as Connecting until the Owner's Mac lets this device in. The cache and the Connecting row come from
+   * the relay's answer. A refusal (withdrawn, expired, another address) keeps its sentence and the relay's fresh view, and the
+   * row is redrawn or dropped from that view.
+   */
+  async joinInvitation(inviteId: string): Promise<{ pondId: string; invitation: Invitation }> {
     const accept = this.options.invites?.accept;
     if (!accept) throw new FlotillaError("Invitations need Squeak's cloud. Sign in to Squeak, then try again.", 503);
-    // The state changes on the relay's answer only: a refusal leaves the invitation as it was.
-    await this.viaRelay(() => accept.call(this.options.invites, inviteId));
-    if (found) {
-      // Coming back (docs/spec.md "Coming back"): what this device kept of the earlier stay (a removed Pond's note, the day's
-      // "do not ask to be added back" after a leave) must not stand in the way of the new invitation.
-      const stale = this.pondsFile.data.ponds[found.pondId];
-      if (stale && TERMINAL.includes(stale.status)) this.forgetPond(found.pondId);
-      if (this.pondsFile.data.leftUntil?.[found.pondId] !== undefined) {
-        delete this.pondsFile.data.leftUntil[found.pondId];
-        this.pondsFile.save();
-      }
-      this.expecting.set(found.pondId, { ...found, state: "joined" });
+    const known = this.myInvitations?.list.find((i) => i.id === inviteId);
+    let answer;
+    try {
+      answer = await accept.call(this.options.invites, inviteId);
+    } catch (error) {
+      throw this.refused(error);
     }
-    if (this.myInvitations)
-      this.myInvitations = {
-        at: this.now(),
-        list: this.myInvitations.list.map((i) => (i.id === inviteId ? { ...i, state: "joined" as const } : i)),
-      };
-    this.emit("changed", found?.pondId ?? "");
-    return { pondId: found?.pondId ?? "" };
+    const { pondId, invitation } = answer;
+    // Coming back (docs/spec.md "Coming back"): what this device kept of the earlier stay (a removed Pond's note, the day's
+    // "do not ask to be added back" after a leave) must not stand in the way of the new invitation.
+    const stale = this.pondsFile.data.ponds[pondId];
+    if (stale && TERMINAL.includes(stale.status)) this.forgetPond(pondId);
+    if (this.pondsFile.data.leftUntil?.[pondId] !== undefined) {
+      delete this.pondsFile.data.leftUntil[pondId];
+      this.pondsFile.save();
+    }
+    const joined: Invitation = { ...(known ?? invitation), ...invitation, state: "joined", youAreMember: true };
+    this.expecting.set(pondId, joined);
+    this.learn(joined);
+    this.emit("changed", pondId);
+    return { pondId, invitation: joined };
   }
 
-  /** Decline asks nothing: the relay settles the invite and it is gone from the list. */
-  async declineInvitation(inviteId: string): Promise<void> {
+  /** Decline: the relay settles the invite and answers it; the row goes from the answer. */
+  async declineInvitation(inviteId: string): Promise<{ invitation: Invitation }> {
     const decline = this.options.invites?.decline;
     if (!decline) throw new FlotillaError("Invitations need Squeak's cloud. Sign in to Squeak, then try again.", 503);
-    await this.viaRelay(() => decline.call(this.options.invites, inviteId));
-    if (this.myInvitations)
-      this.myInvitations = { at: this.now(), list: this.myInvitations.list.filter((i) => i.id !== inviteId) };
+    let invitation;
+    try {
+      invitation = await decline.call(this.options.invites, inviteId);
+    } catch (error) {
+      throw this.refused(error);
+    }
+    this.learn(invitation);
     this.emit("changed", "");
+    return { invitation };
+  }
+
+  /** A refusal of Join or Decline: its sentence and status, and the relay's fresh view, which also updates what is shown. */
+  private refused(error: unknown): unknown {
+    if (!(error instanceof InviteRefused)) return error;
+    if (error.invitation) {
+      this.learn(error.invitation);
+      this.emit("changed", "");
+    }
+    return new FlotillaError(error.message, error.status, error.invitation ? { invitation: error.invitation } : {});
   }
 
   /** The rows of Ponds joined in the cloud that this Mac has not been let into yet, from the last read of the relay's record. */

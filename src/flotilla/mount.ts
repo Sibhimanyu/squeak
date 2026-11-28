@@ -120,16 +120,14 @@ export class FlotillaRoutes {
     }
     // Invitations for this Mac's account (#127): read from the relay's record; Join and Decline change state on its answer only.
     if (a === "invitations" && parts.length === 2 && method === "GET") {
-      ctx.json(200, { invitations: await service.invitations() });
+      // `stale: true` means the cloud could not be read just now and the list is the last good one ("Couldn't refresh").
+      ctx.json(200, await service.invitationsRead(ctx.url.searchParams.get("fresh") === "1"));
       return true;
     }
     if (a === "invitations" && b && (c === "join" || c === "decline") && parts.length === 4 && method === "POST") {
       exact(await ctx.body(), []);
       if (c === "join") ctx.json(200, await service.joinInvitation(b));
-      else {
-        await service.declineInvitation(b);
-        ctx.json(200, { ok: true });
-      }
+      else ctx.json(200, { ok: true, ...(await service.declineInvitation(b)) });
       return true;
     }
     if (a === "account-devices" && parts.length === 2 && method === "GET") {

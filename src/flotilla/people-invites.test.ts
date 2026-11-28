@@ -26,7 +26,12 @@ function fakeRelay() {
       calls.push(`create ${input.emails.join(",")} ${input.role} ${input.pondName}`);
       return input.emails.map((email) => {
         if (email === "in@example.com")
-          return { email, ok: false as const, message: `${email} is already in this Pond.` };
+          return {
+            email,
+            ok: false as const,
+            status: "already-member" as const,
+            message: `${email} is already in this Pond.`,
+          };
         const invite: InviteRecord = {
           id: `i${++n}`,
           email,
@@ -38,7 +43,7 @@ function fakeRelay() {
           settledAt: 0,
         };
         records.set(invite.id, invite);
-        return { email, ok: true as const, invite, mailed: true };
+        return { email, ok: true as const, status: "invited" as const, invite };
       });
     },
     async list() {
@@ -105,10 +110,11 @@ describe("inviting by email through the relay", () => {
     const r = await service.inviteEmails(pond.id, ["asha@example.com", "in@example.com"], "viewer");
     expect([...docs.keys()].some((k) => k.endsWith("/pond/meta"))).toBe(true);
     expect(relay.calls).toEqual(["create asha@example.com,in@example.com viewer greenroom"]);
-    expect(r.results[0]).toMatchObject({ ok: true, mailed: true, invite: { state: "pending", role: "viewer" } });
+    expect(r.results[0]).toMatchObject({ ok: true, status: "invited", invite: { state: "pending", role: "viewer" } });
     expect(r.results[1]).toEqual({
       email: "in@example.com",
       ok: false,
+      status: "already-member",
       message: "in@example.com is already in this Pond.",
     });
   });

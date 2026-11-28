@@ -47,7 +47,10 @@ describe("an invited person is let in by the Owner's Mac", () => {
   });
 
   it("Join changes state on the relay's answer: the Pond is Connecting, waiting for the Owner's Mac", async () => {
-    expect(await invitee.service.joinInvitation(inviteId)).toEqual({ pondId });
+    expect(await invitee.service.joinInvitation(inviteId)).toMatchObject({
+      pondId,
+      invitation: { state: "joined", youAreMember: true },
+    });
     expect(await invitee.service.list()).toEqual([
       expect.objectContaining({
         id: pondId,

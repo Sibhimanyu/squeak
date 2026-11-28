@@ -19,18 +19,30 @@ export interface InviteRecord {
   name?: string;
   /** The account, once the address belongs to one. */
   userId?: string;
+  /** The email could not be delivered after the relay's retries: the People list says so and offers Resend. */
+  emailFailed?: true;
 }
 
-/** One address of a send: the invite, or the plain sentence it was refused with (already in, already invited, Pond full). */
-export type InviteResult =
-  | { email: string; ok: true; invite: InviteRecord; mailed: boolean }
-  | { email: string; ok: false; message: string };
+/** What happened to one address of a send. */
+export type InviteOutcome = "invited" | "already-member" | "already-invited" | "refused";
 
-/** The relay refused an invite action; `message` is a plain sentence the surface can show as it is. */
+/**
+ * One address of a send: the invite (`ok`), or the plain sentence it was refused with. The email is queued at the relay and
+ * sent after its answer, so `ok` means the row is written. An address that is already invited carries the waiting invite.
+ */
+export type InviteResult =
+  | { email: string; ok: true; status: "invited"; invite: InviteRecord }
+  | { email: string; ok: false; status: Exclude<InviteOutcome, "invited">; message: string; invite?: InviteRecord };
+
+/**
+ * The relay refused an invite action; `message` is a plain sentence the surface can show as it is. `invitation` is the fresh
+ * view the relay attached (what the invitation is now), so the caller redraws from the refusal instead of guessing.
+ */
 export class InviteRefused extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly invitation?: Invitation,
   ) {
     super(message);
     this.name = "InviteRefused";
@@ -38,26 +50,37 @@ export class InviteRefused extends Error {
 }
 
 /**
- * An invitation as the invited person's account reads it (`GET /invites`): pending ones to answer, and ones already
- * joined whose Pond the Owner's Mac has not opened to the account yet (`joined`: drawn as Connecting).
+ * An invitation as the relay's Invitation module computes it for the viewer (`InvitationView`, people.js): every field is the
+ * relay's, nothing here is decided. `GET /account/invitations` lists the pending ones to answer and the ones already joined
+ * whose Pond the Owner's Mac has not opened to the account yet (`joined`: drawn as Connecting); every action answers the fresh one.
  */
+export type InvitationState = "pending" | "joined" | "declined" | "withdrawn" | "expired";
 export interface Invitation {
   id: string;
   pondId: string;
   pondName: string;
-  /** Who invited them: the Owner's name. */
+  /** Who invited them: the inviter's name, or their email masked when they have no name; never blank. */
   inviter: string;
   role: "member" | "viewer";
-  state: "pending" | "joined";
+  state: InvitationState;
+  /** This account is a Member of the Pond now. */
+  youAreMember: boolean;
   expiresAt: number;
+}
+
+/** What Join answers: the Pond to open, and the invitation as it is now. */
+export interface JoinAnswer {
+  pondId: string;
+  pondName: string;
+  invitation: Invitation;
 }
 
 export interface PondInvites {
   /** The invitee's side (the Mac's own account): the invitations waiting for it, and the ones joined but not yet open. */
   mine?(): Promise<Invitation[]>;
-  /** Join: the person is a Member in the cloud at once. */
-  accept?(inviteId: string): Promise<InviteRecord>;
-  decline?(inviteId: string): Promise<InviteRecord>;
+  /** Join, idempotent: the person is a Member in the cloud at once (already joined or already a Member is success). */
+  accept?(inviteId: string): Promise<JoinAnswer>;
+  decline?(inviteId: string): Promise<Invitation>;
   create(
     pondId: string,
     input: { emails: string[]; role: "member" | "viewer"; pondName: string },
@@ -75,6 +98,7 @@ export interface PondInvites {
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 const COULD_NOT_REACH = "Squeak could not reach the cloud. Try again.";
 const STATES: readonly InviteState[] = ["pending", "joined", "declined", "expired", "withdrawn"];
+const ACCOUNT_NAME_HEADER = "x-squeak-account-name";
 
 /** One record from the relay's JSON, or null when it is not the shape (a newer relay's extra fields are ignored). */
 export function readInvite(raw: unknown): InviteRecord | null {
@@ -99,10 +123,11 @@ export function readInvite(raw: unknown): InviteRecord | null {
     settledAt: num(r.settledAt),
     ...(typeof r.name === "string" && r.name ? { name: r.name.slice(0, 100) } : {}),
     ...(typeof r.userId === "string" && r.userId ? { userId: r.userId } : {}),
+    ...(r.emailFailed === true ? { emailFailed: true as const } : {}),
   };
 }
 
-/** One invitation from the relay's JSON, or null when it is not the shape. */
+/** One invitation view from the relay's JSON, or null when it is not the shape. */
 export function readInvitation(raw: unknown): Invitation | null {
   const r = raw as Record<string, unknown> | null;
   if (!r || typeof r !== "object") return null;
@@ -110,16 +135,18 @@ export function readInvitation(raw: unknown): Invitation | null {
     typeof r.inviteId !== "string" ||
     typeof r.pondId !== "string" ||
     (r.role !== "member" && r.role !== "viewer") ||
-    (r.state !== "pending" && r.state !== "joined")
+    !STATES.includes(r.state as InviteState)
   )
     return null;
+  const inviter = (r.inviter as { name?: unknown } | null)?.name;
   return {
     id: r.inviteId,
     pondId: r.pondId,
-    pondName: typeof r.pond === "string" && r.pond ? r.pond.slice(0, 200) : "A pond",
-    inviter: typeof r.inviter === "string" && r.inviter ? r.inviter.slice(0, 100) : "Someone",
+    pondName: typeof r.pondName === "string" && r.pondName ? r.pondName.slice(0, 200) : "A pond",
+    inviter: typeof inviter === "string" && inviter.trim() ? inviter.slice(0, 100) : "A teammate",
     role: r.role,
-    state: r.state,
+    state: r.state as InvitationState,
+    youAreMember: r.youAreMember === true,
     expiresAt: typeof r.expiresAt === "number" && Number.isFinite(r.expiresAt) ? r.expiresAt : 0,
   };
 }
@@ -134,11 +161,18 @@ export class HttpPondInvites implements PondInvites {
     private readonly relayKey: string,
     private readonly fetchImpl: FetchLike = relayFetch,
     hosted = false,
+    /** This Mac's account name, sent with its own key so an invite names who sent it and a name is never blanked. */
+    private readonly accountName: () => string | null = () => null,
   ) {
     const checked = relayBaseUrl(baseUrl);
     if (!checked) throw new Error("not a Catalyst relay address");
     this.url = checked;
     this.keyHeader = relayKeyHeader(hosted);
+  }
+
+  private nameHeader(): Record<string, string> {
+    const name = this.accountName()?.trim();
+    return name ? { [ACCOUNT_NAME_HEADER]: encodeURIComponent(name.slice(0, 100)) } : {};
   }
 
   private async call(method: "GET" | "POST", route: string, body?: unknown): Promise<Record<string, unknown>> {
@@ -149,6 +183,7 @@ export class HttpPondInvites implements PondInvites {
         headers: {
           [this.keyHeader]: this.relayKey,
           ...macClientHeaders(),
+          ...this.nameHeader(),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -163,27 +198,44 @@ export class HttpPondInvites implements PondInvites {
       if (response.status === 429)
         throw new InviteRefused("That is a lot of invitations for today. Try again tomorrow.", 429);
       if (response.status === 401) throw new InviteRefused("Sign in to Squeak to invite people.", 401);
-      throw new InviteRefused(message || COULD_NOT_REACH, response.status >= 500 ? 503 : response.status);
+      const invitation = readInvitation(json?.invitation) ?? undefined;
+      throw new InviteRefused(message || COULD_NOT_REACH, response.status >= 500 ? 503 : response.status, invitation);
     }
     if (!json) throw new InviteRefused(COULD_NOT_REACH, 503);
     return json;
   }
 
   async mine(): Promise<Invitation[]> {
-    const body = await this.call("GET", "/invites");
-    if (!Array.isArray(body.invites)) throw new InviteRefused(COULD_NOT_REACH, 503);
-    return body.invites.flatMap((row: unknown) => {
+    const body = await this.call("GET", "/account/invitations");
+    if (!Array.isArray(body.invitations)) throw new InviteRefused(COULD_NOT_REACH, 503);
+    return body.invitations.flatMap((row: unknown) => {
       const one = readInvitation(row);
       return one ? [one] : [];
     });
   }
 
-  async accept(inviteId: string): Promise<InviteRecord> {
-    return (await this.one(`/invites/${encodeURIComponent(inviteId)}/accept`)).invite;
+  private async answer(route: string): Promise<Record<string, unknown>> {
+    return this.call("POST", route, {});
   }
 
-  async decline(inviteId: string): Promise<InviteRecord> {
-    return (await this.one(`/invites/${encodeURIComponent(inviteId)}/decline`)).invite;
+  async accept(inviteId: string): Promise<JoinAnswer> {
+    const body = await this.answer(`/account/invitations/${encodeURIComponent(inviteId)}/join`);
+    const invitation = readInvitation(body.invitation);
+    const pond = body.pond as { pondId?: unknown; name?: unknown } | null;
+    if (!invitation || typeof pond?.pondId !== "string") throw new InviteRefused(COULD_NOT_REACH, 503);
+    return {
+      pondId: pond.pondId,
+      pondName: typeof pond.name === "string" ? pond.name : invitation.pondName,
+      invitation,
+    };
+  }
+
+  async decline(inviteId: string): Promise<Invitation> {
+    const invitation = readInvitation(
+      (await this.answer(`/account/invitations/${encodeURIComponent(inviteId)}/decline`)).invitation,
+    );
+    if (!invitation) throw new InviteRefused(COULD_NOT_REACH, 503);
+    return invitation;
   }
 
   private base = (pondId: string): string => `/ponds/${encodeURIComponent(pondId)}/invites`;
@@ -197,15 +249,16 @@ export class HttpPondInvites implements PondInvites {
     return body.results.flatMap((row: unknown): InviteResult[] => {
       const r = row as Record<string, unknown> | null;
       if (!r || typeof r.email !== "string") return [];
-      if (r.ok === true) {
-        const invite = readInvite(r.invite);
-        return invite ? [{ email: r.email, ok: true, invite, mailed: r.mailed === true }] : [];
-      }
+      const invite = readInvite(r.invitation ?? r.invite) ?? undefined;
+      if (r.ok === true) return invite ? [{ email: r.email, ok: true, status: "invited", invite }] : [];
+      const status = r.status === "already-member" || r.status === "already-invited" ? r.status : "refused";
       return [
         {
           email: r.email,
           ok: false,
+          status,
           message: typeof r.message === "string" && r.message ? r.message : COULD_NOT_REACH,
+          ...(invite ? { invite } : {}),
         },
       ];
     });
@@ -222,7 +275,7 @@ export class HttpPondInvites implements PondInvites {
 
   private async one(route: string, body?: unknown): Promise<{ invite: InviteRecord; mailed: boolean }> {
     const answer = await this.call("POST", route, body ?? {});
-    const invite = readInvite(answer.invite);
+    const invite = readInvite(answer.invitation ?? answer.invite);
     if (!invite) throw new InviteRefused(COULD_NOT_REACH, 503);
     return { invite, mailed: answer.mailed === true };
   }

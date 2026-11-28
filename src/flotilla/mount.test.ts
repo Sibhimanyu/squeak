@@ -153,7 +153,7 @@ describe("flotilla routes", () => {
     expect((await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true })).status).toBe(404);
     expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id })).status).toBe(404);
     // The invited person's routes: no cloud, nothing waiting, and Join or Decline say what is missing instead of pretending.
-    expect((await h.call("GET", "/native/ponds/invitations")).json).toEqual({ invitations: [] });
+    expect((await h.call("GET", "/native/ponds/invitations")).json).toEqual({ invitations: [], stale: false });
     expect((await h.call("POST", "/native/ponds/invitations/i1/join", {})).status).toBe(503);
     expect((await h.call("POST", "/native/ponds/invitations/i1/decline", {})).status).toBe(503);
     expect((await h.call("POST", "/native/ponds/invitations/i1/explode", {})).status).toBe(404);
