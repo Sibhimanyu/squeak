@@ -2747,7 +2747,8 @@ export class FlotillaService extends EventEmitter {
   async deletePond(pondId: string): Promise<void> {
     const pond = this.pond(pondId);
     // Who may delete is the Pond policy's call (a Pond mid-delete is still this Owner's: the resume needs no new check).
-    if (pond.status === "active" && !pond.ending) this.allow(pond, "delete-pond", {}, "Only an owner can delete the pond.");
+    if (pond.status === "active" && !pond.ending)
+      this.allow(pond, "delete-pond", {}, "Only an owner can delete the pond.");
     await this.endings.end(pondId, "delete");
   }
 
