@@ -74,6 +74,8 @@ export interface FlotillaDeps {
   /** The Room and its Tasks, carried to Members of a shared pond (`room-sync.ts`); without them nothing is published. */
   room?: Room;
   jobs?: RoomTasks;
+  /** The host's "Remove from Squeak" for a project; a local Pond's Delete runs it (PondEnding). */
+  removeProject?: (projectId: string) => Promise<void>;
 }
 
 const git = (cwd: string, args: string[]): Promise<string> =>
@@ -228,6 +230,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     liveState: () => (store instanceof CatalystStore ? store.liveState() : null),
     updateRequired: () => updateGate.required,
     supportDir: deps.supportDir,
+    ...(deps.removeProject ? { removeProject: deps.removeProject } : {}),
     nest: computerName(),
     ...(where ? { location: where } : {}),
     // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member holds

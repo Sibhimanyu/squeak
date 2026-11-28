@@ -21,13 +21,15 @@ import Testing
         #expect(p.sharingState == .shared)
     }
 
-    @Test func aLocalDeleteIsNotSaidToBeForEveryone() {
-        let p = pond(#","sharing":"local","endOffer":{"primary":"delete","words":{"menu":"Delete Pond…","title":"Delete Alpha?","message":"Squeak forgets this Pond.","button":"Delete Pond"}}"#, local: true)
+    @Test func aLocalDeleteIsRemoveFromSqueakNotForEveryone() {
+        let p = pond(#","sharing":"local","endOffer":{"primary":"delete","words":{"menu":"Remove from Squeak…","title":"Remove Alpha from Squeak?","message":"Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.","button":"Remove from Squeak"}}"#, local: true)
         #expect(p.sharingState == .local)
-        #expect(p.endOffering.words.title == "Delete Alpha?")
+        #expect(p.endOffering.words.menu == "Remove from Squeak\u{2026}")
+        #expect(p.endOffering.words.title == "Remove Alpha from Squeak?")
         // An older host sends no offer: the same local words are made here, never "for everyone".
         let old = pond(local: true)
-        #expect(old.endOffering.words.button == "Delete Pond")
+        #expect(old.endOffering.words.button == "Remove from Squeak")
+        #expect(old.endOffering.words.message == "Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.")
         #expect(!old.endOffering.words.title.contains("everyone"))
         #expect(old.sharingState == .local)
     }

@@ -67,8 +67,8 @@ extension PondSummary {
         if role == .owner {
             if local {
                 return PondEndOffer(primary: .delete, words: PondEndWords(
-                    menu: "Delete Pond\u{2026}", title: "Delete \(name)?",
-                    message: "Squeak forgets this Pond. Nobody else is in it. Your folder, its Git history and your Ducks stay as they are.", button: "Delete Pond"))
+                    menu: "Remove from Squeak\u{2026}", title: "Remove \(name) from Squeak?",
+                    message: "Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.", button: "Remove from Squeak"))
             }
             return PondEndOffer(primary: .delete, words: PondEndWords(
                 menu: "Delete Pond\u{2026}", title: "Delete \(name) for everyone?",

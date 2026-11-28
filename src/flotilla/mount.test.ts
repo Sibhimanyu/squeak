@@ -53,6 +53,8 @@ async function boot(
     account: named("Me"),
     nest: "mac",
     location: { provider: "firebase", databaseUrl: dbUrl },
+    // What the real host does for a local Pond's Delete: Remove from Squeak.
+    removeProject: async (id) => void store.removeProject(id),
   });
   const bridge = new FlotillaBridge(service, hostPortFor({ host, store, tools: {} as never }), { flushMs: 60_000 });
   bridge.start();
@@ -200,24 +202,23 @@ describe("flotilla routes", () => {
     expect(sent.json).toEqual({ ok: true, queued: false, state: "sent", line: "Sent." });
   });
 
-  it("Delete on a local Pond forgets it: the project's next GET /ponds makes no new Pond, and the row says what to offer (#142)", async () => {
+  it("Delete on a local Pond is Remove from Squeak: the project and the row leave together, nothing is made again (#142)", async () => {
     const h = await boot(true, null, ({ store }) => ({ projects: () => store.listProjects() }));
     const project = h.store.createProject({ name: "Folder", rootPath: os.tmpdir(), defaultBranch: "main" });
     const first = (await h.call("GET", "/native/ponds")).json.ponds;
     expect(first).toHaveLength(1);
     const row = first[0];
     expect(row).toMatchObject({ local: true, sharing: "local", projectId: project.id });
-    expect(row.endOffer).toMatchObject({ primary: "delete", words: { menu: "Delete Pond…", title: "Delete Folder?" } });
+    expect(row.endOffer).toMatchObject({
+      primary: "delete",
+      words: { menu: "Remove from Squeak…", title: "Remove Folder from Squeak?" },
+    });
 
     // Only what the row offers is accepted.
     expect((await h.call("POST", `/native/ponds/${row.id}/end`, { kind: "leave" })).status).toBe(409);
     expect((await h.call("POST", `/native/ponds/${row.id}/end`, { kind: "delete" })).status).toBe(200);
-    // The old route is the same module.
-    const second = (await h.call("GET", "/native/ponds")).json.ponds;
-    expect(second).toEqual([]);
-    // Only an explicit action makes it again, under the same id.
-    const back = await h.call("POST", "/native/ponds/local", { projectId: project.id });
-    expect(back.json.pond.id).toBe(row.id);
+    expect(h.store.getProject(project.id)).toBeFalsy();
+    expect((await h.call("GET", "/native/ponds")).json.ponds).toEqual([]);
   });
 
   it("an own thread needs the pond's git remote", async () => {

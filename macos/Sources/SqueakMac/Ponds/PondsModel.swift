@@ -701,11 +701,11 @@ final class PondsModel {
     }
 
     func deletePond(pond: String) async -> Bool {
-        // A local Pond is only forgotten: its project stays in the list, so nothing is dropped and no one is sent home.
-        let wasLocal = ponds.first { $0.id == pond }?.local ?? false
+        // A local Pond's Delete is Remove from Squeak (the daemon runs the host's removal): the project and the row leave together.
         let ok = await act("delete:\(pond)", pond: pond, success: nil, kind: .delete) { try await self.client!.deletePond(pond: pond) }
         if ok {
-            if wasLocal { await refresh(); await refreshDirectory() } else { await dropGone(id: pond) }
+            await AppModel.shared.refreshNativeProjects()
+            await dropGone(id: pond)
         }
         return ok
     }

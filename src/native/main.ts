@@ -212,7 +212,20 @@ export async function runHost(supportDir: string): Promise<void> {
         },
       },
     });
-    flotilla = createFlotilla({ host, starter, store, workspaces, ...shared, supportDir, room, jobs });
+    flotilla = createFlotilla({
+      host,
+      starter,
+      store,
+      workspaces,
+      ...shared,
+      supportDir,
+      room,
+      jobs,
+      // A local Pond's Delete is Remove from Squeak: the server's own removal (busy chats refuse with its sentence).
+      removeProject: async (projectId) => {
+        server?.removeProject(projectId);
+      },
+    });
   }
   server = new NativeServer({
     host,

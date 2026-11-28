@@ -165,7 +165,7 @@ struct PondEndSection: View {
         let busy = ponds.isBusy(key)
         if offer.primary != .forget {
             VStack(alignment: .leading, spacing: 6) {
-                Text(leaving ? "Leave this pond" : "Delete this pond").font(Typo.label).foregroundStyle(Theme.ink)
+                Text(leaving ? "Leave this pond" : pond.local ? "Remove this pond" : "Delete this pond").font(Typo.label).foregroundStyle(Theme.ink)
                 Text(verbatim: offer.blockedBy ?? offer.words.message).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 Button(busy ? (leaving ? "Leaving\u{2026}" : "Deleting\u{2026}") : offer.words.menu) { confirming = true }
                     .buttonStyle(DestructiveButtonStyle()).disabled(offer.blockedBy != nil || busy)

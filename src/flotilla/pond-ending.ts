@@ -22,7 +22,7 @@ export type Sharing = "local" | "sharing" | "shared";
 
 /** The steps a plan is made of; the port runs each one and every one is safe to run twice. */
 export type EndStep =
-  | "dismiss" // a local Pond: Squeak forgets it, its record is kept aside under the same id
+  | "remove" // a local Pond: the project is removed from Squeak (the host's Remove from Squeak), and the Pond goes with it
   | "tell" // the Owner tells each Member's device the Pond was deleted
   | "revoke" // every other Member's access ends
   | "cloud" // the relay's people records end (leaving: the account leaves)
@@ -32,7 +32,7 @@ export type EndStep =
 
 const PLANS = {
   delete: ["tell", "revoke", "cloud", "documents", "forget"],
-  localDelete: ["dismiss"],
+  localDelete: ["remove"],
   leave: ["cloud", "owner", "forget"],
   forget: ["forget"],
 } as const;
@@ -125,11 +125,10 @@ export function offerFor(f: EndingFacts): EndOffer | null {
       return {
         primary: "delete",
         words: {
-          menu: "Delete Pond…",
-          title: `Delete ${f.name}?`,
-          message:
-            "Squeak forgets this Pond. Nobody else is in it. Your folder, its Git history and your Ducks stay as they are.",
-          button: "Delete Pond",
+          menu: "Remove from Squeak…",
+          title: `Remove ${f.name} from Squeak?`,
+          message: "Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.",
+          button: "Remove from Squeak",
         },
       };
     }

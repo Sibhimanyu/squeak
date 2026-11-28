@@ -52,7 +52,7 @@ function fakePort(initial: Partial<EndingFacts> = {}) {
         throw new FlotillaError(`The ${step} step failed.`, 503);
       }
       ran.push(step);
-      if (step === "forget" || step === "dismiss") facts = null;
+      if (step === "forget" || step === "remove") facts = null;
     },
     changed: () => undefined,
     removeMember: async (_id, memberId) => {
@@ -102,13 +102,15 @@ function fakePort(initial: Partial<EndingFacts> = {}) {
 }
 
 describe("PondEnding.offer: the one place that decides local versus shared", () => {
-  it("a local Pond is deleted by forgetting it; a shared one is deleted for everyone; a Member leaves", () => {
+  it("a local Pond is removed from Squeak; a shared one is deleted for everyone; a Member leaves", () => {
     const local = offerFor({ ...base, local: true, people: 1 })!;
     expect(local.primary).toBe("delete");
-    expect(local.words.menu).toBe("Delete Pond…");
-    expect(local.words.title).toBe("Delete Alpha?");
-    expect(local.words.message).toMatch(/Squeak forgets this Pond/);
-    expect(local.words.message).toMatch(/Ducks stay/);
+    expect(local.words.menu).toBe("Remove from Squeak…");
+    expect(local.words.title).toBe("Remove Alpha from Squeak?");
+    expect(local.words.button).toBe("Remove from Squeak");
+    expect(local.words.message).toBe(
+      "Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.",
+    );
 
     const shared = offerFor(base)!;
     expect(shared.primary).toBe("delete");
@@ -139,7 +141,7 @@ describe("PondEnding.end: cloud first, progress recorded, nothing swallowed", ()
 
     const local = fakePort({ local: true });
     await new PondEnding(local.port).end("p1", "delete");
-    expect(local.ran).toEqual(["dismiss"]);
+    expect(local.ran).toEqual(["remove"]);
   });
 
   it("a failed step stays in the record with its sentence, and the next press resumes at that step", async () => {
@@ -268,7 +270,16 @@ class Cloud {
       watch: () => () => undefined,
     };
   }
-  mac(name: string, options: { owner?: boolean; dir?: string; relay?: unknown; invites?: PondInvites } = {}) {
+  mac(
+    name: string,
+    options: {
+      owner?: boolean;
+      dir?: string;
+      relay?: unknown;
+      invites?: PondInvites;
+      removeProject?: (projectId: string) => Promise<void>;
+    } = {},
+  ) {
     const dir = options.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "pond-ending-"));
     if (!options.dir) dirs.push(dir);
     const store = this.store();
@@ -282,6 +293,7 @@ class Cloud {
       storeFor: () => store,
       ...(options.relay ? { relay: options.relay as never } : {}),
       ...(options.invites ? { invites: options.invites } : {}),
+      ...(options.removeProject ? { removeProject: options.removeProject } : {}),
     });
     return { dir, service };
   }
@@ -290,44 +302,53 @@ class Cloud {
   }
 }
 
-describe("Delete on a local Pond (the service)", () => {
-  it("forgets the Pond, never makes a new one for the project, and brings the same id back on an explicit ask", async () => {
+describe("Delete on a local Pond is Remove from Squeak (the service)", () => {
+  it("runs the host's removal, so the project and its Pond leave together and no dead-end row is left", async () => {
     const c = new Cloud();
-    const A = c.mac("Sibhi", { owner: true });
+    const removed: string[] = [];
+    const A = c.mac("Sibhi", {
+      owner: true,
+      removeProject: async (id) => {
+        removed.push(id);
+        A.service.projectRemoved(id); // what the host does after removing the project
+      },
+    });
     const made = A.service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
-    // A Duck shared into the Pond: its link is the Pond's id.
-    const inside = A.service as unknown as {
-      pondsFile: { data: { ponds: Record<string, { threads: Record<string, unknown> }> } };
-    };
-    inside.pondsFile.data.ponds[made.id]!.threads["t1"] = { sessionId: "s1" };
-
-    expect(A.service.endOffer(made.id)!.words.title).toBe("Delete Alpha?");
+    const offer = A.service.endOffer(made.id)!;
+    expect(offer.words).toMatchObject({
+      menu: "Remove from Squeak…",
+      message: "Squeak forgets this folder and its Pond. The folder and its files stay on your Mac.",
+    });
     await A.service.deletePond(made.id);
+    expect(removed).toEqual(["p1"]);
     expect(await A.service.list()).toEqual([]);
-    // The host's "every project is a pond" pass sees a Pond for the project (deleted), so it makes no new one.
-    expect(A.service.hasPondForProject({ projectId: "p1" })).toBe(true);
-    expect(() => A.service.ensureLocalPond({ name: "Alpha", projectId: "p1" })).toThrow(/was deleted/);
-    expect(await A.service.list()).toEqual([]);
-
-    // Restarted: still deleted.
-    const again = c.mac("Sibhi", { owner: true, dir: A.dir });
-    expect(again.service.hasPondForProject({ projectId: "p1" })).toBe(true);
-
-    // The explicit action brings back the same Pond, Ducks linked.
-    const back = again.service.ensureLocalPond({ name: "Alpha", projectId: "p1" }, { explicit: true });
-    expect(back.id).toBe(made.id);
-    const restored = again.service as unknown as typeof inside;
-    expect(restored.pondsFile.data.ponds[made.id]!.threads["t1"]).toEqual({ sessionId: "s1" });
-    expect(c.docs.size).toBe(0);
+    expect(A.service.hasPondForProject({ projectId: "p1" })).toBe(false);
+    // Adding the folder again later simply makes a Pond again.
+    expect(A.service.ensureLocalPond({ name: "Alpha", projectId: "p1" }).id).not.toBe(made.id);
   });
 
-  it("removing the project drops the kept Pond too", async () => {
+  it("a busy chat refuses with the host's sentence, the Pond stays, and Try again works once it is done", async () => {
     const c = new Cloud();
-    const A = c.mac("Sibhi", { owner: true });
+    let busy = true;
+    const A = c.mac("Sibhi", {
+      owner: true,
+      removeProject: async () => {
+        if (busy)
+          throw Object.assign(new Error("A chat is still working or waiting on you here. Finish or stop it first."), {
+            status: 409,
+          });
+      },
+    });
     const made = A.service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
+    await expect(A.service.deletePond(made.id)).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/still working or waiting on you/),
+    });
+    const [row] = await A.service.list();
+    expect(row!.ending).toMatchObject({ kind: "delete", failed: expect.stringMatching(/Finish or stop it first/) });
+    busy = false;
     await A.service.deletePond(made.id);
-    A.service.projectRemoved("p1");
-    expect(A.service.hasPondForProject({ projectId: "p1" })).toBe(false);
+    expect(await A.service.list()).toEqual([]);
   });
 });
 
@@ -553,5 +574,5 @@ describe("Invite shares first (the service)", () => {
 });
 
 // A step is only a step: the names are part of the contract the port is written against.
-const _steps: EndStep[] = ["dismiss", "tell", "revoke", "cloud", "documents", "owner", "forget"];
+const _steps: EndStep[] = ["remove", "tell", "revoke", "cloud", "documents", "owner", "forget"];
 void _steps;

@@ -153,14 +153,11 @@ export class FlotillaRoutes {
       if (!project) throw new FlotillaError("That project is not on this Mac.", 404);
       const remote = await this.deps.remoteOf(projectId, project.rootPath).catch(() => null);
       ctx.json(200, {
-        pond: service.ensureLocalPond(
-          {
-            name: project.name,
-            ...(remote ? { gitRemote: remote } : {}),
-            ...(projectId ? { projectId } : {}),
-          },
-          { explicit: true },
-        ),
+        pond: service.ensureLocalPond({
+          name: project.name,
+          ...(remote ? { gitRemote: remote } : {}),
+          ...(projectId ? { projectId } : {}),
+        }),
       });
       return true;
     }

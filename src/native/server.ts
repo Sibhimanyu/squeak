@@ -590,6 +590,27 @@ export class NativeServer {
     return { ...built, pondOwnThreads: flag("pondOwnThreads"), ducksOwnBranch: flag("ducksOwnBranch") };
   }
 
+  /** A project is not removed from under a chat that works or waits on the person. */
+  private refuseWhileBusy(projectId: string): void {
+    const busy = this.options.store.busySessionsOfProject(projectId);
+    if (busy.length > 0)
+      throw new HttpError(
+        409,
+        `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
+      );
+  }
+
+  /**
+   * "Remove from Squeak": the project and its workspace rows go, its local Pond with it, chats keep their history, no file
+   * or git is touched. Also what a local Pond's Delete runs (PondEnding). Throws a 409 sentence while a chat is busy.
+   */
+  removeProject(projectId: string): void {
+    this.refuseWhileBusy(projectId);
+    this.options.store.removeProject(projectId);
+    this.options.flotilla?.projectRemoved?.(projectId);
+    this.prefs?.forget(projectId);
+  }
+
   /** What the sidebar keeps for a project: hidden, labels, and the Squeak icon's URL and time when it has one. */
   private prefsView(key: string): Record<string, unknown> {
     const p = this.prefs;
@@ -1225,12 +1246,7 @@ export class NativeServer {
       // "Remove from Squeak": the project and its workspace rows go; chats keep their history; no file or git is touched.
       const key = decodeKey(id);
       if (!store.getProject(key)) throw new HttpError(404, "no such project");
-      const busy = store.busySessionsOfProject(key);
-      if (busy.length > 0)
-        throw new HttpError(
-          409,
-          `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
-        );
+      this.refuseWhileBusy(key);
       // A project whose pond is shared is not removed from under it: the owner deletes the pond first.
       // `?endPond=1` is the person's answer to that sentence ("deletes the Pond for everyone"): the Pond is ended first, the
       // right way (PondEnding, cloud first, resumable), and only then does the project go. A failed end leaves both as they were.
@@ -1258,9 +1274,7 @@ export class NativeServer {
           { pondId: key, includeLive: true },
         );
       }
-      store.removeProject(key);
-      this.options.flotilla?.projectRemoved?.(key);
-      this.prefs?.forget(key);
+      this.removeProject(key);
       return this.json(res, 200, cleanup ? { ok: true, cleanup } : { ok: true });
     }
     if (

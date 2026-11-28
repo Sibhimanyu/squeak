@@ -350,6 +350,8 @@ export interface FlotillaOptions {
   wakeDebounceMs?: number;
   /** Deleting a Pond tells each Member first, then waits this long for them to read it before their access ends (default 2 s; 0 in tests). */
   deleteGraceMs?: number;
+  /** The host's "Remove from Squeak" for a project (busy chats refuse with a 409 sentence): a local Pond's Delete runs it. */
+  removeProject?: (projectId: string) => Promise<void>;
   /** At least this long between two reads of one pond that a notice started (default 3 s). */
   wakeMinIntervalMs?: number;
   /** 0..1, for the back-off's jitter (default Math.random). */
@@ -573,11 +575,6 @@ export class FlotillaService extends EventEmitter {
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
   private readonly pondsFile: SecretFile<{
     ponds: Record<string, LocalPond>;
-    /**
-     * Local Ponds the person deleted, by project id: the record (same id, name, Ducks) is kept aside so the project's Pond
-     * is never made again with a new id. Only an explicit action brings it back (`createPond`).
-     */
-    dismissed?: Record<string, LocalPond>;
     leftUntil?: Record<string, number>;
     /** When the start-clean migration ran on this Mac (once; docs/cloud-layer.md, "Clean start"). */
     cleanStartedAt?: number;
@@ -987,11 +984,6 @@ export class FlotillaService extends EventEmitter {
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
       if (pond.projectId === projectId && pond.local) this.forgetPond(pond.id);
     }
-    // The project is gone, so a Pond kept aside for it has nothing left to link to.
-    if (this.pondsFile.data.dismissed?.[projectId]) {
-      delete this.pondsFile.data.dismissed[projectId];
-      this.save();
-    }
   }
 
   projectIdOf(pondId: string): string | null {
@@ -1171,12 +1163,9 @@ export class FlotillaService extends EventEmitter {
     return all.find((p) => p.projectId === input.projectId) ?? null;
   }
 
-  /**
-   * Whether a project has a pond here: local, published, or deleted by the person (kept aside, never made again by itself,
-   * so the host's "every project is a pond" pass does not give it a new one).
-   */
+  /** Whether a project already has a pond here, local or published (by project id). */
   hasPondForProject(input: { projectId?: string }): boolean {
-    return this.pondOfProject(input) !== null || this.dismissedOf(input.projectId) !== null;
+    return this.pondOfProject(input) !== null;
   }
 
   /**
@@ -1184,19 +1173,10 @@ export class FlotillaService extends EventEmitter {
    * or returns the one it already has, so a project tied to a published pond never gets a second. Takes a project id
    * only (a name alone is refused). Synchronous, so two calls cannot both create.
    */
-  ensureLocalPond(
-    input: { name: string; gitRemote?: string; projectId?: string },
-    options: { explicit?: boolean } = {},
-  ): PondSummary {
+  ensureLocalPond(input: { name: string; gitRemote?: string; projectId?: string }): PondSummary {
     if (!input.projectId) throw new FlotillaError(NEEDS_PROJECT, 400);
     const found = this.pondOfProject(input);
     if (found) return this.summary(found, 1, 0, 0);
-    // A Pond the person deleted comes back only when they ask for one, never from the host's own pass.
-    if (options.explicit) {
-      const back = this.restoreDismissed(input.projectId);
-      if (back) return this.summary(back, 1, 0, 0);
-    }
-    if (this.dismissedOf(input.projectId)) throw new FlotillaError("That project's pond was deleted.", 409);
     return this.summary(this.newPond(input, true), 1, 0, 0);
   }
 
@@ -1252,10 +1232,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
-    // The explicit action: a deleted local Pond comes back under its own id, never a new one.
-    const existing = input.projectId
-      ? (this.pondOfProject({ projectId: input.projectId }) ?? this.restoreDismissed(input.projectId))
-      : null;
+    const existing = input.projectId ? this.pondOfProject({ projectId: input.projectId }) : null;
     if (existing?.local) {
       await this.publish(existing.id);
       return this.summary(existing, 1, 0, 0);
@@ -2706,9 +2683,21 @@ export class FlotillaService extends EventEmitter {
   private async runEndStep(pondId: string, step: EndStep): Promise<void> {
     const pond = this.pond(pondId);
     switch (step) {
-      case "dismiss":
-        this.dismissPond(pondId);
+      case "remove": {
+        // A local Pond ends with its project: the host's own Remove from Squeak (it refuses while a chat is working, with
+        // its sentence, and calls `projectRemoved`), so the row leaves the sidebar. Without a project there is only the record.
+        const remove = this.options.removeProject;
+        if (remove && pond.projectId) {
+          try {
+            await remove(pond.projectId);
+          } catch (error) {
+            const e = error as { status?: number; message?: string };
+            throw new FlotillaError(e.message || "Squeak couldn't remove it. Try again.", e.status ?? 503);
+          }
+        }
+        this.forgetPond(pondId);
         return;
+      }
       case "forget": {
         const leaving = pond.role !== "owner" && pond.status === "active";
         this.forgetPond(pondId);
@@ -2795,36 +2784,6 @@ export class FlotillaService extends EventEmitter {
         return;
       }
     }
-  }
-
-  /**
-   * A local Pond the person deleted: Squeak forgets it (nothing is in the cloud), keeping its record aside under the same
-   * id by project, so the project is never given a second Pond with a new id and the Ducks keep their link.
-   */
-  private dismissPond(pondId: string): void {
-    const pond = this.pond(pondId);
-    if (pond.projectId) {
-      const kept: LocalPond = { ...pond };
-      delete kept.ending;
-      delete kept.sharingStarted;
-      (this.pondsFile.data.dismissed ??= {})[pond.projectId] = kept;
-    }
-    this.forgetPond(pondId);
-  }
-
-  /** The Pond a project had before it was deleted, if any. */
-  private dismissedOf(projectId: string | undefined): LocalPond | null {
-    return (projectId && this.pondsFile.data.dismissed?.[projectId]) || null;
-  }
-
-  /** Puts a deleted local Pond back under its own id (the explicit action: making a Pond for that project again). */
-  private restoreDismissed(projectId: string): LocalPond | null {
-    const kept = this.dismissedOf(projectId);
-    if (!kept) return null;
-    delete this.pondsFile.data.dismissed![projectId];
-    this.pondsFile.data.ponds[kept.id] = kept;
-    this.save();
-    return kept;
   }
 
   /** The relay's account index lists no account this Owner removed; throws a plain sentence when it still does. */
