@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.35.5
+
+**Invitations that just work.**
+
+- Join never says "already used": joining twice, or a Pond you're already in, simply opens it.
+- Invitations to you appear and disappear within seconds. If the list can't refresh, it says so with Try again.
+- Inviting several people is one quick step: each address shows Inviting…, then Invited or the reason. An email that didn't arrive shows Resend.
+- Invitations show who invited you by name, never "Someone".
+
 ## 2.35.4
 
 **The Room speaks plainly.**
