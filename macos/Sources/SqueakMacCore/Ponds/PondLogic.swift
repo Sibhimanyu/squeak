@@ -310,8 +310,9 @@ public enum PondThreadRules {
     /// The Private toggle is the starter's alone.
     public static func canTogglePrivate(starter: String, me: String?) -> Bool { me != nil && starter == me }
 
-    public static func composerPlaceholder(role: PondRole, working: Bool) -> String {
-        if !role.canMessage { return "You\u{2019}re a viewer: you can read but not send." }
+    public static func composerPlaceholder(role: PondRole, working: Bool, can: PondCan? = nil) -> String {
+        let can = can ?? PondCan(role: role)
+        if !can.allows(.messageDuck) { return can.reason(.messageDuck) ?? "You\u{2019}re a viewer: you can read but not send." }
         return working ? "Message, \u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer" : "Message"
     }
 }
@@ -342,7 +343,7 @@ public enum PondStartThread: Sendable, Equatable {
 
     /// A pond shared with me that this Mac cannot start a thread in: Start still works, on the owner's Mac (a signed request).
     public static func runsOnOwnerMac(_ pond: PondSummary?) -> Bool {
-        guard let pond, PondSharing.isSharedWithMe(pond), pond.role.canMessage else { return false }
+        guard let pond, PondSharing.isSharedWithMe(pond), PondCan(role: pond.role).allows(.startDuck) else { return false }
         if case .shareOnly = offer(for: pond) { return true }
         return false
     }
@@ -358,7 +359,7 @@ public enum PondStartThread: Sendable, Equatable {
     }
 
     public static func places(for pond: PondSummary, ownThreads: Bool = true) -> [Place] {
-        guard pond.role.canMessage else { return [] }
+        guard PondCan(role: pond.role).allows(.startDuck) else { return [] }
         let remote = !(pond.gitRemote?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
         let owner = pond.ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
         let mine = pond.role == .owner
@@ -370,7 +371,7 @@ public enum PondStartThread: Sendable, Equatable {
         return out
     }
     public static func offer(for pond: PondSummary) -> PondStartThread {
-        guard pond.role.canMessage else { return .none }
+        guard PondCan(role: pond.role).allows(.startDuck) else { return .none }
         // The host decides (it knows which projects this Mac holds); an older host says nothing, so the remote decides.
         let remote = pond.gitRemote?.trimmingCharacters(in: .whitespaces) ?? ""
         // A pond someone shared that has no Git remote says so in the fixed place line; every other refusal keeps its words.

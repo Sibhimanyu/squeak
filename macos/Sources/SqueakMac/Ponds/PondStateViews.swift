@@ -87,14 +87,14 @@ struct PondActionsSection: View {
 
     enum Confirm: Identifiable { case leave, delete, rotate; var id: Self { self } }
 
-    private var role: PondRole { detail?.myRole ?? pond.role }
+    private var can: PondCan { detail?.can ?? PondCan(role: pond.role) }
     private var others: Int { max(0, (detail?.members.count ?? pond.memberCount) - 1) }
 
     var body: some View {
         let canWrite = ponds.freshness(pond).canWrite
         VStack(alignment: .leading, spacing: Space.m) {
             Text("This pond").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
-            if role.canInvite {
+            if can.allows(.renamePond) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Name").font(Typo.label).foregroundStyle(Theme.ink)
                     if renaming {
@@ -130,7 +130,7 @@ struct PondActionsSection: View {
             if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             if !canWrite, let why = ponds.freshness(pond).writesDisabledReason { Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted) }
             Divider().overlay(Theme.line)
-            if role.canInvite {
+            if can.allows(.deletePond) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Delete this pond").font(Typo.label).foregroundStyle(Theme.ink)
                     Text(verbatim: PondActionWords.deleteMessage(pond.name, others: others)).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)

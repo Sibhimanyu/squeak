@@ -109,9 +109,9 @@ struct PondLogicTests {
     }
 
     @Test func roleDecidesWhoMayDoWhat() {
-        #expect(PondRole.owner.canInvite && PondRole.owner.canRemoveMembers)
-        #expect(!PondRole.member.canInvite && PondRole.member.canMessage)
-        #expect(!PondRole.viewer.canMessage)
+        #expect(PondCan(role: .owner).allows(.invite) && PondCan(role: .owner).allows(.removeMember))
+        #expect(!PondCan(role: .member).allows(.invite) && PondCan(role: .member).allows(.messageDuck))
+        #expect(!PondCan(role: .viewer).allows(.messageDuck))
         #expect(PondRole(raw: "nonsense") == .viewer && PondRole(raw: nil) == .viewer)
     }
 }

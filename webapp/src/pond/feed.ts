@@ -10,6 +10,7 @@ import { open, importChannelKey } from "../../../src/shared/box.js";
 import { deviceIdOf, signedText, verifyText } from "../../../src/shared/member-box.js";
 import type { FetchLike, Relay, SealedDoc } from "../relay/client.js";
 import { readDuck, readDuckEvents, threadOfEventDoc, type Duck, type DuckEvent } from "./duck-format.js";
+import { DEFAULT_POLICY, readPolicy, type PondPolicy } from "../../../src/shared/pond-policy.js";
 import { readMemberDoc, type Member } from "./people-format.js";
 import { readMemberPost, readRoomPost, readRoomTask, type RoomPost, type RoomTask } from "./room-format.js";
 
@@ -32,13 +33,15 @@ export interface PondData {
   /** The Room's posts in the order the Room reads: `seq`, then id. Oldest first. */
   posts: RoomPost[];
   tasks: RoomTask[];
+  /** The Pond policy the Owner signed into `pond/meta`; the defaults (Room first) when none is there or none reads. */
+  policy: PondPolicy;
   /** The cloud has paged the oldest Room messages out (25 MB cap): the Room says so above its first post. */
   earlier: boolean;
 }
 
 export type SyncResult = "ok" | "unauthorized" | "forbidden" | "unreachable";
 
-const KINDS = new Set(["members", "threads", "tevents", "room", "rtasks", "rposts", "roomnote"]);
+const KINDS = new Set(["pond", "members", "threads", "tevents", "room", "rtasks", "rposts", "roomnote"]);
 
 interface Held {
   seq: number;
@@ -171,12 +174,38 @@ export function createPondFeed(o: PondFeedOptions): PondFeed {
   };
 
   const data = async (keys: PondKeys | null): Promise<PondData> => {
-    const out: PondData = { head, members: [], ducks: [], events: new Map(), posts: [], tasks: [], earlier: false };
+    const out: PondData = {
+      head,
+      members: [],
+      ducks: [],
+      events: new Map(),
+      posts: [],
+      tasks: [],
+      policy: DEFAULT_POLICY,
+      earlier: false,
+    };
     if (!keys) return out;
     const owner = await (ownerId ??= deviceIdOf(o.ownerKey));
     const sorted = [...held.entries()].sort((a, b) => a[1].seq - b[1].seq);
     const ofKind = (kind: string) => sorted.filter(([name]) => name.startsWith(`${kind}/`));
     const idOf = (name: string): string => name.slice(name.indexOf("/") + 1);
+
+    // The Pond policy: `pond/meta`, believed only when the Owner's key signed it and it names this Owner.
+    const metaHeld = held.get("pond/meta");
+    if (metaHeld) {
+      const op = await openOne("pond/meta", "pond", "meta", metaHeld, keys);
+      const v = op?.value;
+      const rec = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : null;
+      if (
+        op &&
+        rec &&
+        op.doc.device === owner &&
+        rec["owner"] === owner &&
+        rec["ownerKey"] === o.ownerKey &&
+        (await signedBy("pond", "meta", metaHeld, op, [o.ownerKey], o.ownerKey))
+      )
+        out.policy = readPolicy(rec["policy"]);
+    }
 
     // The Owner's documents: members (who is in, with which keys), the Room and its Tasks.
     for (const [name, h] of ofKind("members")) {

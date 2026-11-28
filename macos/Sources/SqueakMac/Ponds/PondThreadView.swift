@@ -45,7 +45,8 @@ struct PondThreadView: View {
     }
     private var state: PondThreadState { ThreadTimeline.latestState(events) ?? PondThreadState(raw: thread?.state ?? "") }
     private var working: Bool { state == .working }
-    private var access: ThreadAccess { ThreadAccess(role: role, starter: thread?.starter ?? "", me: me, starterName: starterName, asks: thread?.asks) }
+    private var can: PondCan { detail?.can ?? PondCan(role: role) }
+    private var access: ThreadAccess { ThreadAccess(role: role, starter: thread?.starter ?? "", me: me, starterName: starterName, asks: thread?.asks, can: can) }
     private var starterMember: FlockMember? { members.first { $0.id == thread?.starter } }
     private var laid: [GroupChat.Entry] {
         GroupChat.lay(rows, starter: thread?.starter ?? "", me: me, nameOf: { name($0) }, pendingMine: !(ponds.outbox[threadId] ?? []).isEmpty)
@@ -420,11 +421,11 @@ struct PondThreadView: View {
             } else {
             VStack(alignment: .leading, spacing: 4) {
                 ComposerField(
-                    text: $draft, sendKey: .returnSends, placeholder: PondThreadRules.composerPlaceholder(role: role, working: working),
-                    isEnabled: role.canMessage && !sending, focusToken: focusToken,
+                    text: $draft, sendKey: .returnSends, placeholder: PondThreadRules.composerPlaceholder(role: role, working: working, can: can),
+                    isEnabled: can.allows(.messageDuck) && !sending, focusToken: focusToken,
                     onSend: { send(.steer) }, onCommandReturn: { send(.queue) })
                     .frame(height: 56)
-                if role.canMessage, working {
+                if can.allows(.messageDuck), working {
                     Text("\u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
                 // A remote pond has no agent or model to pick: the duck runs on the owner's Mac.
@@ -446,7 +447,7 @@ struct PondThreadView: View {
 
     private func send(_ key: ComposerKeyAction) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard role.canMessage, !text.isEmpty, !sending, let mode = ComposerKeys.mode(key) else { return }
+        guard can.allows(.messageDuck), !text.isEmpty, !sending, let mode = ComposerKeys.mode(key) else { return }
         sending = true
         Task {
             // The message moves under the transcript at once, with its state; a refusal says why right there.

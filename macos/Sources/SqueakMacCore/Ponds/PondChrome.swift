@@ -43,9 +43,21 @@ public struct PondChrome: Sendable, Equatable {
     /// May they message at all, and why not (the pond view's `access { canMessage, reason }`).
     public var canMessage: Bool
     public var reason: String?
+    /// The daemon's sentence for why a Duck cannot be started here ("Ducks start from the Room here..."); nil when allowed or unsaid.
+    public var startReason: String?
+    /// The Duck a Member asks for waits for the Owner (`startDucks: members-approval`): the daemon says so, never the role.
+    public var startWaitsForOwner: Bool
 
-    public init(access: PondMembership, ownerName: String? = nil, canStart: Bool = true, canMessage: Bool = true, reason: String? = nil) {
+    public init(access: PondMembership, ownerName: String? = nil, canStart: Bool = true, canMessage: Bool = true, reason: String? = nil,
+                startReason: String? = nil, startWaitsForOwner: Bool = false) {
         self.access = access; self.ownerName = ownerName; self.canStart = canStart; self.canMessage = canMessage; self.reason = reason
+        self.startReason = startReason; self.startWaitsForOwner = startWaitsForOwner
+    }
+
+    /// From what the daemon says this person may do (`PondDetail.can`) and the policy that applies to them.
+    public init(access: PondMembership, ownerName: String?, can: PondCan, policy: PondEffectivePolicy?) {
+        self.init(access: access, ownerName: ownerName, canStart: can.allows(.startDuck), canMessage: can.allows(.postRoom),
+                  reason: can.reason(.postRoom), startReason: can.reason(.startDuck), startWaitsForOwner: policy?.startDucks.waitsForOwner ?? false)
     }
 
     public var isRemote: Bool { access == .remote }

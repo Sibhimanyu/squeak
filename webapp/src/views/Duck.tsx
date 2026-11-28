@@ -5,6 +5,7 @@
 import { useState } from "preact/hooks";
 import type { PondSummary } from "../../../src/shared/shapes.js";
 import { age } from "../format.js";
+import { canOf } from "../pond/can.js";
 import { conversationOf, firstName, letter } from "../pond/derive.js";
 import type { PondSession, SendResult } from "../pond/session.js";
 import type { Route } from "../router.js";
@@ -67,8 +68,7 @@ export function DuckScreen(props: DuckScreenProps) {
 
   const now = props.now ?? Date.now();
   const owner = firstName(pond.ownerName);
-  const isOwner = pond.role === "owner";
-  const canWrite = pond.role !== "viewer";
+  const can = canOf(pond.role, state.selfId, data.policy, duck.starter);
   // A reply waiting to show up as a real message goes away when the same words from this person arrive.
   const echoed = (p: PendingReply): boolean =>
     conv.items.some((i) => i.kind === "message" && i.mine && i.text === p.text && i.at >= p.at - 120_000);
@@ -87,7 +87,7 @@ export function DuckScreen(props: DuckScreenProps) {
         title={duck.title}
         sub={`${duck.starterName} · ${duck.state === "working" ? "Working" : duck.state === "waiting" ? "Waiting" : "Idle"}`}
       />
-      {isOwner && duck.state === "working" ? (
+      {can.stop === true && duck.state === "working" ? (
         <div class="actions">
           <button
             type="button"
@@ -170,7 +170,7 @@ export function DuckScreen(props: DuckScreenProps) {
         <Decision
           key={conv.question.requestId}
           question={conv.question}
-          canAnswer={canWrite}
+          canAnswer={can.answerQuestion === true}
           answer={async (answer) => {
             const requestId = conv.question!.requestId;
             const result = await session.command({ kind: "answer", threadId: duck.id, requestId, answer });
@@ -179,7 +179,14 @@ export function DuckScreen(props: DuckScreenProps) {
           }}
         />
       ) : null}
-      <Composer role={pond.role} owner={owner} label={`Reply to ${duck.title}`} placeholder="Reply" send={reply} />
+      <Composer
+        role={pond.role}
+        owner={owner}
+        label={`Reply to ${duck.title}`}
+        placeholder="Reply"
+        send={reply}
+        blocked={can.messageDuck === true ? undefined : can.messageDuck}
+      />
     </section>
   );
 }

@@ -12,9 +12,10 @@ extension PondsModel {
     func dashboardHeader(key: String) -> PondDashboardHeader {
         let pond = self.pond(key: key), chrome = self.chrome(key: key)
         let role = detail(key: key)?.myRole ?? pond?.role ?? .owner
+        let can = detail(key: key)?.can ?? PondCan(role: role)
         let freshness = self.freshness(pond)
         var blocked: String?
-        if let p = pond, !chrome.isRemote, role.canMessage {
+        if let p = pond, !chrome.isRemote, can.allows(.startDuck) {
             switch PondStartThread.offer(for: p) {
             case .shareOnly(let why) where !p.local && !PondStartThread.runsOnOwnerMac(p): blocked = why
             case .none where !p.local: blocked = "Squeak can\u{2019}t start a duck in this Pond from this Mac."
@@ -24,7 +25,8 @@ extension PondsModel {
         return PondDashboardHeader.make(.init(
             role: role, hasPond: pond != nil, isLocal: pond?.local ?? true, plainFolder: native(key: key)?.isPlainFolder == true,
             isRemote: chrome.isRemote, ownerName: pond?.ownerName, people: detail(key: key)?.members.count ?? pond?.memberCount ?? 1,
-            connection: PondConnection.resolve(pond?.connection, freshness: freshness, role: role), connectionLine: pond?.connection?.line, start: chrome.start, startBlockedReason: blocked, canWrite: freshness.canWrite))
+            connection: PondConnection.resolve(pond?.connection, freshness: freshness, role: role), connectionLine: pond?.connection?.line, start: chrome.start, startBlockedReason: blocked, canWrite: freshness.canWrite,
+            can: can, startReason: chrome.startReason))
     }
 }
 
@@ -69,7 +71,7 @@ struct PondHomeView: View {
         let ducks = PondDuckSections.build(layout)
         let needs = PondDashboardNeedsYou.build(
             rows: ducks.open + ducks.closed, tasks: room?.feed.jobs ?? [], role: role, ownerName: pond?.ownerName,
-            starts: detail?.starts ?? [])
+            starts: detail?.starts ?? [], can: detail?.can)
         let latest = PondLatest.build(room?.feed.rows.map(\.post) ?? [])
         let blocks = PondDashboardBlocks.of(needsYou: needs.count, ducks: ducks, latest: latest.count)
         GeometryReader { geometry in
@@ -258,7 +260,7 @@ struct PondHomeView: View {
     private var emptyGuide: some View {
         VStack(spacing: 14) {
             ThreadDuckView(id: key, size: 56).accessibilityHidden(true)
-            Text(verbatim: PondDashboardBlocks.emptySentence(role: role)).font(Typo.body).foregroundStyle(Theme.muted)
+            Text(verbatim: PondDashboardBlocks.emptySentence(can: detail?.can ?? PondCan(role: role), policy: detail?.myPolicy)).font(Typo.body).foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
         }
         .padding(32).frame(maxWidth: .infinity)

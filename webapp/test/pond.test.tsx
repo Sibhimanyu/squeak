@@ -75,6 +75,18 @@ const events = (mac: OwnerMac, id: string, first: number, list: Record<string, u
     events: list.map((e, i) => ({ seq: first + i, at: Date.now() - 300_000 + i, ...e })),
   });
 
+/** The Owner's signed Pond meta carrying the Pond policy. */
+const OLDER = { reachDucks: "direct", startDucks: "members-approval" };
+const policy = (mac: OwnerMac, value: Record<string, unknown>) =>
+  mac.put("pond", "meta", {
+    id: "p-green",
+    name: "greenroom",
+    owner: mac.ownerId,
+    ownerKey: mac.ownerKey,
+    created: 1,
+    policy: value,
+  });
+
 /** A Pond Asha belongs to, booted at `hash`; the Owner's Mac has answered the device request unless `connect` is false. */
 let presence: { userId: string; online: boolean }[] | null = null;
 async function open(role: "owner" | "member" | "viewer", hash: string, fill: (s: PondSetup) => void, connect = true) {
@@ -265,9 +277,10 @@ describe("Room tab", () => {
   });
 
   it("a Member posts and Makes a task; the Owner approves tasks, and the line says so", async () => {
-    const setup = await open("member", "#/ponds/p-green/room", (s) =>
-      post(s.mac, 1, "a1", "can someone fix the footer?"),
-    );
+    const setup = await open("member", "#/ponds/p-green/room", (s) => {
+      policy(s.mac, OLDER);
+      post(s.mac, 1, "a1", "can someone fix the footer?");
+    });
     expect(app!.text(".composer .note")).toBe("Sibhi approves Tasks");
     act(() => q<HTMLButtonElement>(".make-task")!.click());
     await until(() => setup.mac.pond.writes.length === 1, "make task");
@@ -446,6 +459,7 @@ describe("Room tab", () => {
 describe("Ducks tab", () => {
   it("puts what is working first, then Earlier newest first; a Member's new Duck waits for the Owner", async () => {
     const setup = await open("member", "#/ponds/p-green/ducks", (s) => {
+      policy(s.mac, OLDER);
       duck(s.mac, "older", { title: "older chat", updatedAt: 1000 });
       duck(s.mac, "newer", { title: "newer chat", updatedAt: 5000 });
       duck(s.mac, "busy", { title: "busy duck", state: "working", updatedAt: 10 });
@@ -573,7 +587,10 @@ describe("Duck conversation", () => {
   });
 
   it("a Member replies; a Viewer reads and cannot answer or reply", async () => {
-    const setup = await open("member", "#/ponds/p-green/ducks/d1", (s) => conversation(s));
+    const setup = await open("member", "#/ponds/p-green/ducks/d1", (s) => {
+      policy(s.mac, OLDER);
+      conversation(s);
+    });
     expect(q("[aria-label='Stop']")).toBeNull();
     expect(qa("button").map((b) => b.textContent)).not.toContain("Stop");
     const box = q<HTMLTextAreaElement>("textarea")!;

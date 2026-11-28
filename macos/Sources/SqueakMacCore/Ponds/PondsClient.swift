@@ -82,6 +82,11 @@ public struct PondsClient: Sendable {
         _ = try await host.call("POST", "\(Self.p(pond))/members/\(NativeHostClient.id(member))/role", body: .object(["role": .string(role.rawValue)]), timeout: 60)
     }
 
+    /// Owner: the Pond policy (`PondPermissions.body` / `overrideBody`); the daemon refuses anyone else with a sentence.
+    public func setPolicy(pond: String, body: NativeJSON) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/policy", body: body, timeout: 60)
+    }
+
     /// A member leaves.
     public func leave(pond: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/leave", body: .object(["pondId": .string(pond)]), timeout: 60)

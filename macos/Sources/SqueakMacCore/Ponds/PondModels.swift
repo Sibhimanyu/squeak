@@ -31,9 +31,6 @@ public enum PondRole: String, Sendable, Equatable, Codable {
     /// An unknown role reads as the least a person can do.
     init(raw: String?) { self = raw.flatMap(PondRole.init(rawValue:)) ?? .viewer }
 
-    public var canMessage: Bool { self != .viewer }
-    public var canInvite: Bool { self == .owner }
-    public var canRemoveMembers: Bool { self == .owner }
     /// What the role picker says.
     public var word: String {
         switch self {
@@ -206,6 +203,9 @@ public struct PondCaps: Sendable, Equatable, Decodable {
 public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     /// What this person may do, derived by the host from the role; nil from an older host.
     public var caps: PondCaps? = nil
+    /// What this person may do and the Pond policy that applies to them (the daemon's answer; nil from an older daemon).
+    public var can: PondVerdicts? = nil
+    public var policy: PondEffectivePolicy? = nil
     public var id: String
     public var name: String
     public var role: PondRole
@@ -220,12 +220,14 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     /// The account's email, drawn under the name and on hover; nil from an older host or a member with none on file.
     public var email: String? = nil
 
-    enum CodingKeys: String, CodingKey { case id, name, email, role, nest, online, you, nestName, client, lastSeenAt, caps }
+    enum CodingKeys: String, CodingKey { case id, name, email, role, nest, online, you, nestName, client, lastSeenAt, caps, can, policy }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         caps = c.lenient(PondCaps.self, .caps)
+        can = c.lenient(PondVerdicts.self, .can)
+        policy = c.lenient(PondEffectivePolicy.self, .policy)
         name = c.lenient(String.self, .name) ?? ""
         email = c.lenient(String.self, .email).flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
         role = PondRole(raw: c.lenient(String.self, .role))
@@ -444,13 +446,18 @@ public struct PondMe: Sendable, Equatable, Decodable {
     public var role: PondRole
     public var nest: String?
     public var caps: PondCaps? = nil
+    /// `me.can` and `me.policy`: nil from an older daemon (`PondDetail.can` then falls back to the role).
+    public var can: PondVerdicts? = nil
+    public var policy: PondEffectivePolicy? = nil
 
-    enum CodingKeys: String, CodingKey { case id, name, role, nest, caps }
+    enum CodingKeys: String, CodingKey { case id, name, role, nest, caps, can, policy }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         caps = c.lenient(PondCaps.self, .caps)
+        can = c.lenient(PondVerdicts.self, .can)
+        policy = c.lenient(PondEffectivePolicy.self, .policy)
         name = c.lenient(String.self, .name) ?? ""
         role = PondRole(raw: c.lenient(String.self, .role))
         nest = c.lenient(String.self, .nest)
@@ -472,8 +479,10 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     public var me: PondMe?
     /// Ducks Members asked for that wait for the Owner: every one on the Owner's Mac, a Member's own on theirs; empty from an older host.
     public var starts: [PondPendingStart]
+    /// The Pond's policy as the Owner set it (nil from an older daemon: Room first, nothing custom).
+    public var policy: PondPolicy?
 
-    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, me, starts, offline, asOf, offlineLine }
+    enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, me, starts, offline, asOf, offlineLine, policy }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -485,6 +494,7 @@ public struct PondDetail: Sendable, Equatable, Decodable {
         holds = c.list(PondHold.self, .holds)
         me = c.lenient(PondMe.self, .me)
         starts = c.list(PondPendingStart.self, .starts)
+        policy = c.lenient(PondPolicy.self, .policy)
         // The contract puts `offline` on the pond; a host may also write it beside it.
         if c.lenient(Bool.self, .offline) == true { pond.offline = true }
         if pond.asOf == nil { pond.asOf = PondTime.decode(c, CodingKeys.asOf) }
@@ -504,6 +514,15 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     /// This Mac's person: the member the host marks `you`, else the one `me` names.
     public var meMember: FlockMember? { members.first { $0.you } ?? members.first { $0.id == me?.id } }
     public var myRole: PondRole { me?.role ?? meMember?.role ?? pond.role }
+    /// What this person may do here: the daemon's `me.can`, else (an older daemon) what their role used to mean. Views ask this.
+    public var can: PondCan { PondCan(me?.can ?? meMember?.can, role: myRole) }
+    /// The policy that applies to this person.
+    public var myPolicy: PondEffectivePolicy? { me?.policy ?? meMember?.policy }
+    /// One member's `can`, for the per-person menu.
+    public func can(member id: String) -> PondCan {
+        let m = members.first { $0.id == id }
+        return PondCan(m?.can, role: m?.role ?? .viewer)
+    }
 }
 
 /// A Duck a Member asked for, waiting for the Owner's Approve or Decline (`starts` on the pond view). The Owner's Mac

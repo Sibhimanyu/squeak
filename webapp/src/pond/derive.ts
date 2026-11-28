@@ -1,6 +1,7 @@
 // What the screens draw, worked out in the browser from a Pond's opened documents (the cloud cannot: it never reads content,
 // ADR 0005). Pure: the same documents always give the same lines, so a re-read never moves anything.
 
+import { canOf } from "./can.js";
 import type { PondSummary } from "../../../src/shared/shapes.js";
 import type { Duck, DuckEvent } from "./duck-format.js";
 import type { PondData } from "./feed.js";
@@ -37,7 +38,7 @@ export function openQuestion(events: readonly DuckEvent[]): Extract<DuckEvent, {
 
 /** Questions waiting on this person in a Pond. A Viewer answers nothing, so nothing waits on them. */
 export function needsYouOf(pond: Pick<PondSummary, "pondId" | "name" | "role">, data: PondData): NeedsYouItem[] {
-  if (pond.role === "viewer") return [];
+  if (canOf(pond.role, "", data.policy).answerQuestion !== true) return [];
   const out: NeedsYouItem[] = [];
   for (const duck of data.ducks) {
     if (duck.state !== "waiting" || duck.waitingFor === "approval") continue;

@@ -86,7 +86,7 @@ struct RoomInspector: View {
             HStack {
                 label("People", count)
                 Spacer()
-                if role.canInvite, let pond {
+                if (detail?.can ?? PondCan(role: role)).allows(.invite), let pond {
                     Button("Invite") { ponds.startInvite(pondId: pond.id, account: model.account) }
                         .buttonStyle(SecondaryButtonStyle()).controlSize(.small)
                         .disabled(!ponds.freshness(pond).canWrite)

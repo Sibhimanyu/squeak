@@ -183,7 +183,7 @@ struct PondPanel: View {
     /// Member avatars in one row with Invite beside them.
     private func peopleRow(_ list: [PondGlance.Person], key: String, detail: PondDetail?) -> some View {
         let pond = detail?.pond ?? PondsModel.shared.pond(key: key)
-        let canInvite = detail.map { $0.myRole.canInvite } ?? (pond != nil)
+        let canInvite = detail.map { $0.can.allows(.invite) } ?? (pond != nil)
         return section("People") {
             HStack(spacing: Space.s) {
                 HStack(spacing: -6) {
@@ -200,7 +200,7 @@ struct PondPanel: View {
 
     private func footer(key: String, detail: PondDetail?) -> some View {
         HStack(spacing: Space.s) {
-            if let d = detail, d.myRole.canInvite {
+            if let d = detail, d.can.allows(.invite) {
                 Button("Invite") { PondsModel.shared.startInvite(pondId: d.pond.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
             } else if detail == nil, let pond = PondsModel.shared.pond(key: key) {
                 Button("Invite") { PondsModel.shared.startInvite(pondId: pond.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
