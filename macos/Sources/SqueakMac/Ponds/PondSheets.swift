@@ -88,6 +88,9 @@ struct InvitePondSheet: View {
                 Text(verbatim: InviteSheetPlan.headline(pond: pondName)).font(Typo.title).foregroundStyle(Theme.ink)
                 Text(verbatim: InviteSheetPlan.subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                if let note = ponds.ponds.first(where: { $0.id == pondId }).flatMap({ InviteSheetPlan.note(for: $0.sharingState) }) {
+                    Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

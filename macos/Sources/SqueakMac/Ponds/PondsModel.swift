@@ -143,7 +143,7 @@ final class PondsModel {
         _ = readTick
         let id = pond?.id ?? ""
         return PondHeaderStatus.make(
-            access: access, local: pond?.local ?? true, offer: pond.map { PondStartThread.offer(for: $0) },
+            access: access, local: pond.map { $0.sharingState != .shared } ?? true, offer: pond.map { PondStartThread.offer(for: $0) },
             freshness: freshness(pond), readShown: readTracker.isShown(id))
     }
 
@@ -701,9 +701,34 @@ final class PondsModel {
     }
 
     func deletePond(pond: String) async -> Bool {
+        // A local Pond is only forgotten: its project stays in the list, so nothing is dropped and no one is sent home.
+        let wasLocal = ponds.first { $0.id == pond }?.local ?? false
         let ok = await act("delete:\(pond)", pond: pond, success: nil, kind: .delete) { try await self.client!.deletePond(pond: pond) }
-        if ok { await dropGone(id: pond) }
+        if ok {
+            if wasLocal { await refresh(); await refreshDirectory() } else { await dropGone(id: pond) }
+        }
         return ok
+    }
+
+    /// The one End for a Pond: whatever the daemon offers it (Delete, Leave or Remove). The view draws the offer's words and
+    /// calls this; nothing here decides local versus shared.
+    func endPond(pond: String) async -> Bool {
+        switch ponds.first(where: { $0.id == pond })?.endOffering.primary ?? .leave {
+        case .delete: return await deletePond(pond: pond)
+        case .leave: return await leave(pond: pond)
+        case .forget: return await forget(pond: pond)
+        }
+    }
+
+    /// The same by a directory key (the sidebar), dropping the row once it is done.
+    func endAndDrop(key: String) async -> Bool {
+        let id = (directory?.pond(id: key) ?? directory?.pond(pondId: key))?.pondId ?? pond(key: key)?.id ?? key
+        guard let p = ponds.first(where: { $0.id == id }) else { return false }
+        switch p.endOffering.primary {
+        case .leave: return await leaveAndDrop(key: key)
+        case .delete: return await deletePond(pond: id)
+        case .forget: return await forget(pond: id)
+        }
     }
 
     /// Clears an ended pond (declined, expired, withdrawn, removed) from this Mac.

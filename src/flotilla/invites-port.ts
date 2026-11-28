@@ -81,9 +81,15 @@ export interface PondInvites {
   /** Join, idempotent: the person is a Member in the cloud at once (already joined or already a Member is success). */
   accept?(inviteId: string): Promise<JoinAnswer>;
   decline?(inviteId: string): Promise<Invitation>;
+  /**
+   * Makes the Pond exist at the relay with this account as Owner (`POST /ponds/<id>/share`); idempotent. "unsupported" is a
+   * relay that has no such route yet: the first invite then names the Pond (`pondName`) and the relay makes it, as before.
+   */
+  ensurePond?(pondId: string, name: string): Promise<"shared" | "unsupported">;
+  /** `pondName` is sent only to a relay without the share route; a current relay refuses an invite to a Pond it does not know. */
   create(
     pondId: string,
-    input: { emails: string[]; role: "member" | "viewer"; pondName: string },
+    input: { emails: string[]; role: "member" | "viewer"; pondName?: string },
   ): Promise<InviteResult[]>;
   list(pondId: string): Promise<InviteRecord[]>;
   resend(pondId: string, inviteId: string): Promise<{ invite: InviteRecord; mailed: boolean }>;
@@ -240,9 +246,20 @@ export class HttpPondInvites implements PondInvites {
 
   private base = (pondId: string): string => `/ponds/${encodeURIComponent(pondId)}/invites`;
 
+  async ensurePond(pondId: string, name: string): Promise<"shared" | "unsupported"> {
+    try {
+      await this.call("POST", `/ponds/${encodeURIComponent(pondId)}/share`, { name });
+      return "shared";
+    } catch (error) {
+      // A relay from before this route answers 404 or 405 to it: the first invite creates the Pond there.
+      if (error instanceof InviteRefused && (error.status === 404 || error.status === 405)) return "unsupported";
+      throw error;
+    }
+  }
+
   async create(
     pondId: string,
-    input: { emails: string[]; role: "member" | "viewer"; pondName: string },
+    input: { emails: string[]; role: "member" | "viewer"; pondName?: string },
   ): Promise<InviteResult[]> {
     const body = await this.call("POST", this.base(pondId), input);
     if (!Array.isArray(body.results)) throw new InviteRefused(COULD_NOT_REACH, 503);

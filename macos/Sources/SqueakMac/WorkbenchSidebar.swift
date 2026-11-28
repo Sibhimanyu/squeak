@@ -31,8 +31,8 @@ struct WorkbenchSidebar: View {
     /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
     /// The pond being dragged, and the slot (0...count) where a gap is open for it. Both clear on drop and on cancel.
     @State private var draggingPond: String?
-    /// The joined pond whose "Leave pond…" confirmation is open (its directory key).
-    @State private var leaveFor: String?
+    /// The pond whose "Delete Pond…" or "Leave Pond…" confirmation is open (its directory key).
+    @State private var endFor: String?
     @State private var dropSlot: Int?
     private var order: PondOrderStore { PondOrderStore.shared }
     private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
@@ -121,7 +121,7 @@ struct WorkbenchSidebar: View {
             if !model.demoMode { await PondsModel.shared.refreshDirectory() }
         }
         .pondSheets()
-        .leavePondDialog($leaveFor)
+        .endPondDialog($endFor)
         .diskCleanupSheet()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
     }
@@ -442,13 +442,13 @@ struct WorkbenchSidebar: View {
                     Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
                     Button("Pond settings…") { openSettings(key) }
                     Button("Clean up disk…") { DiskCleanupCenter.shared.open(pondId: native.id, pondName: name) }
-                    if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond…") { leaveFor = key } }
+                    if let pond = PondsModel.shared.pond(key: key) { Button(pond.endOffering.words.menu) { endFor = key } }
                 } else if entry != nil {
                     // A joined pond has no folder here: it can be labelled, hidden and opened, with its own id as the key.
                     Button("Labels…") { labelsFor = key }
                     Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
                     Button("Pond settings…") { openSettings(key) }
-                    if PondsModel.shared.chrome(key: key).showsLeave { Button("Leave pond…") { leaveFor = key } }
+                    if let pond = PondsModel.shared.pond(key: key) { Button(pond.endOffering.words.menu) { endFor = key } }
                 }
             }
             if !projectFolded && model.ducksMode {

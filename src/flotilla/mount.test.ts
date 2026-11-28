@@ -200,6 +200,26 @@ describe("flotilla routes", () => {
     expect(sent.json).toEqual({ ok: true, queued: false, state: "sent", line: "Sent." });
   });
 
+  it("Delete on a local Pond forgets it: the project's next GET /ponds makes no new Pond, and the row says what to offer (#142)", async () => {
+    const h = await boot(true, null, ({ store }) => ({ projects: () => store.listProjects() }));
+    const project = h.store.createProject({ name: "Folder", rootPath: os.tmpdir(), defaultBranch: "main" });
+    const first = (await h.call("GET", "/native/ponds")).json.ponds;
+    expect(first).toHaveLength(1);
+    const row = first[0];
+    expect(row).toMatchObject({ local: true, sharing: "local", projectId: project.id });
+    expect(row.endOffer).toMatchObject({ primary: "delete", words: { menu: "Delete Pond…", title: "Delete Folder?" } });
+
+    // Only what the row offers is accepted.
+    expect((await h.call("POST", `/native/ponds/${row.id}/end`, { kind: "leave" })).status).toBe(409);
+    expect((await h.call("POST", `/native/ponds/${row.id}/end`, { kind: "delete" })).status).toBe(200);
+    // The old route is the same module.
+    const second = (await h.call("GET", "/native/ponds")).json.ponds;
+    expect(second).toEqual([]);
+    // Only an explicit action makes it again, under the same id.
+    const back = await h.call("POST", "/native/ponds/local", { projectId: project.id });
+    expect(back.json.pond.id).toBe(row.id);
+  });
+
   it("an own thread needs the pond's git remote", async () => {
     const h = await boot(true, null);
     const id = (await h.call("POST", "/native/ponds", { name: "NoRemote", projectId: "proj-NoRemote" })).json.pond

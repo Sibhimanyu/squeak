@@ -107,6 +107,12 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var connection: PondConnectionInfo?
     /// A new device of an account already in the Pond, waiting for the Owner\u{2019}s Mac to seal the key: "Connecting", with nothing to press.
     public var connecting: Bool
+    /// The daemon's word on sharing (`local`, `sharing`, `shared`); nil from an older host (`sharingState` reads `local`).
+    public var sharing: String?
+    /// What the daemon offers to end this Pond, in the words to draw (`endOffering` falls back for an older host).
+    public var endOffer: PondEndOffer?
+    /// Present while a delete, leave or remove has not finished.
+    public var ending: PondEndingProgress?
     public var state: PondStatus { PondStatus(raw: status, local: local) }
     public var isWaiting: Bool { state == .pending }
     public var isDeclined: Bool { state == .declined }
@@ -115,6 +121,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
 
     enum CodingKeys: String, CodingKey {
         case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words, connection, connecting, deleted
+        case sharing, endOffer, ending
         case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere
     }
 
@@ -143,10 +150,15 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         connection = c.lenient(PondConnectionInfo.self, .connection)
         connecting = c.lenient(Bool.self, .connecting) ?? false
         deleted = c.lenient(Bool.self, .deleted) ?? false
+        sharing = c.lenient(String.self, .sharing)
+        endOffer = c.lenient(PondEndOffer.self, .endOffer)
+        ending = c.lenient(PondEndingProgress.self, .ending)
     }
 
     public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil,
-                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil, connecting: Bool = false, deleted: Bool = false) {
+                statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil, connection: PondConnectionInfo? = nil, connecting: Bool = false, deleted: Bool = false,
+                sharing: String? = nil, endOffer: PondEndOffer? = nil, ending: PondEndingProgress? = nil) {
+        self.sharing = sharing; self.endOffer = endOffer; self.ending = ending
         self.connection = connection; self.connecting = connecting; self.deleted = deleted
         self.statusLine = statusLine; self.ownerName = ownerName; self.offline = offline; self.asOf = asOf; self.offlineLine = offlineLine; self.requestedAt = requestedAt
         self.status = status; self.requestedRole = requestedRole; self.words = []

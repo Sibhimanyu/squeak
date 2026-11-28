@@ -85,10 +85,9 @@ struct PondActionsSection: View {
     @State private var confirm: Confirm?
     private var ponds: PondsModel { .shared }
 
-    enum Confirm: Identifiable { case leave, delete, rotate; var id: Self { self } }
+    enum Confirm: Identifiable { case rotate; var id: Self { self } }
 
     private var role: PondRole { detail?.myRole ?? pond.role }
-    private var others: Int { max(0, (detail?.members.count ?? pond.memberCount) - 1) }
 
     var body: some View {
         let canWrite = ponds.freshness(pond).canWrite
@@ -119,45 +118,19 @@ struct PondActionsSection: View {
                 }
             }
             if let line = ponds.result[pond.id] { Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted) }
-            ForEach(["leave:\(pond.id)", "delete:\(pond.id)"], id: \.self) { key in
-                if let failed = ponds.actions.failure(key) {
-                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                        Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        Button(PondActionWords.tryAgain) { Task { await ponds.retry(action: key, pond: pond.id) } }.buttonStyle(SecondaryButtonStyle())
-                    }
-                }
-            }
             if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             if !canWrite, let why = ponds.freshness(pond).writesDisabledReason { Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted) }
             Divider().overlay(Theme.line)
-            if role.canInvite {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Delete this pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text(verbatim: PondActionWords.deleteMessage(pond.name, others: others)).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    Button(ponds.isBusy("delete:\(pond.id)") ? "Deleting\u{2026}" : "Delete pond\u{2026}") { confirm = .delete }
-                        .buttonStyle(DestructiveButtonStyle()).disabled(!canWrite || ponds.isBusy("delete:\(pond.id)"))
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Leave this pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text(verbatim: PondActionWords.leaveMessage(pond.name, owner: pond.ownerName)).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    Button(ponds.isBusy("leave:\(pond.id)") ? "Leaving\u{2026}" : "Leave pond\u{2026}") { confirm = .leave }
-                        .buttonStyle(DestructiveButtonStyle()).disabled(!canWrite || ponds.isBusy("leave:\(pond.id)"))
-                }
-            }
+            PondEndSection(pond: pond)
         }
         .confirmationDialog(title, isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
             switch confirm {
-            case .leave: Button("Leave", role: .destructive) { Task { _ = await ponds.leave(pond: pond.id) } }
-            case .delete: Button("Delete for everyone", role: .destructive) { Task { _ = await ponds.deletePond(pond: pond.id) } }
             case .rotate: Button("Change the key") { Task { await ponds.rotateKey(pond: pond.id) } }
             case nil: EmptyView()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             switch confirm {
-            case .leave: Text(verbatim: PondActionWords.leaveMessage(pond.name, owner: pond.ownerName))
-            case .delete: Text(verbatim: PondActionWords.deleteMessage(pond.name, others: others))
             case .rotate: Text(verbatim: PondActionWords.rotateExplain)
             case nil: EmptyView()
             }
@@ -166,8 +139,6 @@ struct PondActionsSection: View {
 
     private var title: String {
         switch confirm {
-        case .leave: "Leave \(pond.name)?"
-        case .delete: "Delete \(pond.name) for everyone?"
         case .rotate: "Change the pond key?"
         case nil: ""
         }
@@ -177,6 +148,43 @@ struct PondActionsSection: View {
         let n = name.trimmingCharacters(in: .whitespaces)
         guard !n.isEmpty else { return }
         Task { if await ponds.rename(pond: pond.id, name: n) { renaming = false } }
+    }
+}
+
+/// "Delete Pond…" or "Leave Pond…" in Pond settings, for a local Pond too: the words are the daemon's (`endOffer`), there is one
+/// confirm, "Deleting…" shows in place, and a failure stays here (also after a restart) with its sentence and Try again.
+struct PondEndSection: View {
+    let pond: PondSummary
+    @State private var confirming = false
+    private var ponds: PondsModel { .shared }
+
+    var body: some View {
+        let offer = pond.endOffering
+        let leaving = offer.primary == .leave
+        let key = "\(leaving ? "leave" : "delete"):\(pond.id)"
+        let busy = ponds.isBusy(key)
+        if offer.primary != .forget {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(leaving ? "Leave this pond" : "Delete this pond").font(Typo.label).foregroundStyle(Theme.ink)
+                Text(verbatim: offer.blockedBy ?? offer.words.message).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                Button(busy ? (leaving ? "Leaving\u{2026}" : "Deleting\u{2026}") : offer.words.menu) { confirming = true }
+                    .buttonStyle(DestructiveButtonStyle()).disabled(offer.blockedBy != nil || busy)
+                if let failed = ponds.actions.failure(key) ?? pond.ending?.failed {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Text(verbatim: failed).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Button(PondActionWords.tryAgain) { Task { _ = await ponds.endPond(pond: pond.id) } }.buttonStyle(SecondaryButtonStyle())
+                    }
+                } else if let line = pond.ending?.line {
+                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
+            }
+            .confirmationDialog(offer.words.title, isPresented: $confirming, titleVisibility: .visible) {
+                Button(offer.words.button, role: .destructive) { Task { _ = await ponds.endPond(pond: pond.id) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(verbatim: offer.words.message)
+            }
+        }
     }
 }
 

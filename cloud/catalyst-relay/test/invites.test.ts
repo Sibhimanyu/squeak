@@ -647,3 +647,39 @@ describe("one Join route, old aliases, batch invite, instant send (issue #141)",
 });
 
 const mine_ = (deps: unknown, who: string) => call(deps, "GET", "/invites", as(who), undefined);
+
+describe("sharing a Pond before inviting (issue #143)", () => {
+  const share = (deps: unknown, from: string, name = "greenroom", pondId = POND) =>
+    call(deps, "POST", `/ponds/${pondId}/share`, as(from), { name });
+  const bare = (deps: unknown, from: string, emails: string[], pondId = POND) =>
+    call(deps, "POST", `/ponds/${pondId}/invites`, as(from), { emails, role: "member" });
+
+  it("refuses an invite to a Pond the relay was not told about, until the Owner's Mac shares it", async () => {
+    const { deps, people, sent } = world();
+    const refused = await bare(deps, "sibhi", ["asha@example.com"]);
+    expect(refused.status).toBe(404);
+    expect(refused.json).toMatchObject({ error: "unknown-pond" });
+    expect(await people.getPond(POND)).toBeNull();
+    expect(sent).toHaveLength(0);
+
+    const shared = await share(deps, "sibhi");
+    expect(shared.status).toBe(200);
+    expect(await people.getPond(POND)).toMatchObject({ name: "greenroom", ownerUserId: "sibhi" });
+    const after = await bare(deps, "sibhi", ["asha@example.com"]);
+    expect(after.json.results[0]).toMatchObject({ ok: true, status: "invited" });
+  });
+
+  it("share is idempotent for the Owner and refused for anyone else", async () => {
+    const { deps } = world();
+    expect((await share(deps, "sibhi")).status).toBe(200);
+    expect((await share(deps, "sibhi", "renamed")).status).toBe(200);
+    expect((await share(deps, "eve")).status).toBe(403);
+  });
+
+  it("a Mac from before the share route still has its first invite make the Pond (pondName)", async () => {
+    const { deps, people } = world();
+    const old = await invite(deps, "sibhi", ["asha@example.com"]);
+    expect(old.status).toBe(200);
+    expect(await people.getPond(POND)).toMatchObject({ name: "greenroom", ownerUserId: "sibhi" });
+  });
+});

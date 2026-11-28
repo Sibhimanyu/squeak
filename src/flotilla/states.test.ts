@@ -302,7 +302,7 @@ describe("the pond's people", () => {
     const again = A.service.ensureLocalPond({ name: "Alpha", projectId: "p1" });
     expect(again.id).not.toBe(local.id);
     await A.service.createPond({ name: "Alpha", projectId: "p1" });
-    expect(A.service.projectRemovalBlock("p1")).toMatch(/Delete the pond Alpha first/);
+    expect(A.service.projectRemovalBlock("p1")).toMatch(/deletes the Pond for everyone/);
   });
 });
 

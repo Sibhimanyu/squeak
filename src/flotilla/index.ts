@@ -53,6 +53,8 @@ export interface Flotilla {
    * its people and its invites with nothing to open it from), else null.
    */
   projectRemovalBlock?(projectId: string): string | null;
+  /** Ends the project's shared Pond (delete for everyone, cloud first) before the project is removed. */
+  endProjectPond?(projectId: string): Promise<void>;
   /** The project is gone: its pond, if it never left this Mac, goes with it. */
   projectRemoved?(projectId: string): void;
   /** The pond records the directory is built from. */
@@ -341,6 +343,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     roomSync,
     handle: (ctx) => routes.handle(ctx),
     projectRemovalBlock: (projectId) => service.projectRemovalBlock(projectId),
+    endProjectPond: (projectId) => service.endProjectPond(projectId),
     projectRemoved: (projectId) => service.projectRemoved(projectId),
     records: () => service.directoryRecords(),
     stop: () => {

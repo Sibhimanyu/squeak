@@ -1701,8 +1701,10 @@ function createRelay(deps) {
   /**
    * /ponds/<pondId>/invites... (Owner only: the account that owns the Pond; a Mac's own key stands for its account). Every
    * answer carries the fresh InvitationView(s) (people.js); `invite`/`invites` are the same objects under the names older apps read.
-   *   POST  /ponds/<id>/invites {emails:[...], role, pondName?}   (a single `email` is still accepted) one invite per address; the first one
-   *                                                            makes the Pond exist in the cloud with this account as Owner. Emails are
+   *   POST  /ponds/<id>/share {name}                           the Owner's Mac makes the Pond exist here with this account as Owner (idempotent)
+   *   POST  /ponds/<id>/invites {emails:[...], role, pondName?}   (a single `email` is still accepted) one invite per address; a Pond the relay
+   *                                                            does not know is refused (404 unknown-pond) unless `pondName` is sent (a Mac from
+   *                                                            before /share): then the first invite makes it with this account as Owner. Emails are
    *                                                            queued and sent after the answer. -> {results:[{email, ok, status, code?, message?,
    *                                                            invitation?, invite?, mailed}]}  status: invited | already-member | already-invited | refused
    *   GET   /ponds/<id>/invites                                -> {invites, invitations} one view per address
@@ -1724,6 +1726,18 @@ function createRelay(deps) {
     if (!user) return out(401, { error: "signin" });
     const pond = await deps.people.getPond(pondId);
     try {
+      if (parts[1] === "share") {
+        // The Owner's Mac makes the Pond exist here before it invites anyone (idempotent): sharing is the Mac's step, and the
+        // invite route no longer makes a Pond it was not told about.
+        if (method !== "POST") return out(405, {});
+        if (pond) return pond.ownerUserId === user.userId ? out(200, { shared: true }) : out(403, {});
+        const body = await readJson(req, 2 * 1024);
+        const name = typeof (body && body.name) === "string" ? body.name.trim().slice(0, 100) : "";
+        if (!name) return out(400, { error: "pondName" });
+        if (!user.email) return out(401, { error: "signin" });
+        await deps.people.createPond({ pondId, ownerUserId: user.userId, name });
+        return out(200, { shared: true });
+      }
       if (!inviteId) {
         if (method === "GET") {
           const views = await Promise.all((await deps.people.listForPond(user, pondId)).map(withMail));
@@ -1740,8 +1754,14 @@ function createRelay(deps) {
         if (!emails || emails.length < 1 || emails.length > INVITE_MAIL_MAX || (role !== "member" && role !== "viewer"))
           return out(400, { error: "body" });
         if (pond && pond.ownerUserId !== user.userId) return out(403, {});
+        // A Pond the relay was not told about is refused: the Owner's Mac shares it first (`POST /ponds/<id>/share`). A Mac from
+        // before that route names the Pond in the invite instead, and the relay still makes it for that Mac (`pondName`).
         const name = typeof body.pondName === "string" ? body.pondName.trim().slice(0, 100) : "";
-        if (!pond && !name) return out(400, { error: "pondName" });
+        if (!pond && !name)
+          return out(404, {
+            error: "unknown-pond",
+            message: "This Pond isn't shared yet. Share it first, then invite.",
+          });
         if (!pond && !user.email) return out(401, { error: "signin" });
         const count = new Set(emails.map((e) => (typeof e === "string" ? normEmail(e) : ""))).size;
         if (!(await spend(INVITE_MAIL_PK, `d-${user.userId}`, DAY_MS, INVITE_MAIL_PER_MAC_DAY, count)))
@@ -1934,6 +1954,10 @@ function createRelay(deps) {
           mac,
           route.startsWith("/invites/") ? route.split("/").slice(1) : ["list"],
         );
+      {
+        const m = /^\/ponds\/([^/]+)\/share$/.exec(route);
+        if (m) return await handlePondInvites(req, res, method, mac, [m[1], "share"]);
+      }
       {
         const m = /^\/ponds\/([^/]+)\/invites(?:\/([^/]+)\/(resend|withdraw|again))?$/.exec(route);
         if (m) return await handlePondInvites(req, res, method, mac, [m[1], "invites", m[2], m[3]]);

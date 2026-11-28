@@ -35,6 +35,8 @@ struct PondSettingsView: View {
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(key: key) }
+    /// Removing the project deletes its shared Pond for everyone first (the daemon's PondEnding); a local Pond just goes with it.
+    private var removeEndsPond: Bool { pond.map { !$0.local && $0.role == .owner && $0.state == .active } ?? false }
     private var role: PondRole { ponds.detail(key: key)?.myRole ?? pond?.role ?? .owner }
     private var native: NativeProject? { ponds.native(key: key) }
 
@@ -81,6 +83,7 @@ struct PondSettingsView: View {
                                     .font(Typo.footnote).foregroundStyle(Theme.muted)
                                 PondFlockSection(key: key, showsHeading: false)
                                 if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]).padding(.top, Space.m) }
+                                else if let pond { PondEndSection(pond: pond).padding(.top, Space.m) }
                             }.id("Flock")
                             agents(native).id("Agents")
                             thisMac(native).id("This Mac")
@@ -92,6 +95,7 @@ struct PondSettingsView: View {
                             PondFreshnessStrip(pond: pond)
                             PondFlockSection(key: key)
                             if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]) }
+                            else if let pond { PondEndSection(pond: pond) }
                         }
                     }
                     .padding(.horizontal, 24).padding(.vertical, 24)
@@ -131,12 +135,12 @@ struct PondSettingsView: View {
             Text(verbatim: FolderPond.gitPondQuestion(isPublic: false) + " Choose public only if you want everyone to see it.")
         }
         .confirmationDialog("Remove \(project) from Squeak?", isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button("Remove from Squeak", role: .destructive) { remove() }
-            Button("Remove and move its streams' folders to the Trash", role: .destructive) { removeCleaning = true; remove() }
+            Button(removeEndsPond ? "Delete the Pond and remove from Squeak" : "Remove from Squeak", role: .destructive) { remove() }
+            Button(removeEndsPond ? "Delete the Pond, remove, and move its streams' folders to the Trash" : "Remove and move its streams' folders to the Trash", role: .destructive) { removeCleaning = true; remove() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            if let pond, !pond.local {
-                Text(verbatim: PondActionWords.removeFromSqueakWarning(project, others: max(1, pond.memberCount - 1)))
+            if removeEndsPond, let pond {
+                Text(verbatim: pond.endOffering.words.message + " Its folder and files stay on this Mac.")
             } else {
                 Text("Remove \(project) from Squeak? Its folder and files stay where they are; you can add it back with New pond.")
             }
@@ -411,8 +415,8 @@ struct PondSettingsView: View {
             Divider().overlay(Theme.line)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Remove this pond").font(Typo.label).foregroundStyle(Theme.ink)
-                if let pond, !pond.local {
-                    Text(verbatim: PondActionWords.removeFromSqueakWarning(p.name, others: max(1, pond.memberCount - 1)))
+                if removeEndsPond, let pond {
+                    Text(verbatim: "Removing it deletes the Pond for everyone first. " + pond.endOffering.words.message)
                         .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(verbatim: PondActionWords.removeLocal).font(Typo.footnote).foregroundStyle(Theme.muted)
@@ -420,8 +424,8 @@ struct PondSettingsView: View {
                 Button("Remove from Squeak\u{2026}") { removeProblem = nil; confirmRemove = true }.buttonStyle(DestructiveButtonStyle())
                 if let removeProblem {
                     Text(verbatim: removeProblem).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
-                    if let pond, !pond.local {
-                        Text("Leave or delete the pond first (under Flock), then remove it from Squeak.").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    if removeEndsPond {
+                        Button(PondActionWords.tryAgain) { self.removeProblem = nil; remove() }.buttonStyle(SecondaryButtonStyle())
                     }
                 }
             }
@@ -502,7 +506,7 @@ struct PondSettingsView: View {
             do {
                 // The default keeps every file; the second choice cleans this pond's stream folders the same way as
                 // Clean up disk (safe ones only, to the Trash; anything with unsaved work stays).
-                let cleaned = try await model.nativeHost.removeProject(projectId: native.id, cleaningStreams: removeCleaning)
+                let cleaned = try await model.nativeHost.removeProject(projectId: native.id, cleaningStreams: removeCleaning, endPond: removeEndsPond)
                 if let cleaned { AppLog.info("pond removed; \(DiskCleanupLogic.resultLine(cleaned))") }
                 await model.refreshNativeProjects()
                 AppModel.shared.closePondPage()

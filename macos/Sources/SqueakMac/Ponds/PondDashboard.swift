@@ -22,7 +22,7 @@ extension PondsModel {
             }
         }
         return PondDashboardHeader.make(.init(
-            role: role, hasPond: pond != nil, isLocal: pond?.local ?? true, plainFolder: native(key: key)?.isPlainFolder == true,
+            role: role, hasPond: pond != nil, isLocal: pond.map { $0.sharingState != .shared } ?? true, plainFolder: native(key: key)?.isPlainFolder == true,
             isRemote: chrome.isRemote, ownerName: pond?.ownerName, people: detail(key: key)?.members.count ?? pond?.memberCount ?? 1,
             connection: PondConnection.resolve(pond?.connection, freshness: freshness, role: role), connectionLine: pond?.connection?.line, start: chrome.start, startBlockedReason: blocked, canWrite: freshness.canWrite))
     }

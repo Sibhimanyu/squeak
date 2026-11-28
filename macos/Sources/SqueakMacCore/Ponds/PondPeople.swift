@@ -186,6 +186,9 @@ public struct InviteSheetPlan: Sendable, Equatable {
     public static let roles: [PondRole] = [.member, .viewer]
     public static let separators = CharacterSet(charactersIn: ", ;\n\t\r")
     public static let subtitle = "They get an email, and an invitation in Squeak if they already have an account."
+    /// Said once, on a Pond that is not shared yet: sending the first invite shares it (the daemon does that step).
+    public static let shareNote = "Inviting someone shares this Pond. Your Ducks stay private until you share them."
+    public static func note(for sharing: PondSharingState) -> String? { sharing == .shared ? nil : shareNote }
     public static let placeholder = "Add another address"
     public static let firstPlaceholder = "name@company.com"
 

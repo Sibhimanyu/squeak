@@ -184,6 +184,34 @@ assumes a Mac.
 
 Removed 2026-11-26 (#122): the `tasks`, `claims` and `locks` kinds, `coordination.ts`, `tasks.ts`, `scope.ts` and their routes (`/ponds/<id>/tasks`, `/locks`). The Room's own Tasks (`rtasks`, below) are the only Tasks. The same change removed the `ripples` and `presence` kinds and the `grants` kind: what happened in a Pond is a Room line from the Owner's Mac, and who is online comes from live connections (cloud-layer.md, "Live notices").
 
+## Ending a Pond, and sharing one (#142, #143)
+
+`src/flotilla/pond-ending.ts` (**PondEnding**) is the one module that owns every way a person's relationship with a Pond
+ends, and the one way a Pond becomes shared. It alone decides local versus shared; surfaces draw what it returns. The service
+supplies each step (`FlotillaService.endingPort`), the module owns the sequence and the progress record.
+
+- `offer(pondId)` is `{ primary: delete | leave | forget, words: { menu, title, message, button }, blockedBy? }`, sent on every
+  Pond row as `endOffer` (with `sharing` and, while unfinished, `ending: { kind, line, failed? }`). A local Pond: Delete forgets
+  it (folder, Git and Ducks stay). A shared Pond, Owner: "Delete for everyone". Anyone else in it: Leave. An ended join: Remove.
+- `end(pondId, kind)` (`POST /native/ponds/<id>/end { kind }`; `/delete`, `/leave`, `/forget` are the same module): cloud
+  first, then local. Delete (shared): `tell`, `revoke`, `cloud` (relay), `documents`, `forget`. Leave: `cloud`, `owner`, `forget`.
+  Each step is recorded in `ponds.json` (`ending: { kind, step, failed? }`) before it runs; a failure is never swallowed: the
+  row reads "Couldn't finish deleting <name>" with the sentence and Try again, and a retry or the next start (`resumeEndings`)
+  resumes at that step. A relay 404/405 on the cloud step means it was already ended.
+- A local Delete never recreates a Pond: the record is kept under `dismissed[projectId]` (same id, Ducks), the host's "every
+  project is a pond" pass skips that project, and only an explicit `POST /native/ponds/local` (or `createPond`) brings the same
+  Pond back. Removing the project drops it.
+- `removeMember(pondId, memberId)`: the account index call that cannot be made is recorded (`unindexed`) and settled by the
+  retry or at start; it says "Couldn't finish removing them" instead of swallowing the failure.
+- Remove from Squeak (`DELETE /native/projects/<id>`): a project whose Pond is shared answers 409 with the sentence "Removing X
+  from Squeak deletes the Pond for everyone"; with `?endPond=1` PondEnding ends the Pond first, and only then does the project go.
+- `share(pondId)` (`POST /native/ponds/<id>/sharing`) is idempotent and resumable: publish (meta, Owner member document), then
+  make the Pond exist at the relay (`POST /ponds/<id>/share { name }`). `sharing` is `local`, `sharing` (started, not finished) or
+  `shared`. Invite calls it first, so every Pond the person owns can invite, with no Ducks and no cloud record. The relay's
+  invite route refuses a Pond it was not told about (404 `unknown-pond`), but still makes one when the invite names it
+  (`pondName`), so Squeak for Mac 2.35.5 and older keep working; a Mac that finds no share route (an older relay) falls back to
+  sending `pondName` itself.
+
 ## Members are accounts (2026-11-17)
 
 A pond member is a person's Squeak **account**, not one device's key. Someone who joined in a browser and later signs in on

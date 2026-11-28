@@ -183,7 +183,8 @@ struct PondPanel: View {
     /// Member avatars in one row with Invite beside them.
     private func peopleRow(_ list: [PondGlance.Person], key: String, detail: PondDetail?) -> some View {
         let pond = detail?.pond ?? PondsModel.shared.pond(key: key)
-        let canInvite = detail.map { $0.myRole.canInvite } ?? (pond != nil)
+        // Every Pond this person owns can invite, a local one with no Ducks included: the invite shares it first.
+        let canInvite = pond?.mayInvite(detailRole: detail?.myRole) ?? false
         return section("People") {
             HStack(spacing: Space.s) {
                 HStack(spacing: -6) {

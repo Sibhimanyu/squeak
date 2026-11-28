@@ -153,11 +153,14 @@ export class FlotillaRoutes {
       if (!project) throw new FlotillaError("That project is not on this Mac.", 404);
       const remote = await this.deps.remoteOf(projectId, project.rootPath).catch(() => null);
       ctx.json(200, {
-        pond: service.ensureLocalPond({
-          name: project.name,
-          ...(remote ? { gitRemote: remote } : {}),
-          ...(projectId ? { projectId } : {}),
-        }),
+        pond: service.ensureLocalPond(
+          {
+            name: project.name,
+            ...(remote ? { gitRemote: remote } : {}),
+            ...(projectId ? { projectId } : {}),
+          },
+          { explicit: true },
+        ),
       });
       return true;
     }
@@ -262,6 +265,24 @@ export class FlotillaRoutes {
       if (!name) throw new FlotillaError("name is required");
       await service.renamePond(pondId, name);
       ctx.json(200, { ok: true });
+      return true;
+    }
+    // The one way to end a Pond (PondEnding): the kind must be what its row offers (`endOffer.primary`).
+    if (b === "end" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["kind"]);
+      const kind = str(body.kind);
+      if (kind !== "delete" && kind !== "leave" && kind !== "forget")
+        throw new FlotillaError("kind is delete, leave or forget");
+      await service.end(pondId, kind);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    // Makes the Pond itself shared (PondEnding.share); `/share` below is a chat shared into it.
+    if (b === "sharing" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.share(pondId);
+      ctx.json(200, { ok: true, sharing: service.sharingOf(pondId) });
       return true;
     }
     if (b === "delete" && parts.length === 3 && method === "POST") {

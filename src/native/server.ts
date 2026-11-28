@@ -82,6 +82,8 @@ export interface NativeServerOptions {
   flotilla?: {
     handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
     projectRemovalBlock?(projectId: string): string | null;
+    /** Ends the project's shared Pond the way PondEnding offers (Delete for everyone), cloud first; throws a plain sentence. */
+    endProjectPond?(projectId: string): Promise<void>;
     projectRemoved?(projectId: string): void;
     /** The pond records the directory is built from (`FlotillaService.directoryRecords`). */
     records?(): Promise<import("../flotilla/directory.js").DirRecord[]>;
@@ -1230,8 +1232,22 @@ export class NativeServer {
           `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
         );
       // A project whose pond is shared is not removed from under it: the owner deletes the pond first.
+      // `?endPond=1` is the person's answer to that sentence ("deletes the Pond for everyone"): the Pond is ended first, the
+      // right way (PondEnding, cloud first, resumable), and only then does the project go. A failed end leaves both as they were.
       const blocked = this.options.flotilla?.projectRemovalBlock?.(key);
-      if (blocked) throw new HttpError(409, blocked);
+      if (blocked) {
+        if (url.searchParams.get("endPond") !== "1") throw new HttpError(409, blocked);
+        try {
+          await this.options.flotilla?.endProjectPond?.(key);
+        } catch (error) {
+          throw new HttpError(
+            (error as { status?: number }).status ?? 503,
+            error instanceof Error && error.message
+              ? error.message
+              : "Squeak couldn't finish deleting the Pond. Try again.",
+          );
+        }
+      }
       // Optional (`?cleanup=1`): the pond's streams' folders go the same way as in Clean up disk (safe ones only,
       // to the Trash or `git worktree remove`; anything with unsaved work stays). Default keeps every file.
       let cleanup: unknown;

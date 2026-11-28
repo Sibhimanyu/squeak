@@ -83,8 +83,17 @@ public struct PondsClient: Sendable {
     }
 
     /// A member leaves.
-    public func leave(pond: String) async throws {
-        _ = try await host.call("POST", "\(Self.p(pond))/leave", body: .object(["pondId": .string(pond)]), timeout: 60)
+    public func leave(pond: String) async throws { try await end(pond: pond, kind: .leave) }
+
+    /// The one way a Pond ends (the daemon's PondEnding): the kind must be what the row's `endOffer` says. The daemon answers
+    /// after every step finished; a failure carries its sentence and the half-done end resumes on the next press.
+    public func end(pond: String, kind: PondEndKind) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/end", body: .object(["kind": .string(kind.rawValue)]), timeout: 120)
+    }
+
+    /// Makes the Pond shared (idempotent, resumable). Invite does this by itself; this is for a surface that shares without inviting.
+    public func shareNow(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/sharing", body: .object(["pondId": .string(pond)]), timeout: 60)
     }
 
     /// A member ends one of their own devices here (409 for the only one: leave the pond instead).
@@ -117,9 +126,7 @@ public struct PondsClient: Sendable {
     }
 
     /// Owner: ends the pond for everyone.
-    public func deletePond(pond: String) async throws {
-        _ = try await host.call("POST", "\(Self.p(pond))/delete", body: .object(["pondId": .string(pond)]), timeout: 120)
-    }
+    public func deletePond(pond: String) async throws { try await end(pond: pond, kind: .delete) }
 
     public func rotateKey(pond: String) async throws {
         _ = try await host.call("POST", "\(Self.p(pond))/rotate-key", body: .object(["pondId": .string(pond)]), timeout: 120)

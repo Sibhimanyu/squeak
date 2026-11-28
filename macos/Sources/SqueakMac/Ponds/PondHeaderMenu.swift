@@ -3,7 +3,7 @@ import SqueakMacCore
 import SwiftUI
 
 // The Pond's ⋯ menu: on the Dashboard it sits in the page header and holds what the three buttons do not (Pond settings,
-// Notebook, Rename, Leave or Delete); in the Room's bar the same menu also keeps Invite and Put on GitHub. What it holds
+// Notebook, Rename, Delete Pond or Leave Pond, in the words the daemon's PondEnding offers); in the Room's bar the same menu also keeps Invite and Put on GitHub. What it holds
 // for a role is decided in `PondDashboardHeader.menu` (SqueakMacCore).
 
 struct PondHeaderMenu: View {
@@ -11,12 +11,11 @@ struct PondHeaderMenu: View {
     /// The Room's bar keeps Invite and Put on GitHub here (the Dashboard has them as buttons).
     var withActions = false
     @Environment(AppModel.self) private var model
-    @State private var leaving: String?
+    @State private var ending: String?
     @State private var confirmGitPond = false
     @State private var gitPondBusy = false
     @State private var renaming = false
     @State private var newName = ""
-    @State private var deleting = false
 
     private var ponds: PondsModel { .shared }
 
@@ -41,8 +40,9 @@ struct PondHeaderMenu: View {
                 case .settings: Button("Pond settings\u{2026}") { model.openSettings(.pond(key)) }
                 case .notebook: Button("Notebook") { model.openPondItem(.notebook) }
                 case .rename: Button("Rename\u{2026}") { newName = name; renaming = true }.disabled(!ponds.freshness(pond).canWrite)
-                case .leave: Button("Leave \(name)\u{2026}") { leaving = key }
-                case .delete: Button("Delete \(name)\u{2026}", role: .destructive) { deleting = true }.disabled(!ponds.freshness(pond).canWrite)
+                case .leave, .delete:
+                    // One item for both: the daemon says which it is (Delete Pond… or Leave Pond…) and in what words.
+                    if let pond { Button(pond.endOffering.words.menu, role: .destructive) { ending = key }.disabled(!ponds.freshness(pond).canWrite && !pond.local) }
                 }
             }
         } label: {
@@ -50,7 +50,7 @@ struct PondHeaderMenu: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("More for this Pond").accessibilityLabel("More for this Pond")
-        .leavePondDialog($leaving)
+        .endPondDialog($ending)
         .gitPondFlow(key: key, ask: $confirmGitPond, busy: $gitPondBusy)
         .alert("Rename \(name)", isPresented: $renaming) {
             TextField("Name", text: $newName)
@@ -60,35 +60,31 @@ struct PondHeaderMenu: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Delete \(name) for everyone?", isPresented: $deleting, titleVisibility: .visible) {
-            Button("Delete for everyone", role: .destructive) { if let pond { Task { _ = await ponds.deletePond(pond: pond.id) } } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(verbatim: PondActionWords.deleteMessage(name, others: max(0, (ponds.detail(key: key)?.members.count ?? pond?.memberCount ?? 1) - 1)))
-        }
     }
 }
 
 extension View {
-    /// "Leave pond…": a one-line confirmation, then the daemon's leave; on success the pond leaves the sidebar and the
-    /// Dashboard opens (`PondsModel.leaveAndDrop`).
-    func leavePondDialog(_ key: Binding<String?>) -> some View { modifier(LeavePondDialog(key: key)) }
+    /// "Delete Pond…" / "Leave Pond…": one confirmation drawing the words the daemon's PondEnding offers for that Pond, then
+    /// its end; on success the pond leaves the sidebar (`PondsModel.endAndDrop`). A failure stays on the Pond with Try again.
+    func endPondDialog(_ key: Binding<String?>) -> some View { modifier(EndPondDialog(key: key)) }
 }
 
-private struct LeavePondDialog: ViewModifier {
+private struct EndPondDialog: ViewModifier {
     @Binding var key: String?
 
     func body(content: Content) -> some View {
-        let name = key.map { PondsModel.shared.name(key: $0) } ?? ""
-        content.confirmationDialog("Leave \(name)?", isPresented: Binding(get: { key != nil }, set: { if !$0 { key = nil } }), titleVisibility: .visible) {
-            Button("Leave", role: .destructive) {
-                guard let k = key else { return }
-                key = nil
-                Task { _ = await PondsModel.shared.leaveAndDrop(key: k) }
+        let offer = key.flatMap { PondsModel.shared.pond(key: $0)?.endOffering }
+        content.confirmationDialog(offer?.words.title ?? "", isPresented: Binding(get: { key != nil }, set: { if !$0 { key = nil } }), titleVisibility: .visible) {
+            if let offer, offer.blockedBy == nil {
+                Button(offer.words.button, role: .destructive) {
+                    guard let k = key else { return }
+                    key = nil
+                    Task { _ = await PondsModel.shared.endAndDrop(key: k) }
+                }
             }
             Button("Cancel", role: .cancel) { key = nil }
         } message: {
-            Text(verbatim: PondActionWords.leaveMessage(name, owner: key.flatMap { PondsModel.shared.pond(key: $0)?.ownerName }))
+            Text(verbatim: offer?.blockedBy ?? offer?.words.message ?? "")
         }
     }
 }

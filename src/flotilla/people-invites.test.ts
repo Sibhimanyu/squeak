@@ -21,9 +21,17 @@ function fakeRelay() {
   const records = new Map<string, InviteRecord>();
   const calls: string[] = [];
   let n = 0;
+  const known = new Set<string>();
   const port: PondInvites = {
-    async create(_pondId, input) {
+    async ensurePond(pondId, name) {
+      calls.push(`share ${name}`);
+      known.add(pondId);
+      return "shared";
+    },
+    async create(pondId, input) {
       calls.push(`create ${input.emails.join(",")} ${input.role} ${input.pondName}`);
+      // The relay refuses a Pond it was not told about unless the (older) caller names it.
+      if (!known.has(pondId) && !input.pondName) throw new InviteRefused("This Pond isn't shared yet.", 404);
       return input.emails.map((email) => {
         if (email === "in@example.com")
           return {
@@ -109,7 +117,8 @@ describe("inviting by email through the relay", () => {
     const pond = service.ensureLocalPond({ name: "greenroom", projectId: "p1" });
     const r = await service.inviteEmails(pond.id, ["asha@example.com", "in@example.com"], "viewer");
     expect([...docs.keys()].some((k) => k.endsWith("/pond/meta"))).toBe(true);
-    expect(relay.calls).toEqual(["create asha@example.com,in@example.com viewer greenroom"]);
+    // Shared first, then invited: the invite no longer carries the Pond's name (the relay refuses a Pond it was not told about).
+    expect(relay.calls).toEqual(["share greenroom", "create asha@example.com,in@example.com viewer undefined"]);
     expect(r.results[0]).toMatchObject({ ok: true, status: "invited", invite: { state: "pending", role: "viewer" } });
     expect(r.results[1]).toEqual({
       email: "in@example.com",
@@ -148,7 +157,7 @@ describe("inviting by email through the relay", () => {
     const again = await service.inviteAgain(pond.id, id, "viewer");
     expect(again.invite).toMatchObject({ state: "pending", role: "viewer" });
     await expect(service.inviteAgain(pond.id, id, "owner" as never)).rejects.toThrow(/member or a viewer/);
-    expect(relay.calls.slice(1)).toEqual([`resend ${id}`, `withdraw ${id}`, `resend ${id}`, `again ${id} viewer`]);
+    expect(relay.calls.slice(2)).toEqual([`resend ${id}`, `withdraw ${id}`, `resend ${id}`, `again ${id} viewer`]);
   });
 });
 

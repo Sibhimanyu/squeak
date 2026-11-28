@@ -28,6 +28,16 @@ import { can, capsOf, type Action, type Actor, type Context, type Caps } from ".
 import { connectionOf, overallConnection, type Connection } from "./connection.js";
 import { AnnouncedInvites, buildPeople, owedLines, type PeopleView } from "./pond-people.js";
 import {
+  PondEnding,
+  type EndKind,
+  type EndOffer,
+  type EndStep,
+  type EndingPort,
+  type EndingRecord,
+  type EndingView,
+  type Sharing,
+} from "./pond-ending.js";
+import {
   InviteRefused,
   type Invitation,
   type InviteRecord,
@@ -203,6 +213,12 @@ interface LocalPond {
   answered?: string[];
   /** The owner's first invite has been made: Ducks shared before it were set Private then; later ones are visible. */
   invited?: true;
+  /** An end (delete, leave, remove) that has not finished: the step that runs next, and why the last try failed (PondEnding). */
+  ending?: EndingRecord;
+  /** A share was started and has not finished (PondEnding.share): the Pond reads `sharing`. */
+  sharingStarted?: true;
+  /** The Owner's Mac: accounts removed from this Pond that the relay's account index still lists; settled on the next try. */
+  unindexed?: string[];
   role: Role;
   ownerKey: string;
   location: unknown;
@@ -392,6 +408,12 @@ export interface PondSummary {
   ownerName?: string;
   /** True until the first invite publishes it: only this Mac can see it. */
   local?: boolean;
+  /** `local` until the Pond is shared, `sharing` while a share is unfinished, `shared` after (PondEnding). */
+  sharing?: Sharing;
+  /** What this person may do to end it: Delete, Leave or Remove, in the words to draw (PondEnding.offer). */
+  endOffer?: EndOffer;
+  /** Present while a delete, leave or remove is unfinished: "Deleting…", or what failed and Try again. */
+  ending?: EndingView;
   /** A new device of an account already in the Pond, waiting for the Owner's Mac to seal the key: "Connecting", no button. */
   connecting?: true;
   /** True when the relay could not be reached and this is the last known state (docs/ponds.md, "Offline"). */
@@ -551,6 +573,11 @@ export class FlotillaService extends EventEmitter {
   private readonly identityFile: SecretFile<{ identity: Identity | null }>;
   private readonly pondsFile: SecretFile<{
     ponds: Record<string, LocalPond>;
+    /**
+     * Local Ponds the person deleted, by project id: the record (same id, name, Ducks) is kept aside so the project's Pond
+     * is never made again with a new id. Only an explicit action brings it back (`createPond`).
+     */
+    dismissed?: Record<string, LocalPond>;
     leftUntil?: Record<string, number>;
     /** When the start-clean migration ran on this Mac (once; docs/cloud-layer.md, "Clean start"). */
     cleanStartedAt?: number;
@@ -581,9 +608,14 @@ export class FlotillaService extends EventEmitter {
   private readonly ownerSeen = new Map<string, boolean>();
   private readonly lastPresence = new Map<string, { viewing?: string; typing?: string; at: number }>();
   private readonly pendingWake = new Map<string, number>();
+  /** Every way a Pond ends, and how it becomes shared (pond-ending.ts). It alone decides local versus shared. */
+  private readonly endings: PondEnding;
+  /** Ponds on a relay that has no share route yet (an older one): the first invite names the Pond so it makes the row. */
+  private readonly legacyRelay = new Set<string>();
 
   constructor(private readonly options: FlotillaOptions) {
     super();
+    this.endings = new PondEnding(this.endingPort());
     this.now = options.now ?? Date.now;
     this.budgetMs = options.budgetMs ?? DEFAULT_BUDGET_MS;
     const dir = path.join(options.supportDir, "flotilla");
@@ -861,9 +893,10 @@ export class FlotillaService extends EventEmitter {
   }
 
   /**
-   * A project whose pond is shared must not be removed from Squeak: the pond would stay in the cloud with its people and
-   * invites, and adding the folder back would make a second pond. The owner deletes the pond first (or hands nothing over:
-   * a pond cannot change hands yet). A local pond has no one in it and goes with the project.
+   * "Remove from Squeak" on a project whose Pond is shared: the Pond would stay in the cloud with its people, and adding the
+   * folder back would make a second one. It is ended first, the right way (PondEnding): the Owner's delete for everyone. The
+   * caller asks with `endPond` once the person has been told in these words; without it this answers the sentence that says so.
+   * A local Pond has no one in it and goes with the project.
    */
   projectRemovalBlock(projectId: string): string | null {
     const pond = Object.values(this.pondsFile.data.ponds).find(
@@ -872,7 +905,18 @@ export class FlotillaService extends EventEmitter {
     if (!pond) return null;
     const others = Math.max(0, (this.snapshotFile.data.ponds[pond.id]?.counts.members ?? 1) - 1);
     const who = others > 0 ? `It is shared with ${others} ${others === 1 ? "person" : "people"}. ` : "It is shared. ";
-    return `${who}Delete the pond ${pond.name} first (Pond settings), then remove the project.`;
+    return `${who}Removing ${pond.name} from Squeak deletes the Pond for everyone.`;
+  }
+
+  /** Ends the project's shared Pond the way PondEnding offers (delete for everyone), before the project is removed. */
+  async endProjectPond(projectId: string): Promise<void> {
+    const pond = Object.values(this.pondsFile.data.ponds).find(
+      (p) => p.projectId === projectId && (p.status === "active" || p.status === "pending") && !p.local,
+    );
+    if (!pond) return;
+    const offer = this.endings.offer(pond.id);
+    if (!offer) return;
+    await this.endings.end(pond.id, offer.primary);
   }
 
   /**
@@ -942,6 +986,11 @@ export class FlotillaService extends EventEmitter {
   projectRemoved(projectId: string): void {
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
       if (pond.projectId === projectId && pond.local) this.forgetPond(pond.id);
+    }
+    // The project is gone, so a Pond kept aside for it has nothing left to link to.
+    if (this.pondsFile.data.dismissed?.[projectId]) {
+      delete this.pondsFile.data.dismissed[projectId];
+      this.save();
     }
   }
 
@@ -1122,9 +1171,12 @@ export class FlotillaService extends EventEmitter {
     return all.find((p) => p.projectId === input.projectId) ?? null;
   }
 
-  /** Whether a project already has a pond here, local or published (by project id). */
+  /**
+   * Whether a project has a pond here: local, published, or deleted by the person (kept aside, never made again by itself,
+   * so the host's "every project is a pond" pass does not give it a new one).
+   */
   hasPondForProject(input: { projectId?: string }): boolean {
-    return this.pondOfProject(input) !== null;
+    return this.pondOfProject(input) !== null || this.dismissedOf(input.projectId) !== null;
   }
 
   /**
@@ -1132,10 +1184,19 @@ export class FlotillaService extends EventEmitter {
    * or returns the one it already has, so a project tied to a published pond never gets a second. Takes a project id
    * only (a name alone is refused). Synchronous, so two calls cannot both create.
    */
-  ensureLocalPond(input: { name: string; gitRemote?: string; projectId?: string }): PondSummary {
+  ensureLocalPond(
+    input: { name: string; gitRemote?: string; projectId?: string },
+    options: { explicit?: boolean } = {},
+  ): PondSummary {
     if (!input.projectId) throw new FlotillaError(NEEDS_PROJECT, 400);
     const found = this.pondOfProject(input);
     if (found) return this.summary(found, 1, 0, 0);
+    // A Pond the person deleted comes back only when they ask for one, never from the host's own pass.
+    if (options.explicit) {
+      const back = this.restoreDismissed(input.projectId);
+      if (back) return this.summary(back, 1, 0, 0);
+    }
+    if (this.dismissedOf(input.projectId)) throw new FlotillaError("That project's pond was deleted.", 409);
     return this.summary(this.newPond(input, true), 1, 0, 0);
   }
 
@@ -1191,7 +1252,10 @@ export class FlotillaService extends EventEmitter {
   }
 
   async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
-    const existing = input.projectId ? this.pondOfProject({ projectId: input.projectId }) : null;
+    // The explicit action: a deleted local Pond comes back under its own id, never a new one.
+    const existing = input.projectId
+      ? (this.pondOfProject({ projectId: input.projectId }) ?? this.restoreDismissed(input.projectId))
+      : null;
     if (existing?.local) {
       await this.publish(existing.id);
       return this.summary(existing, 1, 0, 0);
@@ -1308,6 +1372,7 @@ export class FlotillaService extends EventEmitter {
       ...(pond.ownerName ? { ownerName: pond.ownerName } : {}),
       ...(pond.status === "pending" && pond.deviceJoin ? { connecting: true as const } : {}),
       ...(pond.local ? { local: true } : {}),
+      ...this.endings.view(pond.id),
     };
   }
 
@@ -1504,7 +1569,8 @@ export class FlotillaService extends EventEmitter {
   async prepareFirstInvite(pondId: string): Promise<void> {
     const pond = this.activePond(pondId);
     this.allow(pond, "invite", {}, "Only an owner can invite.");
-    if (pond.local) await this.publish(pond.id);
+    // Sharing is PondEnding's: publish, then make the Pond exist at the relay; idempotent, so every invite re-checks it.
+    await this.endings.share(pond.id);
     if (pond.invited) return;
     const members = await this.members(pond).catch(() => null);
     if (!members) return; // unreadable now: ask again at the next invite rather than guess
@@ -1551,7 +1617,9 @@ export class FlotillaService extends EventEmitter {
       throw new FlotillaError(`Invite between 1 and ${MAX_EMAILS_PER_SEND} people at a time.`);
     const port = this.invitePort();
     await this.prepareFirstInvite(pondId);
-    const results = await this.viaRelay(() => port.create(pond.id, { emails, role, pondName: pond.name }));
+    const results = await this.viaRelay(() =>
+      port.create(pond.id, { emails, role, ...(this.legacyRelay.has(pond.id) ? { pondName: pond.name } : {}) }),
+    );
     this.emit("changed", pond.id);
     return { results };
   }
@@ -1869,7 +1937,7 @@ export class FlotillaService extends EventEmitter {
 
   /** Removes a member and rotates the pond key: a new key goes only to those who remain. */
   async removeMember(pondId: string, memberId: string): Promise<void> {
-    await this.removeAndRotate(pondId, memberId, (gone) => `removed ${gone.name}`);
+    await this.endings.removeMember(pondId, memberId);
   }
 
   /**
@@ -2436,8 +2504,15 @@ export class FlotillaService extends EventEmitter {
     // reads (Firebase has none) learns it from that; on Catalyst the revoked token says the same by refusing them.
     await this.sendRemoval(pond, gone).catch(() => undefined);
     await store.delete(this.docPath(pond.id, "members", memberId));
-    // Their account no longer lists this pond, and no waiting device request of theirs may bring a device back.
-    if (gone.accountId) await this.indexAccounts(pond, [], [gone.accountId]).catch(() => undefined);
+    // Their account no longer lists this pond, and no waiting device request of theirs may bring a device back. A failed
+    // index call is recorded, not dropped: PondEnding.removeMember settles it (and says so when it cannot), and so does the start.
+    if (gone.accountId) {
+      pond.unindexed = [...new Set([...(pond.unindexed ?? []), gone.accountId])];
+      this.save();
+      await this.settleIndex(pond.id).catch((error) =>
+        logger.warn("the account index still lists a removed member", { pond: pond.id, error: String(error) }),
+      );
+    }
     for (const d of devicesOf(gone)) await this.dropDeviceRequest(pond, d.id);
     // Whatever they still held (a question being answered) goes with them: a hold by a key that is no member reads as nothing.
     await this.dropHoldsOf(pond, memberId).catch(() => undefined);
@@ -2508,45 +2583,6 @@ export class FlotillaService extends EventEmitter {
     this.emit("changed", pondId);
   }
 
-  /**
-   * A member leaves: told to the owner (who then removes the member, the key and every device's token), and the pond is
-   * forgotten here at once. Safe from any surface: a pond already gone is a plain 404, a pond still waiting or already
-   * ended is simply forgotten, an owner is refused with a sentence. For a day this Mac's account sync does not ask to
-   * be added back (the account index lists the pond until the owner's Mac has processed the leave).
-   */
-  async leave(pondId: string): Promise<void> {
-    const stored = this.pond(pondId);
-    if (stored.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
-    if (stored.status !== "active") {
-      this.forgetPond(pondId);
-      return;
-    }
-    const pond = this.activePond(pondId);
-    // Done only when the cloud confirms (issue #130): the account-level leave first, so another device of this account does
-    // not take the pond back. A relay without the route (404, 405: an older one) leaves it to the owner's removal.
-    try {
-      await this.options.relay?.leaveAccountPond?.(pondId);
-    } catch (error) {
-      const missing = error instanceof RelayRefused && (error.status === 404 || error.status === 405);
-      if (!missing && !(error instanceof Error && error.message === "404")) {
-        throw new FlotillaError(LEAVE_NOT_CONFIRMED, 503);
-      }
-    }
-    // Told to the Owner's Mac through the cloud queue (it waits there if that Mac is away); the relay's refusal of this
-    // account's token is what ends access at once.
-    try {
-      await this.queueForOwner(pond.id, { leave: true });
-    } catch (error) {
-      // A token the Owner already ended is the leave done; any other failure leaves the person in, to try again.
-      if (!FlotillaService.isAccessEnded(error)) throw error;
-    }
-    this.forgetPond(pondId);
-    // Kept on disk: a restart inside the day must not ask to be added back.
-    this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
-    this.pondsFile.save();
-    this.emit("changed", pondId);
-  }
-
   /** Owner: renames the pond for everyone (the meta document), and here. */
   async renamePond(pondId: string, name: string): Promise<void> {
     const pond = this.activePond(pondId);
@@ -2571,60 +2607,248 @@ export class FlotillaService extends EventEmitter {
     this.emit("changed", pondId);
   }
 
-  /** Owner: ends the pond for everyone. Their access ends (tokens, member documents), then its documents go. */
+  /**
+   * Owner: Delete. A local Pond is forgotten here (same id kept aside, Ducks stay linked); a shared one ends for everyone,
+   * cloud first, with progress recorded so a half-done delete resumes (PondEnding).
+   */
   async deletePond(pondId: string): Promise<void> {
-    const pond = this.activePond(pondId);
-    this.allow(pond, "remove-member", {}, "Only an owner can delete the pond.");
-    if (pond.local) {
-      this.forgetPond(pondId);
-      return;
-    }
-    const members = await this.members(pond);
-    // Each Member's device is told "deleted" first, so it reads "<Pond> was deleted." and not "You were removed".
-    let told = 0;
-    for (const member of members.values()) {
-      if (member.id === this.identity.id) continue;
-      await this.sendRemoval(pond, member, undefined, true)
-        .then(() => told++)
-        .catch(() => undefined);
-    }
-    const grace = this.options.deleteGraceMs ?? 2_000;
-    if (told > 0 && grace > 0) await new Promise((r) => setTimeout(r, grace));
-    for (const member of members.values()) {
-      if (member.id !== this.identity.id) {
-        await this.revokeToken(pond, member.id, "Squeak couldn't end a member's access. Try again.");
-      }
-    }
-    // The cloud's people records end with the Pond, so a browser or another device of a Member reads "<Pond> was deleted" too.
-    // Best effort: a relay without the route (or one that already ended it, when the web asked) changes nothing here.
-    await this.options.relay?.deletePond?.(pond.id, pond.name).catch(() => undefined);
-    const store = this.storeOf(pond);
-    // Members first: from then on everyone else reads "removed".
-    for (const member of members.values()) {
-      if (member.id !== this.identity.id) {
-        await store.delete(this.docPath(pond.id, "members", member.id));
-      }
-    }
-    const kinds = ["keys", "holds", "threads", "tevents", "tcmds", "room", "rposts", "rtasks"];
-    await Promise.all(
-      kinds.map(async (kind) => {
-        for (const { id } of await store.list(`channels/${pond.id}/${kind}`).catch(() => [])) {
-          await store.delete(this.docPath(pond.id, kind, id)).catch(() => undefined);
-        }
-      }),
-    );
-    await store.delete(this.docPath(pond.id, "members", this.identity.id)).catch(() => undefined);
-    await store.delete(this.docPath(pond.id, "pond", "meta")).catch(() => undefined);
-    this.forgetPond(pondId);
+    await this.endings.end(pondId, "delete");
+  }
+
+  /** A Member leaves; safe from any surface (a Pond already gone is a plain 404, an Owner is refused with a sentence). */
+  async leave(pondId: string): Promise<void> {
+    await this.endings.end(pondId, "leave");
   }
 
   /** Remove: forgets a pond whose join or membership ended, or a request not yet decided. An active pond is never forgotten here. */
   async forget(pondId: string): Promise<void> {
+    await this.endings.end(pondId, "forget");
+  }
+
+  /** The one end the person is offered for this Pond (`POST /ponds/<id>/end { kind }` runs it). */
+  async end(pondId: string, kind: EndKind): Promise<void> {
+    const offer = this.endings.offer(pondId);
+    if (!offer) throw new FlotillaError("no such pond", 404);
+    if (offer.primary !== kind) throw new FlotillaError("That isn't something you can do to this pond.", 409);
+    await this.endings.end(pondId, kind);
+  }
+
+  endOffer(pondId: string): EndOffer | null {
+    return this.endings.offer(pondId);
+  }
+
+  /** Makes the Pond shared (idempotent, resumable). Invite does this first. */
+  async share(pondId: string): Promise<void> {
+    await this.endings.share(pondId);
+  }
+
+  sharingOf(pondId: string): Sharing {
+    return this.endings.sharing(pondId);
+  }
+
+  /** At start: finishes every end that was half done and every account index left wrong. */
+  resumeEndings(): Promise<void> {
+    return this.endings.resume((message, error) => logger.warn(message, { error: String(error) }));
+  }
+
+  /** The steps PondEnding runs. Each is safe to run twice; the sequence and the progress record are PondEnding's. */
+  private endingPort(): EndingPort {
+    const record = (id: string): LocalPond | undefined => this.pondsFile.data.ponds[id];
+    return {
+      facts: (id) => {
+        const p = record(id);
+        if (!p) return null;
+        const members = this.snapshotFile.data.ponds[id]?.counts.members ?? 1;
+        return {
+          id,
+          name: p.name,
+          role: p.role,
+          local: !!p.local,
+          status: p.status === "active" ? "active" : p.status === "pending" ? "pending" : "over",
+          people: members,
+          ...(p.ownerName ? { ownerName: p.ownerName } : {}),
+          cloud: this.hasCloud(),
+          ...(p.ending ? { ending: p.ending } : {}),
+          ...(p.sharingStarted ? { sharingStarted: true } : {}),
+        };
+      },
+      mark: (id, ending) => {
+        const p = record(id);
+        if (!p) return;
+        if (ending) p.ending = ending;
+        else delete p.ending;
+        this.save();
+      },
+      run: (id, step) => this.runEndStep(id, step),
+      changed: (id) => {
+        this.summaryCache.delete(id);
+        this.emit("changed", id);
+      },
+      removeMember: (id, memberId) => this.removeAndRotate(id, memberId, (gone) => `removed ${gone.name}`),
+      unindexed: (id) => record(id)?.unindexed ?? [],
+      settleIndex: (id) => this.settleIndex(id),
+      publish: (id) => this.publish(id),
+      ensureAtRelay: (id) => this.ensureAtRelay(id),
+      markSharing: (id, started) => {
+        const p = record(id);
+        if (!p) return;
+        if (started) p.sharingStarted = true;
+        else delete p.sharingStarted;
+        this.save();
+      },
+      unfinished: () =>
+        Object.values(this.pondsFile.data.ponds)
+          .filter((p) => p.ending || (p.unindexed?.length ?? 0) > 0)
+          .map((p) => p.id),
+    };
+  }
+
+  private async runEndStep(pondId: string, step: EndStep): Promise<void> {
     const pond = this.pond(pondId);
-    if (pond.status !== "pending" && !TERMINAL.includes(pond.status)) {
-      throw new FlotillaError("You're still in that pond. Leave it first.", 409);
+    switch (step) {
+      case "dismiss":
+        this.dismissPond(pondId);
+        return;
+      case "forget": {
+        const leaving = pond.role !== "owner" && pond.status === "active";
+        this.forgetPond(pondId);
+        if (leaving) {
+          // Kept on disk: a restart inside the day must not ask to be added back.
+          this.pondsFile.data.leftUntil = { ...this.pondsFile.data.leftUntil, [pondId]: this.now() + LEFT_SKIP_MS };
+          this.pondsFile.save();
+        }
+        return;
+      }
+      case "tell": {
+        const members = await this.members(pond);
+        // Each Member's device is told "deleted" first, so it reads "<Pond> was deleted." and not "You were removed". A
+        // missed note is a courtesy lost (the relay's deleted index row and the revoked token say the same), not a failure.
+        let told = 0;
+        for (const member of members.values()) {
+          if (member.id === this.identity.id) continue;
+          await this.sendRemoval(pond, member, undefined, true)
+            .then(() => told++)
+            .catch((error) => logger.warn("could not tell a member the pond was deleted", { error: String(error) }));
+        }
+        const grace = this.options.deleteGraceMs ?? 2_000;
+        if (told > 0 && grace > 0) await new Promise((r) => setTimeout(r, grace));
+        return;
+      }
+      case "revoke": {
+        for (const member of (await this.members(pond)).values()) {
+          if (member.id !== this.identity.id) {
+            await this.revokeToken(pond, member.id, "Squeak couldn't end a member's access. Try again.");
+          }
+        }
+        return;
+      }
+      case "cloud": {
+        if (pond.role === "owner") {
+          // The cloud's people records end with the Pond, so a browser or another device of a Member reads "<Pond> was
+          // deleted" too. A relay without the route, or one that already ended it (the web asked first), is done.
+          try {
+            await this.options.relay?.deletePond?.(pond.id, pond.name);
+          } catch (error) {
+            const gone = error instanceof RelayRefused && (error.status === 404 || error.status === 405);
+            if (!gone) throw new FlotillaError("Squeak couldn't end the Pond in the cloud. Try again.", 503);
+          }
+          return;
+        }
+        // The account-level leave first, so another device of this account does not take the pond back. A relay without
+        // the route (404, 405: an older one) leaves it to the owner's removal.
+        try {
+          await this.options.relay?.leaveAccountPond?.(pondId);
+        } catch (error) {
+          const missing = error instanceof RelayRefused && (error.status === 404 || error.status === 405);
+          if (!missing && !(error instanceof Error && error.message === "404")) {
+            throw new FlotillaError(LEAVE_NOT_CONFIRMED, 503);
+          }
+        }
+        return;
+      }
+      case "documents": {
+        const store = this.storeOf(pond);
+        const me = this.identity.id;
+        // Members first: from then on everyone else reads "removed". Every list and delete counts: a failure is not skipped.
+        for (const { id } of await store.list(`channels/${pond.id}/members`)) {
+          if (id !== me) await store.delete(this.docPath(pond.id, "members", id));
+        }
+        const kinds = ["keys", "holds", "threads", "tevents", "tcmds", "room", "rposts", "rtasks"];
+        for (const kind of kinds) {
+          for (const { id } of await store.list(`channels/${pond.id}/${kind}`)) {
+            await store.delete(this.docPath(pond.id, kind, id));
+          }
+        }
+        await store.delete(this.docPath(pond.id, "members", me));
+        await store.delete(this.docPath(pond.id, "pond", "meta"));
+        return;
+      }
+      case "owner": {
+        // Told to the Owner's Mac through the cloud queue (it waits there if that Mac is away); the relay's refusal of this
+        // account's token is what ends access at once. A token the Owner already ended is the leave done; any other failure
+        // leaves the person in, to try again.
+        try {
+          await this.queueForOwner(pond.id, { leave: true });
+        } catch (error) {
+          if (!FlotillaService.isAccessEnded(error)) throw error;
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * A local Pond the person deleted: Squeak forgets it (nothing is in the cloud), keeping its record aside under the same
+   * id by project, so the project is never given a second Pond with a new id and the Ducks keep their link.
+   */
+  private dismissPond(pondId: string): void {
+    const pond = this.pond(pondId);
+    if (pond.projectId) {
+      const kept: LocalPond = { ...pond };
+      delete kept.ending;
+      delete kept.sharingStarted;
+      (this.pondsFile.data.dismissed ??= {})[pond.projectId] = kept;
     }
     this.forgetPond(pondId);
+  }
+
+  /** The Pond a project had before it was deleted, if any. */
+  private dismissedOf(projectId: string | undefined): LocalPond | null {
+    return (projectId && this.pondsFile.data.dismissed?.[projectId]) || null;
+  }
+
+  /** Puts a deleted local Pond back under its own id (the explicit action: making a Pond for that project again). */
+  private restoreDismissed(projectId: string): LocalPond | null {
+    const kept = this.dismissedOf(projectId);
+    if (!kept) return null;
+    delete this.pondsFile.data.dismissed![projectId];
+    this.pondsFile.data.ponds[kept.id] = kept;
+    this.save();
+    return kept;
+  }
+
+  /** The relay's account index lists no account this Owner removed; throws a plain sentence when it still does. */
+  private async settleIndex(pondId: string): Promise<void> {
+    const pond = this.pondsFile.data.ponds[pondId];
+    const pending = pond?.unindexed ?? [];
+    if (!pond || pending.length === 0) return;
+    try {
+      await this.indexAccounts(pond, [], pending);
+    } catch {
+      throw new FlotillaError(`Couldn't finish removing them from ${pond.name}. Try again.`, 503);
+    }
+    delete pond.unindexed;
+    this.save();
+  }
+
+  /** The relay knows this Pond, with this account as Owner (idempotent). A relay without the route leaves the first invite to create it. */
+  private async ensureAtRelay(pondId: string): Promise<void> {
+    const pond = this.pond(pondId);
+    const port = this.options.invites;
+    if (!port?.ensurePond) return;
+    const made = await this.viaRelay(() => port.ensurePond!(pond.id, pond.name));
+    if (made === "unsupported") this.legacyRelay.add(pond.id);
+    else this.legacyRelay.delete(pond.id);
   }
 
   /** Owner only: a new pond key sealed to every current member, whose old tokens are ended and issued again. */
@@ -2943,6 +3167,8 @@ export class FlotillaService extends EventEmitter {
 
   start(): void {
     this.dropOldInvites();
+    // An end that was half done (a delete the cloud refused, a removal whose index call failed) carries on now.
+    void this.resumeEndings();
     for (const id of this.pondIds()) {
       this.watch(id);
       this.wake(id);

@@ -95,8 +95,10 @@ extension NativeHostClient {
     }
 
     /// Remove from Squeak and also clean its streams' folders the same way as Clean up disk (safe ones only).
-    public func removeProject(projectId: String, cleaningStreams: Bool) async throws -> CleanupResult? {
-        let data = try await call("DELETE", "/native/projects/\(Self.id(projectId))\(cleaningStreams ? "?cleanup=1" : "")", timeout: cleaningStreams ? 900 : 15)
+    /// `endPond`: the person has been told that removing the project deletes its shared Pond for everyone; the host ends the Pond first.
+    public func removeProject(projectId: String, cleaningStreams: Bool, endPond: Bool = false) async throws -> CleanupResult? {
+        let query = [cleaningStreams ? "cleanup=1" : nil, endPond ? "endPond=1" : nil].compactMap { $0 }.joined(separator: "&")
+        let data = try await call("DELETE", "/native/projects/\(Self.id(projectId))\(query.isEmpty ? "" : "?" + query)", timeout: cleaningStreams || endPond ? 900 : 15)
         struct Reply: Decodable { var cleanup: CleanupResult? }
         return (try? JSONDecoder().decode(Reply.self, from: data))?.cleanup
     }
